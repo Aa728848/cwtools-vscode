@@ -38,8 +38,8 @@ let private macroBracketParamPattern =
         @"\[\[\s*!?\s*([A-Za-z0-9_]+)(?=\]|\s)",
         System.Text.RegularExpressions.RegexOptions.Compiled)
 
-let private valueArgTokenBoundaries = [|' '; '\t'; '='; '<'; '>'; '{'; '}'; ','; '\n'; '\r'|]
 let private completionPrefixBoundaries = [|' '; '\t'; '='; '<'; '>'; '{'; '}'; ','; ':'; '|'; '('; ')'; '['; ']'; '"'; '\''; '\n'; '\r'|]
+let private valueCallTokenBoundaries = [|' '; '\t'; '='; '<'; '>'; '{'; '}'; ','; '"'; '\''; '\n'; '\r'|]
 
 /// Extract a single line from text without allocating a full string[] via Split.
 let private getLineAt (text: string) (lineIdx: int) =
@@ -63,7 +63,7 @@ let private getTextBeforeCursor (filetext: string) (position: pos) =
     let safeColumn = Math.Max(0, Math.Min(position.Column, targetLine.Length))
     targetLine.Substring(0, safeColumn)
 
-let private tryGetValueArgEntity (textBeforeCursor: string) =
+let private tryGetValueArgContext (textBeforeCursor: string) =
     try
         let lastPipeIdx = textBeforeCursor.LastIndexOf('|')
         if lastPipeIdx <= 0 then None
@@ -71,19 +71,27 @@ let private tryGetValueArgEntity (textBeforeCursor: string) =
             let afterPipe = textBeforeCursor.Substring(lastPipeIdx + 1)
             if afterPipe |> Seq.exists Char.IsWhiteSpace then None
             else
-                let tokenStart = textBeforeCursor.LastIndexOfAny(valueArgTokenBoundaries)
+                let tokenStart = textBeforeCursor.LastIndexOfAny(valueCallTokenBoundaries)
                 let potentialToken =
-                    if tokenStart < lastPipeIdx then
-                        textBeforeCursor.Substring(tokenStart + 1, lastPipeIdx - tokenStart - 1)
+                    if tokenStart < textBeforeCursor.Length - 1 then
+                        textBeforeCursor.Substring(tokenStart + 1)
                     else ""
 
-                if not (potentialToken.StartsWith("value:", StringComparison.OrdinalIgnoreCase)) then
+                let cleanToken = potentialToken.TrimStart('"', '\'')
+                if not (cleanToken.StartsWith("value:", StringComparison.OrdinalIgnoreCase)) then
                     None
                 else
-                    let cleanToken = potentialToken.Substring(6)
+                    let cleanToken = cleanToken.Substring(6)
                     let parts = cleanToken.Split('|')
                     let entityName = if parts.Length > 0 then parts.[0] else ""
-                    if entityName = "" then None else Some entityName
+                    if entityName = "" then None
+                    else
+                        let firstPipeIdx = cleanToken.IndexOf('|')
+                        if firstPipeIdx < 0 then None
+                        else
+                            let afterFirstPipe = cleanToken.Substring(firstPipeIdx + 1)
+                            let pipeCount = afterFirstPipe |> Seq.filter ((=) '|') |> Seq.length
+                            Some(entityName, pipeCount % 2 = 0)
     with _ -> None
 
 let private tryFindScriptValueLikeType (game: IGame) (entityName: string) =
@@ -113,19 +121,21 @@ let private tryReadTypeFileText (docs: DocumentStore) (filePath: string) =
 let private tryGetScriptValueMacroParams (game: IGame) (docs: DocumentStore) (filetext: string) (position: pos) =
     let textBeforeCursor = getTextBeforeCursor filetext position
 
-    tryGetValueArgEntity textBeforeCursor
-    |> Option.bind (fun entityName ->
-        tryFindScriptValueLikeType game entityName
-        |> Option.bind (fun t ->
-            tryReadTypeFileText docs t.range.FileName
-            |> Option.bind (fun sourceText ->
-                let values =
-                    [ for m in macroParamPattern.Matches(sourceText) -> m.Groups.[1].Value
-                      for m in macroBracketParamPattern.Matches(sourceText) -> m.Groups.[1].Value ]
-                    |> List.distinct
-                    |> List.filter (fun x -> x <> "")
+    tryGetValueArgContext textBeforeCursor
+    |> Option.bind (fun (entityName, isParamPosition) ->
+        if not isParamPosition then None
+        else
+            tryFindScriptValueLikeType game entityName
+            |> Option.bind (fun t ->
+                tryReadTypeFileText docs t.range.FileName
+                |> Option.bind (fun sourceText ->
+                    let values =
+                        [ for m in macroParamPattern.Matches(sourceText) -> m.Groups.[1].Value
+                          for m in macroBracketParamPattern.Matches(sourceText) -> m.Groups.[1].Value ]
+                        |> List.distinct
+                        |> List.filter (fun x -> x <> "")
 
-                if values.IsEmpty then None else Some values)))
+                    if values.IsEmpty then None else Some values)))
 
 let private completionPrefixFromTextBeforeCursor (textBeforeCursor: string) =
     let boundary = textBeforeCursor.LastIndexOfAny(completionPrefixBoundaries)
@@ -506,17 +516,15 @@ let completionCallLSP (game: IGame) (p: CompletionParams) debugMode supportsInse
                 let currentLine = getLineAt filetext (line - 1)
                 if currentLine <> "" then
                     let textBefore = currentLine.Substring(0, min col currentLine.Length)
-                    let valueIdx = textBefore.LastIndexOf("value:")
-                    if valueIdx <> -1 then
+                    let valueIdx = textBefore.LastIndexOf("value:", StringComparison.OrdinalIgnoreCase)
+                    if valueIdx <> -1 && not (textBefore.Substring(valueIdx + 6) |> Seq.exists Char.IsWhiteSpace) then
                         let afterValue = textBefore.Substring(valueIdx + 6)
                         let pipeIdx = afterValue.LastIndexOf('|')
-                        if pipeIdx <> -1 then
-                            let insertStartCol = valueIdx + 6 + pipeIdx + 1
-                            let insertRange = { start = { line = line - 1; character = insertStartCol }
-                                                ``end`` = { line = line - 1; character = col } }
-                            Some (insertRange, insertRange)
-                        else
-                            Some (computeCompletionRanges filetext line col)
+                        let insertStartCol =
+                            if pipeIdx <> -1 then valueIdx + 6 + pipeIdx + 1 else valueIdx
+                        let insertRange = { start = { line = line - 1; character = insertStartCol }
+                                            ``end`` = { line = line - 1; character = col } }
+                        Some (insertRange, insertRange)
                     else
                         Some (computeCompletionRanges filetext line col)
                 else
@@ -666,7 +674,10 @@ let completion
                 let paramTextEdit (text: string) =
                     if supportsInsertReplaceEdit then
                         let lspLine = position.Line - 1
-                        let insertRange = { start = { line = lspLine; character = position.Column }
+                        let replaceStart =
+                            let pipeIdx = textBeforeCursor.LastIndexOf('|')
+                            if pipeIdx >= 0 then pipeIdx + 1 else position.Column
+                        let insertRange = { start = { line = lspLine; character = replaceStart }
                                             ``end`` = { line = lspLine; character = position.Column } }
                         Some { newText = text; insert = insertRange; replace = insertRange }
                     else None
@@ -674,13 +685,14 @@ let completion
                 let paramItems = 
                     macroParams 
                     |> List.map (fun p -> 
+                        let insertText = $"{p}|"
                         { defaultCompletionItem with 
                             label = p
                             kind = Some CompletionItemKind.Variable
-                            insertText = if supportsInsertReplaceEdit then None else Some p
+                            insertText = if supportsInsertReplaceEdit then None else Some insertText
                             filterText = Some p
                             sortText = Some "0000000"
-                            textEdit = paramTextEdit p
+                            textEdit = paramTextEdit insertText
                         })
 
                 logInfo $"completion script-value params time %i{stopwatch.ElapsedMilliseconds}ms"

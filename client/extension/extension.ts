@@ -38,6 +38,49 @@ export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
 let fileExplorer: FileExplorer;
 
+const CONFLICTING_UPSTREAM_EXTENSION_ID = 'tboby.cwtools-vscode';
+
+/**
+ * Remove the upstream extension before this fork starts its language server.
+ * VSIX manifests have no supported way to declare mutually exclusive extensions,
+ * so UI/Marketplace installs need this activation-time fallback. Returning false
+ * keeps this extension dormant until the window is reloaded.
+ */
+async function removeConflictingUpstreamExtension(): Promise<boolean> {
+	if (!vs.extensions.getExtension(CONFLICTING_UPSTREAM_EXTENSION_ID)) {
+		return true;
+	}
+
+	try {
+		await commands.executeCommand(
+			'workbench.extensions.uninstallExtension',
+			CONFLICTING_UPSTREAM_EXTENSION_ID
+		);
+
+		const reloadAction = localize('Reload Window', '重新加载窗口');
+		const choice = await window.showInformationMessage(
+			localize(
+				'The conflicting upstream CWTools extension was uninstalled. Reload the window to finish switching to Eddy\'s Stellaris CWTools.',
+				'已自动卸载冲突的原版 CWTools 插件。请重新加载窗口以完成切换。'
+			),
+			reloadAction
+		);
+		if (choice === reloadAction) {
+			await commands.executeCommand('workbench.action.reloadWindow');
+		}
+	} catch (error) {
+		await window.showErrorMessage(
+			localize(
+				`Could not uninstall ${CONFLICTING_UPSTREAM_EXTENSION_ID}. This extension will stay inactive to avoid starting two CWTools servers. Uninstall the upstream extension manually and reload the window.`,
+				`无法卸载 ${CONFLICTING_UPSTREAM_EXTENSION_ID}。为避免同时启动两个 CWTools 服务，当前插件本次不会启动。请手动卸载原插件并重新加载窗口。`
+			)
+		);
+		ErrorReporter.warn('Extension', 'Failed to remove conflicting upstream extension', error);
+	}
+
+	return false;
+}
+
 const registeredCommands = new Map<string, Disposable>();
 function safeRegisterCommand(context: ExtensionContext, commandId: string, handler: (...args: any[]) => any): void {
 	const existing = registeredCommands.get(commandId);
@@ -820,6 +863,9 @@ async function maybeShowFirstRunExperience(options: InstallHealthOptions): Promi
 }
 
 export async function activate(context: ExtensionContext) {
+	if (!await removeConflictingUpstreamExtension()) {
+		return;
+	}
 
 	// Background check for extension updates
 	await checkForUpdates(context).catch((e) => ErrorReporter.warn(SOURCE.UPDATE_CHECKER, 'Failed to check for updates', e));

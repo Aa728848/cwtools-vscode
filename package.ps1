@@ -8,7 +8,8 @@
 .PARAMETER Version
     Specifies a new version (e.g. 2.2.3) to update in release/package.json.
 .PARAMETER Install
-    Force installs the newly generated VSIX package to the local VSCode instance.
+    Force installs the newly generated VSIX package to the local VSCode instance,
+    then removes the conflicting upstream CWTools extension if it is installed.
 .PARAMETER SkipServer
     Skips the F# .NET server compilation step to save time.
 .PARAMETER SkipClient
@@ -195,6 +196,23 @@ if ($Install) {
         Write-Host "[*] Executing local installation (code --install-extension)..." -ForegroundColor Yellow
         code --install-extension $VsixFile.FullName --force
         if ($LASTEXITCODE -eq 0) {
+            # The upstream extension starts the same F# language server and must not
+            # remain installed alongside this fork. VSIX manifests cannot declare
+            # conflicting extensions, so enforce the replacement in this install flow.
+            $ConflictingExtensionId = "tboby.cwtools-vscode"
+            $InstalledExtensions = @(code --list-extensions 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $InstalledExtensions -contains $ConflictingExtensionId) {
+                Write-Host "[*] Removing conflicting extension: $ConflictingExtensionId ..." -ForegroundColor Yellow
+                code --uninstall-extension $ConflictingExtensionId
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "[OK] Conflicting upstream CWTools extension was uninstalled." -ForegroundColor Green
+                } else {
+                    Write-Warning "Could not uninstall $ConflictingExtensionId automatically. Run: code --uninstall-extension $ConflictingExtensionId"
+                }
+            } elseif ($LASTEXITCODE -ne 0) {
+                Write-Warning "Could not inspect installed extensions; skipped the CWTools conflict check."
+            }
+
             Write-Host ""
             Write-Host "[OK] Extension installed and upgraded successfully!" -ForegroundColor Green
             Write-Host "[OK] Tip: Execute [Developer: Reload Window] in VSCode to apply updates!" -ForegroundColor Green

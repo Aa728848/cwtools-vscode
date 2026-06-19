@@ -26,3 +26,4 @@ runs/
 *.user
 cwtools.local.props
 .vs/
+.tmp-test

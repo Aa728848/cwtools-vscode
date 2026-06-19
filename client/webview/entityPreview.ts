@@ -1586,8 +1586,18 @@ function resolveSubmeshTextures(
     meshIndexInShape = 0,
 ): ResolvedTextures {
     // Match by shape name + mesh index within shape (meshsettings index = material slot within shape)
-    const ms = entity.resolvedMeshSettings?.find(s => s.name === submeshName && s.index === meshIndexInShape)
-        ?? entity.resolvedMeshSettings?.find(s => s.name === submeshName);
+    const meshSettings = entity.resolvedMeshSettings ?? [];
+    const namedSetting = meshSettings.find(s => s.name === submeshName && s.index === meshIndexInShape)
+        ?? meshSettings.find(s => s.name === submeshName);
+    const unnamedSettings = meshSettings.filter(s => s.name === '__unnamed');
+    // A sole unnamed meshsettings block is the default for the whole mesh. If there are
+    // multiple unnamed blocks, their intended targets are ambiguous, so do not guess.
+    // Never let that default turn collision/shadow geometry into a visible PBR mesh.
+    const canUseGlobalDefault = classifyShader(meshMaterial.shader ?? '') !== 'invisible';
+    const globalDefaultSetting = unnamedSettings.length === 1 && canUseGlobalDefault
+        ? unnamedSettings[0]
+        : undefined;
+    const ms = namedSetting ?? globalDefaultSetting;
     const textureMap = entity.textureMap ?? {};
 
     // Helper: resolve a mesh-embedded relative path via textureMap

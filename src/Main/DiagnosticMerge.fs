@@ -42,3 +42,10 @@ let mergeDeferredValidationDiagnostics existing refreshed =
 
 let mergeDeferredDefinitionDiagnostics existing refreshed =
     replaceDomain isDynamicExpansionDiagnostic existing refreshed
+
+/// A per-file lint of a dynamic definition sees the raw template, not every
+/// parameterized call-site expansion. It owns direct/parser diagnostics and
+/// must preserve the expansion diagnostics until deferred validation replaces
+/// that complementary domain.
+let mergeImmediateDefinitionDiagnostics existing refreshed =
+    replaceDomain (isDynamicExpansionDiagnostic >> not) existing refreshed

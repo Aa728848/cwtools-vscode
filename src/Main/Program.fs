@@ -2306,24 +2306,36 @@ type Server(client: ILanguageClient) =
                 | x -> x |> List.map parserErrorToDiagnostics
             let visibleDiagnosticsList = diagnosticsList |> List.filter diagnosticFilter
 
-            // Publish to VS Code Problems panel
-            // IMPORTANT: You must ensure that the currently edited file always receives diagnostic updates,
-            // Even though there is no entry for this file in diagnosticsList (bugs all fixed)
-            match visibleDiagnosticsList with
-            | [] -> client.PublishDiagnostics { uri = doc; diagnostics = [] }
-            | x ->
-                x |> sendDiagnostics
-                // If the current file is not in diagnosticsList, reissue empty diagnostics to clear old errors
-                let currentFileDiags = x |> List.filter (fun (f, _) -> f = name)
-                if currentFileDiags.IsEmpty then
-                    client.PublishDiagnostics { uri = doc; diagnostics = [] }
+            // Publish to VS Code Problems panel. A lint of a dynamic definition
+            // validates only the raw template, so it must not clear diagnostics
+            // produced by parameterized call-site expansion. This also prevents
+            // the post-RefreshCaches lint from racing and overwriting deferred
+            // validation results after a slow Ctrl+S refresh.
+            let refreshedCurrentDiagnostics = diagnosticsForFile name visibleDiagnosticsList
+            let publishedCurrentDiagnostics =
+                if isDynamicDefinitionPath name then
+                    DiagnosticMerge.mergeImmediateDefinitionDiagnostics
+                        (existingDiagnosticsForFile name)
+                        refreshedCurrentDiagnostics
+                else
+                    refreshedCurrentDiagnostics
+
+            visibleDiagnosticsList
+            |> List.filter (fun (filePath, _) -> normaliseCachePath filePath <> normaliseCachePath name)
+            |> function
+                | [] -> ()
+                | otherDiagnostics -> sendDiagnostics otherDiagnostics
+
+            // Always publish the current file, including an empty complete result
+            // for ordinary files, so fixed diagnostics are cleared.
+            client.PublishDiagnostics { uri = doc; diagnostics = publishedCurrentDiagnostics }
 
             //Update diagnostic freshness status table
             let newEpoch = System.Threading.Interlocked.Increment(diagnosticEpoch)
             let pendingKinds = pendingRefreshDomainList ()
             let freshness =
                 if pendingKinds.IsEmpty then Fresh else Pending
-            setFileDiagnosticStateWithEpoch name newEpoch freshness pendingKinds (diagnosticsForFile name visibleDiagnosticsList)
+            setFileDiagnosticStateWithEpoch name newEpoch freshness pendingKinds publishedCurrentDiagnostics
 
             visibleDiagnosticsList
             |> List.groupBy fst

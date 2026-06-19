@@ -21,6 +21,16 @@ let isParserDiagnostic (diagnostic: Diagnostic) =
     diagnostic.code
     |> Option.exists (fun code -> code.StartsWith("CW001", StringComparison.OrdinalIgnoreCase))
 
+let isDynamicExpansionDiagnostic (diagnostic: Diagnostic) =
+    let hasDynamicCode =
+        diagnostic.code
+        |> Option.exists (fun code -> code.StartsWith("CW274", StringComparison.OrdinalIgnoreCase))
+
+    hasDynamicCode
+    || diagnostic.message.Contains("results in an error", StringComparison.OrdinalIgnoreCase)
+    || (diagnostic.relatedInformation
+        |> List.exists (fun related -> related.message = "Related source"))
+
 /// Deferred dynamic revalidation currently recomputes rule and localisation
 /// diagnostics, but not parser diagnostics. Diagnostics without a code are
 /// conservatively left to their original producer.
@@ -29,3 +39,6 @@ let isDeferredValidationDiagnostic (diagnostic: Diagnostic) =
 
 let mergeDeferredValidationDiagnostics existing refreshed =
     replaceDomain isDeferredValidationDiagnostic existing refreshed
+
+let mergeDeferredDefinitionDiagnostics existing refreshed =
+    replaceDomain isDynamicExpansionDiagnostic existing refreshed

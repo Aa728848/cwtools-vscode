@@ -2380,16 +2380,14 @@ type Server(client: ILanguageClient) =
                             |> List.filter diagnosticFilter
                             |> List.map snd
                         | false, _ -> []
-                    // This is a partial validation pass: ValidationErrors/locCache do not
-                    // contain parser, brace-scan, or structural-recovery diagnostics.
-                    // publishDiagnostics replaces the complete list for a URI, so merge
-                    // the refreshed validation domain with diagnostics owned by other
-                    // passes instead of clearing those diagnostics accidentally.
+
                     let refreshedDiags = valDiags @ locDiags
+                    let existingDiags = existingDiagnosticsForFile path
                     let fileDiags =
-                        DiagnosticMerge.mergeDeferredValidationDiagnostics
-                            (existingDiagnosticsForFile path)
-                            refreshedDiags
+                        if isDynamicDefinitionPath path then
+                            DiagnosticMerge.mergeDeferredDefinitionDiagnostics existingDiags refreshedDiags
+                        else
+                            DiagnosticMerge.mergeDeferredValidationDiagnostics existingDiags refreshedDiags
                     client.PublishDiagnostics { uri = diagnosticUri path; diagnostics = fileDiags }
                     setFileDiagnosticStateWithEpoch path epoch Fresh [] fileDiags
             with e -> logDiag $"Deferred dynamic revalidation failed: {e.Message}"

@@ -35,6 +35,7 @@
     <Compile Include="GameLoader.fs" />
     <Compile Include="Completion.fs" />
     <Compile Include="GraphTypes.fs" />
+    <Compile Include="DiagnosticMerge.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

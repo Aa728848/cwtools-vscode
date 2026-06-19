@@ -1837,6 +1837,19 @@ type Server(client: ILanguageClient) =
         |> List.choose (fun (f, d) ->
             if normaliseCachePath f = normalisedPath then Some d else None)
 
+    let existingDiagnosticsForFile filePath =
+        match fileDiagnosticStates.TryGetValue(filePath) with
+        | true, state -> state.diagnostics
+        | false, _ ->
+            let normalisedPath = normaliseCachePath filePath
+            fileDiagnosticStates
+            |> Seq.tryPick (fun kvp ->
+                if normaliseCachePath kvp.Key = normalisedPath then
+                    Some kvp.Value.diagnostics
+                else
+                    None)
+            |> Option.defaultValue []
+
     let sendDiagnostics s =
         s
         |> List.groupBy fst
@@ -2367,7 +2380,16 @@ type Server(client: ILanguageClient) =
                             |> List.filter diagnosticFilter
                             |> List.map snd
                         | false, _ -> []
-                    let fileDiags = valDiags @ locDiags
+                    // This is a partial validation pass: ValidationErrors/locCache do not
+                    // contain parser, brace-scan, or structural-recovery diagnostics.
+                    // publishDiagnostics replaces the complete list for a URI, so merge
+                    // the refreshed validation domain with diagnostics owned by other
+                    // passes instead of clearing those diagnostics accidentally.
+                    let refreshedDiags = valDiags @ locDiags
+                    let fileDiags =
+                        DiagnosticMerge.mergeDeferredValidationDiagnostics
+                            (existingDiagnosticsForFile path)
+                            refreshedDiags
                     client.PublishDiagnostics { uri = diagnosticUri path; diagnostics = fileDiags }
                     setFileDiagnosticStateWithEpoch path epoch Fresh [] fileDiags
             with e -> logDiag $"Deferred dynamic revalidation failed: {e.Message}"

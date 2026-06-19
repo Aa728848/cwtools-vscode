@@ -11,47 +11,6 @@ open CWTools.Utilities.Utils
 // Store vanilla scripted variables path for hover (set after game load)
 let mutable stlVanillaScriptedVarsPath: string option = None
 
-// let loadSTL() =
-//     let stlLocCommands =
-//         configs |> List.tryFind (fun (fn, _) -> Path.GetFileName fn = "localisation.cwt")
-//                 |> Option.bind (fun (fn, ft) -> if activeGame = STL then Some (fn, ft) else None)
-//                 |> Option.map (fun (fn, ft) -> STLParser.loadLocCommands fn ft)
-//                 |> Option.defaultValue []
-//     let stlEventTargetLinks =
-//         configs |> List.tryFind (fun (fn, _) -> Path.GetFileName fn = "links.cwt")
-//                 |> Option.map (fun (fn, ft) -> UtilityParser.loadEventTargetLinks STLConstants.Scope.Any STLConstants.parseScope STLConstants.allScopes fn ft)
-//                 |> Option.defaultValue (Scopes.STL.scopedEffects |> List.map SimpleLink)
-
-
-//     let stlsettings = {
-//         CWTools.Games.Stellaris.StellarisSettings.rootDirectory = path
-//         scope = FilesScope.All
-//         modFilter = None
-//         scriptFolders = folders
-//         excludeGlobPatterns = Some dontLoadPatterns
-//         validation = {
-//             validateVanilla = validateVanilla
-//             experimental = experimental
-//             langs = languages
-//         }
-//         rules = Some {
-//             ruleFiles = configs
-//             validateRules = true
-//             debugRulesOnly = false
-//             debugMode = false
-//         }
-//         embedded = {
-//             triggers = triggers
-//             effects = effects
-//             modifiers = modifiers
-//             embeddedFiles = cachedFiles
-//             cachedResourceData = cached
-//             localisationCommands = stlLocCommands
-//             eventTargetLinks = stlEventTargetLinks
-//         }
-//         initialLookup = STLLookup()
-//     }
-
 let rec replaceFirst predicate value =
     function
     | [] -> []
@@ -198,11 +157,6 @@ type GameLanguage =
     | EU5
     | Custom
 
-// Resolve the on-disk cache file next to the cache parent directory.
-// Mirrors the WRITE side (Program.fs) which uses Directory.GetParent instead of a
-// string "/../" concatenation, so UNC (\\server\share\...) and symlinked paths
-// resolve to the SAME physical location on read and write (otherwise the cache is
-// written but never found on Linux/macOS or network mounts).
 let private gameCacheFile (cp: string) (fileName: string) =
     let parent = System.IO.Directory.GetParent(cp)
     let dir = if parent <> null then parent.FullName else cp + "/.."

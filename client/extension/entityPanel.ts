@@ -18,6 +18,8 @@ type EntityPanelMessage =
     | { command: 'openFile' }
     | { command: 'updateLocator'; locatorName: string; position: [number, number, number]; rotation: [number, number, number]; scale: number }
     | { command: 'addLocator'; locatorName: string; position: [number, number, number]; rotation: [number, number, number]; attachEntity?: string }
+    | { command: 'duplicateLocators'; locators: Array<{ locatorName: string; position: [number, number, number]; rotation: [number, number, number]; attachEntity?: string }> }
+    | { command: 'deleteLocators'; locatorNames: string[] }
     | { command: 'updateAttach'; locatorName: string; entityName: string; targetEntity?: string }
     | { command: 'requestEntityNames' }
     | { command: 'undo' }
@@ -113,6 +115,14 @@ export class EntityPanel {
                     }
                     case 'addLocator': {
                         await this._handleAddLocator(msg);
+                        break;
+                    }
+                    case 'duplicateLocators': {
+                        await this._handleDuplicateLocators(msg);
+                        break;
+                    }
+                    case 'deleteLocators': {
+                        await this._handleDeleteLocators(msg);
                         break;
                     }
                     case 'updateAttach': {
@@ -433,6 +443,195 @@ export class EntityPanel {
             await this._sendAttachEntityData(msg.locatorName, msg.attachEntity);
         }
         this._entityGraph = null;
+    }
+
+    /** Insert a Duplicate Special result as one edit/save operation. */
+    private async _handleDuplicateLocators(msg: Extract<EntityPanelMessage, { command: 'duplicateLocators' }>) {
+        if (!this._document || msg.locators.length === 0) return;
+        const doc = this._document;
+        const lines = doc.getText().split('\n');
+        const entityName = this._currentEntityName;
+        if (!entityName) return;
+
+        const entityNameEsc = entityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const entityNamePat = new RegExp(`name\\s*=\\s*"?${entityNameEsc}"?`);
+        let entityBlockStart = -1;
+        let entityBlockEnd = -1;
+        for (let i = 0; i < lines.length; i++) {
+            if (!/entity\s*=\s*\{/.test(lines[i]!)) continue;
+            let depth = 0;
+            let blockEnd = i;
+            let hasName = false;
+            for (let j = i; j < lines.length; j++) {
+                for (const ch of lines[j]!) {
+                    if (ch === '{') depth++;
+                    if (ch === '}') depth--;
+                }
+                if (entityNamePat.test(lines[j]!)) hasName = true;
+                if (depth <= 0) { blockEnd = j; break; }
+            }
+            if (hasName) {
+                entityBlockStart = i;
+                entityBlockEnd = blockEnd;
+                break;
+            }
+        }
+        if (entityBlockEnd < 0) {
+            console.warn(`[EntityPanel] Cannot find entity block "${entityName}" for Duplicate Special`);
+            return;
+        }
+
+        const entityBlockText = lines.slice(entityBlockStart, entityBlockEnd + 1).join('\n');
+        let meshData: Buffer | undefined;
+        if (this._entityGraph) {
+            const entityDef = this._entityGraph.entities.get(entityName);
+            const meshDef = entityDef?.pdxmesh ? this._entityGraph.meshes.get(entityDef.pdxmesh) : undefined;
+            const meshFilePath = meshDef ? this._resolveFilePath(meshDef.file, this._searchRoots) : undefined;
+            if (meshFilePath) {
+                try { meshData = fs.readFileSync(meshFilePath); } catch { /* skip mesh collision check */ }
+            }
+        }
+
+        const accepted: typeof msg.locators = [];
+        const acceptedNames = new Set<string>();
+        for (const locator of msg.locators.slice(0, 100)) {
+            const name = locator.locatorName.trim();
+            if (!name || /["{}\r\n=]/.test(name)) continue;
+            if (!locator.position.every(Number.isFinite) || !locator.rotation.every(Number.isFinite)) continue;
+
+            const lowerName = name.toLowerCase();
+            if (acceptedNames.has(lowerName)) continue;
+            const nameEsc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const scriptNamePattern = new RegExp(`locator\\s*=\\s*\\{[\\s\\S]*?name\\s*=\\s*"?${nameEsc}"?(?:\\s|$)`, 'i');
+            const existsInScript = scriptNamePattern.test(entityBlockText);
+            const existsInMesh = meshData?.includes(Buffer.from(name, 'utf8')) ?? false;
+            if (existsInScript || existsInMesh) {
+                console.warn(`[EntityPanel] Skipped duplicate locator name "${name}"`);
+                continue;
+            }
+
+            acceptedNames.add(lowerName);
+            accepted.push({ ...locator, locatorName: name });
+        }
+        if (accepted.length === 0) return;
+
+        let insertText = '';
+        for (const locator of accepted) {
+            const p = locator.position;
+            const r = locator.rotation;
+            insertText += `\tlocator = { name = "${locator.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }\n`;
+            if (locator.attachEntity) {
+                insertText += `\tattach = { "${locator.locatorName}" = "${locator.attachEntity}" }\n`;
+            }
+        }
+
+        const edit = new vscode.WorkspaceEdit();
+        edit.insert(doc.uri, new vscode.Position(entityBlockEnd, 0), insertText);
+        this._skipNextReload = true;
+        const applied = await vscode.workspace.applyEdit(edit);
+        if (!applied) {
+            this._skipNextReload = false;
+            console.warn('[EntityPanel] Duplicate Special edit could not be applied');
+            return;
+        }
+        await doc.save();
+
+        for (const locator of accepted) {
+            if (locator.attachEntity) {
+                await this._sendAttachEntityData(locator.locatorName, locator.attachEntity);
+            }
+        }
+        console.log(`[EntityPanel] Duplicate Special created ${accepted.length} locator(s)`);
+        this._entityGraph = null;
+    }
+
+    /** Delete script-defined locator and matching attach blocks in one undoable edit. */
+    private async _handleDeleteLocators(msg: Extract<EntityPanelMessage, { command: 'deleteLocators' }>) {
+        if (!this._document || msg.locatorNames.length === 0) return;
+        const names = Array.from(new Set(
+            msg.locatorNames.slice(0, 100)
+                .map(name => name.trim())
+                .filter(name => name.length > 0 && !/["{}\r\n=]/.test(name)),
+        ));
+        if (names.length === 0) return;
+
+        const doc = this._document;
+        const lines = doc.getText().split('\n');
+        const entityName = this._currentEntityName;
+        if (!entityName) return;
+
+        const entityNameEsc = entityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const entityNamePat = new RegExp(`name\\s*=\\s*"?${entityNameEsc}"?`);
+        let entityBlockStart = -1;
+        let entityBlockEnd = -1;
+        for (let i = 0; i < lines.length; i++) {
+            if (!/entity\s*=\s*\{/.test(lines[i]!)) continue;
+            let depth = 0;
+            let hasName = false;
+            let blockEnd = i;
+            for (let j = i; j < lines.length; j++) {
+                for (const ch of lines[j]!) {
+                    if (ch === '{') depth++;
+                    if (ch === '}') depth--;
+                }
+                if (entityNamePat.test(lines[j]!)) hasName = true;
+                if (depth <= 0) { blockEnd = j; break; }
+            }
+            if (hasName) {
+                entityBlockStart = i;
+                entityBlockEnd = blockEnd;
+                break;
+            }
+        }
+        if (entityBlockEnd < 0) return;
+
+        const namePatterns = names.map(name => {
+            const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return {
+                locator: new RegExp(`name\\s*=\\s*"?${escaped}"?(?:\\s|$)`, 'i'),
+                attach: new RegExp(`"?${escaped}"?\\s*=`, 'i'),
+            };
+        });
+        const blocksToDelete: Array<{ start: number; end: number }> = [];
+        for (let i = entityBlockStart + 1; i < entityBlockEnd; i++) {
+            const isLocator = /locator\s*=\s*\{/.test(lines[i]!);
+            const isAttach = /attach\s*=\s*\{/.test(lines[i]!);
+            if (!isLocator && !isAttach) continue;
+
+            let depth = 0;
+            let blockEnd = i;
+            for (let j = i; j <= entityBlockEnd; j++) {
+                for (const ch of lines[j]!) {
+                    if (ch === '{') depth++;
+                    if (ch === '}') depth--;
+                }
+                if (depth <= 0) { blockEnd = j; break; }
+            }
+            const blockText = lines.slice(i, blockEnd + 1).join('\n');
+            const matches = namePatterns.some(pattern =>
+                isLocator ? pattern.locator.test(blockText) : pattern.attach.test(blockText));
+            if (matches) blocksToDelete.push({ start: i, end: blockEnd });
+            i = blockEnd;
+        }
+        if (blocksToDelete.length === 0) return;
+
+        const edit = new vscode.WorkspaceEdit();
+        for (const block of blocksToDelete) {
+            const start = new vscode.Position(block.start, 0);
+            const end = block.end + 1 < lines.length
+                ? new vscode.Position(block.end + 1, 0)
+                : new vscode.Position(block.end, lines[block.end]!.length);
+            edit.delete(doc.uri, new vscode.Range(start, end));
+        }
+        this._skipNextReload = true;
+        const applied = await vscode.workspace.applyEdit(edit);
+        if (!applied) {
+            this._skipNextReload = false;
+            return;
+        }
+        await doc.save();
+        this._entityGraph = null;
+        console.log(`[EntityPanel] Deleted ${names.length} locator(s)`);
     }
 
     /**
@@ -1338,6 +1537,10 @@ export class EntityPanel {
             <input type="checkbox" id="chk-locators" checked>
             <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></div>
         </label>
+        <label class="toolbar-checkbox-btn" title="${locale.startsWith('zh') ? '显示 Mesh 自带定位器' : 'Show mesh locators'}">
+            <input type="checkbox" id="chk-mesh-locators" checked>
+            <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 3.5 6.5 12 11l8.5-4.5L12 2Z"/><path d="M3.5 6.5V16L12 21l8.5-5V6.5M12 11v10"/><circle cx="12" cy="11" r="2.2" fill="currentColor" stroke="none"/></svg></div>
+        </label>
         <label class="toolbar-checkbox-btn" data-i18n-title="bones">
             <input type="checkbox" id="chk-bones">
             <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg></div>
@@ -1363,6 +1566,13 @@ export class EntityPanel {
                 <div class="empty-hint" data-i18n="openHint">Open a .asset file and click preview</div>
             </div>
             <div id="transform-hint" class="hidden"></div>
+            <div id="selection-marquee"></div>
+            <div id="locator-selection-actions" class="hidden">
+                <span id="locator-selection-count"></span>
+                <button class="toolbar-btn secondary" id="btn-hide-selected-locators" title="${locale.startsWith('zh') ? 'H 隐藏，Shift+H 恢复最近隐藏项' : 'H to hide; Shift+H restores the last hidden selection'}">${locale.startsWith('zh') ? '隐藏' : 'Hide'}</button>
+                <button class="toolbar-btn danger" id="btn-delete-selected-locators" title="Delete">${locale.startsWith('zh') ? '删除' : 'Delete'}</button>
+                <button class="props-close" id="btn-clear-locator-selection">&times;</button>
+            </div>
 
             <div id="context-menu">
                 <div class="ctx-menu-item" id="ctx-add-locator"><span class="ctx-icon">📌</span><span>${locale.startsWith('zh') ? '新建定位器' : 'Add Locator'}</span></div>
@@ -1384,6 +1594,7 @@ export class EntityPanel {
                     <div class="props-row" style="position:relative"><label>${locale.startsWith('zh') ? '挂载实体' : 'Attach'}</label><input type="text" id="prop-attach-entity" autocomplete="off" placeholder="${locale.startsWith('zh') ? '(无)' : '(none)'}"></div>
                     <div id="prop-autocomplete-list" class="autocomplete-dropdown"></div>
                     <div class="props-actions">
+                        <button class="toolbar-btn secondary props-action-leading" id="btn-special-duplicate" title="${locale.startsWith('zh') ? '特殊复制 (Ctrl+Shift+D)' : 'Duplicate Special (Ctrl+Shift+D)'}">${locale.startsWith('zh') ? '特殊复制…' : 'Duplicate…'}</button>
                         <button class="toolbar-btn" id="btn-apply" data-i18n="apply">Apply</button>
                         <button class="toolbar-btn secondary" id="btn-reset" data-i18n="reset">Reset</button>
                     </div>
@@ -1402,6 +1613,39 @@ export class EntityPanel {
                     <div class="props-actions">
                         <button class="toolbar-btn" id="btn-add-loc-confirm">${locale.startsWith('zh') ? '确认' : 'Confirm'}</button>
                         <button class="toolbar-btn secondary" id="btn-add-loc-cancel">${locale.startsWith('zh') ? '取消' : 'Cancel'}</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="special-duplicate-panel" class="hidden">
+                <div class="props-header">
+                    <span class="props-title">${locale.startsWith('zh') ? '特殊复制' : 'Duplicate Special'}</span>
+                    <span class="props-name" id="duplicate-source-name"></span>
+                    <button class="props-close" id="btn-special-duplicate-close">&times;</button>
+                </div>
+                <div class="props-body">
+                    <div class="props-row"><label>${locale.startsWith('zh') ? '副本数' : 'Copies'}</label><input type="number" min="1" max="100" step="1" value="1" id="duplicate-copies"></div>
+                    <div class="duplicate-section-label">${locale.startsWith('zh') ? '位置间隔' : 'Position step'}</div>
+                    <div class="duplicate-vector-row">
+                        <label><span class="axis-x">X</span><input type="number" step="0.1" value="0" id="duplicate-tx"></label>
+                        <label><span class="axis-y">Y</span><input type="number" step="0.1" value="0" id="duplicate-ty"></label>
+                        <label><span class="axis-z">Z</span><input type="number" step="0.1" value="0" id="duplicate-tz"></label>
+                    </div>
+                    <div class="duplicate-section-label">${locale.startsWith('zh') ? '旋转间隔（度）' : 'Rotation step (degrees)'}</div>
+                    <div class="duplicate-vector-row">
+                        <label><span class="axis-x">X</span><input type="number" step="1" value="0" id="duplicate-rx"></label>
+                        <label><span class="axis-y">Y</span><input type="number" step="1" value="0" id="duplicate-ry"></label>
+                        <label><span class="axis-z">Z</span><input type="number" step="1" value="0" id="duplicate-rz"></label>
+                    </div>
+                    <label class="duplicate-checkbox" title="${locale.startsWith('zh') ? '旋转副本的位置，形成以模型原点为中心的环形阵列' : 'Rotate copied positions to form an array around the model origin'}">
+                        <input type="checkbox" id="duplicate-orbit">
+                        <span>${locale.startsWith('zh') ? '绕模型原点旋转位置' : 'Orbit position around model origin'}</span>
+                    </label>
+                    <div class="duplicate-help">${locale.startsWith('zh') ? '每个副本在前一项基础上累加间隔；挂载实体会一并复制。' : 'Steps accumulate per copy; the attached entity is copied too.'}</div>
+                    <div class="duplicate-preview" id="duplicate-preview"></div>
+                    <div class="props-actions">
+                        <button class="toolbar-btn" id="btn-special-duplicate-confirm">${locale.startsWith('zh') ? '复制' : 'Duplicate'}</button>
+                        <button class="toolbar-btn secondary" id="btn-special-duplicate-cancel">${locale.startsWith('zh') ? '取消' : 'Cancel'}</button>
                     </div>
                 </div>
             </div>

@@ -12,6 +12,15 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { parsePdxMesh, parsePdxAnim, type ParsedMeshFile, type ParsedSubMesh, type ParsedAnimation, type ParsedLocator } from './pdxMeshParser';
 import { pdxHelperFunctions, pdxNormalFragmentMaps, pdxRoughnessFragment, pdxMetalnessFragment, pdxEmissiveFragment } from './pdxShaders';
 import { Icons } from './svgIcons';
+import {
+    applyLocatorTransformDelta,
+    buildSpecialDuplicateTransforms,
+    generateDuplicateLocatorNames,
+    getLocatorTransformDelta,
+    type LocatorTransform,
+    type LocatorTransformDelta,
+    type LocatorVector3,
+} from './locatorDuplicate';
 
 // ── VS Code API ──────────────────────────────────────────────────────────────
 
@@ -135,6 +144,7 @@ const transformHint = document.getElementById('transform-hint')!;
 const entityNameEl = toolbar.querySelector('.entity-name') as HTMLElement;
 const wireframeToggle = document.getElementById('chk-wireframe') as HTMLInputElement;
 const locatorToggle = document.getElementById('chk-locators') as HTMLInputElement;
+const meshLocatorToggle = document.getElementById('chk-mesh-locators') as HTMLInputElement;
 const normalToggle = document.getElementById('chk-normals') as HTMLInputElement;
 const bonesToggle = document.getElementById('chk-bones') as HTMLInputElement;
 
@@ -154,6 +164,22 @@ const addLocatorPanel = document.getElementById('add-locator-panel')!;
 const addLocName = document.getElementById('add-loc-name') as HTMLInputElement;
 const addLocEntity = document.getElementById('add-loc-entity') as HTMLInputElement;
 const autocompleteList = document.getElementById('autocomplete-list')!;
+const specialDuplicatePanel = document.getElementById('special-duplicate-panel')!;
+const duplicateSourceName = document.getElementById('duplicate-source-name')!;
+const duplicateCopies = document.getElementById('duplicate-copies') as HTMLInputElement;
+const duplicateTx = document.getElementById('duplicate-tx') as HTMLInputElement;
+const duplicateTy = document.getElementById('duplicate-ty') as HTMLInputElement;
+const duplicateTz = document.getElementById('duplicate-tz') as HTMLInputElement;
+const duplicateRx = document.getElementById('duplicate-rx') as HTMLInputElement;
+const duplicateRy = document.getElementById('duplicate-ry') as HTMLInputElement;
+const duplicateRz = document.getElementById('duplicate-rz') as HTMLInputElement;
+const duplicateOrbit = document.getElementById('duplicate-orbit') as HTMLInputElement;
+const duplicatePreview = document.getElementById('duplicate-preview')!;
+const selectionMarquee = document.getElementById('selection-marquee')!;
+const locatorSelectionActions = document.getElementById('locator-selection-actions')!;
+const locatorSelectionCount = document.getElementById('locator-selection-count')!;
+const hideSelectedLocatorsButton = document.getElementById('btn-hide-selected-locators') as HTMLButtonElement;
+const deleteSelectedLocatorsButton = document.getElementById('btn-delete-selected-locators') as HTMLButtonElement;
 const sidebarResize = document.getElementById('sidebar-resize')!;
 
 // Cached entity names for autocomplete
@@ -174,6 +200,10 @@ let currentModel: THREE.Group | null = null;
 let locatorHelpers: THREE.Group | null = null;
 let animationFrameId = 0;
 let selectedLocator: THREE.Object3D | null = null;
+let selectedLocatorEditable = false;
+const selectedLocators = new Set<THREE.Object3D>();
+let lastHiddenLocators: THREE.Object3D[] = [];
+let duplicateSourceLocator: THREE.Object3D | null = null;
 let currentEntity: EntityData | null = null;
 let lastParsedMeshFile: ParsedMeshFile | null = null;
 let skeletonHelper: THREE.SkeletonHelper | null = null;
@@ -193,6 +223,13 @@ let isAnimPlaying = true;
 let animLooping = true;
 // Snapshot of selected locator's original position/rotation at selection time
 let selectedLocatorSnapshot: { px: number; py: number; pz: number; rx: number; ry: number; rz: number } | null = null;
+interface SmartDuplicateState {
+    activeObject: THREE.Object3D;
+    baseTransform: LocatorTransform;
+    step?: LocatorTransformDelta;
+    attachEntity?: string;
+}
+let smartDuplicateState: SmartDuplicateState | null = null;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 //Skeleton mounting synchronization list: not directly mounted to the skeleton scene graph to avoid SkinnedMesh double transformation
@@ -291,6 +328,7 @@ function initThree() {
         controls.enabled = !isDragging;
         // Auto-save when gizmo drag finishes
         if (!isDragging && selectedLocator) {
+            updateSmartDuplicateStepFromSelected();
             autoSaveLocator();
         }
     });
@@ -299,6 +337,54 @@ function initThree() {
     });
     const transformHelper = transformCtrl.getHelper();
     scene.add(transformHelper);
+
+    // Ctrl/Cmd + left drag performs marquee selection without changing the
+    // established left-drag orbit camera behavior.
+    let marqueePointerId: number | null = null;
+    let marqueeStart = { x: 0, y: 0 };
+    let marqueeAdditive = false;
+    const updateMarquee = (clientX: number, clientY: number) => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const left = Math.min(marqueeStart.x, clientX) - rect.left;
+        const top = Math.min(marqueeStart.y, clientY) - rect.top;
+        selectionMarquee.style.left = `${left}px`;
+        selectionMarquee.style.top = `${top}px`;
+        selectionMarquee.style.width = `${Math.abs(clientX - marqueeStart.x)}px`;
+        selectionMarquee.style.height = `${Math.abs(clientY - marqueeStart.y)}px`;
+    };
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 || (!e.ctrlKey && !e.metaKey) || !currentModel || !locatorToggle.checked) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        marqueePointerId = e.pointerId;
+        marqueeStart = { x: e.clientX, y: e.clientY };
+        marqueeAdditive = e.shiftKey;
+        controls.enabled = false;
+        renderer.domElement.setPointerCapture(e.pointerId);
+        selectionMarquee.classList.add('visible');
+        updateMarquee(e.clientX, e.clientY);
+    }, true);
+    renderer.domElement.addEventListener('pointermove', (e) => {
+        if (marqueePointerId !== e.pointerId) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        updateMarquee(e.clientX, e.clientY);
+    }, true);
+    const finishMarquee = (e: PointerEvent, cancelled: boolean) => {
+        if (marqueePointerId !== e.pointerId) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const start = marqueeStart;
+        marqueePointerId = null;
+        controls.enabled = true;
+        selectionMarquee.classList.remove('visible');
+        if (renderer.domElement.hasPointerCapture(e.pointerId)) {
+            renderer.domElement.releasePointerCapture(e.pointerId);
+        }
+        if (!cancelled) selectLocatorsInScreenRect(start.x, start.y, e.clientX, e.clientY, marqueeAdditive);
+    };
+    renderer.domElement.addEventListener('pointerup', e => finishMarquee(e, false), true);
+    renderer.domElement.addEventListener('pointercancel', e => finishMarquee(e, true), true);
 
     // Click handler for locator selection — use 'pointerup' with distance check
     // to avoid interfering with TransformControls drag events
@@ -322,16 +408,12 @@ function initThree() {
 /** Auto-save locator position/rotation to the .asset file after gizmo drag */
 function autoSaveLocator() {
     if (!selectedLocator) return;
-    const euler = new THREE.Euler().setFromQuaternion(selectedLocator.quaternion, 'XYZ');
+    const rotation = getLocatorRotationDegrees(selectedLocator);
     vscode.postMessage({
         command: 'updateLocator',
         locatorName: selectedLocator.name,
         position: [selectedLocator.position.x, selectedLocator.position.y, selectedLocator.position.z],
-        rotation: [
-            euler.x * 180 / Math.PI,
-            euler.y * 180 / Math.PI,
-            euler.z * 180 / Math.PI,
-        ],
+        rotation: toPdxScriptRotation(rotation),
         scale: 1,
     });
 }
@@ -470,6 +552,10 @@ function updateLocatorLabels() {
         if (!el) {
             el = createLocatorLabel(displayName, source);
             locatorLabelEls.set(key, el);
+            if (selectedLocators.has(obj)) {
+                el.style.background = 'rgba(0, 127, 212, 0.75)';
+                el.style.fontWeight = '600';
+            }
         }
 
         obj.getWorldPosition(_labelWorldPos);
@@ -487,24 +573,13 @@ function updateLocatorLabels() {
         el.style.top = `${y}px`;
     };
 
-    // Determine whether the object belongs to the sub-entity (inside the attach model) - the point of the sub-entity is not displayed
-    const isInsideChildEntity = (obj: THREE.Object3D): boolean => {
-        let p = obj.parent;
-        while (p) {
-            if (p.name.startsWith('attach_')) return true;
-            if (p === currentModel) return false;
-            p = p.parent;
-        }
-        return false;
-    };
-
     // Only traverse the locators and bones of the root entity, skipping those of the child entities
     currentModel.traverse(obj => {
         // Skip objects inside child entities
         if (isInsideChildEntity(obj)) return;
 
         // Root entity locator — controlled by locatorToggle
-        if (obj.userData?.isLocator && showLocators) {
+        if (obj.userData?.isLocator && showLocators && isLocatorVisuallyVisible(obj)) {
             const src = (obj.userData as { source?: string }).source ?? 'mesh';
             processPoint(obj, obj.name, src);
         }
@@ -550,6 +625,68 @@ function pdxScriptEuler(ryDeg: number, rxDeg: number, rzDeg: number): THREE.Eule
     );
 }
 
+/** Return the locator's logical X/Y/Z rotation in degrees. */
+function getLocatorRotationDegrees(obj: THREE.Object3D): LocatorVector3 {
+    const euler = new THREE.Euler().setFromQuaternion(obj.quaternion, 'YXZ');
+    return [
+        -euler.x * 180 / Math.PI,
+         euler.y * 180 / Math.PI,
+        -euler.z * 180 / Math.PI,
+    ];
+}
+
+function setLocatorRotationDegrees(obj: THREE.Object3D, rotation: LocatorVector3) {
+    obj.setRotationFromEuler(pdxScriptEuler(rotation[1], rotation[0], rotation[2]));
+}
+
+/** Convert logical X/Y/Z UI rotation to the PDX script's Y/X/Z storage order. */
+function toPdxScriptRotation(rotation: LocatorVector3): LocatorVector3 {
+    return [rotation[1], rotation[0], rotation[2]];
+}
+
+function getLocatorTransform(obj: THREE.Object3D): LocatorTransform {
+    return {
+        position: [obj.position.x, obj.position.y, obj.position.z],
+        rotation: getLocatorRotationDegrees(obj),
+    };
+}
+
+function isInsideChildEntity(obj: THREE.Object3D): boolean {
+    let parent = obj.parent;
+    while (parent) {
+        if (parent.name.startsWith('attach_')) return true;
+        if (parent === currentModel) return false;
+        parent = parent.parent;
+    }
+    return false;
+}
+
+function isLocatorObjectEditable(obj: THREE.Object3D): boolean {
+    return obj.userData?.isLocator === true
+        && !isInsideChildEntity(obj)
+        && !(obj.parent instanceof THREE.Bone);
+}
+
+function isLocatorObjectDeletable(obj: THREE.Object3D): boolean {
+    return isLocatorObjectEditable(obj) && obj.userData?.source === 'script';
+}
+
+function isLocatorVisuallyVisible(obj: THREE.Object3D): boolean {
+    if (!locatorToggle.checked || obj.userData?.userHidden === true) return false;
+    return obj.userData?.source !== 'mesh' || meshLocatorToggle.checked;
+}
+
+function updateLocatorVisualVisibility(obj: THREE.Object3D) {
+    if (!obj.userData?.isLocator) return;
+    const axes = obj.getObjectByName(`${obj.name}_axes`);
+    if (axes) axes.visible = isLocatorVisuallyVisible(obj);
+}
+
+function refreshLocatorVisualVisibility() {
+    currentModel?.traverse(updateLocatorVisualVisibility);
+    updateLocatorLabels();
+}
+
 /** Create a locator Group: invisible hit sphere + AxesHelper visual */
 function createLocatorGroup(name: string, size: number, source: string): THREE.Group {
     const group = new THREE.Group();
@@ -564,7 +701,7 @@ function createLocatorGroup(name: string, size: number, source: string): THREE.G
     // Visible axes
     const axes = new THREE.AxesHelper(size);
     axes.name = `${name}_axes`;
-    axes.visible = locatorToggle.checked;
+    axes.visible = isLocatorVisuallyVisible(group);
     group.add(axes);
 
     return group;
@@ -641,29 +778,59 @@ function onLocatorPointerDown(event: PointerEvent) {
     // Raycast against locator hit meshes (recursive=true to find spheres inside Groups)
     const intersects = raycaster.intersectObjects(locatorHelpers.children, true);
 
-    if (intersects.length > 0) {
-        // Walk up to find the top-level locator Group (direct child of locatorHelpers)
-        let target = intersects[0]!.object;
-        while (target.parent && target.parent !== locatorHelpers) {
-            target = target.parent;
+    let target: THREE.Object3D | null = null;
+    for (const intersection of intersects) {
+        let candidate: THREE.Object3D | null = intersection.object;
+        while (candidate && !candidate.userData?.isLocator) candidate = candidate.parent;
+        if (candidate?.userData?.isLocator && isLocatorVisuallyVisible(candidate)) {
+            target = candidate;
+            break;
         }
-        if (target.userData?.isLocator) {
-            selectLocator(target);
-        }
+    }
+    if (target) {
+        selectLocator(target, isLocatorObjectEditable(target));
     } else {
         deselectLocator();
     }
 }
 
-function selectLocator(obj: THREE.Object3D, editable = true) {
-    // Unhighlight previous
-    if (selectedLocator) {
-        const prevLabel = getLabelForObject(selectedLocator);
-        if (prevLabel) {
-            prevLabel.style.background = 'rgba(0, 0, 0, 0.65)';
-            prevLabel.style.fontWeight = 'normal';
-        }
+function setLocatorSelectedStyle(obj: THREE.Object3D, selected: boolean) {
+    const label = getLabelForObject(obj);
+    if (label) {
+        label.style.background = selected ? 'rgba(0, 127, 212, 0.75)' : 'rgba(0, 0, 0, 0.65)';
+        label.style.fontWeight = selected ? '600' : 'normal';
     }
+}
+
+function updateLocatorSelectionActions() {
+    const selection = Array.from(selectedLocators);
+    if (selection.length === 0 || selectedLocator) {
+        locatorSelectionActions.classList.add('hidden');
+        return;
+    }
+    locatorSelectionActions.classList.remove('hidden');
+    locatorSelectionCount.textContent = isChinese ? `已选择 ${selection.length} 个` : `${selection.length} selected`;
+    const allHidden = selection.every(obj => obj.userData?.userHidden === true);
+    hideSelectedLocatorsButton.textContent = allHidden
+        ? (isChinese ? '显示' : 'Show')
+        : (isChinese ? '隐藏' : 'Hide');
+    const deletableCount = selection.filter(isLocatorObjectDeletable).length;
+    deleteSelectedLocatorsButton.disabled = deletableCount === 0;
+    deleteSelectedLocatorsButton.textContent = isChinese ? `删除 (${deletableCount})` : `Delete (${deletableCount})`;
+    deleteSelectedLocatorsButton.title = deletableCount < selection.length
+        ? (isChinese ? '仅删除脚本中新建的定位器；Mesh 定位器只能隐藏' : 'Only script-created locators can be deleted; mesh locators can only be hidden')
+        : '';
+}
+
+function clearLocatorSelectionStyles() {
+    for (const obj of selectedLocators) setLocatorSelectedStyle(obj, false);
+}
+
+function selectLocator(obj: THREE.Object3D, editable = true, preserveSmartDuplicate = false) {
+    clearLocatorSelectionStyles();
+    selectedLocators.clear();
+    selectedLocators.add(obj);
+    if (!preserveSmartDuplicate) smartDuplicateState = null;
 
     selectedLocator = obj;
     // Determine if this locator is inside a submodel structure
@@ -677,6 +844,7 @@ function selectLocator(obj: THREE.Object3D, editable = true) {
         p = p.parent;
     }
     const isSubmodel = ownerEntity !== '';
+    selectedLocatorEditable = editable && !isSubmodel && !(obj instanceof THREE.Bone) && !(obj.parent instanceof THREE.Bone);
 
     // Always show properties panel (attach editing is always allowed)
     updatePropsFromLocator(obj);
@@ -693,26 +861,28 @@ function selectLocator(obj: THREE.Object3D, editable = true) {
     // Apply/Reset buttons: visible only for editable locators
     const applyBtn = document.getElementById('btn-apply');
     const resetBtn = document.getElementById('btn-reset');
+    const duplicateBtn = document.getElementById('btn-special-duplicate');
     if (applyBtn) applyBtn.style.display = editable ? '' : 'none';
     if (resetBtn) resetBtn.style.display = editable ? '' : 'none';
+    if (duplicateBtn) duplicateBtn.style.display = selectedLocatorEditable ? '' : 'none';
 
     // Attach entity input: enabled for all, including submodels (cross-file write supported)
     propAttachEntity.disabled = false;
     propAttachEntity.style.opacity = '1';
     propAttachEntity.placeholder = isSubmodel ? `Attach to ${ownerEntity}` : 'e.g. some_entity_name';
 
-    if (editable && !isSubmodel) {
+    if (selectedLocatorEditable) {
         transformCtrl.attach(obj);
 
         // Snapshot the original position/rotation for Reset
-        const euler = new THREE.Euler().setFromQuaternion(obj.quaternion, 'XYZ');
+        const rotation = getLocatorRotationDegrees(obj);
         selectedLocatorSnapshot = {
             px: obj.position.x,
             py: obj.position.y,
             pz: obj.position.z,
-            rx: euler.x * 180 / Math.PI,
-            ry: euler.y * 180 / Math.PI,
-            rz: euler.z * 180 / Math.PI,
+            rx: rotation[0],
+            ry: rotation[1],
+            rz: rotation[2],
         };
 
         // Show hint
@@ -730,33 +900,140 @@ function selectLocator(obj: THREE.Object3D, editable = true) {
         transformHint.classList.remove('visible');
     }
 
-    // Highlight selected label
-    const label = getLabelForObject(obj);
-    if (label) {
-        label.style.background = 'rgba(0, 127, 212, 0.75)';
-        label.style.fontWeight = '600';
-    }
+    locatorSelectionActions.classList.add('hidden');
+    setLocatorSelectedStyle(obj, true);
 
     // Highlight in entity tree
     highlightTreeItem(obj.name);
 }
 
-function deselectLocator() {
-    if (selectedLocator) {
-        // Unhighlight label
-        const label = getLabelForObject(selectedLocator);
-        if (label) {
-            label.style.background = 'rgba(0, 0, 0, 0.65)';
-            label.style.fontWeight = 'normal';
-        }
-        selectedLocator = null;
-        selectedLocatorSnapshot = null;
-        transformCtrl.detach();
-        propsPanel.classList.add('hidden');
-        transformHint.classList.remove('visible');
-        hidePropAutocomplete();
-        highlightTreeItem(null);
+function selectLocatorsFromMarquee(objects: THREE.Object3D[], additive: boolean) {
+    if (!additive) {
+        clearLocatorSelectionStyles();
+        selectedLocators.clear();
     }
+    for (const obj of objects) selectedLocators.add(obj);
+
+    selectedLocator = null;
+    selectedLocatorEditable = false;
+    selectedLocatorSnapshot = null;
+    smartDuplicateState = null;
+    transformCtrl.detach();
+    propsPanel.classList.add('hidden');
+    hideSpecialDuplicatePanel(false);
+    transformHint.classList.add('hidden');
+    transformHint.classList.remove('visible');
+    for (const obj of selectedLocators) setLocatorSelectedStyle(obj, true);
+    highlightTreeItems(new Set(Array.from(selectedLocators, obj => obj.name)));
+    updateLocatorSelectionActions();
+}
+
+function selectLocatorsInScreenRect(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+    additive: boolean,
+) {
+    if (!currentModel) return;
+    const canvasRect = renderer.domElement.getBoundingClientRect();
+    const clickPadding = Math.abs(endX - startX) < 4 && Math.abs(endY - startY) < 4 ? 5 : 0;
+    const left = Math.min(startX, endX) - clickPadding;
+    const right = Math.max(startX, endX) + clickPadding;
+    const top = Math.min(startY, endY) - clickPadding;
+    const bottom = Math.max(startY, endY) + clickPadding;
+    const worldPosition = new THREE.Vector3();
+    const projected = new THREE.Vector3();
+    const matches: THREE.Object3D[] = [];
+
+    currentModel.traverse(obj => {
+        if (!isLocatorObjectEditable(obj) || !isLocatorVisuallyVisible(obj)) return;
+        obj.getWorldPosition(worldPosition);
+        projected.copy(worldPosition).project(camera);
+        if (projected.z < -1 || projected.z > 1) return;
+        const x = canvasRect.left + (projected.x + 1) * canvasRect.width / 2;
+        const y = canvasRect.top + (1 - projected.y) * canvasRect.height / 2;
+        if (x >= left && x <= right && y >= top && y <= bottom) matches.push(obj);
+    });
+
+    selectLocatorsFromMarquee(matches, additive);
+}
+
+function toggleSelectedLocatorVisibility() {
+    const selection = Array.from(selectedLocators).filter(isLocatorObjectEditable);
+    if (selection.length === 0) return;
+    const shouldShow = selection.every(obj => obj.userData?.userHidden === true);
+    if (!shouldShow) lastHiddenLocators = selection.slice();
+    for (const obj of selection) {
+        obj.userData.userHidden = !shouldShow;
+        updateLocatorVisualVisibility(obj);
+    }
+    selectedLocator = null;
+    selectedLocatorEditable = false;
+    selectedLocatorSnapshot = null;
+    smartDuplicateState = null;
+    transformCtrl.detach();
+    propsPanel.classList.add('hidden');
+    transformHint.classList.add('hidden');
+    refreshLocatorVisualVisibility();
+    updateLocatorSelectionActions();
+}
+
+function restoreLastHiddenLocators() {
+    const restorable = lastHiddenLocators.filter(obj => obj.parent && obj.userData?.isLocator);
+    for (const obj of restorable) {
+        obj.userData.userHidden = false;
+        updateLocatorVisualVisibility(obj);
+    }
+    lastHiddenLocators = [];
+    refreshLocatorVisualVisibility();
+    if (restorable.length > 0) selectLocatorsFromMarquee(restorable, false);
+}
+
+function deleteSelectedLocatorObjects() {
+    const deletable = Array.from(selectedLocators).filter(isLocatorObjectDeletable);
+    if (deletable.length === 0) return;
+    const names = deletable.map(obj => obj.name);
+    vscode.postMessage({ command: 'deleteLocators', locatorNames: names });
+
+    for (const obj of deletable) {
+        removeAttachAtLocator(obj.name);
+        const labelKey = `${obj.id}`;
+        locatorLabelEls.get(labelKey)?.remove();
+        locatorLabelEls.delete(labelKey);
+        obj.parent?.remove(obj);
+    }
+    if (currentEntity) {
+        const deletedNames = new Set(names);
+        currentEntity.locators = currentEntity.locators?.filter(locator => !deletedNames.has(locator.name));
+        currentEntity.attaches = currentEntity.attaches?.filter(attach => !deletedNames.has(attach.locatorName));
+        currentEntity.attachData = currentEntity.attachData?.filter(attach => !deletedNames.has(attach.locatorName));
+        updateEntityTree(currentEntity, lastParsedMeshFile ?? undefined);
+    }
+    lastHiddenLocators = lastHiddenLocators.filter(obj => !deletable.includes(obj));
+    const remaining = Array.from(selectedLocators).filter(obj => !deletable.includes(obj));
+    if (remaining.length > 0) {
+        selectLocatorsFromMarquee(remaining, false);
+    } else {
+        deselectLocator();
+    }
+}
+
+function deselectLocator() {
+    clearLocatorSelectionStyles();
+    selectedLocators.clear();
+    selectedLocator = null;
+    selectedLocatorEditable = false;
+    selectedLocatorSnapshot = null;
+    smartDuplicateState = null;
+    transformCtrl.detach();
+    propsPanel.classList.add('hidden');
+    locatorSelectionActions.classList.add('hidden');
+    hideSpecialDuplicatePanel(false);
+    transformHint.classList.add('hidden');
+    transformHint.classList.remove('visible');
+    hidePropAutocomplete();
+    highlightTreeItem(null);
 }
 
 function updatePropsFromLocator(obj: THREE.Object3D) {
@@ -764,11 +1041,10 @@ function updatePropsFromLocator(obj: THREE.Object3D) {
     propPy.value = obj.position.y.toFixed(3);
     propPz.value = obj.position.z.toFixed(3);
 
-    // Convert quaternion to euler degrees for display
-    const euler = new THREE.Euler().setFromQuaternion(obj.quaternion, 'XYZ');
-    propRx.value = (euler.x * 180 / Math.PI).toFixed(2);
-    propRy.value = (euler.y * 180 / Math.PI).toFixed(2);
-    propRz.value = (euler.z * 180 / Math.PI).toFixed(2);
+    const rotation = getLocatorRotationDegrees(obj);
+    propRx.value = rotation[0].toFixed(2);
+    propRy.value = rotation[1].toFixed(2);
+    propRz.value = rotation[2].toFixed(2);
 
     let ownerEntity = '';
     let p = obj.parent;
@@ -817,21 +1093,20 @@ function applyPropsToLocator() {
         parseFloat(propPy.value) || 0,
         parseFloat(propPz.value) || 0,
     );
-    const rx = (parseFloat(propRx.value) || 0) * Math.PI / 180;
-    const ry = (parseFloat(propRy.value) || 0) * Math.PI / 180;
-    const rz = (parseFloat(propRz.value) || 0) * Math.PI / 180;
-    selectedLocator.setRotationFromEuler(new THREE.Euler(rx, ry, rz, 'XYZ'));
+    const rotation: LocatorVector3 = [
+        parseFloat(propRx.value) || 0,
+        parseFloat(propRy.value) || 0,
+        parseFloat(propRz.value) || 0,
+    ];
+    setLocatorRotationDegrees(selectedLocator, rotation);
+    updateSmartDuplicateStepFromSelected();
 
     // Send to extension for file write-back
     vscode.postMessage({
         command: 'updateLocator',
         locatorName: selectedLocator.name,
         position: [selectedLocator.position.x, selectedLocator.position.y, selectedLocator.position.z],
-        rotation: [
-            parseFloat(propRx.value) || 0,
-            parseFloat(propRy.value) || 0,
-            parseFloat(propRz.value) || 0,
-        ],
+        rotation: toPdxScriptRotation(rotation),
         scale: 1,
     });
 }
@@ -940,15 +1215,18 @@ propAttachEntity.addEventListener('keydown', (e) => {
     }
 });
 
-function highlightTreeItem(name: string | null) {
+function highlightTreeItems(names: Set<string>) {
     const items = entityTree.querySelectorAll('.tree-item');
     items.forEach(item => {
         const el = item as HTMLElement;
-        // Check both old-style data-locator and new data-locator-idx
-        const isMatch = el.dataset.locator === name ||
-            (el.querySelector('.tree-label')?.textContent === name && el.hasAttribute('data-locator-idx'));
-        el.classList.toggle('selected', !!name && isMatch);
+        const label = el.querySelector('.tree-label')?.textContent ?? '';
+        const locatorName = el.dataset.locator ?? label;
+        el.classList.toggle('selected', el.classList.contains('tree-locator') && names.has(locatorName));
     });
+}
+
+function highlightTreeItem(name: string | null) {
+    highlightTreeItems(name ? new Set([name]) : new Set());
 }
 
 interface SkeletonBuildResult {
@@ -1844,6 +2122,7 @@ let totalVertices = 0;
 async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined) {
     // Deselect and clear labels
     deselectLocator();
+    lastHiddenLocators = [];
     clearLocatorLabels();
 
     // Clear previous model
@@ -2071,6 +2350,7 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                         existing.setRotationFromEuler(pdxScriptEuler(loc.rotation[0], loc.rotation[1], loc.rotation[2]));
                     }
                     existing.userData = { source: 'override', isLocator: true };
+                    updateLocatorVisualVisibility(existing);
                 } else if (loc.position) {
                     const group = createLocatorGroup(loc.name, 0.4, 'script');
                     group.position.set(loc.position[0], loc.position[1], loc.position[2]);
@@ -2296,6 +2576,7 @@ async function loadAttachChildren(
                             existing.setRotationFromEuler(pdxScriptEuler(loc.rotation[0], loc.rotation[1], loc.rotation[2]));
                         }
                         existing.userData = { source: 'override', isLocator: true };
+                        updateLocatorVisualVisibility(existing);
                     } else {
                         const group = createLocatorGroup(loc.name, 0.3, 'script');
                         if (loc.position) group.position.set(loc.position[0], loc.position[1], loc.position[2]);
@@ -2729,6 +3010,7 @@ function updateEntityTree(_entity: EntityData, _parsed?: ParsedMeshFile) {
             const uuid = el.dataset.objectUuid!;
             const obj = treeObjects.get(uuid);
             if (obj) {
+                if (obj.userData?.isLocator && !isLocatorVisuallyVisible(obj)) return;
                 // Determine whether the object belongs to a sub-entity (inside the attach model)
                 let isInsideChild = false;
                 let p = obj.parent;
@@ -2983,21 +3265,14 @@ wireframeToggle.addEventListener('change', () => {
 });
 
 locatorToggle.addEventListener('change', () => {
-    const visible = locatorToggle.checked;
-    const toggleAxes = (obj: THREE.Object3D) => {
-        if (obj.userData?.isLocator) {
-            const axes = obj.getObjectByName(`${obj.name}_axes`);
-            if (axes) axes.visible = visible;
-        }
-    };
-    if (locatorHelpers) locatorHelpers.traverse(toggleAxes);
-    if (currentModel) currentModel.traverse(toggleAxes);
+    refreshLocatorVisualVisibility();
+    if (!locatorToggle.checked) deselectLocator();
+});
 
-    // Hide/show HTML label overlays
-    for (const el of locatorLabelEls.values()) {
-        el.style.display = visible ? '' : 'none';
-    }
-    if (!visible) {
+meshLocatorToggle.addEventListener('change', () => {
+    refreshLocatorVisualVisibility();
+    if (!meshLocatorToggle.checked
+        && Array.from(selectedLocators).some(obj => obj.userData?.source === 'mesh')) {
         deselectLocator();
     }
 });
@@ -3049,6 +3324,9 @@ function setTransformMode(mode: 'translate' | 'rotate') {
 
 document.getElementById('btn-translate')?.addEventListener('click', () => setTransformMode('translate'));
 document.getElementById('btn-rotate')?.addEventListener('click', () => setTransformMode('rotate'));
+hideSelectedLocatorsButton.addEventListener('click', toggleSelectedLocatorVisibility);
+deleteSelectedLocatorsButton.addEventListener('click', deleteSelectedLocatorObjects);
+document.getElementById('btn-clear-locator-selection')?.addEventListener('click', deselectLocator);
 
 // Properties panel buttons
 document.getElementById('btn-apply')?.addEventListener('click', applyPropsToLocator);
@@ -3060,15 +3338,186 @@ document.getElementById('btn-reset')?.addEventListener('click', () => {
             selectedLocatorSnapshot.py,
             selectedLocatorSnapshot.pz,
         );
-        const rx = selectedLocatorSnapshot.rx * Math.PI / 180;
-        const ry = selectedLocatorSnapshot.ry * Math.PI / 180;
-        const rz = selectedLocatorSnapshot.rz * Math.PI / 180;
-        selectedLocator.setRotationFromEuler(new THREE.Euler(rx, ry, rz, 'XYZ'));
+        setLocatorRotationDegrees(selectedLocator, [
+            selectedLocatorSnapshot.rx,
+            selectedLocatorSnapshot.ry,
+            selectedLocatorSnapshot.rz,
+        ]);
         updatePropsFromLocator(selectedLocator);
         autoSaveLocator();
     }
 });
 document.getElementById('btn-props-close')?.addEventListener('click', deselectLocator);
+
+// ── Maya-style Special Duplicate ────────────────────────────────────────────
+
+const specialDuplicateInputs = [
+    duplicateCopies,
+    duplicateTx, duplicateTy, duplicateTz,
+    duplicateRx, duplicateRy, duplicateRz,
+];
+
+function getExistingLocatorNames(): Set<string> {
+    const names = new Set<string>();
+    currentModel?.traverse(obj => {
+        if (obj.userData?.isLocator || obj instanceof THREE.Bone) names.add(obj.name);
+    });
+    for (const locator of currentEntity?.locators ?? []) names.add(locator.name);
+    return names;
+}
+
+function readDuplicateVector(inputs: [HTMLInputElement, HTMLInputElement, HTMLInputElement]): LocatorVector3 {
+    return inputs.map(input => {
+        const value = Number(input.value);
+        return Number.isFinite(value) ? value : 0;
+    }) as LocatorVector3;
+}
+
+function readDuplicateOptions() {
+    const rawCopies = Number(duplicateCopies.value);
+    const copies = Number.isFinite(rawCopies) ? Math.floor(rawCopies) : 0;
+    return {
+        copies,
+        positionStep: readDuplicateVector([duplicateTx, duplicateTy, duplicateTz]),
+        rotationStep: readDuplicateVector([duplicateRx, duplicateRy, duplicateRz]),
+        orbitAroundOrigin: duplicateOrbit.checked,
+    };
+}
+
+function updateSpecialDuplicatePreview() {
+    const source = duplicateSourceLocator;
+    const options = readDuplicateOptions();
+    const valid = options.copies >= 1 && options.copies <= 100;
+    duplicateCopies.classList.toggle('invalid', !valid);
+    if (!source || !valid) {
+        duplicatePreview.textContent = isChinese ? '副本数应为 1–100' : 'Copies must be between 1 and 100';
+        return;
+    }
+
+    const names = generateDuplicateLocatorNames(source.name, options.copies, getExistingLocatorNames());
+    const transforms = buildSpecialDuplicateTransforms({
+        position: [source.position.x, source.position.y, source.position.z],
+        rotation: getLocatorRotationDegrees(source),
+    }, options);
+    const last = transforms[transforms.length - 1]!;
+    const lastName = names[names.length - 1]!;
+    const nameRange = names.length === 1 ? names[0]! : `${names[0]} … ${lastName}`;
+    duplicatePreview.textContent = isChinese
+        ? `${nameRange}；末项位置 ${last.position.map(v => v.toFixed(2)).join(', ')}；旋转 ${last.rotation.map(v => v.toFixed(1)).join('°, ')}°`
+        : `${nameRange}; last position ${last.position.map(v => v.toFixed(2)).join(', ')}; rotation ${last.rotation.map(v => v.toFixed(1)).join('°, ')}°`;
+}
+
+function showSpecialDuplicatePanel() {
+    if (!selectedLocator || !selectedLocatorEditable) return;
+    duplicateSourceLocator = selectedLocator;
+    duplicateSourceName.textContent = selectedLocator.name;
+    duplicateCopies.value = '1';
+    duplicateTx.value = '0';
+    duplicateTy.value = '0';
+    duplicateTz.value = '0';
+    duplicateRx.value = '0';
+    duplicateRy.value = '0';
+    duplicateRz.value = '0';
+    duplicateOrbit.checked = false;
+    propsPanel.classList.add('hidden');
+    specialDuplicatePanel.classList.remove('hidden');
+    updateSpecialDuplicatePreview();
+    duplicateCopies.focus();
+    duplicateCopies.select();
+}
+
+function hideSpecialDuplicatePanel(restoreProperties = true) {
+    specialDuplicatePanel.classList.add('hidden');
+    duplicateSourceLocator = null;
+    if (restoreProperties && selectedLocator) propsPanel.classList.remove('hidden');
+}
+
+function confirmSpecialDuplicate() {
+    const source = duplicateSourceLocator;
+    const options = readDuplicateOptions();
+    if (!source || options.copies < 1 || options.copies > 100) {
+        updateSpecialDuplicatePreview();
+        return;
+    }
+
+    const names = generateDuplicateLocatorNames(source.name, options.copies, getExistingLocatorNames());
+    const transforms = buildSpecialDuplicateTransforms({
+        position: [source.position.x, source.position.y, source.position.z],
+        rotation: getLocatorRotationDegrees(source),
+    }, options);
+    const attachEntity = currentEntity?.attaches?.find(attach => attach.locatorName === source.name)?.entityName;
+    const locators = transforms.map((transform, index) => ({
+        locatorName: names[index]!,
+        position: transform.position,
+        rotation: toPdxScriptRotation(transform.rotation),
+        attachEntity,
+    }));
+
+    addLocatorsToScene(locators);
+    vscode.postMessage({ command: 'duplicateLocators', locators });
+    hideSpecialDuplicatePanel();
+}
+
+document.getElementById('btn-special-duplicate')?.addEventListener('click', showSpecialDuplicatePanel);
+document.getElementById('btn-special-duplicate-close')?.addEventListener('click', () => hideSpecialDuplicatePanel());
+document.getElementById('btn-special-duplicate-cancel')?.addEventListener('click', () => hideSpecialDuplicatePanel());
+document.getElementById('btn-special-duplicate-confirm')?.addEventListener('click', confirmSpecialDuplicate);
+for (const input of specialDuplicateInputs) {
+    input.addEventListener('input', updateSpecialDuplicatePreview);
+    input.addEventListener('keydown', event => {
+        if (event.key === 'Enter') confirmSpecialDuplicate();
+        if (event.key === 'Escape') hideSpecialDuplicatePanel();
+    });
+}
+duplicateOrbit.addEventListener('change', updateSpecialDuplicatePreview);
+
+function updateSmartDuplicateStepFromSelected() {
+    if (!selectedLocator || smartDuplicateState?.activeObject !== selectedLocator) return;
+    smartDuplicateState.step = getLocatorTransformDelta(
+        smartDuplicateState.baseTransform,
+        getLocatorTransform(selectedLocator),
+    );
+}
+
+function smartDuplicateSelectedLocator() {
+    const source = selectedLocator;
+    if (!source || !selectedLocatorEditable) return;
+    const sourceTransform = getLocatorTransform(source);
+    let chainState = smartDuplicateState?.activeObject === source ? smartDuplicateState : null;
+    if (chainState && !chainState.step) {
+        updateSmartDuplicateStepFromSelected();
+        chainState = smartDuplicateState;
+    }
+
+    const step = chainState?.step;
+    const targetTransform = step
+        ? applyLocatorTransformDelta(sourceTransform, step)
+        : sourceTransform;
+    const attachEntity = chainState
+        ? chainState.attachEntity
+        : currentEntity?.attaches?.find(attach => attach.locatorName === source.name)?.entityName;
+    const [name] = generateDuplicateLocatorNames(source.name, 1, getExistingLocatorNames());
+    const locator: SceneLocatorInput = {
+        locatorName: name!,
+        position: targetTransform.position,
+        rotation: toPdxScriptRotation(targetTransform.rotation),
+        attachEntity,
+    };
+    const duplicate = addLocatorsToScene([locator]);
+    if (!duplicate) return;
+    vscode.postMessage({ command: 'duplicateLocators', locators: [locator] });
+    smartDuplicateState = {
+        activeObject: duplicate,
+        baseTransform: sourceTransform,
+        step,
+        attachEntity,
+    };
+    transformHint.textContent = step
+        ? (isChinese ? '已按上次变换复制 · 继续 Shift+D' : 'Repeated previous transform · Shift+D again')
+        : (isChinese ? '已原地复制 · 拉动后继续 Shift+D' : 'Duplicated in place · move it, then press Shift+D')
+    transformHint.classList.remove('hidden');
+    transformHint.classList.add('visible');
+}
 
 // Screenshot button
 document.getElementById('btn-screenshot')?.addEventListener('click', takeScreenshot);
@@ -3097,6 +3546,28 @@ function handleWindowKeydown(e: KeyboardEvent) {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
 
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        showSpecialDuplicatePanel();
+        return;
+    }
+    if (!e.ctrlKey && !e.metaKey && e.shiftKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        smartDuplicateSelectedLocator();
+        return;
+    }
+    if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        if (e.shiftKey) restoreLastHiddenLocators();
+        else toggleSelectedLocatorVisibility();
+        return;
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        deleteSelectedLocatorObjects();
+        return;
+    }
+
     switch (e.key.toLowerCase()) {
         case 'f':
             e.preventDefault();
@@ -3111,7 +3582,11 @@ function handleWindowKeydown(e: KeyboardEvent) {
             setTransformMode('rotate');
             break;
         case 'escape':
-            deselectLocator();
+            if (!specialDuplicatePanel.classList.contains('hidden')) {
+                hideSpecialDuplicatePanel();
+            } else {
+                deselectLocator();
+            }
             break;
     }
 }
@@ -3355,32 +3830,52 @@ document.getElementById('btn-add-loc-confirm')?.addEventListener('click', () => 
 
 /** Incrementally add a locator to the current scene without full reload */
 function addLocatorToScene(name: string, position: [number, number, number], rotation: [number, number, number]) {
-    if (!locatorHelpers || !currentEntity) return;
+    addLocatorsToScene([{ locatorName: name, position, rotation }]);
+}
 
-    const group = createLocatorGroup(name, 0.5, 'script');
-    group.position.set(position[0], position[1], position[2]);
-    group.rotation.copy(pdxScriptEuler(rotation[1], rotation[0], rotation[2]));
-    group.userData = { source: 'script', isLocator: true };
-    locatorHelpers.add(group);
+interface SceneLocatorInput {
+    locatorName: string;
+    position: LocatorVector3;
+    /** PDX script order: Y, X, Z. */
+    rotation: LocatorVector3;
+    attachEntity?: string;
+}
+
+/** Incrementally add a batch of locators and rebuild the tree only once. */
+function addLocatorsToScene(locators: SceneLocatorInput[]) {
+    if (!locatorHelpers || !currentEntity) return null;
 
     // Update currentEntity so the tree knows about the new locator
     if (!currentEntity.locators) {
         currentEntity.locators = [];
     }
-    const existingLoc = currentEntity.locators.find(l => l.name === name);
-    if (!existingLoc) {
-        currentEntity.locators.push({ name, position, rotation });
+    let lastGroup: THREE.Group | null = null;
+    for (const locator of locators) {
+        const group = createLocatorGroup(locator.locatorName, 0.5, 'script');
+        group.position.set(locator.position[0], locator.position[1], locator.position[2]);
+        group.rotation.copy(pdxScriptEuler(locator.rotation[0], locator.rotation[1], locator.rotation[2]));
+        group.userData = { source: 'script', isLocator: true };
+        locatorHelpers.add(group);
+        lastGroup = group;
+
+        const existingLoc = currentEntity.locators.find(l => l.name === locator.locatorName);
+        if (!existingLoc) {
+            currentEntity.locators.push({
+                name: locator.locatorName,
+                position: locator.position,
+                rotation: locator.rotation,
+            });
+        }
     }
 
-    // Update the entity tree to include the new locator
     if (lastParsedMeshFile) {
         updateEntityTree(currentEntity, lastParsedMeshFile);
     } else {
         updateEntityTree(currentEntity);
     }
 
-    // Select the newly created locator
-    selectLocator(group, true);
+    if (lastGroup) selectLocator(lastGroup, true);
+    return lastGroup;
 }
 
 // Allow Enter key to confirm in add-locator inputs

@@ -119,6 +119,16 @@ body {
     opacity: 0.7;
 }
 
+.toolbar-btn.danger {
+    background: var(--vscode-button-secondaryBackground, #5a2525);
+    color: var(--vscode-button-secondaryForeground, #fff);
+}
+
+.toolbar-btn:disabled {
+    cursor: default;
+    opacity: 0.38;
+}
+
 .toolbar-icon-btn {
     background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.15);
@@ -644,6 +654,10 @@ body {
     justify-content: flex-end;
 }
 
+.props-action-leading {
+    margin-right: auto;
+}
+
 .toolbar-btn.secondary {
     background: var(--ep-input-bg);
     color: var(--ep-fg);
@@ -651,7 +665,8 @@ body {
 
 /* ── Add Locator Panel ───────────────────────────────────────────────────── */
 
-#add-locator-panel {
+#add-locator-panel,
+#special-duplicate-panel {
     position: absolute;
     right: 12px;
     top: 48px;
@@ -664,8 +679,92 @@ body {
     overflow: hidden;
 }
 
-#add-locator-panel.hidden {
+#add-locator-panel.hidden,
+#special-duplicate-panel.hidden {
     display: none;
+}
+
+#special-duplicate-panel {
+    width: min(330px, calc(100% - 24px));
+    box-sizing: border-box;
+}
+
+.duplicate-section-label {
+    margin: 9px 0 4px;
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.72;
+}
+
+.duplicate-vector-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.duplicate-vector-row label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    font-size: 11px;
+}
+
+.duplicate-vector-row label span {
+    width: 10px;
+    flex: 0 0 10px;
+    font-weight: 700;
+}
+
+.duplicate-vector-row input[type="number"] {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    background: var(--ep-input-bg);
+    color: var(--ep-input-fg);
+    border: 1px solid var(--ep-input-border);
+    border-radius: 3px;
+    padding: 3px 5px;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 12px;
+    outline: none;
+}
+
+.duplicate-vector-row input[type="number"]:focus {
+    border-color: var(--ep-accent);
+}
+
+.axis-x { color: #f06a6a; }
+.axis-y { color: #72c472; }
+.axis-z { color: #6b9ff0; }
+
+.duplicate-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.duplicate-help,
+.duplicate-preview {
+    margin-top: 7px;
+    font-size: 10px;
+    line-height: 1.4;
+    opacity: 0.62;
+}
+
+.duplicate-preview {
+    min-height: 28px;
+    padding: 5px 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.035);
+    overflow-wrap: anywhere;
+}
+
+input.invalid {
+    border-color: var(--vscode-inputValidation-errorBorder, #be1100) !important;
 }
 
 /* ── Custom Autocomplete Dropdown ────────────────────────────────────────── */
@@ -768,6 +867,49 @@ body {
 
 #transform-hint.hidden {
     display: none;
+}
+
+/* ── Locator Marquee Selection ──────────────────────────────────────────── */
+
+#selection-marquee {
+    position: absolute;
+    display: none;
+    pointer-events: none;
+    z-index: 45;
+    border: 1px solid var(--ep-accent);
+    background: rgba(0, 127, 212, 0.14);
+    box-sizing: border-box;
+}
+
+#selection-marquee.visible {
+    display: block;
+}
+
+#locator-selection-actions {
+    position: absolute;
+    left: 50%;
+    bottom: 12px;
+    transform: translateX(-50%);
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 7px 5px 10px;
+    border: 1px solid var(--ep-border);
+    border-radius: 6px;
+    background: var(--ep-toolbar-bg);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+#locator-selection-actions.hidden {
+    display: none;
+}
+
+#locator-selection-count {
+    margin-right: 3px;
+    opacity: 0.78;
 }
 
 /* ── Locator Labels ──────────────────────────────────────────────────────── */

@@ -145,6 +145,8 @@ const entityNameEl = toolbar.querySelector('.entity-name') as HTMLElement;
 const wireframeToggle = document.getElementById('chk-wireframe') as HTMLInputElement;
 const locatorToggle = document.getElementById('chk-locators') as HTMLInputElement;
 const meshLocatorToggle = document.getElementById('chk-mesh-locators') as HTMLInputElement;
+const gridSnapToggle = document.getElementById('chk-grid-snap') as HTMLInputElement;
+const vertexSnapToggle = document.getElementById('chk-vertex-snap') as HTMLInputElement;
 const normalToggle = document.getElementById('chk-normals') as HTMLInputElement;
 const bonesToggle = document.getElementById('chk-bones') as HTMLInputElement;
 
@@ -203,6 +205,7 @@ let selectedLocator: THREE.Object3D | null = null;
 let selectedLocatorEditable = false;
 const selectedLocators = new Set<THREE.Object3D>();
 let lastHiddenLocators: THREE.Object3D[] = [];
+let treeSelectionAnchor: THREE.Object3D | null = null;
 let duplicateSourceLocator: THREE.Object3D | null = null;
 let currentEntity: EntityData | null = null;
 let lastParsedMeshFile: ParsedMeshFile | null = null;
@@ -232,6 +235,10 @@ interface SmartDuplicateState {
 let smartDuplicateState: SmartDuplicateState | null = null;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
+const lastPointerNdc = new THREE.Vector2();
+let gridSnapHeld = false;
+let vertexSnapHeld = false;
+let vertexSnapMeshes: THREE.Mesh[] = [];
 //Skeleton mounting synchronization list: not directly mounted to the skeleton scene graph to avoid SkinnedMesh double transformation
 interface BoneAttachment {
     bone: THREE.Bone;
@@ -275,7 +282,8 @@ function initThree() {
     controls.minDistance = 0.5;
     controls.maxDistance = 5000;
     
-    //Remap buttons: left button=rotation, middle button=translation. Right-click is completely disabled in favor of right-click menu creation locator.
+    // OrbitControls still uses its left-button rotate binding, but the capture
+    // handler below only lets Alt+left reach it. Middle pans; right opens our menu.
     controls.mouseButtons = {
         LEFT: THREE.MOUSE.ROTATE,
         MIDDLE: THREE.MOUSE.PAN,
@@ -289,6 +297,13 @@ function initThree() {
             e.stopPropagation();  // Prevent OrbitControls from processing right clicks
         }
     }, true);  // use capture phase
+    renderer.domElement.addEventListener('pointermove', (e) => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        lastPointerNdc.set(
+            ((e.clientX - rect.left) / rect.width) * 2 - 1,
+            -((e.clientY - rect.top) / rect.height) * 2 + 1,
+        );
+    }, true);
 
     // Lighting — bright PBR setup for dark-textured models
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
@@ -333,16 +348,23 @@ function initThree() {
         }
     });
     transformCtrl.addEventListener('objectChange', () => {
-        if (selectedLocator) updatePropsFromLocator(selectedLocator);
+        if (selectedLocator) {
+            if (isVertexSnapActive() && transformCtrl.getMode() === 'translate') {
+                snapSelectedLocatorToPointerVertex();
+            }
+            updatePropsFromLocator(selectedLocator);
+        }
     });
     const transformHelper = transformCtrl.getHelper();
     scene.add(transformHelper);
 
-    // Ctrl/Cmd + left drag performs marquee selection without changing the
-    // established left-drag orbit camera behavior.
+    // Maya-style navigation: Alt+left drag orbits; unmodified left drag selects.
     let marqueePointerId: number | null = null;
     let marqueeStart = { x: 0, y: 0 };
-    let marqueeAdditive = false;
+    let marqueeCtrl = false;
+    let marqueeShift = false;
+    let altNavigationPointerId: number | null = null;
+    let suppressClickPointerId: number | null = null;
     const updateMarquee = (clientX: number, clientY: number) => {
         const rect = renderer.domElement.getBoundingClientRect();
         const left = Math.min(marqueeStart.x, clientX) - rect.left;
@@ -353,15 +375,24 @@ function initThree() {
         selectionMarquee.style.height = `${Math.abs(clientY - marqueeStart.y)}px`;
     };
     renderer.domElement.addEventListener('pointerdown', (e) => {
-        if (e.button !== 0 || (!e.ctrlKey && !e.metaKey) || !currentModel || !locatorToggle.checked) return;
+        if (e.button !== 0 || !currentModel) return;
+        if (e.altKey) {
+            altNavigationPointerId = e.pointerId;
+            transformCtrl.enabled = false;
+            return;
+        }
+        // Let TransformControls receive pointer events when hovering a gizmo handle.
+        if (transformCtrl.axis || transformCtrl.dragging) return;
         e.preventDefault();
         e.stopImmediatePropagation();
         marqueePointerId = e.pointerId;
         marqueeStart = { x: e.clientX, y: e.clientY };
-        marqueeAdditive = e.shiftKey;
+        marqueeCtrl = e.ctrlKey || e.metaKey;
+        marqueeShift = e.shiftKey;
         controls.enabled = false;
         renderer.domElement.setPointerCapture(e.pointerId);
         selectionMarquee.classList.add('visible');
+        selectionMarquee.classList.toggle('subtract', marqueeCtrl);
         updateMarquee(e.clientX, e.clientY);
     }, true);
     renderer.domElement.addEventListener('pointermove', (e) => {
@@ -378,13 +409,37 @@ function initThree() {
         marqueePointerId = null;
         controls.enabled = true;
         selectionMarquee.classList.remove('visible');
+        selectionMarquee.classList.remove('subtract');
         if (renderer.domElement.hasPointerCapture(e.pointerId)) {
             renderer.domElement.releasePointerCapture(e.pointerId);
         }
-        if (!cancelled) selectLocatorsInScreenRect(start.x, start.y, e.clientX, e.clientY, marqueeAdditive);
+        if (!cancelled) {
+            const isClick = Math.abs(e.clientX - start.x) < 4 && Math.abs(e.clientY - start.y) < 4;
+            if (isClick) {
+                const operation: LocatorSelectionOperation = marqueeShift ? 'remove' : marqueeCtrl ? 'add' : 'replace';
+                selectLocatorAtScreenPoint(e.clientX, e.clientY, operation);
+            } else {
+                selectLocatorsInScreenRect(
+                    start.x,
+                    start.y,
+                    e.clientX,
+                    e.clientY,
+                    marqueeCtrl ? 'remove' : 'replace',
+                );
+            }
+        }
     };
-    renderer.domElement.addEventListener('pointerup', e => finishMarquee(e, false), true);
-    renderer.domElement.addEventListener('pointercancel', e => finishMarquee(e, true), true);
+    const finishPointerInteraction = (e: PointerEvent, cancelled: boolean) => {
+        if (altNavigationPointerId === e.pointerId) {
+            altNavigationPointerId = null;
+            suppressClickPointerId = e.pointerId;
+            transformCtrl.enabled = true;
+            return;
+        }
+        finishMarquee(e, cancelled);
+    };
+    renderer.domElement.addEventListener('pointerup', e => finishPointerInteraction(e, false), true);
+    renderer.domElement.addEventListener('pointercancel', e => finishPointerInteraction(e, true), true);
 
     // Click handler for locator selection — use 'pointerup' with distance check
     // to avoid interfering with TransformControls drag events
@@ -393,6 +448,11 @@ function initThree() {
         pointerDownPos = { x: e.clientX, y: e.clientY };
     });
     renderer.domElement.addEventListener('pointerup', (e) => {
+        if (suppressClickPointerId === e.pointerId) {
+            suppressClickPointerId = null;
+            return;
+        }
+        if (e.altKey) return;
         // Only treat as "click" if the pointer didn't move (not a drag)
         const dx = e.clientX - pointerDownPos.x;
         const dy = e.clientY - pointerDownPos.y;
@@ -429,12 +489,13 @@ function animate() {
 
     // Update animation mixers
     const delta = clock.getDelta();
-    if (mixer && isAnimPlaying) {
-        mixer.update(delta);
-        updateTimelineUI();
+    if (isAnimPlaying) {
+        if (mixer) {
+            mixer.update(delta);
+            updateTimelineUI();
+        }
+        for (const cm of childMixers) cm.mixer.update(delta);
     }
-    // Always update child entity mixers
-    for (const cm of childMixers) cm.mixer.update(delta);
 
 
 
@@ -687,6 +748,67 @@ function refreshLocatorVisualVisibility() {
     updateLocatorLabels();
 }
 
+const GRID_SNAP_STEP = 1;
+const vertexSnapRaycaster = new THREE.Raycaster();
+const vertexSnapLocal = new THREE.Vector3();
+const vertexSnapWorld = new THREE.Vector3();
+const vertexSnapBest = new THREE.Vector3();
+
+function isGridSnapActive(): boolean {
+    return gridSnapHeld || (gridSnapToggle.checked && !vertexSnapHeld);
+}
+
+function isVertexSnapActive(): boolean {
+    return vertexSnapHeld || (vertexSnapToggle.checked && !gridSnapHeld);
+}
+
+function updateTransformSnapping() {
+    transformCtrl.setTranslationSnap(isVertexSnapActive() ? null : isGridSnapActive() ? GRID_SNAP_STEP : null);
+}
+
+function rebuildVertexSnapMeshCache() {
+    vertexSnapMeshes = [];
+    currentModel?.traverse(obj => {
+        if (!(obj instanceof THREE.Mesh)) return;
+        if (obj.parent?.userData?.isLocator && obj.name.endsWith('_hit')) return;
+        vertexSnapMeshes.push(obj);
+    });
+}
+
+function snapSelectedLocatorToPointerVertex() {
+    if (!selectedLocator || !selectedLocator.parent || vertexSnapMeshes.length === 0) return;
+    currentModel?.updateWorldMatrix(true, true);
+    vertexSnapRaycaster.setFromCamera(lastPointerNdc, camera);
+    const intersections = vertexSnapRaycaster.intersectObjects(vertexSnapMeshes, false);
+    const hit = intersections.find(intersection => {
+        if (!intersection.face || !(intersection.object instanceof THREE.Mesh)) return false;
+        let parent: THREE.Object3D | null = intersection.object;
+        while (parent) {
+            if (!parent.visible) return false;
+            if (parent === selectedLocator) return false;
+            parent = parent.parent;
+        }
+        return true;
+    });
+    if (!hit?.face || !(hit.object instanceof THREE.Mesh)) return;
+
+    const mesh = hit.object;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const vertexIndex of [hit.face.a, hit.face.b, hit.face.c]) {
+        mesh.getVertexPosition(vertexIndex, vertexSnapLocal);
+        vertexSnapWorld.copy(vertexSnapLocal);
+        mesh.localToWorld(vertexSnapWorld);
+        const distance = vertexSnapWorld.distanceToSquared(hit.point);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            vertexSnapBest.copy(vertexSnapWorld);
+        }
+    }
+
+    selectedLocator.parent.updateWorldMatrix(true, false);
+    selectedLocator.position.copy(selectedLocator.parent.worldToLocal(vertexSnapBest.clone()));
+}
+
 /** Create a locator Group: invisible hit sphere + AxesHelper visual */
 function createLocatorGroup(name: string, size: number, source: string): THREE.Group {
     const group = new THREE.Group();
@@ -762,16 +884,12 @@ function applyLocatorTransform(obj: THREE.Object3D, loc: ParsedLocator) {
     }
 }
 
-function onLocatorPointerDown(event: PointerEvent) {
-    if (!locatorHelpers || !locatorHelpers.visible) return;
-    if (event.button !== 0) return;
-
-    // Check if click is on TransformControls gizmo (don't deselect)
-    if (transformCtrl.dragging) return;
+function findLocatorAtScreenPoint(clientX: number, clientY: number): THREE.Object3D | null {
+    if (!locatorHelpers || !locatorHelpers.visible) return null;
 
     const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
 
     raycaster.setFromCamera(mouse, camera);
 
@@ -787,6 +905,12 @@ function onLocatorPointerDown(event: PointerEvent) {
             break;
         }
     }
+    return target;
+}
+
+function onLocatorPointerDown(event: PointerEvent) {
+    if (event.button !== 0 || event.altKey || transformCtrl.dragging || transformCtrl.axis) return;
+    const target = findLocatorAtScreenPoint(event.clientX, event.clientY);
     if (target) {
         selectLocator(target, isLocatorObjectEditable(target));
     } else {
@@ -831,6 +955,7 @@ function selectLocator(obj: THREE.Object3D, editable = true, preserveSmartDuplic
     selectedLocators.clear();
     selectedLocators.add(obj);
     if (!preserveSmartDuplicate) smartDuplicateState = null;
+    treeSelectionAnchor = obj;
 
     selectedLocator = obj;
     // Determine if this locator is inside a submodel structure
@@ -888,7 +1013,11 @@ function selectLocator(obj: THREE.Object3D, editable = true, preserveSmartDuplic
         // Show hint
         const hintEntry = i18n['transformHint'];
         if (hintEntry) {
-            transformHint.textContent = isChinese ? hintEntry.zh : hintEntry.en;
+            const baseHint = isChinese ? '点击定位器选择 · W 移动 · E 旋转' : hintEntry.en;
+            const snapHint = isChinese
+                ? 'Alt+左键 视角 · 按住 X 网格吸附 · 按住 V 顶点吸附'
+                : 'Alt+left orbit · hold X grid snap · hold V vertex snap';
+            transformHint.textContent = `${baseHint} · ${snapHint}`;
         }
         transformHint.classList.remove('hidden');
         transformHint.classList.add('visible');
@@ -907,12 +1036,28 @@ function selectLocator(obj: THREE.Object3D, editable = true, preserveSmartDuplic
     highlightTreeItem(obj.name);
 }
 
-function selectLocatorsFromMarquee(objects: THREE.Object3D[], additive: boolean) {
-    if (!additive) {
+type LocatorSelectionOperation = 'replace' | 'add' | 'remove';
+
+function applyLocatorSelection(objects: THREE.Object3D[], operation: LocatorSelectionOperation) {
+    for (const existing of Array.from(selectedLocators)) {
+        if (!isLocatorObjectEditable(existing)) {
+            selectedLocators.delete(existing);
+            setLocatorSelectedStyle(existing, false);
+        }
+    }
+    objects = objects.filter(isLocatorObjectEditable);
+    if (operation === 'replace') {
         clearLocatorSelectionStyles();
         selectedLocators.clear();
     }
-    for (const obj of objects) selectedLocators.add(obj);
+    for (const obj of objects) {
+        if (operation === 'remove') {
+            selectedLocators.delete(obj);
+            setLocatorSelectedStyle(obj, false);
+        } else {
+            selectedLocators.add(obj);
+        }
+    }
 
     selectedLocator = null;
     selectedLocatorEditable = false;
@@ -928,12 +1073,28 @@ function selectLocatorsFromMarquee(objects: THREE.Object3D[], additive: boolean)
     updateLocatorSelectionActions();
 }
 
+function selectLocatorAtScreenPoint(clientX: number, clientY: number, operation: LocatorSelectionOperation) {
+    const target = findLocatorAtScreenPoint(clientX, clientY);
+    if (operation === 'replace') {
+        if (target && isLocatorObjectEditable(target)) {
+            treeSelectionAnchor = target;
+            selectLocator(target, true);
+        } else {
+            deselectLocator();
+        }
+        return;
+    }
+    if (!target || !isLocatorObjectEditable(target)) return;
+    if (operation === 'add') treeSelectionAnchor = target;
+    applyLocatorSelection([target], operation);
+}
+
 function selectLocatorsInScreenRect(
     startX: number,
     startY: number,
     endX: number,
     endY: number,
-    additive: boolean,
+    operation: LocatorSelectionOperation,
 ) {
     if (!currentModel) return;
     const canvasRect = renderer.domElement.getBoundingClientRect();
@@ -956,7 +1117,8 @@ function selectLocatorsInScreenRect(
         if (x >= left && x <= right && y >= top && y <= bottom) matches.push(obj);
     });
 
-    selectLocatorsFromMarquee(matches, additive);
+    if (operation === 'replace') treeSelectionAnchor = matches[matches.length - 1] ?? null;
+    applyLocatorSelection(matches, operation);
 }
 
 function toggleSelectedLocatorVisibility() {
@@ -987,7 +1149,7 @@ function restoreLastHiddenLocators() {
     }
     lastHiddenLocators = [];
     refreshLocatorVisualVisibility();
-    if (restorable.length > 0) selectLocatorsFromMarquee(restorable, false);
+    if (restorable.length > 0) applyLocatorSelection(restorable, 'replace');
 }
 
 function deleteSelectedLocatorObjects() {
@@ -1003,6 +1165,7 @@ function deleteSelectedLocatorObjects() {
         locatorLabelEls.delete(labelKey);
         obj.parent?.remove(obj);
     }
+    rebuildVertexSnapMeshCache();
     if (currentEntity) {
         const deletedNames = new Set(names);
         currentEntity.locators = currentEntity.locators?.filter(locator => !deletedNames.has(locator.name));
@@ -1013,7 +1176,7 @@ function deleteSelectedLocatorObjects() {
     lastHiddenLocators = lastHiddenLocators.filter(obj => !deletable.includes(obj));
     const remaining = Array.from(selectedLocators).filter(obj => !deletable.includes(obj));
     if (remaining.length > 0) {
-        selectLocatorsFromMarquee(remaining, false);
+        applyLocatorSelection(remaining, 'replace');
     } else {
         deselectLocator();
     }
@@ -1026,6 +1189,7 @@ function deselectLocator() {
     selectedLocatorEditable = false;
     selectedLocatorSnapshot = null;
     smartDuplicateState = null;
+    treeSelectionAnchor = null;
     transformCtrl.detach();
     propsPanel.classList.add('hidden');
     locatorSelectionActions.classList.add('hidden');
@@ -1440,12 +1604,7 @@ function switchAnimation(clip: THREE.AnimationClip) {
     }
 
     currentAction = newAction;
-    clock.start();
-    isAnimPlaying = true;
-
-    // Update play button
-    const playBtn = document.getElementById('btn-anim-play');
-    if (playBtn) playBtn.textContent = '⏸';
+    setAnimationPlayback(true);
 }
 
 /**
@@ -1477,6 +1636,32 @@ function updateTimelineUI() {
         return `${s}.${ms}`;
     };
     timeDisplay.textContent = `${fmt(time)} / ${fmt(duration)}s`;
+}
+
+function hasPlayableAnimation(): boolean {
+    return !!currentAction || childMixers.some(entry => !!entry.currentAction);
+}
+
+function setAnimationPlayback(playing: boolean): boolean {
+    if (!hasPlayableAnimation()) return false;
+    isAnimPlaying = playing;
+    if (currentAction) currentAction.paused = !playing;
+    for (const entry of childMixers) {
+        if (entry.currentAction) entry.currentAction.paused = !playing;
+    }
+    const playBtn = document.getElementById('btn-anim-play');
+    if (playBtn) {
+        playBtn.textContent = playing ? '⏸' : '▶';
+        playBtn.title = playing
+            ? (isChinese ? '暂停（Space）' : 'Pause (Space)')
+            : (isChinese ? '播放（Space）' : 'Play (Space)');
+    }
+    if (playing) clock.start();
+    return true;
+}
+
+function toggleAnimationPlayback(): boolean {
+    return setAnimationPlayback(!isAnimPlaying);
 }
 
 
@@ -3005,8 +3190,12 @@ function updateEntityTree(_entity: EntityData, _parsed?: ParsedMeshFile) {
         showAddLocatorPanel();
     });
 
+    const orderedSelectableLocators = Array.from(entityTree.querySelectorAll<HTMLElement>('.tree-locator[data-object-uuid]'))
+        .map(el => treeObjects.get(el.dataset.objectUuid!))
+        .filter((obj): obj is THREE.Object3D => !!obj && isLocatorObjectEditable(obj) && isLocatorVisuallyVisible(obj));
+
     entityTree.querySelectorAll<HTMLElement>('[data-object-uuid]').forEach(el => {
-        el.addEventListener('click', () => {
+        el.addEventListener('click', (event) => {
             const uuid = el.dataset.objectUuid!;
             const obj = treeObjects.get(uuid);
             if (obj) {
@@ -3027,6 +3216,21 @@ function updateEntityTree(_entity: EntityData, _parsed?: ParsedMeshFile) {
 
                 const isBoneParented = obj.parent instanceof THREE.Bone;
                 const isEditable = !isBoneParented && !(obj instanceof THREE.Bone);
+                if (isEditable && (event.ctrlKey || event.metaKey)) {
+                    treeSelectionAnchor = obj;
+                    applyLocatorSelection([obj], 'add');
+                    return;
+                }
+                if (isEditable && event.shiftKey) {
+                    const anchorIndex = treeSelectionAnchor ? orderedSelectableLocators.indexOf(treeSelectionAnchor) : -1;
+                    const targetIndex = orderedSelectableLocators.indexOf(obj);
+                    if (anchorIndex >= 0 && targetIndex >= 0) {
+                        const start = Math.min(anchorIndex, targetIndex);
+                        const end = Math.max(anchorIndex, targetIndex);
+                        applyLocatorSelection(orderedSelectableLocators.slice(start, end + 1), 'replace');
+                        return;
+                    }
+                }
                 selectLocator(obj, isEditable);
             }
         });
@@ -3211,16 +3415,7 @@ document.getElementById('sel-state')?.addEventListener('change', (e) => {
 
 // Animation timeline controls
 document.getElementById('btn-anim-play')?.addEventListener('click', () => {
-    if (!mixer || !currentAction) return;
-    isAnimPlaying = !isAnimPlaying;
-    const btn = document.getElementById('btn-anim-play');
-    if (btn) btn.textContent = isAnimPlaying ? '⏸' : '▶';
-    if (isAnimPlaying) {
-        currentAction.paused = false;
-        clock.start();
-    } else {
-        currentAction.paused = true;
-    }
+    toggleAnimationPlayback();
 });
 
 document.getElementById('anim-scrub')?.addEventListener('input', (e) => {
@@ -3275,6 +3470,16 @@ meshLocatorToggle.addEventListener('change', () => {
         && Array.from(selectedLocators).some(obj => obj.userData?.source === 'mesh')) {
         deselectLocator();
     }
+});
+
+gridSnapToggle.addEventListener('change', () => {
+    if (gridSnapToggle.checked) vertexSnapToggle.checked = false;
+    updateTransformSnapping();
+});
+
+vertexSnapToggle.addEventListener('change', () => {
+    if (vertexSnapToggle.checked) gridSnapToggle.checked = false;
+    updateTransformSnapping();
 });
 
 // Store original normal maps so they can be restored
@@ -3546,6 +3751,24 @@ function handleWindowKeydown(e: KeyboardEvent) {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
 
+    if (e.code === 'Space' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) {
+        if (toggleAnimationPlayback()) e.preventDefault();
+        return;
+    }
+
+    if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        gridSnapHeld = true;
+        updateTransformSnapping();
+        return;
+    }
+    if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        vertexSnapHeld = true;
+        updateTransformSnapping();
+        return;
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
         e.preventDefault();
         showSpecialDuplicatePanel();
@@ -3590,7 +3813,26 @@ function handleWindowKeydown(e: KeyboardEvent) {
             break;
     }
 }
+
+function handleWindowKeyup(e: KeyboardEvent) {
+    if (e.key.toLowerCase() === 'x' && gridSnapHeld) {
+        gridSnapHeld = false;
+        updateTransformSnapping();
+    }
+    if (e.key.toLowerCase() === 'v' && vertexSnapHeld) {
+        vertexSnapHeld = false;
+        updateTransformSnapping();
+    }
+}
+
+function handleWindowBlur() {
+    gridSnapHeld = false;
+    vertexSnapHeld = false;
+    updateTransformSnapping();
+}
 window.addEventListener('keydown', handleWindowKeydown);
+window.addEventListener('keyup', handleWindowKeyup);
+window.addEventListener('blur', handleWindowBlur);
 
 // ── Window Events ────────────────────────────────────────────────────────────
 
@@ -3609,6 +3851,8 @@ function disposeAll() {
     // Remove event listeners
     window.removeEventListener('resize', handleResize);
     window.removeEventListener('keydown', handleWindowKeydown);
+    window.removeEventListener('keyup', handleWindowKeyup);
+    window.removeEventListener('blur', handleWindowBlur);
     window.removeEventListener('message', handleWindowMessage);
     document.removeEventListener('visibilitychange', handleVisibilityChange);
     document.removeEventListener('click', handleDocumentClick);
@@ -4061,6 +4305,7 @@ async function handleWindowMessage(event: MessageEvent) {
                 }
             }
             await loadModel(data.entity, meshBuffer);
+            rebuildVertexSnapMeshCache();
             // Initialize animations after model is loaded
             if (animBuffers.size > 0) {
                 initAnimations(animBuffers);
@@ -4107,6 +4352,7 @@ async function handleWindowMessage(event: MessageEvent) {
                 removeAttachAtLocator(locName);
                 // Load the new attached entity
                 await loadAttachChildren([attachData], locatorHelpers, currentModel, currentEntity?.defaultState);
+                rebuildVertexSnapMeshCache();
                 // Rebuild the entity tree in the sidebar
                 buildEntityTree();
             }
@@ -4125,6 +4371,7 @@ async function handleWindowMessage(event: MessageEvent) {
             }
             
             removeAttachAtLocator(locName2);
+            rebuildVertexSnapMeshCache();
             buildEntityTree();
             break;
         }

@@ -885,6 +885,11 @@ input.invalid {
     display: block;
 }
 
+#selection-marquee.subtract {
+    border-color: var(--vscode-inputValidation-errorBorder, #d65a5a);
+    background: rgba(190, 17, 0, 0.12);
+}
+
 #locator-selection-actions {
     position: absolute;
     left: 50%;

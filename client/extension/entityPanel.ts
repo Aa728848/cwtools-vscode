@@ -1528,6 +1528,14 @@ export class EntityPanel {
         <span class="toolbar-separator"></span>
         <button id="btn-translate" class="toolbar-icon-btn tool-mode active" data-i18n-title="translateBtn" data-mode="translate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="14,7 19,12 14,17"/><line x1="12" y1="5" x2="12" y2="19"/><polyline points="7,14 12,19 17,14"/></svg></button>
         <button id="btn-rotate" class="toolbar-icon-btn tool-mode" data-i18n-title="rotateBtn" data-mode="rotate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/><polyline points="21,3 21,9 15,9"/></svg></button>
+        <label class="toolbar-checkbox-btn" title="${locale.startsWith('zh') ? '网格吸附（按住 X 临时启用，步长 1）' : 'Grid snap (hold X temporarily, step 1)'}">
+            <input type="checkbox" id="chk-grid-snap">
+            <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h16v16H4zM9.33 4v16M14.67 4v16M4 9.33h16M4 14.67h16"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg></div>
+        </label>
+        <label class="toolbar-checkbox-btn" title="${locale.startsWith('zh') ? '顶点吸附（按住 V 临时启用）' : 'Vertex snap (hold V temporarily)'}">
+            <input type="checkbox" id="chk-vertex-snap">
+            <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 9 17H3L12 3Z"/><circle cx="12" cy="3" r="2.2" fill="currentColor" stroke="none"/><circle cx="3" cy="20" r="2.2" fill="currentColor" stroke="none"/><circle cx="21" cy="20" r="2.2" fill="currentColor" stroke="none"/></svg></div>
+        </label>
         <span class="toolbar-separator"></span>
         <label class="toolbar-checkbox-btn" data-i18n-title="wireframe">
             <input type="checkbox" id="chk-wireframe">
@@ -1653,7 +1661,7 @@ export class EntityPanel {
     </div>
 
     <div id="timeline" style="display:none">
-        <button id="btn-anim-play" class="timeline-btn" title="Play/Pause">▶</button>
+        <button id="btn-anim-play" class="timeline-btn" title="${locale.startsWith('zh') ? '播放/暂停（Space）' : 'Play/Pause (Space)'}">▶</button>
         <input type="range" id="anim-scrub" min="0" max="1000" value="0" class="timeline-scrub">
         <span id="anim-time" class="timeline-time">0.0 / 0.0s</span>
         <button id="btn-anim-loop" class="timeline-btn" title="Loop"><svg width="14" height="14" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M2.08 4.79l2.84-2.85.71.71-1.63 1.63h6.64a2.91 2.91 0 0 1 2.9 2.9v4.28h-1V7.18a1.91 1.91 0 0 0-1.9-1.9H4.01l1.62 1.62-.7.7-2.85-2.81zm11.84 6.42l-2.84 2.85-.71-.71 1.63-1.63H5.36a2.91 2.91 0 0 1-2.9-2.9V4.54h1v4.28a1.91 1.91 0 0 0 1.9 1.9h6.63l-1.62-1.62.7-.7 2.85 2.81z"/></svg></button>

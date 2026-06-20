@@ -27,6 +27,8 @@ import {
     getModelOutputTokens,
     getDisableThinkingParams,
     getEnableThinkingParams,
+    getEffectiveTemperature,
+    getOpenCodeApiFormat,
 } from './providers';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
@@ -359,6 +361,9 @@ export class AIService {
         // Strip the UI '(免费)' suffix from the model ID before sending to the API
         const model = rawModel.replace(/\s*\(免费\)$/i, '');
         const lowerModel = model.toLowerCase();
+        const effectiveApiFormat = providerId === 'opencode'
+            ? getOpenCodeApiFormat(model)
+            : customApiFormat;
 
         // ── Disable thinking: per-provider API parameters ──
         // Each provider has a different mechanism to disable thinking/reasoning.
@@ -397,7 +402,7 @@ export class AIService {
             messages: finalMessages,
             tools: options?.tools,
             tool_choice: options?.tools && options.tools.length > 0 ? 'auto' : undefined,
-            temperature: options?.temperature ?? 0.3,
+            temperature: getEffectiveTemperature(model, options?.temperature),
             // M5 Fix: dynamically set maxTokens based on model/provider.
             // Reasoning models (like DeepSeek-R1) generate >20K thinking tokens 
             // and will self-truncate if capped at 8192.
@@ -409,9 +414,9 @@ export class AIService {
         // Inject reasoning effort / thinking preferences based on provider
         if (!options?.disableThinking) {
             const rEffort = config.reasoningEffort || 'high';
-            if (config.provider === 'deepseek' || config.provider === 'openai') {
+            if (config.provider === 'deepseek' || config.provider === 'openai' || effectiveApiFormat === 'openai-responses') {
                 request.reasoning_effort = rEffort;
-            } else if (config.provider === 'claude' || customApiFormat === 'anthropic-messages') {
+            } else if (config.provider === 'claude' || effectiveApiFormat === 'anthropic-messages') {
                 // Consumed by toClaudeRequest: mapped to output_config.effort and
                 // adaptive thinking on models that support them (Fable 5, Opus/Sonnet 4.6+).
                 request.reasoning_effort = rEffort;
@@ -447,11 +452,11 @@ export class AIService {
 
         try {
             // MiniMax Token Plan uses Anthropic Messages API format
-            const isAnthropicCompat = providerId === 'claude' || providerId === 'minimax-token-plan' || customApiFormat === 'anthropic-messages';
-            if (customApiFormat === 'openai-responses') {
+            const isAnthropicCompat = providerId === 'claude' || providerId === 'minimax-token-plan' || effectiveApiFormat === 'anthropic-messages';
+            if (effectiveApiFormat === 'openai-responses') {
                 return await this.callOpenAIResponses(endpoint, apiKey, request, providerId, controller, options?.onTextDelta);
             }
-            if (customApiFormat === 'gemini-generate-content') {
+            if (effectiveApiFormat === 'gemini-generate-content') {
                 return await this.callGeminiGenerateContent(endpoint, apiKey, request, providerId, controller, options?.onTextDelta, options?.onToolCallDelta);
             }
             // Use streaming for OpenAI-compat providers when they support it.
@@ -1330,7 +1335,10 @@ export class AIService {
         onToolCallDelta?: (toolName: string, argsBuf: string) => void
     ): Promise<ChatCompletionResponse> {
         const url = this.withGeminiKey(this.buildGeminiUrl(endpoint, request.model), apiKey);
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            ...this.buildAuthHeaders(providerId, apiKey),
+        };
         if (apiKey) headers['x-goog-api-key'] = apiKey;
         const response = await this.fetchWithRetry(url, {
             method: 'POST',
@@ -1445,6 +1453,7 @@ export class AIService {
                 'Content-Type': 'application/json',
                 'x-api-key': apiKey,
                 'anthropic-version': '2023-06-01',
+                ...(providerId === 'opencode' ? this.buildAuthHeaders(providerId, apiKey) : {}),
             },
             body: JSON.stringify(claudeRequest),
             signal: controller.signal,

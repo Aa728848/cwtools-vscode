@@ -18,6 +18,15 @@ describe('getModelPricing', () => {
         expect(getModelPricing('deepseek-v4-pro')).to.deep.equal([2.97, 5.93]);
     });
 
+    it('uses current direct-provider pricing', () => {
+        expect(getModelPricing('glm-5.2')).to.deep.equal([9.56, 30.05]);
+        expect(getModelPricing('MiniMax-M3')).to.deep.equal([2.10, 8.40]);
+        expect(getModelPricing('qwen3.7-max-2026-06-08')).to.deep.equal([12.00, 36.00]);
+        expect(getModelPricing('gemini-3.5-flash')).to.deep.equal([10.23, 61.38]);
+        expect(getModelPricing('mimo-v2.5-pro')).to.deep.equal([3.00, 6.00]);
+        expect(getModelPricing('kimi-k2.7-code')).to.deep.equal([6.50, 27.00]);
+    });
+
     it('prefix match: dated model tag', () => {
         expect(getModelPricing('claude-opus-4-7-20251101')).to.deep.equal([34.10, 170.50]);
     });
@@ -30,6 +39,10 @@ describe('getModelPricing', () => {
     it('provider-specific override beats base model pricing', () => {
         expect(getModelPricing('deepseek-ai/DeepSeek-V4-Pro', 'siliconflow')).to.deep.equal([3.00, 6.00]);
         expect(getModelPricing('deepseek-ai/DeepSeek-V4-Pro', 'deepinfra')).to.deep.equal([8.87, 17.73]);
+        expect(getModelPricing('z-ai/glm-5.2', 'openrouter')).to.deep.equal([8.18, 27.96]);
+        expect(getModelPricing('gpt-5.5', 'opencode')).to.deep.equal([34.10, 204.60]);
+        expect(getModelPricing('deepseek-v4-pro', 'opencode')).to.deep.equal([11.87, 23.73]);
+        expect(getModelPricing('minimax-m3-free', 'opencode')).to.deep.equal([0, 0]);
     });
 
     it('unknown model returns [0, 0]', () => {
@@ -69,8 +82,8 @@ describe('getCacheDiscountFactor', () => {
         expect(getCacheDiscountFactor('gpt-5.4-mini')).to.equal(0.5);
     });
 
-    it('returns 0.25 for Gemini models', () => {
-        expect(getCacheDiscountFactor('gemini-2.5-pro')).to.equal(0.25);
+    it('returns 0.1 for Gemini models', () => {
+        expect(getCacheDiscountFactor('gemini-3.5-flash')).to.equal(0.1);
     });
 
     it('returns 0.2 for Qwen models', () => {
@@ -78,10 +91,20 @@ describe('getCacheDiscountFactor', () => {
     });
 
     it('returns correct factors for other providers', () => {
-        expect(getCacheDiscountFactor('glm-5.1')).to.equal(0.1);
+        expect(getCacheDiscountFactor('glm-5.2')).to.equal(0.19);
+        expect(getCacheDiscountFactor('kimi-k2.7-code')).to.equal(0.2);
         expect(getCacheDiscountFactor('kimi-k2.6')).to.equal(0.17);
-        expect(getCacheDiscountFactor('minimax-m2.7')).to.equal(0.1);
-        expect(getCacheDiscountFactor('mimo-v2.5')).to.equal(0.01);
+        expect(getCacheDiscountFactor('minimax-m2.7')).to.equal(0.2);
+        expect(getCacheDiscountFactor('mimo-v2.5-pro')).to.equal(0.0083);
+        expect(getCacheDiscountFactor('mimo-v2.5')).to.equal(0.02);
+    });
+
+    it('uses OpenCode provider-specific cache rates', () => {
+        expect(getCacheDiscountFactor('gpt-5.5', 'opencode')).to.equal(0.1);
+        expect(getCacheDiscountFactor('gpt-5.5-pro', 'opencode')).to.equal(1);
+        expect(getCacheDiscountFactor('deepseek-v4-pro', 'opencode')).to.equal(0.08);
+        expect(getCacheDiscountFactor('deepseek-v4-flash', 'opencode')).to.equal(0.2);
+        expect(getCacheDiscountFactor('minimax-m3-free', 'opencode')).to.equal(0);
     });
 
     it('returns 1.0 for unknown-model without cache discount', () => {

@@ -12,6 +12,7 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'gpt-5.5-pro': true,
     'gpt-5.5-instant': true,
     'gpt-5.3-instant': true,
+    'gpt-5.3-codex-spark': false,
     'gpt-5.4': true,
     'gpt-5.4-mini': true,
     'gpt-5.4-nano': true,
@@ -39,7 +40,8 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'gemini-2.5-flash': true,
     'gemini-2.5-flash-lite': true,
     'gemini': true,
-    'MiniMax-M3': false,
+    'minimax-m3-free': false,
+    'MiniMax-M3': true,
     'MiniMax-M2': false,
     'glm-5v-turbo': true,
     'glm-4.1v-thinking': true,
@@ -48,6 +50,7 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'glm-5v-flash': true,
     'glm-4v': true,
     'glm-4.5v': true,
+    'glm-5.2': false,
     'glm-5.1': false,
     'glm-5-air': false,
     'glm-5-flash': false,
@@ -57,11 +60,12 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'glm-4.7-flash': false,
     'glm-z1-flash': false,
     'glm-4-flash': false,
-    'qwen3.6-plus': false,
-    'qwen3.5-plus': false,
-    'qwen3.6-flash': false,
+    'qwen3.7-max-2026-06-08': true,
+    'qwen3.6-plus': true,
+    'qwen3.5-plus': true,
+    'qwen3.6-flash': true,
     'qwen3.7-max': false,
-    'qwen3.7-plus': false,
+    'qwen3.7-plus': true,
     'qwen3.7-flash': false,
     'qwen3.6-27b': true,
     'qwen3-235b-a22b': false,
@@ -76,12 +80,15 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'deepseek-v4-pro': false,
     'deepseek-v4-flash': false,
     'mimo-v2.5-pro': true,
+    'mimo-v2.5-free': true,
     'mimo-v2-omni': true,
     'mimo-v2-pro': false,
     'mimo-v2.5': false,
     'mimo-v2-flash': false,
+    'kimi-k2.7-code': true,
     'kimi-k2.6': true,
     'kimi-k2.5': true,
+    'grok-build-0.1': true,
     'qwen3.7': false,
     'Qwen3.7': false
 };
@@ -141,8 +148,61 @@ export const ALWAYS_THINKING_PREFIXES: string[] = [
     'gemini-2.5-pro', 'gemini-3.1-pro',
     'QwQ', 'qwq',
     'Thinking', 'thinking',
+    'kimi-k2.7-code',
     'phi-4-reasoning',
 ];
+
+/** OpenCode Zen limits from its current model metadata. */
+export const OPENCODE_MODEL_LIMITS: Record<string, { context: number; output: number }> = {
+    'claude-fable-5': { context: 1000000, output: 128000 },
+    'claude-haiku-4-5': { context: 200000, output: 64000 },
+    'claude-opus-4-1': { context: 200000, output: 32000 },
+    'claude-opus-4-5': { context: 200000, output: 64000 },
+    'claude-opus-4-6': { context: 1000000, output: 128000 },
+    'claude-opus-4-7': { context: 1000000, output: 128000 },
+    'claude-opus-4-8': { context: 1000000, output: 128000 },
+    'claude-sonnet-4': { context: 1000000, output: 64000 },
+    'claude-sonnet-4-5': { context: 1000000, output: 64000 },
+    'claude-sonnet-4-6': { context: 1000000, output: 64000 },
+    'gpt-5': { context: 400000, output: 128000 },
+    'gpt-5-codex': { context: 400000, output: 128000 },
+    'gpt-5-nano': { context: 400000, output: 128000 },
+    'gpt-5.1': { context: 400000, output: 128000 },
+    'gpt-5.1-codex': { context: 400000, output: 128000 },
+    'gpt-5.1-codex-max': { context: 400000, output: 128000 },
+    'gpt-5.1-codex-mini': { context: 400000, output: 128000 },
+    'gpt-5.2': { context: 400000, output: 128000 },
+    'gpt-5.2-codex': { context: 400000, output: 128000 },
+    'gpt-5.3-codex': { context: 400000, output: 128000 },
+    'gpt-5.3-codex-spark': { context: 128000, output: 128000 },
+    'gpt-5.4': { context: 1050000, output: 128000 },
+    'gpt-5.4-mini': { context: 400000, output: 128000 },
+    'gpt-5.4-nano': { context: 400000, output: 128000 },
+    'gpt-5.4-pro': { context: 1050000, output: 128000 },
+    'gpt-5.5': { context: 1050000, output: 128000 },
+    'gpt-5.5-pro': { context: 1050000, output: 128000 },
+    'gemini-3-flash': { context: 1048576, output: 65536 },
+    'gemini-3.1-pro': { context: 1048576, output: 65536 },
+    'gemini-3.5-flash': { context: 1048576, output: 65536 },
+    'deepseek-v4-flash': { context: 1000000, output: 384000 },
+    'big-pickle': { context: 200000, output: 32000 },
+    'deepseek-v4-flash-free': { context: 200000, output: 128000 },
+    'deepseek-v4-pro': { context: 1000000, output: 384000 },
+    'glm-5': { context: 204800, output: 131072 },
+    'glm-5.1': { context: 204800, output: 131072 },
+    'kimi-k2.5': { context: 262144, output: 65536 },
+    'kimi-k2.6': { context: 262144, output: 65536 },
+    'qwen3.5-plus': { context: 262144, output: 65536 },
+    'qwen3.6-plus': { context: 262144, output: 65536 },
+    'qwen3.6-plus-free': { context: 262144, output: 65536 },
+    'grok-build-0.1': { context: 256000, output: 256000 },
+    'minimax-m2.5': { context: 204800, output: 131072 },
+    'minimax-m2.7': { context: 204800, output: 131072 },
+    'minimax-m3-free': { context: 200000, output: 32000 },
+    'mimo-v2.5-free': { context: 200000, output: 32000 },
+    'nemotron-3-ultra-free': { context: 1000000, output: 128000 },
+    'north-mini-code-free': { context: 256000, output: 64000 },
+};
 
 /**
  * Per-model context window sizes (tokens).
@@ -170,21 +230,23 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'MiniMax-M2.5-highspeed': 200000,
     'MiniMax-M2.1': 200000,
     'MiniMax-M2': 200000,
+    'glm-5.2': 1000000,
     'glm-5.1': 200000,
     'glm-5.1-highspeed': 200000,
     'glm-5': 200000,
     'glm-5-air': 200000,
     'glm-5-flash': 200000,
-    'glm-5-turbo': 128000,
+    'glm-5-turbo': 200000,
     'glm-5v': 128000,
     'glm-5v-flash': 128000,
-    'glm-5v-turbo': 128000,
+    'glm-5v-turbo': 200000,
     'glm-4.1v-thinking': 128000,
     'glm-4.1v-thinking-flash': 128000,
-    'glm-4.7': 128000,
-    'glm-4.7-flash': 128000,
+    'glm-4.7': 200000,
+    'glm-4.7-flash': 200000,
     'glm-z1-flash': 128000,
     'glm-4-flash': 128000,
+    'qwen3.7-max-2026-06-08': 1000000,
     'qwen3.7-max': 1000000,
     'qwen3.7-plus': 1000000,
     'qwen3.7-flash': 1000000,
@@ -250,14 +312,17 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'qwen-turbo': 32000,
     'qwen-long': 1000000,
     'qwen': 128000,
+    'GLM-5.2': 1000000,
     'GLM-5.1': 200000,
     'GLM-5': 200000,
-    'GLM-4.6': 128000,
+    'GLM-4.6': 200000,
     'GLM-4.5': 128000,
     'GLM-4.1': 128000,
     'GLM-Z1': 128000,
     'GLM-4': 128000,
     'glm': 128000,
+    'kimi-k2.7-code-highspeed': 262144,
+    'kimi-k2.7-code': 262144,
     'kimi-k2.6': 262144,
     'kimi-k2.5': 262144,
     'Kimi-K2': 128000,
@@ -287,6 +352,9 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'phi-4-reasoning': 16384,
     'Qwen3.7-Max': 1000000,
     'openrouter:deepseek/deepseek-v4-pro': 1048576,
+    'openrouter:z-ai/glm-5.2': 1048576,
+    'openrouter:moonshotai/kimi-k2.7-code': 262144,
+    'openrouter:minimax/minimax-m3': 1048576,
     'openrouter:anthropic/claude-opus-4.8': 1000000,
     'openrouter:anthropic/claude-sonnet-4.6': 1000000,
     'openrouter:anthropic/claude-haiku-4.5': 200000,
@@ -294,6 +362,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'openrouter:google/gemini-3.5-flash': 1048576,
     'openrouter:openai/gpt-5.5': 1050000,
     'openrouter:qwen/qwen3.7-max': 1000000,
+    'openrouter:qwen/qwen3.7-plus': 1000000,
     'openrouter:moonshotai/kimi-k2.6': 262144,
     'siliconflow:deepseek-ai/DeepSeek-V4-Pro': 1048576,
     'siliconflow:deepseek-ai/DeepSeek-V4-Flash': 1048576,
@@ -310,6 +379,9 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'together:deepseek-ai/DeepSeek-V4-Pro': 1048576,
     'together:Qwen/Qwen3.7-Max': 1000000,
     'together:meta-llama/Llama-3.3-70B-Instruct': 131072,
+    ...Object.fromEntries(
+        Object.entries(OPENCODE_MODEL_LIMITS).map(([model, limits]) => [`opencode:${model}`, limits.context])
+    ),
 };
 
 /**
@@ -353,6 +425,10 @@ export function getModelOutputTokens(model: string, providerId?: string): number
     if (!model) return 16384;
     const lower = model.toLowerCase();
 
+    if (providerId === 'opencode') {
+        return OPENCODE_MODEL_LIMITS[lower]?.output ?? 32768;
+    }
+
     if (providerId === 'openai') {
         return 128000;
     }
@@ -375,7 +451,7 @@ export function getModelOutputTokens(model: string, providerId?: string): number
         return 65536;
     }
     if (providerId === 'kimi' || lower.includes('kimi') || lower.includes('moonshot')) {
-        return 16384;
+        return 32768;
     }
 
     if (lower.includes('deepseek') && lower.includes('v4')) {

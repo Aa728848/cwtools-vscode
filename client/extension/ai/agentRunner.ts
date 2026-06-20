@@ -1669,7 +1669,7 @@ export class AgentRunner {
                                      (response.usage as any)?.prompt_cache_hit_tokens ??
                                      (response.usage as any)?.cached_content_token_count ?? 0;
                 const uncachedInputTokens = Math.max(0, promptTokens - cachedTokens);
-                const cacheDiscount = getCacheDiscountFactor(response.model ?? options?.model ?? '');
+                const cacheDiscount = getCacheDiscountFactor(response.model ?? options?.model ?? '', responseProviderId);
                 const cachedCost = (cachedTokens / 1_000_000) * pricing[0] * cacheDiscount;
                 const uncachedCost = (uncachedInputTokens / 1_000_000) * pricing[0];
                 const outputCost = (completionTokens / 1_000_000) * pricing[1];

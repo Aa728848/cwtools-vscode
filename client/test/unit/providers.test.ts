@@ -7,6 +7,8 @@ import {
     getProvider,
     getEffectiveEndpoint,
     getEffectiveModel,
+    getEffectiveTemperature,
+    getOpenCodeApiFormat,
     getDisableThinkingParams,
     getEnableThinkingParams,
     toClaudeRequest,
@@ -15,6 +17,8 @@ import {
     MODEL_CONTEXT_TOKENS,
     VISION_CAPABLE_MODELS,
     FIM_CAPABLE_MODELS,
+    ALWAYS_THINKING_PREFIXES,
+    OPENCODE_MODEL_LIMITS,
 } from '../../extension/ai/providers';
 import type { ChatCompletionRequest, ChatMessage } from '../../extension/ai/types';
 
@@ -59,6 +63,13 @@ describe('isModelVisionCapable', () => {
 
     it('returns true for glm vision models', () => {
         expect(isModelVisionCapable('glm-5v-turbo')).to.equal(true);
+    });
+
+    it('tracks newly multimodal MiniMax, Qwen, and Kimi models', () => {
+        expect(isModelVisionCapable('MiniMax-M3')).to.equal(true);
+        expect(isModelVisionCapable('qwen3.7-max-2026-06-08')).to.equal(true);
+        expect(isModelVisionCapable('qwen3.7-plus')).to.equal(true);
+        expect(isModelVisionCapable('kimi-k2.7-code-highspeed')).to.equal(true);
     });
 });
 
@@ -123,6 +134,18 @@ describe('getModelContextTokens', () => {
         expect(getModelContextTokens('gemini-3.1-pro', 'google')).to.equal(2097152);
     });
 
+    it('uses current GLM and Kimi context windows', () => {
+        expect(getModelContextTokens('glm-5.2', 'glm')).to.equal(1000000);
+        expect(getModelContextTokens('glm-5v-turbo', 'glm')).to.equal(200000);
+        expect(getModelContextTokens('kimi-k2.7-code', 'kimi')).to.equal(262144);
+    });
+
+    it('uses OpenCode-specific limits', () => {
+        expect(getModelContextTokens('gpt-5.3-codex-spark', 'opencode')).to.equal(128000);
+        expect(getModelContextTokens('qwen3.6-plus', 'opencode')).to.equal(262144);
+        expect(getModelContextTokens('nemotron-3-ultra-free', 'opencode')).to.equal(1000000);
+    });
+
     it('returns 0 for completely unknown model and provider', () => {
         expect(getModelContextTokens('nonexistent-model')).to.equal(0);
     });
@@ -142,6 +165,16 @@ describe('getModelOutputTokens', () => {
     it('returns high value for deepseek provider', () => {
         const result = getModelOutputTokens('deepseek-v4-pro', 'deepseek');
         expect(result).to.be.a('number').and.greaterThan(100000);
+    });
+
+    it('returns the supported Kimi K2.7 output budget', () => {
+        expect(getModelOutputTokens('kimi-k2.7-code', 'kimi')).to.equal(32768);
+    });
+
+    it('uses OpenCode-specific output limits', () => {
+        expect(getModelOutputTokens('claude-opus-4-8', 'opencode')).to.equal(128000);
+        expect(getModelOutputTokens('minimax-m3-free', 'opencode')).to.equal(32000);
+        expect(getModelOutputTokens('grok-build-0.1', 'opencode')).to.equal(256000);
     });
 
     it('returns reasonable default for unknown provider', () => {
@@ -237,6 +270,28 @@ describe('getEffectiveModel', () => {
 
     it('trims whitespace from override', () => {
         expect(getEffectiveModel('openai', '  gpt-5.4  ')).to.equal('gpt-5.4');
+    });
+});
+
+describe('getEffectiveTemperature', () => {
+    it('enforces Kimi K2.7 Code fixed sampling temperature', () => {
+        expect(getEffectiveTemperature('kimi-k2.7-code', 0.2)).to.equal(1.0);
+        expect(getEffectiveTemperature('moonshotai/kimi-k2.7-code-highspeed')).to.equal(1.0);
+    });
+
+    it('preserves normal model overrides and defaults', () => {
+        expect(getEffectiveTemperature('glm-5.2', 0.7)).to.equal(0.7);
+        expect(getEffectiveTemperature('glm-5.2')).to.equal(0.3);
+    });
+});
+
+describe('getOpenCodeApiFormat', () => {
+    it('routes each OpenCode model family to its documented wire protocol', () => {
+        expect(getOpenCodeApiFormat('gpt-5.5')).to.equal('openai-responses');
+        expect(getOpenCodeApiFormat('claude-opus-4-8')).to.equal('anthropic-messages');
+        expect(getOpenCodeApiFormat('qwen3.6-plus-free (免费)')).to.equal('anthropic-messages');
+        expect(getOpenCodeApiFormat('gemini-3.5-flash')).to.equal('gemini-generate-content');
+        expect(getOpenCodeApiFormat('deepseek-v4-pro')).to.equal('openai-chat-completions');
     });
 });
 
@@ -524,6 +579,42 @@ describe('BUILTIN_PROVIDERS', () => {
         const openai = BUILTIN_PROVIDERS['openai'];
         expect(openai).to.not.equal(undefined);
         expect(openai!.isOpenAICompatible).to.equal(true);
+    });
+
+    it('uses current direct-provider defaults and supported model IDs', () => {
+        expect(BUILTIN_PROVIDERS['glm']!.defaultModel).to.equal('glm-5.2');
+        expect(BUILTIN_PROVIDERS['qwen']!.defaultModel).to.equal('qwen3.7-max-2026-06-08');
+        expect(BUILTIN_PROVIDERS['qwen']!.models).to.not.include('qwen3.7-flash');
+        expect(BUILTIN_PROVIDERS['google']!.models).to.deep.equal([
+            'gemini-3.5-flash',
+            'gemini-3.1-pro-preview',
+            'gemini-3.1-flash-lite',
+        ]);
+        expect(BUILTIN_PROVIDERS['kimi']!.defaultModel).to.equal('kimi-k2.7-code');
+        expect(BUILTIN_PROVIDERS['kimi']!.endpoint).to.equal('https://api.moonshot.cn/v1');
+        expect(ALWAYS_THINKING_PREFIXES).to.include('kimi-k2.7-code');
+    });
+
+    it('matches the enabled OpenCode paid and free model list', () => {
+        const opencode = BUILTIN_PROVIDERS['opencode']!;
+        expect(opencode.defaultModel).to.equal('big-pickle (免费)');
+        expect(opencode.models).to.have.length(48);
+        expect(opencode.models.filter(model => model.includes('(免费)'))).to.have.length(7);
+        expect(opencode.models).to.include.members([
+            'claude-fable-5',
+            'claude-opus-4-8',
+            'gpt-5.5-pro',
+            'gemini-3.5-flash',
+            'deepseek-v4-flash-free (免费)',
+            'big-pickle (免费)',
+            'minimax-m3-free (免费)',
+            'north-mini-code-free (免费)',
+        ]);
+        expect(opencode.models).to.not.include.members([
+            'minimax-m2.5-free (免费)',
+            'nemotron-3-super-free (免费)',
+        ]);
+        expect(Object.keys(OPENCODE_MODEL_LIMITS)).to.have.length(48);
     });
 });
 

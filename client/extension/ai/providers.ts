@@ -2,7 +2,7 @@
  * CWTools AI Module — Provider Definitions & Quick Configurations Facade
  */
 
-import type { AIProviderConfig, ChatCompletionRequest, ContentPart } from './types';
+import type { AIProviderConfig, ChatCompletionRequest, ContentPart, CustomApiFormat } from './types';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
 import { contentToString } from './types';
@@ -15,6 +15,7 @@ import {
     FIM_CAPABLE_MODELS,
     isModelFIMCapable,
     ALWAYS_THINKING_PREFIXES,
+    OPENCODE_MODEL_LIMITS,
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
     getModelOutputTokens,
@@ -29,6 +30,7 @@ export {
     FIM_CAPABLE_MODELS,
     isModelFIMCapable,
     ALWAYS_THINKING_PREFIXES,
+    OPENCODE_MODEL_LIMITS,
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
     getModelOutputTokens,
@@ -204,6 +206,21 @@ export function getEffectiveModel(providerId: string, userModel?: string): strin
     }
     const provider = getProvider(providerId);
     return provider.defaultModel;
+}
+
+/** Apply provider-enforced sampling constraints while preserving normal user overrides. */
+export function getEffectiveTemperature(model: string, requested?: number): number {
+    if (model.toLowerCase().includes('kimi-k2.7-code')) return 1.0;
+    return requested ?? 0.3;
+}
+
+/** OpenCode Zen exposes different wire protocols for each model family. */
+export function getOpenCodeApiFormat(model: string): CustomApiFormat {
+    const normalized = model.toLowerCase().replace(/\s*\(免费\)$/i, '');
+    if (normalized.startsWith('gpt-')) return 'openai-responses';
+    if (normalized.startsWith('claude-') || normalized.startsWith('qwen')) return 'anthropic-messages';
+    if (normalized.startsWith('gemini-')) return 'gemini-generate-content';
+    return 'openai-chat-completions';
 }
 
 // ─── Disable-Thinking Capability Descriptors ─────────────────────────────────

@@ -247,7 +247,7 @@ export class UsageTracker {
                     // Fallback: re-compute from pricing table (may fail if model name doesn't match)
                     const model = r.model;
                     const pricing = getModelPricing(model, r.provider);
-                    const cacheDiscount = getCacheDiscountFactor(model);
+                    const cacheDiscount = getCacheDiscountFactor(model, r.provider);
                     // Savings = cached tokens * full price * (1 - discount factor)
                     estimatedSavingsCny += (r.cachedTokens / 1_000_000) * pricing[0] * (1 - cacheDiscount);
                 }

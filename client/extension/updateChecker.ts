@@ -76,39 +76,50 @@ export async function checkForUpdates(context: vscode.ExtensionContext) {
 
         if (needsUpdate) {
             const releaseUrl = release.html_url || 'https://github.com/Aa728848/cwtools-vscode/releases/latest';
+            const reinstallCurrentVersion = currentVersion === latestVersion;
             
-            vscode.window.showInformationMessage(
+            void Promise.resolve(vscode.window.showInformationMessage(
                 promptMessage,
                 '立即更新',
                 '忽略此更新'
-            ).then(async selection => {
+            )).then(async selection => {
                 if (selection === '立即更新') {
-                    if (currentVersion === latestVersion) {
-                        await context.globalState.update(stateKeyKnownAssetUpdate, latestAssetUpdate);
-                    }
                     if (vsixDownloadUrl) {
-                        void downloadAndInstallUpdate(vsixDownloadUrl, releaseUrl);
+                        const installed = await downloadAndInstallUpdate(
+                            vsixDownloadUrl,
+                            releaseUrl,
+                            context.extension.id,
+                            reinstallCurrentVersion
+                        );
+                        if (installed && reinstallCurrentVersion) {
+                            await context.globalState.update(stateKeyKnownAssetUpdate, latestAssetUpdate);
+                        }
                     } else {
                         void vscode.env.openExternal(vscode.Uri.parse(releaseUrl));
                     }
                 } else if (selection === '忽略此更新') {
-                    if (currentVersion === latestVersion) {
+                    if (reinstallCurrentVersion) {
                         await context.globalState.update(stateKeyKnownAssetUpdate, latestAssetUpdate);
                     } else {
                         await context.globalState.update(stateKeyIgnoreVersion, latestVersion);
                     }
                 }
-            });
+            }).catch((e: unknown) => ErrorReporter.warn('UpdateChecker', 'Failed to handle update selection', e));
         }
     } catch (e) {
         ErrorReporter.warn('UpdateChecker', 'Failed to check for updates', e);
     }
 }
 
-async function downloadAndInstallUpdate(originalUrl: string, fallbackUrl: string) {
+async function downloadAndInstallUpdate(
+    originalUrl: string,
+    fallbackUrl: string,
+    extensionId: string,
+    reinstallCurrentVersion: boolean
+): Promise<boolean> {
     const downloadUrls = [originalUrl];
 
-    vscode.window.withProgress({
+    return vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: '正在下载 CWTools 更新...',
         cancellable: true
@@ -126,16 +137,16 @@ async function downloadAndInstallUpdate(originalUrl: string, fallbackUrl: string
                 
                 // Download successful
                 progress.report({ message: '下载完成，正在安装...' });
-                await vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(tmpPath));
+                await installDownloadedUpdate(tmpPath, extensionId, reinstallCurrentVersion);
                 
-                vscode.window.showInformationMessage('CWTools 已成功更新安装！', '重新加载窗口').then(sel => {
+                void vscode.window.showInformationMessage('CWTools 已成功更新安装！', '重新加载窗口').then(sel => {
                     if (sel === '重新加载窗口') {
-                        vscode.commands.executeCommand('workbench.action.reloadWindow');
+                        void vscode.commands.executeCommand('workbench.action.reloadWindow');
                     }
                 });
-                return; // Exit after successful installation
+                return true; // Exit after successful installation
             } catch (err: any) {
-                ErrorReporter.warn('UpdateChecker', `下载失败 [${url}]`, err);
+                ErrorReporter.warn('UpdateChecker', `下载或安装失败 [${url}]`, err);
                 if (fs.existsSync(tmpPath)) {
                     fs.unlinkSync(tmpPath);
                 }
@@ -143,13 +154,30 @@ async function downloadAndInstallUpdate(originalUrl: string, fallbackUrl: string
         }
         
         if (!token.isCancellationRequested) {
-            vscode.window.showErrorMessage('CWTools 更新自动下载失败（网络超时），请前往网页下载并手动导入。', '前往下载').then(sel => {
+            void vscode.window.showErrorMessage('CWTools 更新自动下载或安装失败，请前往网页下载并手动导入。', '前往下载').then(sel => {
                 if (sel === '前往下载') {
-                    vscode.env.openExternal(vscode.Uri.parse(fallbackUrl));
+                    void vscode.env.openExternal(vscode.Uri.parse(fallbackUrl));
                 }
             });
         }
+        return false;
     });
+}
+
+/**
+ * VS Code does not replace an installed extension when a VSIX has the same
+ * version. Remove the current installation first only for same-version asset
+ * updates; normal version upgrades continue through the regular install path.
+ */
+export async function installDownloadedUpdate(
+    vsixPath: string,
+    extensionId: string,
+    reinstallCurrentVersion: boolean
+): Promise<void> {
+    if (reinstallCurrentVersion) {
+        await vscode.commands.executeCommand('workbench.extensions.uninstallExtension', extensionId);
+    }
+    await vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(vsixPath));
 }
 
 function downloadFile(url: string, dest: string, progress: vscode.Progress<{ message?: string, increment?: number }>, token: vscode.CancellationToken): Promise<void> {

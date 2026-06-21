@@ -20,7 +20,7 @@ The main runtime layers are:
   `CWTools Server` executable.
 - `packages/cwtools-shared/` and `packages/cwtools-mcp/`: standalone, read-only
   **MCP server** (npm workspaces) that re-exports the PDX semantic tools to
-  external agents (Codex / Codex). Shipped inside the extension. See the
+  external agents (Codex / Claude Code). Shipped inside the extension. See the
   `MCP Server` section below.
 - `submodules/cwtools/`: upstream CWTools F# library, including shared game and
   shader parsing code.
@@ -265,8 +265,9 @@ Important constraints:
 - `runner/commandPreflight.ts` classifies `run_command`; high-risk or escalated
   commands must require user permission.
 - `planModeGuard.ts` also gates `git_ops` in non-writing modes
-  (`validateGitOpsForMode`): explore/review/script/orchestrator/plan may only run
-  `status`/`diff`; enforced before execution in `agentRunner` and `agentTools`.
+  (`validateGitOpsForMode`): plan/explore/review/script_reviewer/orchestrator/script
+  may only run `status`/`diff`; enforced before execution in `agentRunner` and
+  `agentTools`.
 - `runner/permissionPolicy.ts` must keep hardened `cwdScope` checks based on
   `path.relative`, not string-prefix tests.
 - File writes go through `PartitionedWriteQueue`; multi-file writes acquire
@@ -299,7 +300,7 @@ The active multi-agent tools are `dispatch_agents`, `query_blackboard`, and
 ## MCP Server (`packages/`)
 
 A standalone, **read-only** MCP server ships inside the extension so external
-agents (Codex / Codex) get the same PDX semantic tools. Two npm-workspace
+agents (Codex / Claude Code) get the same PDX semantic tools. Two npm-workspace
 packages:
 
 | Path | Purpose |

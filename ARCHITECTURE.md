@@ -235,7 +235,7 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 - `runner/toolInvocation.ts` 在执行前归一化 tool call，派生风险元数据，提取目标文件并生成稳定 `invocationId`。
 - `runner/toolScheduler.ts` 根据 `concurrencyClass` 实施并发上限和 per-file-write 互斥；对存在在途写入的文件，读操作经 `writeCoordinator.afterCurrentWrites` 排在其后。`getAgentToolTargetFiles` 同时为 `read_file`/`get_pdx_block`/`get_file_context`/`edit_file` 提取目标路径。
 - `runner/commandPreflight.ts` 对 `run_command` 做风险分级；destructive 或 escalated 命令必须经由用户授权。
-- `planModeGuard.ts` 的 `validateGitOpsForMode` 在 explore/review/script/orchestrator/plan 等非写入模式下只放行 `status`/`diff` 的 `git_ops`，由 `agentRunner`/`agentTools` 在执行前拦截变更性 action。
+- `planModeGuard.ts` 的 `validateGitOpsForMode` 在 plan/explore/review/script_reviewer/orchestrator/script 等非写入模式下只放行 `status`/`diff` 的 `git_ops`，由 `agentRunner`/`agentTools` 在执行前拦截变更性 action。
 - `runner/permissionPolicy.ts` 的 `cwdScope` 判断使用 `path.relative`，避免前缀绕过。
 - 写工具经由 `PartitionedWriteQueue` 管理；`.yml` 本地化写入必须使用 `write_localisation`。
 - `edit_file(filePath, oldString, newString, replaceAll?)` 是单处模糊替换原语（registry `EDIT`、`per-file-write`），复用 `fuzzyReplace` 与既有写守卫。
@@ -521,11 +521,11 @@ npx @vscode/vsce package
 
 ### Webview 隔离
 
-Webview 与 Extension Host 是完全隔离的运行环境。由于 Webview 运行在受限的 Chromium 沙盒中，**绝对禁止在其前端引入任何 Node.js 原生 API (如 fs, path) 或 vscode 模块**。
+Webview 与 Extension Host 是完全隔离的运行环境。Webview 运行在受限的 Chromium 沙盒中，**禁止在前端引入任何 Node.js 原生 API（如 fs、path）或 vscode 模块**。
 
-为了确保沙盒的物理安全等级：
-- **底层 I/O 完全收敛**：原本散落在 Webview 安全边界内的多文件并发文件写入和 ReadTracker 的 I/O 跟踪逻辑已被完全移出到了 Extension Host 中。
-- **文件读取与操作代理化**：Webview 前端（如 ChatPanel 和 AgentManager）已退化为纯数据驱动的展示壳。如果需要获取或监控工作区的文件元数据、文件树或是写操作动作，前端必须通过标准的 `vscode.postMessage` 异步 IPC 机制向 Extension 宿主发起委托，由宿主执行安全校验后再将数据流式返回。这彻底杜绝了前端由于受限沙盒的间接引用漏洞导致宿主文件系统泄漏的风险。
+为保证沙盒隔离：
+- **底层 I/O 收敛到 Host**：多文件并发写入和 ReadTracker 的 I/O 跟踪逻辑只在 Extension Host 中执行，不在 Webview 边界内。
+- **文件操作代理化**：Webview 前端（ChatPanel、AgentManager）是纯数据驱动的展示层。需要读取/监控工作区文件元数据、文件树或发起写操作时，前端通过 `vscode.postMessage` 异步 IPC 委托给 Host，由 Host 做安全校验后返回数据，避免前端直接触达宿主文件系统。
 
 ### 写入并发
 
@@ -587,23 +587,23 @@ Extension/AI 代码优先使用 `ErrorReporter`，避免裸 `console.error`。�
 
 CWTools 诊断消息的中文化不走上述模块：F# 服务端硬编码英文文本，由 `client/extension/diagnosticI18n.ts` 在 LSP middleware 中按消息形态 + CW 错误码翻译并附加修复建议（见"诊断、格式化与补全降级"一节）。
 
-### 前缀缓存（Prompt Cache）度量审计与高保真展现 (D3 重构)
+### 前缀缓存（Prompt Cache）度量与展现
 
-针对现代长上下文 AI 推理中的成本与效能问题，系统内建了完善的 **前缀缓存度量审计与高保真展现** 体系：
+系统对前缀缓存做计量、成本核算和 UI 展现：
 
-1. **多厂商缓存向后兼容嗅探**：
-   在 `agentRunner.ts` 的执行流中，系统会自动提取大模型回传响应里的缓存计量。采用极其健壮的兼容性设计，支持包括 `usage.cached_tokens`、`prompt_tokens_details.cached_tokens`（OpenAI/DeepSeek 格式）、以及 `prompt_cache_hit_tokens`（Anthropic 格式）等多源字段，同时精准解析并获取 Claude 3.5 和 DeepSeek 特有的“新建缓存字节（`cache_creation_tokens`）”。
+1. **多厂商缓存字段嗅探**：
+   `agentRunner.ts` 从模型响应中提取缓存计量，兼容多种字段来源——`usage.cached_tokens`、`prompt_tokens_details.cached_tokens`（OpenAI/DeepSeek）、`prompt_cache_hit_tokens`（Anthropic），并解析 Claude / DeepSeek 的新建缓存字节（`cache_creation_tokens`）。
 
-2. **打折费率与成本精算 (Pricing Engine)**：
-   `providers/models/pricing.ts` 中集成了模型缓存节省的精算公式（费率数据存于 `providers/models/pricingData.json`）。系统能精准识别模型类型并应用差异化打折率（例如：识别为 `deepseek` 或 `claude` 则触发 0.1× 的 1 折特惠计费，识别为 `gpt-` 系列则触发 0.5× 的 5 折优惠），并将每一轮推断在物理上节省的真实人民币金额（CNY）通过 `savedCostCny` 字段流式发射。
+2. **打折费率与成本核算（Pricing Engine）**：
+   `providers/models/pricing.ts` 按模型类型应用差异化缓存折扣率（费率数据存于 `providers/models/pricingData.json`，如 `deepseek`/`claude` 为 0.1×、`gpt-` 系列为 0.5×），并通过 `savedCostCny` 字段发射每轮节省的人民币金额。
 
-3. **三柱微图 (Cache Sparkline) 极致展现**：
-   在前端 Webview（`messageRenderer.ts`）中，系统拦截 `cache_stats` 事件，将“缓存命中数”、“新建缓存数”、“穿透数”三者按比例编译并渲染为视觉效果惊艳的“绿色 (命中) / 蓝色 (新建) / 橙黄色 (穿透) 三柱微图进度条”，并在右侧醒目高亮展现为用户节省的具体金额。
+3. **三柱微图（Cache Sparkline）**：
+   前端 `messageRenderer.ts` 拦截 `cache_stats` 事件，把命中数 / 新建数 / 穿透数渲染为三柱进度条（绿色命中 / 蓝色新建 / 橙黄穿透），并展示节省金额。
 
-4. **全局指标与实时会话双重覆写**：
-   - **全局统计**：全局多轮历史运行统计通过 `UsageTracker` 模块对 `UsageRecord` 进行累加与持久化。在设置界面的“消耗统计”中，动态汇总并渲染出总消耗、预估成本、累计缓存命中量、整体命中率以及累计省钱金额，做到彻底的数据透明度。
-   - **会话仪表盘 (Context Gauge)**：在聊天面板顶部的会话上下文进度条区域中，我们通过拦截 `tokenUsage` 消息，实时为标签覆写类似于 `, ⚡ X,XXX 缓存` 的字样，让当前实时会话的缓存状态触手可得。
-   - **高保真 SVG 替换规范**：所有涉及缓存命中的 UI 展现（包括仪表盘和运行管理器卡片）均杜绝了非标准的裸 Emoji（如 ⚡），必须升级并内联高清晰度的 SVG 矢量闪电图标（支持亮暗色主题自适应与垂直排版像素对齐）。
+4. **全局统计与会话仪表盘**：
+   - **全局统计**：`UsageTracker` 累加并持久化 `UsageRecord`，设置界面的「消耗统计」汇总总消耗、预估成本、累计缓存命中量、命中率和累计省钱金额。
+   - **会话仪表盘（Context Gauge）**：聊天面板顶部的上下文进度条拦截 `tokenUsage` 消息，实时在标签上覆写当前会话的缓存字样。
+   - **SVG 图标**：缓存相关 UI（仪表盘、运行管理器卡片）使用内联 SVG 矢量图标而非裸 Emoji，支持亮暗色主题自适应与垂直对齐。
 
 ## 目录概览
 
@@ -659,7 +659,7 @@ cwtools-vscode/
       techTreePreview.ts
       entityPreview.ts
     test/
-      unit/                   58 个单元测试文件
+      unit/                   60 个单元测试文件
       suite/
   docs/
     diagnostic-codes.md       CWxxx 诊断码中英双语参考（codeDescription 链接目标）

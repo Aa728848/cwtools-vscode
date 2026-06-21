@@ -155,7 +155,7 @@ client/
     svgIcons.ts               High-fidelity SVG icon library
     *Preview.ts               GUI, solar system, event chain, tech tree, entity previews
   test/
-    unit/                     ts-mocha unit tests (58 files)
+    unit/                     ts-mocha unit tests (60 files)
     suite/                    VS Code integration tests
 
 src/
@@ -206,9 +206,9 @@ Webview 运行在浏览器沙盒中：
 - Three.js/WebGL 面板必须在销毁时释放 renderer、geometry、material、texture、worker、事件监听器和动画循环。
 - 新增 chat UI 逻辑时，优先沿用 `client/webview/chat/` 的拆分模式。
 - Chat 面板和 Agent Manager 面板共享 host-side state；涉及跨 surface 同步时检查 `AgentUiBroadcaster`、`AgentSessionCoordinator`、`ArtifactStore` 和 `ai/chat/bridge.ts`。
-- **沙盒与 I/O 隔离边界 (ReadTracker)**：严禁在 Webview 端直接操作文件或通过任何越权手段绕过 IPC 抓取文件树与文件元数据。所有的 I/O 跟踪逻辑（如 `ReadTracker`）已全部收敛在 Extension Host 扩展宿主进程中，前端仅处理数据展现并遵循纯粹的数据驱动模型，防止浏览器沙盒漏洞越权。
-- **前缀缓存审计卡片与度量显示 (Prompt Cache)**：当大模型支持缓存并成功命中或新建前缀缓存（如 DeepSeek, Claude），会由后端发射 `cache_stats` 事件。前端渲染器 `messageRenderer.ts` 会将该事件编译拦截，并渲染为高颜值的"绿色 (命中) / 蓝色 (新建) / 橙黄色 (穿透) 三柱微图卡片 (Cache Sparkline)"。任何针对缓存费率打折因子（例如 DeepSeek/Claude 的 0.1× 优惠）或持久化的修改，应同步查验 `pricing.ts`、`UsageTracker` 与前端 `agentManager.ts` / `chatPanel.ts` 的自适应渲染区块。
-- **UI 图标高保真原则**：在任何 Token 使用看板或 UI 文字标注区域中，严禁混用裸 Emojis 符号（如 ⚡），必须物理升级为带内联样式修饰的高保真 SVG 矢量图标（支持 `stroke="currentColor"` 主题色自适应与垂直对齐），保持编辑器的现代精致质感。
+- **沙盒与 I/O 隔离边界 (ReadTracker)**：不要在 Webview 端直接操作文件或绕过 IPC 抓取文件树与文件元数据。I/O 跟踪逻辑（如 `ReadTracker`）只在 Extension Host 中执行，前端仅做数据展现，所有文件访问通过 `postMessage` 委托给 Host。
+- **前缀缓存度量卡片 (Prompt Cache)**：模型支持缓存并命中或新建前缀缓存（如 DeepSeek、Claude）时，后端会发射 `cache_stats` 事件，前端 `messageRenderer.ts` 将其渲染为三柱微图卡片（绿色命中 / 蓝色新建 / 橙黄穿透，Cache Sparkline）。改动缓存折扣率（如 DeepSeek/Claude 的 0.1× 优惠）或其持久化时，需同步查验 `pricing.ts`、`UsageTracker` 与前端 `agentManager.ts` / `chatPanel.ts` 的渲染区块。
+- **UI 图标规范**：Token 使用看板等 UI 区域不要使用裸 Emoji（如 ⚡），改用带内联样式的 SVG 矢量图标（支持 `stroke="currentColor"` 主题色自适应与垂直对齐）。
 
 ### 平台与索引层
 
@@ -238,7 +238,7 @@ Webview 运行在浏览器沙盒中：
 - 多 Agent 协作使用 `dispatch_agents`、`query_blackboard`、`merge_results`；子 Agent 分派必须经过 `orchestrator/subAgentSandbox.ts`。
 - 技能系统：`SKILL.md` 文件（built-in / user / project 三类作用域）由 `skills.ts` 建立索引，`promptBuilder.ts` 只注入精简的技能索引；完整技能正文通过 `run_skill` 工具按需加载，避免撑大基础 prompt。
 - 计划模式写入受 `planModeGuard.ts` 约束：仅允许写入实现计划（`implementation_plan.md`）与 plan/blueprint/walkthrough 等产物文件，其余写操作一律拦截。
-- 只读导向模式（explore/review/script_reviewer/orchestrator/script/plan）下的 `git_ops` 只放行 `status`/`diff`，变更性 action 由 `planModeGuard.ts` 的 `validateGitOpsForMode` 在 `agentRunner`/`agentTools` 执行前拦截。
+- 只读导向模式（plan/explore/review/script_reviewer/orchestrator/script）下的 `git_ops` 只放行 `status`/`diff`，变更性 action 由 `planModeGuard.ts` 的 `validateGitOpsForMode` 在 `agentRunner`/`agentTools` 执行前拦截。
 - `edit_file(filePath, oldString, newString, replaceAll?)` 是单处模糊替换原语，复用 `fuzzyReplace` 与既有写守卫（`.yml` 拒绝、ReadTracker、pending-write）。新增同类编辑工具时记得同步 `editFailCount` 升级与 `doomLoopDetector` 归一化。
 - `apply_patch`、`multi_replace_file_content`、`ast_mutate` 已从模型可见工具集中退役：`agentTools.execute()` 会拦截这些调用并引导改用 `edit_file`/`replace_lines`/`edit_pdx_block`/`write_localisation`；实现保留仅供内部调用，不要重新暴露。
 - 同一文件的读操作会经 `writeCoordinator.afterCurrentWrites` 排在在途写入之后；`getAgentToolTargetFiles` 已为 `read_file`/`get_pdx_block`/`get_file_context`/`edit_file` 补齐路径提取。
@@ -301,7 +301,7 @@ Webview 运行在浏览器沙盒中：
 | 自定义 scripted 类型增量刷新 | `dotnet build src/Main/`；行为验证需在扩展开发宿主开启 `experimental`，手测脚本定义文件的增/改/删是否即时生效且无重复/丢失 |
 | 发布前总检 | `npm run verify` |
 
-常见单测文件（58 个）包括：`agentToolSafety.test.ts`、`agentRunnerState.test.ts`、`agentRunnerFallback.test.ts`、`agentRunnerToolRepair.test.ts`、`agentResumeState.test.ts`、`agentSessionCoordinator.test.ts`、`agentUiBroadcaster.test.ts`、`agentManagerContracts.test.ts`、`agentManagerRunSnapshot.test.ts`、`aiServiceTimeout.test.ts`、`approvalBoundary.test.ts`、`argRepair.test.ts`、`artifactPanelModel.test.ts`、`artifactStore.test.ts`、`chatFormatters.test.ts`、`chatModels.test.ts`、`commandPreflight.test.ts`、`contextBudget.test.ts`、`contextMemory.test.ts`、`diagnosticI18n.test.ts`、`diagnosticMetadata.test.ts`、`diffEngine.test.ts`、`editFileReplacer.test.ts`、`gameProfiles.test.ts`、`graphicsFeatures.test.ts`、`indexService.test.ts`、`jsonRepair.test.ts`、`mcpPermissions.test.ts`、`memoryParser.test.ts`、`messageRenderer.test.ts`、`orchestrator.test.ts`、`pdxIndentFormatter.test.ts`、`pdxshader-grammar.test.ts`、`permissionPolicy.test.ts`、`planModeGuard.test.ts`、`policyEngine.test.ts`、`pricing.test.ts`、`projectProfile.test.ts`、`promptBuilderContext.test.ts`、`promptBuilderSnapshot.test.ts`、`promptBuilderSprite.test.ts`、`providers.test.ts`、`readTracker.test.ts`、`reducers.test.ts`、`resumeStateV2.test.ts`、`runCommandReadonly.test.ts`、`runLedger.test.ts`、`runnerPolicy.test.ts`、`subAgentSandbox.test.ts`、`toolCallParser.test.ts`、`toolDefinitions.test.ts`、`toolInvocation.test.ts`、`toolScheduler.test.ts`、`webviewSmoke.test.ts`、`workflowRegistry.test.ts`、`workflowViewModel.test.ts`、`workspaceSymbolParser.test.ts`、`worktreeManager.test.ts`。
+常见单测文件（60 个）包括：`agentToolSafety.test.ts`、`agentRunnerState.test.ts`、`agentRunnerFallback.test.ts`、`agentRunnerToolRepair.test.ts`、`agentResumeState.test.ts`、`agentSessionCoordinator.test.ts`、`agentUiBroadcaster.test.ts`、`agentManagerContracts.test.ts`、`agentManagerRunSnapshot.test.ts`、`aiServiceTimeout.test.ts`、`approvalBoundary.test.ts`、`argRepair.test.ts`、`artifactPanelModel.test.ts`、`artifactStore.test.ts`、`chatFormatters.test.ts`、`chatModels.test.ts`、`commandPreflight.test.ts`、`contextBudget.test.ts`、`contextMemory.test.ts`、`diagnosticI18n.test.ts`、`diagnosticMetadata.test.ts`、`diffEngine.test.ts`、`editFileReplacer.test.ts`、`gameKnowledge.test.ts`、`gameProfiles.test.ts`、`graphicsFeatures.test.ts`、`indexService.test.ts`、`jsonRepair.test.ts`、`locatorDuplicate.test.ts`、`mcpPermissions.test.ts`、`memoryParser.test.ts`、`messageRenderer.test.ts`、`orchestrator.test.ts`、`pdxIndentFormatter.test.ts`、`pdxshader-grammar.test.ts`、`permissionPolicy.test.ts`、`planModeGuard.test.ts`、`policyEngine.test.ts`、`pricing.test.ts`、`projectProfile.test.ts`、`promptBuilderContext.test.ts`、`promptBuilderSnapshot.test.ts`、`promptBuilderSprite.test.ts`、`providers.test.ts`、`readTracker.test.ts`、`reducers.test.ts`、`resumeStateV2.test.ts`、`runCommandReadonly.test.ts`、`runLedger.test.ts`、`runnerPolicy.test.ts`、`subAgentSandbox.test.ts`、`toolCallParser.test.ts`、`toolDefinitions.test.ts`、`toolInvocation.test.ts`、`toolScheduler.test.ts`、`webviewSmoke.test.ts`、`workflowRegistry.test.ts`、`workflowViewModel.test.ts`、`workspaceSymbolParser.test.ts`、`worktreeManager.test.ts`。
 
 ## Pull Request 清单
 
@@ -327,7 +327,7 @@ Webview 运行在浏览器沙盒中：
 
 ## 打包
 
-打包详细流程与说明请参见 [.agents/workflows/package.md](file:///c:/Users/A/Documents/cwtools-vscode/.agents/workflows/package.md)。当前 release 包从 `release/package.json` 生成。
+打包详细流程与说明请参见 [.agents/workflows/package.md](./.agents/workflows/package.md)。当前 release 包从 `release/package.json` 生成。
 
 我们强烈推荐在根目录下运行 `package.ps1` 自动化脚本，或直接通过快捷 npm scripts 进行打包和安装：
 ```bash

@@ -265,8 +265,9 @@ Important constraints:
 - `runner/commandPreflight.ts` classifies `run_command`; high-risk or escalated
   commands must require user permission.
 - `planModeGuard.ts` also gates `git_ops` in non-writing modes
-  (`validateGitOpsForMode`): explore/review/script/orchestrator/plan may only run
-  `status`/`diff`; enforced before execution in `agentRunner` and `agentTools`.
+  (`validateGitOpsForMode`): plan/explore/review/script_reviewer/orchestrator/script
+  may only run `status`/`diff`; enforced before execution in `agentRunner` and
+  `agentTools`.
 - `runner/permissionPolicy.ts` must keep hardened `cwdScope` checks based on
   `path.relative`, not string-prefix tests.
 - File writes go through `PartitionedWriteQueue`; multi-file writes acquire

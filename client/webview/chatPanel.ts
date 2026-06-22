@@ -3192,7 +3192,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const thinkingSteps = sortedSteps.filter((s: any) => s.type === 'thinking' || s.type === 'thinking_content');
         const textDeltas = sortedSteps.filter((s: any) => s.type === 'text_delta');
         const cacheStatsSteps = sortedSteps.filter((s: any) => s.type === 'cache_stats');
-        const specialSteps = sortedSteps.filter((s: any) => !['thinking', 'thinking_content', 'tool_call', 'tool_result', 'text_delta', 'cache_stats'].includes(s.type));
+        const specialSteps = sortedSteps.filter((s: any) =>
+            !['thinking', 'thinking_content', 'tool_call', 'tool_result', 'text_delta', 'cache_stats'].includes(s.type)
+            && !(s.type === 'compaction' && s.compactionInfo)
+        );
         const toolCalls = sortedSteps.filter((s: any) => s.type === 'tool_call');
         const toolResults = sortedSteps.filter((s: any) => s.type === 'tool_result');
         const hasFailedTool = toolResults.some((s: any) => {
@@ -3400,6 +3403,43 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return panel;
     }
 
+    function updateContextCompactionCard(card: HTMLElement, step: RendererStep): void {
+        const info = step.compactionInfo;
+        const state = info?.state ?? 'start';
+        const stateClass = state === 'complete' ? 'is-complete' : state === 'failed' ? 'is-failed' : 'is-running';
+        const title = state === 'complete'
+            ? chatI18n.live.contextCompacted
+            : state === 'failed'
+                ? chatI18n.live.contextCompactionFailed
+                : chatI18n.live.compactingContext;
+        let detail = state === 'start' ? chatI18n.live.compactingContextDetail : String(step.content || '');
+        if (info?.beforeTokens && info.afterTokens) {
+            detail = `${formatNum(info.beforeTokens)} → ${formatNum(info.afterTokens)} tokens`;
+        } else if (state === 'start' && info?.beforeTokens && info.thresholdTokens) {
+            detail += ` · ${formatNum(info.beforeTokens)} / ${formatNum(info.thresholdTokens)} tokens`;
+        }
+        const icon = state === 'complete' ? 'check' : state === 'failed' ? 'x' : 'package';
+        const status = state === 'complete' ? '✓' : state === 'failed' ? '!' : '•••';
+        card.className = `context-compaction-card ${stateClass}`;
+        card.dataset.compactionState = state;
+        card.setAttribute('role', 'status');
+        card.setAttribute('aria-live', 'polite');
+        card.innerHTML = `
+            <span class="context-compaction-icon" aria-hidden="true">${svgIconNoMargin(icon as keyof typeof Icons)}</span>
+            <span class="context-compaction-copy">
+                <span class="context-compaction-title">${escapeHtml(title)}</span>
+                <span class="context-compaction-detail">${escapeHtml(detail)}</span>
+            </span>
+            <span class="context-compaction-status" aria-hidden="true">${status}</span>
+        `;
+    }
+
+    function createContextCompactionCard(step: RendererStep): HTMLElement {
+        const card = document.createElement('div');
+        updateContextCompactionCard(card, step);
+        return card;
+    }
+
     // ── OpenCode-style: build complete assistant message DOM ────────────────────
     //   Structure (matches OpenCode's message anatomy):
     //   1. [Thinking block]  — extended reasoning, collapsible, at the top
@@ -3449,6 +3489,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             const sorted = [...mainSteps].sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0));
+            for (const step of sorted.filter((s: any) =>
+                s.type === 'compaction' && s.compactionInfo && s.compactionInfo.state !== 'start'
+            )) {
+                div.appendChild(createContextCompactionCard(step as RendererStep));
+            }
             const processPanel = buildProcessPanel(sorted);
             if (processPanel) div.appendChild(processPanel);
             hadTextDelta = sorted.some((s: any) => s.type === 'text_delta');
@@ -3587,6 +3632,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         liveThinkBody: HTMLElement | null;
         liveThinkSum: HTMLElement | null;
         liveToolTimeline: HTMLElement | null;
+        liveCompactionCard: HTMLElement | null;
         liveTextBubble: HTMLDivElement | null;
         liveTextContent: string;
         liveThinkContent: string;
@@ -3605,6 +3651,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         lastSpecialElement: HTMLElement | null;
     }
     const streamStates = new Map<string, AgentStreamState>();
+    let standaloneCompactionCard: HTMLElement | null = null;
     let subagentTicker: ReturnType<typeof setInterval> | null = null;
     const LIVE_RENDER_MAX_CHARS = 16000;
     const LIVE_SPECIAL_MAX_ITEMS = 18;
@@ -3648,6 +3695,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 liveThinkBody: null,
                 liveThinkSum: null,
                 liveToolTimeline: null,
+                liveCompactionCard: null,
                 liveTextBubble: null,
                 liveTextContent: '',
                 liveThinkContent: '',
@@ -3906,6 +3954,31 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return wrapper.firstElementChild as HTMLElement | null;
     }
 
+    function applyLiveCompactionStep(state: AgentStreamState, step: RendererStep): void {
+        const startsNewCard = step.compactionInfo?.state === 'start'
+            && state.liveCompactionCard?.dataset.compactionState !== 'start';
+        if (!state.liveCompactionCard?.isConnected || startsNewCard) {
+            state.liveCompactionCard = createContextCompactionCard(step);
+            state.container?.appendChild(state.liveCompactionCard);
+        } else {
+            updateContextCompactionCard(state.liveCompactionCard, step);
+        }
+    }
+
+    function applyStandaloneCompactionStep(step: RendererStep): void {
+        const startsNewCard = step.compactionInfo?.state === 'start'
+            && standaloneCompactionCard?.dataset.compactionState !== 'start';
+        if (!standaloneCompactionCard?.isConnected || startsNewCard) {
+            standaloneCompactionCard = createContextCompactionCard(step);
+            standaloneCompactionCard.classList.add('context-compaction-standalone');
+            chatArea.appendChild(standaloneCompactionCard);
+        } else {
+            updateContextCompactionCard(standaloneCompactionCard, step);
+            standaloneCompactionCard.classList.add('context-compaction-standalone');
+        }
+        scrollBottom(true);
+    }
+
     function applyLiveStep(s: any) {
         if (!currentAssistantDiv) return;
 
@@ -3920,6 +3993,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         ensureLiveSummary(state, s, coalesced);
         state.lastStepAt = Date.now();
         updateSubagentCard(state);
+
+        if (s.type === 'compaction' && s.compactionInfo) {
+            applyLiveCompactionStep(state, s as RendererStep);
+            scrollBottom();
+            return;
+        }
 
         if (s.type === 'subtask_complete') {
             state.isComplete = true;
@@ -4855,6 +4934,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'agentStep':
                 applyLiveStep(msg.step);
+                break;
+            case 'contextCompactionStatus':
+                applyStandaloneCompactionStep(msg.step as RendererStep);
                 break;
             case 'generationComplete': {
                 removeReplayBanners();

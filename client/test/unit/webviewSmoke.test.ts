@@ -73,6 +73,7 @@ describe('webview smoke checks', () => {
             '.annotatable-plan',
             '.md-table-wrap',
             '.md-codeblock',
+            '.context-compaction-card',
         ]) {
             expect(css).to.include(selector);
         }
@@ -84,6 +85,10 @@ describe('webview smoke checks', () => {
         expect(script).to.include('IntersectionObserver');
         expect(script).to.include('enhanceCodeBlocks');
         expect(script).to.include('enhanceTaskLists');
+        expect(script).to.include('applyLiveCompactionStep');
+        expect(script).to.include("case 'contextCompactionStatus'");
+        expect(css).to.include('context-compact-flow');
+        expect(css).to.include('prefers-reduced-motion');
     });
 
     it('chat sidebar reserves composer height for bottom confirmation cards', () => {

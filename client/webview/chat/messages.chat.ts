@@ -13,5 +13,6 @@ export type ChatSurfaceHostMessage =
     | { type: 'clearChat'; targetSurface?: 'chat' | 'manager' }
     | { type: 'floatingCardResolved'; card: 'permission' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
     | { type: 'generationComplete' | 'generationError' }
+    | { type: 'contextCompactionStatus'; step: unknown }
     | { type: 'artifactList'; artifacts: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }> }
     | { type: 'todoUpdate'; todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'done' }> };

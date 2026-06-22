@@ -34,6 +34,13 @@ export interface RendererStep {
         savedCostCny: number;
         cacheCreationTokens?: number;
     };
+    compactionInfo?: {
+        state: 'start' | 'complete' | 'failed';
+        kind: 'history' | 'mid_loop' | 'emergency' | 'manual';
+        beforeTokens?: number;
+        afterTokens?: number;
+        thresholdTokens?: number;
+    };
 }
 
 export interface ClassifiedSteps {

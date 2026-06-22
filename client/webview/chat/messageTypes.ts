@@ -84,6 +84,7 @@ export type WebviewToHostMessage =
 
 export interface StreamTextMessage { type: 'streamText'; text: string; isComplete: boolean }
 export interface AgentStepMessage { type: 'agentStep'; step: unknown }
+export interface ContextCompactionStatusMessage { type: 'contextCompactionStatus'; step: unknown }
 export interface UpdateHistoryMessage { type: 'updateHistory'; messages: unknown[] }
 export interface SetModeMessage { type: 'setMode'; mode: string }
 export interface WorkflowListMessage { type: 'workflowList'; workflows: unknown[]; currentWorkflowId?: string | null; labels?: unknown }
@@ -104,6 +105,7 @@ export interface SkillsUpdateMessage { type: 'skillsUpdate'; skills: unknown[] }
 export type HostToWebviewMessage =
     | StreamTextMessage
     | AgentStepMessage
+    | ContextCompactionStatusMessage
     | UpdateHistoryMessage
     | SetModeMessage
     | WorkflowListMessage

@@ -366,6 +366,57 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .special-step { max-width: 100%; overflow-wrap: anywhere; word-break: break-word; white-space: normal; font-size: 11px; padding: 3px 0; opacity: 0.65; }
 .special-step.orchestrator_progress { opacity: 0.9; color: var(--vscode-charts-blue); font-weight: 500; margin: 4px 0; background: rgba(0, 122, 204, 0.1); padding: 4px 8px; border-radius: 4px; display: inline-block; }
 
+/* Context compaction appears directly in the conversation, outside process details. */
+.context-compaction-card {
+    position: relative;
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    margin: 7px 0;
+    padding: 9px 11px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--vscode-progressBar-background, var(--accent)) 38%, var(--border));
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--input-bg) 90%, var(--vscode-progressBar-background, var(--accent)) 10%);
+    animation: context-compact-enter 160ms ease-out;
+}
+.context-compaction-icon {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+    border-radius: 50%;
+    color: var(--vscode-progressBar-background, var(--accent));
+}
+.context-compaction-card.is-running .context-compaction-icon { animation: context-compact-spin 1.35s linear infinite; }
+.context-compaction-card.is-complete .context-compaction-icon { color: var(--success); }
+.context-compaction-card.is-failed .context-compaction-icon { color: var(--error); }
+.context-compaction-copy { min-width: 0; display: block; }
+.context-compaction-title { display: block; font-size: 12px; font-weight: 600; color: var(--fg); }
+.context-compaction-detail { display: block; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; opacity: 0.62; }
+.context-compaction-status { min-width: 18px; text-align: right; font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; opacity: 0.72; }
+.context-compaction-card.is-complete .context-compaction-status { color: var(--success); }
+.context-compaction-card.is-failed .context-compaction-status { color: var(--error); }
+.context-compaction-card.is-running::after {
+    content: '';
+    position: absolute;
+    left: -35%;
+    bottom: 0;
+    width: 35%;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--vscode-progressBar-background, var(--accent));
+    animation: context-compact-flow 1.25s ease-in-out infinite;
+}
+.context-compaction-standalone { width: min(calc(100% - 28px), var(--chat-column-width)); margin: 4px auto; }
+@keyframes context-compact-spin { to { transform: rotate(360deg); } }
+@keyframes context-compact-flow { 0% { left: -35%; } 100% { left: 100%; } }
+@keyframes context-compact-enter { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+
 /* ── Code block ── */
 .code-block { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; margin: 6px 0; overflow: hidden; }
 .code-header { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: rgba(255,255,255,0.04); border-bottom: 1px solid var(--border); font-size: 11px; }

@@ -45,6 +45,14 @@ export const AGENT = {
         `循环内上下文压缩中... (${tokens} tokens, 阈值 ${threshold})`,
     COMPACTION_EMERGENCY: (tokens: number, limit: number) =>
         `紧急上下文压缩 (${tokens} tokens > ${limit} 上限)`,
+    COMPACTION_PHASE_DONE: (beforeTokens: number, afterTokens: number) =>
+        `上下文压缩完成 (${beforeTokens} → ${afterTokens} tokens)`,
+    COMPACTION_THRASHING:
+        '上下文连续压缩后仍无法释放足够空间，已停止运行以避免压缩/重试死循环。请缩小任务范围或新建话题。',
+    OUTPUT_REPETITION_RETRY: (kind: string, cycleChars: number) =>
+        `检测到模型${kind}进入重复循环（循环片段约 ${cycleChars} 字符），已中止本次输出并进行一次受控重试。`,
+    OUTPUT_REPETITION_STOP: (kind: string) =>
+        `模型${kind}再次进入重复循环，已停止生成以避免继续消耗上下文与额度。`,
 
     /** File write announcements */
     FILE_LOCKING: (filePath: string) =>
@@ -102,6 +110,8 @@ export const UI = {
     NO_WORKSPACE_INIT: 'Eddy CWTool Code /init: 当前没有打开的工作区',
     SELECT_CODE_FIRST: '请先选中要发送的代码。',
     INSERT_CANCELLED: '已取消插入',
+    CONTEXT_COMPACTED: '当前 Agent 活动上下文已压缩；完整聊天记录仍保留在话题中。',
+    CONTEXT_COMPACT_EMPTY: '当前话题内容太少，无需压缩。',
     SUGGEST_REVIEW: '分析当前文件并列出潜在的语法和逻辑问题',
     SUGGEST_REVIEW_LABEL: '代码审查',
 };

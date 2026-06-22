@@ -155,6 +155,7 @@ describe('chat i18n and command helpers', () => {
         const commands = buildSlashCommands(getChatI18n('zh-cn').slashDescriptions, [workflow]);
 
         expect(commands.find(command => command.cmd === '/workflow:off')!.desc).to.equal('关闭当前 AI 工作流');
+        expect(commands.find(command => command.cmd === '/compact')!.desc).to.equal('压缩 Agent 活动上下文，同时保留话题聊天记录');
         expect(commands.find(command => command.cmd === '/workflow:diagnostic-fix')!.desc).to.equal('自动修复诊断');
         expect(filterSlashCommands(commands, '/workflow')).to.have.length.greaterThan(1);
         expect(renderSlashCommandItems(commands)).to.include('/workflow:diagnostic-fix');

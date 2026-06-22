@@ -2008,6 +2008,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const cmd = command.trim().toLowerCase();
         if (cmd === 'clear' || cmd === '/clear') {
             this.startNewTopic();
+        } else if (cmd === 'compact' || cmd === '/compact') {
+            const result = await this.agentRunner.compactActiveHistory(this.conversationMessages, {
+                mode: this.currentMode,
+                model: this.aiService.getConfig().model || undefined,
+            }, step => {
+                if (step.compactionInfo) this.postMessage({ type: 'contextCompactionStatus', step });
+            });
+            vs.window.showInformationMessage(result.compacted ? UI.CONTEXT_COMPACTED : UI.CONTEXT_COMPACT_EMPTY);
         } else if (cmd.startsWith('mode:') || cmd.startsWith('/mode:')) {
             const mode = cmd.split(':')[1] as AgentMode;
             if (mode === 'general') {

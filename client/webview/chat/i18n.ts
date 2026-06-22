@@ -58,6 +58,10 @@ export interface ChatI18nText {
         reads: string;
         writes: string;
         thinkingDetails: string;
+        compactingContext: string;
+        compactingContextDetail: string;
+        contextCompacted: string;
+        contextCompactionFailed: string;
     };
     annotations: {
         plan: AnnotationI18nText;
@@ -174,6 +178,7 @@ const EN: ChatI18nText = {
     slashDescriptions: {
         '/init': 'Scan the project and generate Agent profile + CWTOOLS.md',
         '/clear': 'Clear the current conversation and start a new topic',
+        '/compact': 'Summarize the active Agent context while keeping the topic transcript',
         '/fork': 'Fork the conversation from the current point',
         '/archive': 'Archive the current topic',
         '/workflow:list': 'List available AI workflows',
@@ -240,6 +245,10 @@ const EN: ChatI18nText = {
         reads: 'reads',
         writes: 'writes',
         thinkingDetails: 'Thinking details',
+        compactingContext: 'Compacting context',
+        compactingContextDetail: 'Summarizing older turns while preserving goals, decisions, and recent progress',
+        contextCompacted: 'Context compacted',
+        contextCompactionFailed: 'Context compaction failed',
     },
     annotations: {
         plan: {
@@ -392,6 +401,7 @@ const ZH_CN: ChatI18nText = {
     slashDescriptions: {
         '/init': '扫描项目，生成 Agent 画像和 CWTOOLS.md',
         '/clear': '清空当前对话，开始新话题',
+        '/compact': '压缩 Agent 活动上下文，同时保留话题聊天记录',
         '/fork': '从当前位置分叉对话',
         '/archive': '归档当前话题',
         '/workflow:list': '列出可用 AI 工作流',
@@ -458,6 +468,10 @@ const ZH_CN: ChatI18nText = {
         reads: '读取',
         writes: '写入',
         thinkingDetails: '思考详情',
+        compactingContext: '正在压缩上下文',
+        compactingContextDetail: '整理较早的对话，同时保留目标、关键决策和最新进展',
+        contextCompacted: '上下文压缩完成',
+        contextCompactionFailed: '上下文压缩失败',
     },
     annotations: {
         plan: {

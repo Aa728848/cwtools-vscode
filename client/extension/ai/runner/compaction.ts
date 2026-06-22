@@ -1,15 +1,17 @@
 import type { ChatMessage, AgentStep, TokenUsage } from '../types';
 import type { AgentRunnerOptions } from '../agentRunner';
 import { contentToString } from '../types';
-import { getProvider } from '../providers';
+import { getModelContextTokens, getProvider } from '../providers';
 import { getModelPricing } from '../pricing';
 import { AGENT } from '../messages';
 import type { AIService } from '../aiService';
 import type { PromptBuilder } from '../promptBuilder';
+import { OutputRepetitionDetector } from './outputRepetitionDetector';
 import { estimateTokenCount, CHARS_PER_TOKEN, supportsOpenAiStylePrefixCache } from '../agentRunner';
 
-// Compact when conversation exceeds this fraction of provider context
-export const COMPACTION_THRESHOLD_RATIO = 0.95;
+// Leave room for the system prompt, tool schemas, the current turn, and output.
+// Both Codex and Claude Code compact before the model's hard context boundary.
+export const COMPACTION_THRESHOLD_RATIO = 0.80;
 // Default context limit if unknown
 export const DEFAULT_CONTEXT_LIMIT = 128000;
 // How many recent messages to keep un-compressed during compaction
@@ -18,6 +20,7 @@ export const COMPACTION_KEEP_LAST_N = 8;
 export const MID_LOOP_COMPACTION_INTERVAL = 3;
 // Mid-loop compaction triggers at this fraction of context limit
 export const MID_LOOP_COMPACTION_RATIO = 0.78;
+const MIN_HISTORY_TOKENS_FOR_AUTO_COMPACTION = 2_048;
 
 const COMPACTION_SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the section order unchanged:
 
@@ -62,13 +65,100 @@ export interface CompactionDependencies {
     promptBuilder: PromptBuilder;
 }
 
+export interface CompactionBudgetOptions {
+    /** Tokens outside conversation history: system/context messages and tool schemas. */
+    reservedTokens?: number;
+    /** Force a compact pass even when the normal threshold has not been reached. */
+    force?: boolean;
+}
+
+export function resolveCompactionContextLimit(
+    providerId: string,
+    model: string | undefined,
+    configuredLimit: number | undefined,
+): number {
+    if (configuredLimit && configuredLimit > 0) return configuredLimit;
+    const provider = getProvider(providerId);
+    const resolvedModel = model || provider.defaultModel;
+    const modelLimit = getModelContextTokens(resolvedModel, providerId);
+    return modelLimit > 0 ? modelLimit : (provider.maxContextTokens || DEFAULT_CONTEXT_LIMIT);
+}
+
+function renderMessageForCompaction(message: ChatMessage): string {
+    const role = message.role.toUpperCase();
+    if (message.role === 'tool') {
+        const summary = message.tool_calls
+            ?.map(tc => `${tc.function.name}: ${JSON.stringify(tc.function.arguments).substring(0, 100)}`)
+            .join(' | ');
+        const content = contentToString(message.content);
+        return `<${role}>: ${summary || content.substring(0, 500)}`;
+    }
+    if (message.role === 'assistant') {
+        const content = contentToString(message.content);
+        const summary = [
+            content.includes('<write_file>') ? '[wrote file]' : '',
+            content.includes('<run_command>') ? '[ran command]' : '',
+            content.includes('<search_web>') ? '[searched web]' : '',
+        ].filter(Boolean).join(' ');
+        return `<${role}>: ${summary || content.substring(0, 500)}`;
+    }
+    const maxLen = message.role === 'user' ? 500 : 2000;
+    return `<${role}>: ${contentToString(message.content).substring(0, maxLen)}`;
+}
+
+/** Keep the original goal and the newest evidence while bounding the compactor request itself. */
+function buildBoundedMessageContext(messages: ChatMessage[], maxTokens: number): string {
+    const rendered = messages.map(renderMessageForCompaction);
+    const all = rendered.join('\n');
+    if (estimateTokenCount(all) <= maxTokens) return all;
+
+    const selected = new Set<number>();
+    let usedTokens = 0;
+    const add = (index: number): boolean => {
+        if (index < 0 || index >= rendered.length || selected.has(index)) return true;
+        const cost = estimateTokenCount(rendered[index]!) + 2;
+        if (usedTokens + cost > maxTokens) return false;
+        selected.add(index);
+        usedTokens += cost;
+        return true;
+    };
+
+    for (let i = 0; i < Math.min(4, rendered.length); i++) add(i);
+    for (let i = rendered.length - 1; i >= 4; i--) {
+        if (!add(i)) break;
+    }
+
+    const indices = [...selected].sort((a, b) => a - b);
+    const output: string[] = [];
+    let previous = -1;
+    for (const index of indices) {
+        if (previous >= 0 && index > previous + 1) {
+            output.push(`<OMITTED>: ${index - previous - 1} older messages excluded from the compactor input budget`);
+        }
+        output.push(rendered[index]!);
+        previous = index;
+    }
+    return output.join('\n');
+}
+
+function buildSafeFallbackTail(history: ChatMessage[], count: number): ChatMessage[] {
+    if (history.length <= count) return history;
+    let start = Math.max(0, history.length - count);
+    while (start > 0 && history[start]?.role === 'tool') start--;
+    if (start > 0 && history[start - 1]?.role === 'assistant' && history[start - 1]?.tool_calls?.length) start--;
+    const tail = history.slice(start);
+    const system = history[0]?.role === 'system' && start > 0 ? [history[0]] : [];
+    return [...system, ...tail];
+}
+
 export async function maybeCompactHistory(
     history: ChatMessage[],
     emitStep: (step: AgentStep) => void,
     deps: CompactionDependencies,
     options?: AgentRunnerOptions,
     tokenAccumulator?: TokenUsage,
-    thresholdRatio: number = COMPACTION_THRESHOLD_RATIO
+    thresholdRatio: number = COMPACTION_THRESHOLD_RATIO,
+    budgetOptions: CompactionBudgetOptions = {},
 ): Promise<ChatMessage[]> {
     // Estimate total token usage using CJK-aware estimation.
     const estimatedTokens = history.reduce((sum, m) => {
@@ -85,34 +175,62 @@ export async function maybeCompactHistory(
         }
         return sum;
     }, 0);
+    if (estimatedTokens === 0 || (!budgetOptions.force && estimatedTokens < MIN_HISTORY_TOKENS_FOR_AUTO_COMPACTION)) {
+        return history;
+    }
 
-    const providerDef = getProvider(options?.providerId ?? 'openai');
-    const modelLimit = (providerDef.models as any[]).find(m => (m.id || m) === options?.model)?.contextWindow ?? DEFAULT_CONTEXT_LIMIT;
+    const config = deps.aiService.getConfig();
+    const providerId = options?.providerId ?? config.provider ?? 'openai';
+    const model = options?.model ?? config.model;
+    const configuredLimit = options?.maxContextTokens ?? config.maxContextTokens;
+    const modelLimit = resolveCompactionContextLimit(providerId, model, configuredLimit);
     const compactionThreshold = Math.floor(modelLimit * thresholdRatio);
+    const estimatedRequestTokens = estimatedTokens + Math.max(0, budgetOptions.reservedTokens ?? 0);
 
-    if (estimatedTokens <= compactionThreshold) {
+    if (!budgetOptions.force && estimatedRequestTokens <= compactionThreshold) {
         return history;
     }
 
     emitStep({
         type: 'compaction',
-        content: AGENT.COMPACTION_START(estimatedTokens, compactionThreshold),
+        content: AGENT.COMPACTION_START(estimatedRequestTokens, compactionThreshold),
         timestamp: Date.now(),
+        compactionInfo: {
+            state: 'start',
+            kind: 'history',
+            beforeTokens: estimatedRequestTokens,
+            thresholdTokens: compactionThreshold,
+        },
     });
 
     try {
         const keepN = Math.min(COMPACTION_KEEP_LAST_N, Math.max(1, history.length - 1));
-        const splitIndex = history.length - keepN;
+        let splitIndex = history.length - keepN;
+        // Never leave a tool result in the retained tail without its assistant
+        // tool-call message. Providers reject such orphaned tool results.
+        while (splitIndex > 1 && history[splitIndex]?.role === 'tool') splitIndex--;
+        if (splitIndex > 1 && history[splitIndex - 1]?.role === 'assistant' && history[splitIndex - 1]?.tool_calls?.length) {
+            splitIndex--;
+        }
+        if (
+            splitIndex < history.length
+            && history[splitIndex - 1]?.role === 'user'
+            && String(history[splitIndex - 1]?.content).includes('[Context Recovery]')
+            && history[splitIndex]?.role === 'assistant'
+            && String(history[splitIndex]?.content).includes('## Conversation Summary (compacted)')
+        ) {
+            splitIndex++;
+        }
         let olderMessages = history.slice(0, splitIndex);
         const recentMessages = history.slice(splitIndex);
 
         let existingSummaryText = '';
-        const existingSummaryPairs: ChatMessage[] = [];
         if (olderMessages[0]?.role === 'system' && String(olderMessages[0].content).includes('Conversation Summary (compacted)')) {
             existingSummaryText = String(olderMessages[0].content).replace(/^## Conversation Summary \(compacted\)\n/, '');
             olderMessages.shift();
         } else {
-            // 🌟 核心升级：遍历并安全提取所有老摘要消息对，保留它们 (T2.3)
+            // Extract the newest active summary, then replace it after compaction.
+            // Keeping every cumulative summary causes quadratic context growth.
             let i = 0;
             const toRemoveIndices = new Set<number>();
             while (i < olderMessages.length) {
@@ -120,7 +238,7 @@ export async function maybeCompactHistory(
                 if (m && m.role === 'user' && String(m.content).includes('[Context Recovery]')) {
                     const nextM = olderMessages[i + 1];
                     if (nextM && nextM.role === 'assistant' && String(nextM.content).includes('## Conversation Summary (compacted)')) {
-                        existingSummaryPairs.push(m, nextM);
+                        existingSummaryText = String(nextM.content).replace(/^## Conversation Summary \(compacted\)\n/, '');
                         toRemoveIndices.add(i);
                         toRemoveIndices.add(i + 1);
                         i += 2;
@@ -129,14 +247,7 @@ export async function maybeCompactHistory(
                 }
                 i++;
             }
-            // 从 olderMessages 中踢出这些老摘要消息对，以防止它们合并到 messageContext 参与二次重复压缩
             olderMessages = olderMessages.filter((_, idx) => !toRemoveIndices.has(idx));
-            
-            // 将历史所有已存摘要作为背景提供给模型，用于生成精准的增量摘要段
-            existingSummaryText = existingSummaryPairs
-                .filter(m => m.role === 'assistant')
-                .map(m => String(m.content).replace(/^## Conversation Summary \(compacted\)\n/, ''))
-                .join('\n\n---\n\n');
         }
 
         const pinnedContext: string[] = [];
@@ -147,26 +258,8 @@ export async function maybeCompactHistory(
         }
         const pinnedSection = pinnedContext.length > 0 ? `\n## Pinned Files\n${pinnedContext.join('\n')}` : '';
 
-        const messageContext = olderMessages.map(m => {
-            const role = m.role.toUpperCase();
-            if (m.role === 'tool') {
-                const summary = m.tool_calls?.map(tc => `${tc.function.name}: ${JSON.stringify(tc.function.arguments).substring(0, 100)}`).join(' | ');
-                const content = contentToString(m.content);
-                return `<${role}>: ${summary || content.substring(0, 500)}`;
-            }
-            if (m.role === 'assistant') {
-                const content = contentToString(m.content);
-                const summary = [
-                    content.includes('<write_file>') ? '[wrote file]' : '',
-                    content.includes('<run_command>') ? '[ran command]' : '',
-                    content.includes('<search_web>') ? '[searched web]' : '',
-                ].filter(Boolean).join(' ');
-                return `<${role}>: ${summary || content.substring(0, 500)}`;
-            }
-            const maxLen = m.role === 'user' ? 500 : 2000;
-            const content = contentToString(m.content).substring(0, maxLen);
-            return `<${role}>: ${content}`;
-        }).join('\n');
+        const compactorInputBudget = Math.max(4_096, Math.floor(modelLimit * 0.60));
+        const messageContext = buildBoundedMessageContext(olderMessages, compactorInputBudget);
 
         const compactionSystemPrompt = existingSummaryText
             ? [
@@ -193,12 +286,12 @@ export async function maybeCompactHistory(
         const compactionResponse = await deps.aiService.chatCompletion(compactionMessages, {
             temperature: 0.1,
             maxTokens: 2048,
-            providerId: options?.providerId,
-            model: options?.model,
+            providerId,
+            model,
         });
 
         if (tokenAccumulator && compactionResponse.usage) {
-            const pricing = getModelPricing(compactionResponse.model ?? options?.model ?? '', options?.providerId);
+            const pricing = getModelPricing(compactionResponse.model ?? model ?? '', providerId);
             tokenAccumulator.input += compactionResponse.usage.prompt_tokens;
             tokenAccumulator.output += compactionResponse.usage.completion_tokens;
             tokenAccumulator.total += compactionResponse.usage.total_tokens;
@@ -207,7 +300,14 @@ export async function maybeCompactHistory(
                 (compactionResponse.usage.completion_tokens / 1_000_000) * pricing[1];
         }
 
-        const summary = compactionResponse.choices?.[0]?.message?.content ?? '';
+        const summary = contentToString(compactionResponse.choices?.[0]?.message?.content);
+        const summaryRepetition = new OutputRepetitionDetector().append(summary);
+        if (summaryRepetition) {
+            throw new Error(`Compaction summary entered a repeated-output cycle (${summaryRepetition.cycleChars} chars).`);
+        }
+        if (compactionResponse.choices?.[0]?.finish_reason === 'length') {
+            throw new Error('Compaction summary reached the model output limit before completion.');
+        }
 
         if (summary.length > 0) {
             const compactionType = existingSummaryText ? AGENT.COMPACTION_INCREMENTAL : AGENT.COMPACTION_INITIAL;
@@ -215,15 +315,21 @@ export async function maybeCompactHistory(
                 type: 'compaction',
                 content: AGENT.COMPACTION_DONE(compactionType, olderMessages.length, summary.length, pinnedContext.length),
                 timestamp: Date.now(),
+                compactionInfo: {
+                    state: 'complete',
+                    kind: 'history',
+                    beforeTokens: estimatedRequestTokens,
+                    thresholdTokens: compactionThreshold,
+                },
             });
 
-            const supportsPrefixCache = supportsOpenAiStylePrefixCache(options?.providerId ?? '', deps.aiService.getConfig().customApiFormat);
+            const supportsPrefixCache = supportsOpenAiStylePrefixCache(providerId, config.customApiFormat);
 
             if (supportsPrefixCache) {
                 const systemMsg = history[0]?.role === 'system' ? history[0] : undefined;
                 const newSummaryUser = {
                     role: 'user' as const,
-                    content: `[Context Recovery] Please review the incremental conversation summary Part ${existingSummaryPairs.length / 2 + 1} below and continue.`
+                    content: '[Context Recovery] Use the compacted conversation summary below as the active history and continue.'
                 };
                 const newSummaryAssistant = {
                     role: 'assistant' as const,
@@ -232,7 +338,6 @@ export async function maybeCompactHistory(
 
                 return [
                     ...(systemMsg ? [systemMsg] : []),
-                    ...existingSummaryPairs,
                     newSummaryUser,
                     newSummaryAssistant,
                     ...recentMessages,
@@ -250,12 +355,17 @@ export async function maybeCompactHistory(
         }
     } catch (e) {
         emitStep({
+            type: 'compaction',
+            content: AGENT.COMPACTION_FAILED(e instanceof Error ? e.message : String(e)),
+            timestamp: Date.now(),
+            compactionInfo: { state: 'failed', kind: 'history' },
+        });
+        emitStep({
             type: 'error',
             content: AGENT.COMPACTION_FAILED(e instanceof Error ? e.message : String(e)),
             timestamp: Date.now(),
         });
     }
 
-    const fallbackCount = Math.min(6, history.length);
-    return history.slice(history.length - fallbackCount);
+    return buildSafeFallbackTail(history, 6);
 }

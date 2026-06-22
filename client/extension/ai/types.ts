@@ -1382,6 +1382,14 @@ export interface AgentStep {
         savedCostCny: number;
         cacheCreationTokens?: number;
     };
+    /** Context-compaction lifecycle metadata for inline chat status rendering. */
+    compactionInfo?: {
+        state: 'start' | 'complete' | 'failed';
+        kind: 'history' | 'mid_loop' | 'emergency' | 'manual';
+        beforeTokens?: number;
+        afterTokens?: number;
+        thresholdTokens?: number;
+    };
     content: string;
     toolName?: AgentToolName | string;
     toolArgs?: Record<string, unknown>;
@@ -1662,6 +1670,7 @@ export type HostMessage =
     | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[] }
     | { type: 'startBackgroundGeneration' }
     | { type: 'agentStep'; step: AgentStep }
+    | { type: 'contextCompactionStatus'; step: AgentStep }
     | { type: 'generationComplete'; result: GenerationResult }
     | { type: 'generationError'; error: string; canResume?: boolean }
     | { type: 'insertSelectionReference'; relPath: string; startLine: number; endLine: number }

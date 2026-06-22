@@ -9,6 +9,7 @@ export interface SlashCommandView {
 const BASE_SLASH_COMMANDS = [
     '/init',
     '/clear',
+    '/compact',
     '/fork',
     '/archive',
     '/workflow:list',

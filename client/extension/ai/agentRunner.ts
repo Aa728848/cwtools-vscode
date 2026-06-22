@@ -54,11 +54,12 @@ import { TOOL_REGISTRY, WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { PartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
-import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT } from './runner/compaction';
+import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT, type CompactionBudgetOptions } from './runner/compaction';
 import { executeFallbackRetry, isFallbackEligibleApiError } from './runner/fallbackPolicy';
 import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles, toolScheduler } from './runner/toolScheduler';
 import { buildToolInvocation } from './runner/toolInvocation';
 import { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeToolResultHash, DoomLoopState } from './runner/doomLoopDetector';
+import { OutputRepetitionDetector, type OutputRepetitionMatch } from './runner/outputRepetitionDetector';
 import { ReadTracker } from './runner/readTracker';
 import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 
@@ -72,6 +73,8 @@ export { StepEmitter } from './runner/stepEmitter';
 // Maximum validation-retry rounds (reduced: edit_file now returns inline LSP diagnostics)
 const MAX_VALIDATION_RETRIES = 2;
 const VALIDATION_DIAGNOSTIC_FRESHNESS_RECHECK_DELAYS_MS = [500, 1500, 3000];
+const MAX_OUTPUT_REPETITION_RECOVERIES = 1;
+const MAX_TOP_LEVEL_LENGTH_RECOVERIES = 1;
 // Token estimation: Dual-path strategy for balancing speed and accuracy.
 // Path 1 (fast): Short text (<1000 chars) uses character-ratio interpolation.
 // Path 2 (precise): Longer text uses sub-word segmentation heuristic for
@@ -617,11 +620,6 @@ export class AgentRunner {
             onTodoUpdate: options?.onTodoUpdate
         };
 
-        // Context compaction: if history is too long, summarize it
-        const compactedHistory = await this.maybeCompactHistory(
-            conversationHistory, emitStep, options, tokenAccumulator
-        );
-
         // Vision capability check: if the active provider doesn't support image input,
         // silently drop image attachments and emit a warning so the user knows.
         const _cfgVision = this.aiService.getConfig();
@@ -823,6 +821,44 @@ export class AgentRunner {
             })
             : [];
 
+        const contextMessages = this.promptBuilder.buildContextMessages({
+            ...context,
+            commandToolsAvailable: options?.useSlimPrompt !== true,
+        });
+        const fixedPromptMessages: ChatMessage[] = [
+            { role: 'system', content: systemPrompt },
+            ...contextMessages,
+            ...dynamicBlock,
+            { role: 'user', content: userContent },
+        ];
+        const fixedPromptTokens = fixedPromptMessages.reduce((sum, message) => {
+            if (!Array.isArray(message.content)) return sum + estimateTokenCount(contentToString(message.content));
+            return sum + message.content.reduce((partSum, part) => {
+                if (part.type === 'text') return partSum + estimateTokenCount(part.text);
+                if (part.type === 'image_url') return partSum + Math.ceil(part.image_url.url.length / 3 / CHARS_PER_TOKEN);
+                return partSum;
+            }, 0);
+        }, 0);
+        // Tool schemas are part of every model request even though they are not
+        // represented in ChatMessage[]. Reserve their full known size here.
+        const promptToolDefinitions = filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
+            useSlimPrompt: options?.useSlimPrompt,
+        });
+        const toolSchemaTokens = estimateTokenCount(JSON.stringify(promptToolDefinitions));
+        const compactedHistory = await this.maybeCompactHistory(
+            conversationHistory,
+            emitStep,
+            options,
+            tokenAccumulator,
+            { reservedTokens: fixedPromptTokens + toolSchemaTokens },
+        );
+        if (compactedHistory !== conversationHistory) {
+            // Keep the full transcript in ChatTopicManager, but replace the active
+            // model history. This mirrors Codex/Claude: disk transcript is durable,
+            // active context becomes a rolling summary.
+            conversationHistory.splice(0, conversationHistory.length, ...compactedHistory);
+        }
+
         // Build the message array
         let messages: ChatMessage[];
         
@@ -846,10 +882,7 @@ export class AgentRunner {
             } else {
                 messages = [
                     { role: 'system', content: systemPrompt },
-                    ...this.promptBuilder.buildContextMessages({
-                        ...context,
-                        commandToolsAvailable: options?.useSlimPrompt !== true,
-                    }),
+                    ...contextMessages,
                     ...compactedHistory,
                     ...dynamicBlock,
                     { role: 'user', content: userContent },
@@ -858,10 +891,7 @@ export class AgentRunner {
         } else {
             messages = [
                 { role: 'system', content: systemPrompt },
-                ...this.promptBuilder.buildContextMessages({
-                    ...context,
-                    commandToolsAvailable: options?.useSlimPrompt !== true,
-                }),
+                ...contextMessages,
                 ...compactedHistory,
                 ...dynamicBlock,
                 { role: 'user', content: userContent },
@@ -1018,9 +1048,47 @@ export class AgentRunner {
         history: import('./types').ChatMessage[],
         emitStep: (step: import('./types').AgentStep) => void,
         options?: import('./agentRunner').AgentRunnerOptions,
-        tokenAccumulator?: import('./types').TokenUsage
+        tokenAccumulator?: import('./types').TokenUsage,
+        budgetOptions?: CompactionBudgetOptions,
     ): Promise<import('./types').ChatMessage[]> {
-        return _maybeCompactHistory(history, emitStep, { aiService: this.aiService, promptBuilder: this.promptBuilder }, options, tokenAccumulator);
+        return _maybeCompactHistory(
+            history,
+            emitStep,
+            { aiService: this.aiService, promptBuilder: this.promptBuilder },
+            options,
+            tokenAccumulator,
+            undefined,
+            budgetOptions,
+        );
+    }
+
+    /** Manually replace the active model history with one rolling summary. */
+    public async compactActiveHistory(
+        history: ChatMessage[],
+        options?: AgentRunnerOptions,
+        onStep?: (step: AgentStep) => void,
+    ): Promise<{ compacted: boolean; steps: AgentStep[] }> {
+        if (history.length < 2) return { compacted: false, steps: [] };
+        const steps: AgentStep[] = [];
+        const compacted = await this.maybeCompactHistory(
+            history,
+            step => {
+                const manualStep = step.compactionInfo
+                    ? { ...step, compactionInfo: { ...step.compactionInfo, kind: 'manual' as const } }
+                    : step;
+                steps.push(manualStep);
+                onStep?.(manualStep);
+            },
+            options,
+            undefined,
+            {
+                force: true,
+                reservedTokens: estimateTokenCount(JSON.stringify(TOOL_DEFINITIONS)),
+            },
+        );
+        if (compacted === history) return { compacted: false, steps };
+        history.splice(0, history.length, ...compacted);
+        return { compacted: true, steps };
     }
 
     /**
@@ -1261,6 +1329,9 @@ export class AgentRunner {
         let consecutiveErrorCount = 0;
         // Flag set to true when we need to exit the outer while loop
         let forceStop = false;
+        let outputRepetitionRecoveries = 0;
+        let topLevelLengthRecoveries = 0;
+        let ineffectiveCompactionCount = 0;
         const updateFinalPromptMetric = () => {
             if (!runMetrics) return;
             runMetrics.finalPromptTokens = messages.reduce((s, m) => {
@@ -1338,7 +1409,9 @@ export class AgentRunner {
             ? _config0.maxContextTokens
             : (_provider0.maxContextTokens || DEFAULT_CONTEXT_LIMIT);
             
-        const contextLimit = bypassSandbox ? Number.MAX_SAFE_INTEGER : baseContextLimit;
+        // Security permissions must never disable context safety. Full-access
+        // mode may relax approvals, but the model still has the same window.
+        const contextLimit = baseContextLimit;
         
         const midLoopThreshold = Math.floor(contextLimit * MID_LOOP_COMPACTION_RATIO);
         const toolResultBudget = getToolResultBudget(baseContextLimit);
@@ -1407,12 +1480,20 @@ export class AgentRunner {
             // Every MID_LOOP_COMPACTION_INTERVAL iterations, estimate message size
             // and compact if approaching the context window limit.
             if (iteration > 1 && (iteration - 1) % MID_LOOP_COMPACTION_INTERVAL === 0) {
-                const loopTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
+                const activeToolSchemaTokens = estimateTokenCount(JSON.stringify(availableTools));
+                const loopTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
+                    + activeToolSchemaTokens;
                 if (loopTokens > midLoopThreshold) {
                     emitStep({
                         type: 'compaction',
                         content: AGENT.COMPACTION_MID_LOOP(loopTokens, midLoopThreshold),
                         timestamp: Date.now(),
+                        compactionInfo: {
+                            state: 'start',
+                            kind: 'mid_loop',
+                            beforeTokens: loopTokens,
+                            thresholdTokens: midLoopThreshold,
+                        },
                     });
                     await runLedger.appendEvent(
                         runRecord.runId,
@@ -1421,13 +1502,53 @@ export class AgentRunner {
                         { status: 'running' }
                     );
                     this.compactMessagesInPlace(messages, toolResultBudget, compactionOptions);
-                    const afterTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
+                    let afterTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
+                        + activeToolSchemaTokens;
+                    if (afterTokens > midLoopThreshold && afterTokens >= loopTokens * 0.90) {
+                        messages = await this.maybeCompactHistory(
+                            messages,
+                            emitStep,
+                            options,
+                            tokenAccumulator,
+                            { reservedTokens: activeToolSchemaTokens, force: true },
+                        );
+                        afterTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
+                            + activeToolSchemaTokens;
+                    }
+                    if (afterTokens > midLoopThreshold && afterTokens >= loopTokens * 0.95) {
+                        ineffectiveCompactionCount++;
+                    } else {
+                        ineffectiveCompactionCount = 0;
+                    }
                     await runLedger.appendEvent(
                         runRecord.runId,
                         'compaction_end',
                         { kind: 'mid_loop', success: true, beforeTokens: loopTokens, afterTokens },
                         { status: 'done' }
                     );
+                    emitStep({
+                        type: 'compaction',
+                        content: ineffectiveCompactionCount >= 3
+                            ? AGENT.COMPACTION_THRASHING
+                            : AGENT.COMPACTION_PHASE_DONE(loopTokens, afterTokens),
+                        timestamp: Date.now(),
+                        compactionInfo: {
+                            state: ineffectiveCompactionCount >= 3 ? 'failed' : 'complete',
+                            kind: 'mid_loop',
+                            beforeTokens: loopTokens,
+                            afterTokens,
+                            thresholdTokens: midLoopThreshold,
+                        },
+                    });
+                    if (ineffectiveCompactionCount >= 3) {
+                        emitStep({
+                            type: 'error',
+                            content: AGENT.COMPACTION_THRASHING,
+                            timestamp: Date.now(),
+                        });
+                        updateFinalPromptMetric();
+                        return '[Agent Execution Terminated]: Context compaction was ineffective three times; stopped to avoid a retry loop.';
+                    }
                 }
             }
 
@@ -1473,6 +1594,14 @@ export class AgentRunner {
             let streamedThinkingChars = 0;
             let slimThinkingBudgetExceeded = false;
             const modelAbortController = new AbortController();
+            const thinkingRepetitionDetector = new OutputRepetitionDetector();
+            const textRepetitionDetector = new OutputRepetitionDetector();
+            let outputRepetition: { kind: '思考内容' | '正文'; match: OutputRepetitionMatch } | undefined;
+            const stopRepeatedOutput = (kind: '思考内容' | '正文', match: OutputRepetitionMatch) => {
+                if (outputRepetition) return;
+                outputRepetition = { kind, match };
+                modelAbortController.abort(new Error(`Repeated ${kind} output detected.`));
+            };
             const parentAbortSignal = options?.abortSignal;
             const abortModelFromParent = () => modelAbortController.abort(parentAbortSignal?.reason);
             if (parentAbortSignal?.aborted) {
@@ -1532,6 +1661,11 @@ export class AgentRunner {
                             modelAbortController.abort(new Error('Slim sub-agent thinking budget exceeded.'));
                             return;
                         }
+                        const repetition = thinkingRepetitionDetector.append(text);
+                        if (repetition) {
+                            stopRepeatedOutput('思考内容', repetition);
+                            return;
+                        }
                         streamedThinkingChars += text.length;
                         appendModelDeltaEvent('thinking', text);
                         emitStep({
@@ -1542,6 +1676,11 @@ export class AgentRunner {
                     } : undefined,
                     // Stream text content tokens for typewriter effect
                     onTextDelta: options?.streaming ? (text) => {
+                        const repetition = textRepetitionDetector.append(text);
+                        if (repetition) {
+                            stopRepeatedOutput('正文', repetition);
+                            return;
+                        }
                         appendModelDeltaEvent('text', text);
                         if (text.includes('<tool_call>')) isInsideDsml = true;
                         if (text.includes('</tool_call>')) {
@@ -1569,6 +1708,38 @@ export class AgentRunner {
                     }
                 });
             } catch (err: any) {
+                if (outputRepetition) {
+                    await runLedger.appendEvent(
+                        runRecord.runId,
+                        'model_call_end',
+                        {
+                            iteration,
+                            success: false,
+                            error: 'Repeated streaming output detected.',
+                            repetition: outputRepetition,
+                        },
+                        { invocationId: modelCallId, status: 'failed' }
+                    );
+                    if (outputRepetitionRecoveries < MAX_OUTPUT_REPETITION_RECOVERIES) {
+                        outputRepetitionRecoveries++;
+                        emitStep({
+                            type: 'validation',
+                            content: AGENT.OUTPUT_REPETITION_RETRY(outputRepetition.kind, outputRepetition.match.cycleChars),
+                            timestamp: Date.now(),
+                        });
+                        messages.push({
+                            role: 'user',
+                            content: '[SYSTEM] Your previous stream entered an exact repeated-output cycle and was stopped. Do not restate the abandoned reasoning. Re-evaluate from the latest verified state, then either make one concrete tool call or return one concise final answer. If context is insufficient, say what is missing instead of repeating.',
+                        });
+                        continue;
+                    }
+                    emitStep({
+                        type: 'error',
+                        content: AGENT.OUTPUT_REPETITION_STOP(outputRepetition.kind),
+                        timestamp: Date.now(),
+                    });
+                    return '[Agent Execution Terminated]: Repeated model output was detected twice; generation stopped safely.';
+                }
                 if (slimThinkingBudgetExceeded) {
                     await runLedger.appendEvent(
                         runRecord.runId,
@@ -1726,6 +1897,30 @@ export class AgentRunner {
             // Save raw content for DSML parsing BEFORE stripping markup
             // (assistant messages from API are always text strings, not ContentPart[])
             const rawContent = contentToString(assistantMessage.content);
+            if (!options?.streaming) {
+                const repetition = textRepetitionDetector.append(rawContent);
+                if (repetition) {
+                    if (outputRepetitionRecoveries < MAX_OUTPUT_REPETITION_RECOVERIES) {
+                        outputRepetitionRecoveries++;
+                        emitStep({
+                            type: 'validation',
+                            content: AGENT.OUTPUT_REPETITION_RETRY('正文', repetition.cycleChars),
+                            timestamp: Date.now(),
+                        });
+                        messages.push({
+                            role: 'user',
+                            content: '[SYSTEM] Your previous response entered an exact repeated-output cycle and was discarded. Do not restate it. Make one concrete tool call or return one concise final answer; report missing context instead of repeating.',
+                        });
+                        continue;
+                    }
+                    emitStep({
+                        type: 'error',
+                        content: AGENT.OUTPUT_REPETITION_STOP('正文'),
+                        timestamp: Date.now(),
+                    });
+                    return '[Agent Execution Terminated]: Repeated model output was detected twice; generation stopped safely.';
+                }
+            }
 
             // ── Extract thinking/reasoning content ──────────────────────
             // 1. reasoning_content field (DeepSeek-R1 / some OpenAI-compat providers)
@@ -1798,6 +1993,11 @@ export class AgentRunner {
                 if (options?.useSlimPrompt === true) {
                     return stopForSlimOutputBudget();
                 }
+                if (topLevelLengthRecoveries >= MAX_TOP_LEVEL_LENGTH_RECOVERIES) {
+                    return this.cleanFinalContent(contentToString(assistantMessage.content))
+                        || '[Agent Execution Terminated]: The model reached its output limit twice; generation stopped safely.';
+                }
+                topLevelLengthRecoveries++;
                 messages.push({
                     role: 'user',
                     content: `[SYSTEM] Your previous response was truncated by the API max_tokens length limit. Please DO NOT output massive blocks of text. Break down your modifications into smaller steps. Use todo_write to plan them, and execute a single edit_file/replace_lines per response.`
@@ -2352,35 +2552,6 @@ export class AgentRunner {
 
             if (forceStop) break;
 
-            // Emergency compaction: if a single batch of tool results pushed the
-            // conversation past 98% of context limit, force-compact immediately
-            // rather than waiting for the next MID_LOOP_COMPACTION_INTERVAL check.
-            const emergencyTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
-            if (emergencyTokens > contextLimit * 0.98) {
-                emitStep({
-                    type: 'compaction',
-                    content: AGENT.COMPACTION_EMERGENCY(emergencyTokens, contextLimit),
-                    timestamp: Date.now(),
-                });
-                await runLedger.appendEvent(
-                    runRecord.runId,
-                    'compaction_start',
-                    { kind: 'emergency', beforeTokens: emergencyTokens, contextLimit },
-                    { status: 'running' }
-                );
-                this.compactMessagesInPlace(messages, toolResultBudget, compactionOptions);
-                const afterEmergencyTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
-                await runLedger.appendEvent(
-                    runRecord.runId,
-                    'compaction_end',
-                    { kind: 'emergency', success: true, beforeTokens: emergencyTokens, afterTokens: afterEmergencyTokens },
-                    { status: 'done' }
-                );
-            }
-
-            // If forceStop was set in the inner loop, exit the outer while now
-            if (forceStop) break;
-
             // Emit results in original order and feed back to AI
             for (let j = 0; j < parsedCalls.length; j++) {
                 // Fix #10: use _prefix for intentionally unused destructured vars
@@ -2424,6 +2595,66 @@ export class AgentRunner {
                         content: budgetedResult,
                         tool_call_id: toolCall.id,
                         name: toolName,
+                    });
+                }
+            }
+
+            // Run emergency compaction only after every tool result has been
+            // appended. Compacting between an assistant tool call and its result
+            // creates an invalid orphaned tool_result sequence.
+            if (!forceStop) {
+                const activeToolSchemaTokens = estimateTokenCount(JSON.stringify(availableTools));
+                const emergencyTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
+                    + activeToolSchemaTokens;
+                if (emergencyTokens > contextLimit * 0.92) {
+                    emitStep({
+                        type: 'compaction',
+                        content: AGENT.COMPACTION_EMERGENCY(emergencyTokens, contextLimit),
+                        timestamp: Date.now(),
+                        compactionInfo: {
+                            state: 'start',
+                            kind: 'emergency',
+                            beforeTokens: emergencyTokens,
+                            thresholdTokens: contextLimit,
+                        },
+                    });
+                    await runLedger.appendEvent(
+                        runRecord.runId,
+                        'compaction_start',
+                        { kind: 'emergency', beforeTokens: emergencyTokens, contextLimit },
+                        { status: 'running' }
+                    );
+                    this.compactMessagesInPlace(messages, toolResultBudget, compactionOptions);
+                    let afterEmergencyTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
+                        + activeToolSchemaTokens;
+                    if (afterEmergencyTokens > contextLimit * MID_LOOP_COMPACTION_RATIO) {
+                        messages = await this.maybeCompactHistory(
+                            messages,
+                            emitStep,
+                            options,
+                            tokenAccumulator,
+                            { reservedTokens: activeToolSchemaTokens, force: true },
+                        );
+                        afterEmergencyTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
+                            + activeToolSchemaTokens;
+                    }
+                    await runLedger.appendEvent(
+                        runRecord.runId,
+                        'compaction_end',
+                        { kind: 'emergency', success: true, beforeTokens: emergencyTokens, afterTokens: afterEmergencyTokens },
+                        { status: 'done' }
+                    );
+                    emitStep({
+                        type: 'compaction',
+                        content: AGENT.COMPACTION_PHASE_DONE(emergencyTokens, afterEmergencyTokens),
+                        timestamp: Date.now(),
+                        compactionInfo: {
+                            state: 'complete',
+                            kind: 'emergency',
+                            beforeTokens: emergencyTokens,
+                            afterTokens: afterEmergencyTokens,
+                            thresholdTokens: contextLimit,
+                        },
                     });
                 }
             }

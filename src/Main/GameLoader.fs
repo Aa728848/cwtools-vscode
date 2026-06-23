@@ -7,6 +7,8 @@ open System.IO
 open CWTools.Games.Files
 open Main.Serialize
 open CWTools.Utilities.Utils
+open LibGit2Sharp
+open System.Text.Json
 
 // Store vanilla scripted variables path for hover (set after game load)
 let mutable stlVanillaScriptedVarsPath: string option = None
@@ -91,7 +93,45 @@ let private getRuleFilesFromZip (zipPath: string) : (string * string) list =
 let private readConfigFiles configFiles =
     configFiles |> List.map (fun f -> f, File.ReadAllText(f))
 
-let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder =
+let private tryGetCachedRulesCommitTime (folder: string) =
+    try
+        if Repository.IsValid folder then
+            use repository = new Repository(folder)
+            if isNull repository.Head.Tip then None
+            else Some(repository.Head.Tip.Committer.When.ToUnixTimeSeconds())
+        else
+            None
+    with e ->
+        logInfo $"Failed to read cached rules version from %s{folder}: %A{e}"
+        None
+
+let private tryGetBundledRulesCommitTime (zipPath: string) =
+    let versionPath = Path.ChangeExtension(zipPath, ".version.json")
+    try
+        if File.Exists versionPath then
+            use document = JsonDocument.Parse(File.ReadAllText(versionPath))
+            let mutable value = Unchecked.defaultof<JsonElement>
+            if document.RootElement.TryGetProperty("committedAtUnixSeconds", &value) then
+                Some(value.GetInt64())
+            else
+                None
+        else
+            None
+    with e ->
+        logInfo $"Failed to read bundled rules version from %s{versionPath}: %A{e}"
+        None
+
+let private shouldPreferBundledRules (cachePath: string option) (bundledRulesFolder: string option) =
+    match cachePath, bundledRulesFolder with
+    | Some cacheFolder, Some bundledPath when bundledPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ->
+        match tryGetCachedRulesCommitTime cacheFolder, tryGetBundledRulesCommitTime bundledPath with
+        | Some cachedTime, Some bundledTime when bundledTime > cachedTime ->
+            logInfo $"Bundled rules are newer than the stale cache (%d{bundledTime} > %d{cachedTime}); using bundled rules."
+            true
+        | _ -> false
+    | _ -> false
+
+let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder preferBundledRules =
     let manualConfigFiles =
         match useManualRules, manualRulesFolder with
         | true, Some rf when Directory.Exists rf -> getRuleFilesFromFolder rf
@@ -115,8 +155,16 @@ let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder
         | false when Directory.Exists "./.cwtools" -> getRuleFilesFromFolder "./.cwtools"
         | _ -> []
 
+    let useNewerBundledRules =
+        not useManualRules
+        && preferBundledRules
+        && cachedConfigFiles.Length > 0
+        && bundledConfigFiles.Length > 0
+        && shouldPreferBundledRules cachePath bundledRulesFolder
+
     let configFiles =
         if manualConfigFiles.Length > 0 then readConfigFiles manualConfigFiles
+        elif useNewerBundledRules then bundledConfigFiles
         elif cachedConfigFiles.Length > 0 then readConfigFiles cachedConfigFiles
         elif bundledConfigFiles.Length > 0 then bundledConfigFiles
         else readConfigFiles workspaceConfigFiles
@@ -132,6 +180,7 @@ let getFolderList (filename: string, filetext: string) =
 type ServerSettings =
     { cachePath: string option
       bundledRulesPath: string option
+      preferBundledRules: bool
       useManualRules: bool
       manualRulesFolder: string option
       isVanillaFolder: bool
@@ -210,7 +259,7 @@ let loadEU4 (serverSettings: ServerSettings) =
         getCachedFiles EU4 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath serverSettings.preferBundledRules
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -244,7 +293,7 @@ let loadHOI4 serverSettings =
         getCachedFiles HOI4 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath serverSettings.preferBundledRules
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -278,7 +327,7 @@ let loadCK2 serverSettings =
         getCachedFiles CK2 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath serverSettings.preferBundledRules
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -312,7 +361,7 @@ let loadIR serverSettings =
         getCachedFiles IR serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath serverSettings.preferBundledRules
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -347,7 +396,7 @@ let loadVIC2 serverSettings =
         getCachedFiles VIC2 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath serverSettings.preferBundledRules
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -380,7 +429,7 @@ let loadSTL serverSettings =
         getCachedFiles STL serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath serverSettings.preferBundledRules
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -423,7 +472,7 @@ let loadCK3 serverSettings =
         getCachedFiles CK3 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath serverSettings.preferBundledRules
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -459,7 +508,7 @@ let loadVIC3 serverSettings =
         getCachedFiles VIC3 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath serverSettings.preferBundledRules
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -493,7 +542,7 @@ let loadEU5 serverSettings =
         getCachedFiles EU5 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath serverSettings.preferBundledRules
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -525,7 +574,7 @@ let loadEU5 serverSettings =
 let loadCustom serverSettings =
     // let cached, cachedFiles = getCachedFiles STL serverSettings.cachePath serverSettings.isVanillaFolder
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath serverSettings.preferBundledRules
 
     let folders = configs |> List.tryPick getFolderList
 

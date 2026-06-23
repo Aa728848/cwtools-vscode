@@ -1078,6 +1078,7 @@ type Server(client: ILanguageClient) =
     let mutable rulesChannel: string = "stable"
     let mutable manualRulesFolder: string option = None
     let mutable useManualRules: bool = false
+    let mutable preferBundledRules: bool = false
     let mutable validateVanilla: bool = false
     let mutable experimental: bool = false
     let mutable debugMode: bool = false
@@ -2886,6 +2887,7 @@ type Server(client: ILanguageClient) =
 
     let setupRulesCaches () =
         let sw = Stopwatch.StartNew()
+        preferBundledRules <- false
         let finishRules status error =
             sw.Stop()
             updateLoadingRuntime (fun state ->
@@ -2934,7 +2936,8 @@ type Server(client: ILanguageClient) =
                 rulesStatus <- "up_to_date"
                 logInfo "CWTools rules are already up-to-date."
             | Some (false, None) ->
-                let fallbackConfigs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath
+                preferBundledRules <- true
+                let fallbackConfigs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
                 if fallbackConfigs.Length > 0 then
                     rulesStatus <- "fallback"
                     let warningMsg =
@@ -2959,7 +2962,7 @@ type Server(client: ILanguageClient) =
                           message = errorMsg }
                     )
             | Some _ -> rulesStatus <- "unknown"
-            | None -> ()
+            | None -> preferBundledRules <- true
 
             finishRules rulesStatus rulesError
 
@@ -3240,6 +3243,7 @@ type Server(client: ILanguageClient) =
                 let serverSettings =
                     { cachePath = cachePath
                       bundledRulesPath = bundledRulesPath
+                      preferBundledRules = preferBundledRules
                       useManualRules = useManualRules
                       manualRulesFolder = manualRulesFolder
                       isVanillaFolder = isVanillaFolder
@@ -5617,7 +5621,7 @@ type Server(client: ILanguageClient) =
                             None
                         | { command = "reloadrulesconfig"
                             arguments = _ } ->
-                            let configs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath
+                            let configs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
                             game.ReplaceConfigRules configs
                             None
                         | { command = "cacheVanilla"

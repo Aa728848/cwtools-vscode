@@ -121,9 +121,21 @@ if (-not $SkipClient) {
     Copy-Item "client/webview/solarSystemPreview.css" "$DestCssDir/" -Force
     Copy-Item "client/webview/chatPanel.css" "$DestCssDir/" -Force
     $RulesSourceDir = Join-Path $PSScriptRoot "submodules/cwtools-stellaris-config/config"
+    $RulesRepoDir = Split-Path $RulesSourceDir -Parent
     $RulesDestZip = Join-Path $PSScriptRoot "release/rules/stellaris-rules.zip"
+    $RulesVersionPath = [System.IO.Path]::ChangeExtension($RulesDestZip, ".version.json")
     if (-not (Test-Path $RulesSourceDir)) {
         Write-Error "Bundled Stellaris rules source not found: $RulesSourceDir"
+        exit 1
+    }
+    $RulesCommit = (& git -C $RulesRepoDir rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $RulesCommit) {
+        Write-Error "Failed to read bundled Stellaris rules commit from: $RulesRepoDir"
+        exit 1
+    }
+    $RulesCommittedAtUnixSeconds = (& git -C $RulesRepoDir show -s --format=%ct HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $RulesCommittedAtUnixSeconds -notmatch '^\d+$') {
+        Write-Error "Failed to read bundled Stellaris rules commit timestamp from: $RulesRepoDir"
         exit 1
     }
     $RulesDestDir = Split-Path $RulesDestZip -Parent
@@ -134,7 +146,14 @@ if (-not $SkipClient) {
     $LegacyDir = Join-Path $PSScriptRoot "release/rules/stellaris"
     if (Test-Path $LegacyDir) { Remove-Item -LiteralPath $LegacyDir -Recurse -Force }
     if (Test-Path $RulesDestZip) { Remove-Item -LiteralPath $RulesDestZip -Force }
+    if (Test-Path $RulesVersionPath) { Remove-Item -LiteralPath $RulesVersionPath -Force }
     Compress-Archive -Path (Join-Path $RulesSourceDir "*") -DestinationPath $RulesDestZip -CompressionLevel Optimal
+    $RulesVersion = [ordered]@{
+        schemaVersion = 1
+        commit = $RulesCommit
+        committedAtUnixSeconds = [long]$RulesCommittedAtUnixSeconds
+    } | ConvertTo-Json
+    [System.IO.File]::WriteAllText($RulesVersionPath, $RulesVersion, [System.Text.UTF8Encoding]::new($false))
     Write-Host "[OK] Bundled Stellaris rules compressed to ZIP successfully." -ForegroundColor Green
     Write-Host "[OK] Static CSS assets copied successfully." -ForegroundColor Green
 } else {

@@ -4673,6 +4673,21 @@ type Server(client: ILanguageClient) =
                                 let locMap = getOrBuildLocMap game |> Map.ofList
                                 let hints = ResizeArray<InlayHint>()
                                 let targetPath = filePath
+                                let typeDefsByName =
+                                    game.TypeDefs()
+                                    |> Seq.map (fun td -> td.name, td)
+                                    |> Map.ofSeq
+                                let typeInfosForFile =
+                                    game.Types()
+                                    |> Map.toSeq
+                                    |> Seq.collect (fun (typeName, infos) ->
+                                        infos
+                                        |> Seq.choose (fun tdi ->
+                                            if String.Equals(tdi.range.FileName, targetPath, pathComparison) then
+                                                Some(typeName, tdi)
+                                            else
+                                                None))
+                                    |> Seq.toArray
         
                                 // Build scripted variable lookup map
                                 let globalVars = game.ScriptedVariables()
@@ -4738,6 +4753,70 @@ type Server(client: ILanguageClient) =
                                     else
                                         let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
                                         Some truncated
+
+                                let trimLocKey (value: string) =
+                                    value.Trim().Trim('"')
+
+                                let sameRange (left: CWTools.Utilities.Position.range) (right: CWTools.Utilities.Position.range) =
+                                    String.Equals(left.FileName, right.FileName, pathComparison)
+                                    && left.StartLine = right.StartLine
+                                    && left.StartColumn = right.StartColumn
+                                    && left.EndLine = right.EndLine
+                                    && left.EndColumn = right.EndColumn
+
+                                let typeLocalisationKeys (typeName: string) (tdi: TypeDefInfo) (key: string) =
+                                    let parts = typeName.Split([|'.'|], 2)
+                                    let baseTypeName = parts.[0]
+                                    match Map.tryFind baseTypeName typeDefsByName with
+                                    | None -> []
+                                    | Some typeDef ->
+                                        let subtypeNames =
+                                            [ if parts.Length > 1 then yield parts.[1]
+                                              yield! tdi.subtypes ]
+                                            |> List.distinct
+                                        let subtypeLocs =
+                                            subtypeNames
+                                            |> List.collect (fun subtypeName ->
+                                                typeDef.subtypes
+                                                |> List.tryFind (fun st -> String.Equals(st.name, subtypeName, StringComparison.OrdinalIgnoreCase))
+                                                |> Option.map (fun st -> st.localisation)
+                                                |> Option.defaultValue [])
+                                        (typeDef.localisation @ subtypeLocs)
+                                        |> List.choose (fun locDef ->
+                                            if locDef.explicitField.IsSome then
+                                                None
+                                            else
+                                                Some(locDef.prefix + key + locDef.suffix))
+
+                                let nodeLocCandidates (n: CWTools.Process.Node) =
+                                    let nodeKey = trimLocKey n.Key
+                                    let matchingTypeInfos =
+                                        typeInfosForFile
+                                        |> Seq.filter (fun (_, tdi) ->
+                                            String.Equals(tdi.id, nodeKey, StringComparison.OrdinalIgnoreCase)
+                                            && sameRange tdi.range n.Position)
+                                        |> Seq.toList
+                                    seq {
+                                        for typeName, tdi in matchingTypeInfos do
+                                            yield nodeKey
+                                            yield! typeLocalisationKeys typeName tdi nodeKey
+                                    }
+                                    |> Seq.filter (String.IsNullOrWhiteSpace >> not)
+                                    |> Seq.distinct
+                                    |> Seq.toList
+
+                                let modifierLocCandidates (key: string) =
+                                    let key = trimLocKey key
+                                    if String.IsNullOrWhiteSpace key then []
+                                    elif key.StartsWith("mod_", StringComparison.OrdinalIgnoreCase) then [ key ]
+                                    else [ "mod_" + key ]
+
+                                let valueLocCandidates (value: string) =
+                                    let value = trimLocKey value
+                                    [ yield value
+                                      yield! modifierLocCandidates value ]
+                                    |> List.filter (String.IsNullOrWhiteSpace >> not)
+                                    |> List.distinct
         
                                 let fileLines = fileText.Split([|"\r\n"; "\n"|], StringSplitOptions.None)
                                 let getRealEndPos (startPos: LSP.Types.Position) (endPos: LSP.Types.Position) =
@@ -4758,6 +4837,44 @@ type Server(client: ILanguageClient) =
                                             found <- true
                                     let fixedPos : LSP.Types.Position = { line = l; character = c }
                                     fixedPos
+
+                                let getKeyEndPos (key: string) (position: CWTools.Utilities.Position.range) =
+                                    let lineIndex = max 0 (int position.StartLine - 1)
+                                    if lineIndex >= fileLines.Length then
+                                        { line = lineIndex; character = int position.StartColumn }
+                                    else
+                                        let lineText = fileLines.[lineIndex]
+                                        let startColumn = min (max 0 (int position.StartColumn)) lineText.Length
+                                        let rawKey = trimLocKey key
+                                        let candidates =
+                                            [ rawKey
+                                              "\"" + rawKey + "\"" ]
+                                            |> List.filter (String.IsNullOrWhiteSpace >> not)
+                                        let found =
+                                            candidates
+                                            |> List.choose (fun candidate ->
+                                                let index = lineText.IndexOf(candidate, startColumn, StringComparison.Ordinal)
+                                                if index >= 0 then Some(index, candidate.Length) else None)
+                                            |> List.sortBy fst
+                                            |> List.tryHead
+                                        match found with
+                                        | Some(index, length) -> { line = lineIndex; character = min lineText.Length (index + length) }
+                                        | None -> { line = lineIndex; character = min lineText.Length (startColumn + rawKey.Length) }
+
+                                let tryAddLocHintAt (position: LSP.Types.Position) (candidates: string list) =
+                                    candidates
+                                    |> List.tryPick (fun locKey ->
+                                        Map.tryFind locKey locMap
+                                        |> Option.bind (fun tr ->
+                                            formatHintLabel tr.desc
+                                            |> Option.map (fun label -> locKey, label)))
+                                    |> Option.iter (fun (_, label) ->
+                                        hints.Add {
+                                            position = position
+                                            label = label
+                                            paddingLeft = true
+                                            paddingRight = true
+                                        })
 
                                 let tryAddVarHint (rawVal: string) (position: CWTools.Utilities.Position.range) =
                                     if rawVal.StartsWith("@[") && rawVal.EndsWith("]") then
@@ -4802,42 +4919,23 @@ type Server(client: ILanguageClient) =
                                         | None -> ()
         
                                 let rec visitNode (n: CWTools.Process.Node) =
+                                    if n.Position.FileName = targetPath then
+                                        tryAddLocHintAt (getKeyEndPos n.Key n.Position) (nodeLocCandidates n)
                                     n.Leaves |> Seq.iter (fun l ->
                                         if l.Position.FileName = targetPath then
+                                            tryAddLocHintAt (getKeyEndPos l.Key l.Position) (modifierLocCandidates l.Key)
                                             let rawVal = l.Value.ToRawString().Trim('\"')
                                             // Localization hint
-                                            match Map.tryFind rawVal locMap with
-                                            | Some tr ->
-                                                match formatHintLabel tr.desc with
-                                                | Some label ->
-                                                    let range = convRangeToLSPRange l.Position
-                                                    hints.Add {
-                                                        position = getRealEndPos range.start range.``end``
-                                                        label = label
-                                                        paddingLeft = true
-                                                        paddingRight = true
-                                                    }
-                                                | None -> ()
-                                            | None -> ()
+                                            let range = convRangeToLSPRange l.Position
+                                            tryAddLocHintAt (getRealEndPos range.start range.``end``) (valueLocCandidates rawVal)
                                             // Scripted variable hint
                                             tryAddVarHint rawVal l.Position
                                     )
                                     n.LeafValues |> Seq.iter (fun lv ->
                                         if lv.Position.FileName = targetPath then
                                             let rawVal = lv.Value.ToRawString().Trim('\"')
-                                            match Map.tryFind rawVal locMap with
-                                            | Some tr ->
-                                                match formatHintLabel tr.desc with
-                                                | Some label ->
-                                                    let range = convRangeToLSPRange lv.Position
-                                                    hints.Add {
-                                                        position = getRealEndPos range.start range.``end``
-                                                        label = label
-                                                        paddingLeft = true
-                                                        paddingRight = true
-                                                    }
-                                                | None -> ()
-                                            | None -> ()
+                                            let range = convRangeToLSPRange lv.Position
+                                            tryAddLocHintAt (getRealEndPos range.start range.``end``) (valueLocCandidates rawVal)
                                             tryAddVarHint rawVal lv.Position
                                     )
                                     n.Nodes |> Seq.iter visitNode
@@ -4845,7 +4943,7 @@ type Server(client: ILanguageClient) =
                                 visitNode rootNode
 
                                 hints
-                                |> Seq.distinctBy (fun h -> h.position.line, h.label)
+                                |> Seq.distinctBy (fun h -> h.position.line, h.position.character, h.label)
                                 |> Seq.toList
                                 |> Some
                             

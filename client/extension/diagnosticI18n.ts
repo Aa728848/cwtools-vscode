@@ -36,6 +36,14 @@ interface DiagnosticRule {
 
 // Ordered: more specific patterns must come before generic ones.
 const RULES: DiagnosticRule[] = [
+    // ---- Stellaris custom validators (CW999) ----
+    {
+        codes: ['CW999'],
+        pattern: /^In scripted_action, user_scope must be declared before scope(?:, either on an earlier line or earlier on the same line)?$/,
+        zh: () => '在 scripted_action 中，user_scope 必须写在 scope 前面：可以在上一行，也可以在同一行但要位于 scope 之前。',
+        en: () => 'Move user_scope before scope in the same scripted_action block; it can be on an earlier line or earlier on the same line.',
+    },
+
     // ---- Syntax / structure (CW001*, CW002) ----
     {
         pattern: /^Missing '\}' for '\{' opened at line (\d+) col (\d+)/,

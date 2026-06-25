@@ -39,9 +39,9 @@ const RULES: DiagnosticRule[] = [
     // ---- Stellaris custom validators (CW999) ----
     {
         codes: ['CW999'],
-        pattern: /^In scripted_action, user_scope must be declared before scope(?:, either on an earlier line or earlier on the same line)?$/,
-        zh: () => '在 scripted_action 中，user_scope 必须写在 scope 前面：可以在上一行，也可以在同一行但要位于 scope 之前。',
-        en: () => 'Move user_scope before scope in the same scripted_action block; it can be on an earlier line or earlier on the same line.',
+        pattern: /^In scripted_action, user_scope must be the first entry and scope must be the second entry$/,
+        zh: () => '在 scripted_action 中，第一项必须是 user_scope，第二项必须是 scope。',
+        en: () => 'Move user_scope to the first entry and scope to the second entry in the same scripted_action block.',
     },
 
     // ---- Syntax / structure (CW001*, CW002) ----

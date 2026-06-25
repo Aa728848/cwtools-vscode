@@ -74,11 +74,12 @@ describe('diagnostic i18n enrichment', () => {
         });
 
         it('translates scripted_action scope ordering errors', () => {
-            const hint = zh('In scripted_action, user_scope must be declared before scope, either on an earlier line or earlier on the same line', 'CW999');
+            const hint = zh('In scripted_action, user_scope must be the first entry and scope must be the second entry', 'CW999');
             expect(hint).to.include('scripted_action');
             expect(hint).to.include('user_scope');
             expect(hint).to.include('scope');
-            expect(hint).to.include('上一行');
+            expect(hint).to.include('第一项');
+            expect(hint).to.include('第二项');
         });
 
         it('translates encoding and duplicate-definition errors', () => {
@@ -106,8 +107,8 @@ describe('diagnostic i18n enrichment', () => {
             expect(en('unknown trigger has_pop used.', 'CW102')).to.include('spelling');
             expect(en('File gfx/foo.dds not found, this is case sensitive', 'CW113'))
                 .to.include('case sensitive');
-            expect(en('In scripted_action, user_scope must be declared before scope, either on an earlier line or earlier on the same line', 'CW999'))
-                .to.include('Move user_scope before scope');
+            expect(en('In scripted_action, user_scope must be the first entry and scope must be the second entry', 'CW999'))
+                .to.include('Move user_scope to the first entry');
             // Pure-translation rules add nothing in English.
             expect(en('Expecting yes or no, got maybe', 'CW240')).to.equal(undefined);
         });

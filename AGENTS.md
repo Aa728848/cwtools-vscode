@@ -236,6 +236,9 @@ checks.
   `get_pdx_block`) before raw workspace scans or shell commands.
 - Add bounded caches for data that can grow with workspace or vanilla size.
 - Use `ErrorReporter` instead of bare `console.error` in extension/AI code.
+- After related code changes, maintain matching documentation when applicable,
+  such as `CHANGELOG.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, `README.md`, and
+  feature docs.
 - Put user-visible Chinese text in the existing message/i18n modules when
   practical: `client/extension/ai/messages.ts`,
   `client/extension/ai/workflowI18n.ts`, and `client/webview/chat/i18n.ts`.

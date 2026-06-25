@@ -4757,6 +4757,22 @@ type Server(client: ILanguageClient) =
                                 let trimLocKey (value: string) =
                                     value.Trim().Trim('"')
 
+                                let withUppercaseModifierFallback (candidates: string list) =
+                                    candidates
+                                    |> List.collect (fun candidate ->
+                                        let candidate = trimLocKey candidate
+                                        if String.IsNullOrWhiteSpace candidate then
+                                            []
+                                        elif candidate.StartsWith("mod_", StringComparison.OrdinalIgnoreCase) then
+                                            let upperCandidate = candidate.ToUpperInvariant()
+                                            if String.Equals(candidate, upperCandidate, StringComparison.Ordinal) then
+                                                [ candidate ]
+                                            else
+                                                [ candidate; upperCandidate ]
+                                        else
+                                            [ candidate ])
+                                    |> List.distinct
+
                                 let sameRange (left: CWTools.Utilities.Position.range) (right: CWTools.Utilities.Position.range) =
                                     String.Equals(left.FileName, right.FileName, pathComparison)
                                     && left.StartLine = right.StartLine
@@ -4787,6 +4803,7 @@ type Server(client: ILanguageClient) =
                                                 None
                                             else
                                                 Some(locDef.prefix + key + locDef.suffix))
+                                        |> withUppercaseModifierFallback
 
                                 let nodeLocCandidates (n: CWTools.Process.Node) =
                                     let nodeKey = trimLocKey n.Key
@@ -4807,9 +4824,11 @@ type Server(client: ILanguageClient) =
 
                                 let modifierLocCandidates (key: string) =
                                     let key = trimLocKey key
-                                    if String.IsNullOrWhiteSpace key then []
-                                    elif key.StartsWith("mod_", StringComparison.OrdinalIgnoreCase) then [ key ]
-                                    else [ "mod_" + key ]
+                                    let baseCandidates =
+                                        if String.IsNullOrWhiteSpace key then []
+                                        elif key.StartsWith("mod_", StringComparison.OrdinalIgnoreCase) then [ key ]
+                                        else [ "mod_" + key ]
+                                    withUppercaseModifierFallback baseCandidates
 
                                 let valueLocCandidates (value: string) =
                                     let value = trimLocKey value

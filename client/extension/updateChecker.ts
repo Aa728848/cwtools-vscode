@@ -3,6 +3,7 @@ import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { execFile } from 'child_process';
 import { ErrorReporter } from './ai/errorReporter';
 
 export async function checkForUpdates(context: vscode.ExtensionContext) {
@@ -164,10 +165,130 @@ async function downloadAndInstallUpdate(
     });
 }
 
+const CLI_UNINSTALL_TIMEOUT_MS = 90_000;
+const CLI_INSTALL_TIMEOUT_MS = 180_000;
+const CLI_MAX_BUFFER = 1024 * 1024;
+
+function getVsCodeCliBaseName(): string {
+    const scheme = vscode.env.uriScheme?.toLowerCase() ?? '';
+    const appName = vscode.env.appName?.toLowerCase() ?? '';
+    if (scheme.includes('vscodium-insiders') || (appName.includes('codium') && appName.includes('insider'))) {
+        return 'codium-insiders';
+    }
+    if (scheme.includes('vscodium') || appName.includes('codium')) {
+        return 'codium';
+    }
+    if (scheme.includes('insiders') || appName.includes('insiders')) {
+        return 'code-insiders';
+    }
+    if (scheme.includes('code-oss') || appName.includes('code - oss')) {
+        return 'code-oss';
+    }
+    return 'code';
+}
+
+function getVsCodeCliExecutableName(): string {
+    const base = getVsCodeCliBaseName();
+    return process.platform === 'win32' ? `${base}.cmd` : base;
+}
+
+function resolveVsCodeCliCommand(): string {
+    const envCli = process.env.VSCODE_CLI?.trim();
+    if (envCli) {
+        return envCli;
+    }
+
+    const base = getVsCodeCliBaseName();
+    const executable = getVsCodeCliExecutableName();
+    const appDir = path.dirname(process.execPath);
+    const candidates = process.platform === 'darwin'
+        ? [path.resolve(appDir, '..', 'Resources', 'app', 'bin', base)]
+        : process.platform === 'win32'
+            ? [
+                path.join(appDir, 'bin', executable),
+                path.join(path.dirname(appDir), 'bin', executable)
+            ]
+            : [
+                path.join(appDir, 'bin', base),
+                path.resolve(appDir, '..', 'bin', base),
+                path.join(appDir, 'resources', 'app', 'bin', base),
+                path.resolve(appDir, '..', 'resources', 'app', 'bin', base)
+            ];
+
+    for (const candidate of candidates) {
+        if (fs.existsSync(candidate)) {
+            return candidate;
+        }
+    }
+
+    return executable;
+}
+
+function getCurrentExtensionsDirArgs(extensionId: string): string[] {
+    const extensionPath = vscode.extensions.getExtension(extensionId)?.extensionPath;
+    if (!extensionPath) {
+        return [];
+    }
+
+    const folderName = path.basename(extensionPath).toLowerCase();
+    const normalizedId = extensionId.toLowerCase();
+    if (folderName !== normalizedId && !folderName.startsWith(`${normalizedId}-`)) {
+        return [];
+    }
+
+    return ['--extensions-dir', path.dirname(extensionPath)];
+}
+
+function shouldUseWindowsCommandWrapper(command: string): boolean {
+    return process.platform === 'win32' && (path.extname(command) === '' || /\.(cmd|bat)$/i.test(command));
+}
+
+function quoteCmdArg(value: string): string {
+    if (value.includes('"')) {
+        throw new Error(`VS Code CLI argument contains an unsupported quote: ${value}`);
+    }
+    return `"${value}"`;
+}
+
+function runVsCodeCli(args: string[], timeoutMs: number): Promise<void> {
+    const cliCommand = resolveVsCodeCliCommand();
+    const useCmdWrapper = shouldUseWindowsCommandWrapper(cliCommand);
+    const command = useCmdWrapper ? (process.env.ComSpec || 'cmd.exe') : cliCommand;
+    const commandArgs = useCmdWrapper
+        ? ['/d', '/s', '/c', [cliCommand, ...args].map(quoteCmdArg).join(' ')]
+        : args;
+
+    return new Promise((resolve, reject) => {
+        execFile(command, commandArgs, {
+            encoding: 'utf8',
+            maxBuffer: CLI_MAX_BUFFER,
+            timeout: timeoutMs,
+            windowsHide: true
+        }, (error, stdout, stderr) => {
+            if (error) {
+                const detail = [error.message, stderr?.trim(), stdout?.trim()]
+                    .filter(Boolean)
+                    .join('\n');
+                reject(new Error(detail));
+                return;
+            }
+            resolve();
+        });
+    });
+}
+
+async function reinstallCurrentVersionWithCli(vsixPath: string, extensionId: string): Promise<void> {
+    const extensionDirArgs = getCurrentExtensionsDirArgs(extensionId);
+    await runVsCodeCli([...extensionDirArgs, '--uninstall-extension', extensionId], CLI_UNINSTALL_TIMEOUT_MS);
+    await runVsCodeCli([...extensionDirArgs, '--install-extension', vsixPath, '--force'], CLI_INSTALL_TIMEOUT_MS);
+}
+
 /**
  * VS Code does not replace an installed extension when a VSIX has the same
- * version. Remove the current installation first only for same-version asset
- * updates; normal version upgrades continue through the regular install path.
+ * version. Same-version asset replacements must not uninstall this extension
+ * through the active extension host because that can stop this code before the
+ * install step runs. Use the external VS Code CLI for that path; normal version
+ * upgrades continue through the regular workbench install command.
  */
 export async function installDownloadedUpdate(
     vsixPath: string,
@@ -175,7 +296,8 @@ export async function installDownloadedUpdate(
     reinstallCurrentVersion: boolean
 ): Promise<void> {
     if (reinstallCurrentVersion) {
-        await vscode.commands.executeCommand('workbench.extensions.uninstallExtension', extensionId);
+        await reinstallCurrentVersionWithCli(vsixPath, extensionId);
+        return;
     }
     await vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(vsixPath));
 }

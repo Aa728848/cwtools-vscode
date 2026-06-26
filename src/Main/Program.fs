@@ -247,6 +247,20 @@ let private isAllowedDefinitionTarget (sourcePath: string) (targetPath: string) 
 let private normalizeDefinitionSymbol (symbol: string) =
     symbol.Trim().Trim('"')
 
+let private tryScriptValueNameFromSymbol (symbol: string) =
+    let valuePrefix = "value:"
+    let normalized = normalizeDefinitionSymbol symbol
+    if normalized.StartsWith(valuePrefix, StringComparison.OrdinalIgnoreCase) then
+        let valueName = normalized.Substring(valuePrefix.Length)
+        let pipeIndex = valueName.IndexOf('|')
+        let valueName =
+            if pipeIndex >= 0 then valueName.Substring(0, pipeIndex)
+            else valueName
+
+        if String.IsNullOrWhiteSpace valueName then None else Some valueName
+    else
+        None
+
 let private trimLocalisationKey (value: string) =
     value.Trim().Trim('"')
 
@@ -400,13 +414,28 @@ let private tryCodeDefinitionBySymbol
     if String.IsNullOrWhiteSpace needle then None
     else
         let typeMap = game.Types()
-        let fromTypes =
-            typeMap
-            |> Map.toSeq
-            |> Seq.tryPick (fun (_, infos) ->
-                infos
+        let fromScriptValue =
+            tryScriptValueNameFromSymbol needle
+            |> Option.bind (fun scriptValueName ->
+                typeMap
+                |> Map.tryFind "script_value"
+                |> Option.defaultValue [||]
                 |> Array.tryPick (fun tdi ->
-                    if isCodeRange tdi.range && sameSymbol tdi.id then Some tdi.range else None))
+                    if isCodeRange tdi.range
+                       && String.Equals(tdi.id, scriptValueName, StringComparison.OrdinalIgnoreCase) then
+                        Some tdi.range
+                    else
+                        None))
+
+        let fromTypes =
+            fromScriptValue
+            |> Option.orElseWith (fun () ->
+                typeMap
+                |> Map.toSeq
+                |> Seq.tryPick (fun (_, infos) ->
+                    infos
+                    |> Array.tryPick (fun tdi ->
+                        if isCodeRange tdi.range && sameSymbol tdi.id then Some tdi.range else None)))
 
         let fromGfxSpriteNames () =
             let visitor =
@@ -459,6 +488,10 @@ let private preferCodeDefinitionOverLocalisation
     | Some target when isLocalisationDefinitionPath target.FileName ->
         // GoToType already resolved to a loc file - return it directly.
         candidate
+    | None ->
+        tryDefinitionSymbolAt sourceText line character
+        |> Option.filter (tryScriptValueNameFromSymbol >> Option.isSome)
+        |> Option.bind (tryCodeDefinitionBySymbol gameDispatcher game sourcePath)
     | _ -> candidate |> Option.filter isNavigableDefinitionRange
 
 [<assembly: AssemblyDescription("CWTools language server for PDXScript")>]

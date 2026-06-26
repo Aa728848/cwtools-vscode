@@ -247,6 +247,94 @@ let private isAllowedDefinitionTarget (sourcePath: string) (targetPath: string) 
 let private normalizeDefinitionSymbol (symbol: string) =
     symbol.Trim().Trim('"')
 
+let private trimLocalisationKey (value: string) =
+    value.Trim().Trim('"')
+
+let private withUppercaseModifierFallback (candidates: string list) =
+    candidates
+    |> List.collect (fun candidate ->
+        let candidate = trimLocalisationKey candidate
+        if String.IsNullOrWhiteSpace candidate then
+            []
+        elif candidate.StartsWith("mod_", StringComparison.OrdinalIgnoreCase) then
+            let upperCandidate = candidate.ToUpperInvariant()
+            if String.Equals(candidate, upperCandidate, StringComparison.Ordinal) then
+                [ candidate ]
+            else
+                [ candidate; upperCandidate ]
+        else
+            [ candidate ])
+    |> List.distinct
+
+let private typeLocalisationDefinitions
+    (typeDefsByName: Map<string, TypeDefinition>)
+    (typeName: string)
+    (tdi: TypeDefInfo)
+    =
+    let parts = typeName.Split([|'.'|], 2)
+    let baseTypeName = parts.[0]
+
+    match Map.tryFind baseTypeName typeDefsByName with
+    | None -> []
+    | Some typeDef ->
+        let subtypeNames =
+            [ if parts.Length > 1 then yield parts.[1]
+              yield! tdi.subtypes ]
+            |> List.distinct
+
+        let subtypeLocs =
+            subtypeNames
+            |> List.collect (fun subtypeName ->
+                typeDef.subtypes
+                |> List.tryFind (fun st -> String.Equals(st.name, subtypeName, StringComparison.OrdinalIgnoreCase))
+                |> Option.map (fun st -> st.localisation)
+                |> Option.defaultValue [])
+
+        typeDef.localisation @ subtypeLocs
+
+let private typeLocalisationKeysForSymbol
+    (typeDefsByName: Map<string, TypeDefinition>)
+    (typeName: string)
+    (tdi: TypeDefInfo)
+    (key: string)
+    =
+    typeLocalisationDefinitions typeDefsByName typeName tdi
+    |> List.choose (fun locDef ->
+        if locDef.explicitField.IsSome then
+            None
+        else
+            Some(locDef.prefix + key + locDef.suffix))
+    |> withUppercaseModifierFallback
+
+let private typeLocalisationRenamePairs
+    (typeDefsByName: Map<string, TypeDefinition>)
+    (typeName: string)
+    (tdi: TypeDefInfo)
+    (oldKey: string)
+    (newKey: string)
+    =
+    typeLocalisationDefinitions typeDefsByName typeName tdi
+    |> List.collect (fun locDef ->
+        if locDef.explicitField.IsSome then
+            []
+        else
+            let oldLocKey = trimLocalisationKey (locDef.prefix + oldKey + locDef.suffix)
+            let newLocKey = trimLocalisationKey (locDef.prefix + newKey + locDef.suffix)
+            if String.IsNullOrWhiteSpace oldLocKey
+               || String.Equals(oldLocKey, newLocKey, StringComparison.Ordinal) then
+                []
+            else
+                withUppercaseModifierFallback [ oldLocKey ]
+                |> List.map (fun oldVariant ->
+                    let newVariant =
+                        if oldVariant.StartsWith("MOD_", StringComparison.Ordinal) then
+                            newLocKey.ToUpperInvariant()
+                        else
+                            newLocKey
+
+                    oldVariant, newVariant))
+    |> List.distinct
+
 let private tryDefinitionSymbolAt (sourceText: string) (line: int) (character: int) =
     if String.IsNullOrEmpty sourceText then None
     else
@@ -4781,29 +4869,7 @@ type Server(client: ILanguageClient) =
                                     && left.EndColumn = right.EndColumn
 
                                 let typeLocalisationKeys (typeName: string) (tdi: TypeDefInfo) (key: string) =
-                                    let parts = typeName.Split([|'.'|], 2)
-                                    let baseTypeName = parts.[0]
-                                    match Map.tryFind baseTypeName typeDefsByName with
-                                    | None -> []
-                                    | Some typeDef ->
-                                        let subtypeNames =
-                                            [ if parts.Length > 1 then yield parts.[1]
-                                              yield! tdi.subtypes ]
-                                            |> List.distinct
-                                        let subtypeLocs =
-                                            subtypeNames
-                                            |> List.collect (fun subtypeName ->
-                                                typeDef.subtypes
-                                                |> List.tryFind (fun st -> String.Equals(st.name, subtypeName, StringComparison.OrdinalIgnoreCase))
-                                                |> Option.map (fun st -> st.localisation)
-                                                |> Option.defaultValue [])
-                                        (typeDef.localisation @ subtypeLocs)
-                                        |> List.choose (fun locDef ->
-                                            if locDef.explicitField.IsSome then
-                                                None
-                                            else
-                                                Some(locDef.prefix + key + locDef.suffix))
-                                        |> withUppercaseModifierFallback
+                                    typeLocalisationKeysForSymbol typeDefsByName typeName tdi key
 
                                 let nodeLocCandidates (n: CWTools.Process.Node) =
                                     let nodeKey = trimLocKey n.Key
@@ -5458,6 +5524,48 @@ type Server(client: ILanguageClient) =
                     let endColumn = int target.EndColumn |> max startColumn |> min line.Length
                     Some(line.Substring(startColumn, endColumn - startColumn))
 
+            let tryFindLocalisationKeyRange (entry: Entry) (expectedKey: string) =
+                let text = readDocumentText entry.position.FileName
+                let lines = text.Split('\n')
+                let lineIndex = int entry.position.StartLine - 1
+
+                if lineIndex < 0 || lineIndex >= lines.Length then
+                    None
+                else
+                    let line = lines.[lineIndex].TrimEnd('\r')
+                    let entryMatch = localisationEntryPattern.Match(line)
+
+                    if entryMatch.Success
+                       && String.Equals(entryMatch.Groups.[2].Value, expectedKey, StringComparison.Ordinal) then
+                        let keyGroup = entryMatch.Groups.[2]
+                        Some(
+                            mkRange
+                                entry.position.FileName
+                                (mkPos (lineIndex + 1) keyGroup.Index)
+                                (mkPos (lineIndex + 1) (keyGroup.Index + keyGroup.Length))
+                        )
+                    else
+                        let minColumn = int entry.position.StartColumn |> max 0 |> min line.Length
+                        let maxColumn = int entry.position.EndColumn |> max minColumn |> min line.Length
+                        let index = line.IndexOf(expectedKey, minColumn, StringComparison.Ordinal)
+
+                        if index >= 0 && index + expectedKey.Length <= maxColumn then
+                            let afterIndex = index + expectedKey.Length
+                            let beforeOk = index = 0 || Char.IsWhiteSpace(line.[index - 1])
+                            let afterOk = afterIndex < line.Length && line.[afterIndex] = ':'
+
+                            if beforeOk && afterOk then
+                                Some(
+                                    mkRange
+                                        entry.position.FileName
+                                        (mkPos (lineIndex + 1) index)
+                                        (mkPos (lineIndex + 1) afterIndex)
+                                )
+                            else
+                                None
+                        else
+                            None
+
             let tryFindIdentifierRangeInRange (target: range) (symbol: string) =
                 let needle = normalizeDefinitionSymbol symbol
                 if String.IsNullOrWhiteSpace needle then None
@@ -5584,18 +5692,52 @@ type Server(client: ILanguageClient) =
                             @ (fallbackRange |> Option.toList)
                             |> List.distinctBy rangeKey
 
-                        match renameRanges with
+                        let localisationRenamePairs =
+                            match typeInfo, renameSymbol with
+                            | Some(typeName, tdi), Some oldSymbol ->
+                                let typeDefsByName =
+                                    game.TypeDefs()
+                                    |> Seq.map (fun td -> td.name, td)
+                                    |> Map.ofSeq
+
+                                typeLocalisationRenamePairs typeDefsByName typeName tdi oldSymbol p.newName
+                            | _ -> []
+
+                        let localisationRenameEdits =
+                            if List.isEmpty localisationRenamePairs then
+                                []
+                            else
+                                let pairByOldKey = localisationRenamePairs |> Map.ofList
+                                let visitor =
+                                    { new IGameVisitor<_> with
+                                        member _.Visit game = game.References().Localisation }
+
+                                gameDispatcher.Dispatch visitor
+                                |> Option.defaultValue []
+                                |> List.choose (fun (locKey, entry) ->
+                                    match Map.tryFind locKey pairByOldKey with
+                                    | Some newLocKey ->
+                                        tryFindLocalisationKeyRange entry locKey
+                                        |> Option.map (fun r -> r, newLocKey)
+                                    | None -> None)
+
+                        let renameEdits =
+                            (renameRanges |> List.map (fun r -> r, p.newName))
+                            @ localisationRenameEdits
+                            |> List.distinctBy (fun (r, _) -> rangeKey r)
+
+                        match renameEdits with
                         | gotos when gotos.Length > 0 ->
                             let changes =
                                 gotos
-                                |> List.groupBy (fun r -> r.FileName)
-                                |> List.map (fun (fileName, ranges) ->
+                                |> List.groupBy (fun (r, _) -> r.FileName)
+                                |> List.map (fun (fileName, editsForFile) ->
                                     let uri = Uri(fileName).ToString()
                                     let edits =
-                                        ranges
-                                        |> List.map (fun r ->
+                                        editsForFile
+                                        |> List.map (fun (r, newText) ->
                                             { range = convRangeToLSPRange r
-                                              newText = p.newName })
+                                              newText = newText })
                                     uri, edits)
                                 |> Map.ofList
 

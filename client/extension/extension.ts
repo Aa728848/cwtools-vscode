@@ -29,6 +29,7 @@ import { enrichDiagnosticsInPlace, diagnosticCodeString, diagnosticMatchesIgnore
 import { isImagePathLinkText, registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
 import { registerPdxIndentFormatter } from './pdxIndentFormatter';
+import { registerTexturePreviewEditor } from './texturePreviewEditor';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
 import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
 import type { GameProfile } from './gameProfiles';
@@ -1544,6 +1545,7 @@ export async function activate(context: ExtensionContext) {
 	});
 
 	// ── Graphics Features: DDS hover preview, GFX sprite goto, room completion ──
+	registerTexturePreviewEditor(context);
 	registerGraphicsFeatures(context);
 
 	// ── Vanilla Code Comparison: block-level and file-level diff against vanilla game ──

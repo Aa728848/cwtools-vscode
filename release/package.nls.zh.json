@@ -3,6 +3,7 @@
   "extension.description": "使用 CWTools 为 Paradox Interactive 脚本文件提供支持 (基于 cwtools/cwtools-vscode 开发)",
   "views.cwtools-files.name": "CWTools 已加载文件",
   "views.cwtools.aiChat.name": "AI 助手",
+  "customEditors.cwtools.texturePreview.displayName": "DDS/TGA 贴图预览",
   "commands.outputerrors.title": "将错误写入文件",
   "commands.genlocall.title": "为所有文件生成缺失的本地化",
   "commands.reloadrulesconfig.title": "重新加载配置规则",

@@ -3,6 +3,7 @@
   "extension.description": "Paradox Interactive scripting file support using CWTools (Based on cwtools/cwtools-vscode)",
   "views.cwtools-files.name": "CWTools loaded files",
   "views.cwtools.aiChat.name": "AI Assistant",
+  "customEditors.cwtools.texturePreview.displayName": "DDS/TGA Texture Preview",
   "commands.outputerrors.title": "Write errors to file",
   "commands.genlocall.title": "Generate missing loc for all files",
   "commands.reloadrulesconfig.title": "Reload config rules",

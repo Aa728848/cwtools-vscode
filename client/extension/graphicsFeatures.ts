@@ -12,6 +12,7 @@ import * as crypto from 'crypto';
 import { decodeDds, decodeTga, type DdsResult } from './ddsDecoder';
 import { matchesExt, stripExt } from './fileExtensions';
 import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
+import { OPEN_TEXTURE_PREVIEW_COMMAND } from './texturePreviewEditor';
 
 // ─── LRU Cache ──────────────────────────────────────────────────────────────
 
@@ -52,7 +53,6 @@ class LRUCache<K, V> {
 const IMAGE_PATH_QUOTED_RE = /["']([^"']+\.(?:dds|tga|png))["']/gi;
 const IMAGE_PATH_UNQUOTED_RE = /=\s*([^\s"'{}#]+\.(?:dds|tga|png))\b/gi;
 const IMAGE_PATH_EXT_RE = /\.(?:dds|tga|png)$/i;
-const OPEN_IMAGE_PATH_IN_EXPLORER_COMMAND = 'cwtools.openImagePathInExplorer';
 
 export interface ImagePathSpan {
     path: string;
@@ -187,8 +187,7 @@ class ImageHoverProvider implements vs.HoverProvider {
 
 /**
  * DocumentLinkProvider for .gfx image paths.
- * Ctrl+Click reveals the resolved image in the OS file explorer instead of
- * opening the binary/texture file in an editor tab.
+ * Ctrl+Click opens the resolved image in VS Code's texture preview.
  */
 class ImagePathDocumentLinkProvider implements vs.DocumentLinkProvider {
     provideDocumentLinks(document: vs.TextDocument): vs.DocumentLink[] {
@@ -202,8 +201,8 @@ class ImagePathDocumentLinkProvider implements vs.DocumentLinkProvider {
                 if (!fullPath) continue;
 
                 const range = new vs.Range(line, span.start, line, span.end);
-                const link = new vs.DocumentLink(range, createOpenImagePathCommandUri(fullPath));
-                link.tooltip = `Reveal ${path.basename(fullPath)} in File Explorer`;
+                const link = new vs.DocumentLink(range, createOpenTexturePreviewCommandUri(fullPath));
+                link.tooltip = `Open ${path.basename(fullPath)} preview`;
                 links.push(link);
             }
         }
@@ -718,17 +717,9 @@ function normalizeAssetPathForFs(assetPath: string): string {
     return assetPath.trim().replace(/[\\/]+/g, path.sep);
 }
 
-function createOpenImagePathCommandUri(fullPath: string): vs.Uri {
+function createOpenTexturePreviewCommandUri(fullPath: string): vs.Uri {
     const args = encodeURIComponent(JSON.stringify([fullPath]));
-    return vs.Uri.parse(`command:${OPEN_IMAGE_PATH_IN_EXPLORER_COMMAND}?${args}`);
-}
-
-async function revealImagePathInExplorer(fullPath: string): Promise<void> {
-    if (!fullPath || !fs.existsSync(fullPath)) {
-        await vs.window.showWarningMessage(`Image file not found: ${fullPath}`);
-        return;
-    }
-    await vs.commands.executeCommand('revealFileInOS', vs.Uri.file(fullPath));
+    return vs.Uri.parse(`command:${OPEN_TEXTURE_PREVIEW_COMMAND}?${args}`);
 }
 
 // ─── Shared Image Hover Helper ─────────────────────────────────────────────
@@ -828,10 +819,6 @@ function cleanupOldTempFiles() {
 export function registerGraphicsFeatures(context: vs.ExtensionContext): void {
     // Run background cleanup 5 seconds after activation
     setTimeout(cleanupOldTempFiles, 5000);
-
-    context.subscriptions.push(
-        vs.commands.registerCommand(OPEN_IMAGE_PATH_IN_EXPLORER_COMMAND, revealImagePathInExplorer),
-    );
 
     const gameLanguages = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox'];
     const gfxSelector: vs.DocumentSelector = [

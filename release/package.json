@@ -30,6 +30,8 @@
     ],
     "main": "./bin/client/extension/extension.js",
     "activationEvents": [
+        "onCustomEditor:cwtools.texturePreview",
+        "onCommand:cwtools.openTexturePreview",
         "onStartupFinished"
     ],
     "contributes": {
@@ -67,6 +69,33 @@
                 }
             ]
         },
+        "customEditors": [
+            {
+                "viewType": "cwtools.texturePreview",
+                "displayName": "%customEditors.cwtools.texturePreview.displayName%",
+                "selector": [
+                    {
+                        "filenamePattern": "*.dds"
+                    },
+                    {
+                        "filenamePattern": "*.DDS"
+                    },
+                    {
+                        "filenamePattern": "*.Dds"
+                    },
+                    {
+                        "filenamePattern": "*.tga"
+                    },
+                    {
+                        "filenamePattern": "*.TGA"
+                    },
+                    {
+                        "filenamePattern": "*.Tga"
+                    }
+                ],
+                "priority": "default"
+            }
+        ],
         "menus": {
             "editor/title": [
                 {

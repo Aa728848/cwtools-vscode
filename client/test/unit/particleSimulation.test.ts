@@ -70,4 +70,38 @@ describe('particle curve and simulation', () => {
         expect(buffer.count).to.be.greaterThan(1);
         expect(new Set(frames).size).to.be.greaterThan(1);
     });
+
+    it('treats range scalars as base plus variance for color and emitter radius', () => {
+        const effect: ParticleEffect = {
+            name: 'range_semantics',
+            subsystems: [{
+                name: 'ring',
+                maxAmount: 4,
+                emitterType: 'sphere',
+                sphereEmitterRadius: { a: { value: 40 }, b: { value: 8 } },
+                sphereEmitterYaw: { value: 0 },
+                sphereEmitterPitch: { value: 0 },
+                duration: { value: -1 },
+                life: { value: 1 },
+                emission: { value: 80 },
+                velocity: { value: 0 },
+                color: {
+                    r: { a: { value: 255 }, b: { value: 15 } },
+                    g: { value: 255 },
+                    b: { value: 255 },
+                    alpha: { value: 255 },
+                },
+            }],
+            animations: [],
+            forces: [],
+        };
+        const sim = new ParticleEffectSimulation(effect);
+        sim.update(0.05);
+        const buffer = sim.systems[0]!.buffer;
+        expect(buffer.count).to.be.greaterThan(0);
+        expect(buffer.positions[2]).to.be.within(32, 48);
+        expect(Math.abs(buffer.positions[0] ?? 0)).to.be.lessThan(0.001);
+        expect(Math.abs(buffer.positions[1] ?? 0)).to.be.lessThan(0.001);
+        expect(buffer.colors[0]).to.be.greaterThan(0.9);
+    });
 });

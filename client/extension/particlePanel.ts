@@ -6,23 +6,25 @@ import { ErrorReporter } from './ai/errorReporter';
 import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { isPathInsideOrEqual } from './pathScope';
 import { parseParticleFile } from './particleAssetParser';
-import {
-    findEditableSpan,
-    getByFieldPath,
-    serializeEffect,
-    serializeFieldValue,
-    setByFieldPath,
-} from './particleAssetSerializer';
-import type { NumberStyle, ParticleEffect, ParticleRenderPayload, ParticleTexturePayload, Span, Subsystem } from '../webview/particleTypes';
+import { serializeEffect } from './particleAssetSerializer';
+import type {
+    ParticleEffect,
+    ParticleRenderPayload,
+    ParticleTextureCandidate,
+    ParticleTextureCandidateSource,
+    ParticleTexturePayload,
+    Subsystem,
+} from '../webview/particleTypes';
+
+const TEXTURE_CANDIDATE_LIMIT = 3000;
 
 type ParticlePanelMessage =
     | { command: 'selectEffect'; index: number }
-    | { command: 'fieldEdit'; effectIndex: number; path: Array<string | number>; value: unknown; reload?: boolean }
-    | { command: 'replaceEffect'; effectIndex: number; effect: ParticleEffect }
+    | { command: 'dirtyState'; dirty: boolean }
+    | { command: 'previewEffects'; requestId: number; effects: ParticleEffect[] }
+    | { command: 'saveEffects'; selectedEffectIndex: number; effects: ParticleEffect[]; dirtyEffectIndices: number[] }
     | { command: 'openFile' }
     | { command: 'close' }
-    | { command: 'undo' }
-    | { command: 'redo' }
     | { command: 'screenshot'; data: string }
     | { command: 'log'; text: string; level?: 'info' | 'warn' | 'error' };
 
@@ -30,13 +32,6 @@ interface TextureCacheEntry {
     mtimeMs: number;
     size: number;
     payload: Omit<ParticleTexturePayload, 'file'>;
-}
-
-interface EditableFieldTarget {
-    span: Span;
-    value: unknown;
-    numberStyle?: NumberStyle;
-    forceQuote?: boolean;
 }
 
 export class ParticlePanel {
@@ -50,6 +45,7 @@ export class ParticlePanel {
     private _searchRoots: string[] = [];
     private _selectedEffectIndex = 0;
     private _pendingProgrammaticSaves = 0;
+    private _hasUnsavedPreviewChanges = false;
     private readonly _textureCache = new Map<string, TextureCacheEntry>();
 
     public static async create(extensionPath: string, document: vscode.TextDocument): Promise<void> {
@@ -87,6 +83,9 @@ export class ParticlePanel {
                         this._pendingProgrammaticSaves--;
                         return;
                     }
+                    if (this._hasUnsavedPreviewChanges) {
+                        return;
+                    }
                     await this._loadAndRender(savedDoc, this._selectedEffectIndex);
                 }
             }),
@@ -98,23 +97,22 @@ export class ParticlePanel {
         try {
             switch (msg.command) {
                 case 'selectEffect':
-                    if (this._document) await this._loadAndRender(this._document, msg.index);
+                    this._selectedEffectIndex = msg.index;
                     break;
-                case 'fieldEdit':
-                    await this._handleFieldEdit(msg);
+                case 'dirtyState':
+                    this._hasUnsavedPreviewChanges = msg.dirty;
                     break;
-                case 'replaceEffect':
-                    await this._handleReplaceEffect(msg.effectIndex, msg.effect);
+                case 'previewEffects':
+                    await this._handlePreviewEffects(msg.effects, msg.requestId);
+                    break;
+                case 'saveEffects':
+                    await this._handleSaveEffects(msg);
                     break;
                 case 'openFile':
                     await this._handleOpenFile();
                     break;
                 case 'close':
                     this.dispose();
-                    break;
-                case 'undo':
-                case 'redo':
-                    await this._handleUndoRedo(msg.command);
                     break;
                 case 'screenshot':
                     await this._handleScreenshot(msg.data);
@@ -131,6 +129,15 @@ export class ParticlePanel {
     }
 
     private async _handleOpenFile(): Promise<void> {
+        if (this._hasUnsavedPreviewChanges) {
+            const choice = await vscode.window.showWarningMessage(
+                'The particle editor has unsaved cached changes. Open another file and discard them?',
+                'Discard and Open',
+                'Cancel',
+            );
+            if (choice !== 'Discard and Open') return;
+            this._hasUnsavedPreviewChanges = false;
+        }
         const uris = await vscode.window.showOpenDialog({
             canSelectFiles: true,
             canSelectFolders: false,
@@ -147,15 +154,6 @@ export class ParticlePanel {
         await this._loadAndRender(doc);
     }
 
-    private async _handleUndoRedo(command: 'undo' | 'redo'): Promise<void> {
-        if (!this._document) return;
-        await vscode.window.showTextDocument(this._document.uri, { viewColumn: vscode.ViewColumn.One, preserveFocus: false });
-        await vscode.commands.executeCommand(command);
-        await this._saveProgrammatic(this._document);
-        await this._loadAndRender(this._document, this._selectedEffectIndex);
-        this._panel.reveal();
-    }
-
     private async _handleScreenshot(data: string): Promise<void> {
         const doc = this._document;
         const uri = await vscode.window.showSaveDialog({
@@ -168,121 +166,43 @@ export class ParticlePanel {
         await vscode.window.showInformationMessage(`Screenshot saved: ${path.basename(uri.fsPath)}`);
     }
 
-    private async _handleFieldEdit(msg: Extract<ParticlePanelMessage, { command: 'fieldEdit' }>): Promise<void> {
-        const previousPath = this._document?.uri.fsPath;
+    private async _handlePreviewEffects(effects: ParticleEffect[], requestId: number): Promise<void> {
+        const doc = this._document;
+        if (!doc) return;
+        const textures = await this._buildTexturePayloads(effects, doc);
+        await this._panel.webview.postMessage({ command: 'textures', requestId, textures });
+    }
+
+    private async _handleSaveEffects(msg: Extract<ParticlePanelMessage, { command: 'saveEffects' }>): Promise<void> {
         const doc = await this._ensureWritableDocument();
         if (!doc) return;
-        const createdCopy = !!previousPath && doc.uri.fsPath !== previousPath;
+        this._selectedEffectIndex = msg.selectedEffectIndex;
+
         const parsed = parseParticleFile(doc.getText(), doc.uri.fsPath);
-        const effect = parsed.effects[msg.effectIndex];
-        if (!effect) return;
-
-        const originalValue = getByFieldPath(effect, msg.path);
-        setByFieldPath(effect, msg.path, msg.value);
-        const target = this._editableTargetForFieldPath(effect, msg.path, originalValue);
-        const replacement = target ? serializeFieldValue(target.value, target.numberStyle, target.forceQuote) : undefined;
-
-        if (!target || replacement === undefined) {
-            const fieldName = msg.path.map(String).join('.');
-            ErrorReporter.warn('ParticlePanel', `Refused field edit without a safe source span: ${fieldName}`);
-            await vscode.window.showWarningMessage(`Particle field "${fieldName}" is not present in the source file. Use Save after adding structural fields.`);
-            await this._loadAndRender(doc, msg.effectIndex);
-            return;
-        }
-
-        await this._replaceText(doc, target.span, replacement, createdCopy || !!msg.reload || this._fieldEditNeedsReload(msg.path), msg.effectIndex);
-    }
-
-    private async _handleReplaceEffect(effectIndex: number, effect: ParticleEffect): Promise<void> {
-        const doc = await this._ensureWritableDocument();
-        if (!doc) return;
-        const parsed = parseParticleFile(doc.getText(), doc.uri.fsPath);
-        const current = parsed.effects[effectIndex];
-        if (!current?.span) return;
-        effect.span = current.span;
-        await this._replaceEffectBlock(doc, effect, effectIndex);
-    }
-
-    private _editableTargetForFieldPath(effect: ParticleEffect, pathParts: Array<string | number>, value: unknown): EditableFieldTarget | undefined {
-        const direct = findEditableSpan(value);
-        if (direct) {
-            return {
-                span: direct,
-                value: getByFieldPath(effect, pathParts),
-                numberStyle: this._numberStyleForFieldPath(effect, pathParts),
-                forceQuote: this._forceQuoteForFieldPath(pathParts),
-            };
-        }
-        if (pathParts.length === 0) return undefined;
-        const parentPath = pathParts.slice(0, -1);
-        const key = String(pathParts[pathParts.length - 1]);
-        const parent = parentPath.length ? getByFieldPath(effect, parentPath) : effect;
-        const spans = (parent as { spans?: Record<string, Span> } | undefined)?.spans;
-        if (spans?.[key]) {
-            return {
-                span: spans[key],
-                value: getByFieldPath(effect, pathParts),
-                numberStyle: this._numberStyleForFieldPath(effect, pathParts),
-                forceQuote: this._forceQuoteForFieldPath(pathParts),
-            };
-        }
-
-        if (pathParts.length >= 2) {
-            const aggregatePath = pathParts.slice(0, -1);
-            const aggregateKey = String(pathParts[pathParts.length - 2]);
-            const containerPath = pathParts.slice(0, -2);
-            const container = containerPath.length ? getByFieldPath(effect, containerPath) : effect;
-            const aggregateSpan = (container as { spans?: Record<string, Span> } | undefined)?.spans?.[aggregateKey];
-            if (aggregateSpan) {
-                return {
-                    span: aggregateSpan,
-                    value: getByFieldPath(effect, aggregatePath),
-                    numberStyle: this._numberStyleForFieldPath(effect, aggregatePath),
-                    forceQuote: this._forceQuoteForFieldPath(aggregatePath),
-                };
-            }
-        }
-        return undefined;
-    }
-
-    private _numberStyleForFieldPath(effect: ParticleEffect, pathParts: Array<string | number>): NumberStyle | undefined {
-        if (pathParts.length === 0) return undefined;
-        const parentPath = pathParts.slice(0, -1);
-        const key = String(pathParts[pathParts.length - 1]);
-        const parent = parentPath.length ? getByFieldPath(effect, parentPath) : effect;
-        return (parent as { numberStyles?: Record<string, NumberStyle> } | undefined)?.numberStyles?.[key];
-    }
-
-    private _forceQuoteForFieldPath(pathParts: Array<string | number>): boolean {
-        const key = String(pathParts[pathParts.length - 1] ?? '');
-        return key === 'name' || key === 'file' || key === 'shader' || key === 'op' || key === 'time' ||
-            key === 'emitterType' || key === 'sort' || key === 'type';
-    }
-
-    private _fieldEditNeedsReload(pathParts: Array<string | number>): boolean {
-        return pathParts.includes('texture') && String(pathParts[pathParts.length - 1] ?? '') === 'file';
-    }
-
-    private async _replaceText(doc: vscode.TextDocument, span: Span, replacement: string, reload = false, effectIndex = this._selectedEffectIndex): Promise<void> {
         const edit = new vscode.WorkspaceEdit();
-        edit.replace(doc.uri, new vscode.Range(doc.positionAt(span.startOffset), doc.positionAt(span.endOffset)), replacement);
-        const applied = await vscode.workspace.applyEdit(edit);
-        if (!applied) return;
-        await this._saveProgrammatic(doc);
-        if (reload) await this._loadAndRender(doc, effectIndex);
-    }
+        const dirtyIndices = [...new Set(msg.dirtyEffectIndices)]
+            .filter(index => Number.isInteger(index) && index >= 0 && index < msg.effects.length)
+            .sort((a, b) => b - a);
 
-    private async _replaceEffectBlock(doc: vscode.TextDocument, effect: ParticleEffect, effectIndex: number): Promise<void> {
-        const parsed = parseParticleFile(doc.getText(), doc.uri.fsPath);
-        const current = parsed.effects[effectIndex];
-        if (!current?.span) return;
-        const replacement = serializeEffect(effect);
-        const edit = new vscode.WorkspaceEdit();
-        edit.replace(doc.uri, new vscode.Range(doc.positionAt(current.span.startOffset), doc.positionAt(current.span.endOffset)), replacement);
-        const applied = await vscode.workspace.applyEdit(edit);
-        if (!applied) return;
-        await this._saveProgrammatic(doc);
-        await this._loadAndRender(doc, effectIndex);
+        let replacementCount = 0;
+        for (const index of dirtyIndices) {
+            const current = parsed.effects[index];
+            const effect = msg.effects[index];
+            if (!current?.span || !effect) continue;
+            effect.span = current.span;
+            edit.replace(doc.uri, new vscode.Range(doc.positionAt(current.span.startOffset), doc.positionAt(current.span.endOffset)), serializeEffect(effect));
+            replacementCount++;
+        }
+
+        if (replacementCount > 0) {
+            const applied = await vscode.workspace.applyEdit(edit);
+            if (!applied) return;
+            const saved = await this._saveProgrammatic(doc);
+            if (!saved) return;
+        }
+
+        this._hasUnsavedPreviewChanges = false;
+        await this._postSaveComplete(doc, msg.effects, msg.selectedEffectIndex);
     }
 
     private async _ensureWritableDocument(): Promise<vscode.TextDocument | undefined> {
@@ -324,7 +244,6 @@ export class ParticlePanel {
         await vscode.window.showTextDocument(newDoc, vscode.ViewColumn.One);
         this._document = newDoc;
         this._panel.title = `Particle: ${path.basename(newDoc.fileName)}`;
-        await this._loadAndRender(newDoc, this._selectedEffectIndex);
         return newDoc;
     }
 
@@ -353,20 +272,39 @@ export class ParticlePanel {
     private async _loadAndRender(document: vscode.TextDocument, selectedEffectIndex = 0): Promise<void> {
         this._document = document;
         this._selectedEffectIndex = selectedEffectIndex;
+        this._hasUnsavedPreviewChanges = false;
         this._searchRoots = this._buildSearchRoots(document);
         const parsed = parseParticleFile(document.getText(), document.uri.fsPath);
         const selectedIndex = Math.min(Math.max(selectedEffectIndex, 0), Math.max(parsed.effects.length - 1, 0));
         this._selectedEffectIndex = selectedIndex;
         const textures = await this._buildTexturePayloads(parsed.effects, document);
+        const textureCandidates = this._buildTextureCandidates();
         const payload: ParticleRenderPayload = {
             effects: parsed.effects,
             diagnostics: parsed.diagnostics,
             fileName: path.basename(document.fileName),
             selectedEffectIndex: selectedIndex,
             textures,
+            textureCandidates,
             readonly: !this._isEditableFile(document.uri.fsPath),
         };
         await this._panel.webview.postMessage({ command: 'render', ...payload });
+    }
+
+    private async _postSaveComplete(document: vscode.TextDocument, effects: ParticleEffect[], selectedEffectIndex: number): Promise<void> {
+        this._document = document;
+        this._selectedEffectIndex = selectedEffectIndex;
+        this._searchRoots = this._buildSearchRoots(document);
+        const textures = await this._buildTexturePayloads(effects, document);
+        const textureCandidates = this._buildTextureCandidates();
+        await this._panel.webview.postMessage({
+            command: 'saved',
+            fileName: path.basename(document.fileName),
+            selectedEffectIndex,
+            textures,
+            textureCandidates,
+            readonly: !this._isEditableFile(document.uri.fsPath),
+        });
     }
 
     private _buildSearchRoots(document: vscode.TextDocument): string[] {
@@ -379,6 +317,75 @@ export class ParticlePanel {
         const gamePath = this._getGamePath();
         if (gamePath && !roots.includes(gamePath)) roots.push(gamePath);
         return roots;
+    }
+
+    private _buildTextureCandidates(): ParticleTextureCandidate[] {
+        const sourcesByFile = new Map<string, Set<Exclude<ParticleTextureCandidateSource, 'mod+vanilla'>>>();
+        let count = 0;
+        for (const root of this._searchRoots) {
+            if (count >= TEXTURE_CANDIDATE_LIMIT) break;
+            count += this._collectTextureCandidates(root, sourcesByFile, TEXTURE_CANDIDATE_LIMIT - count);
+        }
+        return [...sourcesByFile.entries()]
+            .map(([file, sources]) => ({
+                file,
+                source: this._textureCandidateSource(sources),
+            }))
+            .sort((a, b) => {
+                const sourceOrder = this._textureSourceSort(a.source) - this._textureSourceSort(b.source);
+                return sourceOrder || a.file.localeCompare(b.file, undefined, { sensitivity: 'base' });
+            });
+    }
+
+    private _collectTextureCandidates(
+        root: string,
+        sourcesByFile: Map<string, Set<Exclude<ParticleTextureCandidateSource, 'mod+vanilla'>>>,
+        remaining: number,
+    ): number {
+        const baseDir = path.join(root, 'gfx', 'particles');
+        if (remaining <= 0 || !fs.existsSync(baseDir)) return 0;
+        const source: Exclude<ParticleTextureCandidateSource, 'mod+vanilla'> = this._isGameFile(baseDir) ? 'vanilla' : 'mod';
+        const stack: Array<{ dir: string; depth: number }> = [{ dir: baseDir, depth: 0 }];
+        let added = 0;
+
+        while (stack.length && added < remaining) {
+            const current = stack.pop()!;
+            let entries: fs.Dirent[];
+            try {
+                entries = fs.readdirSync(current.dir, { withFileTypes: true });
+            } catch (error) {
+                ErrorReporter.debug('ParticlePanel', `Failed to scan particle texture directory ${current.dir}`, error);
+                continue;
+            }
+
+            entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+            for (const entry of entries) {
+                const fullPath = path.join(current.dir, entry.name);
+                if (entry.isDirectory() && current.depth < 4) {
+                    stack.push({ dir: fullPath, depth: current.depth + 1 });
+                    continue;
+                }
+                if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.dds') continue;
+                const texturePath = path.relative(root, fullPath).split(path.sep).join('/');
+                const sources = sourcesByFile.get(texturePath) ?? new Set<Exclude<ParticleTextureCandidateSource, 'mod+vanilla'>>();
+                const hadSource = sources.has(source);
+                sources.add(source);
+                sourcesByFile.set(texturePath, sources);
+                if (!hadSource) added++;
+                if (added >= remaining) break;
+            }
+        }
+        return added;
+    }
+
+    private _textureCandidateSource(sources: Set<Exclude<ParticleTextureCandidateSource, 'mod+vanilla'>>): ParticleTextureCandidateSource {
+        return sources.size > 1 ? 'mod+vanilla' : sources.has('mod') ? 'mod' : 'vanilla';
+    }
+
+    private _textureSourceSort(source: ParticleTextureCandidateSource): number {
+        if (source === 'mod') return 0;
+        if (source === 'mod+vanilla') return 1;
+        return 2;
     }
 
     private async _buildTexturePayloads(effects: ParticleEffect[], document: vscode.TextDocument): Promise<Record<string, ParticleTexturePayload>> {

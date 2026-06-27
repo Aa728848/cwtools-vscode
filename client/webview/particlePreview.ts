@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import type { ParticleEffect, ParticleRenderPayload, Scalar } from './particleTypes';
 import { isRange } from './particleTypes';
 import { ParticleEffectSimulation } from './particleSimulation';
@@ -9,6 +13,20 @@ import { createDefaultCurve, createDefaultForce, createDefaultSubsystem, Particl
 
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void; getState(): unknown; setState(s: unknown): void };
 const vscode = acquireVsCodeApi();
+const GAME_LOOK_EXPOSURE = 1.08;
+const GAME_BLOOM_STRENGTH = 0.32;
+const GAME_BLOOM_RADIUS = 0.28;
+const GAME_BLOOM_THRESHOLD = 0.72;
+const HISTORY_LIMIT = 100;
+const CURVE_HISTORY_IDLE_MS = 350;
+
+interface EditorSnapshot {
+    effects: ParticleEffect[];
+    currentEffectIndex: number;
+    currentSubsystemIndex: number;
+    currentCurveIndex: number;
+    currentForceIndex: number;
+}
 
 const locale = document.body.dataset.locale ?? 'en';
 const isChinese = locale.toLowerCase().startsWith('zh');
@@ -52,10 +70,16 @@ const hideOthersToggle = document.getElementById('hide-others-toggle') as HTMLIn
 const emitterVisualsToggle = document.getElementById('emitter-visuals-toggle') as HTMLInputElement;
 const scrub = document.getElementById('time-scrub') as HTMLInputElement;
 const timeLabel = document.getElementById('time-label')!;
+const saveButton = document.getElementById('btn-save') as HTMLButtonElement;
+const undoButton = document.getElementById('btn-undo') as HTMLButtonElement;
+const redoButton = document.getElementById('btn-redo') as HTMLButtonElement;
 
 let glRenderer: THREE.WebGLRenderer;
 let scene: THREE.Scene;
 let camera: THREE.PerspectiveCamera;
+let composer: EffectComposer;
+let bloomPass: UnrealBloomPass;
+let outputPass: OutputPass;
 let controls: OrbitControls;
 let emitterVisualsGroup: THREE.Group | undefined;
 let particleRenderer: ParticleRenderer;
@@ -71,9 +95,14 @@ let currentSubsystemIndex = 0;
 let currentCurveIndex = 0;
 let currentForceIndex = 0;
 let dirty = false;
+let savedEffectsBaseline: ParticleEffect[] = [];
+let undoStack: EditorSnapshot[] = [];
+let redoStack: EditorSnapshot[] = [];
+let textureRequestId = 0;
 let hideOtherSubsystems = false;
 let curveEditor: CurveEditor | null = null;
-let curveSaveTimer = 0;
+let curveHistoryTimer = 0;
+let curveHistoryOpen = false;
 
 const inspector = new ParticleInspector(inspectorRoot);
 const forceInspector = new ParticleInspector(forceInspectorRoot);
@@ -83,13 +112,16 @@ function cssColor(variable: string, fallback: string): string {
 }
 
 function initThree(): void {
-    glRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    glRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
     glRenderer.setPixelRatio(window.devicePixelRatio);
+    glRenderer.setClearColor(0x000000, 1);
     glRenderer.outputColorSpace = THREE.SRGBColorSpace;
+    glRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+    glRenderer.toneMappingExposure = GAME_LOOK_EXPOSURE;
     viewport.append(glRenderer.domElement);
 
     scene = new THREE.Scene();
-    scene.background = new THREE.Color().setStyle(cssColor('--vscode-editor-background', '#1e1e1e'));
+    scene.background = new THREE.Color(0x000000);
     camera = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
     camera.position.set(0, 4, 9);
     controls = new OrbitControls(camera, glRenderer.domElement);
@@ -116,6 +148,13 @@ function initThree(): void {
     emitterVisualsGroup = new THREE.Group();
     scene.add(emitterVisualsGroup);
 
+    composer = new EffectComposer(glRenderer);
+    composer.addPass(new RenderPass(scene, camera));
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), GAME_BLOOM_STRENGTH, GAME_BLOOM_RADIUS, GAME_BLOOM_THRESHOLD);
+    composer.addPass(bloomPass);
+    outputPass = new OutputPass();
+    composer.addPass(outputPass);
+
     particleRenderer = new ParticleRenderer(scene);
     handleResize();
     animationId = requestAnimationFrame(animate);
@@ -138,7 +177,7 @@ function animate(now: number): void {
     }
     if (simulation) particleRenderer.update(camera);
     controls.update();
-    glRenderer.render(scene, camera);
+    composer.render(dt);
     updateTimelineControls();
     animationId = requestAnimationFrame(animate);
 }
@@ -148,6 +187,7 @@ function handleResize(): void {
     const width = Math.max(1, rect.width);
     const height = Math.max(1, rect.height);
     glRenderer.setSize(width, height, false);
+    composer?.setSize(width, height);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
 }
@@ -162,7 +202,13 @@ function currentSubsystem() {
 
 function scalarBaseValue(value: Scalar | undefined, fallback: number): number {
     if (!value) return fallback;
-    return isRange(value) ? value.b.value : value.value;
+    return isRange(value) ? value.a.value : value.value;
+}
+
+function scalarExtentValue(value: Scalar | undefined, fallback: number): number {
+    if (!value) return Math.abs(fallback);
+    if (isRange(value)) return Math.abs(value.a.value) + Math.abs(value.b.value);
+    return Math.abs(value.value);
 }
 
 function computePlaybackDuration(effect: ParticleEffect | undefined): number {
@@ -175,6 +221,39 @@ function computePlaybackDuration(effect: ParticleEffect | undefined): number {
         maxTime = Math.max(maxTime, start + (duration >= 0 ? duration : 8) + Math.max(0.1, life));
     }
     return Math.max(1, Math.min(60, maxTime || 20));
+}
+
+function computeEffectRadius(effect: ParticleEffect | undefined): number {
+    if (!effect) return 20;
+    let radius = 20;
+    for (const subsystem of effect.subsystems) {
+        const px = scalarBaseValue(subsystem.position?.x, 0);
+        const py = scalarBaseValue(subsystem.position?.y, 0);
+        const pz = scalarBaseValue(subsystem.position?.z, 0);
+        const positionRadius = Math.hypot(px, py, pz);
+        const emitterRadius = subsystem.emitterType === 'box'
+            ? Math.hypot(
+                scalarExtentValue(subsystem.boxEmitterX, 0),
+                scalarExtentValue(subsystem.boxEmitterY, 0),
+                scalarExtentValue(subsystem.boxEmitterZ, 0),
+            )
+            : subsystem.emitterType === 'sphere'
+                ? scalarExtentValue(subsystem.sphereEmitterRadius, 1)
+                : 0;
+        const particleSize = scalarExtentValue(subsystem.size, 1);
+        radius = Math.max(radius, positionRadius + emitterRadius + particleSize);
+    }
+    return Math.max(10, radius * Math.max(0.1, effect.scale ?? 1));
+}
+
+function frameCurrentEffect(effect: ParticleEffect | undefined): void {
+    const radius = computeEffectRadius(effect);
+    controls.target.set(0, 0, 0);
+    camera.near = Math.max(0.1, radius / 1000);
+    camera.far = Math.max(2000, radius * 10);
+    camera.position.set(radius * 0.35, radius * 0.55, radius * 1.45);
+    camera.updateProjectionMatrix();
+    controls.update();
 }
 
 function updatePlayButton(): void {
@@ -220,38 +299,6 @@ function setByPath(root: unknown, path: Array<string | number>, value: unknown):
     current[String(path[path.length - 1]!)] = value;
 }
 
-function getByPath(root: unknown, path: Array<string | number>): unknown {
-    let current: unknown = root;
-    for (const segment of path) {
-        if (current === undefined || current === null) return undefined;
-        current = (current as Record<string, unknown>)[String(segment)];
-    }
-    return current;
-}
-
-function hasSpan(value: unknown): boolean {
-    return !!(value as { span?: unknown } | undefined)?.span;
-}
-
-function fieldPathHasSourceSpan(effect: ParticleEffect, path: Array<string | number>): boolean {
-    const current = getByPath(effect, path);
-    if (hasSpan(current)) return true;
-    if (path.length === 0) return false;
-
-    const parentPath = path.slice(0, -1);
-    const key = String(path[path.length - 1]);
-    const parent = getByPath(effect, parentPath) as { spans?: Record<string, unknown> } | undefined;
-    if (parent?.spans?.[key]) return true;
-
-    if (path.length >= 2) {
-        const containerPath = path.slice(0, -2);
-        const aggregateKey = String(path[path.length - 2]);
-        const container = getByPath(effect, containerPath) as { spans?: Record<string, unknown> } | undefined;
-        if (container?.spans?.[aggregateKey]) return true;
-    }
-    return false;
-}
-
 function fieldEditNeedsSimulationRebuild(path: Array<string | number>): boolean {
     const parts = path.map(String);
     if (parts[0] === 'subsystems') {
@@ -278,8 +325,122 @@ function fieldEditChangesEmitterVisuals(path: Array<string | number>): boolean {
     return field === 'position' && (parts[3] === 'x' || parts[3] === 'y' || parts[3] === 'z');
 }
 
+function fieldEditNeedsTextureRefresh(path: Array<string | number>): boolean {
+    const parts = path.map(String);
+    return parts[0] === 'subsystems' && parts[2] === 'texture' && parts[3] === 'file';
+}
+
+function effectFingerprint(effect: ParticleEffect | undefined): string {
+    return JSON.stringify(effect ?? null);
+}
+
+function dirtyEffectIndices(): number[] {
+    if (!currentPayload) return [];
+    const dirtyIndices: number[] = [];
+    const count = Math.max(currentPayload.effects.length, savedEffectsBaseline.length);
+    for (let index = 0; index < count; index++) {
+        if (effectFingerprint(currentPayload.effects[index]) !== effectFingerprint(savedEffectsBaseline[index])) {
+            dirtyIndices.push(index);
+        }
+    }
+    return dirtyIndices;
+}
+
+function hasUnsavedChanges(): boolean {
+    return dirtyEffectIndices().length > 0;
+}
+
+function setDirtyState(nextDirty: boolean): void {
+    if (dirty === nextDirty) {
+        updateEditButtons();
+        return;
+    }
+    dirty = nextDirty;
+    vscode.postMessage({ command: 'dirtyState', dirty });
+    updateEditButtons();
+}
+
+function updateEditButtons(): void {
+    saveButton.disabled = !dirty;
+    undoButton.disabled = undoStack.length === 0;
+    redoButton.disabled = redoStack.length === 0;
+}
+
 function markDirty(): void {
-    dirty = true;
+    setDirtyState(true);
+}
+
+function editorSnapshot(): EditorSnapshot | undefined {
+    if (!currentPayload) return undefined;
+    return {
+        effects: cloneEffectValue(currentPayload.effects),
+        currentEffectIndex,
+        currentSubsystemIndex,
+        currentCurveIndex,
+        currentForceIndex,
+    };
+}
+
+function pushHistorySnapshot(): void {
+    const snapshot = editorSnapshot();
+    if (!snapshot) return;
+    undoStack.push(snapshot);
+    if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+    redoStack = [];
+    updateEditButtons();
+}
+
+function restoreEditorSnapshot(snapshot: EditorSnapshot): void {
+    if (!currentPayload) return;
+    currentPayload.effects = cloneEffectValue(snapshot.effects);
+    currentEffectIndex = Math.min(snapshot.currentEffectIndex, Math.max(0, currentPayload.effects.length - 1));
+    currentPayload.selectedEffectIndex = currentEffectIndex;
+    const effect = currentEffect();
+    currentSubsystemIndex = Math.min(snapshot.currentSubsystemIndex, Math.max(0, (effect?.subsystems.length ?? 1) - 1));
+    currentCurveIndex = Math.min(snapshot.currentCurveIndex, Math.max(0, (effect?.animations.length ?? 1) - 1));
+    currentForceIndex = Math.min(snapshot.currentForceIndex, Math.max(0, (effect?.forces.length ?? 1) - 1));
+    setDirtyState(hasUnsavedChanges());
+    refreshAll(false);
+    requestPreviewTextures();
+}
+
+function undoCachedEdit(): void {
+    const previous = undoStack.pop();
+    const current = editorSnapshot();
+    if (!previous || !current) {
+        updateEditButtons();
+        return;
+    }
+    redoStack.push(current);
+    restoreEditorSnapshot(previous);
+}
+
+function redoCachedEdit(): void {
+    const next = redoStack.pop();
+    const current = editorSnapshot();
+    if (!next || !current) {
+        updateEditButtons();
+        return;
+    }
+    undoStack.push(current);
+    restoreEditorSnapshot(next);
+}
+
+function isTextEditingTarget(target: EventTarget | null): boolean {
+    const element = target as HTMLElement | null;
+    if (!element) return false;
+    const tag = element.tagName.toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || element.isContentEditable;
+}
+
+function finishCommittedEdit(): void {
+    setDirtyState(hasUnsavedChanges());
+}
+
+function requestPreviewTextures(): void {
+    if (!currentPayload) return;
+    textureRequestId++;
+    vscode.postMessage({ command: 'previewEffects', requestId: textureRequestId, effects: currentPayload.effects });
 }
 
 function rebuildSimulation(reset = true): void {
@@ -395,22 +556,18 @@ function refreshSelectors(): void {
     forceSelect.disabled = effect.forces.length === 0;
 }
 
-function handleFieldEdit(path: Array<string | number>, value: unknown, options?: { reload?: boolean }): void {
+function handleFieldEdit(path: Array<string | number>, value: unknown): void {
     const effect = currentEffect();
     if (!effect) return;
-    const canPatchField = fieldPathHasSourceSpan(effect, path);
+    pushHistorySnapshot();
     setByPath(effect, path, value);
-    dirty = true;
+    finishCommittedEdit();
     if (fieldEditNeedsSimulationRebuild(path)) rebuildSimulation(false);
     else if (fieldEditChangesEmitterVisuals(path)) refreshEmitterVisuals();
     if (fieldEditChangesSelectors(path)) refreshSelectors();
     refreshInspector();
     refreshForceInspector();
-    if (canPatchField) {
-        vscode.postMessage({ command: 'fieldEdit', effectIndex: currentEffectIndex, path, value, reload: !!options?.reload });
-    } else {
-        saveCurrentEffect();
-    }
+    if (fieldEditNeedsTextureRefresh(path)) requestPreviewTextures();
 }
 
 function inspectorCallbacks() {
@@ -421,7 +578,7 @@ function inspectorCallbacks() {
 }
 
 function refreshInspector(): void {
-    inspector.render(currentEffect(), currentSubsystemIndex, inspectorCallbacks());
+    inspector.render(currentEffect(), currentSubsystemIndex, inspectorCallbacks(), currentPayload?.textureCandidates ?? []);
 }
 
 function refreshForceInspector(): void {
@@ -432,13 +589,21 @@ function refreshCurveEditor(): void {
     const effect = currentEffect();
     const curve = effect?.animations[currentCurveIndex];
     curveEditor?.dispose();
+    window.clearTimeout(curveHistoryTimer);
+    curveHistoryOpen = false;
     curveEditor = new CurveEditor(curveCanvas, points => {
         const current = currentEffect()?.animations[currentCurveIndex];
         if (!current) return;
+        if (!curveHistoryOpen) {
+            pushHistorySnapshot();
+            curveHistoryOpen = true;
+        }
         current.points = points;
-        dirty = true;
-        window.clearTimeout(curveSaveTimer);
-        curveSaveTimer = window.setTimeout(() => saveCurrentEffect(), 250);
+        window.clearTimeout(curveHistoryTimer);
+        curveHistoryTimer = window.setTimeout(() => {
+            curveHistoryOpen = false;
+        }, CURVE_HISTORY_IDLE_MS);
+        finishCommittedEdit();
     });
     curveEditor.setPoints(curve?.points ?? [{ x: 0, y: 0 }, { x: 1, y: 1 }]);
 }
@@ -454,14 +619,23 @@ function refreshAll(reset = true): void {
     refreshInspector();
     refreshForceInspector();
     refreshCurveEditor();
+    if (reset) frameCurrentEffect(effect);
     rebuildSimulation(reset);
 }
 
-function saveCurrentEffect(): void {
-    const effect = currentEffect();
-    if (!effect) return;
-    vscode.postMessage({ command: 'replaceEffect', effectIndex: currentEffectIndex, effect });
-    dirty = false;
+function saveCachedEffects(): void {
+    if (!currentPayload) return;
+    const changed = dirtyEffectIndices();
+    if (!changed.length) {
+        setDirtyState(false);
+        return;
+    }
+    vscode.postMessage({
+        command: 'saveEffects',
+        selectedEffectIndex: currentEffectIndex,
+        effects: currentPayload.effects,
+        dirtyEffectIndices: changed,
+    });
 }
 
 function cloneEffectValue<T>(value: T): T {
@@ -471,24 +645,24 @@ function cloneEffectValue<T>(value: T): T {
 function addSubsystem(): void {
     const effect = currentEffect();
     if (!effect) return;
+    pushHistorySnapshot();
     effect.subsystems.push(createDefaultSubsystem(`subsystem_${effect.subsystems.length + 1}`));
     currentSubsystemIndex = effect.subsystems.length - 1;
-    dirty = true;
+    finishCommittedEdit();
     refreshAll();
-    saveCurrentEffect();
 }
 
 function cloneSubsystem(): void {
     const effect = currentEffect();
     const source = effect?.subsystems[currentSubsystemIndex];
     if (!effect || !source) return;
+    pushHistorySnapshot();
     const clone = cloneEffectValue(source);
     clone.name = `${clone.name ?? 'subsystem'}_copy`;
     effect.subsystems.splice(currentSubsystemIndex + 1, 0, clone);
     currentSubsystemIndex++;
-    dirty = true;
+    finishCommittedEdit();
     refreshAll();
-    saveCurrentEffect();
 }
 
 function moveSubsystem(delta: number): void {
@@ -496,64 +670,64 @@ function moveSubsystem(delta: number): void {
     if (!effect) return;
     const nextIndex = currentSubsystemIndex + delta;
     if (nextIndex < 0 || nextIndex >= effect.subsystems.length) return;
+    pushHistorySnapshot();
     const [item] = effect.subsystems.splice(currentSubsystemIndex, 1);
     if (!item) return;
     effect.subsystems.splice(nextIndex, 0, item);
     currentSubsystemIndex = nextIndex;
-    dirty = true;
+    finishCommittedEdit();
     refreshAll();
-    saveCurrentEffect();
 }
 
 function removeSubsystem(): void {
     const effect = currentEffect();
     if (!effect || effect.subsystems.length === 0) return;
+    pushHistorySnapshot();
     effect.subsystems.splice(currentSubsystemIndex, 1);
     currentSubsystemIndex = Math.max(0, currentSubsystemIndex - 1);
-    dirty = true;
+    finishCommittedEdit();
     refreshAll();
-    saveCurrentEffect();
 }
 
 function addCurve(): void {
     const effect = currentEffect();
     if (!effect) return;
+    pushHistorySnapshot();
     effect.animations.push(createDefaultCurve(`curve_${effect.animations.length + 1}`));
     currentCurveIndex = effect.animations.length - 1;
-    dirty = true;
+    finishCommittedEdit();
     refreshAll(false);
-    saveCurrentEffect();
 }
 
 function removeCurve(): void {
     const effect = currentEffect();
     if (!effect || effect.animations.length === 0) return;
+    pushHistorySnapshot();
     effect.animations.splice(currentCurveIndex, 1);
     currentCurveIndex = Math.max(0, currentCurveIndex - 1);
-    dirty = true;
+    finishCommittedEdit();
     refreshAll(false);
-    saveCurrentEffect();
 }
 
 function addForce(): void {
     const effect = currentEffect();
     if (!effect) return;
+    pushHistorySnapshot();
     effect.forces.push(createDefaultForce(`force_${effect.forces.length + 1}`));
     currentForceIndex = effect.forces.length - 1;
-    dirty = true;
+    finishCommittedEdit();
     refreshAll(false);
-    saveCurrentEffect();
 }
 
 function removeForce(): void {
     const effect = currentEffect();
     const index = currentForceIndex;
     if (!effect || !Number.isInteger(index) || index < 0 || index >= effect.forces.length) return;
+    pushHistorySnapshot();
     effect.forces.splice(index, 1);
     currentForceIndex = Math.max(0, currentForceIndex - 1);
-    dirty = true;
+    finishCommittedEdit();
     refreshAll(false);
-    saveCurrentEffect();
 }
 
 function handleMessage(event: MessageEvent): void {
@@ -570,17 +744,45 @@ function handleMessage(event: MessageEvent): void {
                 fileName: message.fileName ?? 'particle.asset',
                 selectedEffectIndex: message.selectedEffectIndex ?? 0,
                 textures: message.textures ?? {},
+                textureCandidates: message.textureCandidates ?? [],
                 readonly: !!message.readonly,
             };
-            currentEffectIndex = currentPayload.selectedEffectIndex;
+            currentEffectIndex = Math.min(currentPayload.selectedEffectIndex, Math.max(0, currentPayload.effects.length - 1));
+            currentPayload.selectedEffectIndex = currentEffectIndex;
             const effect = currentPayload.effects[currentEffectIndex];
             currentSubsystemIndex = Math.min(previousSubsystem, Math.max(0, (effect?.subsystems.length ?? 1) - 1));
             currentCurveIndex = Math.min(previousCurve, Math.max(0, (effect?.animations.length ?? 1) - 1));
             currentForceIndex = Math.min(previousForce, Math.max(0, (effect?.forces.length ?? 1) - 1));
-            dirty = false;
+            savedEffectsBaseline = cloneEffectValue(currentPayload.effects);
+            undoStack = [];
+            redoStack = [];
+            textureRequestId++;
+            setDirtyState(false);
             refreshAll();
             break;
         }
+        case 'textures':
+            if (currentPayload) {
+                if (message.requestId !== textureRequestId) break;
+                currentPayload.textures = message.textures ?? {};
+                if (simulation) particleRenderer.setSystems(simulation.systems, currentPayload.textures);
+            }
+            break;
+        case 'saved':
+            if (currentPayload) {
+                currentPayload.fileName = message.fileName ?? currentPayload.fileName;
+                currentPayload.selectedEffectIndex = message.selectedEffectIndex ?? currentEffectIndex;
+                currentPayload.textures = message.textures ?? currentPayload.textures;
+                currentPayload.textureCandidates = message.textureCandidates ?? currentPayload.textureCandidates;
+                currentPayload.readonly = !!message.readonly;
+                currentEffectIndex = Math.min(currentPayload.selectedEffectIndex, Math.max(0, currentPayload.effects.length - 1));
+                currentPayload.selectedEffectIndex = currentEffectIndex;
+                savedEffectsBaseline = cloneEffectValue(currentPayload.effects);
+                textureRequestId++;
+                setDirtyState(false);
+                refreshAll(false);
+            }
+            break;
         case 'dispose':
             disposeAll();
             break;
@@ -589,6 +791,18 @@ function handleMessage(event: MessageEvent): void {
 
 window.addEventListener('message', handleMessage);
 window.addEventListener('resize', handleResize);
+document.addEventListener('keydown', event => {
+    if (!(event.ctrlKey || event.metaKey) || isTextEditingTarget(event.target)) return;
+    const key = event.key.toLowerCase();
+    if (key === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) redoCachedEdit();
+        else undoCachedEdit();
+    } else if (key === 'y') {
+        event.preventDefault();
+        redoCachedEdit();
+    }
+});
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         playing = false;
@@ -598,8 +812,12 @@ document.addEventListener('visibilitychange', () => {
 
 effectSelect.addEventListener('change', () => {
     currentEffectIndex = Number(effectSelect.value) || 0;
+    if (currentPayload) currentPayload.selectedEffectIndex = currentEffectIndex;
     currentSubsystemIndex = 0;
+    currentCurveIndex = 0;
+    currentForceIndex = 0;
     vscode.postMessage({ command: 'selectEffect', index: currentEffectIndex });
+    refreshAll();
 });
 subsystemSelect.addEventListener('change', () => {
     currentSubsystemIndex = Number(subsystemSelect.value) || 0;
@@ -617,9 +835,9 @@ forceSelect.addEventListener('change', () => {
     currentForceIndex = Number(forceSelect.value) || 0;
     refreshForceInspector();
 });
-document.getElementById('btn-save')?.addEventListener('click', saveCurrentEffect);
-document.getElementById('btn-undo')?.addEventListener('click', () => vscode.postMessage({ command: 'undo' }));
-document.getElementById('btn-redo')?.addEventListener('click', () => vscode.postMessage({ command: 'redo' }));
+saveButton.addEventListener('click', saveCachedEffects);
+undoButton.addEventListener('click', undoCachedEdit);
+redoButton.addEventListener('click', redoCachedEdit);
 document.getElementById('btn-open')?.addEventListener('click', () => vscode.postMessage({ command: 'openFile' }));
 document.getElementById('btn-close')?.addEventListener('click', () => vscode.postMessage({ command: 'close' }));
 hideOthersToggle.addEventListener('change', () => {
@@ -652,12 +870,15 @@ document.getElementById('btn-screenshot')?.addEventListener('click', () => {
 });
 
 function disposeAll(): void {
-    window.clearTimeout(curveSaveTimer);
+    window.clearTimeout(curveHistoryTimer);
     curveEditor?.dispose();
     curveEditor = null;
     particleRenderer?.dispose();
     disposeEmitterVisuals();
     controls?.dispose();
+    bloomPass?.dispose();
+    outputPass?.dispose();
+    composer?.dispose();
     if (animationId) cancelAnimationFrame(animationId);
     glRenderer?.dispose();
     glRenderer?.forceContextLoss();
@@ -667,6 +888,5 @@ function disposeAll(): void {
 initThree();
 
 window.addEventListener('beforeunload', () => {
-    if (dirty) saveCurrentEffect();
     disposeAll();
 });

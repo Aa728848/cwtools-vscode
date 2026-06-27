@@ -1,4 +1,4 @@
-import type { AnimatedValue, AnimationCurve, Force, ParticleEffect, Range, Scalar, Subsystem } from './particleTypes';
+import type { AnimatedValue, AnimationCurve, Force, ParticleEffect, ParticleTextureCandidate, Range, Scalar, Subsystem } from './particleTypes';
 import { isRange } from './particleTypes';
 
 export interface FieldEditOptions {
@@ -14,6 +14,7 @@ const EMITTER_TYPES = ['point', 'sphere', 'box'];
 const SORT_TYPES = ['depth', 'age', 'distance'];
 const SHADERS = ['ParticleAdditive', 'ParticleAlphaBlend'];
 const MAX_SCALAR_CELLS = 8;
+const MAX_TEXTURE_MATCHES = 100;
 
 function scalarNumber(value: Scalar | undefined, fallback = 0): number {
     if (!value) return fallback;
@@ -81,7 +82,12 @@ export class ParticleInspector {
         this.root = root;
     }
 
-    render(effect: ParticleEffect | undefined, subsystemIndex: number, callbacks: InspectorCallbacks): void {
+    render(
+        effect: ParticleEffect | undefined,
+        subsystemIndex: number,
+        callbacks: InspectorCallbacks,
+        textureCandidates: ParticleTextureCandidate[] = [],
+    ): void {
         this.root.innerHTML = '';
         if (!effect || !effect.subsystems[subsystemIndex]) {
             this.root.append(this.empty('No subsystem selected'));
@@ -136,7 +142,7 @@ export class ParticleInspector {
                 this.scalarField('Mass', subsystem.mass, [...basePath, 'mass'], callbacks, animationNames, 1),
             ]),
             this.group('Appearance', [
-                this.textField('Texture name', subsystem.texture?.file ?? '', [...basePath, 'texture', 'file'], callbacks),
+                this.textureField('Texture name', subsystem.texture?.file ?? '', textureCandidates, [...basePath, 'texture', 'file'], callbacks),
                 this.cycleField('Shader name', subsystem.texture?.shader ?? 'ParticleAdditive', SHADERS, [...basePath, 'texture', 'shader'], callbacks),
                 this.checkboxField('Trail', subsystem.trail ?? false, [...basePath, 'trail'], callbacks),
                 this.checkboxField('Spritesheet animation', subsystem.spritesheetAnimation ?? false, [...basePath, 'spritesheetAnimation'], callbacks),
@@ -231,6 +237,132 @@ export class ParticleInspector {
         input.addEventListener('input', () => callbacks.onDirty());
         input.addEventListener('change', () => callbacks.onFieldEdit(path, input.value));
         return this.row(label, input);
+    }
+
+    private textureField(
+        label: string,
+        value: string,
+        candidates: ParticleTextureCandidate[],
+        path: Array<string | number>,
+        callbacks: InspectorCallbacks,
+    ): HTMLElement {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = value;
+        input.placeholder = 'gfx/particles/texture.dds';
+        if (candidates.length) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'texture-picker';
+            const dropdown = document.createElement('div');
+            dropdown.className = 'texture-dropdown';
+            dropdown.setAttribute('role', 'listbox');
+
+            let committedValue = value;
+            const commit = (nextValue: string): void => {
+                if (nextValue === committedValue) return;
+                committedValue = nextValue;
+                callbacks.onFieldEdit(path, nextValue, { reload: true });
+            };
+            const hideDropdown = (): void => {
+                dropdown.classList.remove('visible');
+                dropdown.innerHTML = '';
+            };
+            const chooseCandidate = (candidate: ParticleTextureCandidate): void => {
+                input.value = candidate.file;
+                hideDropdown();
+                commit(candidate.file);
+                input.focus();
+            };
+            const renderMatches = (): void => {
+                const query = input.value.trim().toLowerCase();
+                const matches = candidates
+                    .filter(candidate => !query || candidate.file.toLowerCase().includes(query))
+                    .slice(0, MAX_TEXTURE_MATCHES);
+                dropdown.innerHTML = '';
+                if (!matches.length) {
+                    hideDropdown();
+                    return;
+                }
+                for (const candidate of matches) {
+                    const item = document.createElement('div');
+                    item.className = 'texture-option';
+                    item.tabIndex = 0;
+                    item.setAttribute('role', 'option');
+                    item.title = `${candidate.file} (${this.textureCandidateSourceLabel(candidate.source)})`;
+                    const file = document.createElement('span');
+                    file.className = 'texture-option-file';
+                    file.textContent = candidate.file;
+                    const source = document.createElement('span');
+                    source.className = 'texture-option-source';
+                    source.textContent = this.textureCandidateSourceLabel(candidate.source);
+                    item.append(file, source);
+                    item.addEventListener('pointerdown', event => {
+                        event.preventDefault();
+                        chooseCandidate(candidate);
+                    });
+                    item.addEventListener('keydown', event => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            chooseCandidate(candidate);
+                        } else if (event.key === 'ArrowDown') {
+                            event.preventDefault();
+                            (item.nextElementSibling as HTMLElement | null)?.focus();
+                        } else if (event.key === 'ArrowUp') {
+                            event.preventDefault();
+                            const previous = item.previousElementSibling as HTMLElement | null;
+                            if (previous) previous.focus();
+                            else input.focus();
+                        } else if (event.key === 'Escape') {
+                            event.preventDefault();
+                            hideDropdown();
+                            input.focus();
+                        }
+                    });
+                    dropdown.append(item);
+                }
+                dropdown.classList.add('visible');
+            };
+
+            input.addEventListener('input', () => {
+                callbacks.onDirty();
+                renderMatches();
+            });
+            input.addEventListener('focus', renderMatches);
+            input.addEventListener('change', () => {
+                hideDropdown();
+                commit(input.value);
+            });
+            input.addEventListener('keydown', event => {
+                if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    if (!dropdown.classList.contains('visible')) renderMatches();
+                    (dropdown.querySelector('.texture-option') as HTMLElement | null)?.focus();
+                } else if (event.key === 'Enter' && dropdown.classList.contains('visible')) {
+                    const first = dropdown.querySelector('.texture-option') as HTMLElement | null;
+                    if (first) {
+                        event.preventDefault();
+                        first.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+                    }
+                } else if (event.key === 'Escape') {
+                    hideDropdown();
+                }
+            });
+            wrapper.addEventListener('focusout', () => {
+                window.setTimeout(() => {
+                    if (!wrapper.contains(document.activeElement)) hideDropdown();
+                }, 0);
+            });
+            wrapper.append(input, dropdown);
+            return this.row(label, wrapper);
+        }
+        input.addEventListener('input', () => callbacks.onDirty());
+        input.addEventListener('change', () => callbacks.onFieldEdit(path, input.value));
+        return this.row(label, input);
+    }
+
+    private textureCandidateSourceLabel(source: ParticleTextureCandidate['source']): string {
+        if (source === 'mod+vanilla') return 'MOD + Vanilla';
+        return source === 'mod' ? 'MOD' : 'Vanilla';
     }
 
     private checkboxField(label: string, value: boolean, path: Array<string | number>, callbacks: InspectorCallbacks): HTMLElement {

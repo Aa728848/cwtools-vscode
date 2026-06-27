@@ -187,12 +187,20 @@ export interface ParticleTexturePayload {
     height: number;
 }
 
+export type ParticleTextureCandidateSource = 'mod' | 'vanilla' | 'mod+vanilla';
+
+export interface ParticleTextureCandidate {
+    file: string;
+    source: ParticleTextureCandidateSource;
+}
+
 export interface ParticleRenderPayload {
     effects: ParticleEffect[];
     diagnostics: ParticleDiagnostic[];
     fileName: string;
     selectedEffectIndex: number;
     textures: Record<string, ParticleTexturePayload>;
+    textureCandidates: ParticleTextureCandidate[];
     readonly: boolean;
 }
 

@@ -212,13 +212,14 @@ input[type="number"] {
     min-height: 0;
     display: grid;
     grid-template-rows: 1fr auto;
-    background: var(--particle-bg);
+    background: #000;
 }
 
 #viewport {
     position: relative;
     min-width: 0;
     min-height: 0;
+    background: #000;
 }
 
 #viewport canvas {
@@ -303,9 +304,64 @@ input[type="number"] {
 }
 
 .scalar-row select,
+.texture-picker,
 .cycle-control,
 .scalar-controls {
     min-width: 0;
+}
+
+.texture-picker {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+}
+
+.texture-dropdown {
+    display: none;
+    max-height: 300px;
+    min-width: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    color: var(--particle-input-fg);
+    background: var(--particle-input-bg);
+    border: 1px solid var(--particle-border);
+    border-radius: 2px;
+    font-size: 12px;
+}
+
+.texture-dropdown.visible {
+    display: block;
+}
+
+.texture-option {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    padding: 4px 6px;
+    cursor: pointer;
+    outline: none;
+}
+
+.texture-option:hover,
+.texture-option:focus {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.texture-option .texture-option-file {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--particle-fg);
+}
+
+.texture-option .texture-option-source {
+    min-width: max-content;
+    color: var(--particle-muted);
+    font-size: 11px;
 }
 
 .inspector-row span,

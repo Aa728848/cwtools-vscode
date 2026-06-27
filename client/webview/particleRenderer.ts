@@ -13,6 +13,9 @@ interface Batch {
     rotAttr: THREE.InstancedBufferAttribute;
     colorAttr: THREE.InstancedBufferAttribute;
     frameAttr: THREE.InstancedBufferAttribute;
+    sortOrder: number[];
+    sortDepths: number[];
+    sortByCameraDepth: boolean;
     texture?: THREE.Texture;
 }
 
@@ -56,6 +59,7 @@ varying vec4 vColor;
 void main() {
     vec4 texel = mix(vec4(1.0), texture2D(uMap, vUv), uUseTexture);
     vec4 outColor = texel * vColor;
+    outColor.a *= 0.8;
     if (outColor.a < 0.01) discard;
     gl_FragColor = outColor;
 }`;
@@ -91,6 +95,16 @@ function blendMode(subsystem: Subsystem): THREE.Blending {
     return shader.includes('alphablend') ? THREE.NormalBlending : THREE.AdditiveBlending;
 }
 
+function isAdditive(subsystem: Subsystem): boolean {
+    const shader = subsystem.texture?.shader?.toLowerCase() ?? '';
+    return shader.includes('additive') || (!shader.includes('alphablend') && !shader.includes('prealpha'));
+}
+
+function shouldSortByCameraDepth(subsystem: Subsystem): boolean {
+    const sort = subsystem.sort?.toLowerCase();
+    return sort === 'depth' || sort === 'distance' || !isAdditive(subsystem);
+}
+
 function scalarBaseValue(value: Scalar | undefined, fallback = 0): number {
     if (!value) return fallback;
     return isRange(value) ? value.a.value : value.value;
@@ -111,6 +125,7 @@ export class ParticleRenderer {
     private readonly scene: THREE.Scene;
     private batches: Batch[] = [];
     private readonly loader = new THREE.TextureLoader();
+    private readonly cameraPosition = new THREE.Vector3();
 
     constructor(scene: THREE.Scene) {
         this.scene = scene;
@@ -127,14 +142,11 @@ export class ParticleRenderer {
         const elements = camera.matrixWorld.elements;
         const right = new THREE.Vector3(elements[0] ?? 1, elements[1] ?? 0, elements[2] ?? 0);
         const up = new THREE.Vector3(elements[4] ?? 0, elements[5] ?? 1, elements[6] ?? 0);
+        this.cameraPosition.setFromMatrixPosition(camera.matrixWorld);
         for (const batch of this.batches) {
             const buffer = batch.system.buffer;
             batch.geometry.instanceCount = buffer.count;
-            batch.posAttr.array.set(buffer.positions);
-            batch.sizeAttr.array.set(buffer.sizes);
-            batch.rotAttr.array.set(buffer.rotations);
-            batch.colorAttr.array.set(buffer.colors);
-            batch.frameAttr.array.set(buffer.frames);
+            this.copyInstanceData(batch);
             batch.posAttr.needsUpdate = true;
             batch.sizeAttr.needsUpdate = true;
             batch.rotAttr.needsUpdate = true;
@@ -142,6 +154,55 @@ export class ParticleRenderer {
             batch.frameAttr.needsUpdate = true;
             batch.material.uniforms.uCameraRight!.value.copy(right);
             batch.material.uniforms.uCameraUp!.value.copy(up);
+        }
+    }
+
+    private copyInstanceData(batch: Batch): void {
+        const buffer = batch.system.buffer;
+        const count = buffer.count;
+        const posArray = batch.posAttr.array as Float32Array;
+        const sizeArray = batch.sizeAttr.array as Float32Array;
+        const rotArray = batch.rotAttr.array as Float32Array;
+        const colorArray = batch.colorAttr.array as Float32Array;
+        const frameArray = batch.frameAttr.array as Float32Array;
+
+        if (!batch.sortByCameraDepth || count <= 1) {
+            posArray.set(buffer.positions.subarray(0, count * 3));
+            sizeArray.set(buffer.sizes.subarray(0, count));
+            rotArray.set(buffer.rotations.subarray(0, count));
+            colorArray.set(buffer.colors.subarray(0, count * 4));
+            frameArray.set(buffer.frames.subarray(0, count));
+            return;
+        }
+
+        batch.sortOrder.length = count;
+        batch.sortDepths.length = count;
+        for (let i = 0; i < count; i++) {
+            const offset = i * 3;
+            const dx = (buffer.positions[offset] ?? 0) - this.cameraPosition.x;
+            const dy = (buffer.positions[offset + 1] ?? 0) - this.cameraPosition.y;
+            const dz = (buffer.positions[offset + 2] ?? 0) - this.cameraPosition.z;
+            batch.sortOrder[i] = i;
+            batch.sortDepths[i] = dx * dx + dy * dy + dz * dz;
+        }
+        batch.sortOrder.sort((a, b) => (batch.sortDepths[b] ?? 0) - (batch.sortDepths[a] ?? 0));
+
+        for (let dst = 0; dst < count; dst++) {
+            const src = batch.sortOrder[dst] ?? dst;
+            const dst3 = dst * 3;
+            const src3 = src * 3;
+            const dst4 = dst * 4;
+            const src4 = src * 4;
+            posArray[dst3] = buffer.positions[src3] ?? 0;
+            posArray[dst3 + 1] = buffer.positions[src3 + 1] ?? 0;
+            posArray[dst3 + 2] = buffer.positions[src3 + 2] ?? 0;
+            sizeArray[dst] = buffer.sizes[src] ?? 1;
+            rotArray[dst] = buffer.rotations[src] ?? 0;
+            colorArray[dst4] = buffer.colors[src4] ?? 1;
+            colorArray[dst4 + 1] = buffer.colors[src4 + 1] ?? 1;
+            colorArray[dst4 + 2] = buffer.colors[src4 + 2] ?? 1;
+            colorArray[dst4 + 3] = buffer.colors[src4 + 3] ?? 1;
+            frameArray[dst] = buffer.frames[src] ?? 0;
         }
     }
 
@@ -171,18 +232,23 @@ export class ParticleRenderer {
         const texturePayload = system.subsystem.texture?.file ? textures[system.subsystem.texture.file] : undefined;
         const texture = texturePayload ? this.loader.load(texturePayload.dataUri) : makeWhiteTexture();
         texture.colorSpace = THREE.SRGBColorSpace;
-        texture.wrapS = THREE.ClampToEdgeWrapping;
-        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.magFilter = THREE.LinearFilter;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
 
         const cols = Math.max(1, system.subsystem.texture?.x ?? 1);
         const rows = Math.max(1, system.subsystem.texture?.y ?? 1);
+        const additive = isAdditive(system.subsystem);
         const orientation = fixedOrientation(system.subsystem);
         const material = new THREE.ShaderMaterial({
             vertexShader: VERTEX_SHADER,
             fragmentShader: FRAGMENT_SHADER,
             transparent: true,
+            depthTest: true,
             depthWrite: false,
             blending: blendMode(system.subsystem),
+            premultipliedAlpha: (system.subsystem.texture?.shader?.toLowerCase() ?? '').includes('prealpha'),
             uniforms: {
                 uMap: { value: texture },
                 uUseTexture: { value: texturePayload ? 1 : 0 },
@@ -197,7 +263,22 @@ export class ParticleRenderer {
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.frustumCulled = false;
+        mesh.renderOrder = additive ? 20 : 10;
         this.scene.add(mesh);
-        return { system, geometry, material, mesh, posAttr, sizeAttr, rotAttr, colorAttr, frameAttr, texture };
+        return {
+            system,
+            geometry,
+            material,
+            mesh,
+            posAttr,
+            sizeAttr,
+            rotAttr,
+            colorAttr,
+            frameAttr,
+            sortOrder: [],
+            sortDepths: [],
+            sortByCameraDepth: shouldSortByCameraDepth(system.subsystem),
+            texture,
+        };
     }
 }

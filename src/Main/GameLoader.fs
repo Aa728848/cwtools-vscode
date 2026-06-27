@@ -131,7 +131,7 @@ let private shouldPreferBundledRules (cachePath: string option) (bundledRulesFol
         | _ -> false
     | _ -> false
 
-let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder preferBundledRules =
+let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder _preferBundledRules =
     let manualConfigFiles =
         match useManualRules, manualRulesFolder with
         | true, Some rf when Directory.Exists rf -> getRuleFilesFromFolder rf
@@ -157,7 +157,6 @@ let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder
 
     let useNewerBundledRules =
         not useManualRules
-        && preferBundledRules
         && cachedConfigFiles.Length > 0
         && bundledConfigFiles.Length > 0
         && shouldPreferBundledRules cachePath bundledRulesFolder

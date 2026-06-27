@@ -1,0 +1,418 @@
+:root {
+    --particle-border: var(--vscode-editorWidget-border);
+    --particle-bg: var(--vscode-editor-background);
+    --particle-side-bg: var(--vscode-sideBar-background);
+    --particle-fg: var(--vscode-editor-foreground);
+    --particle-muted: var(--vscode-descriptionForeground);
+    --particle-accent: var(--vscode-focusBorder);
+    --particle-input-bg: var(--vscode-input-background);
+    --particle-input-fg: var(--vscode-input-foreground);
+    --particle-button-bg: var(--vscode-button-background);
+    --particle-button-fg: var(--vscode-button-foreground);
+    --particle-button-hover: var(--vscode-button-hoverBackground);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#particle-root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    color: var(--particle-fg);
+    background: var(--particle-bg);
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size);
+}
+
+#particle-root {
+    display: grid;
+    grid-template-columns: minmax(280px, 360px) minmax(320px, 1fr) minmax(280px, 380px);
+}
+
+.side-pane {
+    min-width: 0;
+    overflow: auto;
+    padding: 0;
+    background: var(--particle-side-bg);
+    border-color: var(--particle-border);
+}
+
+.side-pane > *:not(details) {
+    margin-inline: 10px;
+}
+
+#particle-left {
+    border-right: 1px solid var(--particle-border);
+}
+
+#particle-right {
+    border-left: 1px solid var(--particle-border);
+}
+
+#particle-right > #inspector {
+    margin-inline: 0;
+}
+
+.pane-title {
+    margin: 0 0 8px;
+    font-weight: 600;
+    color: var(--particle-fg);
+}
+
+.pane-section {
+    margin-top: 14px;
+}
+
+.left-header {
+    padding: 14px 0 8px;
+}
+
+.left-header h1 {
+    margin: 0 0 6px;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 28px;
+    font-weight: 500;
+    line-height: 1.1;
+}
+
+.loaded-effect {
+    margin-bottom: 12px;
+    font-weight: 600;
+}
+
+.left-control-row,
+.left-check-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    margin: 10px 0;
+}
+
+.left-check-row input {
+    justify-self: start;
+}
+
+.wide-button,
+.button-stack button {
+    width: 100%;
+    min-height: 34px;
+    color: var(--particle-fg);
+    background: transparent;
+    border: 1px solid var(--particle-border);
+}
+
+.button-stack {
+    display: grid;
+    justify-items: start;
+    gap: 8px;
+    padding: 10px;
+}
+
+.left-section {
+    margin: 0 0 10px;
+    border: 0;
+}
+
+.left-section summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 6px 10px;
+    color: var(--vscode-button-foreground);
+    background: var(--vscode-button-background);
+}
+
+.left-section > select,
+.left-section > canvas,
+.left-section > #force-inspector {
+    margin: 10px;
+    width: calc(100% - 20px);
+}
+
+select,
+input,
+button {
+    min-height: 24px;
+    color: var(--particle-input-fg);
+    background: var(--particle-input-bg);
+    border: 1px solid var(--particle-border);
+    border-radius: 2px;
+    font: inherit;
+}
+
+button {
+    color: var(--particle-button-fg);
+    background: var(--particle-button-bg);
+    border-color: transparent;
+    padding: 3px 8px;
+    cursor: pointer;
+}
+
+button:hover {
+    background: var(--particle-button-hover);
+}
+
+select,
+input[type="text"],
+input[type="number"] {
+    width: 100%;
+    padding: 2px 5px;
+}
+
+#effect-select,
+#subsystem-select,
+#curve-select,
+#force-select {
+    margin-bottom: 6px;
+}
+
+.button-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
+    gap: 6px;
+    margin: 6px 0;
+}
+
+.readonly {
+    margin: 8px 0;
+    padding: 6px;
+    border: 1px solid var(--vscode-inputValidation-warningBorder);
+    color: var(--vscode-inputValidation-warningForeground);
+    background: var(--vscode-inputValidation-warningBackground);
+}
+
+.preview-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 0;
+    color: var(--particle-muted);
+}
+
+.hidden {
+    display: none !important;
+}
+
+#curve-canvas {
+    display: block;
+    width: calc(100% - 20px);
+    max-width: calc(100% - 20px);
+    aspect-ratio: 16 / 9;
+    border: 1px solid var(--particle-border);
+}
+
+#particle-stage {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: 1fr auto;
+    background: var(--particle-bg);
+}
+
+#viewport {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+}
+
+#viewport canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+#viewport-overlay {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    pointer-events: none;
+    color: var(--particle-fg);
+}
+
+#particle-title {
+    font-weight: 600;
+}
+
+#approx-label {
+    color: var(--particle-muted);
+}
+
+#playbar {
+    display: grid;
+    grid-template-columns: auto auto 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+    min-height: 38px;
+    padding: 7px 10px;
+    border-top: 1px solid var(--particle-border);
+    background: var(--vscode-panel-background);
+}
+
+#time-scrub {
+    width: 100%;
+}
+
+#empty-state {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--particle-muted);
+    pointer-events: none;
+}
+
+#inspector details {
+    border: 0;
+    margin-bottom: 10px;
+    padding: 0 0 8px;
+    overflow: hidden;
+}
+
+#inspector summary {
+    cursor: pointer;
+    font-weight: 600;
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    color: var(--vscode-button-foreground);
+    background: var(--vscode-button-background);
+}
+
+.inspector-row,
+.scalar-row {
+    display: grid;
+    grid-template-columns: minmax(102px, 0.65fr) minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    margin: 6px 0;
+    padding: 0 10px;
+}
+
+.scalar-row {
+    grid-template-columns: minmax(102px, 0.65fr) minmax(0, 1fr);
+}
+
+.scalar-row select,
+.cycle-control,
+.scalar-controls {
+    min-width: 0;
+}
+
+.inspector-row span,
+.scalar-row span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--particle-muted);
+}
+
+.cycle-control,
+.scalar-controls {
+    display: grid;
+    gap: 4px;
+    align-items: center;
+}
+
+.cycle-control {
+    grid-template-columns: 24px minmax(0, 1fr) 24px;
+}
+
+.scalar-controls {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.scalar-controls-range {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
+.scalar-controls-range .scalar-value-row {
+    min-width: 0;
+}
+
+.scalar-value-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+}
+
+.scalar-cell {
+    display: grid;
+    grid-template-columns: minmax(48px, 1fr) 24px 24px;
+    gap: 4px;
+    min-width: min(100%, 116px);
+    flex: 1 1 116px;
+}
+
+.scalar-suffix-cell {
+    grid-template-columns: minmax(48px, 1fr) 24px 24px;
+}
+
+.cycle-control button,
+.scalar-cell button {
+    width: 24px;
+    min-width: 24px;
+    padding: 0;
+    border: 1px solid var(--particle-border);
+    color: var(--particle-fg);
+    background: transparent;
+}
+
+.scalar-cell button:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.scalar-range-separator {
+    text-align: center;
+    color: var(--particle-muted);
+}
+
+.cycle-value {
+    min-height: 24px;
+    padding: 3px 6px;
+    color: var(--particle-input-fg);
+    background: var(--particle-input-bg);
+    border: 1px solid var(--particle-border);
+}
+
+.empty-panel {
+    color: var(--particle-muted);
+    padding: 8px 0;
+}
+
+@media (max-width: 860px) {
+    #particle-root {
+        grid-template-columns: minmax(240px, 320px) minmax(280px, 1fr);
+    }
+
+    #particle-right {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        height: 34vh;
+        border-left: 0;
+        border-top: 1px solid var(--particle-border);
+    }
+}
+
+@media (max-width: 1180px) {
+    .scalar-controls-range {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        scroll-behavior: auto !important;
+    }
+}

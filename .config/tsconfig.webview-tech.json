@@ -14,6 +14,7 @@
         "../client/webview/guiPreview.ts",
         "../client/webview/solarSystemPreview.ts",
         "../client/webview/chatPanel.ts",
-        "../client/webview/eventChainPreview.ts"
+        "../client/webview/eventChainPreview.ts",
+        "../client/webview/particlePreview.ts"
     ]
 }

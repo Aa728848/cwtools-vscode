@@ -161,4 +161,26 @@ export default [
             copyFile('client/webview/entityPreview.css', 'release/bin/client/webview/entityPreview.css'),
         ],
     },
+    // Particle Preview / Editor webview bundle
+    {
+        input: './client/webview/particlePreview.ts',
+        output: {
+            file: './release/bin/client/webview/particlePreview.js',
+            format: "iife",
+            name: "cwtoolsparticlepreview",
+            indent: false,
+        },
+        plugins: [
+            resolve({ browser: true }),
+            commonjs(),
+            typescript({
+                tsconfig: ".config/tsconfig.webview-particle.json",
+                clean: false,
+                tsconfigOverride: {
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                }
+            }),
+            copyFile('client/webview/particlePreview.css', 'release/bin/client/webview/particlePreview.css'),
+        ],
+    },
 ];

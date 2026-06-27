@@ -144,6 +144,11 @@
                     "group": "navigation"
                 },
                 {
+                    "command": "cwtools.previewParticle",
+                    "when": "resourceExtname == .asset",
+                    "group": "navigation"
+                },
+                {
                     "command": "cwtools.vanillaCompare.fileDiff",
                     "when": "resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh",
                     "group": "navigation"
@@ -356,6 +361,12 @@
                 "title": "%commands.cwtools.previewEntity.title%",
                 "category": "cwtools",
                 "icon": "$(symbol-misc)"
+            },
+            {
+                "command": "cwtools.previewParticle",
+                "title": "%commands.cwtools.previewParticle.title%",
+                "category": "cwtools",
+                "icon": "$(symbol-color)"
             },
             {
                 "command": "cwtools.ai.sendSelectionToChat",

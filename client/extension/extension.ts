@@ -14,6 +14,8 @@ import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, No
 import { FileExplorer, FileListItem } from './fileExplorer';
 import { GuiPanel } from './guiPanel';
 import { EntityPanel } from './entityPanel';
+import { ParticlePanel } from './particlePanel';
+import { classifyAssetFile } from './particleSniff';
 import { UI, SOURCE } from './ai/messages';
 import { ErrorReporter } from './ai/errorReporter';
 import { SolarSystemPanel } from './solarSystemPanel';
@@ -1996,6 +1998,27 @@ export async function activate(context: ExtensionContext) {
 			await EntityPanel.create(context.extensionPath, doc);
 		});
 
+		// Particle Preview command
+		safeRegisterCommand(context, "cwtools.previewParticle", async () => {
+			const editor = vs.window.activeTextEditor;
+			if (!editor) {
+				vs.window.showWarningMessage('No active editor to preview');
+				return;
+			}
+			const doc = editor.document;
+			const fileName = doc.fileName.toLowerCase();
+			if (!fileName.endsWith('.asset')) {
+				vs.window.showWarningMessage('Particle Preview is only available for .asset files');
+				return;
+			}
+			const kind = classifyAssetFile(doc.getText());
+			if (kind !== 'particle') {
+				vs.window.showWarningMessage('This .asset file does not contain a top-level particle definition. It may be an entity asset.');
+				return;
+			}
+			await ParticlePanel.create(context.extensionPath, doc);
+		});
+
 		safeRegisterCommand(context, "cwtools.reloadExtension", async () => {
 			// Stop the language server client first
 			if (defaultClient) {
@@ -2007,6 +2030,9 @@ export async function activate(context: ExtensionContext) {
 			}
 			if (EntityPanel.currentPanel) {
 				try { EntityPanel.currentPanel.dispose(); } catch { /* ignore */ }
+			}
+			if (ParticlePanel.currentPanel) {
+				try { ParticlePanel.currentPanel.dispose(); } catch { /* ignore */ }
 			}
 			// L7 Fix: dispose the chat panel provider before re-activating so its
 			// WebView is closed and callbacks don't reference a stale agentRunner.

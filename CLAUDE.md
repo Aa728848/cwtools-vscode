@@ -71,6 +71,7 @@ builds these Webview entries into `release/bin/client/webview/`:
 - `eventChainPreview.ts`
 - `techTreePreview.ts`
 - `entityPreview.ts`
+- `particlePreview.ts`
 
 `npm run verify` is the broad local gate: lint, compile, unit tests, and release
 checks.
@@ -92,6 +93,10 @@ checks.
 | `client/extension/fsCaseInsensitive.ts` | Case-insensitive path resolution for case-sensitive filesystems |
 | `client/extension/pathScope.ts` | Neutral `isPathInsideOrEqual` / `foldPathCase` shared by UI and AI layers |
 | `client/extension/*Panel.ts` / `*Parser.ts` | GUI, solar system, event chain, tech tree, and entity previews |
+| `client/extension/particlePanel.ts` | Stellaris particle preview/editor host panel |
+| `client/extension/particleAssetParser.ts` | Typed `particle={}` parser with spans and `,curve` support |
+| `client/extension/particleAssetSerializer.ts` | Particle block serializer and span replacement helpers |
+| `client/extension/particleSniff.ts` | Top-level `.asset` particle/entity content classifier |
 | `client/extension/vanillaCompare.ts` | Vanilla file diff and block migration commands |
 | `client/extension/locDecorations.ts` | Localisation editor features backed by `IndexService` |
 | `client/extension/graphicsFeatures.ts` | Graphics resource editor features |
@@ -214,6 +219,11 @@ checks.
 | `client/webview/svgIcons.ts` | High-fidelity SVG icon library |
 | `client/webview/chat/` | Extracted chat and Agent Manager browser modules (22 files) |
 | `client/webview/entityPreview.ts` | Three.js entity renderer |
+| `client/webview/particlePreview.ts` | Three.js particle preview/editor entry |
+| `client/webview/particleSimulation.ts` | CPU particle simulation core |
+| `client/webview/particleRenderer.ts` | Instanced quad particle renderer |
+| `client/webview/curveEditor.ts` | Canvas curve editor and shared curve evaluation |
+| `client/webview/inspector.ts` | Particle subsystem/force property controls |
 | `client/webview/guiPreview.ts` | `.gui` Canvas preview, drag editing, DDS/TGA display |
 | `client/webview/solarSystemPreview.ts` | Star system, orbit, planet interactive preview |
 | `client/webview/eventChainPreview.ts` | Cytoscape.js event reference graph |

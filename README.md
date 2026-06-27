@@ -25,6 +25,7 @@
 - **3D 恒星系渲染与轨道编辑**：进入 `solar_system_initializers/` 脚本，即可开启精美的 3D 星系空间。支持恒星、行星、卫星、环形世界（Ring World）的任意递归嵌套。开发者可以通过直接拖动行星改变其 `orbit_distance` 与 `orbit_angle` 并自动同步至脚本。
 - **科技树与事件引用网络**：利用 Cytoscape.js 渲染高交互性的科技依赖图与事件链流向图。支持快速检索、关系筛选及点击节点瞬间定位至对应的 `.txt` 脚本源码行。
 - **Three.js 实体与动画渲染**：支持 Paradox 原生 `.asset` 三维网格、贴图及骨骼动画在 Webview 中的沙盒化加载与动作调试。
+- **粒子特效预览与编辑**：支持 Stellaris `gfx/particles/**/*.asset` 中 `particle={...}` 的三栏粒子编辑器，提供 Three.js 实时近似模拟、曲线编辑、子系统/力/属性编辑、贴图解码预览与 `.asset` 写回。
 
 ### 🤖 3. 全自主多 Agent AI 协处理器 (Advanced AI System)
 这是本插件最引以为傲的革新性子系统。不同于普通的单轮对话 AI，我们内置了一个由多 Agent 编排的高阶推理运行器。
@@ -53,7 +54,7 @@ flowchart LR
     subgraph Webview ["Webview 隔离前端 (HTML / JS / Three.js)"]
         UI["智能对话 & 任务看板\nchatPanel.ts"]
         Canvas["GUI 实时画布预览\nguiPreview.ts"]
-        TD3D["星系/实体 3D 渲染\nentityPreview.ts"]
+        TD3D["星系/实体/粒子 3D 渲染\nentityPreview.ts / particlePreview.ts"]
         Graph["科技/事件依赖拓扑\ntechTreePreview.ts"]
     end
 

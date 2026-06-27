@@ -49,6 +49,8 @@ export interface PreviewCapabilityProfile {
 	techTreePreview: boolean;
 	/** Whether 3D entity preview is supported. */
 	entityPreview: boolean;
+	/** Whether particle effect preview/editor is supported. */
+	particlePreview: boolean;
 }
 
 /** AI-specific profile data for prompt construction. */
@@ -129,6 +131,7 @@ const NO_PREVIEWS: PreviewCapabilityProfile = {
 	eventChainPreview: false,
 	techTreePreview: false,
 	entityPreview: false,
+	particlePreview: false,
 };
 
 // ─── Profile registry ────────────────────────────────────────────────────────
@@ -163,6 +166,7 @@ registerProfile({
 		eventChainPreview: true,
 		techTreePreview: true,
 		entityPreview: true,
+		particlePreview: true,
 	},
 	ai: { knowledgeKey: 'stellaris' },
 	install: {

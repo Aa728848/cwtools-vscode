@@ -112,7 +112,7 @@ class Parser {
     }
 
     private peek(): Token {
-        return this.tokens[this.pos] ?? { type: TokenType.EOF, value: '', line: 0 };
+        return this.tokens[this.pos] ?? { type: TokenType.EOF, value: '', line: 0, startOffset: 0, endOffset: 0 };
     }
 
     private advance(): Token {

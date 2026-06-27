@@ -61,6 +61,7 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 | `eventChainPanel.ts` / `eventChainParser.ts` | 事件链扫描、子图和源码跳转 |
 | `techTreePanel.ts` / `techTreeParser.ts` | 科技树扫描、筛选和依赖图 |
 | `entityPanel.ts` / `entityAssetParser.ts` | `.asset` 实体模型预览宿主和资源解析 |
+| `particlePanel.ts` / `particleAssetParser.ts` / `particleAssetSerializer.ts` | Stellaris `particle={}` 预览编辑宿主、span 解析与写回 |
 | `graphicsFeatures.ts` | 图形资源相关编辑器功能 |
 | `ddsDecoder.ts` | DDS/TGA 解码支持 |
 | `locDecorations.ts` | 基于 `IndexService` 的本地化 hover / definition / 装饰 |
@@ -403,7 +404,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ## Webview 层
 
-`client/webview/` 编译为浏览器端脚本。Rollup 打包 7 个入口：
+`client/webview/` 编译为浏览器端脚本。Rollup 打包 8 个入口：
 
 | 入口 | 相关文件 | 作用 |
 | --- | --- | --- |
@@ -414,6 +415,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 | `eventChainPreview.ts` | `eventChainPreview.css` | Cytoscape.js 事件引用图 |
 | `techTreePreview.ts` | `techTreePreview.css` | Cytoscape.js 科技依赖图 |
 | `entityPreview.ts` | `entityPreview.css`, `meshWorker.ts`, `pdxMeshParser.ts`, `pdxShaders.ts` | Three.js 实体模型、网格、动画和材质渲染 |
+| `particlePreview.ts` | `particlePreview.css`, `particleSimulation.ts`, `particleRenderer.ts`, `curveEditor.ts`, `inspector.ts`, `particleTypes.ts` | Stellaris 粒子特效近似模拟、实例化渲染、曲线/属性编辑和 `.asset` 写回 |
 
 `client/webview/chat/` 承载 chat 和 Agent Manager 的共享浏览器模块，包括 artifacts、topics、workflow、formatters、i18n、modes、slash commands、settings overview、live steps、markdown、annotations、context mentions、message contracts、run timeline 和 run inspector。
 
@@ -658,8 +660,13 @@ cwtools-vscode/
       eventChainPreview.ts
       techTreePreview.ts
       entityPreview.ts
+      particlePreview.ts
+      particleSimulation.ts
+      particleRenderer.ts
+      curveEditor.ts
+      inspector.ts
     test/
-      unit/                   60 个单元测试文件
+      unit/                   单元测试文件
       suite/
   docs/
     diagnostic-codes.md       CWxxx 诊断码中英双语参考（codeDescription 链接目标）

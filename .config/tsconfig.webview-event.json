@@ -12,6 +12,7 @@
         "../client/test/**",
         "../client/webview/guiPreview.ts",
         "../client/webview/solarSystemPreview.ts",
-        "../client/webview/chatPanel.ts"
+        "../client/webview/chatPanel.ts",
+        "../client/webview/particlePreview.ts"
     ]
 }

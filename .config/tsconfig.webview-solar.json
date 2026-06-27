@@ -10,6 +10,7 @@
     "exclude": [
         "../client/extension/**",
         "../client/test/**",
-        "../client/webview/guiPreview.ts"
+        "../client/webview/guiPreview.ts",
+        "../client/webview/particlePreview.ts"
     ]
 }

@@ -10,6 +10,7 @@
     "exclude": [
         "../client/extension/**",
         "../client/test/**",
-        "../client/webview/solarSystemPreview.ts"
+        "../client/webview/solarSystemPreview.ts",
+        "../client/webview/particlePreview.ts"
     ]
 }

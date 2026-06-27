@@ -152,5 +152,6 @@
   "commands.cwtools.vanillaCompare.migrateBlockFromVanilla.title": "Migrate Block from Vanilla",
   "commands.cwtools.vanillaCompare.migrateChangedFromVanilla.title": "Migrate Changed Blocks from Vanilla",
   "commands.cwtools.previewEntity.title": "Preview Entity Model",
+  "commands.cwtools.previewParticle.title": "Preview Particle Effect",
   "configuration.cwtools.vanillaCompare.showGutterDecorations.description": "Show line-level diff decorations in the editor gutter for blocks that differ from vanilla. Uses distinct colors from Git SCM decorations."
 }

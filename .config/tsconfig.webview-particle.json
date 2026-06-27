@@ -4,8 +4,12 @@
     },
     "extends": "../tsconfig.json",
     "include": [
-        "../client/webview/entityPreview.ts",
-        "../client/webview/pdxMeshParser.ts",
+        "../client/webview/particlePreview.ts",
+        "../client/webview/particleSimulation.ts",
+        "../client/webview/particleRenderer.ts",
+        "../client/webview/curveEditor.ts",
+        "../client/webview/inspector.ts",
+        "../client/webview/particleTypes.ts",
         "../client/webview/vscode.d.ts"
     ],
     "exclude": [
@@ -14,8 +18,9 @@
         "../client/webview/guiPreview.ts",
         "../client/webview/solarSystemPreview.ts",
         "../client/webview/chatPanel.ts",
+        "../client/webview/agentManager.ts",
         "../client/webview/eventChainPreview.ts",
         "../client/webview/techTreePreview.ts",
-        "../client/webview/particlePreview.ts"
+        "../client/webview/entityPreview.ts"
     ]
 }

@@ -6,7 +6,16 @@ import * as os from 'os';
 import { execFile } from 'child_process';
 import { ErrorReporter } from './ai/errorReporter';
 
-export async function checkForUpdates(context: vscode.ExtensionContext) {
+export interface UpdateInstallContext {
+    reinstallCurrentVersion: boolean;
+    vsixPath: string;
+}
+
+export interface UpdateInstallHooks {
+    beforeInstall?: (installContext: UpdateInstallContext) => void | Promise<void>;
+}
+
+export async function checkForUpdates(context: vscode.ExtensionContext, installHooks: UpdateInstallHooks = {}) {
     const config = vscode.workspace.getConfiguration('cwtools');
     const isEnabled = config.get<boolean>('checkForUpdates', true);
     if (!isEnabled) {
@@ -38,22 +47,11 @@ export async function checkForUpdates(context: vscode.ExtensionContext) {
             return;
         }
 
-        const latestVersion = release.tag_name.replace(/^v/, '');
-        
-        let latestAssetUpdate = release.published_at || '';
-        let vsixDownloadUrl = '';
-        if (release.assets && release.assets.length > 0) {
-            for (const asset of release.assets) {
-                if (asset.name?.endsWith('.vsix')) {
-                    if (asset.updated_at && asset.updated_at > latestAssetUpdate) {
-                        latestAssetUpdate = asset.updated_at;
-                    }
-                    if (!vsixDownloadUrl) {
-                        vsixDownloadUrl = asset.browser_download_url;
-                    }
-                }
-            }
-        }
+        const tagVersion = release.tag_name.replace(/^v/i, '');
+        const selectedVsix = selectReleaseVsixAsset(release);
+        const latestVersion = selectedVsix?.version || tagVersion;
+        const latestAssetUpdate = selectedVsix?.updatedAt || release.published_at || '';
+        const vsixDownloadUrl = selectedVsix?.downloadUrl || '';
 
         const stateKeyKnownAssetUpdate = `cwtools.updateCheck.knownAssetDate_${currentVersion}`;
         const knownAssetUpdate = context.globalState.get<string>(stateKeyKnownAssetUpdate);
@@ -66,7 +64,7 @@ export async function checkForUpdates(context: vscode.ExtensionContext) {
             if (ignoredVersion !== latestVersion) {
                 needsUpdate = true;
             }
-        } else if (currentVersion === latestVersion && latestAssetUpdate) {
+        } else if (compareVersions(currentVersion, latestVersion) === 0 && latestAssetUpdate) {
             if (!knownAssetUpdate) {
                 await context.globalState.update(stateKeyKnownAssetUpdate, latestAssetUpdate);
             } else if (latestAssetUpdate > knownAssetUpdate) {
@@ -77,7 +75,7 @@ export async function checkForUpdates(context: vscode.ExtensionContext) {
 
         if (needsUpdate) {
             const releaseUrl = release.html_url || 'https://github.com/Aa728848/cwtools-vscode/releases/latest';
-            const reinstallCurrentVersion = currentVersion === latestVersion;
+            const reinstallCurrentVersion = compareVersions(currentVersion, latestVersion) === 0;
             
             void Promise.resolve(vscode.window.showInformationMessage(
                 promptMessage,
@@ -90,7 +88,8 @@ export async function checkForUpdates(context: vscode.ExtensionContext) {
                             vsixDownloadUrl,
                             releaseUrl,
                             context.extension.id,
-                            reinstallCurrentVersion
+                            reinstallCurrentVersion,
+                            installHooks
                         );
                         if (installed && reinstallCurrentVersion) {
                             await context.globalState.update(stateKeyKnownAssetUpdate, latestAssetUpdate);
@@ -116,7 +115,8 @@ async function downloadAndInstallUpdate(
     originalUrl: string,
     fallbackUrl: string,
     extensionId: string,
-    reinstallCurrentVersion: boolean
+    reinstallCurrentVersion: boolean,
+    installHooks: UpdateInstallHooks = {}
 ): Promise<boolean> {
     const downloadUrls = [originalUrl];
 
@@ -138,6 +138,10 @@ async function downloadAndInstallUpdate(
                 
                 // Download successful
                 progress.report({ message: '下载完成，正在安装...' });
+                if (reinstallCurrentVersion && installHooks.beforeInstall) {
+                    progress.report({ message: '正在停止语言服务以释放安装文件...' });
+                }
+                await installHooks.beforeInstall?.({ reinstallCurrentVersion, vsixPath: tmpPath });
                 await installDownloadedUpdate(tmpPath, extensionId, reinstallCurrentVersion);
                 
                 void vscode.window.showInformationMessage('CWTools 已成功更新安装！', '重新加载窗口').then(sel => {
@@ -165,7 +169,56 @@ async function downloadAndInstallUpdate(
     });
 }
 
-const CLI_UNINSTALL_TIMEOUT_MS = 90_000;
+interface SelectedVsixAsset {
+    name: string;
+    version: string;
+    downloadUrl: string;
+    updatedAt: string;
+}
+
+export function extractVsixVersion(assetName: string | undefined): string | undefined {
+    if (!assetName || !assetName.toLowerCase().endsWith('.vsix')) {
+        return undefined;
+    }
+
+    const stem = assetName.replace(/\.vsix$/i, '');
+    const matches = [...stem.matchAll(/(?:^|[-_])v?(\d+\.\d+\.\d+)(?=$|[-_])/gi)];
+    return matches.length > 0 ? matches[matches.length - 1]?.[1] : undefined;
+}
+
+export function selectReleaseVsixAsset(release: any): SelectedVsixAsset | undefined {
+    const fallbackVersion = String(release?.tag_name ?? '').replace(/^v/i, '');
+    const releaseTimestamp = release?.published_at || release?.updated_at || '';
+    let selected: SelectedVsixAsset | undefined;
+
+    for (const asset of release?.assets ?? []) {
+        const name = String(asset?.name ?? '');
+        const downloadUrl = String(asset?.browser_download_url ?? '');
+        if (!name.toLowerCase().endsWith('.vsix') || !downloadUrl) {
+            continue;
+        }
+
+        const candidate: SelectedVsixAsset = {
+            name,
+            version: extractVsixVersion(name) || fallbackVersion,
+            downloadUrl,
+            updatedAt: asset?.updated_at || releaseTimestamp,
+        };
+
+        if (!selected) {
+            selected = candidate;
+            continue;
+        }
+
+        const versionComparison = compareVersions(selected.version, candidate.version);
+        if (versionComparison < 0 || (versionComparison === 0 && candidate.updatedAt > selected.updatedAt)) {
+            selected = candidate;
+        }
+    }
+
+    return selected;
+}
+
 const CLI_INSTALL_TIMEOUT_MS = 180_000;
 const CLI_MAX_BUFFER = 1024 * 1024;
 
@@ -279,16 +332,14 @@ function runVsCodeCli(args: string[], timeoutMs: number): Promise<void> {
 
 async function reinstallCurrentVersionWithCli(vsixPath: string, extensionId: string): Promise<void> {
     const extensionDirArgs = getCurrentExtensionsDirArgs(extensionId);
-    await runVsCodeCli([...extensionDirArgs, '--uninstall-extension', extensionId], CLI_UNINSTALL_TIMEOUT_MS);
     await runVsCodeCli([...extensionDirArgs, '--install-extension', vsixPath, '--force'], CLI_INSTALL_TIMEOUT_MS);
 }
 
 /**
  * VS Code does not replace an installed extension when a VSIX has the same
- * version. Same-version asset replacements must not uninstall this extension
- * through the active extension host because that can stop this code before the
- * install step runs. Use the external VS Code CLI for that path; normal version
- * upgrades continue through the regular workbench install command.
+ * version through the regular workbench command. Use the external VS Code CLI
+ * with --force for that path; normal version upgrades continue through the
+ * regular workbench install command.
  */
 export async function installDownloadedUpdate(
     vsixPath: string,
@@ -449,7 +500,7 @@ function fetchLatestRelease(): Promise<any> {
     });
 }
 
-function isNewerVersion(current: string, latest: string): boolean {
+function compareVersions(current: string, latest: string): number {
     const parse = (v: string) => v.split('.').map(n => parseInt(n, 10) || 0);
     const c = parse(current);
     const l = parse(latest);
@@ -457,8 +508,12 @@ function isNewerVersion(current: string, latest: string): boolean {
     for (let i = 0; i < Math.max(c.length, l.length); i++) {
         const cv = c[i] || 0;
         const lv = l[i] || 0;
-        if (lv > cv) return true;
-        if (lv < cv) return false;
+        if (lv > cv) return -1;
+        if (lv < cv) return 1;
     }
-    return false;
+    return 0;
+}
+
+function isNewerVersion(current: string, latest: string): boolean {
+    return compareVersions(current, latest) < 0;
 }

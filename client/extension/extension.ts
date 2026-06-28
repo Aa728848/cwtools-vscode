@@ -871,7 +871,18 @@ export async function activate(context: ExtensionContext) {
 	}
 
 	// Background check for extension updates
-	await checkForUpdates(context).catch((e) => ErrorReporter.warn(SOURCE.UPDATE_CHECKER, 'Failed to check for updates', e));
+	await checkForUpdates(context, {
+		beforeInstall: async ({ reinstallCurrentVersion }) => {
+			if (!reinstallCurrentVersion || !defaultClient) {
+				return;
+			}
+			try {
+				await defaultClient.stop();
+			} catch (e) {
+				ErrorReporter.warn(SOURCE.UPDATE_CHECKER, 'Failed to stop CWTools language server before same-version reinstall', e);
+			}
+		}
+	}).catch((e) => ErrorReporter.warn(SOURCE.UPDATE_CHECKER, 'Failed to check for updates', e));
 
 	const indexService = new IndexService();
 	context.subscriptions.push(indexService);

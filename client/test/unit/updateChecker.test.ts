@@ -14,7 +14,7 @@ const vscodeStub = {
         uriScheme: 'vscode',
     },
     extensions: {
-        getExtension: () => ({ extensionPath: 'C:\\Users\\A\\.vscode\\extensions\\eddy.eddy-stellaris-cwt-2.6.7' }),
+        getExtension: () => ({ extensionPath: 'C:\\Users\\A\\.vscode\\extensions\\eddy.eddy-stellaris-cwt-2.7.0' }),
     },
     Uri: {
         file: (filePath: string) => ({ fsPath: filePath }),

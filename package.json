@@ -1,6 +1,6 @@
 {
   "name": "cwtools-vscode",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "workspaces": [
     "packages/cwtools-shared",
     "packages/cwtools-mcp"

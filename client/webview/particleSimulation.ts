@@ -1,12 +1,16 @@
-import type { AnimationCurve, Force, ParticleEffect, Scalar, Subsystem } from './particleTypes';
+import type { AnimatedValue, AnimationCurve, Force, ParticleEffect, Scalar, Subsystem } from './particleTypes';
 import { isRange } from './particleTypes';
 import { evalCurve } from './curveEditor';
+import * as THREE from 'three';
 
 export interface ParticleInstanceData {
     count: number;
     positions: Float32Array;
+    trailTails: Float32Array;
     sizes: Float32Array;
     rotations: Float32Array;
+    rights: Float32Array;
+    ups: Float32Array;
     colors: Float32Array;
     frames: Float32Array;
 }
@@ -25,8 +29,7 @@ function scalarValue(value: Scalar | undefined, fallback: number, progress: numb
     return animatedValue(value, progress, curves);
 }
 
-function animatedValue(value: Scalar, progress: number, curves: Map<string, AnimationCurve>): number {
-    if (isRange(value)) return animatedValue(value.a, progress, curves);
+function animatedValue(value: AnimatedValue, progress: number, curves: Map<string, AnimationCurve>): number {
     const primaryCurve = value.raw && !isNumericCellText(value.raw) ? curves.get(value.raw) : undefined;
     if (primaryCurve) return animationCurveValue(primaryCurve, progress);
     const curve = value.curve ? curves.get(value.curve) : undefined;
@@ -67,6 +70,12 @@ function clamp01(value: number): number {
     return Math.max(0, Math.min(1, value));
 }
 
+function rangeMagnitude(value: Scalar | undefined, progress: number, curves: Map<string, AnimationCurve>): number {
+    if (!value || !isRange(value)) return 0;
+    const values = [value.b, ...(value.extras ?? [])];
+    return values.reduce((max, item) => Math.max(max, Math.abs(animatedValue(item, progress, curves))), 0);
+}
+
 function directionFromYawPitch(yawDeg: number, pitchDeg: number): [number, number, number] {
     const yaw = degToRad(yawDeg);
     const pitch = degToRad(pitchDeg);
@@ -74,10 +83,26 @@ function directionFromYawPitch(yawDeg: number, pitchDeg: number): [number, numbe
     return [Math.sin(yaw) * cp, Math.sin(pitch), Math.cos(yaw) * cp];
 }
 
+function assetVectorToWorld(vector: [number, number, number]): [number, number, number] {
+    // Stellaris particle local X uses negative values for the muzzle-forward axis.
+    return [vector[2], vector[1], -vector[0]];
+}
+
 function normalize3(vector: [number, number, number], fallback: [number, number, number] = [0, 1, 0]): [number, number, number] {
     const length = Math.hypot(vector[0], vector[1], vector[2]);
     if (length <= 0.00001) return fallback;
     return [vector[0] / length, vector[1] / length, vector[2] / length];
+}
+
+function rotateYawVector(vector: [number, number, number], yawDeg: number): [number, number, number] {
+    const yaw = degToRad(yawDeg);
+    const c = Math.cos(yaw);
+    const s = Math.sin(yaw);
+    return [
+        vector[0] * c + vector[2] * s,
+        vector[1],
+        -vector[0] * s + vector[2] * c,
+    ];
 }
 
 function cross3(a: [number, number, number], b: [number, number, number]): [number, number, number] {
@@ -92,8 +117,11 @@ function makeBuffer(capacity: number): ParticleInstanceData {
     return {
         count: 0,
         positions: new Float32Array(capacity * 3),
+        trailTails: new Float32Array(capacity * 3),
         sizes: new Float32Array(capacity),
         rotations: new Float32Array(capacity),
+        rights: new Float32Array(capacity * 3),
+        ups: new Float32Array(capacity * 3),
         colors: new Float32Array(capacity * 4),
         frames: new Float32Array(capacity),
     };
@@ -113,19 +141,27 @@ export class ParticleSystemSim {
     private readonly px: Float32Array;
     private readonly py: Float32Array;
     private readonly pz: Float32Array;
+    private readonly prevPx: Float32Array;
+    private readonly prevPy: Float32Array;
+    private readonly prevPz: Float32Array;
     private readonly vx: Float32Array;
     private readonly vy: Float32Array;
     private readonly vz: Float32Array;
     private readonly rot: Float32Array;
     private readonly rotSpeed: Float32Array;
+    private readonly orientationRight = new THREE.Vector3();
+    private readonly orientationUp = new THREE.Vector3();
+    private readonly orientationNormal = new THREE.Vector3();
+    private readonly spatialScale: number;
     private systemAge = 0;
     private emissionAcc = 0;
     private burstDone = false;
 
-    constructor(subsystem: Subsystem, animations: AnimationCurve[], forces: Force[]) {
+    constructor(subsystem: Subsystem, animations: AnimationCurve[], forces: Force[], spatialScale = 1) {
         this.subsystem = subsystem;
         this.capacity = Math.max(1, Math.min(2048, subsystem.maxAmount ?? 128));
         this.buffer = makeBuffer(this.capacity);
+        this.spatialScale = Math.max(0.001, Math.abs(spatialScale));
         this.curves = new Map(animations.map(curve => [curve.name, curve]));
         this.forces = Object.fromEntries(forces.map(force => [force.name, force]));
         this.active = new Array<boolean>(this.capacity).fill(false);
@@ -135,6 +171,9 @@ export class ParticleSystemSim {
         this.px = new Float32Array(this.capacity);
         this.py = new Float32Array(this.capacity);
         this.pz = new Float32Array(this.capacity);
+        this.prevPx = new Float32Array(this.capacity);
+        this.prevPy = new Float32Array(this.capacity);
+        this.prevPz = new Float32Array(this.capacity);
         this.vx = new Float32Array(this.capacity);
         this.vy = new Float32Array(this.capacity);
         this.vz = new Float32Array(this.capacity);
@@ -199,13 +238,16 @@ export class ParticleSystemSim {
         this.px[index] = pos[0];
         this.py[index] = pos[1];
         this.pz[index] = pos[2];
+        this.prevPx[index] = pos[0];
+        this.prevPy[index] = pos[1];
+        this.prevPz[index] = pos[2];
 
         const yaw = scalarValue(this.subsystem.velocityYaw, 0, 0, seed + 1, this.curves) +
             scalarValue(this.subsystem.emitterYaw, 0, 0, seed + 2, this.curves);
         const pitch = scalarValue(this.subsystem.velocityPitch, 0, 0, seed + 3, this.curves) +
             scalarValue(this.subsystem.emitterPitch, 0, 0, seed + 4, this.curves);
         const dir = directionFromYawPitch(yaw, pitch);
-        const speed = scalarValue(this.subsystem.velocity, 1, 0, seed + 5, this.curves);
+        const speed = scalarValue(this.subsystem.velocity, 1, 0, seed + 5, this.curves) * this.spatialScale;
         this.vx[index] = dir[0] * speed;
         this.vy[index] = dir[1] * speed;
         this.vz[index] = dir[2] * speed;
@@ -214,17 +256,17 @@ export class ParticleSystemSim {
     }
 
     private initialPosition(seed: number): [number, number, number] {
-        const base: [number, number, number] = [
-            scalarValue(this.subsystem.position?.x, 0, 0, seed + 10, this.curves),
-            scalarValue(this.subsystem.position?.y, 0, 0, seed + 11, this.curves),
-            scalarValue(this.subsystem.position?.z, 0, 0, seed + 12, this.curves),
-        ];
+        const base = assetVectorToWorld([
+            scalarValue(this.subsystem.position?.x, 0, 0, seed + 10, this.curves) * this.spatialScale,
+            scalarValue(this.subsystem.position?.y, 0, 0, seed + 11, this.curves) * this.spatialScale,
+            scalarValue(this.subsystem.position?.z, 0, 0, seed + 12, this.curves) * this.spatialScale,
+        ]);
         if (this.subsystem.emitterType === 'box') {
-            base[0] += scalarValue(this.subsystem.boxEmitterX, 0, 0, seed + 13, this.curves) * (seeded(seed, 14) * 2 - 1);
-            base[1] += scalarValue(this.subsystem.boxEmitterY, 0, 0, seed + 15, this.curves) * (seeded(seed, 16) * 2 - 1);
-            base[2] += scalarValue(this.subsystem.boxEmitterZ, 0, 0, seed + 17, this.curves) * (seeded(seed, 18) * 2 - 1);
+            base[2] += scalarValue(this.subsystem.boxEmitterX, 0, 0, seed + 13, this.curves) * this.spatialScale * (seeded(seed, 14) * 2 - 1);
+            base[1] += scalarValue(this.subsystem.boxEmitterY, 0, 0, seed + 15, this.curves) * this.spatialScale * (seeded(seed, 16) * 2 - 1);
+            base[0] += scalarValue(this.subsystem.boxEmitterZ, 0, 0, seed + 17, this.curves) * this.spatialScale * (seeded(seed, 18) * 2 - 1);
         } else if (this.subsystem.emitterType === 'sphere') {
-            const radius = Math.max(0, scalarValue(this.subsystem.sphereEmitterRadius, 1, 0, seed + 19, this.curves));
+            const radius = Math.max(0, scalarValue(this.subsystem.sphereEmitterRadius, 1, 0, seed + 19, this.curves) * this.spatialScale);
             if (this.subsystem.sphereEmitterYaw || this.subsystem.sphereEmitterPitch) {
                 const yaw = scalarValue(this.subsystem.sphereEmitterYaw, seeded(seed, 20) * 360, 0, seed + 20, this.curves);
                 const pitch = scalarValue(this.subsystem.sphereEmitterPitch, 0, 0, seed + 21, this.curves);
@@ -244,6 +286,27 @@ export class ParticleSystemSim {
         return base;
     }
 
+    private forceDirection(force: Force, fallback: [number, number, number] = [0, 1, 0]): [number, number, number] {
+        return rotateYawVector(assetVectorToWorld(force.direction ?? fallback), force.yaw ?? 0);
+    }
+
+    private forceAxis(force: Force, fallback: [number, number, number] = [0, 1, 0]): [number, number, number] {
+        return normalize3(this.forceDirection(force, fallback), fallback);
+    }
+
+    private forcePosition(force: Force): [number, number, number] {
+        const position = rotateYawVector(assetVectorToWorld(force.position ?? [0, 0, 0]), force.yaw ?? 0);
+        return [
+            position[0] * this.spatialScale,
+            position[1] * this.spatialScale,
+            position[2] * this.spatialScale,
+        ];
+    }
+
+    private spatialForceAmount(force: Force, fallback: number, progress: number, seed: number): number {
+        return scalarValue(force.amount, fallback, progress, seed, this.curves) * this.spatialScale;
+    }
+
     private integrate(dt: number): void {
         const force = this.subsystem.force ? this.forces[this.subsystem.force] : undefined;
         for (let i = 0; i < this.capacity; i++) {
@@ -259,6 +322,9 @@ export class ParticleSystemSim {
             const progress = nextAge / life;
             const mass = Math.max(0.05, scalarValue(this.subsystem.mass, 1, progress, seed + 37, this.curves));
             const forceDt = dt / mass;
+            this.prevPx[i] = this.px[i] ?? 0;
+            this.prevPy[i] = this.py[i] ?? 0;
+            this.prevPz[i] = this.pz[i] ?? 0;
             if (force?.type === 'friction') {
                 const amount = Math.max(0, scalarValue(force.amount, 0.2, progress, seed, this.curves));
                 const damp = Math.max(0, 1 - amount * dt);
@@ -266,15 +332,47 @@ export class ParticleSystemSim {
                 this.vy[i] = (this.vy[i] ?? 0) * damp;
                 this.vz[i] = (this.vz[i] ?? 0) * damp;
             } else if (force?.type === 'planar') {
-                const direction = force.direction ?? [0, 1, 0];
-                const amount = scalarValue(force.amount, 1, progress, seed, this.curves);
+                const direction = this.forceDirection(force);
+                const amount = this.spatialForceAmount(force, 1, progress, seed);
                 this.vx[i] = (this.vx[i] ?? 0) + (direction[0] ?? 0) * amount * forceDt;
                 this.vy[i] = (this.vy[i] ?? 0) + (direction[1] ?? 0) * amount * forceDt;
                 this.vz[i] = (this.vz[i] ?? 0) + (direction[2] ?? 0) * amount * forceDt;
+            } else if (force?.type === 'point') {
+                const center = this.forcePosition(force);
+                const amount = this.spatialForceAmount(force, 1, progress, seed);
+                const dx = (this.px[i] ?? 0) - center[0];
+                const dy = (this.py[i] ?? 0) - center[1];
+                const dz = (this.pz[i] ?? 0) - center[2];
+                const radialLength = Math.max(0.001, Math.hypot(dx, dy, dz));
+                const fallback = this.forceAxis(force, [1, 0, 0]);
+                const radial: [number, number, number] = radialLength > 0.001 ? [dx / radialLength, dy / radialLength, dz / radialLength] : fallback;
+                const falloff = 1 / Math.max(0.25, radialLength / Math.max(1, force.division ?? 16));
+                this.vx[i] = (this.vx[i] ?? 0) + radial[0] * amount * falloff * forceDt;
+                this.vy[i] = (this.vy[i] ?? 0) + radial[1] * amount * falloff * forceDt;
+                this.vz[i] = (this.vz[i] ?? 0) + radial[2] * amount * falloff * forceDt;
+            } else if (force?.type === 'spin') {
+                const center = this.forcePosition(force);
+                const axis = this.forceAxis(force);
+                const amount = this.spatialForceAmount(force, 1, progress, seed);
+                const dx = (this.px[i] ?? 0) - center[0];
+                const dy = (this.py[i] ?? 0) - center[1];
+                const dz = (this.pz[i] ?? 0) - center[2];
+                const axial = dx * axis[0] + dy * axis[1] + dz * axis[2];
+                const radial: [number, number, number] = [
+                    dx - axis[0] * axial,
+                    dy - axis[1] * axial,
+                    dz - axis[2] * axial,
+                ];
+                const tangent = normalize3(cross3(axis, radial), [1, 0, 0]);
+                const radialLength = Math.max(0.001, Math.hypot(radial[0], radial[1], radial[2]));
+                const strength = amount * Math.max(0.25, radialLength / Math.max(1, force.division ?? 16));
+                this.vx[i] = (this.vx[i] ?? 0) + tangent[0] * strength * forceDt;
+                this.vy[i] = (this.vy[i] ?? 0) + tangent[1] * strength * forceDt;
+                this.vz[i] = (this.vz[i] ?? 0) + tangent[2] * strength * forceDt;
             } else if (force?.type === 'vortex') {
-                const center = force.position ?? [0, 0, 0];
-                const axis = normalize3(force.direction ?? [0, 1, 0]);
-                const amount = scalarValue(force.amount, 0.5, progress, seed, this.curves);
+                const center = this.forcePosition(force);
+                const axis = this.forceAxis(force);
+                const amount = this.spatialForceAmount(force, 0.5, progress, seed);
                 const dx = (this.px[i] ?? 0) - (center[0] ?? 0);
                 const dy = (this.py[i] ?? 0) - (center[1] ?? 0);
                 const dz = (this.pz[i] ?? 0) - (center[2] ?? 0);
@@ -291,7 +389,7 @@ export class ParticleSystemSim {
                 this.vy[i] = (this.vy[i] ?? 0) + tangent[1] * scale * forceDt;
                 this.vz[i] = (this.vz[i] ?? 0) + tangent[2] * scale * forceDt;
             } else if (force?.type === 'turbulence') {
-                const amount = scalarValue(force.amount, 1, progress, seed, this.curves);
+                const amount = this.spatialForceAmount(force, 1, progress, seed);
                 const phase = Math.floor((this.systemAge + progress) * Math.max(1, force.division ?? 8));
                 this.vx[i] = (this.vx[i] ?? 0) + (seeded(seed + phase, 41) * 2 - 1) * amount * forceDt;
                 this.vy[i] = (this.vy[i] ?? 0) + (seeded(seed + phase, 42) * 2 - 1) * amount * forceDt;
@@ -312,25 +410,118 @@ export class ParticleSystemSim {
         for (let i = 0; i < this.capacity; i++) {
             if (!this.active[i]) continue;
             const seed = this.seed[i] ?? 0;
-            const progress = Math.max(0, Math.min(1, (this.age[i] ?? 0) / Math.max(0.001, this.life[i] ?? 1)));
+            const ageSeconds = this.age[i] ?? 0;
+            const lifeSeconds = Math.max(0.001, this.life[i] ?? 1);
+            const progress = Math.max(0, Math.min(1, ageSeconds / lifeSeconds));
             const posOffset = count * 3;
             const colorOffset = count * 4;
             this.buffer.positions[posOffset] = this.px[i] ?? 0;
             this.buffer.positions[posOffset + 1] = this.py[i] ?? 0;
             this.buffer.positions[posOffset + 2] = this.pz[i] ?? 0;
-            this.buffer.sizes[count] = Math.max(0.001, scalarValue(this.subsystem.size, 1, progress, seed + 31, this.curves));
+            this.buffer.sizes[count] = Math.max(0.001, scalarValue(this.subsystem.size, 1, progress, seed + 31, this.curves) * this.spatialScale);
+            this.writeTrailTail(count, i);
             this.buffer.rotations[count] = this.rot[i] ?? 0;
+            this.writeOrientation(count, progress, seed, ageSeconds, lifeSeconds);
             this.buffer.colors[colorOffset] = clamp01(scalarValue(this.subsystem.color?.r, 255, progress, seed + 32, this.curves) / 255);
             this.buffer.colors[colorOffset + 1] = clamp01(scalarValue(this.subsystem.color?.g, 255, progress, seed + 33, this.curves) / 255);
             this.buffer.colors[colorOffset + 2] = clamp01(scalarValue(this.subsystem.color?.b, 255, progress, seed + 34, this.curves) / 255);
             this.buffer.colors[colorOffset + 3] = clamp01(scalarValue(this.subsystem.color?.alpha, 255, progress, seed + 35, this.curves) / 255);
-            const loop = this.subsystem.spritesheetAnimationLoop ?? (this.subsystem.spritesheetAnimation ? 1 : 0);
-            this.buffer.frames[count] = loop
-                ? Math.floor((progress * frameCount) % frameCount)
-                : frameCount > 1 ? Math.floor(seeded(seed, 36) * frameCount) : 0;
+            this.buffer.frames[count] = this.frameForParticle(frameCount, progress, ageSeconds, seed);
             count++;
         }
         this.buffer.count = count;
+    }
+
+    private frameForParticle(frameCount: number, progress: number, ageSeconds: number, seed: number): number {
+        if (frameCount <= 1) return 0;
+        if (this.subsystem.spritesheetAnimation === false) {
+            return Math.floor(seeded(seed, 36) * frameCount);
+        }
+        if (this.subsystem.spritesheetAnimation === true && (this.subsystem.spritesheetAnimationLoop ?? 0) > 0) {
+            const loopSeconds = Math.max(0.001, this.subsystem.spritesheetAnimationLoop ?? 1);
+            return Math.floor((ageSeconds / loopSeconds * frameCount) % frameCount);
+        }
+        return Math.min(frameCount - 1, Math.floor(progress * frameCount));
+    }
+
+    private writeTrailTail(outputIndex: number, particleIndex: number): void {
+        const offset = outputIndex * 3;
+        const px = this.px[particleIndex] ?? 0;
+        const py = this.py[particleIndex] ?? 0;
+        const pz = this.pz[particleIndex] ?? 0;
+        if (!this.subsystem.trail) {
+            this.buffer.trailTails[offset] = px;
+            this.buffer.trailTails[offset + 1] = py;
+            this.buffer.trailTails[offset + 2] = pz;
+            return;
+        }
+
+        const speed = Math.hypot(this.vx[particleIndex] ?? 0, this.vy[particleIndex] ?? 0, this.vz[particleIndex] ?? 0);
+        const age = this.age[particleIndex] ?? 0;
+        const size = this.buffer.sizes[outputIndex] ?? 1;
+        if (speed > 0.0001) {
+            const length = Math.max(
+                Math.hypot(px - (this.prevPx[particleIndex] ?? px), py - (this.prevPy[particleIndex] ?? py), pz - (this.prevPz[particleIndex] ?? pz)),
+                Math.min(size * 6, speed * Math.min(age, 0.25)),
+            );
+            this.buffer.trailTails[offset] = px - (this.vx[particleIndex] ?? 0) / speed * length;
+            this.buffer.trailTails[offset + 1] = py - (this.vy[particleIndex] ?? 0) / speed * length;
+            this.buffer.trailTails[offset + 2] = pz - (this.vz[particleIndex] ?? 0) / speed * length;
+            return;
+        }
+
+        this.buffer.trailTails[offset] = this.prevPx[particleIndex] ?? px;
+        this.buffer.trailTails[offset + 1] = this.prevPy[particleIndex] ?? py;
+        this.buffer.trailTails[offset + 2] = this.prevPz[particleIndex] ?? pz;
+    }
+
+    private writeOrientation(index: number, progress: number, seed: number, ageSeconds: number, lifeSeconds: number): void {
+        const yawBase = scalarValue(this.subsystem.particleYaw, 0, progress, seed + 38, this.curves);
+        const pitchBase = scalarValue(this.subsystem.particlePitch, 0, progress, seed + 39, this.curves);
+        const rollBase = scalarValue(this.subsystem.particleRoll, 0, progress, seed + 40, this.curves);
+        const yawSpeed = scalarValue(this.subsystem.rotationSpeedYaw, 0, progress, seed + 41, this.curves);
+        const pitchSpeed = scalarValue(this.subsystem.rotationSpeedPitch, 0, progress, seed + 42, this.curves);
+        const rollSpeed = scalarValue(this.subsystem.rotationSpeedRoll, 0, progress, seed + 43, this.curves);
+        const flutter = this.orientationFlutter(progress, seed, ageSeconds, lifeSeconds);
+        const yaw = degToRad(yawBase + yawSpeed * ageSeconds + flutter.yaw);
+        const pitch = degToRad(pitchBase + pitchSpeed * ageSeconds + flutter.pitch);
+        const roll = degToRad(rollBase + rollSpeed * ageSeconds + flutter.roll);
+
+        this.orientationRight.set(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
+        this.orientationUp.set(0, 1, 0).applyAxisAngle(this.orientationRight, pitch).normalize();
+        this.orientationNormal.crossVectors(this.orientationRight, this.orientationUp).normalize();
+        if (Math.abs(roll) > 0.00001) {
+            this.orientationRight.applyAxisAngle(this.orientationNormal, roll).normalize();
+            this.orientationUp.applyAxisAngle(this.orientationNormal, roll).normalize();
+        }
+
+        const offset = index * 3;
+        this.buffer.rights[offset] = this.orientationRight.x;
+        this.buffer.rights[offset + 1] = this.orientationRight.y;
+        this.buffer.rights[offset + 2] = this.orientationRight.z;
+        this.buffer.ups[offset] = this.orientationUp.x;
+        this.buffer.ups[offset + 1] = this.orientationUp.y;
+        this.buffer.ups[offset + 2] = this.orientationUp.z;
+    }
+
+    private orientationFlutter(progress: number, seed: number, ageSeconds: number, lifeSeconds: number): { yaw: number; pitch: number; roll: number } {
+        if (this.subsystem.billboard !== false) return { yaw: 0, pitch: 0, roll: 0 };
+        const shortLife = clamp01((0.45 - lifeSeconds) / 0.35);
+        if (shortLife <= 0) return { yaw: 0, pitch: 0, roll: 0 };
+        const yawRange = rangeMagnitude(this.subsystem.particleYaw, progress, this.curves);
+        const pitchRange = rangeMagnitude(this.subsystem.particlePitch, progress, this.curves);
+        const rollRange = rangeMagnitude(this.subsystem.particleRoll, progress, this.curves);
+        const totalRange = yawRange + pitchRange + rollRange;
+        if (totalRange <= 0.001) return { yaw: 0, pitch: 0, roll: 0 };
+        const cycle = (ageSeconds * (12 + seeded(seed, 51) * 18) + progress * 0.35) * Math.PI * 2;
+        const phaseA = seeded(seed, 52) * Math.PI * 2;
+        const phaseB = seeded(seed, 53) * Math.PI * 2;
+        const phaseC = seeded(seed, 54) * Math.PI * 2;
+        return {
+            yaw: Math.sin(cycle + phaseA) * yawRange * 0.35 * shortLife,
+            pitch: Math.sin(cycle + phaseB) * pitchRange * 0.35 * shortLife,
+            roll: Math.sin(cycle + phaseC) * Math.max(rollRange, totalRange * 0.35) * 0.3 * shortLife,
+        };
     }
 }
 
@@ -338,7 +529,7 @@ export class ParticleEffectSimulation {
     readonly systems: ParticleSystemSim[];
 
     constructor(effect: ParticleEffect) {
-        this.systems = effect.subsystems.map(subsystem => new ParticleSystemSim(subsystem, effect.animations, effect.forces));
+        this.systems = effect.subsystems.map(subsystem => new ParticleSystemSim(subsystem, effect.animations, effect.forces, effect.scale ?? 1));
     }
 
     reset(): void {

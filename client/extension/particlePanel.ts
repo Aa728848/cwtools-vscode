@@ -528,8 +528,14 @@ export class ParticlePanel {
         <aside id="particle-left" class="side-pane">
             <header class="left-header">
                 <h1>Particle Editor</h1>
-                <div class="loaded-effect">Loaded effect: <span id="loaded-effect-name">particle</span></div>
-                <label id="effect-row" class="left-control-row"><span>Effect</span><select id="effect-select"></select></label>
+                <div class="loaded-effect">Loaded particle: <span id="loaded-effect-name">particle</span></div>
+                <label id="effect-row" class="left-control-row">
+                    <span>Particle</span>
+                    <div class="effect-load-control">
+                        <select id="effect-select"></select>
+                        <button id="btn-load-effect" type="button" title="Load selected particle">Load</button>
+                    </div>
+                </label>
                 <label class="left-control-row"><span>Subsystem</span><select id="subsystem-select"></select></label>
                 <label class="left-check-row"><span>Hide other subsystems</span><input id="hide-others-toggle" type="checkbox"></label>
                 <label class="left-check-row"><span>Emitter Visuals (Previewer only)</span><input id="emitter-visuals-toggle" type="checkbox"></label>

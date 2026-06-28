@@ -56,6 +56,7 @@ const titleEl = document.getElementById('particle-title')!;
 const loadedEffectName = document.getElementById('loaded-effect-name')!;
 const effectRow = document.getElementById('effect-row')!;
 const effectSelect = document.getElementById('effect-select') as HTMLSelectElement;
+const loadEffectButton = document.getElementById('btn-load-effect') as HTMLButtonElement;
 const subsystemSelect = document.getElementById('subsystem-select') as HTMLSelectElement;
 const curveSelect = document.getElementById('curve-select') as HTMLSelectElement;
 const forceSelect = document.getElementById('force-select') as HTMLSelectElement;
@@ -91,6 +92,7 @@ let elapsed = 0;
 let playbackDurationSeconds = 20;
 let currentPayload: ParticleRenderPayload | null = null;
 let currentEffectIndex = 0;
+let pendingEffectIndex = 0;
 let currentSubsystemIndex = 0;
 let currentCurveIndex = 0;
 let currentForceIndex = 0;
@@ -205,19 +207,37 @@ function scalarBaseValue(value: Scalar | undefined, fallback: number): number {
     return isRange(value) ? value.a.value : value.value;
 }
 
+function scalarMaxValue(value: Scalar | undefined, fallback: number): number {
+    if (!value) return fallback;
+    if (!isRange(value)) return value.value;
+    const base = value.a.value;
+    const variance = Math.abs(value.b.value);
+    const extras = (value.extras ?? []).map(item => item.value);
+    return Math.max(base + variance, base - variance, ...extras);
+}
+
 function scalarExtentValue(value: Scalar | undefined, fallback: number): number {
     if (!value) return Math.abs(fallback);
-    if (isRange(value)) return Math.abs(value.a.value) + Math.abs(value.b.value);
+    if (isRange(value)) {
+        const base = value.a.value;
+        const variance = Math.abs(value.b.value);
+        const extras = (value.extras ?? []).map(item => Math.abs(item.value));
+        return Math.max(Math.abs(base + variance), Math.abs(base - variance), ...extras);
+    }
     return Math.abs(value.value);
+}
+
+function assetVectorToWorld(x: number, y: number, z: number): { x: number; y: number; z: number } {
+    return { x: z, y, z: -x };
 }
 
 function computePlaybackDuration(effect: ParticleEffect | undefined): number {
     if (!effect) return 20;
     let maxTime = 0;
     for (const subsystem of effect.subsystems) {
-        const start = scalarBaseValue(subsystem.start, 0);
-        const duration = scalarBaseValue(subsystem.duration, 4);
-        const life = scalarBaseValue(subsystem.life, 1);
+        const start = scalarMaxValue(subsystem.start, 0);
+        const duration = scalarMaxValue(subsystem.duration, 4);
+        const life = scalarMaxValue(subsystem.life, 1);
         maxTime = Math.max(maxTime, start + (duration >= 0 ? duration : 8) + Math.max(0.1, life));
     }
     return Math.max(1, Math.min(60, maxTime || 20));
@@ -227,9 +247,9 @@ function computeEffectRadius(effect: ParticleEffect | undefined): number {
     if (!effect) return 20;
     let radius = 20;
     for (const subsystem of effect.subsystems) {
-        const px = scalarBaseValue(subsystem.position?.x, 0);
-        const py = scalarBaseValue(subsystem.position?.y, 0);
-        const pz = scalarBaseValue(subsystem.position?.z, 0);
+        const px = scalarExtentValue(subsystem.position?.x, 0);
+        const py = scalarExtentValue(subsystem.position?.y, 0);
+        const pz = scalarExtentValue(subsystem.position?.z, 0);
         const positionRadius = Math.hypot(px, py, pz);
         const emitterRadius = subsystem.emitterType === 'box'
             ? Math.hypot(
@@ -364,6 +384,7 @@ function updateEditButtons(): void {
     saveButton.disabled = !dirty;
     undoButton.disabled = undoStack.length === 0;
     redoButton.disabled = redoStack.length === 0;
+    loadEffectButton.disabled = pendingEffectIndex === currentEffectIndex;
 }
 
 function markDirty(): void {
@@ -395,6 +416,7 @@ function restoreEditorSnapshot(snapshot: EditorSnapshot): void {
     currentPayload.effects = cloneEffectValue(snapshot.effects);
     currentEffectIndex = Math.min(snapshot.currentEffectIndex, Math.max(0, currentPayload.effects.length - 1));
     currentPayload.selectedEffectIndex = currentEffectIndex;
+    pendingEffectIndex = currentEffectIndex;
     const effect = currentEffect();
     currentSubsystemIndex = Math.min(snapshot.currentSubsystemIndex, Math.max(0, (effect?.subsystems.length ?? 1) - 1));
     currentCurveIndex = Math.min(snapshot.currentCurveIndex, Math.max(0, (effect?.animations.length ?? 1) - 1));
@@ -489,22 +511,23 @@ function refreshEmitterVisuals(): void {
     const material = new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: 0.8 });
     let geometry: THREE.BufferGeometry;
     if (subsystem.emitterType === 'box') {
-        const x = Math.max(0.1, Math.abs(scalarBaseValue(subsystem.boxEmitterX, 1)) * 2);
-        const y = Math.max(0.1, Math.abs(scalarBaseValue(subsystem.boxEmitterY, 1)) * 2);
-        const z = Math.max(0.1, Math.abs(scalarBaseValue(subsystem.boxEmitterZ, 1)) * 2);
+        const x = Math.max(0.1, scalarExtentValue(subsystem.boxEmitterZ, 1) * 2);
+        const y = Math.max(0.1, scalarExtentValue(subsystem.boxEmitterY, 1) * 2);
+        const z = Math.max(0.1, scalarExtentValue(subsystem.boxEmitterX, 1) * 2);
         geometry = new THREE.BoxGeometry(x, y, z);
     } else {
         const radius = subsystem.emitterType === 'sphere'
-            ? Math.max(0.1, Math.abs(scalarBaseValue(subsystem.sphereEmitterRadius, 1)))
+            ? Math.max(0.1, scalarExtentValue(subsystem.sphereEmitterRadius, 1))
             : 0.18;
         geometry = new THREE.SphereGeometry(radius, 24, 12);
     }
     const helper = new THREE.Mesh(geometry, material);
-    helper.position.set(
+    const position = assetVectorToWorld(
         scalarBaseValue(subsystem.position?.x, 0),
         scalarBaseValue(subsystem.position?.y, 0),
         scalarBaseValue(subsystem.position?.z, 0),
     );
+    helper.position.set(position.x, position.y, position.z);
     emitterVisualsGroup.add(helper);
 }
 
@@ -522,8 +545,10 @@ function refreshSelectors(): void {
         option.textContent = effect.name || `particle_${index + 1}`;
         effectSelect.append(option);
     });
-    effectSelect.value = String(currentEffectIndex);
+    pendingEffectIndex = Math.min(pendingEffectIndex, Math.max(0, payload.effects.length - 1));
+    effectSelect.value = String(pendingEffectIndex);
     effectRow.classList.toggle('hidden', payload.effects.length <= 1);
+    loadEffectButton.disabled = pendingEffectIndex === currentEffectIndex;
 
     const effect = currentEffect();
     if (!effect) return;
@@ -638,6 +663,19 @@ function saveCachedEffects(): void {
     });
 }
 
+function loadSelectedEffect(): void {
+    if (!currentPayload || pendingEffectIndex === currentEffectIndex) return;
+    currentEffectIndex = Math.min(pendingEffectIndex, Math.max(0, currentPayload.effects.length - 1));
+    pendingEffectIndex = currentEffectIndex;
+    currentPayload.selectedEffectIndex = currentEffectIndex;
+    currentSubsystemIndex = 0;
+    currentCurveIndex = 0;
+    currentForceIndex = 0;
+    vscode.postMessage({ command: 'selectEffect', index: currentEffectIndex });
+    refreshAll();
+    updateEditButtons();
+}
+
 function cloneEffectValue<T>(value: T): T {
     return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -749,6 +787,7 @@ function handleMessage(event: MessageEvent): void {
             };
             currentEffectIndex = Math.min(currentPayload.selectedEffectIndex, Math.max(0, currentPayload.effects.length - 1));
             currentPayload.selectedEffectIndex = currentEffectIndex;
+            pendingEffectIndex = currentEffectIndex;
             const effect = currentPayload.effects[currentEffectIndex];
             currentSubsystemIndex = Math.min(previousSubsystem, Math.max(0, (effect?.subsystems.length ?? 1) - 1));
             currentCurveIndex = Math.min(previousCurve, Math.max(0, (effect?.animations.length ?? 1) - 1));
@@ -777,6 +816,7 @@ function handleMessage(event: MessageEvent): void {
                 currentPayload.readonly = !!message.readonly;
                 currentEffectIndex = Math.min(currentPayload.selectedEffectIndex, Math.max(0, currentPayload.effects.length - 1));
                 currentPayload.selectedEffectIndex = currentEffectIndex;
+                pendingEffectIndex = currentEffectIndex;
                 savedEffectsBaseline = cloneEffectValue(currentPayload.effects);
                 textureRequestId++;
                 setDirtyState(false);
@@ -811,14 +851,10 @@ document.addEventListener('visibilitychange', () => {
 });
 
 effectSelect.addEventListener('change', () => {
-    currentEffectIndex = Number(effectSelect.value) || 0;
-    if (currentPayload) currentPayload.selectedEffectIndex = currentEffectIndex;
-    currentSubsystemIndex = 0;
-    currentCurveIndex = 0;
-    currentForceIndex = 0;
-    vscode.postMessage({ command: 'selectEffect', index: currentEffectIndex });
-    refreshAll();
+    pendingEffectIndex = Number(effectSelect.value) || 0;
+    updateEditButtons();
 });
+loadEffectButton.addEventListener('click', loadSelectedEffect);
 subsystemSelect.addEventListener('change', () => {
     currentSubsystemIndex = Number(subsystemSelect.value) || 0;
     refreshInspector();

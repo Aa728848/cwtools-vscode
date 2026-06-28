@@ -171,6 +171,22 @@ input[type="number"] {
     margin-bottom: 6px;
 }
 
+.effect-load-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+    min-width: 0;
+}
+
+.effect-load-control select {
+    margin-bottom: 0;
+}
+
+.effect-load-control button {
+    min-width: 52px;
+    padding-inline: 8px;
+}
+
 .button-row {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));

@@ -155,7 +155,7 @@
                 },
                 {
                     "command": "cwtools.vanillaCompare.migrateChangedFromVanilla",
-                    "when": "resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh",
+                    "when": "(resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh) && inDiffEditor && cwtools.vanillaCompare.activeComparison",
                     "group": "navigation@3"
                 }
             ],

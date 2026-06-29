@@ -317,7 +317,36 @@ async function buildVanillaBlockIndex(
 
 // ─── Registration ─────────────────────────────────────────────────────────────
 
+const ACTIVE_COMPARISON_CONTEXT = 'cwtools.vanillaCompare.activeComparison';
+
 export function registerVanillaCompare(context: vs.ExtensionContext): void {
+    const comparisonDocuments = new Set<string>();
+
+    const refreshActiveComparisonContext = () => {
+        const activeUri = vs.window.activeTextEditor?.document.uri.toString();
+        const activeComparison = !!activeUri && comparisonDocuments.has(activeUri);
+        void vs.commands.executeCommand('setContext', ACTIVE_COMPARISON_CONTEXT, activeComparison);
+    };
+
+    const markComparisonDocument = (uri: vs.Uri) => {
+        comparisonDocuments.add(uri.toString());
+        refreshActiveComparisonContext();
+        setTimeout(refreshActiveComparisonContext, 250);
+    };
+
+    context.subscriptions.push(
+        vs.window.onDidChangeActiveTextEditor(refreshActiveComparisonContext),
+        vs.window.onDidChangeVisibleTextEditors(editors => {
+            const visibleUris = new Set(editors.map(editor => editor.document.uri.toString()));
+            for (const uri of comparisonDocuments) {
+                if (!visibleUris.has(uri)) {
+                    comparisonDocuments.delete(uri);
+                }
+            }
+            refreshActiveComparisonContext();
+        })
+    );
+    refreshActiveComparisonContext();
 
     // ── Command: Block-level diff (right-click context menu) ──────────────
     context.subscriptions.push(
@@ -424,6 +453,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     `Vanilla vs Mod: ${identity}`,
                     { preview: true, viewColumn: vs.ViewColumn.Beside }
                 );
+                markComparisonDocument(uri);
 
                 // Scroll to the relevant block range in the diff editor
                 setTimeout(async () => {
@@ -471,6 +501,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                         `Vanilla vs Mod (Full): ${path.basename(doc.uri.fsPath)}`,
                         { preview: true, viewColumn: vs.ViewColumn.Beside }
                     );
+                    markComparisonDocument(doc.uri);
                     return;
                 }
 
@@ -548,6 +579,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     `Vanilla vs Mod: ${path.basename(relPath)} (${matchCount} blocks)`,
                     { preview: true, viewColumn: vs.ViewColumn.Beside }
                 );
+                markComparisonDocument(doc.uri);
 
                 // Clean up vanilla temp file after a delay
                 setTimeout(() => {

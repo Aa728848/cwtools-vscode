@@ -916,7 +916,7 @@ async function showSetupPanel(options: InstallHealthOptions): Promise<void> {
 				await reloadExtension(localize('Reload CWTools now?', '现在重新加载 CWTools 吗？'), localize('Reload', '重新加载'));
 				break;
 			case 'settings':
-				await commands.executeCommand('workbench.action.openSettings', `@ext:${options.context.extension.id} cwtools`);
+				await commands.executeCommand('workbench.action.openSettings', `@ext:${options.context.extension.id} stellarisLanguageServices`);
 				break;
 			case 'refresh':
 				setupPanel!.webview.html = renderSetupHtml(options);
@@ -1749,8 +1749,8 @@ export async function activate(context: ExtensionContext) {
 			{ scheme: 'file', language: 'hoi4' }, { scheme: 'file', language: 'eu4' }, { scheme: 'file', language: 'ck2' }, { scheme: 'file', language: 'imperator' }
 				, { scheme: 'file', language: 'vic2' }, { scheme: 'file', language: 'vic3' }, { scheme: 'file', language: 'ck3' }, { scheme: 'file', language: 'eu5' }, { scheme: 'file', language: 'pdx-shader' }, { scheme: 'file', language: 'paradox' }],
 			synchronize: {
-				// Synchronize the setting section 'cwtools' to the server
-				configurationSection: 'cwtools',
+				// Synchronize extension settings to the language server.
+				configurationSection: 'stellarisLanguageServices',
 				// Notify the server about file changes to F# project files contain in the workspace
 
 				fileEvents: fileEvents

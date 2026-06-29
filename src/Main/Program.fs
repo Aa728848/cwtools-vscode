@@ -3862,12 +3862,26 @@ type Server(client: ILanguageClient) =
 
         member this.DidChangeConfiguration(p: DidChangeConfigurationParams) =
             async {
-                let config = p.settings.Item("cwtools")
+                let config =
+                    match p.settings.TryGetProperty("stellarisLanguageServices") with
+                    | Some x -> x
+                    | None ->
+                        match p.settings.TryGetProperty("cwtools") with
+                        | Some x -> x
+                        | None -> p.settings
+
+                let configValue path =
+                    ((Some config), path)
+                    ||> List.fold (fun current key ->
+                        match current with
+                        | Some value -> value.TryGetProperty(key)
+                        | None -> None)
+                    |> Option.defaultValue JsonValue.Null
 
                 let newLanguages =
                     match langConfigMap |> List.tryFind (fun (g, _, _) -> g = activeGame) with
                     | Some (_, parse, defaultFn) ->
-                        match config.Item("localisation").Item("languages") with
+                        match configValue ["localisation"; "languages"] with
                         | JsonValue.Array o ->
                             o
                             |> Array.choose (function JsonValue.String s -> Some (parse s) | _ -> None)
@@ -3889,27 +3903,27 @@ type Server(client: ILanguageClient) =
                     cachedLocMap <- None
                     cachedLocMapCount <- 0
 
-                match config.Item("localisation").Item("generated_strings") with
+                match configValue ["localisation"; "generated_strings"] with
                 | JsonValue.String newString -> generatedStrings <- updateIfChanged generatedStrings newString
                 | _ -> ()
 
                 let newVanillaOnly =
-                    match config.Item("errors").Item("vanilla") with
+                    match configValue ["errors"; "vanilla"] with
                     | JsonValue.Boolean b -> b
                     | _ -> validateVanilla
 
                 validateVanilla <- updateIfChanged validateVanilla newVanillaOnly
 
-                match config.Item("experimental") with
+                match configValue ["experimental"] with
                 | JsonValue.Boolean b -> experimental <- b
                 | _ -> ()
 
-                match config.Item("debug_mode") with
+                match configValue ["debug_mode"] with
                 | JsonValue.Boolean b -> debugMode <- b
                 | _ -> ()
 
                 let newIgnoreCodes =
-                    match config.Item("errors").Item("ignore") with
+                    match configValue ["errors"; "ignore"] with
                     | JsonValue.Array o ->
                         o
                         |> Array.choose (function
@@ -3922,7 +3936,7 @@ type Server(client: ILanguageClient) =
                     requiresReload <- true
 
                 let newIgnoreFiles =
-                    match config.Item("errors").Item("ignorefiles") with
+                    match configValue ["errors"; "ignorefiles"] with
                     | JsonValue.Array o ->
                         o
                         |> Array.choose (function
@@ -3935,7 +3949,7 @@ type Server(client: ILanguageClient) =
                     requiresReload <- true
 
                 let excludePatterns =
-                    match config.Item("ignore_patterns") with
+                    match configValue ["ignore_patterns"] with
                     | JsonValue.Array o ->
                         o
                         |> Array.choose (function
@@ -3947,13 +3961,13 @@ type Server(client: ILanguageClient) =
                     dontLoadPatterns <- excludePatterns
                     requiresReload <- true
 
-                match config.Item("trace").Item("server") with
+                match configValue ["trace"; "server"] with
                 | JsonValue.String "messages"
                 | JsonValue.String "verbose" -> loglevel <- LogLevel.Verbose
                 | _ -> ()
 
                 for (configKey, getter, setter) in vanillaPathMap do
-                    match config.Item("cache").Item(configKey) with
+                    match configValue ["cache"; configKey] with
                     | JsonValue.String "" -> ()
                     | JsonValue.String s -> 
                         let old = getter () |> Option.defaultValue ""
@@ -3963,7 +3977,7 @@ type Server(client: ILanguageClient) =
                     | _ -> ()
 
 
-                match config.Item("rules_folder") with
+                match configValue ["rules_folder"] with
                 | JsonValue.String x -> 
                     let old = manualRulesFolder |> Option.defaultValue ""
                     if old <> x then
@@ -3971,30 +3985,27 @@ type Server(client: ILanguageClient) =
                         requiresReload <- true
                 | _ -> ()
 
-                match config.Item("showInlineText") with
+                match configValue ["showInlineText"] with
                 | JsonValue.Boolean x -> showInlineText <- x
                 | _ -> ()
 
-                match config.Item("maxFileSize") with
+                match configValue ["maxFileSize"] with
                 | JsonValue.Number x -> maxFileSize <- int x
                 | _ -> ()
 
                 let applyDiagnosticsConfig () =
-                    try
-                        let diag = config.Item("diagnostics")
-                        match diag.Item("deferDynamicParameterDiagnostics") with
-                        | JsonValue.Boolean b -> deferDynamicParameterDiagnostics <- b
-                        | _ -> ()
-                        match diag.Item("dynamicPreflightTimeoutMs") with
-                        | JsonValue.Number x -> dynamicPreflightTimeoutMs <- max 0 (int x)
-                        | _ -> ()
-                        match diag.Item("dynamicPreflightMaxEntities") with
-                        | JsonValue.Number x -> dynamicPreflightMaxEntities <- max 0 (int x)
-                        | _ -> ()
-                        match diag.Item("dynamicDeferDelayMs") with
-                        | JsonValue.Number x -> dynamicDeferDelayMs <- max 0 (int x)
-                        | _ -> ()
-                    with _ -> ()
+                    match configValue ["diagnostics"; "deferDynamicParameterDiagnostics"] with
+                    | JsonValue.Boolean b -> deferDynamicParameterDiagnostics <- b
+                    | _ -> ()
+                    match configValue ["diagnostics"; "dynamicPreflightTimeoutMs"] with
+                    | JsonValue.Number x -> dynamicPreflightTimeoutMs <- max 0 (int x)
+                    | _ -> ()
+                    match configValue ["diagnostics"; "dynamicPreflightMaxEntities"] with
+                    | JsonValue.Number x -> dynamicPreflightMaxEntities <- max 0 (int x)
+                    | _ -> ()
+                    match configValue ["diagnostics"; "dynamicDeferDelayMs"] with
+                    | JsonValue.Number x -> dynamicDeferDelayMs <- max 0 (int x)
+                    | _ -> ()
                 applyDiagnosticsConfig ()
 
                 logInfo $"New configuration %s{p.ToString()} - requiresReload: %b{requiresReload}"

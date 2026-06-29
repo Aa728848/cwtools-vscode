@@ -13,6 +13,7 @@
     --thinking-bg: rgba(100,149,237,0.06);
     --thinking-border: rgba(100,149,237,0.25);
     --focus-ring: var(--vscode-focusBorder, #007fd4);
+    --chat-min-width: 420px;
     --chat-column-width: 760px;
     --chat-column-half-width: 380px;
     --side-workspace-width: min(560px, calc(100vw - 28px));
@@ -25,7 +26,8 @@
     --composer-popup-bottom: calc(var(--composer-stack-height) + 12px);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: var(--vscode-font-family, system-ui, sans-serif); font-size: var(--vscode-font-size, 13px); color: var(--fg); background: var(--bg); height: 100vh; display: flex; flex-direction: column; overflow: hidden; line-height: 1.5; }
+html { min-width: var(--chat-min-width); }
+body { font-family: var(--vscode-font-family, system-ui, sans-serif); font-size: var(--vscode-font-size, 13px); color: var(--fg); background: var(--bg); min-width: var(--chat-min-width); height: 100vh; display: flex; flex-direction: column; overflow: hidden; line-height: 1.5; }
 
 /* ── Batch 3.3: Accessibility — keyboard focus ring ── */
 :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; border-radius: 3px; }
@@ -45,9 +47,9 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .header { display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 10px 14px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
 .header-title { min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px; }
 .header-brand-icon { width: 18px; height: 18px; flex-shrink: 0; filter: drop-shadow(0 0 3px rgba(232,200,64,0.4)); }
-.brand-text { flex-shrink: 0; font-family: Georgia, Cambria, serif; font-size: 15px; font-weight: 600; letter-spacing: 0.3px; color: #f0f0f0; }
+.brand-text { min-width: 0; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; font-family: Georgia, Cambria, serif; font-size: 15px; font-weight: 600; letter-spacing: 0.3px; color: #f0f0f0; }
 .header-actions { flex-shrink: 0; display: flex; gap: 4px; align-items: center; margin-left: auto; }
-.current-topic-chip { min-width: 0; max-width: min(42vw, 360px); display: inline-flex; align-items: center; gap: 2px; padding: 2px 3px 2px 8px; border: 1px solid rgba(255,255,255,0.08); border-radius: 7px; background: rgba(255,255,255,0.03); }
+.current-topic-chip { flex: 0 1 180px; min-width: 72px; max-width: min(34vw, 300px); display: inline-flex; align-items: center; gap: 2px; padding: 2px 3px 2px 8px; border: 1px solid rgba(255,255,255,0.08); border-radius: 7px; background: rgba(255,255,255,0.03); }
 .current-topic-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; background: transparent; color: var(--fg); font: inherit; font-size: 12px; cursor: pointer; padding: 2px 3px; opacity: 0.86; }
 .current-topic-title:hover { opacity: 1; }
 .current-topic-rename { width: 22px; height: 22px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 5px; background: transparent; color: var(--fg); cursor: pointer; opacity: 0.56; }
@@ -70,6 +72,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
     .workspace-toggle { display: inline-flex; }
 }
 @media (max-width: 520px) {
+    .current-topic-chip { display: none; }
     .artifact-toggle-text { display: none; }
     .artifact-toggle { padding: 5px 7px; }
 }
@@ -488,7 +491,7 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .ap-dropdown { position: absolute; top: calc(100% + 2px); left: 0; max-height: 200px; overflow-y: auto; background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border); width: calc(100% - 2px); z-index: 1000; box-shadow: 0 4px 8px rgba(0,0,0,0.3); border-radius: 4px; display: none; }
 .ap-dropdown-item { padding: 5px 8px; cursor: pointer; color: var(--vscode-foreground); font-size: 12px; }
 .ap-dropdown-item:hover { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
-.input-wrapper { position: fixed; left: 0; right: 0; bottom: var(--composer-bottom-safe-area); z-index: 40; padding: 10px 12px calc(12px + var(--composer-bottom-safe-area)); flex-shrink: 0; transform: translateY(0); transition: bottom 0.34s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.34s cubic-bezier(0.2, 0.8, 0.2, 1), padding 0.34s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.input-wrapper { position: fixed; left: 0; right: 0; bottom: var(--composer-bottom-safe-area); z-index: 40; min-width: var(--chat-min-width); padding: 10px 12px calc(12px + var(--composer-bottom-safe-area)); flex-shrink: 0; transform: translateY(0); transition: bottom 0.34s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.34s cubic-bezier(0.2, 0.8, 0.2, 1), padding 0.34s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .input-container { width: min(100%, var(--chat-column-width)); max-width: var(--chat-column-width); margin: 0 auto; background: var(--input-bg); border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; overflow: visible; transition: all 0.15s; display: flex; flex-direction: column; max-height: 50vh; }
 body.chat-empty .input-wrapper { bottom: calc(50% - 20px); transform: translateY(50%); padding-left: 30px; padding-right: 30px; }
 body.chat-empty .input-wrapper::before { content: 'cwtools-vscode'; display: block; width: min(100%, var(--chat-column-width)); max-width: var(--chat-column-width); margin: 0 auto 8px; color: var(--fg); font-size: 18px; font-weight: 700; letter-spacing: 0; }

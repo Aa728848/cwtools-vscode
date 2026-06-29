@@ -1,5 +1,5 @@
 {
-  "extension.displayName": "Eddy's Stellaris CWTools",
+  "extension.displayName": "Stellaris Language Serves",
   "extension.description": "Language services, previews, validation, and AI-assisted tooling for Stellaris mod development.",
   "views.loadedFiles.name": "Loaded files",
   "views.stellarisLanguageServices.aiChat.name": "AI Assistant",

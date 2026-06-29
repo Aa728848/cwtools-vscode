@@ -1,6 +1,6 @@
 # 贡献指南
 
-感谢你关注 **Eddy's Stellaris CWTools**。这份文档面向贡献者，说明如何准备环境、运行项目、提交改动和选择验证方式。架构背景见 [ARCHITECTURE.md](./ARCHITECTURE.md)，AI Agent 工作速查见 [CLAUDE.md](./CLAUDE.md)。
+感谢你关注 **Stellaris Language Serves**。这份文档面向贡献者，说明如何准备环境、运行项目、提交改动和选择验证方式。架构背景见 [ARCHITECTURE.md](./ARCHITECTURE.md)，AI Agent 工作速查见 [CLAUDE.md](./CLAUDE.md)。
 
 ## 环境要求
 

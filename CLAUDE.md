@@ -6,7 +6,7 @@ background and `CONTRIBUTING.md` for human contributor workflow.
 
 ## Repository Shape
 
-**Eddy's Stellaris CWTools** is a customized fork of CWTools VS Code support for
+**Stellaris Language Serves** is a customized fork of CWTools VS Code support for
 Paradox modding, with Stellaris as the primary target.
 
 The main runtime layers are:

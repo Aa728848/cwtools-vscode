@@ -159,7 +159,7 @@ async function removeConflictingExtensions(): Promise<boolean> {
 		const reloadAction = localize('Reload Window', '重新加载窗口');
 		const choice = await window.showInformationMessage(
 			localize(
-				`The conflicting CWTools extension (${conflictingExtensionId}) was uninstalled. Reload the window to finish switching to Eddy's Stellaris CWTools.`,
+				`The conflicting CWTools extension (${conflictingExtensionId}) was uninstalled. Reload the window to finish switching to Stellaris Language Serves.`,
 				`已自动卸载冲突的 CWTools 插件 (${conflictingExtensionId})。请重新加载窗口以完成切换。`
 			),
 			reloadAction

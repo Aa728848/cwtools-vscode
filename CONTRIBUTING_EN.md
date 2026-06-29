@@ -1,6 +1,6 @@
 # Contribution Guide
 
-Thank you for your interest in **Eddy's Stellaris CWTools**. This document is for contributors, explaining how to set up the environment, run the project, submit changes, and verify your code. For architectural background, see [ARCHITECTURE.md](./ARCHITECTURE.md); for the AI Agent quick check sheet, see [CLAUDE.md](./CLAUDE.md).
+Thank you for your interest in **Stellaris Language Serves**. This document is for contributors, explaining how to set up the environment, run the project, submit changes, and verify your code. For architectural background, see [ARCHITECTURE.md](./ARCHITECTURE.md); for the AI Agent quick check sheet, see [CLAUDE.md](./CLAUDE.md).
 
 ## Environment Requirements
 

@@ -963,19 +963,15 @@ export async function activate(context: ExtensionContext) {
 	await migrateLegacyPublisherGlobalStorage(context).catch((e) =>
 		ErrorReporter.warn('Extension', 'Failed to migrate legacy publisher globalStorage', e)
 	);
-	await migrateLegacyConfiguration(context).catch((e) =>
-		ErrorReporter.warn('Extension', 'Failed to migrate legacy configuration', e)
-	);
+	void migrateLegacyConfiguration(context);
 	context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
 		if (e.affectsConfiguration(LEGACY_SETTINGS_NAMESPACE)) {
-			void migrateLegacyConfiguration(context).catch((error) =>
-				ErrorReporter.warn('Extension', 'Failed to migrate legacy configuration after settings change', error)
-			);
+			void migrateLegacyConfiguration(context);
 		}
 	}));
 
-	// Background check for extension updates
-	await checkForUpdates(context, {
+	// Run update checks in the background so slow GitHub/network responses never block LSP startup.
+	void checkForUpdates(context, {
 		beforeInstall: async ({ reinstallCurrentVersion }) => {
 			if (!reinstallCurrentVersion || !defaultClient) {
 				return;

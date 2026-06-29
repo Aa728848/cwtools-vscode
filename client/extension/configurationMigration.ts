@@ -118,12 +118,16 @@ async function copyConfiguredValue(
         return false;
     }
 
-    await currentConfig.update(
-        suffix,
-        (legacy as Record<string, unknown>)[field],
-        target,
-    );
-    return true;
+    try {
+        await currentConfig.update(
+            suffix,
+            (legacy as Record<string, unknown>)[field],
+            target,
+        );
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 export async function migrateLegacyConfiguration(context: ExtensionContext): Promise<number> {
@@ -131,17 +135,21 @@ export async function migrateLegacyConfiguration(context: ExtensionContext): Pro
     const suffixes = contributedConfigurationSuffixes(context);
 
     for (const suffix of suffixes) {
-        if (await copyConfiguredValue(suffix, 'globalValue', vs.ConfigurationTarget.Global)) {
-            migrated++;
-        }
-        if (await copyConfiguredValue(suffix, 'workspaceValue', vs.ConfigurationTarget.Workspace)) {
-            migrated++;
-        }
-
-        for (const folder of vs.workspace.workspaceFolders ?? []) {
-            if (await copyConfiguredValue(suffix, 'workspaceFolderValue', vs.ConfigurationTarget.WorkspaceFolder, folder.uri)) {
+        try {
+            if (await copyConfiguredValue(suffix, 'globalValue', vs.ConfigurationTarget.Global)) {
                 migrated++;
             }
+            if (await copyConfiguredValue(suffix, 'workspaceValue', vs.ConfigurationTarget.Workspace)) {
+                migrated++;
+            }
+
+            for (const folder of vs.workspace.workspaceFolders ?? []) {
+                if (await copyConfiguredValue(suffix, 'workspaceFolderValue', vs.ConfigurationTarget.WorkspaceFolder, folder.uri)) {
+                    migrated++;
+                }
+            }
+        } catch {
+            // Migration is compatibility glue only; never let it block activation.
         }
     }
 

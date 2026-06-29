@@ -54,7 +54,7 @@ describe('evaluateMcpPermission', () => {
         const decision = evaluateMcpPermission('filesystem', 'read_file', { isSubAgent: true });
         expect(decision.allowed).to.equal(false);
         expect(decision.action).to.equal('deny');
-        expect(decision.reason).to.include('cwtools.ai.permissions');
+        expect(decision.reason).to.include('stellarisLanguageServices.ai.permissions');
         expect(decision.reason).to.include('filesystem_read_file');
     });
 

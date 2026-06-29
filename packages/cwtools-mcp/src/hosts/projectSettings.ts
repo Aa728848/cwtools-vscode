@@ -46,6 +46,8 @@ interface CachedSettings {
 }
 
 const cache = new Map<string, CachedSettings>();
+const SETTINGS_NAMESPACE = 'stellarisLanguageServices';
+const LEGACY_SETTINGS_NAMESPACE = 'cwtools';
 
 function readSettingsObject(workspaceRoot: string): Record<string, unknown> | undefined {
   const file = path.join(workspaceRoot, '.vscode', 'settings.json');
@@ -88,10 +90,13 @@ function resolveDotted(obj: Record<string, unknown>, fullKey: string): unknown {
 }
 
 
-export function getCwtoolsSetting(workspaceRoot: string, subKey: string): unknown {
+export function getExtensionSetting(workspaceRoot: string, subKey: string): unknown {
   const settings = readSettingsObject(workspaceRoot);
   if (!settings) return undefined;
-  return resolveDotted(settings, `cwtools.${subKey}`);
+  const current = resolveDotted(settings, `${SETTINGS_NAMESPACE}.${subKey}`);
+  return current !== undefined
+    ? current
+    : resolveDotted(settings, `${LEGACY_SETTINGS_NAMESPACE}.${subKey}`);
 }
 
 function asNonEmptyStringArray(value: unknown): string[] {
@@ -101,7 +106,7 @@ function asNonEmptyStringArray(value: unknown): string[] {
 }
 
 export function readIgnoredDiagnostics(workspaceRoot: string): string[] {
-  return asNonEmptyStringArray(getCwtoolsSetting(workspaceRoot, 'ai.ignoredDiagnostics'));
+  return asNonEmptyStringArray(getExtensionSetting(workspaceRoot, 'ai.ignoredDiagnostics'));
 }
 
 
@@ -168,7 +173,7 @@ export interface LocalisationConfig {
 }
 
 export function resolveLocalisationLanguages(workspaceRoot: string): LocalisationConfig {
-  const fromSettings = asNonEmptyStringArray(getCwtoolsSetting(workspaceRoot, 'localisation.languages'));
+  const fromSettings = asNonEmptyStringArray(getExtensionSetting(workspaceRoot, 'localisation.languages'));
   if (fromSettings.length > 0) return { languages: fromSettings, source: 'settings' };
 
   const detected = detectLocalisationLanguage(workspaceRoot);
@@ -178,16 +183,16 @@ export function resolveLocalisationLanguages(workspaceRoot: string): Localisatio
 }
 
 export function resolveGeneratedStrings(workspaceRoot: string): string {
-  const v = getCwtoolsSetting(workspaceRoot, 'localisation.generated_strings');
+  const v = getExtensionSetting(workspaceRoot, 'localisation.generated_strings');
   return typeof v === 'string' && v.length > 0 ? v : 'replace';
 }
 
-// `cwtools.experimental` setting. Defaults ON for the MCP: it gates the incremental
+// `stellarisLanguageServices.experimental` setting. Defaults ON for the MCP: it gates the incremental
 // scripted-type refresh, which lets revalidation of scripted_triggers/effects/values
 // patch the type index in milliseconds instead of triggering a full reload — so
 // definition-file edits don't mis-report references. Honor an explicit opt-out.
 export function resolveExperimental(workspaceRoot: string): boolean {
-  const v = getCwtoolsSetting(workspaceRoot, 'experimental');
+  const v = getExtensionSetting(workspaceRoot, 'experimental');
   return typeof v === 'boolean' ? v : true;
 }
 

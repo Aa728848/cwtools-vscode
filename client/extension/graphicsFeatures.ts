@@ -110,11 +110,11 @@ export function isImagePathLinkText(text: string): boolean {
 
 /**
  * Get the Stellaris vanilla game installation path from user configuration.
- * Uses `cwtools.cache.stellaris` which is set via the "Select vanilla folder" prompt.
+ * Uses `stellarisLanguageServices.cache.stellaris` which is set via the "Select vanilla folder" prompt.
  * This mirrors the approach used by GuiPanel._getGamePath().
  */
 function getGamePath(): string | null {
-    const config = vs.workspace.getConfiguration('cwtools');
+    const config = vs.workspace.getConfiguration('stellarisLanguageServices');
     const configPath = config.get<string>('cache.stellaris');
     if (configPath && fs.existsSync(configPath)) return configPath;
     return null;
@@ -880,7 +880,7 @@ export function registerGraphicsFeatures(context: vs.ExtensionContext): void {
     context.subscriptions.push(textWatcher);
 
     const configWatcher = vs.workspace.onDidChangeConfiguration(event => {
-        if (event.affectsConfiguration('cwtools.cache.stellaris')) {
+        if (event.affectsConfiguration('stellarisLanguageServices.cache.stellaris')) {
             gfxIndexDirty = true;
             roomCacheDirty = true;
             imageCache.clear();

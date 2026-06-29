@@ -475,7 +475,7 @@ export class ParticlePanel {
     }
 
     private _getGamePath(): string | null {
-        const configPath = vscode.workspace.getConfiguration('cwtools').get<string>('cache.stellaris');
+        const configPath = vscode.workspace.getConfiguration('stellarisLanguageServices').get<string>('cache.stellaris');
         return configPath && fs.existsSync(configPath) ? configPath : null;
     }
 

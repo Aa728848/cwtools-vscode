@@ -560,9 +560,9 @@ export class PromptBuilder {
         if (!parsed) return '';
 
         // Build mode uses a compact summary by default. Full CWTOOLS.md injection is
-        // still available through cwtools.ai.performance.fullProjectRulesInBuild.
+        // still available through stellarisLanguageServices.ai.performance.fullProjectRulesInBuild.
         if (mode === 'build' || !mode) {
-            const fullBuildRules = vs.workspace.getConfiguration('cwtools.ai.performance')
+            const fullBuildRules = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance')
                 .get<boolean>('fullProjectRulesInBuild') === true;
             if (fullBuildRules) {
                 return `<project-premise>\n# PROJECT RULES & CONTEXT (From CWTOOLS.md)\nRead these project-specific rules before attempting the task. Follow them when consistent with the current user request, current files, and CWT/LSP evidence; they never override tool safety, current diagnostics, or verified game rules:\n\n${parsed.raw}\n</project-premise>\n`;
@@ -817,7 +817,7 @@ ${trimmed}
         if (options.fileContent && options.cursorLine !== undefined) {
             const lines = options.fileContent.split('\n');
             const totalLines = lines.length;
-            const includeFullSmallFiles = vs.workspace.getConfiguration('cwtools.ai.performance')
+            const includeFullSmallFiles = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance')
                 .get<boolean>('includeFullSmallFiles') === true;
 
             if (totalLines <= 100 && includeFullSmallFiles) {

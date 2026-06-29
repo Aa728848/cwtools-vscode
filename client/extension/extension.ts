@@ -32,6 +32,7 @@ import { isImagePathLinkText, registerGraphicsFeatures } from './graphicsFeature
 import { registerVanillaCompare } from './vanillaCompare';
 import { registerPdxIndentFormatter } from './pdxIndentFormatter';
 import { registerTexturePreviewEditor } from './texturePreviewEditor';
+import { LEGACY_SETTINGS_NAMESPACE, migrateLegacyConfiguration } from './configurationMigration';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
 import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
 import type { GameProfile } from './gameProfiles';
@@ -404,7 +405,7 @@ function resolveBundledRulesPath(context: ExtensionContext, languageId: string):
 function getConfiguredGamePath(languageId: string): string | undefined {
 	if (!isKnownGameLanguageId(languageId)) return undefined;
 	const key = getCacheSettingKey(languageId);
-	const value = workspace.getConfiguration('cwtools').get<string>(key, '')?.trim();
+	const value = workspace.getConfiguration('stellarisLanguageServices').get<string>(key, '')?.trim();
 	return value || undefined;
 }
 
@@ -615,7 +616,7 @@ function inferLanguageIdFromWorkspace(): string | undefined {
 }
 
 function getRulesSourceStatus(languageId: string, cacheDir: string, bundledRulesPath: string): RulesSourceStatus {
-	const config = workspace.getConfiguration('cwtools');
+	const config = workspace.getConfiguration('stellarisLanguageServices');
 	const rulesVersion = config.get<string>('rules_version', 'latest');
 	const manualRulesFolder = config.get<string>('rules_folder', '')?.trim();
 	if (rulesVersion === 'manual' && manualRulesFolder) {
@@ -721,7 +722,7 @@ async function selectGameFolderFlow(languageHint?: string): Promise<boolean> {
 	}
 
 	const finalProfile = getProfileByLanguageId(languageId);
-	await workspace.getConfiguration('cwtools').update(getCacheSettingKey(languageId), selectedPath, true);
+	await workspace.getConfiguration('stellarisLanguageServices').update(getCacheSettingKey(languageId), selectedPath, true);
 
 	// ── Automatically set workspace-level file associations to enable language themes/validation ──
 	if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
@@ -926,13 +927,13 @@ async function showSetupPanel(options: InstallHealthOptions): Promise<void> {
 
 async function maybeShowFirstRunExperience(options: InstallHealthOptions): Promise<void> {
 	const version = options.context.extension.packageJSON?.version ?? 'dev';
-	const shownKey = `cwtools.setupPanel.shown.${version}`;
+	const shownKey = `stellarisLanguageServices.setupPanel.shown.${version}`;
 	if (!options.context.globalState.get<boolean>(shownKey)) {
 		await options.context.globalState.update(shownKey, true);
 		await showSetupPanel(options);
 	}
 
-	const gamePromptKey = `cwtools.gamePathPrompted.${options.languageId}`;
+	const gamePromptKey = `stellarisLanguageServices.gamePathPrompted.${options.languageId}`;
 	const hasGamePath = options.isVanillaFolder || isValidGameDataPath(getConfiguredGamePath(options.languageId));
 	if (!hasGamePath && !options.context.globalState.get<boolean>(gamePromptKey)) {
 		const profile = getKnownProfileByLanguageId(options.languageId);
@@ -962,6 +963,16 @@ export async function activate(context: ExtensionContext) {
 	await migrateLegacyPublisherGlobalStorage(context).catch((e) =>
 		ErrorReporter.warn('Extension', 'Failed to migrate legacy publisher globalStorage', e)
 	);
+	await migrateLegacyConfiguration(context).catch((e) =>
+		ErrorReporter.warn('Extension', 'Failed to migrate legacy configuration', e)
+	);
+	context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
+		if (e.affectsConfiguration(LEGACY_SETTINGS_NAMESPACE)) {
+			void migrateLegacyConfiguration(context).catch((error) =>
+				ErrorReporter.warn('Extension', 'Failed to migrate legacy configuration after settings change', error)
+			);
+		}
+	}));
 
 	// Background check for extension updates
 	await checkForUpdates(context, {
@@ -1328,11 +1339,11 @@ export async function activate(context: ExtensionContext) {
 	toolExecutor.onTodoUpdate = (todos) =>
 		chatPanelProvider.sendTodoUpdate(todos);
 	// Sync fileWriteMode from config on startup
-	toolExecutor.fileWriteMode = workspace.getConfiguration('cwtools.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
+	toolExecutor.fileWriteMode = workspace.getConfiguration('stellarisLanguageServices.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
 	// Re-sync fileWriteMode whenever config changes
 	context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
-		if (e.affectsConfiguration('cwtools.ai.agentFileWriteMode')) {
-			toolExecutor.fileWriteMode = workspace.getConfiguration('cwtools.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
+		if (e.affectsConfiguration('stellarisLanguageServices.ai.agentFileWriteMode')) {
+			toolExecutor.fileWriteMode = workspace.getConfiguration('stellarisLanguageServices.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
 		}
 	}));
 	// Invalidate LSP read cache on document changes so AI doesn't base decisions on stale data
@@ -1411,7 +1422,7 @@ export async function activate(context: ExtensionContext) {
 	});
 
 	safeRegisterCommand(context, "cwtools.ai.manageIgnoredDiagnostics", async () => {
-		const config = vs.workspace.getConfiguration('cwtools.ai');
+		const config = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
 		const currentIgnored = config.get<string[]>('ignoredDiagnostics', []);
 
 		const allDiagnostics = vs.languages.getDiagnostics();
@@ -1760,7 +1771,7 @@ export async function activate(context: ExtensionContext) {
 					}
 				},
 				handleDiagnostics: (uri, diagnostics, next) => {
-					const config = workspace.getConfiguration('cwtools.ai');
+					const config = workspace.getConfiguration('stellarisLanguageServices.ai');
 					const ignored = config.get<string[]>('ignoredDiagnostics', []);
 					let result = diagnostics;
 					if (ignored.length > 0) {
@@ -1790,9 +1801,9 @@ export async function activate(context: ExtensionContext) {
 				isVanillaFolder: isVanillaFolder,
 				rulesCache: cacheDir,
 				bundledRulesPath: bundledRulesPath,
-				rules_version: workspace.getConfiguration('cwtools').get('rules_version'),
+				rules_version: workspace.getConfiguration('stellarisLanguageServices').get('rules_version'),
 				repoPath: repoPath,
-				diagnosticLogging: workspace.getConfiguration('cwtools').get('logging.diagnostic')
+				diagnosticLogging: workspace.getConfiguration('stellarisLanguageServices').get('logging.diagnostic')
 			},
 			revealOutputChannelOn: RevealOutputChannelOn.Error
 		}
@@ -1981,8 +1992,8 @@ export async function activate(context: ExtensionContext) {
 		context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
 			const profile = getKnownProfileByLanguageId(language);
 			if (
-				e.affectsConfiguration('cwtools.rules_version') ||
-				e.affectsConfiguration('cwtools.rules_folder') ||
+				e.affectsConfiguration('stellarisLanguageServices.rules_version') ||
+				e.affectsConfiguration('stellarisLanguageServices.rules_folder') ||
 				(profile ? e.affectsConfiguration(profile.cacheSettingKey) : false)
 			) {
 				updateRulesStatusBar();
@@ -2045,7 +2056,7 @@ export async function activate(context: ExtensionContext) {
 		});
 
 		const toggleInlineTextFunc = async () => {
-			const config = vs.workspace.getConfiguration("cwtools");
+			const config = vs.workspace.getConfiguration("stellarisLanguageServices");
 			const currentState = config.get<boolean>("showInlineText", false);
 			await config.update("showInlineText", !currentState, vs.ConfigurationTarget.Global);
 			if (!currentState) {
@@ -2282,7 +2293,7 @@ export async function activate(context: ExtensionContext) {
 		const rootPath = workspace.workspaceFolders[0]!.uri.fsPath;
 		if (hasWorkspaceModDescriptor(rootPath)) {
 			if (languageId === "paradox") {
-				const gamePromptKey = "cwtools.gamePathPrompted.paradox";
+				const gamePromptKey = "stellarisLanguageServices.gamePathPrompted.paradox";
 				if (!context.globalState.get<boolean>(gamePromptKey)) {
 					void context.globalState.update(gamePromptKey, true);
 					void window.showInformationMessage(
@@ -2324,7 +2335,7 @@ export async function activate(context: ExtensionContext) {
 
 /**
  * Scans the workspace's localisation directories to determine which language
- * has the most YML files. If `cwtools.localisation.languages` has never been
+ * has the most YML files. If `stellarisLanguageServices.localisation.languages` has never been
  * explicitly set by the user (i.e., it's still using the package.json default),
  * this function automatically sets it to the detected language.
  *
@@ -2332,7 +2343,7 @@ export async function activate(context: ExtensionContext) {
  * need to manually configure the validation language.
  */
 async function autoDetectLocLanguage(): Promise<void> {
-	const config = workspace.getConfiguration('cwtools');
+	const config = workspace.getConfiguration('stellarisLanguageServices');
 	const inspected = config.inspect<string[]>('localisation.languages');
 
 	// If the user has explicitly set this at any level, respect their choice

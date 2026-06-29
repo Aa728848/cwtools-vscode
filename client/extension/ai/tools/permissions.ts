@@ -116,7 +116,7 @@ export function evaluateMcpPermission(
     options: { isSubAgent?: boolean; rules?: Record<string, string> }
 ): McpPermissionDecision {
     const id = `${server}_${tool}`;
-    const settingHint = `"cwtools.ai.permissions": { "mcp": { "${id}": "allow" } }`;
+    const settingHint = `"stellarisLanguageServices.ai.permissions": { "mcp": { "${id}": "allow" } }`;
 
     let matched: MatchedMcpRule | undefined;
     for (const [pattern, rawAction] of Object.entries(options.rules ?? {})) {
@@ -154,7 +154,7 @@ export function evaluateMcpPermission(
             allowed: false,
             action: 'deny',
             matchedPattern: matched.pattern,
-            reason: `MCP tool '${server}/${tool}' is denied by permission pattern '${matched.pattern}'. Do not retry this tool; if the call is required, the user must change the rule in cwtools.ai.permissions.mcp.`,
+            reason: `MCP tool '${server}/${tool}' is denied by permission pattern '${matched.pattern}'. Do not retry this tool; if the call is required, the user must change the rule in stellarisLanguageServices.ai.permissions.mcp.`,
         };
     }
     // 'ask': interactive MCP approval is not implemented yet — fail closed with guidance.

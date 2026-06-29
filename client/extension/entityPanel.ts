@@ -867,7 +867,7 @@ export class EntityPanel {
     }
 
     private _getGamePath(): string | null {
-        const config = vscode.workspace.getConfiguration('cwtools');
+        const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
         const configPath = config.get<string>('cache.stellaris');
         if (configPath && fs.existsSync(configPath)) return configPath;
         return null;

@@ -2155,7 +2155,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // Auto-review: reviewer swap at the approval boundary; ask_user falls through to the card.
         // Mode-agnostic: utility/build/script all share this exact funnel.
-        const reviewerMode = vs.workspace.getConfiguration('cwtools.ai').get<string>('approvals.reviewer', 'user');
+        const reviewerMode = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('approvals.reviewer', 'user');
         if (reviewerMode === 'auto_review' && !isEscalationRequest) {
             return this.runAutoReview(id, tool, description, command, context).then(decision => {
                 if (decision !== undefined) return decision;

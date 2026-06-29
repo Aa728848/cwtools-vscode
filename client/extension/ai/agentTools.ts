@@ -1321,7 +1321,7 @@ export class AgentToolExecutor {
 
         // Create new connection
         const { MCPClient } = await import('./mcpClient');
-        const config = vs.workspace.getConfiguration('cwtools.ai');
+        const config = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const servers = config.get<any[]>('mcp.servers') || [];
         const serverConfig = servers.find((s: any) => s.name === serverName);
         if (!serverConfig) throw new Error(`MCP server "${serverName}" not found in configuration`);
@@ -1365,7 +1365,7 @@ export class AgentToolExecutor {
 
     /** List configured MCP servers' tools as mcp_<server>_<tool> definitions. Opt-in; metadata is untrusted. */
     async getDynamicMcpToolDefinitions(mode: import('./types').AgentMode): Promise<import('./types').ToolDefinition[]> {
-        const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         if (cfg.get<boolean>('mcp.registerDynamicTools', false) !== true) return [];
         const { isToolAllowedForMode } = require('./tools/permissions') as typeof import('./tools/permissions');
         if (!isToolAllowedForMode('mcp_call', mode)) return [];
@@ -1464,7 +1464,7 @@ export class AgentToolExecutor {
         const isSubAgent = !!context?.runnerOptions?.useSlimPrompt;
         let mcpRules: Record<string, string> | undefined;
         try {
-            mcpRules = vs.workspace.getConfiguration('cwtools.ai').get<{ mcp?: Record<string, string> }>('permissions')?.mcp;
+            mcpRules = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<{ mcp?: Record<string, string> }>('permissions')?.mcp;
         } catch { /* configuration unavailable (tests) — fall back to defaults */ }
         const permission = evaluateMcpPermission(serverName, toolName, { isSubAgent, rules: mcpRules });
         if (!permission.allowed) {
@@ -1592,7 +1592,7 @@ export class AgentToolExecutor {
             const { TaskGraphEngine } = await import('./orchestrator/taskGraphEngine');
             const { applyUserModelOverrides } = await import('./orchestrator/agentRegistry');
             //Apply user's child Agent model configuration (read from VS Code settings)
-            const cfg = vs.workspace.getConfiguration('cwtools.ai');
+            const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
             const agentModels = cfg.get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels');
             if (agentModels) {
                 applyUserModelOverrides(agentModels);

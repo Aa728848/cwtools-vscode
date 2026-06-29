@@ -84,7 +84,7 @@ export interface GameProfile {
 	languageId: string;
 	/** File extensions associated with this game. */
 	fileExtensions: string[];
-	/** Configuration key for the vanilla cache path (e.g. 'cwtools.cache.stellaris'). */
+	/** Configuration key for the vanilla cache path (e.g. 'stellarisLanguageServices.cache.stellaris'). */
 	cacheSettingKey: string;
 	/** GitHub URL for the CWTools config rules repository. */
 	rulesRemoteUrl: string;
@@ -149,7 +149,7 @@ registerProfile({
 	displayName: 'Stellaris',
 	languageId: 'stellaris',
 	fileExtensions: ['txt', 'gui', 'gfx', 'asset', 'cwt'],
-	cacheSettingKey: 'cwtools.cache.stellaris',
+	cacheSettingKey: 'stellarisLanguageServices.cache.stellaris',
 	rulesRemoteUrl: 'https://github.com/Aa728848/cwtools-stellaris-config',
 	localisation: {
 		...STANDARD_LOC_PROFILE,
@@ -185,7 +185,7 @@ registerProfile({
 	displayName: 'Hearts of Iron IV',
 	languageId: 'hoi4',
 	fileExtensions: ['txt', 'gui', 'gfx', 'asset', 'cwt'],
-	cacheSettingKey: 'cwtools.cache.hoi4',
+	cacheSettingKey: 'stellarisLanguageServices.cache.hoi4',
 	rulesRemoteUrl: 'https://github.com/cwtools/cwtools-hoi4-config',
 	localisation: STANDARD_LOC_PROFILE,
 	folders: {
@@ -211,7 +211,7 @@ registerProfile({
 	displayName: 'Europa Universalis IV',
 	languageId: 'eu4',
 	fileExtensions: ['txt', 'gui', 'gfx', 'asset', 'cwt'],
-	cacheSettingKey: 'cwtools.cache.eu4',
+	cacheSettingKey: 'stellarisLanguageServices.cache.eu4',
 	rulesRemoteUrl: 'https://github.com/cwtools/cwtools-eu4-config',
 	localisation: STANDARD_LOC_PROFILE,
 	folders: {
@@ -237,7 +237,7 @@ registerProfile({
 	displayName: 'Crusader Kings II',
 	languageId: 'ck2',
 	fileExtensions: ['txt', 'gui', 'gfx', 'cwt'],
-	cacheSettingKey: 'cwtools.cache.ck2',
+	cacheSettingKey: 'stellarisLanguageServices.cache.ck2',
 	rulesRemoteUrl: 'https://github.com/cwtools/cwtools-ck2-config',
 	localisation: {
 		directories: ['localisation'],
@@ -268,7 +268,7 @@ registerProfile({
 	displayName: 'Crusader Kings III',
 	languageId: 'ck3',
 	fileExtensions: ['txt', 'gui', 'gfx', 'cwt'],
-	cacheSettingKey: 'cwtools.cache.ck3',
+	cacheSettingKey: 'stellarisLanguageServices.cache.ck3',
 	rulesRemoteUrl: 'https://github.com/cwtools/cwtools-ck3-config',
 	localisation: MODERN_LOC_PROFILE,
 	folders: {
@@ -295,7 +295,7 @@ registerProfile({
 	displayName: 'Victoria II',
 	languageId: 'vic2',
 	fileExtensions: ['txt', 'cwt'],
-	cacheSettingKey: 'cwtools.cache.vic2',
+	cacheSettingKey: 'stellarisLanguageServices.cache.vic2',
 	rulesRemoteUrl: 'https://github.com/cwtools/cwtools-vic2-config',
 	localisation: {
 		directories: ['localisation'],
@@ -326,7 +326,7 @@ registerProfile({
 	displayName: 'Victoria 3',
 	languageId: 'vic3',
 	fileExtensions: ['txt', 'gui', 'gfx', 'cwt'],
-	cacheSettingKey: 'cwtools.cache.vic3',
+	cacheSettingKey: 'stellarisLanguageServices.cache.vic3',
 	rulesRemoteUrl: 'https://github.com/cwtools/cwtools-vic3-config',
 	localisation: MODERN_LOC_PROFILE,
 	folders: {
@@ -353,7 +353,7 @@ registerProfile({
 	displayName: 'Imperator: Rome',
 	languageId: 'imperator',
 	fileExtensions: ['txt', 'gui', 'gfx', 'cwt'],
-	cacheSettingKey: 'cwtools.cache.imperator',
+	cacheSettingKey: 'stellarisLanguageServices.cache.imperator',
 	rulesRemoteUrl: 'https://github.com/cwtools/cwtools-ir-config',
 	localisation: MODERN_LOC_PROFILE,
 	folders: {
@@ -380,7 +380,7 @@ registerProfile({
 	displayName: 'Europa Universalis V',
 	languageId: 'eu5',
 	fileExtensions: ['txt', 'gui', 'gfx', 'cwt'],
-	cacheSettingKey: 'cwtools.cache.eu5',
+	cacheSettingKey: 'stellarisLanguageServices.cache.eu5',
 	rulesRemoteUrl: 'https://github.com/kaiser-chris/cwtools-eu5-config',
 	localisation: MODERN_LOC_PROFILE,
 	folders: {
@@ -486,8 +486,8 @@ export function getRulesRemoteUrl(languageId: string): string {
  */
 export function getCacheSettingKey(languageId: string): string {
 	const profile = getProfileByLanguageId(languageId);
-	// Strip the 'cwtools.' prefix for use with getConfiguration('cwtools')
-	return profile.cacheSettingKey.replace('cwtools.', '');
+	// Strip the namespace prefix for use with getConfiguration('stellarisLanguageServices')
+	return profile.cacheSettingKey.replace('stellarisLanguageServices.', '');
 }
 
 /**

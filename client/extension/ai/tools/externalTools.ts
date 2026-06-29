@@ -721,7 +721,7 @@ export class ExternalToolHandler {
 
     async removeIgnoredDiagnostic(args: { diagnosticKey: string; reason: string }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string }> {
         const vs = await import('vscode');
-        const fileWriteMode = vs.workspace.getConfiguration('cwtools.ai').get<string>('agentFileWriteMode', 'confirm');
+        const fileWriteMode = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('agentFileWriteMode', 'confirm');
 
         // Auto mode -> strictly follow whitelist without asking
         if (fileWriteMode === 'auto') {
@@ -750,7 +750,7 @@ export class ExternalToolHandler {
 
         try {
             const vs = await import('vscode');
-            const config = vs.workspace.getConfiguration('cwtools.ai');
+            const config = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
             const ignored = config.get<string[]>('ignoredDiagnostics', []);
             const updated = ignored.filter(k => k !== args.diagnosticKey);
             await config.update('ignoredDiagnostics', updated, vs.ConfigurationTarget.Workspace);
@@ -768,7 +768,7 @@ export class ExternalToolHandler {
     async getIgnoredDiagnostics(): Promise<{ success: boolean; ignoredKeys: string[]; count: number }> {
         try {
             const vs = await import('vscode');
-            const ignored = vs.workspace.getConfiguration('cwtools.ai').get<string[]>('ignoredDiagnostics', []);
+            const ignored = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string[]>('ignoredDiagnostics', []);
             return { success: true, count: ignored.length, ignoredKeys: ignored };
         } catch {
             return { success: false, count: 0, ignoredKeys: [] };
@@ -1098,7 +1098,7 @@ export class ExternalToolHandler {
         // Env allowlist: 'log' shadow-reports what enforcement would drop; 'enforce' filters.
         let spawnEnv = commandEnv;
         try {
-            const shellCfg = vs.workspace.getConfiguration('cwtools.ai');
+            const shellCfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
             const envMode = shellCfg.get<string>('shell.envAllowlist', 'log');
             if (envMode === 'log' || envMode === 'enforce') {
                 const { buildSandboxedEnv } = await import('../runner/shellEnv');
@@ -1283,7 +1283,7 @@ export class ExternalToolHandler {
         const query = args.query.trim();
 
         // Try Brave Search API first
-        const braveKey = vs.workspace.getConfiguration('cwtools.ai').get<string>('braveSearchApiKey') ?? '';
+        const braveKey = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('braveSearchApiKey') ?? '';
         if (braveKey) {
             try {
                 const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
@@ -1401,7 +1401,7 @@ export class ExternalToolHandler {
         const query = args.query.trim();
 
         // Try Exa semantic code search first
-        const exaKey = vs.workspace.getConfiguration('cwtools.ai').get<string>('exaApiKey') ?? '';
+        const exaKey = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('exaApiKey') ?? '';
         if (exaKey) {
             try {
                 const controller = new AbortController();
@@ -1540,12 +1540,12 @@ export class ExternalToolHandler {
 
     /** Resolve the ImageMagick binary path (custom setting or default 'magick'). */
     private getImageMagickBin(): string {
-        return vs.workspace.getConfiguration('cwtools.ai').get<string>('imageMagickPath') || 'magick';
+        return vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('imageMagickPath') || 'magick';
     }
 
     /** Resolve the ffmpeg binary path (custom setting or default 'ffmpeg'). */
     private getFfmpegBin(): string {
-        return vs.workspace.getConfiguration('cwtools.ai').get<string>('ffmpegPath') || 'ffmpeg';
+        return vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('ffmpegPath') || 'ffmpeg';
     }
 
     /** Check if ImageMagick is installed and accessible. Caches result for the session. */
@@ -1589,7 +1589,7 @@ export class ExternalToolHandler {
         if (!(await this.ensureImageMagickAvailable())) {
             return {
                 success: false,
-                message: `ImageMagick is not installed or not found at "${this.getImageMagickBin()}". Please install ImageMagick (https://imagemagick.org/) and ensure it is in your PATH, or set the custom path in cwtools.ai.imageMagickPath.`,
+                message: `ImageMagick is not installed or not found at "${this.getImageMagickBin()}". Please install ImageMagick (https://imagemagick.org/) and ensure it is in your PATH, or set the custom path in stellarisLanguageServices.ai.imageMagickPath.`,
             };
         }
 
@@ -1667,7 +1667,7 @@ export class ExternalToolHandler {
         if (!(await this.ensureFfmpegAvailable())) {
             return {
                 success: false,
-                message: `ffmpeg is not installed or not found at "${this.getFfmpegBin()}". Please install ffmpeg (https://ffmpeg.org/) and ensure it is in your PATH, or set the custom path in cwtools.ai.ffmpegPath.`,
+                message: `ffmpeg is not installed or not found at "${this.getFfmpegBin()}". Please install ffmpeg (https://ffmpeg.org/) and ensure it is in your PATH, or set the custom path in stellarisLanguageServices.ai.ffmpegPath.`,
             };
         }
 

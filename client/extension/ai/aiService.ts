@@ -171,7 +171,7 @@ export class AIService {
      * Read the current user configuration for AI.
      */
     getConfig(): AIUserConfig {
-        const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const provider = cfg.get<string>('provider', 'openai');
         const providerEndpoints = cfg.get<Record<string, string>>('providerEndpoints', {}) || {};
         // Per-provider endpoint wins; legacy global endpoint only ever applies to the
@@ -218,7 +218,7 @@ export class AIService {
      * so it never leaks into other providers.
      */
     getEndpointForProvider(providerId: string): string {
-        const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const map = cfg.get<Record<string, string>>('providerEndpoints', {}) || {};
         const perProvider = (map[providerId] || '').trim();
         if (perProvider) return perProvider;
@@ -233,7 +233,7 @@ export class AIService {
      * a no-op once the legacy value is empty.
      */
     async migrateLegacyEndpoint(): Promise<void> {
-        const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const legacy = (cfg.get<string>('endpoint', '') || '').trim();
         if (!legacy) return;
         const provider = cfg.get<string>('provider', '');
@@ -256,7 +256,7 @@ export class AIService {
         if (key) return key;
 
         // 2. Migration path: read plaintext from settings.json and move to SecretStorage
-        const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const legacyKey = cfg.get<string>('apiKey', '');
         if (legacyKey && legacyKey.trim().length > 0) {
             const currentProvider = cfg.get<string>('provider', '');
@@ -1681,7 +1681,7 @@ export class AIService {
         const provider = getProvider(providerId);
 
         // Set provider in config
-        await vs.workspace.getConfiguration('cwtools.ai').update('provider', providerId, vs.ConfigurationTarget.Global);
+        await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('provider', providerId, vs.ConfigurationTarget.Global);
 
         // Prompt for model selection
         if (providerId === 'ollama') {
@@ -1719,10 +1719,10 @@ export class AIService {
                                     ignoreFocusOut: true,
                                 });
                                 if (modelName) {
-                                    await vs.workspace.getConfiguration('cwtools.ai').update('model', modelName, vs.ConfigurationTarget.Global);
+                                    await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('model', modelName, vs.ConfigurationTarget.Global);
                                 }
                             } else {
-                                await vs.workspace.getConfiguration('cwtools.ai').update('model', selectedModel.label, vs.ConfigurationTarget.Global);
+                                await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('model', selectedModel.label, vs.ConfigurationTarget.Global);
                             }
                         }
                     } else {
@@ -1737,7 +1737,7 @@ export class AIService {
                             ignoreFocusOut: true,
                         });
                         if (modelName) {
-                            await vs.workspace.getConfiguration('cwtools.ai').update('model', modelName, vs.ConfigurationTarget.Global);
+                            await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('model', modelName, vs.ConfigurationTarget.Global);
                         }
                     }
                 }
@@ -1750,7 +1750,7 @@ export class AIService {
                 ignoreFocusOut: true,
             });
             if (modelName) {
-                await vs.workspace.getConfiguration('cwtools.ai').update('model', modelName, vs.ConfigurationTarget.Global);
+                await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('model', modelName, vs.ConfigurationTarget.Global);
             }
         } else if (provider.models.length > 0) {
             const modelItems = provider.models.map(m => ({
@@ -1776,10 +1776,10 @@ export class AIService {
                         ignoreFocusOut: true,
                     });
                     if (modelName) {
-                        await vs.workspace.getConfiguration('cwtools.ai').update('model', modelName, vs.ConfigurationTarget.Global);
+                        await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('model', modelName, vs.ConfigurationTarget.Global);
                     }
                 } else {
-                    await vs.workspace.getConfiguration('cwtools.ai').update('model', selectedModel.label, vs.ConfigurationTarget.Global);
+                    await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('model', selectedModel.label, vs.ConfigurationTarget.Global);
                 }
             }
         }
@@ -1796,7 +1796,7 @@ export class AIService {
                 ignoreFocusOut: true,
             });
             if (epInput !== undefined) {
-                const cfg = vs.workspace.getConfiguration('cwtools.ai');
+                const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
                 const map = { ...(cfg.get<Record<string, string>>('providerEndpoints', {}) || {}) };
                 const trimmed = epInput.trim();
                 if (trimmed) map[providerId] = trimmed; else delete map[providerId];
@@ -1810,7 +1810,7 @@ export class AIService {
                 ignoreFocusOut: true,
             });
             if (ctxInput && parseInt(ctxInput) > 0) {
-                await vs.workspace.getConfiguration('cwtools.ai').update(
+                await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update(
                     'maxContextTokens', parseInt(ctxInput), vs.ConfigurationTarget.Global
                 );
             }
@@ -1822,7 +1822,7 @@ export class AIService {
         }
 
         // Enable AI
-        await vs.workspace.getConfiguration('cwtools.ai').update('enabled', true, vs.ConfigurationTarget.Global);
+        await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('enabled', true, vs.ConfigurationTarget.Global);
 
     }
 
@@ -1873,7 +1873,7 @@ export class AIService {
                     if (res.ok) {
                         const data = await res.json() as any;
                         if (data && Array.isArray(data.data)) {
-                            const dynModels = data.data.map((m: any) => m.id); const cfg = vs.workspace.getConfiguration('cwtools.ai'); let currentDynamic = cfg.get('dynamicModels') || {}; currentDynamic = { ...currentDynamic, [providerId]: dynModels }; await cfg.update('dynamicModels', currentDynamic, vs.ConfigurationTarget.Global); detectedModels = dynModels.map((id: string) => ({ id }));
+                            const dynModels = data.data.map((m: any) => m.id); const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai'); let currentDynamic = cfg.get('dynamicModels') || {}; currentDynamic = { ...currentDynamic, [providerId]: dynModels }; await cfg.update('dynamicModels', currentDynamic, vs.ConfigurationTarget.Global); detectedModels = dynModels.map((id: string) => ({ id }));
                         }
                     }
                 } catch (e) {
@@ -1932,14 +1932,14 @@ export class AIService {
      * sets the model config, infers maxContextTokens, and shows confirmation.
      */
     private async applyModelSelection(modelName: string, provider: { maxContextTokens: number }): Promise<void> {
-        await vs.workspace.getConfiguration('cwtools.ai').update('model', modelName, vs.ConfigurationTarget.Global);
+        await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('model', modelName, vs.ConfigurationTarget.Global);
         const { MODEL_CONTEXT_TOKENS } = await import('./providers');
         let foundCtx = 0;
         for (const [key, val] of Object.entries(MODEL_CONTEXT_TOKENS)) {
             if (modelName.includes(key)) { foundCtx = val as number; break; }
         }
         if (foundCtx > 0 || provider.maxContextTokens) {
-            await vs.workspace.getConfiguration('cwtools.ai').update('maxContextTokens', foundCtx || provider.maxContextTokens, vs.ConfigurationTarget.Global);
+            await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('maxContextTokens', foundCtx || provider.maxContextTokens, vs.ConfigurationTarget.Global);
         }
         vs.window.showInformationMessage(`AI Model set to: ${modelName}`);
     }

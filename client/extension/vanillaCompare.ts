@@ -147,7 +147,7 @@ function getGamePath(languageId: string): string | null {
 
         // 3. Try to locate the vanilla path that actually contains a 'gfx/FX' folder
         if (targetLang === languageId) {
-            const config = vs.workspace.getConfiguration('cwtools');
+            const config = vs.workspace.getConfiguration('stellarisLanguageServices');
             for (const game of possibleGames) {
                 const cacheKey = LANG_TO_CACHE_KEY[game];
                 if (cacheKey) {
@@ -170,7 +170,7 @@ function getGamePath(languageId: string): string | null {
 
     const cacheKey = LANG_TO_CACHE_KEY[targetLang];
     if (!cacheKey) return null;
-    const config = vs.workspace.getConfiguration('cwtools');
+    const config = vs.workspace.getConfiguration('stellarisLanguageServices');
     const configPath = config.get<string>(cacheKey);
     if (configPath && fs.existsSync(configPath)) return configPath;
     return null;
@@ -413,7 +413,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
 
                 const vanillaRoot = getGamePath(langId);
                 if (!vanillaRoot) {
-                    vs.window.showWarningMessage(tr('The vanilla game path is not configured. Configure cwtools.cache.* in settings.', '未配置原版游戏路径，请在设置中配置 cwtools.cache.*'));
+                    vs.window.showWarningMessage(tr('The vanilla game path is not configured. Configure stellarisLanguageServices.cache.* in settings.', '未配置原版游戏路径，请在设置中配置 stellarisLanguageServices.cache.*'));
                     return;
                 }
 
@@ -485,7 +485,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 const langId = doc.languageId;
                 const vanillaRoot = getGamePath(langId);
                 if (!vanillaRoot) {
-                    vs.window.showWarningMessage(tr('The vanilla game path is not configured. Configure cwtools.cache.* in settings.', '未配置原版游戏路径，请在设置中配置 cwtools.cache.*'));
+                    vs.window.showWarningMessage(tr('The vanilla game path is not configured. Configure stellarisLanguageServices.cache.* in settings.', '未配置原版游戏路径，请在设置中配置 stellarisLanguageServices.cache.*'));
                     return;
                 }
 
@@ -637,7 +637,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
 
                 const vanillaRoot = getGamePath(langId);
                 if (!vanillaRoot) {
-                    vs.window.showWarningMessage(tr('The vanilla game path is not configured. Configure cwtools.cache.* in settings.', '未配置原版游戏路径，请在设置中配置 cwtools.cache.*'));
+                    vs.window.showWarningMessage(tr('The vanilla game path is not configured. Configure stellarisLanguageServices.cache.* in settings.', '未配置原版游戏路径，请在设置中配置 stellarisLanguageServices.cache.*'));
                     return;
                 }
 
@@ -698,7 +698,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 const langId = doc.languageId;
                 const vanillaRoot = getGamePath(langId);
                 if (!vanillaRoot) {
-                    vs.window.showWarningMessage(tr('The vanilla game path is not configured. Configure cwtools.cache.* in settings.', '未配置原版游戏路径，请在设置中配置 cwtools.cache.*'));
+                    vs.window.showWarningMessage(tr('The vanilla game path is not configured. Configure stellarisLanguageServices.cache.* in settings.', '未配置原版游戏路径，请在设置中配置 stellarisLanguageServices.cache.*'));
                     return;
                 }
 
@@ -796,7 +796,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
     // ── Event: Clear cache on config change ────────────────────────────────
     context.subscriptions.push(
         vs.workspace.onDidChangeConfiguration(e => {
-            if (e.affectsConfiguration('cwtools.cache')) {
+            if (e.affectsConfiguration('stellarisLanguageServices.cache')) {
                 vanillaFileCache.clear();
                 _eventLikeKeysCache = null;
             }

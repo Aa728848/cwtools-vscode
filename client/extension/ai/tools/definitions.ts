@@ -613,7 +613,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'search_web',
-            description: 'Search the web for information about Paradox modding, PDXScript syntax, game mechanics, or any topic. Uses Brave Search API if configured (cwtools.ai.braveSearchApiKey), otherwise falls back to DuckDuckGo. Returns result summaries with URLs. Warning: DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
+            description: 'Search the web for information about Paradox modding, PDXScript syntax, game mechanics, or any topic. Uses Brave Search API if configured (stellarisLanguageServices.ai.braveSearchApiKey), otherwise falls back to DuckDuckGo. Returns result summaries with URLs. Warning: DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -830,7 +830,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'convert_image_to_dds',
-            description: 'Convert a PNG/JPG/TGA image to DDS format (required by Clausewitz engine for icons, sprites, and textures). Uses ImageMagick. Supports DXT5/BC3 compression with mipmaps. Requires ImageMagick installed and accessible. Custom path can be set via cwtools.ai.imageMagickPath setting.',
+            description: 'Convert a PNG/JPG/TGA image to DDS format (required by Clausewitz engine for icons, sprites, and textures). Uses ImageMagick. Supports DXT5/BC3 compression with mipmaps. Requires ImageMagick installed and accessible. Custom path can be set via stellarisLanguageServices.ai.imageMagickPath setting.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -847,7 +847,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'convert_audio',
-            description: 'Convert audio files between formats (MP3->OGG for BGM/voice, MP3->WAV for UI sound effects). Uses ffmpeg. Clausewitz engine requires .ogg (Vorbis) for music/voice and .wav (16-bit PCM) for UI sounds. Requires ffmpeg installed and accessible. Custom path can be set via cwtools.ai.ffmpegPath setting.',
+            description: 'Convert audio files between formats (MP3->OGG for BGM/voice, MP3->WAV for UI sound effects). Uses ffmpeg. Clausewitz engine requires .ogg (Vorbis) for music/voice and .wav (16-bit PCM) for UI sounds. Requires ffmpeg installed and accessible. Custom path can be set via stellarisLanguageServices.ai.ffmpegPath setting.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -882,7 +882,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'mcp_call',
-            description: 'Call a tool on a configured MCP (Model Context Protocol) server. MCP servers extend AI capabilities with external tools. Requires a server name (from cwtools.ai.mcp.servers config) and the tool name to call.',
+            description: 'Call a tool on a configured MCP (Model Context Protocol) server. MCP servers extend AI capabilities with external tools. Requires a server name (from stellarisLanguageServices.ai.mcp.servers config) and the tool name to call.',
             parameters: {
                 type: 'object',
                 properties: {

@@ -1239,7 +1239,7 @@ export class AgentRunner {
         runId: string
     ): void {
         try {
-            const cfg = vs.workspace.getConfiguration('cwtools.ai');
+            const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
             if (!cfg.get<boolean>('policy.shadow', true)) return;
             const { resolvePolicy, buildProfile, subjectForEffect } = require('./runner/policyEngine') as typeof import('./runner/policyEngine');
             const subject = subjectForEffect(ci.effect);
@@ -1357,7 +1357,7 @@ export class AgentRunner {
 
         // Track files confirmed-written this session
         const confirmedWrittenFiles = new Set<string>();
-        const performanceConfig = vs.workspace.getConfiguration('cwtools.ai.performance');
+        const performanceConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
         const legacyFullToolset = performanceConfig.get<boolean>('legacyFullToolset') === true;
         let availableTools = filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
             useSlimPrompt: options?.useSlimPrompt,
@@ -1403,7 +1403,7 @@ export class AgentRunner {
         const useDsmlToolRole0 = _provider0.toolCallStyle === 'dsml';
 
         // Compute context limit and tool result budget once for the entire loop
-        const bypassSandbox = vs.workspace.getConfiguration('cwtools.ai.developer').get<boolean>('disableSecuritySandbox') === true;
+        const bypassSandbox = vs.workspace.getConfiguration('stellarisLanguageServices.ai.developer').get<boolean>('disableSecuritySandbox') === true;
         
         const baseContextLimit = _config0.maxContextTokens > 0
             ? _config0.maxContextTokens

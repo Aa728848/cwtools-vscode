@@ -206,16 +206,16 @@ export class ChatSettingsManager {
             maxContextTokens: config.maxContextTokens,
             agentFileWriteMode: config.agentFileWriteMode,
             approvals: {
-                reviewer: vs.workspace.getConfiguration('cwtools.ai').get<'user' | 'auto_review'>('approvals.reviewer', 'user'),
+                reviewer: vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<'user' | 'auto_review'>('approvals.reviewer', 'user'),
             },
-            securitySandboxDisabled: vs.workspace.getConfiguration('cwtools.ai').get<boolean>('developer.disableSecuritySandbox') === true,
+            securitySandboxDisabled: vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<boolean>('developer.disableSecuritySandbox') === true,
             reasoningEffort: config.reasoningEffort,
             braveSearchApiKey: (() => {
-                const k = vs.workspace.getConfiguration('cwtools.ai').get<string>('braveSearchApiKey') ?? '';
+                const k = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('braveSearchApiKey') ?? '';
                 return k ? '••••••••' : '';
             })(),
             exaApiKey: (() => {
-                const k = vs.workspace.getConfiguration('cwtools.ai').get<string>('exaApiKey') ?? '';
+                const k = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('exaApiKey') ?? '';
                 return k ? '••••••••' : '';
             })(),
             inlineCompletion: {
@@ -237,7 +237,7 @@ export class ChatSettingsManager {
                 servers: config.mcp.servers
             },
             orchestrator: {
-                agentModels: vs.workspace.getConfiguration('cwtools.ai').get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels') || undefined,
+                agentModels: vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels') || undefined,
             },
         };
 
@@ -247,7 +247,7 @@ export class ChatSettingsManager {
             if (ep) ollamaModels = await fetchOllamaModels(ep);
         }
 
-        const vscodeConfig = vs.workspace.getConfiguration('cwtools.ai');
+        const vscodeConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const dynamicModelsConfig = vscodeConfig.get<Record<string, string[]>>('dynamicModels') || {};
         const dynamicContexts = vscodeConfig.get<Record<string, number>>('dynamicModelsContext') || {};
 
@@ -284,11 +284,11 @@ export class ChatSettingsManager {
      * Quick ladder from the chat composer: confirm < auto < auto_review < full.
      * auto_review = auto write + read-only LLM reviewer at the approval boundary.
      * full = sandbox and approval boundaries removed for this workspace
-     * (cwtools.ai.developer.disableSecuritySandbox); calls are still logged.
+     * (stellarisLanguageServices.ai.developer.disableSecuritySandbox); calls are still logged.
      * The tier fully determines all underlying settings.
      */
     async quickChangeWriteMode(mode: 'confirm' | 'auto' | 'auto_review' | 'full'): Promise<void> {
-        const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const nextWriteMode = mode === 'confirm' ? 'confirm' : 'auto';
         const nextReviewer = mode === 'auto_review' ? 'auto_review' : 'user';
         await cfg.update('agentFileWriteMode', nextWriteMode, vs.ConfigurationTarget.Global);
@@ -312,7 +312,7 @@ export class ChatSettingsManager {
     }
 
     async saveSettings(settings: PanelSettings, targetSurface?: 'chat' | 'manager'): Promise<void> {
-        const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const { BUILTIN_PROVIDERS } = await import('./providers');
 
         const handleDynamicModel = async (providerId: string, modelId: string, contextTokens: number) => {
@@ -438,7 +438,7 @@ export class ChatSettingsManager {
     }
 
     private async clearLegacyApiKeySettings(): Promise<void> {
-        const baseConfig = vs.workspace.getConfiguration('cwtools.ai');
+        const baseConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const clear = async (config: vs.WorkspaceConfiguration, target: vs.ConfigurationTarget): Promise<void> => {
             try {
                 await config.update('apiKey', undefined, target);
@@ -453,7 +453,7 @@ export class ChatSettingsManager {
         ];
 
         for (const folder of vs.workspace.workspaceFolders ?? []) {
-            const folderConfig = vs.workspace.getConfiguration('cwtools.ai', folder.uri);
+            const folderConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai', folder.uri);
             updates.push(clear(folderConfig, vs.ConfigurationTarget.WorkspaceFolder));
         }
 
@@ -561,7 +561,7 @@ export class ChatSettingsManager {
     }
 
     async deleteDynamicModel(providerId: string, modelId: string): Promise<void> {
-        const vscodeConfig = vs.workspace.getConfiguration('cwtools.ai');
+        const vscodeConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const dynamicModelsConfig = vscodeConfig.get<Record<string, string[]>>('dynamicModels') || {};
         if (dynamicModelsConfig[providerId]) {
             dynamicModelsConfig[providerId] = dynamicModelsConfig[providerId].filter(m => m !== modelId);

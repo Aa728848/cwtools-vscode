@@ -401,9 +401,9 @@ export class IndexService implements vscode.Disposable {
 
 	private _getConfiguredVanillaRoots(): string[] {
 		const roots = new Set<string>();
-		const config = vscode.workspace.getConfiguration('cwtools');
+		const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
 		for (const profile of getAllProfiles()) {
-			const key = profile.cacheSettingKey.replace('cwtools.', '');
+			const key = profile.cacheSettingKey.replace('stellarisLanguageServices.', '');
 			const configured = config.get<string>(key);
 			if (configured?.trim()) roots.add(configured.trim());
 		}

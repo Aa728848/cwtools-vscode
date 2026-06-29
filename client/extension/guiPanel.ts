@@ -159,10 +159,10 @@ export class GuiPanel {
 
     /**
      * Get Stellaris game installation path from the plugin's existing configuration.
-     * Uses `cwtools.cache.stellaris` which is set by the user via the "Select vanilla folder" prompt.
+     * Uses `stellarisLanguageServices.cache.stellaris` which is set by the user via the "Select vanilla folder" prompt.
      */
     private _getGamePath(): string | null {
-        const config = vscode.workspace.getConfiguration('cwtools');
+        const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
         const configPath = config.get<string>('cache.stellaris');
         if (configPath && fs.existsSync(configPath)) return configPath;
         return null;

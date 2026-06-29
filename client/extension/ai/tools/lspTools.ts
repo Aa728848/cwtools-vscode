@@ -722,7 +722,7 @@ export class LspToolHandler {
             }
         }
         
-        const cwtoolsConfig = vs.workspace.getConfiguration('cwtools');
+        const cwtoolsConfig = vs.workspace.getConfiguration('stellarisLanguageServices');
         const customRulesFolder = cwtoolsConfig.get<string>('rules_folder');
         if (customRulesFolder) {
             configPaths.push(customRulesFolder);
@@ -936,7 +936,7 @@ export class LspToolHandler {
 
         const allPairs = vs.languages.getDiagnostics();
         const activelyIgnoredKeys = new Set<string>();
-        const ignored = vs.workspace.getConfiguration('cwtools.ai').get<string[]>('ignoredDiagnostics', []);
+        const ignored = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string[]>('ignoredDiagnostics', []);
 
         const entries: import('../types').DiagnosticEntry[] = [];
         const filesWithDiags = new Set<string>();
@@ -1289,7 +1289,7 @@ export class LspToolHandler {
         }
 
         if (ctxStr === 'vanilla' || ctxStr === 'both') {
-            const cwtoolsConfig = vs.workspace.getConfiguration('cwtools');
+            const cwtoolsConfig = vs.workspace.getConfiguration('stellarisLanguageServices');
             const vanillaStellaris = cwtoolsConfig.get<string>('cache.stellaris');
             const vanillaMods = [vanillaStellaris].filter(Boolean) as string[];
             
@@ -1559,7 +1559,7 @@ export class LspToolHandler {
 
         const collectVanillaRoots = (): string[] => {
             if (ctxStr !== 'vanilla' && ctxStr !== 'both') return [];
-            const cwtoolsConfig = vs.workspace.getConfiguration('cwtools');
+            const cwtoolsConfig = vs.workspace.getConfiguration('stellarisLanguageServices');
             const vanillaStellaris = cwtoolsConfig.get<string>('cache.stellaris');
             const roots = [vanillaStellaris].filter((r): r is string => !!r && fs.existsSync(r));
             searchedRoots.push(...roots);
@@ -1775,7 +1775,7 @@ export class LspToolHandler {
 
         const collectVanillaRoots = (): string[] => {
             if (ctxStr !== 'vanilla' && ctxStr !== 'both') return [];
-            const cwtoolsConfig = vs.workspace.getConfiguration('cwtools');
+            const cwtoolsConfig = vs.workspace.getConfiguration('stellarisLanguageServices');
             const vanillaStellaris = cwtoolsConfig.get<string>('cache.stellaris');
             const roots = [vanillaStellaris].filter((r): r is string => !!r && fs.existsSync(r));
             searchedRoots.push(...roots);

@@ -52,14 +52,14 @@
             "explorer": [
                 {
                     "id": "cwtools-files",
-                    "name": "%views.cwtools-files.name%"
+                    "name": "%views.loadedFiles.name%"
                 }
             ],
             "cwtools-ai-panel": [
                 {
                     "type": "webview",
                     "id": "cwtools.aiChat",
-                    "name": "%views.cwtools.aiChat.name%"
+                    "name": "%views.stellarisLanguageServices.aiChat.name%"
                 }
             ]
         },
@@ -67,7 +67,7 @@
             "secondarySidebar": [
                 {
                     "id": "cwtools-ai-panel",
-                    "title": "%viewsContainers.cwtools-ai-panel.title%",
+                    "title": "%viewsContainers.stellarisAiPanel.title%",
                     "icon": "$(sparkle)"
                 }
             ]
@@ -75,7 +75,7 @@
         "customEditors": [
             {
                 "viewType": "cwtools.texturePreview",
-                "displayName": "%customEditors.cwtools.texturePreview.displayName%",
+                "displayName": "%customEditors.stellarisLanguageServices.texturePreview.displayName%",
                 "selector": [
                     {
                         "filenamePattern": "*.dds"
@@ -113,12 +113,12 @@
                 },
                 {
                     "command": "cwtools.toggleInlineTextOn",
-                    "when": "!config.cwtools.showInlineText",
+                    "when": "!config.stellarisLanguageServices.showInlineText",
                     "group": "navigation"
                 },
                 {
                     "command": "cwtools.toggleInlineTextOff",
-                    "when": "config.cwtools.showInlineText",
+                    "when": "config.stellarisLanguageServices.showInlineText",
                     "group": "navigation"
                 },
                 {
@@ -128,17 +128,17 @@
                 },
                 {
                     "command": "cwtools.previewSolarSystem",
-                    "when": "resourceExtname == .txt \u0026\u0026 resourcePath =~ /solar_system_initializers/",
+                    "when": "resourceExtname == .txt && resourcePath =~ /solar_system_initializers/",
                     "group": "navigation"
                 },
                 {
                     "command": "cwtools.visualizeEventChain",
-                    "when": "resourceExtname == .txt \u0026\u0026 resourcePath =~ /events/",
+                    "when": "resourceExtname == .txt && resourcePath =~ /events/",
                     "group": "navigation"
                 },
                 {
                     "command": "cwtools.visualizeTechTree",
-                    "when": "resourceExtname == .txt \u0026\u0026 resourcePath =~ /technology/",
+                    "when": "resourceExtname == .txt && resourcePath =~ /technology/",
                     "group": "navigation"
                 },
                 {
@@ -166,215 +166,215 @@
                 {
                     "command": "cwtools.vanillaCompare.diff",
                     "when": "resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh",
-                    "group": "cwtools@1"
+                    "group": "stellaris@1"
                 },
                 {
                     "command": "cwtools.vanillaCompare.migrateBlockFromVanilla",
                     "when": "resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh",
-                    "group": "cwtools@2"
+                    "group": "stellaris@2"
                 },
                 {
                     "command": "cwtools.ai.sendSelectionToChat",
                     "when": "editorHasSelection",
-                    "group": "cwtools@0"
+                    "group": "stellaris@0"
                 }
             ]
         },
         "commands": [
             {
                 "command": "cwtools.ai.replayRun",
-                "title": "%commands.cwtools.ai.replayRun.title%",
-                "category": "CWTools AI"
+                "title": "%commands.stellarisLanguageServices.ai.replayRun.title%",
+                "category": "Stellaris AI"
             },
             {
                 "command": "outputerrors",
                 "title": "%commands.outputerrors.title%",
-                "category": "cwtools"
+                "category": "Stellaris"
             },
             {
                 "command": "genlocall",
                 "title": "%commands.genlocall.title%",
-                "category": "cwtools"
+                "category": "Stellaris"
             },
             {
                 "command": "reloadrulesconfig",
                 "title": "%commands.reloadrulesconfig.title%",
-                "category": "cwtools"
+                "category": "Stellaris"
             },
             {
                 "command": "cacheVanilla",
                 "title": "%commands.cacheVanilla.title%",
-                "category": "cwtools"
+                "category": "Stellaris"
             },
             {
                 "command": "cwtools.openSetup",
-                "title": "%commands.cwtools.openSetup.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.openSetup.title%",
+                "category": "Stellaris",
                 "icon": "$(tools)"
             },
             {
                 "command": "cwtools.runInstallationDoctor",
-                "title": "%commands.cwtools.runInstallationDoctor.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.runInstallationDoctor.title%",
+                "category": "Stellaris",
                 "icon": "$(pulse)"
             },
             {
                 "command": "cwtools.selectGameFolder",
-                "title": "%commands.cwtools.selectGameFolder.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.selectGameFolder.title%",
+                "category": "Stellaris",
                 "icon": "$(folder-opened)"
             },
             {
                 "command": "listAllFiles",
                 "title": "%commands.listAllFiles.title%",
-                "category": "cwtools"
+                "category": "Stellaris"
             },
             {
                 "command": "listAllLocFiles",
                 "title": "%commands.listAllLocFiles.title%",
-                "category": "cwtools"
+                "category": "Stellaris"
             },
             {
                 "command": "debugrules",
                 "title": "%commands.debugrules.title%",
-                "category": "cwtools"
+                "category": "Stellaris"
             },
             {
                 "command": "pretriggerAllFiles",
                 "title": "%commands.pretriggerAllFiles.title%",
-                "category": "cwtools"
+                "category": "Stellaris"
             },
             {
                 "command": "startcustomgame",
                 "title": "%commands.startcustomgame.title%",
-                "category": "cwtools"
+                "category": "Stellaris"
             },
             {
                 "command": "exportTypes",
                 "title": "%commands.exportTypes.title%",
-                "category": "cwtools"
+                "category": "Stellaris"
             },
             {
                 "command": "cwtools.toggleInlineTextOn",
-                "title": "%commands.cwtools.toggleInlineTextOn.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.toggleInlineTextOn.title%",
+                "category": "Stellaris",
                 "icon": "$(eye-closed)"
             },
             {
                 "command": "cwtools.toggleInlineTextOff",
-                "title": "%commands.cwtools.toggleInlineTextOff.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.toggleInlineTextOff.title%",
+                "category": "Stellaris",
                 "icon": "$(eye)"
             },
             {
                 "command": "cwtools.previewGUI",
-                "title": "%commands.cwtools.previewGUI.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.previewGUI.title%",
+                "category": "Stellaris",
                 "icon": "$(open-preview)"
             },
             {
                 "command": "cwtools.previewSolarSystem",
-                "title": "%commands.cwtools.previewSolarSystem.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.previewSolarSystem.title%",
+                "category": "Stellaris",
                 "icon": "$(telescope)"
             },
             {
                 "command": "cwtools.ai.configure",
-                "title": "%commands.cwtools.ai.configure%",
-                "category": "CWTools AI"
+                "title": "%commands.stellarisLanguageServices.ai.configure%",
+                "category": "Stellaris AI"
             },
             {
                 "command": "cwtools.ai.openChat",
-                "title": "%commands.cwtools.ai.openChat%",
-                "category": "CWTools AI",
+                "title": "%commands.stellarisLanguageServices.ai.openChat%",
+                "category": "Stellaris AI",
                 "icon": "$(sparkle)"
             },
             {
                 "command": "cwtools.ai.openAgentManager",
-                "title": "%commands.cwtools.ai.openAgentManager.title%",
-                "category": "CWTools AI",
+                "title": "%commands.stellarisLanguageServices.ai.openAgentManager.title%",
+                "category": "Stellaris AI",
                 "icon": "$(layout)"
             },
             {
                 "command": "cwtools.ai.selectModel",
-                "title": "%commands.cwtools.ai.selectModel.title%",
-                "category": "CWTools AI"
+                "title": "%commands.stellarisLanguageServices.ai.selectModel.title%",
+                "category": "Stellaris AI"
             },
             {
                 "command": "cwtools.ai.reviewFile",
-                "title": "%commands.cwtools.ai.reviewFile.title%",
-                "category": "CWTools AI",
+                "title": "%commands.stellarisLanguageServices.ai.reviewFile.title%",
+                "category": "Stellaris AI",
                 "icon": "$(search)"
             },
             {
                 "command": "cwtools.ai.explainSelection",
-                "title": "%commands.cwtools.ai.explainSelection.title%",
-                "category": "CWTools AI",
+                "title": "%commands.stellarisLanguageServices.ai.explainSelection.title%",
+                "category": "Stellaris AI",
                 "icon": "$(lightbulb)"
             },
             {
                 "command": "cwtools.ai.fixDiagnostics",
-                "title": "%commands.cwtools.ai.fixDiagnostics.title%",
-                "category": "CWTools AI",
+                "title": "%commands.stellarisLanguageServices.ai.fixDiagnostics.title%",
+                "category": "Stellaris AI",
                 "icon": "$(wrench)"
             },
             {
                 "command": "cwtools.ai.manageIgnoredDiagnostics",
-                "title": "%commands.cwtools.ai.manageIgnoredDiagnostics.title%",
-                "category": "CWTools AI",
+                "title": "%commands.stellarisLanguageServices.ai.manageIgnoredDiagnostics.title%",
+                "category": "Stellaris AI",
                 "icon": "$(checklist)"
             },
             {
                 "command": "cwtools.visualizeEventChain",
-                "title": "%commands.cwtools.visualizeEventChain.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.visualizeEventChain.title%",
+                "category": "Stellaris",
                 "icon": "$(type-hierarchy)"
             },
             {
                 "command": "cwtools.visualizeTechTree",
-                "title": "%commands.cwtools.visualizeTechTree.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.visualizeTechTree.title%",
+                "category": "Stellaris",
                 "icon": "$(circuit-board)"
             },
             {
                 "command": "cwtools.vanillaCompare.diff",
-                "title": "%commands.cwtools.vanillaCompare.diff.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.vanillaCompare.diff.title%",
+                "category": "Stellaris",
                 "icon": "$(compare-changes)"
             },
             {
                 "command": "cwtools.vanillaCompare.fileDiff",
-                "title": "%commands.cwtools.vanillaCompare.fileDiff.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.vanillaCompare.fileDiff.title%",
+                "category": "Stellaris",
                 "icon": "$(diff-multiple)"
             },
             {
                 "command": "cwtools.vanillaCompare.migrateBlockFromVanilla",
-                "title": "%commands.cwtools.vanillaCompare.migrateBlockFromVanilla.title%",
-                "category": "cwtools"
+                "title": "%commands.stellarisLanguageServices.vanillaCompare.migrateBlockFromVanilla.title%",
+                "category": "Stellaris"
             },
             {
                 "command": "cwtools.vanillaCompare.migrateChangedFromVanilla",
-                "title": "%commands.cwtools.vanillaCompare.migrateChangedFromVanilla.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.vanillaCompare.migrateChangedFromVanilla.title%",
+                "category": "Stellaris",
                 "icon": "$(pass-filled)"
             },
             {
                 "command": "cwtools.previewEntity",
-                "title": "%commands.cwtools.previewEntity.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.previewEntity.title%",
+                "category": "Stellaris",
                 "icon": "$(symbol-misc)"
             },
             {
                 "command": "cwtools.previewParticle",
-                "title": "%commands.cwtools.previewParticle.title%",
-                "category": "cwtools",
+                "title": "%commands.stellarisLanguageServices.previewParticle.title%",
+                "category": "Stellaris",
                 "icon": "$(symbol-color)"
             },
             {
                 "command": "cwtools.ai.sendSelectionToChat",
-                "title": "%commands.cwtools.ai.sendSelectionToChat.title%",
-                "category": "CWTools AI",
+                "title": "%commands.stellarisLanguageServices.ai.sendSelectionToChat.title%",
+                "category": "Stellaris AI",
                 "icon": "$(comment-discussion)"
             }
         ],
@@ -382,24 +382,24 @@
             {
                 "command": "-acceptRenameInput",
                 "key": "enter",
-                "when": "renameInputVisible \u0026\u0026 editorTextFocus \u0026\u0026 !isComposing"
+                "when": "renameInputVisible && editorTextFocus && !isComposing"
             },
             {
                 "command": "acceptRenameInputWithPreview",
                 "key": "enter",
-                "when": "renameInputVisible \u0026\u0026 editorTextFocus \u0026\u0026 !isComposing \u0026\u0026 config.editor.rename.enablePreview"
+                "when": "renameInputVisible && editorTextFocus && !isComposing && config.editor.rename.enablePreview"
             },
             {
                 "command": "-acceptRenameInputWithPreview",
                 "key": "ctrl+enter",
                 "mac": "cmd+enter",
-                "when": "renameInputVisible \u0026\u0026 editorTextFocus \u0026\u0026 !isComposing \u0026\u0026 config.editor.rename.enablePreview"
+                "when": "renameInputVisible && editorTextFocus && !isComposing && config.editor.rename.enablePreview"
             },
             {
                 "command": "acceptRenameInput",
                 "key": "ctrl+enter",
                 "mac": "cmd+enter",
-                "when": "renameInputVisible \u0026\u0026 editorTextFocus \u0026\u0026 !isComposing"
+                "when": "renameInputVisible && editorTextFocus && !isComposing"
             },
             {
                 "command": "cwtools.ai.reviewFile",
@@ -436,13 +436,13 @@
             "type": "object",
             "title": "%configuration.title%",
             "properties": {
-                "cwtools.editor.formatIndentOnPaste": {
+                "stellarisLanguageServices.editor.formatIndentOnPaste": {
                     "scope": "language-overridable",
                     "type": "boolean",
                     "default": true,
-                    "description": "%configuration.cwtools.editor.formatIndentOnPaste.description%"
+                    "description": "%configuration.stellarisLanguageServices.editor.formatIndentOnPaste.description%"
                 },
-                "cwtools.trace.server": {
+                "stellarisLanguageServices.trace.server": {
                     "scope": "window",
                     "type": "string",
                     "enum": [
@@ -451,9 +451,9 @@
                         "verbose"
                     ],
                     "default": "off",
-                    "description": "%configuration.cwtools.trace.server.description%"
+                    "description": "%configuration.stellarisLanguageServices.trace.server.description%"
                 },
-                "cwtools.localisation.languages": {
+                "stellarisLanguageServices.localisation.languages": {
                     "scope": "window",
                     "type": "array",
                     "items": {
@@ -475,31 +475,31 @@
                     "default": [
                         "English"
                     ],
-                    "description": "%configuration.cwtools.localisation.languages.description%",
+                    "description": "%configuration.stellarisLanguageServices.localisation.languages.description%",
                     "uniqueItems": true
                 },
-                "cwtools.localisation.generated_strings": {
+                "stellarisLanguageServices.localisation.generated_strings": {
                     "scope": "window",
                     "type": "string",
                     "default": ":0 \"REPLACE_ME\"",
-                    "description": "%configuration.cwtools.localisation.generated_strings.description%"
+                    "description": "%configuration.stellarisLanguageServices.localisation.generated_strings.description%"
                 },
-                "cwtools.errors.vanilla": {
+                "stellarisLanguageServices.errors.vanilla": {
                     "scope": "window",
                     "type": "boolean",
                     "default": false,
-                    "description": "%configuration.cwtools.errors.vanilla.description%"
+                    "description": "%configuration.stellarisLanguageServices.errors.vanilla.description%"
                 },
-                "cwtools.errors.ignore": {
+                "stellarisLanguageServices.errors.ignore": {
                     "scope": "window",
                     "type": "array",
-                    "description": "%configuration.cwtools.errors.ignore.description%",
+                    "description": "%configuration.stellarisLanguageServices.errors.ignore.description%",
                     "uniqueItems": true
                 },
-                "cwtools.errors.ignorefiles": {
+                "stellarisLanguageServices.errors.ignorefiles": {
                     "scope": "window",
                     "type": "array",
-                    "description": "%configuration.cwtools.errors.ignorefiles.description%",
+                    "description": "%configuration.stellarisLanguageServices.errors.ignorefiles.description%",
                     "uniqueItems": true,
                     "default": [
                         "README.txt",
@@ -509,31 +509,31 @@
                         "startup_info.txt"
                     ]
                 },
-                "cwtools.experimental": {
+                "stellarisLanguageServices.experimental": {
                     "scope": "window",
                     "type": "boolean",
                     "default": true,
-                    "description": "%configuration.cwtools.experimental.description%"
+                    "description": "%configuration.stellarisLanguageServices.experimental.description%"
                 },
-                "cwtools.debug_mode": {
+                "stellarisLanguageServices.debug_mode": {
                     "scope": "window",
                     "type": "boolean",
                     "default": false,
-                    "description": "%configuration.cwtools.debug_mode.description%"
+                    "description": "%configuration.stellarisLanguageServices.debug_mode.description%"
                 },
-                "cwtools.showInlineText": {
+                "stellarisLanguageServices.showInlineText": {
                     "scope": "window",
                     "type": "boolean",
                     "default": false,
-                    "description": "%configuration.cwtools.showInlineText.description%"
+                    "description": "%configuration.stellarisLanguageServices.showInlineText.description%"
                 },
-                "cwtools.logging.diagnostic": {
+                "stellarisLanguageServices.logging.diagnostic": {
                     "scope": "window",
                     "type": "boolean",
                     "default": false,
-                    "description": "%configuration.cwtools.logging.diagnostic.description%"
+                    "description": "%configuration.stellarisLanguageServices.logging.diagnostic.description%"
                 },
-                "cwtools.rules_version": {
+                "stellarisLanguageServices.rules_version": {
                     "scope": "window",
                     "type": "string",
                     "enum": [
@@ -542,107 +542,107 @@
                         "manual"
                     ],
                     "default": "latest",
-                    "description": "%configuration.cwtools.rules_version.description%"
+                    "description": "%configuration.stellarisLanguageServices.rules_version.description%"
                 },
-                "cwtools.rules_folder": {
+                "stellarisLanguageServices.rules_folder": {
                     "scope": "window",
                     "type": "string",
-                    "description": "%configuration.cwtools.rules_folder.description%"
+                    "description": "%configuration.stellarisLanguageServices.rules_folder.description%"
                 },
-                "cwtools.ignore_patterns": {
+                "stellarisLanguageServices.ignore_patterns": {
                     "scope": "window",
                     "type": "array",
-                    "description": "%configuration.cwtools.ignore_patterns.description%",
+                    "description": "%configuration.stellarisLanguageServices.ignore_patterns.description%",
                     "uniqueItems": true,
                     "default": [
                         "**/99_README**.txt"
                     ]
                 },
-                "cwtools.cache.eu4": {
+                "stellarisLanguageServices.cache.eu4": {
                     "scope": "application",
                     "type": "string",
-                    "description": "%configuration.cwtools.cache.eu4.description%"
+                    "description": "%configuration.stellarisLanguageServices.cache.eu4.description%"
                 },
-                "cwtools.cache.hoi4": {
+                "stellarisLanguageServices.cache.hoi4": {
                     "scope": "application",
                     "type": "string",
-                    "description": "%configuration.cwtools.cache.hoi4.description%"
+                    "description": "%configuration.stellarisLanguageServices.cache.hoi4.description%"
                 },
-                "cwtools.cache.stellaris": {
+                "stellarisLanguageServices.cache.stellaris": {
                     "scope": "application",
                     "type": "string",
-                    "description": "%configuration.cwtools.cache.stellaris.description%"
+                    "description": "%configuration.stellarisLanguageServices.cache.stellaris.description%"
                 },
-                "cwtools.cache.ck2": {
+                "stellarisLanguageServices.cache.ck2": {
                     "scope": "application",
                     "type": "string",
-                    "description": "%configuration.cwtools.cache.ck2.description%"
+                    "description": "%configuration.stellarisLanguageServices.cache.ck2.description%"
                 },
-                "cwtools.cache.imperator": {
+                "stellarisLanguageServices.cache.imperator": {
                     "scope": "application",
                     "type": "string",
-                    "description": "%configuration.cwtools.cache.imperator.description%"
+                    "description": "%configuration.stellarisLanguageServices.cache.imperator.description%"
                 },
-                "cwtools.cache.vic2": {
+                "stellarisLanguageServices.cache.vic2": {
                     "scope": "application",
                     "type": "string",
-                    "description": "%configuration.cwtools.cache.vic2.description%"
+                    "description": "%configuration.stellarisLanguageServices.cache.vic2.description%"
                 },
-                "cwtools.cache.ck3": {
+                "stellarisLanguageServices.cache.ck3": {
                     "scope": "application",
                     "type": "string",
-                    "description": "%configuration.cwtools.cache.ck3.description%"
+                    "description": "%configuration.stellarisLanguageServices.cache.ck3.description%"
                 },
-                "cwtools.cache.vic3": {
+                "stellarisLanguageServices.cache.vic3": {
                     "scope": "application",
                     "type": "string",
-                    "description": "%configuration.cwtools.cache.vic3.description%"
+                    "description": "%configuration.stellarisLanguageServices.cache.vic3.description%"
                 },
-                "cwtools.cache.eu5": {
+                "stellarisLanguageServices.cache.eu5": {
                     "scope": "application",
                     "type": "string",
-                    "description": "%configuration.cwtools.cache.eu5.description%"
+                    "description": "%configuration.stellarisLanguageServices.cache.eu5.description%"
                 },
-                "cwtools.maxFileSize": {
+                "stellarisLanguageServices.maxFileSize": {
                     "scope": "resource",
                     "type": "integer",
                     "minimum": 1,
                     "default": 2,
-                    "description": "%configuration.cwtools.maxFileSize.description%"
+                    "description": "%configuration.stellarisLanguageServices.maxFileSize.description%"
                 },
-                "cwtools.diagnostics.deferDynamicParameterDiagnostics": {
+                "stellarisLanguageServices.diagnostics.deferDynamicParameterDiagnostics": {
                     "scope": "window",
                     "type": "boolean",
                     "default": true,
-                    "description": "%configuration.cwtools.diagnostics.deferDynamicParameterDiagnostics.description%"
+                    "description": "%configuration.stellarisLanguageServices.diagnostics.deferDynamicParameterDiagnostics.description%"
                 },
-                "cwtools.diagnostics.dynamicPreflightTimeoutMs": {
+                "stellarisLanguageServices.diagnostics.dynamicPreflightTimeoutMs": {
                     "scope": "window",
                     "type": "integer",
                     "minimum": 0,
                     "default": 2000,
-                    "description": "%configuration.cwtools.diagnostics.dynamicPreflightTimeoutMs.description%"
+                    "description": "%configuration.stellarisLanguageServices.diagnostics.dynamicPreflightTimeoutMs.description%"
                 },
-                "cwtools.diagnostics.dynamicPreflightMaxEntities": {
+                "stellarisLanguageServices.diagnostics.dynamicPreflightMaxEntities": {
                     "scope": "window",
                     "type": "integer",
                     "minimum": 0,
                     "default": 2000,
-                    "description": "%configuration.cwtools.diagnostics.dynamicPreflightMaxEntities.description%"
+                    "description": "%configuration.stellarisLanguageServices.diagnostics.dynamicPreflightMaxEntities.description%"
                 },
-                "cwtools.checkForUpdates": {
+                "stellarisLanguageServices.checkForUpdates": {
                     "scope": "window",
                     "type": "boolean",
                     "default": true,
-                    "description": "%configuration.cwtools.checkForUpdates.description%"
+                    "description": "%configuration.stellarisLanguageServices.checkForUpdates.description%"
                 },
-                "cwtools.ai.enabled": {
+                "stellarisLanguageServices.ai.enabled": {
                     "scope": "window",
                     "type": "boolean",
                     "default": false,
-                    "description": "%configuration.cwtools.ai.enabled.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.enabled.description%"
                 },
-                "cwtools.ai.provider": {
+                "stellarisLanguageServices.ai.provider": {
                     "scope": "window",
                     "type": "string",
                     "enum": [
@@ -667,51 +667,51 @@
                         "kimi"
                     ],
                     "enumDescriptions": [
-                        "%configuration.cwtools.ai.provider.enum.openai%",
-                        "%configuration.cwtools.ai.provider.enum.claude%",
-                        "%configuration.cwtools.ai.provider.enum.deepseek%",
-                        "%configuration.cwtools.ai.provider.enum.minimax%",
-                        "%configuration.cwtools.ai.provider.enum.glm%",
-                        "%configuration.cwtools.ai.provider.enum.qwen%",
-                        "%configuration.cwtools.ai.provider.enum.ollama%",
-                        "%configuration.cwtools.ai.provider.enum.custom%",
-                        "%configuration.cwtools.ai.provider.enum.siliconflow%",
-                        "%configuration.cwtools.ai.provider.enum.openrouter%",
-                        "%configuration.cwtools.ai.provider.enum.github%",
-                        "%configuration.cwtools.ai.provider.enum.together%",
-                        "%configuration.cwtools.ai.provider.enum.deepinfra%",
-                        "%configuration.cwtools.ai.provider.enum.google%",
-                        "%configuration.cwtools.ai.provider.enum.mimo%",
-                        "%configuration.cwtools.ai.provider.enum.minimax-token-plan%",
-                        "%configuration.cwtools.ai.provider.enum.mimo-token-plan%",
-                        "%configuration.cwtools.ai.provider.enum.opencode%",
-                        "%configuration.cwtools.ai.provider.enum.kimi%"
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.claude%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.deepseek%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.minimax%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.glm%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.qwen%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.ollama%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.custom%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.siliconflow%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.openrouter%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.github%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.together%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.deepinfra%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.google%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.mimo%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.minimax-token-plan%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.kimi%"
                     ],
                     "default": "openai",
-                    "markdownDescription": "%configuration.cwtools.ai.provider.description%"
+                    "markdownDescription": "%configuration.stellarisLanguageServices.ai.provider.description%"
                 },
-                "cwtools.ai.model": {
+                "stellarisLanguageServices.ai.model": {
                     "scope": "window",
                     "type": "string",
                     "default": "",
-                    "description": "%configuration.cwtools.ai.model.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.model.description%"
                 },
-                "cwtools.ai.endpoint": {
+                "stellarisLanguageServices.ai.endpoint": {
                     "scope": "window",
                     "type": "string",
                     "default": "",
-                    "description": "%configuration.cwtools.ai.endpoint.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.endpoint.description%"
                 },
-                "cwtools.ai.providerEndpoints": {
+                "stellarisLanguageServices.ai.providerEndpoints": {
                     "scope": "window",
                     "type": "object",
                     "default": {},
                     "additionalProperties": {
                         "type": "string"
                     },
-                    "description": "%configuration.cwtools.ai.providerEndpoints.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.providerEndpoints.description%"
                 },
-                "cwtools.ai.customApiFormat": {
+                "stellarisLanguageServices.ai.customApiFormat": {
                     "scope": "window",
                     "type": "string",
                     "enum": [
@@ -721,15 +721,15 @@
                         "gemini-generate-content"
                     ],
                     "enumDescriptions": [
-                        "%configuration.cwtools.ai.customApiFormat.enum.openai-chat-completions%",
-                        "%configuration.cwtools.ai.customApiFormat.enum.openai-responses%",
-                        "%configuration.cwtools.ai.customApiFormat.enum.anthropic-messages%",
-                        "%configuration.cwtools.ai.customApiFormat.enum.gemini-generate-content%"
+                        "%configuration.stellarisLanguageServices.ai.customApiFormat.enum.openai-chat-completions%",
+                        "%configuration.stellarisLanguageServices.ai.customApiFormat.enum.openai-responses%",
+                        "%configuration.stellarisLanguageServices.ai.customApiFormat.enum.anthropic-messages%",
+                        "%configuration.stellarisLanguageServices.ai.customApiFormat.enum.gemini-generate-content%"
                     ],
                     "default": "openai-chat-completions",
-                    "description": "%configuration.cwtools.ai.customApiFormat.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.customApiFormat.description%"
                 },
-                "cwtools.ai.agentFileWriteMode": {
+                "stellarisLanguageServices.ai.agentFileWriteMode": {
                     "scope": "window",
                     "type": "string",
                     "enum": [
@@ -737,13 +737,13 @@
                         "auto"
                     ],
                     "enumDescriptions": [
-                        "%configuration.cwtools.ai.agentFileWriteMode.enum.confirm%",
-                        "%configuration.cwtools.ai.agentFileWriteMode.enum.auto%"
+                        "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.enum.confirm%",
+                        "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.enum.auto%"
                     ],
                     "default": "confirm",
-                    "description": "%configuration.cwtools.ai.agentFileWriteMode.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.description%"
                 },
-                "cwtools.ai.approvals.reviewer": {
+                "stellarisLanguageServices.ai.approvals.reviewer": {
                     "scope": "window",
                     "type": "string",
                     "enum": [
@@ -751,19 +751,19 @@
                         "auto_review"
                     ],
                     "enumDescriptions": [
-                        "%configuration.cwtools.ai.approvals.reviewer.enum.user%",
-                        "%configuration.cwtools.ai.approvals.reviewer.enum.auto_review%"
+                        "%configuration.stellarisLanguageServices.ai.approvals.reviewer.enum.user%",
+                        "%configuration.stellarisLanguageServices.ai.approvals.reviewer.enum.auto_review%"
                     ],
                     "default": "user",
-                    "description": "%configuration.cwtools.ai.approvals.reviewer.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.approvals.reviewer.description%"
                 },
-                "cwtools.ai.developer.disableSecuritySandbox": {
+                "stellarisLanguageServices.ai.developer.disableSecuritySandbox": {
                     "scope": "window",
                     "type": "boolean",
                     "default": false,
-                    "description": "%configuration.cwtools.ai.developer.disableSecuritySandbox.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.developer.disableSecuritySandbox.description%"
                 },
-                "cwtools.ai.policy.preset": {
+                "stellarisLanguageServices.ai.policy.preset": {
                     "scope": "window",
                     "type": "string",
                     "enum": [
@@ -774,32 +774,32 @@
                         "full-access"
                     ],
                     "enumDescriptions": [
-                        "%configuration.cwtools.ai.policy.preset.enum.read-only%",
-                        "%configuration.cwtools.ai.policy.preset.enum.workspace-auto%",
-                        "%configuration.cwtools.ai.policy.preset.enum.workspace-auto-review%",
-                        "%configuration.cwtools.ai.policy.preset.enum.trusted-automation%",
-                        "%configuration.cwtools.ai.policy.preset.enum.full-access%"
+                        "%configuration.stellarisLanguageServices.ai.policy.preset.enum.read-only%",
+                        "%configuration.stellarisLanguageServices.ai.policy.preset.enum.workspace-auto%",
+                        "%configuration.stellarisLanguageServices.ai.policy.preset.enum.workspace-auto-review%",
+                        "%configuration.stellarisLanguageServices.ai.policy.preset.enum.trusted-automation%",
+                        "%configuration.stellarisLanguageServices.ai.policy.preset.enum.full-access%"
                     ],
                     "default": "workspace-auto",
-                    "description": "%configuration.cwtools.ai.policy.preset.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.policy.preset.description%"
                 },
-                "cwtools.ai.maxRetries": {
+                "stellarisLanguageServices.ai.maxRetries": {
                     "scope": "window",
                     "type": "integer",
                     "default": 3,
                     "minimum": 1,
                     "maximum": 5,
-                    "description": "%configuration.cwtools.ai.maxRetries.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.maxRetries.description%"
                 },
-                "cwtools.ai.requestTimeoutMs": {
+                "stellarisLanguageServices.ai.requestTimeoutMs": {
                     "scope": "window",
                     "type": "integer",
                     "default": 1200000,
                     "minimum": 60000,
                     "maximum": 3600000,
-                    "description": "%configuration.cwtools.ai.requestTimeoutMs.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.requestTimeoutMs.description%"
                 },
-                "cwtools.ai.reasoningEffort": {
+                "stellarisLanguageServices.ai.reasoningEffort": {
                     "scope": "window",
                     "type": "string",
                     "enum": [
@@ -809,95 +809,95 @@
                         "max"
                     ],
                     "enumDescriptions": [
-                        "%configuration.cwtools.ai.reasoningEffort.enum.low%",
-                        "%configuration.cwtools.ai.reasoningEffort.enum.medium%",
-                        "%configuration.cwtools.ai.reasoningEffort.enum.high%",
-                        "%configuration.cwtools.ai.reasoningEffort.enum.max%"
+                        "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.low%",
+                        "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.medium%",
+                        "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.high%",
+                        "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.max%"
                     ],
                     "default": "high",
-                    "description": "%configuration.cwtools.ai.reasoningEffort.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.reasoningEffort.description%"
                 },
-                "cwtools.ai.maxContextTokens": {
+                "stellarisLanguageServices.ai.maxContextTokens": {
                     "scope": "window",
                     "type": "integer",
                     "default": 0,
                     "minimum": 0,
                     "maximum": 10000000,
-                    "description": "%configuration.cwtools.ai.maxContextTokens.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.maxContextTokens.description%"
                 },
-                "cwtools.ai.inlineCompletion.enabled": {
+                "stellarisLanguageServices.ai.inlineCompletion.enabled": {
                     "scope": "window",
                     "type": "boolean",
                     "default": false,
-                    "description": "%configuration.cwtools.ai.inlineCompletion.enabled.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.enabled.description%"
                 },
-                "cwtools.ai.inlineCompletion.debounceMs": {
+                "stellarisLanguageServices.ai.inlineCompletion.debounceMs": {
                     "scope": "window",
                     "type": "integer",
                     "default": 200,
                     "minimum": 100,
                     "maximum": 5000,
-                    "description": "%configuration.cwtools.ai.inlineCompletion.debounceMs.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.debounceMs.description%"
                 },
-                "cwtools.ai.inlineCompletion.maxTokens": {
+                "stellarisLanguageServices.ai.inlineCompletion.maxTokens": {
                     "scope": "window",
                     "type": "integer",
                     "default": 128,
                     "minimum": 16,
                     "maximum": 1024,
-                    "description": "%configuration.cwtools.ai.inlineCompletion.maxTokens.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.maxTokens.description%"
                 },
-                "cwtools.ai.inlineCompletion.contextBeforeLines": {
+                "stellarisLanguageServices.ai.inlineCompletion.contextBeforeLines": {
                     "scope": "window",
                     "type": "integer",
                     "default": 20,
                     "minimum": 0,
                     "maximum": 200,
-                    "description": "%configuration.cwtools.ai.inlineCompletion.contextBeforeLines.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.contextBeforeLines.description%"
                 },
-                "cwtools.ai.inlineCompletion.contextAfterLines": {
+                "stellarisLanguageServices.ai.inlineCompletion.contextAfterLines": {
                     "scope": "window",
                     "type": "integer",
                     "default": 10,
                     "minimum": 1,
                     "maximum": 200,
-                    "description": "%configuration.cwtools.ai.inlineCompletion.contextAfterLines.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.contextAfterLines.description%"
                 },
-                "cwtools.ai.inlineCompletion.includeMcpContext": {
+                "stellarisLanguageServices.ai.inlineCompletion.includeMcpContext": {
                     "scope": "window",
                     "type": "boolean",
                     "default": false,
-                    "description": "%configuration.cwtools.ai.inlineCompletion.includeMcpContext.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.includeMcpContext.description%"
                 },
-                "cwtools.ai.inlineCompletion.mcpCacheTtlMs": {
+                "stellarisLanguageServices.ai.inlineCompletion.mcpCacheTtlMs": {
                     "scope": "window",
                     "type": "integer",
                     "default": 30000,
                     "minimum": 0,
                     "maximum": 300000,
-                    "description": "%configuration.cwtools.ai.inlineCompletion.mcpCacheTtlMs.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.mcpCacheTtlMs.description%"
                 },
-                "cwtools.ai.inlineCompletion.requestTimeoutMs": {
+                "stellarisLanguageServices.ai.inlineCompletion.requestTimeoutMs": {
                     "scope": "window",
                     "type": "integer",
                     "default": 1500,
                     "minimum": 500,
                     "maximum": 30000,
-                    "description": "%configuration.cwtools.ai.inlineCompletion.requestTimeoutMs.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.requestTimeoutMs.description%"
                 },
-                "cwtools.ai.inlineCompletion.lspFastPath": {
+                "stellarisLanguageServices.ai.inlineCompletion.lspFastPath": {
                     "scope": "window",
                     "type": "boolean",
                     "default": true,
-                    "description": "%configuration.cwtools.ai.inlineCompletion.lspFastPath.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.lspFastPath.description%"
                 },
-                "cwtools.ai.inlineCompletion.overlapStripping": {
+                "stellarisLanguageServices.ai.inlineCompletion.overlapStripping": {
                     "scope": "window",
                     "type": "boolean",
                     "default": true,
-                    "description": "%configuration.cwtools.ai.inlineCompletion.overlapStripping.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.overlapStripping.description%"
                 },
-                "cwtools.ai.inlineCompletion.provider": {
+                "stellarisLanguageServices.ai.inlineCompletion.provider": {
                     "scope": "window",
                     "type": "string",
                     "enum": [
@@ -921,82 +921,82 @@
                         "opencode"
                     ],
                     "enumDescriptions": [
-                        "%configuration.cwtools.ai.provider.enum.openai%",
-                        "%configuration.cwtools.ai.provider.enum.claude%",
-                        "%configuration.cwtools.ai.provider.enum.deepseek%",
-                        "%configuration.cwtools.ai.provider.enum.minimax%",
-                        "%configuration.cwtools.ai.provider.enum.glm%",
-                        "%configuration.cwtools.ai.provider.enum.qwen%",
-                        "%configuration.cwtools.ai.provider.enum.ollama%",
-                        "%configuration.cwtools.ai.provider.enum.custom%",
-                        "%configuration.cwtools.ai.provider.enum.siliconflow%",
-                        "%configuration.cwtools.ai.provider.enum.openrouter%",
-                        "%configuration.cwtools.ai.provider.enum.github%",
-                        "%configuration.cwtools.ai.provider.enum.together%",
-                        "%configuration.cwtools.ai.provider.enum.deepinfra%",
-                        "%configuration.cwtools.ai.provider.enum.google%",
-                        "%configuration.cwtools.ai.provider.enum.mimo%",
-                        "%configuration.cwtools.ai.provider.enum.minimax-token-plan%",
-                        "%configuration.cwtools.ai.provider.enum.mimo-token-plan%",
-                        "%configuration.cwtools.ai.provider.enum.opencode%"
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.claude%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.deepseek%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.minimax%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.glm%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.qwen%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.ollama%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.custom%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.siliconflow%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.openrouter%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.github%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.together%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.deepinfra%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.google%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.mimo%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.minimax-token-plan%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%"
                     ],
                     "default": "",
-                    "description": "%configuration.cwtools.ai.inlineCompletion.provider.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.provider.description%"
                 },
-                "cwtools.ai.inlineCompletion.model": {
+                "stellarisLanguageServices.ai.inlineCompletion.model": {
                     "scope": "window",
                     "type": "string",
                     "default": "",
-                    "description": "%configuration.cwtools.ai.inlineCompletion.model.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.model.description%"
                 },
-                "cwtools.ai.inlineCompletion.endpoint": {
+                "stellarisLanguageServices.ai.inlineCompletion.endpoint": {
                     "scope": "window",
                     "type": "string",
                     "default": "",
-                    "description": "%configuration.cwtools.ai.inlineCompletion.endpoint.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.endpoint.description%"
                 },
-                "cwtools.ai.dynamicModels": {
+                "stellarisLanguageServices.ai.dynamicModels": {
                     "type": "object",
                     "default": {},
-                    "description": "%configuration.cwtools.ai.dynamicModels.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.dynamicModels.description%"
                 },
-                "cwtools.ai.dynamicModelsContext": {
+                "stellarisLanguageServices.ai.dynamicModelsContext": {
                     "type": "object",
                     "default": {},
-                    "description": "%configuration.cwtools.ai.dynamicModelsContext.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.dynamicModelsContext.description%"
                 },
-                "cwtools.ai.ignoredDiagnostics": {
+                "stellarisLanguageServices.ai.ignoredDiagnostics": {
                     "scope": "resource",
                     "type": "array",
                     "items": {
                         "type": "string"
                     },
                     "default": [],
-                    "description": "%configuration.cwtools.ai.ignoredDiagnostics.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.ignoredDiagnostics.description%"
                 },
-                "cwtools.ai.enhancedDiagnostics": {
+                "stellarisLanguageServices.ai.enhancedDiagnostics": {
                     "scope": "resource",
                     "type": "boolean",
                     "default": true,
-                    "description": "%configuration.cwtools.ai.enhancedDiagnostics.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.enhancedDiagnostics.description%"
                 },
-                "cwtools.ai.braveSearchApiKey": {
+                "stellarisLanguageServices.ai.braveSearchApiKey": {
                     "scope": "window",
                     "type": "string",
                     "default": "",
-                    "description": "%configuration.cwtools.ai.braveSearchApiKey.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.braveSearchApiKey.description%"
                 },
-                "cwtools.ai.exaApiKey": {
+                "stellarisLanguageServices.ai.exaApiKey": {
                     "scope": "window",
                     "type": "string",
                     "default": "",
-                    "description": "%configuration.cwtools.ai.exaApiKey.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.exaApiKey.description%"
                 },
-                "cwtools.ai.mcp.servers": {
+                "stellarisLanguageServices.ai.mcp.servers": {
                     "scope": "window",
                     "type": "array",
                     "default": [],
-                    "description": "%configuration.cwtools.ai.mcp.servers.description%",
+                    "description": "%configuration.stellarisLanguageServices.ai.mcp.servers.description%",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -1038,11 +1038,11 @@
                         ]
                     }
                 },
-                "cwtools.ai.orchestrator.agentModels": {
+                "stellarisLanguageServices.ai.orchestrator.agentModels": {
                     "scope": "window",
                     "type": "object",
                     "default": {},
-                    "description": "%configuration.cwtools.ai.orchestrator.agentModels.description%",
+                    "description": "%configuration.stellarisLanguageServices.ai.orchestrator.agentModels.description%",
                     "additionalProperties": {
                         "type": "object",
                         "properties": {
@@ -1055,29 +1055,29 @@
                         }
                     }
                 },
-                "cwtools.ai.performance.legacyFullToolset": {
+                "stellarisLanguageServices.ai.performance.legacyFullToolset": {
                     "scope": "window",
                     "type": "boolean",
                     "default": false,
-                    "description": "%configuration.cwtools.ai.performance.legacyFullToolset.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.performance.legacyFullToolset.description%"
                 },
-                "cwtools.ai.performance.fullProjectRulesInBuild": {
+                "stellarisLanguageServices.ai.performance.fullProjectRulesInBuild": {
                     "scope": "window",
                     "type": "boolean",
                     "default": false,
-                    "description": "%configuration.cwtools.ai.performance.fullProjectRulesInBuild.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.performance.fullProjectRulesInBuild.description%"
                 },
-                "cwtools.ai.performance.includeFullSmallFiles": {
+                "stellarisLanguageServices.ai.performance.includeFullSmallFiles": {
                     "scope": "window",
                     "type": "boolean",
                     "default": false,
-                    "description": "%configuration.cwtools.ai.performance.includeFullSmallFiles.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.performance.includeFullSmallFiles.description%"
                 },
-                "cwtools.vanillaCompare.showGutterDecorations": {
+                "stellarisLanguageServices.vanillaCompare.showGutterDecorations": {
                     "scope": "window",
                     "type": "boolean",
                     "default": false,
-                    "description": "%configuration.cwtools.vanillaCompare.showGutterDecorations.description%"
+                    "description": "%configuration.stellarisLanguageServices.vanillaCompare.showGutterDecorations.description%"
                 }
             }
         },

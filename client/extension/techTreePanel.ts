@@ -180,7 +180,7 @@ export class TechTreePanel {
         const locMap = new Map<string, string>();
 
         // Determine target languages (prefer Chinese)
-        const config = vscode.workspace.getConfiguration('cwtools');
+        const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
         const locLangs = config.get<string[]>('localisation.languages') || ['English'];
         let targetLangs = locLangs.map(l => l.toLowerCase());
         if (targetLangs.length >= 2 && targetLangs.includes('chinese')) {

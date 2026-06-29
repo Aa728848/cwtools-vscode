@@ -20,7 +20,7 @@ export interface UpdateInstallHooks {
 }
 
 export async function checkForUpdates(context: vscode.ExtensionContext, installHooks: UpdateInstallHooks = {}) {
-    const config = vscode.workspace.getConfiguration('cwtools');
+    const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
     const isEnabled = config.get<boolean>('checkForUpdates', true);
     if (!isEnabled) {
         return;

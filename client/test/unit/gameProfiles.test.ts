@@ -55,7 +55,7 @@ describe('GameProfile Registry', () => {
             expect(profile.id, `${profile.id}.id`).to.be.a('string').and.not.be.empty;
             expect(profile.displayName, `${profile.id}.displayName`).to.be.a('string').and.not.be.empty;
             expect(profile.languageId, `${profile.id}.languageId`).to.equal(profile.id);
-            expect(profile.cacheSettingKey, `${profile.id}.cacheSettingKey`).to.include('cwtools.cache.');
+            expect(profile.cacheSettingKey, `${profile.id}.cacheSettingKey`).to.include('stellarisLanguageServices.cache.');
             expect(profile.rulesRemoteUrl, `${profile.id}.rulesRemoteUrl`).to.match(/^https:\/\/github\.com\//);
             expect(profile.install.steamAppId, `${profile.id}.steamAppId`).to.be.a('string');
             expect(profile.install.exeName, `${profile.id}.exeName`).to.be.a('string').and.not.be.empty;
@@ -205,7 +205,7 @@ describe('GameProfile Registry', () => {
         const profile = getProfileByLanguageId('hoi4');
         expect(profile.displayName).to.equal('Hearts of Iron IV');
         expect(profile.rulesRemoteUrl).to.include('cwtools-hoi4-config');
-        expect(profile.cacheSettingKey).to.equal('cwtools.cache.hoi4');
+        expect(profile.cacheSettingKey).to.equal('stellarisLanguageServices.cache.hoi4');
         expect(profile.ai.knowledgeKey).to.equal('hoi4');
         expect(profile.install.steamFolderName).to.equal('Hearts of Iron IV');
     });

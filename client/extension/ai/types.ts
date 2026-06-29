@@ -1787,7 +1787,7 @@ export interface PanelSettings {
     agentFileWriteMode: 'confirm' | 'auto';
     /** Approval reviewer: 'user' shows cards; 'auto_review' routes to the read-only LLM reviewer first. */
     approvals?: { reviewer?: 'user' | 'auto_review' };
-    /** Mirror of cwtools.ai.developer.disableSecuritySandbox — the 'full' write tier. */
+    /** Mirror of stellarisLanguageServices.ai.developer.disableSecuritySandbox — the 'full' write tier. */
     securitySandboxDisabled?: boolean;
     /** Reasoning effort / thinking depth (multi-provider) */
     reasoningEffort: 'low' | 'medium' | 'high' | 'max';

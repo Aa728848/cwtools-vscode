@@ -27,7 +27,7 @@ export function escapeRegExp(value: string): string {
 }
 
 export function isSecuritySandboxDisabled(): boolean {
-    return vs.workspace.getConfiguration('cwtools.ai.developer').get<boolean>('disableSecuritySandbox') === true;
+    return vs.workspace.getConfiguration('stellarisLanguageServices.ai.developer').get<boolean>('disableSecuritySandbox') === true;
 }
 
 export function sanitizePathInput(inputPath: string): string {

@@ -22,15 +22,20 @@ describe('MCP diagnostic ignore whitelist contract', () => {
   it('reads the flat dotted key from JSONC with comments and trailing commas', () => {
     const ws = tmpWorkspace(`{
       // diagnostics this project intentionally ignores
-      "cwtools.ai.ignoredDiagnostics": ["CW274", "unused localisation",],
+      "stellarisLanguageServices.ai.ignoredDiagnostics": ["CW274", "unused localisation",],
       "editor.tabSize": 4
     }`);
     expect(readIgnoredDiagnostics(ws)).to.deep.equal(['CW274', 'unused localisation']);
   });
 
   it('reads the nested object form', () => {
-    const ws = tmpWorkspace(JSON.stringify({ 'cwtools.ai': { ignoredDiagnostics: ['nested-key'] } }));
+    const ws = tmpWorkspace(JSON.stringify({ 'stellarisLanguageServices.ai': { ignoredDiagnostics: ['nested-key'] } }));
     expect(readIgnoredDiagnostics(ws)).to.deep.equal(['nested-key']);
+  });
+
+  it('falls back to legacy AI settings for existing projects', () => {
+    const ws = tmpWorkspace(JSON.stringify({ 'cwtools.ai.ignoredDiagnostics': ['legacy-key'] }));
+    expect(readIgnoredDiagnostics(ws)).to.deep.equal(['legacy-key']);
   });
 
   it('returns [] when no settings file or key is present', () => {
@@ -69,7 +74,14 @@ describe('MCP localisation language contract', () => {
     fs.writeFileSync(path.join(dir, `mymod_l_${tag}.yml`), `l_${tag}:\n`);
   }
 
-  it('uses the explicit cwtools.localisation.languages setting', () => {
+  it('uses the explicit stellarisLanguageServices.localisation.languages setting', () => {
+    const ws = tmpWorkspace(JSON.stringify({ 'stellarisLanguageServices.localisation.languages': ['Chinese'] }));
+    const r = resolveLocalisationLanguages(ws);
+    expect(r.languages).to.deep.equal(['Chinese']);
+    expect(r.source).to.equal('settings');
+  });
+
+  it('falls back to legacy localisation settings for existing projects', () => {
     const ws = tmpWorkspace(JSON.stringify({ 'cwtools.localisation.languages': ['Chinese'] }));
     const r = resolveLocalisationLanguages(ws);
     expect(r.languages).to.deep.equal(['Chinese']);

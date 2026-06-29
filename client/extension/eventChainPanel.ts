@@ -322,7 +322,7 @@ if (keysToResolve.size === 0) return;
 const locMap = new Map<string, string>();
 
 // Get configured validation languages, prioritize Chinese if present
-const config = vscode.workspace.getConfiguration('cwtools');
+const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
 const locLangs = config.get<string[]>('localisation.languages') || ['English'];
 
 let targetLangs = locLangs.map(l => l.toLowerCase());

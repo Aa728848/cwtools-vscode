@@ -13,7 +13,7 @@ class PdxIndentFormatter implements vscode.DocumentRangeFormattingEditProvider {
 		options: vscode.FormattingOptions,
 	): vscode.TextEdit[] {
 		const enabled = vscode.workspace
-			.getConfiguration('cwtools', document.uri)
+			.getConfiguration('stellarisLanguageServices', document.uri)
 			.get<boolean>('editor.formatIndentOnPaste', true);
 		if (!enabled) return [];
 

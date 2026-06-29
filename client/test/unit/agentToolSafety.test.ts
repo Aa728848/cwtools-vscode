@@ -1572,7 +1572,7 @@ describe('agent tool progress and aborts', () => {
 
         expect(result.success).to.equal(false);
         expect(result.error).to.include('denied for orchestrator sub-agents');
-        expect(result.error).to.include('cwtools.ai.permissions');
+        expect(result.error).to.include('stellarisLanguageServices.ai.permissions');
     });
 
     it('lets an explicit allow pattern grant sub-agent MCP access', async () => {

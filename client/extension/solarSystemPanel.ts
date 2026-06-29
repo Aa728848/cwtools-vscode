@@ -190,7 +190,7 @@ export class SolarSystemPanel {
     }
 
     private _getGamePath(): string | null {
-        const config = vscode.workspace.getConfiguration('cwtools');
+        const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
         const configPath = config.get<string>('cache.stellaris');
         if (configPath && fs.existsSync(configPath)) return configPath;
         return null;
@@ -526,7 +526,7 @@ export class SolarSystemPanel {
         if (this._locCache) return this._locCache;
         
         const locMap: Record<string, string> = {};
-        const config = vscode.workspace.getConfiguration('cwtools');
+        const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
         const locLangs = config.get<string[]>('localisation.languages') || ['English'];
         let targetLangs = locLangs.map(l => l.toLowerCase());
         if (targetLangs.length >= 2 && targetLangs.includes('chinese')) {

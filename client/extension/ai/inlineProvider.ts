@@ -150,7 +150,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                 this.recordTelemetryAccepted(id);
             }),
             vs.workspace.onDidChangeConfiguration((e) => {
-                if (e.affectsConfiguration('cwtools.ai')) {
+                if (e.affectsConfiguration('stellarisLanguageServices.ai')) {
                     this.updateEnabled();
                 }
             })

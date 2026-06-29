@@ -82,15 +82,15 @@ describe('Update checker release metadata', () => {
                     browser_download_url: 'https://example.test/2.7.1.vsix',
                 },
                 {
-                    name: 'foreverskywalker-stellaris-cwtools-2.7.2.vsix',
+                    name: 'foreverskywalker-stellaris-cwtools-2.7.3.vsix',
                     updated_at: '2026-06-28T14:22:37Z',
-                    browser_download_url: 'https://example.test/2.7.2.vsix',
+                    browser_download_url: 'https://example.test/2.7.3.vsix',
                 },
             ],
         });
 
-        expect(selected?.version).to.equal('2.7.2');
-        expect(selected?.downloadUrl).to.equal('https://example.test/2.7.2.vsix');
+        expect(selected?.version).to.equal('2.7.3');
+        expect(selected?.downloadUrl).to.equal('https://example.test/2.7.3.vsix');
     });
 
     it('falls back to the release tag for unversioned VSIX asset names', () => {

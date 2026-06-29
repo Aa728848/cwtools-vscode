@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.7.2] - 2026-06-29
+## [2.7.3] - 2026-06-29
 
 ### Marketplace identity
 - **[Publish]** Changed the Marketplace extension name to `foreverskywalker-stellaris-cwtools` and added first-run globalStorage migration from legacy IDs (`foreverskywalker.eddy-stellaris-cwt`, `eddy.eddy-stellaris-cwt`).

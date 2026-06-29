@@ -319,6 +319,33 @@ function setByPath(root: unknown, path: Array<string | number>, value: unknown):
     current[String(path[path.length - 1]!)] = value;
 }
 
+function forceReferenceNames(value: string | undefined): string[] {
+    return (value ?? '')
+        .split(',')
+        .map(name => name.trim().replace(/^"|"$/g, ''))
+        .filter(Boolean);
+}
+
+function forceRenameForEdit(effect: ParticleEffect, path: Array<string | number>, value: unknown): { oldName: string; newName: string } | undefined {
+    const parts = path.map(String);
+    if (parts[0] !== 'forces' || parts[2] !== 'name' || typeof value !== 'string') return undefined;
+    const index = Number(parts[1]);
+    const oldName = effect.forces[index]?.name;
+    if (!oldName || oldName === value) return undefined;
+    return { oldName, newName: value };
+}
+
+function renameForceReferences(effect: ParticleEffect, oldName: string, newName: string): void {
+    const visit = (subsystems: ParticleEffect['subsystems']): void => {
+        for (const subsystem of subsystems) {
+            const refs = forceReferenceNames(subsystem.force);
+            if (refs.includes(oldName)) subsystem.force = refs.map(name => name === oldName ? newName : name).join(',');
+            if (subsystem.childsystems?.length) visit(subsystem.childsystems);
+        }
+    };
+    visit(effect.subsystems);
+}
+
 function fieldEditNeedsSimulationRebuild(path: Array<string | number>): boolean {
     const parts = path.map(String);
     if (parts[0] === 'subsystems') {
@@ -584,8 +611,10 @@ function refreshSelectors(): void {
 function handleFieldEdit(path: Array<string | number>, value: unknown): void {
     const effect = currentEffect();
     if (!effect) return;
+    const forceRename = forceRenameForEdit(effect, path, value);
     pushHistorySnapshot();
     setByPath(effect, path, value);
+    if (forceRename) renameForceReferences(effect, forceRename.oldName, forceRename.newName);
     finishCommittedEdit();
     if (fieldEditNeedsSimulationRebuild(path)) rebuildSimulation(false);
     else if (fieldEditChangesEmitterVisuals(path)) refreshEmitterVisuals();

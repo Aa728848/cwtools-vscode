@@ -123,6 +123,13 @@ describe('particle asset parser', () => {
         expect(serializeScalar(emission)).to.equal('{ alpha_fade beta_fade }');
     });
 
+    it('preserves comma-separated subsystem force references', () => {
+        const source = 'particle={ name=test subsystem={ name=shards force=gravity,friction } force={ name=gravity type=planar } force={ name=friction type=friction } }';
+        const effect = parseParticleFile(source).effects[0]!;
+        expect(effect.subsystems[0]?.force).to.equal('gravity,friction');
+        expect(serializeEffect(effect)).to.contain('force=gravity,friction');
+    });
+
     it('serializes parsed effects back into parseable particle blocks', () => {
         const effect = parseParticleFile(SAMPLE).effects[0]!;
         const serialized = serializeEffect(effect);

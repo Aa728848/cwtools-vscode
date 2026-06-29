@@ -383,7 +383,8 @@ export class ParticleInspector {
 
     private selectField(label: string, value: string, options: string[], path: Array<string | number>, callbacks: InspectorCallbacks): HTMLElement {
         const select = document.createElement('select');
-        for (const option of options) {
+        const selectOptions = value && !options.includes(value) ? [...options, value] : options;
+        for (const option of selectOptions) {
             const item = document.createElement('option');
             item.value = option;
             item.textContent = option || '(none)';

@@ -252,6 +252,20 @@ function readString(ctx: ParseCtx): { value: string; span: Span } {
     return { value: tokenText(token), span: spanFromTokens(ctx, token, token) };
 }
 
+function readCommaStringList(ctx: ParseCtx): { value: string; span: Span } {
+    const first = advance(ctx);
+    const values = [tokenText(first)];
+    let end = first;
+    while (peek(ctx)?.type === TokenType.Comma) {
+        advance(ctx);
+        const next = peek(ctx);
+        if (!next || next.type === TokenType.EOF || next.type === TokenType.RBrace) break;
+        end = advance(ctx);
+        values.push(tokenText(end));
+    }
+    return { value: values.filter(Boolean).join(','), span: spanFromTokens(ctx, first, end) };
+}
+
 function readNumber(ctx: ParseCtx): { value: number; span: Span; rawStyle: NumberStyle; raw: string } {
     const token = advance(ctx);
     return {
@@ -397,7 +411,7 @@ function parseSubsystemBlock(ctx: ParseCtx, keyToken: Token): Subsystem {
                 subsystem.numberStyles![String(prop)] = value.rawStyle;
             } else if (key.value in SUBSYSTEM_STRING_KEYS) {
                 const prop = SUBSYSTEM_STRING_KEYS[key.value]!;
-                const value = readString(ctx);
+                const value = key.value === 'force' ? readCommaStringList(ctx) : readString(ctx);
                 (subsystem as Record<string, unknown>)[prop] = value.value;
                 ensureSpans(subsystem)[String(prop)] = value.span;
             } else if (key.value in SUBSYSTEM_BOOL_KEYS) {

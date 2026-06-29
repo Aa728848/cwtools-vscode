@@ -19,22 +19,38 @@ interface ForceMap {
     [name: string]: Force;
 }
 
-function scalarValue(value: Scalar | undefined, fallback: number, progress: number, seed: number, curves: Map<string, AnimationCurve>): number {
-    if (!value) return fallback;
-    if (isRange(value)) {
-        const base = animatedValue(value.a, progress, curves);
-        const variance = Math.abs(animatedValue(value.b, progress, curves));
-        return base + (seeded(seed, 11) * 2 - 1) * variance;
-    }
-    return animatedValue(value, progress, curves);
+interface AnimationSampleContext {
+    lifeProgress: number;
+    particleAge: number;
+    lifeSeconds: number;
+    systemAge: number;
 }
 
-function animatedValue(value: AnimatedValue, progress: number, curves: Map<string, AnimationCurve>): number {
+const FRICTION_RESPONSE_SCALE = 2.5;
+
+function scalarValueAt(
+    value: Scalar | undefined,
+    fallback: number,
+    progress: number,
+    seed: number,
+    curves: Map<string, AnimationCurve>,
+    context?: AnimationSampleContext,
+): number {
+    if (!value) return fallback;
+    if (isRange(value)) {
+        const base = animatedValue(value.a, progress, curves, context);
+        const variance = Math.abs(animatedValue(value.b, progress, curves, context));
+        return base + (seeded(seed, 11) * 2 - 1) * variance;
+    }
+    return animatedValue(value, progress, curves, context);
+}
+
+function animatedValue(value: AnimatedValue, progress: number, curves: Map<string, AnimationCurve>, context?: AnimationSampleContext): number {
     const primaryCurve = value.raw && !isNumericCellText(value.raw) ? curves.get(value.raw) : undefined;
-    if (primaryCurve) return animationCurveValue(primaryCurve, progress);
+    if (primaryCurve) return animationCurveValue(primaryCurve, progress, context);
     const curve = value.curve ? curves.get(value.curve) : undefined;
     if (!curve) return value.value;
-    const rawCurveValue = rawAnimationCurveValue(curve, progress);
+    const rawCurveValue = rawAnimationCurveValue(curve, progress, context);
     if (curve.op === 'MUL' || curve.op === 'mul') return value.value * rawCurveValue;
     return curve.minValue + (curve.maxValue - curve.minValue) * rawCurveValue;
 }
@@ -43,15 +59,36 @@ function isNumericCellText(text: string): boolean {
     return /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?%?$/i.test(text.trim());
 }
 
-function animationCurveValue(curve: AnimationCurve, progress: number): number {
-    const rawCurveValue = rawAnimationCurveValue(curve, progress);
+function animationCurveValue(curve: AnimationCurve, progress: number, context?: AnimationSampleContext): number {
+    const rawCurveValue = rawAnimationCurveValue(curve, progress, context);
     if (curve.op === 'MUL' || curve.op === 'mul') return rawCurveValue;
     return curve.minValue + (curve.maxValue - curve.minValue) * rawCurveValue;
 }
 
-function rawAnimationCurveValue(curve: AnimationCurve, progress: number): number {
-    const localT = Math.max(0, Math.min(1, progress));
+function rawAnimationCurveValue(curve: AnimationCurve, progress: number, context?: AnimationSampleContext): number {
+    const sourceTime = animationSourceTime(curve, progress, context);
+    const duration = curve.duration > 0 ? curve.duration : 1;
+    let localT = (sourceTime - curve.start) / duration;
+    if (curve.repeat && sourceTime >= curve.start) {
+        localT = ((sourceTime - curve.start) % duration) / duration;
+    }
+    localT = Math.max(0, Math.min(1, localT));
     return evalCurve(curve.points, localT);
+}
+
+function animationSourceTime(curve: AnimationCurve, progress: number, context?: AnimationSampleContext): number {
+    if (!context) return progress;
+    switch (curve.time.toLowerCase()) {
+        case 'system':
+            return context.systemAge;
+        case 'life_abs':
+            return context.particleAge;
+        case 'spawn':
+            return Math.max(0, context.systemAge - context.particleAge);
+        case 'life':
+        default:
+            return context.lifeProgress;
+    }
 }
 
 function seeded(seed: number, salt: number): number {
@@ -70,10 +107,10 @@ function clamp01(value: number): number {
     return Math.max(0, Math.min(1, value));
 }
 
-function rangeMagnitude(value: Scalar | undefined, progress: number, curves: Map<string, AnimationCurve>): number {
+function rangeMagnitude(value: Scalar | undefined, progress: number, curves: Map<string, AnimationCurve>, context?: AnimationSampleContext): number {
     if (!value || !isRange(value)) return 0;
     const values = [value.b, ...(value.extras ?? [])];
-    return values.reduce((max, item) => Math.max(max, Math.abs(animatedValue(item, progress, curves))), 0);
+    return values.reduce((max, item) => Math.max(max, Math.abs(animatedValue(item, progress, curves, context))), 0);
 }
 
 function directionFromYawPitch(yawDeg: number, pitchDeg: number): [number, number, number] {
@@ -111,6 +148,13 @@ function cross3(a: [number, number, number], b: [number, number, number]): [numb
         a[2] * b[0] - a[0] * b[2],
         a[0] * b[1] - a[1] * b[0],
     ];
+}
+
+function forceReferenceNames(value: string | undefined): string[] {
+    return (value ?? '')
+        .split(',')
+        .map(name => name.trim().replace(/^"|"$/g, ''))
+        .filter(Boolean);
 }
 
 function makeBuffer(capacity: number): ParticleInstanceData {
@@ -200,10 +244,16 @@ export class ParticleSystemSim {
 
     private spawn(dt: number): void {
         if (this.subsystem.hide) return;
-        const start = scalarValue(this.subsystem.start, 0, 0, 3, this.curves);
+        const systemContext: AnimationSampleContext = {
+            lifeProgress: 0,
+            particleAge: 0,
+            lifeSeconds: 1,
+            systemAge: this.systemAge,
+        };
+        const start = scalarValueAt(this.subsystem.start, 0, 0, 3, this.curves, systemContext);
         if (this.systemAge < start) return;
-        const duration = scalarValue(this.subsystem.duration, -1, 0, 4, this.curves);
-        const emission = scalarValue(this.subsystem.emission, duration === 0 ? this.capacity : 24, 0, 7, this.curves);
+        const duration = scalarValueAt(this.subsystem.duration, -1, 0, 4, this.curves, systemContext);
+        const emission = scalarValueAt(this.subsystem.emission, duration === 0 ? this.capacity : 24, 0, 7, this.curves, systemContext);
         if (duration === 0) {
             if (this.burstDone) return;
             this.burstDone = true;
@@ -212,8 +262,8 @@ export class ParticleSystemSim {
         }
         if (duration >= 0 && this.systemAge > start + duration) return;
 
-        const pulseDuration = scalarValue(this.subsystem.emissionPulseDuration, 0, 0, 5, this.curves);
-        const pulseSilence = scalarValue(this.subsystem.emissionPulseSilence, 0, 0, 6, this.curves);
+        const pulseDuration = scalarValueAt(this.subsystem.emissionPulseDuration, 0, 0, 5, this.curves, systemContext);
+        const pulseSilence = scalarValueAt(this.subsystem.emissionPulseSilence, 0, 0, 6, this.curves, systemContext);
         if (pulseDuration > 0 && pulseSilence > 0) {
             const phase = (this.systemAge - start) % (pulseDuration + pulseSilence);
             if (phase > pulseDuration) return;
@@ -232,9 +282,19 @@ export class ParticleSystemSim {
         this.active[index] = true;
         this.seed[index] = seed;
         this.age[index] = 0;
-        this.life[index] = Math.max(0.05, scalarValue(this.subsystem.life, 1, 0, seed, this.curves));
+        const systemContext: AnimationSampleContext = {
+            lifeProgress: 0,
+            particleAge: 0,
+            lifeSeconds: 1,
+            systemAge: this.systemAge,
+        };
+        this.life[index] = Math.max(0.05, scalarValueAt(this.subsystem.life, 1, 0, seed, this.curves, systemContext));
+        const spawnContext: AnimationSampleContext = {
+            ...systemContext,
+            lifeSeconds: this.life[index] ?? 1,
+        };
 
-        const pos = this.initialPosition(seed);
+        const pos = this.initialPosition(seed, spawnContext);
         this.px[index] = pos[0];
         this.py[index] = pos[1];
         this.pz[index] = pos[2];
@@ -242,34 +302,34 @@ export class ParticleSystemSim {
         this.prevPy[index] = pos[1];
         this.prevPz[index] = pos[2];
 
-        const yaw = scalarValue(this.subsystem.velocityYaw, 0, 0, seed + 1, this.curves) +
-            scalarValue(this.subsystem.emitterYaw, 0, 0, seed + 2, this.curves);
-        const pitch = scalarValue(this.subsystem.velocityPitch, 0, 0, seed + 3, this.curves) +
-            scalarValue(this.subsystem.emitterPitch, 0, 0, seed + 4, this.curves);
+        const yaw = scalarValueAt(this.subsystem.velocityYaw, 0, 0, seed + 1, this.curves, spawnContext) +
+            scalarValueAt(this.subsystem.emitterYaw, 0, 0, seed + 2, this.curves, spawnContext);
+        const pitch = scalarValueAt(this.subsystem.velocityPitch, 0, 0, seed + 3, this.curves, spawnContext) +
+            scalarValueAt(this.subsystem.emitterPitch, 0, 0, seed + 4, this.curves, spawnContext);
         const dir = directionFromYawPitch(yaw, pitch);
-        const speed = scalarValue(this.subsystem.velocity, 1, 0, seed + 5, this.curves) * this.spatialScale;
+        const speed = scalarValueAt(this.subsystem.velocity, 1, 0, seed + 5, this.curves, spawnContext) * this.spatialScale;
         this.vx[index] = dir[0] * speed;
         this.vy[index] = dir[1] * speed;
         this.vz[index] = dir[2] * speed;
-        this.rot[index] = degToRad(scalarValue(this.subsystem.rotation, 0, 0, seed + 6, this.curves));
-        this.rotSpeed[index] = degToRad(scalarValue(this.subsystem.rotationSpeed, 0, 0, seed + 7, this.curves));
+        this.rot[index] = degToRad(scalarValueAt(this.subsystem.rotation, 0, 0, seed + 6, this.curves, spawnContext));
+        this.rotSpeed[index] = degToRad(scalarValueAt(this.subsystem.rotationSpeed, 0, 0, seed + 7, this.curves, spawnContext));
     }
 
-    private initialPosition(seed: number): [number, number, number] {
+    private initialPosition(seed: number, context: AnimationSampleContext): [number, number, number] {
         const base = assetVectorToWorld([
-            scalarValue(this.subsystem.position?.x, 0, 0, seed + 10, this.curves) * this.spatialScale,
-            scalarValue(this.subsystem.position?.y, 0, 0, seed + 11, this.curves) * this.spatialScale,
-            scalarValue(this.subsystem.position?.z, 0, 0, seed + 12, this.curves) * this.spatialScale,
+            scalarValueAt(this.subsystem.position?.x, 0, 0, seed + 10, this.curves, context) * this.spatialScale,
+            scalarValueAt(this.subsystem.position?.y, 0, 0, seed + 11, this.curves, context) * this.spatialScale,
+            scalarValueAt(this.subsystem.position?.z, 0, 0, seed + 12, this.curves, context) * this.spatialScale,
         ]);
         if (this.subsystem.emitterType === 'box') {
-            base[2] += scalarValue(this.subsystem.boxEmitterX, 0, 0, seed + 13, this.curves) * this.spatialScale * (seeded(seed, 14) * 2 - 1);
-            base[1] += scalarValue(this.subsystem.boxEmitterY, 0, 0, seed + 15, this.curves) * this.spatialScale * (seeded(seed, 16) * 2 - 1);
-            base[0] += scalarValue(this.subsystem.boxEmitterZ, 0, 0, seed + 17, this.curves) * this.spatialScale * (seeded(seed, 18) * 2 - 1);
+            base[2] += scalarValueAt(this.subsystem.boxEmitterX, 0, 0, seed + 13, this.curves, context) * this.spatialScale * (seeded(seed, 14) * 2 - 1);
+            base[1] += scalarValueAt(this.subsystem.boxEmitterY, 0, 0, seed + 15, this.curves, context) * this.spatialScale * (seeded(seed, 16) * 2 - 1);
+            base[0] += scalarValueAt(this.subsystem.boxEmitterZ, 0, 0, seed + 17, this.curves, context) * this.spatialScale * (seeded(seed, 18) * 2 - 1);
         } else if (this.subsystem.emitterType === 'sphere') {
-            const radius = Math.max(0, scalarValue(this.subsystem.sphereEmitterRadius, 1, 0, seed + 19, this.curves) * this.spatialScale);
+            const radius = Math.max(0, scalarValueAt(this.subsystem.sphereEmitterRadius, 1, 0, seed + 19, this.curves, context) * this.spatialScale);
             if (this.subsystem.sphereEmitterYaw || this.subsystem.sphereEmitterPitch) {
-                const yaw = scalarValue(this.subsystem.sphereEmitterYaw, seeded(seed, 20) * 360, 0, seed + 20, this.curves);
-                const pitch = scalarValue(this.subsystem.sphereEmitterPitch, 0, 0, seed + 21, this.curves);
+                const yaw = scalarValueAt(this.subsystem.sphereEmitterYaw, seeded(seed, 20) * 360, 0, seed + 20, this.curves, context);
+                const pitch = scalarValueAt(this.subsystem.sphereEmitterPitch, 0, 0, seed + 21, this.curves, context);
                 const direction = directionFromYawPitch(yaw, pitch);
                 base[0] += direction[0] * radius;
                 base[1] += direction[1] * radius;
@@ -303,12 +363,19 @@ export class ParticleSystemSim {
         ];
     }
 
-    private spatialForceAmount(force: Force, fallback: number, progress: number, seed: number): number {
-        return scalarValue(force.amount, fallback, progress, seed, this.curves) * this.spatialScale;
+    private spatialForceAmount(force: Force, fallback: number, progress: number, seed: number, context?: AnimationSampleContext): number {
+        return scalarValueAt(force.amount, fallback, progress, seed, this.curves, context) * this.spatialScale;
+    }
+
+    private subsystemForces(): Force[] {
+        return forceReferenceNames(this.subsystem.force)
+            .map(name => this.forces[name])
+            .filter((force): force is Force => !!force);
     }
 
     private integrate(dt: number): void {
-        const force = this.subsystem.force ? this.forces[this.subsystem.force] : undefined;
+        const activeForces = this.subsystemForces();
+        const singleFriction = activeForces.length === 1 && activeForces[0]?.type === 'friction' ? activeForces[0] : undefined;
         for (let i = 0; i < this.capacity; i++) {
             if (!this.active[i]) continue;
             const nextAge = (this.age[i] ?? 0) + dt;
@@ -320,84 +387,123 @@ export class ParticleSystemSim {
                 continue;
             }
             const progress = nextAge / life;
-            const mass = Math.max(0.05, scalarValue(this.subsystem.mass, 1, progress, seed + 37, this.curves));
+            const context: AnimationSampleContext = {
+                lifeProgress: progress,
+                particleAge: nextAge,
+                lifeSeconds: life,
+                systemAge: this.systemAge,
+            };
+            const mass = Math.max(0.05, scalarValueAt(this.subsystem.mass, 1, progress, seed + 37, this.curves, context));
             const forceDt = dt / mass;
             this.prevPx[i] = this.px[i] ?? 0;
             this.prevPy[i] = this.py[i] ?? 0;
             this.prevPz[i] = this.pz[i] ?? 0;
-            if (force?.type === 'friction') {
-                const amount = Math.max(0, scalarValue(force.amount, 0.2, progress, seed, this.curves));
-                const damp = Math.max(0, 1 - amount * dt);
+            let moveVx = this.vx[i] ?? 0;
+            let moveVy = this.vy[i] ?? 0;
+            let moveVz = this.vz[i] ?? 0;
+            let usedExactFriction = false;
+            if (singleFriction) {
+                const amount = Math.max(0, scalarValueAt(singleFriction.amount, 0.2, progress, seed, this.curves, context));
+                const drag = amount * FRICTION_RESPONSE_SCALE / mass;
+                const damp = Math.exp(-drag * dt);
+                const displacementScale = drag > 0.000001 ? (1 - damp) / (drag * dt) : 1;
+                moveVx *= displacementScale;
+                moveVy *= displacementScale;
+                moveVz *= displacementScale;
                 this.vx[i] = (this.vx[i] ?? 0) * damp;
                 this.vy[i] = (this.vy[i] ?? 0) * damp;
                 this.vz[i] = (this.vz[i] ?? 0) * damp;
-            } else if (force?.type === 'planar') {
-                const direction = this.forceDirection(force);
-                const amount = this.spatialForceAmount(force, 1, progress, seed);
-                this.vx[i] = (this.vx[i] ?? 0) + (direction[0] ?? 0) * amount * forceDt;
-                this.vy[i] = (this.vy[i] ?? 0) + (direction[1] ?? 0) * amount * forceDt;
-                this.vz[i] = (this.vz[i] ?? 0) + (direction[2] ?? 0) * amount * forceDt;
-            } else if (force?.type === 'point') {
-                const center = this.forcePosition(force);
-                const amount = this.spatialForceAmount(force, 1, progress, seed);
-                const dx = (this.px[i] ?? 0) - center[0];
-                const dy = (this.py[i] ?? 0) - center[1];
-                const dz = (this.pz[i] ?? 0) - center[2];
-                const radialLength = Math.max(0.001, Math.hypot(dx, dy, dz));
-                const fallback = this.forceAxis(force, [1, 0, 0]);
-                const radial: [number, number, number] = radialLength > 0.001 ? [dx / radialLength, dy / radialLength, dz / radialLength] : fallback;
-                const falloff = 1 / Math.max(0.25, radialLength / Math.max(1, force.division ?? 16));
-                this.vx[i] = (this.vx[i] ?? 0) + radial[0] * amount * falloff * forceDt;
-                this.vy[i] = (this.vy[i] ?? 0) + radial[1] * amount * falloff * forceDt;
-                this.vz[i] = (this.vz[i] ?? 0) + radial[2] * amount * falloff * forceDt;
-            } else if (force?.type === 'spin') {
-                const center = this.forcePosition(force);
-                const axis = this.forceAxis(force);
-                const amount = this.spatialForceAmount(force, 1, progress, seed);
-                const dx = (this.px[i] ?? 0) - center[0];
-                const dy = (this.py[i] ?? 0) - center[1];
-                const dz = (this.pz[i] ?? 0) - center[2];
-                const axial = dx * axis[0] + dy * axis[1] + dz * axis[2];
-                const radial: [number, number, number] = [
-                    dx - axis[0] * axial,
-                    dy - axis[1] * axial,
-                    dz - axis[2] * axial,
-                ];
-                const tangent = normalize3(cross3(axis, radial), [1, 0, 0]);
-                const radialLength = Math.max(0.001, Math.hypot(radial[0], radial[1], radial[2]));
-                const strength = amount * Math.max(0.25, radialLength / Math.max(1, force.division ?? 16));
-                this.vx[i] = (this.vx[i] ?? 0) + tangent[0] * strength * forceDt;
-                this.vy[i] = (this.vy[i] ?? 0) + tangent[1] * strength * forceDt;
-                this.vz[i] = (this.vz[i] ?? 0) + tangent[2] * strength * forceDt;
-            } else if (force?.type === 'vortex') {
-                const center = this.forcePosition(force);
-                const axis = this.forceAxis(force);
-                const amount = this.spatialForceAmount(force, 0.5, progress, seed);
-                const dx = (this.px[i] ?? 0) - (center[0] ?? 0);
-                const dy = (this.py[i] ?? 0) - (center[1] ?? 0);
-                const dz = (this.pz[i] ?? 0) - (center[2] ?? 0);
-                const axial = dx * axis[0] + dy * axis[1] + dz * axis[2];
-                const radial: [number, number, number] = [
-                    dx - axis[0] * axial,
-                    dy - axis[1] * axial,
-                    dz - axis[2] * axial,
-                ];
-                const radialLength = Math.max(0.001, Math.hypot(radial[0], radial[1], radial[2]));
-                const tangent = normalize3(cross3(axis, radial), [1, 0, 0]);
-                const scale = amount * Math.max(0.25, radialLength / Math.max(1, force.division ?? 16));
-                this.vx[i] = (this.vx[i] ?? 0) + tangent[0] * scale * forceDt;
-                this.vy[i] = (this.vy[i] ?? 0) + tangent[1] * scale * forceDt;
-                this.vz[i] = (this.vz[i] ?? 0) + tangent[2] * scale * forceDt;
-            } else if (force?.type === 'turbulence') {
-                const amount = this.spatialForceAmount(force, 1, progress, seed);
-                const phase = Math.floor((this.systemAge + progress) * Math.max(1, force.division ?? 8));
-                this.vx[i] = (this.vx[i] ?? 0) + (seeded(seed + phase, 41) * 2 - 1) * amount * forceDt;
-                this.vy[i] = (this.vy[i] ?? 0) + (seeded(seed + phase, 42) * 2 - 1) * amount * forceDt;
-                this.vz[i] = (this.vz[i] ?? 0) + (seeded(seed + phase, 43) * 2 - 1) * amount * forceDt;
+                usedExactFriction = true;
+            } else {
+                const startVx = this.vx[i] ?? 0;
+                const startVy = this.vy[i] ?? 0;
+                const startVz = this.vz[i] ?? 0;
+                for (const force of activeForces) {
+                    if (force.type === 'friction') {
+                        const amount = Math.max(0, scalarValueAt(force.amount, 0.2, progress, seed, this.curves, context));
+                        const damp = Math.exp(-amount * FRICTION_RESPONSE_SCALE * forceDt);
+                        this.vx[i] = (this.vx[i] ?? 0) * damp;
+                        this.vy[i] = (this.vy[i] ?? 0) * damp;
+                        this.vz[i] = (this.vz[i] ?? 0) * damp;
+                    } else if (force.type === 'planar') {
+                        const direction = this.forceDirection(force);
+                        const amount = this.spatialForceAmount(force, 1, progress, seed, context);
+                        this.vx[i] = (this.vx[i] ?? 0) + (direction[0] ?? 0) * amount * forceDt;
+                        this.vy[i] = (this.vy[i] ?? 0) + (direction[1] ?? 0) * amount * forceDt;
+                        this.vz[i] = (this.vz[i] ?? 0) + (direction[2] ?? 0) * amount * forceDt;
+                    } else if (force.type === 'point') {
+                        const center = this.forcePosition(force);
+                        const amount = this.spatialForceAmount(force, 1, progress, seed, context);
+                        const dx = (this.px[i] ?? 0) - center[0];
+                        const dy = (this.py[i] ?? 0) - center[1];
+                        const dz = (this.pz[i] ?? 0) - center[2];
+                        const radialLength = Math.max(0.001, Math.hypot(dx, dy, dz));
+                        const fallback = this.forceAxis(force, [1, 0, 0]);
+                        const radial: [number, number, number] = radialLength > 0.001 ? [dx / radialLength, dy / radialLength, dz / radialLength] : fallback;
+                        const falloff = 1 / Math.max(0.25, radialLength / Math.max(1, force.division ?? 16));
+                        this.vx[i] = (this.vx[i] ?? 0) + radial[0] * amount * falloff * forceDt;
+                        this.vy[i] = (this.vy[i] ?? 0) + radial[1] * amount * falloff * forceDt;
+                        this.vz[i] = (this.vz[i] ?? 0) + radial[2] * amount * falloff * forceDt;
+                    } else if (force.type === 'spin') {
+                        const center = this.forcePosition(force);
+                        const axis = this.forceAxis(force);
+                        const amount = this.spatialForceAmount(force, 1, progress, seed, context);
+                        const dx = (this.px[i] ?? 0) - center[0];
+                        const dy = (this.py[i] ?? 0) - center[1];
+                        const dz = (this.pz[i] ?? 0) - center[2];
+                        const axial = dx * axis[0] + dy * axis[1] + dz * axis[2];
+                        const radial: [number, number, number] = [
+                            dx - axis[0] * axial,
+                            dy - axis[1] * axial,
+                            dz - axis[2] * axial,
+                        ];
+                        const tangent = normalize3(cross3(axis, radial), [1, 0, 0]);
+                        const radialLength = Math.max(0.001, Math.hypot(radial[0], radial[1], radial[2]));
+                        const strength = amount * Math.max(0.25, radialLength / Math.max(1, force.division ?? 16));
+                        this.vx[i] = (this.vx[i] ?? 0) + tangent[0] * strength * forceDt;
+                        this.vy[i] = (this.vy[i] ?? 0) + tangent[1] * strength * forceDt;
+                        this.vz[i] = (this.vz[i] ?? 0) + tangent[2] * strength * forceDt;
+                    } else if (force.type === 'vortex') {
+                        const center = this.forcePosition(force);
+                        const axis = this.forceAxis(force);
+                        const amount = this.spatialForceAmount(force, 0.5, progress, seed, context);
+                        const dx = (this.px[i] ?? 0) - (center[0] ?? 0);
+                        const dy = (this.py[i] ?? 0) - (center[1] ?? 0);
+                        const dz = (this.pz[i] ?? 0) - (center[2] ?? 0);
+                        const axial = dx * axis[0] + dy * axis[1] + dz * axis[2];
+                        const radial: [number, number, number] = [
+                            dx - axis[0] * axial,
+                            dy - axis[1] * axial,
+                            dz - axis[2] * axial,
+                        ];
+                        const radialLength = Math.max(0.001, Math.hypot(radial[0], radial[1], radial[2]));
+                        const tangent = normalize3(cross3(axis, radial), [1, 0, 0]);
+                        const scale = amount * Math.max(0.25, radialLength / Math.max(1, force.division ?? 16));
+                        this.vx[i] = (this.vx[i] ?? 0) + tangent[0] * scale * forceDt;
+                        this.vy[i] = (this.vy[i] ?? 0) + tangent[1] * scale * forceDt;
+                        this.vz[i] = (this.vz[i] ?? 0) + tangent[2] * scale * forceDt;
+                    } else if (force.type === 'turbulence') {
+                        const amount = this.spatialForceAmount(force, 1, progress, seed, context);
+                        const phase = Math.floor((this.systemAge + progress) * Math.max(1, force.division ?? 8));
+                        this.vx[i] = (this.vx[i] ?? 0) + (seeded(seed + phase, 41) * 2 - 1) * amount * forceDt;
+                        this.vy[i] = (this.vy[i] ?? 0) + (seeded(seed + phase, 42) * 2 - 1) * amount * forceDt;
+                        this.vz[i] = (this.vz[i] ?? 0) + (seeded(seed + phase, 43) * 2 - 1) * amount * forceDt;
+                    }
+                }
+                if (activeForces.length > 0) {
+                    moveVx = (startVx + (this.vx[i] ?? 0)) * 0.5;
+                    moveVy = (startVy + (this.vy[i] ?? 0)) * 0.5;
+                    moveVz = (startVz + (this.vz[i] ?? 0)) * 0.5;
+                }
             }
-            this.px[i] = (this.px[i] ?? 0) + (this.vx[i] ?? 0) * dt;
-            this.py[i] = (this.py[i] ?? 0) + (this.vy[i] ?? 0) * dt;
-            this.pz[i] = (this.pz[i] ?? 0) + (this.vz[i] ?? 0) * dt;
+            if (!usedExactFriction) {
+                moveVx = activeForces.length > 0 ? moveVx : this.vx[i] ?? 0;
+                moveVy = activeForces.length > 0 ? moveVy : this.vy[i] ?? 0;
+                moveVz = activeForces.length > 0 ? moveVz : this.vz[i] ?? 0;
+            }
+            this.px[i] = (this.px[i] ?? 0) + moveVx * dt;
+            this.py[i] = (this.py[i] ?? 0) + moveVy * dt;
+            this.pz[i] = (this.pz[i] ?? 0) + moveVz * dt;
             this.rot[i] = (this.rot[i] ?? 0) + (this.rotSpeed[i] ?? 0) * dt;
         }
     }
@@ -413,19 +519,25 @@ export class ParticleSystemSim {
             const ageSeconds = this.age[i] ?? 0;
             const lifeSeconds = Math.max(0.001, this.life[i] ?? 1);
             const progress = Math.max(0, Math.min(1, ageSeconds / lifeSeconds));
+            const context: AnimationSampleContext = {
+                lifeProgress: progress,
+                particleAge: ageSeconds,
+                lifeSeconds,
+                systemAge: this.systemAge,
+            };
             const posOffset = count * 3;
             const colorOffset = count * 4;
             this.buffer.positions[posOffset] = this.px[i] ?? 0;
             this.buffer.positions[posOffset + 1] = this.py[i] ?? 0;
             this.buffer.positions[posOffset + 2] = this.pz[i] ?? 0;
-            this.buffer.sizes[count] = Math.max(0.001, scalarValue(this.subsystem.size, 1, progress, seed + 31, this.curves) * this.spatialScale);
+            this.buffer.sizes[count] = Math.max(0.001, scalarValueAt(this.subsystem.size, 1, progress, seed + 31, this.curves, context) * this.spatialScale);
             this.writeTrailTail(count, i);
             this.buffer.rotations[count] = this.rot[i] ?? 0;
-            this.writeOrientation(count, progress, seed, ageSeconds, lifeSeconds);
-            this.buffer.colors[colorOffset] = clamp01(scalarValue(this.subsystem.color?.r, 255, progress, seed + 32, this.curves) / 255);
-            this.buffer.colors[colorOffset + 1] = clamp01(scalarValue(this.subsystem.color?.g, 255, progress, seed + 33, this.curves) / 255);
-            this.buffer.colors[colorOffset + 2] = clamp01(scalarValue(this.subsystem.color?.b, 255, progress, seed + 34, this.curves) / 255);
-            this.buffer.colors[colorOffset + 3] = clamp01(scalarValue(this.subsystem.color?.alpha, 255, progress, seed + 35, this.curves) / 255);
+            this.writeOrientation(count, progress, seed, ageSeconds, lifeSeconds, context);
+            this.buffer.colors[colorOffset] = clamp01(scalarValueAt(this.subsystem.color?.r, 255, progress, seed + 32, this.curves, context) / 255);
+            this.buffer.colors[colorOffset + 1] = clamp01(scalarValueAt(this.subsystem.color?.g, 255, progress, seed + 33, this.curves, context) / 255);
+            this.buffer.colors[colorOffset + 2] = clamp01(scalarValueAt(this.subsystem.color?.b, 255, progress, seed + 34, this.curves, context) / 255);
+            this.buffer.colors[colorOffset + 3] = clamp01(scalarValueAt(this.subsystem.color?.alpha, 255, progress, seed + 35, this.curves, context) / 255);
             this.buffer.frames[count] = this.frameForParticle(frameCount, progress, ageSeconds, seed);
             count++;
         }
@@ -475,14 +587,14 @@ export class ParticleSystemSim {
         this.buffer.trailTails[offset + 2] = this.prevPz[particleIndex] ?? pz;
     }
 
-    private writeOrientation(index: number, progress: number, seed: number, ageSeconds: number, lifeSeconds: number): void {
-        const yawBase = scalarValue(this.subsystem.particleYaw, 0, progress, seed + 38, this.curves);
-        const pitchBase = scalarValue(this.subsystem.particlePitch, 0, progress, seed + 39, this.curves);
-        const rollBase = scalarValue(this.subsystem.particleRoll, 0, progress, seed + 40, this.curves);
-        const yawSpeed = scalarValue(this.subsystem.rotationSpeedYaw, 0, progress, seed + 41, this.curves);
-        const pitchSpeed = scalarValue(this.subsystem.rotationSpeedPitch, 0, progress, seed + 42, this.curves);
-        const rollSpeed = scalarValue(this.subsystem.rotationSpeedRoll, 0, progress, seed + 43, this.curves);
-        const flutter = this.orientationFlutter(progress, seed, ageSeconds, lifeSeconds);
+    private writeOrientation(index: number, progress: number, seed: number, ageSeconds: number, lifeSeconds: number, context: AnimationSampleContext): void {
+        const yawBase = scalarValueAt(this.subsystem.particleYaw, 0, progress, seed + 38, this.curves, context);
+        const pitchBase = scalarValueAt(this.subsystem.particlePitch, 0, progress, seed + 39, this.curves, context);
+        const rollBase = scalarValueAt(this.subsystem.particleRoll, 0, progress, seed + 40, this.curves, context);
+        const yawSpeed = scalarValueAt(this.subsystem.rotationSpeedYaw, 0, progress, seed + 41, this.curves, context);
+        const pitchSpeed = scalarValueAt(this.subsystem.rotationSpeedPitch, 0, progress, seed + 42, this.curves, context);
+        const rollSpeed = scalarValueAt(this.subsystem.rotationSpeedRoll, 0, progress, seed + 43, this.curves, context);
+        const flutter = this.orientationFlutter(progress, seed, ageSeconds, lifeSeconds, context);
         const yaw = degToRad(yawBase + yawSpeed * ageSeconds + flutter.yaw);
         const pitch = degToRad(pitchBase + pitchSpeed * ageSeconds + flutter.pitch);
         const roll = degToRad(rollBase + rollSpeed * ageSeconds + flutter.roll);
@@ -504,13 +616,13 @@ export class ParticleSystemSim {
         this.buffer.ups[offset + 2] = this.orientationUp.z;
     }
 
-    private orientationFlutter(progress: number, seed: number, ageSeconds: number, lifeSeconds: number): { yaw: number; pitch: number; roll: number } {
+    private orientationFlutter(progress: number, seed: number, ageSeconds: number, lifeSeconds: number, context: AnimationSampleContext): { yaw: number; pitch: number; roll: number } {
         if (this.subsystem.billboard !== false) return { yaw: 0, pitch: 0, roll: 0 };
         const shortLife = clamp01((0.45 - lifeSeconds) / 0.35);
         if (shortLife <= 0) return { yaw: 0, pitch: 0, roll: 0 };
-        const yawRange = rangeMagnitude(this.subsystem.particleYaw, progress, this.curves);
-        const pitchRange = rangeMagnitude(this.subsystem.particlePitch, progress, this.curves);
-        const rollRange = rangeMagnitude(this.subsystem.particleRoll, progress, this.curves);
+        const yawRange = rangeMagnitude(this.subsystem.particleYaw, progress, this.curves, context);
+        const pitchRange = rangeMagnitude(this.subsystem.particlePitch, progress, this.curves, context);
+        const rollRange = rangeMagnitude(this.subsystem.particleRoll, progress, this.curves, context);
         const totalRange = yawRange + pitchRange + rollRange;
         if (totalRange <= 0.001) return { yaw: 0, pitch: 0, roll: 0 };
         const cycle = (ageSeconds * (12 + seeded(seed, 51) * 18) + progress * 0.35) * Math.PI * 2;

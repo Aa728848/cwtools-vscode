@@ -408,6 +408,114 @@ describe('particle curve and simulation', () => {
         expect(spinSim.systems[0]!.buffer.positions[0]).to.be.lessThan(0);
     });
 
+    it('keeps friction forces compact and stable across frame steps', () => {
+        const makeEffect = (withFriction: boolean): ParticleEffect => ({
+            name: withFriction ? 'friction_force' : 'no_force',
+            subsystems: [{
+                name: 'spark',
+                maxAmount: 1,
+                emitterType: 'point',
+                duration: { value: 0 },
+                life: { value: 2 },
+                emission: { value: 1 },
+                velocity: { value: 10 },
+                size: { value: 1 },
+                force: withFriction ? 'friction' : undefined,
+            }],
+            animations: [],
+            forces: withFriction ? [{
+                name: 'friction',
+                type: 'friction',
+                amount: { value: 4.5 },
+            }] : [],
+        });
+
+        const noForce = new ParticleEffectSimulation(makeEffect(false));
+        const coarseFriction = new ParticleEffectSimulation(makeEffect(true));
+        const fineFriction = new ParticleEffectSimulation(makeEffect(true));
+        for (let i = 0; i < 20; i++) {
+            noForce.update(0.05);
+            coarseFriction.update(0.05);
+        }
+        for (let i = 0; i < 60; i++) fineFriction.update(1 / 60);
+
+        const noForceZ = noForce.systems[0]!.buffer.positions[2] ?? 0;
+        const coarseZ = coarseFriction.systems[0]!.buffer.positions[2] ?? 0;
+        const fineZ = fineFriction.systems[0]!.buffer.positions[2] ?? 0;
+        expect(noForceZ).to.be.greaterThan(9);
+        expect(coarseZ).to.be.lessThan(noForceZ * 0.15);
+        expect(coarseZ).to.be.closeTo(fineZ, 0.001);
+    });
+
+    it('applies comma-separated subsystem force references together', () => {
+        const effect: ParticleEffect = {
+            name: 'combined_forces',
+            subsystems: [{
+                name: 'shards',
+                maxAmount: 1,
+                emitterType: 'point',
+                duration: { value: 0 },
+                life: { value: 2 },
+                emission: { value: 1 },
+                velocity: { value: 10 },
+                size: { value: 1 },
+                force: 'gravity,friction',
+            }],
+            animations: [],
+            forces: [{
+                name: 'gravity',
+                type: 'planar',
+                direction: [0, -1, 0],
+                amount: { value: 30 },
+            }, {
+                name: 'friction',
+                type: 'friction',
+                amount: { value: 4.5 },
+            }],
+        };
+
+        const sim = new ParticleEffectSimulation(effect);
+        for (let i = 0; i < 20; i++) sim.update(0.05);
+        const buffer = sim.systems[0]!.buffer;
+        expect(buffer.positions[1]).to.be.lessThan(-1);
+        expect(buffer.positions[2]).to.be.lessThan(4);
+    });
+
+    it('samples animation curve start and duration against system time', () => {
+        const effect: ParticleEffect = {
+            name: 'system_time_curve',
+            subsystems: [{
+                name: 'spark',
+                maxAmount: 1,
+                emitterType: 'point',
+                duration: { value: 0 },
+                life: { value: 2 },
+                emission: { value: 1 },
+                velocity: { value: 0 },
+                size: { value: 1, curve: 'system_grow' },
+            }],
+            animations: [{
+                name: 'system_grow',
+                start: 0.5,
+                duration: 0.5,
+                minValue: 0,
+                maxValue: 1,
+                points: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
+                op: 'MUL',
+                time: 'system',
+            }],
+            forces: [],
+        };
+
+        const sim = new ParticleEffectSimulation(effect);
+        for (let i = 0; i < 5; i++) sim.update(0.05);
+        const beforeStart = sim.systems[0]!.buffer.sizes[0] ?? 0;
+        for (let i = 0; i < 10; i++) sim.update(0.05);
+        const duringCurve = sim.systems[0]!.buffer.sizes[0] ?? 0;
+        expect(beforeStart).to.be.lessThan(0.01);
+        expect(duringCurve).to.be.closeTo(0.5, 0.001);
+    });
+
     it('writes trail tails behind moving particles', () => {
         const effect: ParticleEffect = {
             name: 'trail_effect',

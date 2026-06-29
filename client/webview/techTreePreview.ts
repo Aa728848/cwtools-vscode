@@ -70,6 +70,8 @@ const btnZoomOut = document.getElementById('btn-zoom-out')!;
 const btnFit = document.getElementById('btn-fit')!;
 const statsBar = document.getElementById('stats-bar')!;
 const detailPanel = document.getElementById('details-panel') as HTMLDivElement | null;
+const locale = (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh') ? 'zh-cn' : 'en';
+const t = (en: string, zh: string) => locale === 'zh-cn' ? zh : en;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -245,10 +247,10 @@ const cy = cytoscape({
 // ─── UI helpers ───────────────────────────────────────────────────────────────
 
 const areaLabel: Record<string, string> = {
-    physics: '物理学',
-    society: '社会学',
-    engineering: '工程学',
-    unknown: '未知',
+    physics: t('Physics', '物理学'),
+    society: t('Society', '社会学'),
+    engineering: t('Engineering', '工程学'),
+    unknown: t('Unknown', '未知'),
 };
 const areaOrder: TechNode['area'][] = ['physics', 'society', 'engineering', 'unknown'];
 
@@ -479,8 +481,8 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
         detailPanel.classList.add('empty');
         detailPanel.innerHTML = `
             <div class="details-empty">
-                <div class="details-empty-title">选择科技节点</div>
-                <div class="details-empty-copy">查看领域、层级、费用、来源位置，以及它的前置和后续科技。</div>
+                <div class="details-empty-title">${t('Select a technology node', '选择科技节点')}</div>
+                <div class="details-empty-copy">${t('View area, tier, cost, source location, and prerequisite/dependent technologies.', '查看领域、层级、费用、来源位置，以及它的前置和后续科技。')}</div>
             </div>
         `;
         return;
@@ -490,29 +492,29 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
     const incoming = node.incomers('edge').length;
     const outgoing = node.outgoers('edge').length;
     const badges = [
-        data.isStartTech ? '起始科技' : '',
-        data.isRare ? '稀有' : '',
-        data.isDangerous ? '危险' : '',
+        data.isStartTech ? t('Starting tech', '起始科技') : '',
+        data.isRare ? t('Rare', '稀有') : '',
+        data.isDangerous ? t('Dangerous', '危险') : '',
     ].filter(Boolean);
 
     detailPanel.classList.remove('empty');
     detailPanel.innerHTML = `
         <div class="details-header">
             <div class="details-kicker">${escapeHtml(areaLabel[data.area] ?? data.area)}</div>
-            <button type="button" class="details-icon-button" data-clear-selection title="清除选择" aria-label="清除选择">×</button>
+            <button type="button" class="details-icon-button" data-clear-selection title="${t('Clear selection', '清除选择')}" aria-label="${t('Clear selection', '清除选择')}">×</button>
         </div>
         <div class="details-title">${escapeHtml(data.id)}</div>
         ${data.title && data.title !== data.id ? `<div class="details-subtitle">${escapeHtml(data.title)}</div>` : ''}
         ${badges.length > 0 ? `<div class="details-badges">${badges.map(badge => `<span>${escapeHtml(badge)}</span>`).join('')}</div>` : ''}
         <dl class="details-list">
-            <div><dt>层级</dt><dd>Tier ${escapeHtml(data.tier)}</dd></div>
-            <div><dt>分类</dt><dd>${escapeHtml(data.category || '-')}</dd></div>
-            <div><dt>费用</dt><dd>${Number(data.cost) > 0 ? escapeHtml(data.cost) : '-'}</dd></div>
-            <div><dt>依赖</dt><dd>${incoming} 个前置 / ${outgoing} 个后续</dd></div>
-            <div><dt>来源</dt><dd>${escapeHtml(data.file)}:${escapeHtml(data.line)}</dd></div>
+            <div><dt>${t('Tier', '层级')}</dt><dd>Tier ${escapeHtml(data.tier)}</dd></div>
+            <div><dt>${t('Category', '分类')}</dt><dd>${escapeHtml(data.category || '-')}</dd></div>
+            <div><dt>${t('Cost', '费用')}</dt><dd>${Number(data.cost) > 0 ? escapeHtml(data.cost) : '-'}</dd></div>
+            <div><dt>${t('Dependencies', '依赖')}</dt><dd>${t(`${incoming} prerequisites / ${outgoing} dependents`, `${incoming} 个前置 / ${outgoing} 个后续`)}</dd></div>
+            <div><dt>${t('Source', '来源')}</dt><dd>${escapeHtml(data.file)}:${escapeHtml(data.line)}</dd></div>
         </dl>
         <div class="details-actions">
-            <button type="button" data-open-source>打开源文件</button>
+            <button type="button" data-open-source>${t('Open source file', '打开源文件')}</button>
         </div>
     `;
 }
@@ -637,16 +639,16 @@ document.body.appendChild(tooltip);
 cy.on('mouseover', 'node', evt => {
     const d = evt.target.data();
     const flags = [
-        d.isStartTech ? `${svgIconNoMargin('star')} 起始科技` : '',
-        d.isRare ? `${svgIconNoMargin('shield')} 稀有` : '',
-        d.isDangerous ? `${svgIconNoMargin('warning')} 危险` : '',
+        d.isStartTech ? `${svgIconNoMargin('star')} ${t('Starting tech', '起始科技')}` : '',
+        d.isRare ? `${svgIconNoMargin('shield')} ${t('Rare', '稀有')}` : '',
+        d.isDangerous ? `${svgIconNoMargin('warning')} ${t('Dangerous', '危险')}` : '',
     ].filter(Boolean).join(' ');
 
     tooltip.innerHTML = `
         <div class="tt-id">${escapeHtml(d.id)}</div>
         ${d.title !== d.id ? `<div class="tt-title">${escapeHtml(d.title)}</div>` : ''}
         <div class="tt-meta">${escapeHtml(areaLabel[d.area] ?? d.area)} · Tier ${escapeHtml(d.tier)} · ${escapeHtml(d.category || '-')}</div>
-        ${d.cost > 0 ? `<div class="tt-meta">研究费用: ${escapeHtml(d.cost)}</div>` : ''}
+        ${d.cost > 0 ? `<div class="tt-meta">${t('Research cost', '研究费用')}: ${escapeHtml(d.cost)}</div>` : ''}
         ${flags ? `<div class="tt-meta">${flags}</div>` : ''}
         <div class="tt-file">${escapeHtml(d.file)}:${escapeHtml(d.line)}</div>
     `;
@@ -821,11 +823,11 @@ function render(nodes: TechNode[], edges: TechEdge[]) {
     for (const n of nodes) areaCount[n.area] = (areaCount[n.area] ?? 0) + 1;
 
     statsBar.innerHTML = `
-        <span>科技: ${nodes.length}</span>
-        <span>依赖关系: ${edgeSet.size}</span>
-        <span>物理学: ${areaCount.physics ?? 0}</span>
-        <span>社会学: ${areaCount.society ?? 0}</span>
-        <span>工程学: ${areaCount.engineering ?? 0}</span>
+        <span>${t('Technologies', '科技')}: ${nodes.length}</span>
+        <span>${t('Dependencies', '依赖关系')}: ${edgeSet.size}</span>
+        <span>${areaLabel.physics}: ${areaCount.physics ?? 0}</span>
+        <span>${areaLabel.society}: ${areaCount.society ?? 0}</span>
+        <span>${areaLabel.engineering}: ${areaCount.engineering ?? 0}</span>
     `;
 
     applyFilters();
@@ -846,7 +848,7 @@ window.addEventListener('message', (event) => {
         }
         case 'loading': {
             loadingEl.classList.remove('hidden');
-            loadingEl.textContent = msg.text ?? '加载中...';
+            loadingEl.textContent = msg.text ?? t('Loading...', '加载中...');
             break;
         }
     }

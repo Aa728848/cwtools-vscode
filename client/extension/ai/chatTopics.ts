@@ -9,7 +9,7 @@ import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { ChatTopic, ChatHistoryMessage, HostMessage, ChatMessage } from './types';
-import { UI } from './messages';
+import { UI, aiText, getAiMessageLocale } from './messages';
 import { getAiStorageRoot, getProjectWorkspaceRoot } from './workspacePaths';
 
 /** Callback type for sending messages to the WebView */
@@ -138,7 +138,7 @@ export class ChatTopicManager {
         if (!source) return [];
 
         const forkedMessages = source.messages.slice(0, messageIndex + 1);
-        const titlePreview = source.title + ' [分支]';
+        const titlePreview = source.title + aiText(' [fork]', ' [分支]');
 
         const forked: ChatTopic = {
             id: `topic_${Date.now()}`,
@@ -357,21 +357,22 @@ export class ChatTopicManager {
             : this.currentTopic;
 
         if (!topic) {
-            vs.window.showWarningMessage('没有可导出的对话');
+            vs.window.showWarningMessage(aiText('No conversation to export', '没有可导出的对话'));
             return;
         }
 
+        const dateLocale = getAiMessageLocale() === 'zh-cn' ? 'zh-CN' : 'en-US';
         const lines: string[] = [
             `# ${topic.title}`,
             ``,
-            `> 导出时间: ${new Date().toLocaleString('zh-CN')}  `,
-            `> 创建时间: ${new Date(topic.createdAt).toLocaleString('zh-CN')}`,
+            `> ${aiText('Exported', '导出时间')}: ${new Date().toLocaleString(dateLocale)}  `,
+            `> ${aiText('Created', '创建时间')}: ${new Date(topic.createdAt).toLocaleString(dateLocale)}`,
             ``,
         ];
 
         for (const msg of topic.messages) {
             if (msg.role === 'user') {
-                lines.push(`## 用户`);
+                lines.push(`## ${aiText('User', '用户')}`);
                 lines.push(``);
                 lines.push(msg.content);
                 lines.push(``);
@@ -411,7 +412,7 @@ export class ChatTopicManager {
 
         const doc = await vs.workspace.openTextDocument(outPath);
         await vs.window.showTextDocument(doc, { preview: true });
-        vs.window.showInformationMessage(`对话已导出: ${path.basename(outPath)}`);
+        vs.window.showInformationMessage(aiText(`Conversation exported: ${path.basename(outPath)}`, `对话已导出: ${path.basename(outPath)}`));
     }
 
     /**
@@ -423,7 +424,7 @@ export class ChatTopicManager {
             : this.currentTopic;
 
         if (!topic) {
-            vs.window.showWarningMessage('没有可导出的对话');
+            vs.window.showWarningMessage(aiText('No conversation to export', '没有可导出的对话'));
             return;
         }
 
@@ -454,7 +455,7 @@ export class ChatTopicManager {
 
         const doc = await vs.workspace.openTextDocument(outPath);
         await vs.window.showTextDocument(doc, { preview: true });
-        vs.window.showInformationMessage(`对话已导出为 JSON: ${path.basename(outPath)}`);
+        vs.window.showInformationMessage(aiText(`Conversation exported as JSON: ${path.basename(outPath)}`, `对话已导出为 JSON: ${path.basename(outPath)}`));
     }
 
     /**
@@ -467,13 +468,13 @@ export class ChatTopicManager {
 
             // Simple schema validation
             if (!data.title || !Array.isArray(data.messages)) {
-                throw new Error('无效的会话文件格式 (缺少 title 或 messages 数组)');
+                throw new Error(aiText('Invalid session file format (missing title or messages array)', '无效的会话文件格式 (缺少 title 或 messages 数组)'));
             }
 
             // Generate a new ID to avoid collisions
             const importedTopic: ChatTopic = {
                 id: `topic_imported_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-                title: `${data.title} (导入)`,
+                title: `${data.title} ${aiText('(imported)', '(导入)')}`,
                 createdAt: data.createdAt || Date.now(),
                 updatedAt: Date.now(),
                 messages: data.messages as ChatHistoryMessage[],
@@ -484,10 +485,16 @@ export class ChatTopicManager {
             for (let i = 0; i < importedTopic.messages.length; i++) {
                 const msg = importedTopic.messages[i];
                 if (!msg?.role || (msg.role !== 'user' && msg.role !== 'assistant')) {
-                    throw new Error(`消息 ${i} 格式无效: role 必须为 'user' 或 'assistant'`);
+                    throw new Error(aiText(
+                        `Message ${i} is invalid: role must be 'user' or 'assistant'`,
+                        `消息 ${i} 格式无效: role 必须为 'user' 或 'assistant'`,
+                    ));
                 }
                 if (msg.content === undefined || msg.content === null) {
-                    throw new Error(`消息 ${i} 格式无效: 缺少 content field`);
+                    throw new Error(aiText(
+                        `Message ${i} is invalid: missing content field`,
+                        `消息 ${i} 格式无效: 缺少 content field`,
+                    ));
                 }
             }
 
@@ -498,11 +505,11 @@ export class ChatTopicManager {
             const conversationMessages = this.loadTopic(importedTopic.id);
             this.postMessage({ type: 'topicImported', topicId: importedTopic.id, title: importedTopic.title });
 
-            vs.window.showInformationMessage(`成功导入会话: ${importedTopic.title}`);
+            vs.window.showInformationMessage(aiText(`Session imported: ${importedTopic.title}`, `成功导入会话: ${importedTopic.title}`));
             return conversationMessages;
         } catch (e) {
             const err = e instanceof Error ? e.message : String(e);
-            vs.window.showErrorMessage(`导入对话失败: ${err}`);
+            vs.window.showErrorMessage(aiText(`Failed to import conversation: ${err}`, `导入对话失败: ${err}`));
             return null;
         }
     }

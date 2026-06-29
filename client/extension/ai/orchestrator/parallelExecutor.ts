@@ -18,7 +18,7 @@ import { TaskGraphEngine } from './taskGraphEngine';
 import { Blackboard } from './blackboard';
 import { ConflictDetector } from './conflictDetector';
 import { ErrorReporter } from '../errorReporter';
-import { SOURCE } from '../messages';
+import { SOURCE, aiText } from '../messages';
 
 /** Sub-agent executor injected by Orchestrator. */
 export type SubAgentExecutor = (
@@ -96,7 +96,10 @@ export class ParallelExecutor {
 
                     if (matchedId) {
                         healedDeps.push(matchedId);
-                        const healMsg = `✨ 智能依赖自愈: 检测到节点 ${node.id} 依赖了不存在的 "${depId}"，已自动修正并关联至相似节点 "${matchedId}"`;
+                        const healMsg = aiText(
+                            `Dependency auto-heal: node ${node.id} depended on missing "${depId}", so it was linked to similar node "${matchedId}".`,
+                            `✨ 智能依赖自愈: 检测到节点 ${node.id} 依赖了不存在的 "${depId}"，已自动修正并关联至相似节点 "${matchedId}"`,
+                        );
                         ErrorReporter.debug(SOURCE.ORCHESTRATOR, healMsg);
                         emitStep({ type: 'thinking', content: healMsg, timestamp: Date.now() });
                     } else {

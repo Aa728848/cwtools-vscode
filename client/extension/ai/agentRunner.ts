@@ -39,7 +39,7 @@ import { tryRepairJson as _tryRepairJson } from './jsonRepair';
 import { repairToolArgs } from './tools/argRepair';
 import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compactMessagesInPlace, getToolResultBudget } from './contextBudget';
 import type { CompactMessagesOptions } from './contextBudget';
-import { AGENT, SOURCE } from './messages';
+import { AGENT, SOURCE, aiText } from './messages';
 import { ErrorReporter } from './errorReporter';
 import { getProjectWorkspaceRoot, getTopicStorageDir, getTopicStorageDirCandidates } from './workspacePaths';
 import {
@@ -876,7 +876,7 @@ export class AgentRunner {
                 }
                 emitStep({
                     type: 'thinking',
-                    content: '已从断点快照中恢复上下文并继续执行...',
+                    content: aiText('Restored context from checkpoint and continuing...', '已从断点快照中恢复上下文并继续执行...'),
                     timestamp: Date.now(),
                 });
             } else {
@@ -1003,7 +1003,7 @@ export class AgentRunner {
 
             return {
                 code: '',
-                explanation: `[执行异常] ${errorMsg}`,
+                explanation: aiText(`[Execution error] ${errorMsg}`, `[执行异常] ${errorMsg}`),
                 validationErrors: [],
                 isValid: false,
                 retryCount: 0,
@@ -1461,7 +1461,10 @@ export class AgentRunner {
                 toolCalls = initialPending;
                 emitStep({
                     type: 'thinking',
-                    content: '正在恢复并重新审批上一次会话遗留的敏感交互操作...',
+                    content: aiText(
+                        'Restoring and re-approving sensitive interactive operations left from the previous session...',
+                        '正在恢复并重新审批上一次会话遗留的敏感交互操作...',
+                    ),
                     timestamp: Date.now(),
                 });
             } else {
@@ -1582,7 +1585,7 @@ export class AgentRunner {
                     const elapsedSec = Math.max(1, Math.round((Date.now() - modelWaitStartedAt) / 1000));
                     emitStep({
                         type: 'orchestrator_progress',
-                        content: `正在等待模型返回 (${elapsedSec}s)...`,
+                        content: aiText(`Waiting for model response (${elapsedSec}s)...`, `正在等待模型返回 (${elapsedSec}s)...`),
                         timestamp: Date.now(),
                     });
                 }, 30_000);
@@ -1596,8 +1599,8 @@ export class AgentRunner {
             const modelAbortController = new AbortController();
             const thinkingRepetitionDetector = new OutputRepetitionDetector();
             const textRepetitionDetector = new OutputRepetitionDetector();
-            let outputRepetition: { kind: '思考内容' | '正文'; match: OutputRepetitionMatch } | undefined;
-            const stopRepeatedOutput = (kind: '思考内容' | '正文', match: OutputRepetitionMatch) => {
+            let outputRepetition: { kind: 'reasoning' | 'response'; match: OutputRepetitionMatch } | undefined;
+            const stopRepeatedOutput = (kind: 'reasoning' | 'response', match: OutputRepetitionMatch) => {
                 if (outputRepetition) return;
                 outputRepetition = { kind, match };
                 modelAbortController.abort(new Error(`Repeated ${kind} output detected.`));
@@ -1663,7 +1666,7 @@ export class AgentRunner {
                         }
                         const repetition = thinkingRepetitionDetector.append(text);
                         if (repetition) {
-                            stopRepeatedOutput('思考内容', repetition);
+                            stopRepeatedOutput('reasoning', repetition);
                             return;
                         }
                         streamedThinkingChars += text.length;
@@ -1678,7 +1681,7 @@ export class AgentRunner {
                     onTextDelta: options?.streaming ? (text) => {
                         const repetition = textRepetitionDetector.append(text);
                         if (repetition) {
-                            stopRepeatedOutput('正文', repetition);
+                            stopRepeatedOutput('response', repetition);
                             return;
                         }
                         appendModelDeltaEvent('text', text);
@@ -1761,7 +1764,10 @@ export class AgentRunner {
                     );
                     emitStep({
                         type: 'error',
-                        content: `服务端异常断开 (${err.message}). 这通常是因为输出超出物理上限。自动触发切片恢复...`,
+                        content: aiText(
+                            `Server connection dropped unexpectedly (${err.message}). This usually means the output exceeded a hard limit. Triggering chunked recovery...`,
+                            `服务端异常断开 (${err.message}). 这通常是因为输出超出物理上限。自动触发切片恢复...`,
+                        ),
                         timestamp: Date.now(),
                     });
                     messages.push({
@@ -1904,7 +1910,7 @@ export class AgentRunner {
                         outputRepetitionRecoveries++;
                         emitStep({
                             type: 'validation',
-                            content: AGENT.OUTPUT_REPETITION_RETRY('正文', repetition.cycleChars),
+                            content: AGENT.OUTPUT_REPETITION_RETRY('response', repetition.cycleChars),
                             timestamp: Date.now(),
                         });
                         messages.push({
@@ -1915,7 +1921,7 @@ export class AgentRunner {
                     }
                     emitStep({
                         type: 'error',
-                        content: AGENT.OUTPUT_REPETITION_STOP('正文'),
+                        content: AGENT.OUTPUT_REPETITION_STOP('response'),
                         timestamp: Date.now(),
                     });
                     return '[Agent Execution Terminated]: Repeated model output was detected twice; generation stopped safely.';
@@ -1984,7 +1990,10 @@ export class AgentRunner {
             if (choice.finish_reason === 'length') {
                 emitStep({
                     type: 'error',
-                    content: '模型输出因长度限制(max_tokens)被截断。不抛出致命解析错误，自动触发切片引导...',
+                    content: aiText(
+                        'Model output was truncated by the max_tokens limit. Triggering chunked recovery instead of treating it as a fatal parse error...',
+                        '模型输出因长度限制(max_tokens)被截断。不抛出致命解析错误，自动触发切片引导...',
+                    ),
                     timestamp: Date.now(),
                 });
                 if (recoverSlimOutputBudget('length')) {
@@ -2027,7 +2036,10 @@ export class AgentRunner {
             if (assistantText.includes(':::question')) {
                 emitStep({
                     type: 'validation',
-                    content: '检测到问题卡片 — 等待用户回答后再继续',
+                    content: aiText(
+                        'Question card detected - waiting for your answer before continuing',
+                        '检测到问题卡片 — 等待用户回答后再继续',
+                    ),
                     timestamp: Date.now(),
                 });
                 return this.cleanFinalContent(assistantText);
@@ -2124,7 +2136,7 @@ export class AgentRunner {
                     if (matched) {
                         emitStep({
                             type: 'thinking',
-                            content: `修复工具名: ${toolName} → ${matched}`,
+                            content: aiText(`Repaired tool name: ${toolName} -> ${matched}`, `修复工具名: ${toolName} -> ${matched}`),
                             invocationId,
                             timestamp: Date.now(),
                         });
@@ -2173,7 +2185,7 @@ export class AgentRunner {
                     }
                 }
 
-                emitStep({ type: 'tool_call', content: `调用工具: ${toolName}`, toolName, toolArgs, timestamp: Date.now(), stepIndex: ++globalToolCallIndex, iterationInfo: `Iteration ${iteration}/${maxToolIterations}`, invocationId });
+                emitStep({ type: 'tool_call', content: aiText(`Calling tool: ${toolName}`, `调用工具: ${toolName}`), toolName, toolArgs, timestamp: Date.now(), stepIndex: ++globalToolCallIndex, iterationInfo: `Iteration ${iteration}/${maxToolIterations}`, invocationId });
                 if (invocation.argRepairs.length > 0) {
                     emitStep({
                         type: 'thinking',
@@ -2206,7 +2218,7 @@ export class AgentRunner {
                 if (matched) {
                     emitStep({
                         type: 'tool_call',
-                        content: `修复工具名: ${raw} → ${matched}`,
+                        content: aiText(`Repaired tool name: ${raw} -> ${matched}`, `修复工具名: ${raw} -> ${matched}`),
                         toolName: matched as AgentToolName,
                         timestamp: Date.now(),
                     });
@@ -2241,7 +2253,10 @@ export class AgentRunner {
                     if (!safetyCheck.allowed) {
                         emitStep({
                             type: 'validation',
-                            content: `🔴 [子 Agent 沙盒物理强拦截] ${safetyCheck.reason}`,
+                            content: aiText(
+                                `[Sub-agent sandbox hard block] ${safetyCheck.reason}`,
+                                `[子 Agent 沙盒物理强拦截] ${safetyCheck.reason}`,
+                            ),
                             timestamp: Date.now()
                         });
                         // B4: 结构化拒绝事件,供 reducer 投影聚合,而非只发字符串 step。
@@ -2409,7 +2424,13 @@ export class AgentRunner {
                             }
 
                             if (isSupersededWrite) {
-                                toolResults[i] = { skipped: true, message: `已被后续对 ${primaryFilePath} 的写入操作覆盖，跳过本次写入` };
+                                toolResults[i] = {
+                                    skipped: true,
+                                    message: aiText(
+                                        `Skipped because a later write to ${primaryFilePath} superseded this write`,
+                                        `已被后续对 ${primaryFilePath} 的写入操作覆盖，跳过本次写入`,
+                                    ),
+                                };
                             } else if (toolName === 'write_file') {
                                 // Brace validation is handled inside FileToolHandler via the
                                 // tokenizer-based rejectUnsafePdxStructureWrite guard, which

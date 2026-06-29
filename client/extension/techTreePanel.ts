@@ -29,6 +29,10 @@ function getNonce(): string {
     return result;
 }
 
+function panelText(en: string, zh: string): string {
+    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
+}
+
 // ─── Panel ───────────────────────────────────────────────────────────────────
 
 export class TechTreePanel {
@@ -61,8 +65,8 @@ export class TechTreePanel {
         const webviewRootPath = path.join(extensionPath, 'bin/client/webview');
 
         const title = seedDoc
-            ? `科技树: ${path.basename(seedDoc.fileName)}`
-            : '科技树可视化';
+            ? panelText(`Tech Tree: ${path.basename(seedDoc.fileName)}`, `科技树: ${path.basename(seedDoc.fileName)}`)
+            : panelText('Tech Tree Visualizer', '科技树可视化');
 
         this._panel = vscode.window.createWebviewPanel(
             TechTreePanel.viewType,
@@ -107,7 +111,7 @@ export class TechTreePanel {
     // ── Scan & render ─────────────────────────────────────────────────────────
 
     private async _scanAndRender() {
-        this._panel.webview.postMessage({ command: 'loading', text: '扫描科技文件...' });
+        this._panel.webview.postMessage({ command: 'loading', text: panelText('Scanning technology files...', '扫描科技文件...') });
         try {
             const graph = await this._buildTechGraph();
             this._panel.webview.postMessage({ command: 'render', data: graph });
@@ -134,7 +138,7 @@ export class TechTreePanel {
         }
 
         // ── Phase 1: Scan all tech files ──────────────────────────────────────
-        this._panel.webview.postMessage({ command: 'loading', text: '扫描 common/technology/ 文件...' });
+        this._panel.webview.postMessage({ command: 'loading', text: panelText('Scanning common/technology/ files...', '扫描 common/technology/ 文件...') });
 
         const techPattern = new vscode.RelativePattern(wsRoot, '**/common/technology/**/*.txt');
         const techFiles = await vscode.workspace.findFiles(techPattern, '**/node_modules/**', 500);
@@ -149,7 +153,7 @@ export class TechTreePanel {
         }
 
         // ── Phase 2: Merge & BFS-expand ───────────────────────────────────────
-        this._panel.webview.postMessage({ command: 'loading', text: '构建科技关系图...' });
+        this._panel.webview.postMessage({ command: 'loading', text: panelText('Building technology relationship graph...', '构建科技关系图...') });
 
         const fullGraph = mergeTechGraphs(graphs);
 
@@ -160,7 +164,7 @@ export class TechTreePanel {
             : fullGraph;
 
         // ── Phase 3: Resolve localization titles ──────────────────────────────
-        this._panel.webview.postMessage({ command: 'loading', text: '解析本地化文本...' });
+        this._panel.webview.postMessage({ command: 'loading', text: panelText('Resolving localisation text...', '解析本地化文本...') });
         await this._resolveLocTitles(graph.nodes);
 
         return graph;
@@ -240,15 +244,17 @@ export class TechTreePanel {
         );
         const nonce = getNonce();
         const csp = this._panel.webview.cspSource;
+        const lang = vscode.env.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
+        const title = panelText('Tech Tree Visualizer', '科技树可视化');
 
         return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${lang}">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${csp} 'unsafe-inline';" />
     <link href="${styleUri}" rel="stylesheet" />
-    <title>科技树可视化</title>
+    <title>${title}</title>
 </head>
 <body>
     <div id="toolbar">
@@ -260,51 +266,51 @@ export class TechTreePanel {
                 <line x1="1" y1="8" x2="5" y2="8" stroke="#4fc3f7" stroke-width="1.5"/>
                 <line x1="11" y1="8" x2="15" y2="8" stroke="#4fc3f7" stroke-width="1.5"/>
             </svg>
-            科技树可视化
+            ${title}
         </span>
         <div class="controls">
-            <select id="area-filter" title="领域筛选" aria-label="按领域过滤">
-                <option value="__all__">全部领域</option>
-                <option value="physics">物理学</option>
-                <option value="society">社会学</option>
-                <option value="engineering">工程学</option>
+            <select id="area-filter" title="${panelText('Area filter', '领域筛选')}" aria-label="${panelText('Filter by area', '按领域过滤')}">
+                <option value="__all__">${panelText('All areas', '全部领域')}</option>
+                <option value="physics">${panelText('Physics', '物理学')}</option>
+                <option value="society">${panelText('Society', '社会学')}</option>
+                <option value="engineering">${panelText('Engineering', '工程学')}</option>
             </select>
             <span class="separator">|</span>
-            <select id="tier-filter" title="层级筛选" aria-label="按层级过滤">
-                <option value="__all__">全部层级</option>
+            <select id="tier-filter" title="${panelText('Tier filter', '层级筛选')}" aria-label="${panelText('Filter by tier', '按层级过滤')}">
+                <option value="__all__">${panelText('All tiers', '全部层级')}</option>
             </select>
             <span class="separator">|</span>
-            <input type="text" id="search-input" placeholder="搜索科技 ID..." aria-label="搜索科技" />
+            <input type="text" id="search-input" placeholder="${panelText('Search technology ID...', '搜索科技 ID...')}" aria-label="${panelText('Search technologies', '搜索科技')}" />
             <span class="separator">|</span>
-            <label class="toggle-label" title="显示稀有科技">
-                <input type="checkbox" id="show-rare" checked /> 稀有
+            <label class="toggle-label" title="${panelText('Show rare technologies', '显示稀有科技')}">
+                <input type="checkbox" id="show-rare" checked /> ${panelText('Rare', '稀有')}
             </label>
             <span class="separator">|</span>
-            <button id="btn-zoom-in" title="放大" aria-label="放大">+</button>
-            <button id="btn-zoom-out" title="缩小" aria-label="缩小">−</button>
-            <button id="btn-fit" title="适应窗口" aria-label="适应窗口">⊡</button>
+            <button id="btn-zoom-in" title="${panelText('Zoom in', '放大')}" aria-label="${panelText('Zoom in', '放大')}">+</button>
+            <button id="btn-zoom-out" title="${panelText('Zoom out', '缩小')}" aria-label="${panelText('Zoom out', '缩小')}">−</button>
+            <button id="btn-fit" title="${panelText('Fit to window', '适应窗口')}" aria-label="${panelText('Fit to window', '适应窗口')}">⊡</button>
         </div>
     </div>
 
     <div id="cy-container">
-        <div id="loading">扫描科技文件...</div>
+        <div id="loading">${panelText('Scanning technology files...', '扫描科技文件...')}</div>
         <div id="empty-state">
             <div style="font-size:24px; opacity:0.3;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m10.065 12.493-6.18 1.318a.934.934 0 0 1-1.108-.702l-.537-2.15a1.07 1.07 0 0 1 .691-1.265l13.504-4.44"></path><path d="m13.56 11.747 4.332-.924"></path><path d="m16 21-3.105-6.21"></path><path d="M16.485 5.94a2 2 0 0 1 1.455-2.425l1.09-.272a1 1 0 0 1 1.212.727l1.515 6.06a1 1 0 0 1-.727 1.213l-1.09.272a2 2 0 0 1-2.425-1.455z"></path><path d="m6.158 8.633 1.114 4.456"></path><path d="m8 21 3.105-6.21"></path><circle cx="12" cy="13" r="2"></circle></svg></div>
-            <div>未发现科技定义</div>
-            <div style="font-size:10px;">请确保工作区包含 common/technology/ 目录</div>
+            <div>${panelText('No technology definitions found', '未发现科技定义')}</div>
+            <div style="font-size:10px;">${panelText('Make sure the workspace contains a common/technology/ directory.', '请确保工作区包含 common/technology/ 目录')}</div>
         </div>
         <div id="legend">
-            <div class="legend-title">图例</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#4fc3f7;"></span> 物理学</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#81c784;"></span> 社会学</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#ffb74d;"></span> 工程学</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#ce93d8; border-style:dashed; border-width:1px;"></span> 稀有科技</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#ef5350;"></span> 危险科技</div>
+            <div class="legend-title">${panelText('Legend', '图例')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#4fc3f7;"></span> ${panelText('Physics', '物理学')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#81c784;"></span> ${panelText('Society', '社会学')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#ffb74d;"></span> ${panelText('Engineering', '工程学')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#ce93d8; border-style:dashed; border-width:1px;"></span> ${panelText('Rare technology', '稀有科技')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#ef5350;"></span> ${panelText('Dangerous technology', '危险科技')}</div>
         </div>
         <aside id="details-panel" class="empty" aria-live="polite">
             <div class="details-empty">
-                <div class="details-empty-title">选择科技节点</div>
-                <div class="details-empty-copy">查看领域、层级、费用、来源位置，以及它的前置和后续科技。</div>
+                <div class="details-empty-title">${panelText('Select a technology node', '选择科技节点')}</div>
+                <div class="details-empty-copy">${panelText('View its area, tier, cost, source location, prerequisites, and follow-up technologies.', '查看领域、层级、费用、来源位置，以及它的前置和后续科技。')}</div>
             </div>
         </aside>
     </div>

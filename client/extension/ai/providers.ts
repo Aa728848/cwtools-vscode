@@ -4,7 +4,7 @@
 
 import type { AIProviderConfig, ChatCompletionRequest, ContentPart, CustomApiFormat } from './types';
 import { ErrorReporter } from './errorReporter';
-import { SOURCE } from './messages';
+import { SOURCE, aiText } from './messages';
 import { contentToString } from './types';
 
 // Import core settings and capabilities from partitioned sub-modules
@@ -169,20 +169,26 @@ export function suggestOllamaConfig(
 
     // Build reasoning
     const parts: string[] = [];
-    parts.push(`推荐 "${chatModel.name}" (${chatModel.parameterSize || chatModel.paramB + 'B'}) 作为对话模型`);
+    parts.push(aiText(
+        `Recommended "${chatModel.name}" (${chatModel.parameterSize || chatModel.paramB + 'B'}) as the chat model`,
+        `推荐 "${chatModel.name}" (${chatModel.parameterSize || chatModel.paramB + 'B'}) 作为对话模型`,
+    ));
     if (inlineModel && inlineModel.name !== chatModel.name) {
-        parts.push(`推荐 "${inlineModel.name}" 作为补全模型（较快）`);
+        parts.push(aiText(
+            `Recommended "${inlineModel.name}" as the inline completion model (faster)`,
+            `推荐 "${inlineModel.name}" 作为补全模型（较快）`,
+        ));
     }
-    parts.push(`建议上下文窗口: ${contextTokens} tokens`);
+    parts.push(aiText(`Suggested context window: ${contextTokens} tokens`, `建议上下文窗口: ${contextTokens} tokens`));
     if (chatModel.paramB < 7) {
-        parts.push('⚠️ 模型较小，工具调用能力可能有限');
+        parts.push(aiText('Warning: this is a smaller model, so tool-calling ability may be limited', '⚠️ 模型较小，工具调用能力可能有限'));
     }
 
     return {
         chatModel: chatModel.name,
         inlineModel: inlineModel?.name,
         contextTokens,
-        reasoning: parts.join('。'),
+        reasoning: parts.join(aiText('. ', '。')),
     };
 }
 

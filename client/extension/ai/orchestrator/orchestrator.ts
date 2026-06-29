@@ -30,7 +30,7 @@ import { ParallelExecutor, type SubAgentExecutor } from './parallelExecutor';
 import { QualityGate, PDX_DIAGNOSTIC_EXTENSIONS, isPdxDiagnosticFile } from './qualityGate';
 import { getAgentProfile } from './agentRegistry';
 import { ErrorReporter } from '../errorReporter';
-import { SOURCE, ORCHESTRATOR_MSG } from '../messages';
+import { SOURCE, ORCHESTRATOR_MSG, aiText } from '../messages';
 import { runLedger, RunLedger } from '../runner/runLedger';
 import { getAgentToolTargetFiles } from '../runner/toolScheduler';
 import { WRITE_TOOLS } from '../tools/registry';
@@ -163,7 +163,7 @@ export class Orchestrator {
         if (result.success && this.shouldRunQualityGate(taskGraph)) {
             emitStep({
                 type: 'orchestrator_progress',
-                content: '$(search) 触发质量门审查...',
+                content: aiText('$(search) Triggering quality gate review...', '$(search) 触发质量门审查...'),
                 timestamp: Date.now(),
             });
             const allWrittenFiles: string[] = [];
@@ -465,8 +465,14 @@ export class Orchestrator {
             forwardStep({
                 type: 'validation',
                 content: requestPermission
-                    ? `子 Agent 等待用户授权: ${tool}${description ? ` - ${description}` : ''}`
-                    : `子 Agent 无法请求用户授权: ${tool}${description ? ` - ${description}` : ''}`,
+                    ? aiText(
+                        `Sub-agent waiting for user permission: ${tool}${description ? ` - ${description}` : ''}`,
+                        `子 Agent 等待用户授权: ${tool}${description ? ` - ${description}` : ''}`,
+                    )
+                    : aiText(
+                        `Sub-agent cannot request user permission: ${tool}${description ? ` - ${description}` : ''}`,
+                        `子 Agent 无法请求用户授权: ${tool}${description ? ` - ${description}` : ''}`,
+                    ),
                 timestamp: Date.now(),
             });
             if (!requestPermission) return false;
@@ -480,7 +486,10 @@ export class Orchestrator {
                 );
                 forwardStep({
                     type: 'validation',
-                    content: `子 Agent 权限请求${allowed ? '已批准' : '被拒绝'}: ${tool}`,
+                    content: aiText(
+                        `Sub-agent permission request ${allowed ? 'approved' : 'denied'}: ${tool}`,
+                        `子 Agent 权限请求${allowed ? '已批准' : '被拒绝'}: ${tool}`,
+                    ),
                     timestamp: Date.now(),
                 });
                 if (!allowed) {
@@ -498,7 +507,10 @@ export class Orchestrator {
             } catch (error) {
                 forwardStep({
                     type: 'validation',
-                    content: `子 Agent 权限请求失败: ${tool} (${error instanceof Error ? error.message : String(error)})`,
+                    content: aiText(
+                        `Sub-agent permission request failed: ${tool} (${error instanceof Error ? error.message : String(error)})`,
+                        `子 Agent 权限请求失败: ${tool} (${error instanceof Error ? error.message : String(error)})`,
+                    ),
                     timestamp: Date.now(),
                 });
                 return false;
@@ -541,7 +553,10 @@ export class Orchestrator {
                         let content = fs.readFileSync(targetPath, 'utf8');
                         const MAX_CONTEXT_LENGTH = 50000;
                         if (content.length > MAX_CONTEXT_LENGTH) {
-                            content = content.substring(0, MAX_CONTEXT_LENGTH) + '\n\n... [内容超长已截断。如果需要查看完整内容，请使用 read_file 工具自行分块读取]';
+                            content = content.substring(0, MAX_CONTEXT_LENGTH) + aiText(
+                                '\n\n... [Content was too long and has been truncated. Use the read_file tool in chunks if you need the full content.]',
+                                '\n\n... [内容超长已截断。如果需要查看完整内容，请使用 read_file 工具自行分块读取]',
+                            );
                         }
                         injectedContext += `\n--- Context from File: ${contextRef} ---\n${content}\n`;
                     } else {
@@ -642,7 +657,7 @@ export class Orchestrator {
         try {
             wrappedOnStep({
                 type: 'subtask_start',
-                content: `启动 ${profile.mode} 子任务`,
+                content: aiText(`Starting ${profile.mode} subtask`, `启动 ${profile.mode} 子任务`),
                 subagentType: profile.mode,
                 timestamp: Date.now(),
             });
@@ -668,13 +683,16 @@ export class Orchestrator {
                 );
                 wrappedOnStep({
                     type: 'validation',
-                    content: `子任务需要主 Agent 澄清: ${clarification.slice(0, 220)}${clarification.length > 220 ? '...' : ''}`,
+                    content: aiText(
+                        `Subtask needs main agent clarification: ${clarification.slice(0, 220)}${clarification.length > 220 ? '...' : ''}`,
+                        `子任务需要主 Agent 澄清: ${clarification.slice(0, 220)}${clarification.length > 220 ? '...' : ''}`,
+                    ),
                     timestamp: Date.now(),
                 });
                 await this.rollbackSnapshots(fileSnapshots, wrappedOnStep);
                 wrappedOnStep({
                     type: 'subtask_complete',
-                    content: '需要主 Agent 澄清',
+                    content: aiText('Needs main agent clarification', '需要主 Agent 澄清'),
                     timestamp: Date.now(),
                 });
                 return {
@@ -693,7 +711,7 @@ export class Orchestrator {
             // When the task ends, notify the front end to update the status
             wrappedOnStep({
                 type: 'subtask_complete',
-                content: result.isValid ? '完成' : '未通过',
+                content: result.isValid ? aiText('Complete', '完成') : aiText('Failed validation', '未通过'),
                 timestamp: Date.now(),
             });
 
@@ -705,7 +723,10 @@ export class Orchestrator {
                     nodeId: taskNode.id,
                     success: false,
                     output: '',
-                    error: `子任务失败: 验证未通过或执行出错，已回滚 ${fileSnapshots.size} 个文件。${actualError ? ' 原因: ' + actualError : ''}`,
+                    error: aiText(
+                        `Subtask failed: validation failed or execution errored; rolled back ${fileSnapshots.size} file(s).${actualError ? ' Reason: ' + actualError : ''}`,
+                        `子任务失败: 验证未通过或执行出错，已回滚 ${fileSnapshots.size} 个文件。${actualError ? ' 原因: ' + actualError : ''}`,
+                    ),
                     tokenUsage: result.tokenUsage ?? { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
                     writtenFiles: [],
                     stepCount,
@@ -726,16 +747,19 @@ export class Orchestrator {
             const error = e instanceof Error ? e.message : String(e);
             wrappedOnStep({
                 type: 'subtask_complete',
-                content: error.includes('timeout') ? '超时终止' : '异常终止',
+                content: error.includes('timeout') ? aiText('Stopped after timeout', '超时终止') : aiText('Stopped after error', '异常终止'),
                 timestamp: Date.now(),
             });
-            ErrorReporter.warn(SOURCE.ORCHESTRATOR, `子 Agent ${taskNode.id} 执行异常`, e);
+            ErrorReporter.warn(SOURCE.ORCHESTRATOR, aiText(`Sub-agent ${taskNode.id} execution failed`, `子 Agent ${taskNode.id} 执行异常`), e);
             await this.rollbackSnapshots(fileSnapshots, wrappedOnStep);
             return {
                 nodeId: taskNode.id,
                 success: false,
                 output: '',
-                error: `子任务异常中止: ${error}，已回滚 ${fileSnapshots.size} 个文件。`,
+                error: aiText(
+                    `Subtask stopped after error: ${error}; rolled back ${fileSnapshots.size} file(s).`,
+                    `子任务异常中止: ${error}，已回滚 ${fileSnapshots.size} 个文件。`,
+                ),
                 tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
                 writtenFiles: [],
                 stepCount,
@@ -775,7 +799,7 @@ export class Orchestrator {
                         fs.unlinkSync(filePath);
                         onStep({
                             type: 'thinking',
-                            content: `🔄 回滚: 已删除新建的文件 ${filePath}`,
+                            content: aiText(`Rollback: deleted newly created file ${filePath}`, `回滚: 已删除新建的文件 ${filePath}`),
                             timestamp: Date.now(),
                         });
                     }
@@ -784,13 +808,13 @@ export class Orchestrator {
                     fs.writeFileSync(filePath, prevContent, 'utf-8');
                     onStep({
                         type: 'thinking',
-                        content: `🔄 回滚: 已恢复文件 ${filePath} 到修改前状态`,
+                        content: aiText(`Rollback: restored ${filePath} to its previous state`, `回滚: 已恢复文件 ${filePath} 到修改前状态`),
                         timestamp: Date.now(),
                     });
                 }
             }
         } catch (e) {
-            ErrorReporter.warn(SOURCE.ORCHESTRATOR, '执行文件回滚时发生异常', e);
+            ErrorReporter.warn(SOURCE.ORCHESTRATOR, aiText('File rollback failed', '执行文件回滚时发生异常'), e);
         }
     }
 

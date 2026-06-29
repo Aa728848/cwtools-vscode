@@ -117,6 +117,11 @@ describe('Chat Formatters', () => {
         const summary = makeRunSummary([]);
         expect(summary.totalSteps).to.equal(0);
         expect(summary.toolCallCount).to.equal(0);
+        expect(summary.latestStatus).to.equal('Completed');
+    });
+
+    it('makeRunSummary supports Chinese locale', () => {
+        const summary = makeRunSummary([], undefined, 'zh-cn');
         expect(summary.latestStatus).to.equal('已完成');
     });
 

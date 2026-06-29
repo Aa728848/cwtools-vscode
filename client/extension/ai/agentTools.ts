@@ -35,6 +35,7 @@ import { loadSkill } from './skills';
 import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 import { saveProjectWorkflow } from './workflowRegistry';
 import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
+import { aiText } from './messages';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
 const TOOL_TIMEOUTS: Record<string, number> = {
@@ -184,7 +185,10 @@ function compactAgentOutputForReport(output: unknown, maxLength = 1600): string 
         preview = preview.slice(0, lineBreak).trimEnd();
     }
     preview = trimIncompleteMarkdownTail(preview);
-    return `${preview}\n\n_内容较长，已自动压缩：显示前 ${preview.length} / ${text.length} 字符。_`;
+    return `${preview}\n\n${aiText(
+        `_Content was long and has been compacted automatically: showing the first ${preview.length} / ${text.length} characters._`,
+        `_内容较长，已自动压缩：显示前 ${preview.length} / ${text.length} 字符。_`,
+    )}`;
 }
 
 /**

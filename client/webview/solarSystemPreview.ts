@@ -5,6 +5,11 @@
 
 const vscode = acquireVsCodeApi();
 import { svgIcon } from './svgIcons';
+const locale = (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh') ? 'zh-cn' : 'en';
+const isZh = locale === 'zh-cn';
+function tr(en: string, zh: string): string {
+    return isZh ? zh : en;
+}
 
 // ─── Types (mirrors parser output) ──────────────────────────────────────────
 
@@ -84,71 +89,71 @@ interface SolarSystem {
 // ─── Star & Planet Colors ───────────────────────────────────────────────────
 
 const STAR_COLORS: Record<string, { fill: string; glow: string; name: string }> = {
-    'sc_a':            { fill: '#C8D8FF', glow: 'rgba(200,216,255,0.4)', name: 'A型星' },
-    'sc_b':            { fill: '#AAC8FF', glow: 'rgba(170,200,255,0.4)', name: 'B型星' },
-    'sc_f':            { fill: '#F8F0D0', glow: 'rgba(248,240,208,0.35)', name: 'F型星' },
-    'sc_g':            { fill: '#FFD800', glow: 'rgba(255,216,0,0.4)', name: 'G型星' },
-    'sc_k':            { fill: '#FF9030', glow: 'rgba(255,144,48,0.35)', name: 'K型星' },
-    'sc_m':            { fill: '#FF4040', glow: 'rgba(255,64,64,0.3)', name: 'M型矮星' },
-    'sc_m_giant':      { fill: '#CC2020', glow: 'rgba(204,32,32,0.35)', name: 'M型巨星' },
-    'sc_t':            { fill: '#8B4513', glow: 'rgba(139,69,19,0.3)', name: 'T型褐矮星' },
-    'sc_black_hole':   { fill: '#200030', glow: 'rgba(100,0,200,0.3)', name: '黑洞' },
-    'sc_neutron_star': { fill: '#00FFFF', glow: 'rgba(0,255,255,0.4)', name: '中子星' },
-    'sc_pulsar':       { fill: '#FF00FF', glow: 'rgba(255,0,255,0.3)', name: '脉冲星' },
-    'sc_binary_1':     { fill: '#FFD800', glow: 'rgba(255,216,0,0.3)', name: '双星系统' },
-    'sc_binary_2':     { fill: '#FF9030', glow: 'rgba(255,144,48,0.3)', name: '双星系统' },
-    'sc_trinary_1':    { fill: '#FFD800', glow: 'rgba(255,216,0,0.3)', name: '三星系统' },
+    'sc_a':            { fill: '#C8D8FF', glow: 'rgba(200,216,255,0.4)', name: 'A-class star' },
+    'sc_b':            { fill: '#AAC8FF', glow: 'rgba(170,200,255,0.4)', name: 'B-class star' },
+    'sc_f':            { fill: '#F8F0D0', glow: 'rgba(248,240,208,0.35)', name: 'F-class star' },
+    'sc_g':            { fill: '#FFD800', glow: 'rgba(255,216,0,0.4)', name: 'G-class star' },
+    'sc_k':            { fill: '#FF9030', glow: 'rgba(255,144,48,0.35)', name: 'K-class star' },
+    'sc_m':            { fill: '#FF4040', glow: 'rgba(255,64,64,0.3)', name: 'M-class dwarf' },
+    'sc_m_giant':      { fill: '#CC2020', glow: 'rgba(204,32,32,0.35)', name: 'M-class giant' },
+    'sc_t':            { fill: '#8B4513', glow: 'rgba(139,69,19,0.3)', name: 'T-class brown dwarf' },
+    'sc_black_hole':   { fill: '#200030', glow: 'rgba(100,0,200,0.3)', name: 'Black hole' },
+    'sc_neutron_star': { fill: '#00FFFF', glow: 'rgba(0,255,255,0.4)', name: 'Neutron star' },
+    'sc_pulsar':       { fill: '#FF00FF', glow: 'rgba(255,0,255,0.3)', name: 'Pulsar' },
+    'sc_binary_1':     { fill: '#FFD800', glow: 'rgba(255,216,0,0.3)', name: 'Binary system' },
+    'sc_binary_2':     { fill: '#FF9030', glow: 'rgba(255,144,48,0.3)', name: 'Binary system' },
+    'sc_trinary_1':    { fill: '#FFD800', glow: 'rgba(255,216,0,0.3)', name: 'Trinary system' },
 };
 
 const PLANET_COLORS: Record<string, { fill: string; name: string }> = {
     // Stars as planets
-    'pc_a_star':       { fill: '#C8D8FF', name: 'A型星' },
-    'pc_b_star':       { fill: '#AAC8FF', name: 'B型星' },
-    'pc_f_star':       { fill: '#F8F0D0', name: 'F型星' },
-    'pc_g_star':       { fill: '#FFD800', name: 'G型星' },
-    'pc_k_star':       { fill: '#FF9030', name: 'K型星' },
-    'pc_m_star':       { fill: '#FF4040', name: 'M型星' },
-    'pc_m_giant_star': { fill: '#CC2020', name: 'M型巨星' },
-    'pc_t_star':       { fill: '#8B4513', name: 'T型星' },
-    'pc_black_hole':   { fill: '#200030', name: '黑洞' },
-    'pc_neutron_star': { fill: '#00FFFF', name: '中子星' },
-    'pc_pulsar':       { fill: '#FF00FF', name: '脉冲星' },
-    'star':            { fill: '#FFD800', name: '恒星' },
+    'pc_a_star':       { fill: '#C8D8FF', name: 'A-class star' },
+    'pc_b_star':       { fill: '#AAC8FF', name: 'B-class star' },
+    'pc_f_star':       { fill: '#F8F0D0', name: 'F-class star' },
+    'pc_g_star':       { fill: '#FFD800', name: 'G-class star' },
+    'pc_k_star':       { fill: '#FF9030', name: 'K-class star' },
+    'pc_m_star':       { fill: '#FF4040', name: 'M-class star' },
+    'pc_m_giant_star': { fill: '#CC2020', name: 'M-class giant' },
+    'pc_t_star':       { fill: '#8B4513', name: 'T-class star' },
+    'pc_black_hole':   { fill: '#200030', name: 'Black hole' },
+    'pc_neutron_star': { fill: '#00FFFF', name: 'Neutron star' },
+    'pc_pulsar':       { fill: '#FF00FF', name: 'Pulsar' },
+    'star':            { fill: '#FFD800', name: 'Star' },
     // Habitable
-    'ideal_planet_class': { fill: '#40C060', name: '陆地星球' },
-    'pc_continental':  { fill: '#3DA55D', name: '大陆星球' },
-    'pc_ocean':        { fill: '#2090C0', name: '海洋星球' },
-    'pc_tropical':     { fill: '#30B040', name: '热带星球' },
-    'pc_arid':         { fill: '#C0A040', name: '干旱星球' },
-    'pc_desert':       { fill: '#D0B060', name: '沙漠星球' },
-    'pc_savannah':     { fill: '#B0A030', name: '草原星球' },
-    'pc_alpine':       { fill: '#90B0C0', name: '高山星球' },
-    'pc_arctic':       { fill: '#A0D0E0', name: '极地星球' },
-    'pc_tundra':       { fill: '#80A0B0', name: '冻原星球' },
-    'pc_gaia':         { fill: '#50E080', name: '盖亚星球' },
-    'pc_relic':        { fill: '#C0A060', name: '遗迹星球' },
-    'pc_nuked':        { fill: '#808040', name: '死寂星球' },
-    'pc_hive':         { fill: '#608030', name: '蜂巢星球' },
-    'pc_machine':      { fill: '#6090B0', name: '机械星球' },
+    'ideal_planet_class': { fill: '#40C060', name: 'Ideal planet' },
+    'pc_continental':  { fill: '#3DA55D', name: 'Continental world' },
+    'pc_ocean':        { fill: '#2090C0', name: 'Ocean world' },
+    'pc_tropical':     { fill: '#30B040', name: 'Tropical world' },
+    'pc_arid':         { fill: '#C0A040', name: 'Arid world' },
+    'pc_desert':       { fill: '#D0B060', name: 'Desert world' },
+    'pc_savannah':     { fill: '#B0A030', name: 'Savanna world' },
+    'pc_alpine':       { fill: '#90B0C0', name: 'Alpine world' },
+    'pc_arctic':       { fill: '#A0D0E0', name: 'Arctic world' },
+    'pc_tundra':       { fill: '#80A0B0', name: 'Tundra world' },
+    'pc_gaia':         { fill: '#50E080', name: 'Gaia world' },
+    'pc_relic':        { fill: '#C0A060', name: 'Relic world' },
+    'pc_nuked':        { fill: '#808040', name: 'Tomb world' },
+    'pc_hive':         { fill: '#608030', name: 'Hive world' },
+    'pc_machine':      { fill: '#6090B0', name: 'Machine world' },
     // Uninhabitable
-    'pc_gas_giant':    { fill: '#C09060', name: '气态巨行星' },
-    'pc_molten':       { fill: '#E04020', name: '熔融星球' },
-    'pc_barren':       { fill: '#808080', name: '贫瘠星球' },
-    'pc_barren_cold':  { fill: '#6080A0', name: '寒冷贫瘠星球' },
-    'pc_frozen':       { fill: '#A0C0D0', name: '冰冻星球' },
-    'pc_toxic':        { fill: '#80C040', name: '剧毒星球' },
-    'pc_asteroid':     { fill: '#706050', name: '小行星' },
-    'pc_ice_asteroid': { fill: '#90B0C0', name: '冰质小行星' },
+    'pc_gas_giant':    { fill: '#C09060', name: 'Gas giant' },
+    'pc_molten':       { fill: '#E04020', name: 'Molten world' },
+    'pc_barren':       { fill: '#808080', name: 'Barren world' },
+    'pc_barren_cold':  { fill: '#6080A0', name: 'Cold barren world' },
+    'pc_frozen':       { fill: '#A0C0D0', name: 'Frozen world' },
+    'pc_toxic':        { fill: '#80C040', name: 'Toxic world' },
+    'pc_asteroid':     { fill: '#706050', name: 'Asteroid' },
+    'pc_ice_asteroid': { fill: '#90B0C0', name: 'Ice asteroid' },
     // Ringworld
-    'pc_ringworld_habitable':    { fill: '#E0C060', name: '环形世界(宜居)' },
-    'pc_ringworld_tech':         { fill: '#A0A0A0', name: '环形世界(技术)' },
-    'pc_ringworld_tech_damaged': { fill: '#808060', name: '环形世界(受损技术)' },
-    'pc_ringworld_seam':         { fill: '#909090', name: '环形世界(接缝)' },
-    'pc_ringworld_seam_damaged': { fill: '#707060', name: '环形世界(受损接缝)' },
+    'pc_ringworld_habitable':    { fill: '#E0C060', name: 'Ring World (habitable)' },
+    'pc_ringworld_tech':         { fill: '#A0A0A0', name: 'Ring World (technology)' },
+    'pc_ringworld_tech_damaged': { fill: '#808060', name: 'Damaged Ring World (technology)' },
+    'pc_ringworld_seam':         { fill: '#909090', name: 'Ring World seam' },
+    'pc_ringworld_seam_damaged': { fill: '#707060', name: 'Damaged Ring World seam' },
     // Random
-    'random_non_colonizable':    { fill: '#707070', name: '随机不可殖民' },
-    'rl_unhabitable_planets':    { fill: '#606060', name: '不可居住星球' },
-    'rl_standard_stars':         { fill: '#FFD800', name: '标准恒星' },
+    'random_non_colonizable':    { fill: '#707070', name: 'Random non-colonizable' },
+    'rl_unhabitable_planets':    { fill: '#606060', name: 'Uninhabitable planets' },
+    'rl_standard_stars':         { fill: '#FFD800', name: 'Standard stars' },
 };
 
 function getStarColor(starClass: string): { fill: string; glow: string; name: string } {
@@ -168,7 +173,7 @@ function getPlanetColor(planetClass: string): { fill: string; name: string } {
     if (dynamic) {
         return { fill: dynamic.color || '#808080', name: dynamic.name };
     }
-    return { fill: '#808080', name: planetClass || '未知' };
+    return { fill: '#808080', name: planetClass || tr('Unknown', '未知') };
 }
 
 function getBodyColor(body: CelestialBody, systemClass: string): string {
@@ -542,7 +547,7 @@ function drawSystemBoundary(ctx: CanvasRenderingContext2D) {
     const labelPos = project(Math.cos(Math.PI / 4) * renderR, Math.sin(Math.PI / 4) * renderR, 0);
     ctx.fillStyle = 'rgba(255, 96, 96, 0.7)';
     ctx.font = '10px sans-serif';
-    ctx.fillText(`轨道上限 ${MAX_ORBIT_DISTANCE}`, labelPos.x + 6, labelPos.y - 4);
+    ctx.fillText(tr(`Orbit limit ${MAX_ORBIT_DISTANCE}`, `轨道上限 ${MAX_ORBIT_DISTANCE}`), labelPos.x + 6, labelPos.y - 4);
     ctx.restore();
 }
 
@@ -700,11 +705,11 @@ function drawRingWorld(
         let arcText: string;
         if (snapN && snapN > ringGroup.segments.length) {
             const newSegs = snapN - ringGroup.segments.length;
-            arcText = `环世界 ${snapN}段×${snapAngle}° (+${newSegs}段)`;
+            arcText = tr(`Ring World ${snapN} segments x ${snapAngle}deg (+${newSegs})`, `环世界 ${snapN}段×${snapAngle}° (+${newSegs}段)`);
         } else if (coverage >= 358) {
-            arcText = '完整环世界';
+            arcText = tr('Complete Ring World', '完整环世界');
         } else {
-            arcText = `环世界 (${Math.round(coverage)}°/${ringGroup.segments.length}段)`;
+            arcText = tr(`Ring World (${Math.round(coverage)}deg/${ringGroup.segments.length} segments)`, `环世界 (${Math.round(coverage)}°/${ringGroup.segments.length}段)`);
         }
         ctx.fillText(arcText, lp.x, lp.y - fontSize);
         ctx.restore();
@@ -1047,7 +1052,7 @@ function setupControls() {
         switch (id) {
             case 'btn-scale-mode':
                 scaleMode = scaleMode === 'readable' ? 'true' : 'readable';
-                target.textContent = scaleMode === 'readable' ? '可读比例' : '真实比例';
+                target.textContent = scaleMode === 'readable' ? tr('Readable scale', '可读比例') : tr('True scale', '真实比例');
                 target.classList.toggle('active', scaleMode === 'readable');
                 fitToView();
                 break;
@@ -1085,15 +1090,15 @@ function setupControls() {
                 break;
             case 'btn-undo':
                 vscode.postMessage({ command: 'vscodeUndo' });
-                setEditStatus('已撤销');
+                setEditStatus(tr('Undone', '已撤销'));
                 break;
             case 'btn-redo':
                 vscode.postMessage({ command: 'vscodeRedo' });
-                setEditStatus('已重做');
+                setEditStatus(tr('Redone', '已重做'));
                 break;
             case 'btn-save':
                 vscode.postMessage({ command: 'saveDocument' });
-                setEditStatus('已保存');
+                setEditStatus(tr('Saved', '已保存'));
                 break;
             case 'tab-info':
                 target.classList.add('active');
@@ -1116,7 +1121,7 @@ function setupControls() {
         selectedBody = null;
         updateInfoPanel();
         updatePropertiesPanel();
-        setEditStatus('已同步');
+        setEditStatus(tr('Synced', '已同步'));
         fitToView();
     });
 
@@ -1192,7 +1197,7 @@ function setupControls() {
             if (moonsDiv) moonsDiv.style.display = '';
             if (moonSep) moonSep.style.display = '';
             if (moonTitle) {
-                moonTitle.textContent = `添加卫星 → ${ctxTargetBody.name || ctxTargetBody.planetClass}`;
+                moonTitle.textContent = tr(`Add moon -> ${ctxTargetBody.name || ctxTargetBody.planetClass}`, `添加卫星 → ${ctxTargetBody.name || ctxTargetBody.planetClass}`);
             }
             // Ring world as moon
             const bodyHasRing = ctxTargetBody.moons.some(m => m.planetClass?.includes('ringworld'));
@@ -1204,7 +1209,7 @@ function setupControls() {
             if (siblingSep) siblingSep.style.display = '';
             if (siblingDiv) siblingDiv.style.display = '';
             if (siblingTitle) {
-                siblingTitle.textContent = `在同轨道创建 (${ctxTargetBody.name || ctxTargetBody.planetClass})`;
+                siblingTitle.textContent = tr(`Create on same orbit (${ctxTargetBody.name || ctxTargetBody.planetClass})`, `在同轨道创建 (${ctxTargetBody.name || ctxTargetBody.planetClass})`);
             }
         }
 
@@ -1238,7 +1243,7 @@ function setupControls() {
                 ringMsg.parentLine = ctxTargetBody.line;
                 ringMsg.parentEndLine = ctxTargetBody.endLine;
             }
-            setEditStatus('正在添加...');
+            setEditStatus(tr('Adding...', '正在添加...'));
             vscode.postMessage(ringMsg);
             return;
         }
@@ -1264,7 +1269,7 @@ function setupControls() {
                 'pc_f_star': 30, 'pc_k_star': 25, 'pc_m_star': 20, 'pc_t_star': 15,
             };
 
-            setEditStatus(dist > MAX_ORBIT_DISTANCE ? `已限制在最大轨道距离 ${MAX_ORBIT_DISTANCE}，正在添加...` : '正在添加...');
+            setEditStatus(dist > MAX_ORBIT_DISTANCE ? tr(`Clamped to orbit limit ${MAX_ORBIT_DISTANCE}; adding...`, `已限制在最大轨道距离 ${MAX_ORBIT_DISTANCE}，正在添加...`) : tr('Adding...', '正在添加...'));
             vscode.postMessage({
                 command: 'addPlanet',
                 systemEndLine: system.endLine,
@@ -1278,7 +1283,7 @@ function setupControls() {
         else if (action === 'moon') {
             if (!ctxTargetBody) return;
             const moonCount = ctxTargetBody.moons.length;
-            setEditStatus('正在添加...');
+            setEditStatus(tr('Adding...', '正在添加...'));
             vscode.postMessage({
                 command: 'addMoon',
                 parentLine: ctxTargetBody.line,
@@ -1298,7 +1303,7 @@ function setupControls() {
                 'pc_g_star': 30, 'pc_b_star': 30, 'pc_a_star': 30,
                 'pc_f_star': 30, 'pc_k_star': 25, 'pc_m_star': 20, 'pc_t_star': 15,
             };
-            setEditStatus('正在添加...');
+            setEditStatus(tr('Adding...', '正在添加...'));
             vscode.postMessage({
                 command: 'addSibling',
                 siblingLine: ctxTargetBody.line,
@@ -1537,7 +1542,7 @@ function setupControls() {
 
             // Only commit if mouse actually moved
             if (dragMoved) {
-                setEditStatus('正在应用...');
+                setEditStatus(tr('Applying...', '正在应用...'));
                 vscode.postMessage({
                     command: 'movePlanetOrbit',
                     bodyLine: body.line,
@@ -1610,11 +1615,11 @@ function setupControls() {
                 if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
                     e.preventDefault();
                     vscode.postMessage({ command: 'vscodeRedo' });
-                    setEditStatus('已重做');
+                    setEditStatus(tr('Redone', '已重做'));
                 } else if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
                     vscode.postMessage({ command: 'vscodeUndo' });
-                    setEditStatus('已撤销');
+                    setEditStatus(tr('Undone', '已撤销'));
                 }
                 break;
             case 'y':
@@ -1622,7 +1627,7 @@ function setupControls() {
                 if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
                     vscode.postMessage({ command: 'vscodeRedo' });
-                    setEditStatus('已重做');
+                    setEditStatus(tr('Redone', '已重做'));
                 }
                 break;
             case 's':
@@ -1630,13 +1635,13 @@ function setupControls() {
                 if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
                     vscode.postMessage({ command: 'saveDocument' });
-                    setEditStatus('已保存');
+                    setEditStatus(tr('Saved', '已保存'));
                 }
                 break;
             case 'Delete':
                 if (editMode && selectedBody && selectedBody.bodyType !== 'star') {
                     e.preventDefault();
-                    setEditStatus('正在删除...');
+                    setEditStatus(tr('Deleting...', '正在删除...'));
                     vscode.postMessage({ command: 'deletePlanet', line: selectedBody.line });
                     selectedBody = null;
                     updateInfoPanel();
@@ -1748,7 +1753,7 @@ function updateTiltDisplay() {
 function showTooltip(body: CelestialBody, clientX: number, clientY: number) {
     const t = document.getElementById('tooltip')!;
     const pc = getPlanetColor(body.planetClass);
-    const typeNames: Record<string, string> = { star: '恒星', planet: '行星', moon: '卫星' };
+    const typeNames: Record<string, string> = { star: tr('Star', '恒星'), planet: tr('Planet', '行星'), moon: tr('Moon', '卫星') };
 
     let html = '';
 
@@ -1767,22 +1772,22 @@ function showTooltip(body: CelestialBody, clientX: number, clientY: number) {
 
     html += `<div class="tip-type" style="color:${getBodyColor(body, allSystems[currentSystemIndex]?.starClass ?? '')}">${getLoc(body.planetClass, typeNames[body.bodyType] || body.bodyType)}</div>`;
     const localizedClass = getLoc(body.planetClass, pc.name);
-    html += `<div class="tip-name">${getLoc(body.name, localizedClass || '(未命名)')}</div>`;
+    html += `<div class="tip-name">${getLoc(body.name, localizedClass || tr('(unnamed)', '(未命名)'))}</div>`;
     html += `<table>`;
-    html += `<tr><td>类型</td><td>${localizedClass}</td></tr>`;
-    html += `<tr><td>轨道距离</td><td>${formatValueOrRange(body.orbitDistance)}</td></tr>`;
-    html += `<tr><td>轨道角度</td><td>${formatValueOrRange(body.orbitAngle)}</td></tr>`;
-    html += `<tr><td>大小</td><td>${formatValueOrRange(body.size)}</td></tr>`;
+    html += `<tr><td>${tr('Type', '类型')}</td><td>${localizedClass}</td></tr>`;
+    html += `<tr><td>${tr('Orbit distance', '轨道距离')}</td><td>${formatValueOrRange(body.orbitDistance)}</td></tr>`;
+    html += `<tr><td>${tr('Orbit angle', '轨道角度')}</td><td>${formatValueOrRange(body.orbitAngle)}</td></tr>`;
+    html += `<tr><td>${tr('Size', '大小')}</td><td>${formatValueOrRange(body.size)}</td></tr>`;
     if (body.count.type !== 'fixed' || (body.count.value ?? 1) > 1) {
-        html += `<tr><td>数量</td><td>${formatValueOrRange(body.count)}</td></tr>`;
+        html += `<tr><td>${tr('Count', '数量')}</td><td>${formatValueOrRange(body.count)}</td></tr>`;
     }
-    if (body.hasRing) html += `<tr><td>行星环</td><td>是</td></tr>`;
-    if (body.homePlanet) html += `<tr><td>母星</td><td>是</td></tr>`;
-    if (body.startingPlanet) html += `<tr><td>起始星球</td><td>是</td></tr>`;
-    if (body.moons.length > 0) html += `<tr><td>卫星</td><td>${body.moons.length}</td></tr>`;
-    if (body.flags.length > 0) html += `<tr><td>标志</td><td>${body.flags.join(', ')}</td></tr>`;
+    if (body.hasRing) html += `<tr><td>${tr('Planet ring', '行星环')}</td><td>${tr('Yes', '是')}</td></tr>`;
+    if (body.homePlanet) html += `<tr><td>${tr('Home planet', '母星')}</td><td>${tr('Yes', '是')}</td></tr>`;
+    if (body.startingPlanet) html += `<tr><td>${tr('Starting planet', '起始星球')}</td><td>${tr('Yes', '是')}</td></tr>`;
+    if (body.moons.length > 0) html += `<tr><td>${tr('Moons', '卫星')}</td><td>${body.moons.length}</td></tr>`;
+    if (body.flags.length > 0) html += `<tr><td>${tr('Flags', '标志')}</td><td>${body.flags.join(', ')}</td></tr>`;
     html += `</table>`;
-    html += `<div class="tip-line">Line ${body.line} · 双击跳转 · 单击选择</div>`;
+    html += `<div class="tip-line">Line ${body.line} · ${tr('double-click to jump · click to select', '双击跳转 · 单击选择')}</div>`;
 
     t.innerHTML = html;
     t.classList.remove('hidden');
@@ -1819,20 +1824,20 @@ function updateInfoPanel() {
 
     let html = `<div class="sys-card">`;
     html += `<div class="sys-card-title">${getLoc(system.displayName, system.displayName || system.key)}</div>`;
-    html += `<div class="sys-card-row"><span class="sys-card-label">标识</span><span class="sys-card-value">${system.key}</span></div>`;
-    html += `<div class="sys-card-row"><span class="sys-card-label">星级类型</span><span class="sys-card-value" style="color:${sc.fill}">${getLoc(system.starClass, sc.name)} (${system.starClass})</span></div>`;
-    if (system.usage) html += `<div class="sys-card-row"><span class="sys-card-label">用途</span><span class="sys-card-value">${system.usage}</span></div>`;
+    html += `<div class="sys-card-row"><span class="sys-card-label">${tr('ID', '标识')}</span><span class="sys-card-value">${system.key}</span></div>`;
+    html += `<div class="sys-card-row"><span class="sys-card-label">${tr('Star class', '星级类型')}</span><span class="sys-card-value" style="color:${sc.fill}">${getLoc(system.starClass, sc.name)} (${system.starClass})</span></div>`;
+    if (system.usage) html += `<div class="sys-card-row"><span class="sys-card-label">${tr('Usage', '用途')}</span><span class="sys-card-value">${system.usage}</span></div>`;
     if (system.flags.length > 0) {
-        html += `<div class="sys-card-row"><span class="sys-card-label">标志</span><span class="sys-card-value">${system.flags.join(', ')}</span></div>`;
+        html += `<div class="sys-card-row"><span class="sys-card-label">${tr('Flags', '标志')}</span><span class="sys-card-value">${system.flags.join(', ')}</span></div>`;
     }
-    html += `<div class="sys-card-row"><span class="sys-card-label">天体数</span><span class="sys-card-value">${countBodies(system.bodies)}</span></div>`;
+    html += `<div class="sys-card-row"><span class="sys-card-label">${tr('Bodies', '天体数')}</span><span class="sys-card-value">${countBodies(system.bodies)}</span></div>`;
     if (system.asteroidBelts.length > 0) {
-        html += `<div class="sys-card-row"><span class="sys-card-label">小行星带</span><span class="sys-card-value">${system.asteroidBelts.length}</span></div>`;
+        html += `<div class="sys-card-row"><span class="sys-card-label">${tr('Asteroid belts', '小行星带')}</span><span class="sys-card-value">${system.asteroidBelts.length}</span></div>`;
     }
     html += `</div>`;
 
     // Body list
-    html += `<div class="body-list-header">天体树</div>`;
+    html += `<div class="body-list-header">${tr('Body tree', '天体树')}</div>`;
     html += `<ul class="body-list">`;
     for (const body of system.bodies) {
         html += renderBodyListItem(body, system.starClass, 0);
@@ -1856,10 +1861,10 @@ function renderBodyListItem(body: CelestialBody, systemClass: string, indent: nu
     const pc = getPlanetColor(body.planetClass);
     const localizedClass = getLoc(body.planetClass, pc.name);
     const name = getLoc(body.name, body.name || localizedClass || body.bodyType);
-    const typeNames: Record<string, string> = { star: '恒星', planet: '行星', moon: '卫星' };
+    const typeNames: Record<string, string> = { star: tr('Star', '恒星'), planet: tr('Planet', '行星'), moon: tr('Moon', '卫星') };
     const depth = Math.min(indent, 4);
     const childCount = body.moons.length + body.subPlanets.length;
-    const orbitText = body.bodyType === 'star' ? '中心' : `r ${Math.round(body.resolvedOrbitRadius)}`;
+    const orbitText = body.bodyType === 'star' ? tr('center', '中心') : `r ${Math.round(body.resolvedOrbitRadius)}`;
     const isSelected = selectedBody === body;
 
     let html = `<li class="body-item ${isSelected ? 'selected' : ''} body-indent-${depth} body-type-${body.bodyType}" style="--depth:${depth};--body-color:${color}" data-line="${body.line}" title="${escapeHtml(name)} · ${escapeHtml(body.planetClass)}">`;
@@ -1912,13 +1917,13 @@ function updatePropertiesPanel() {
     if (dd) dd.style.display = 'none';
     const panel = document.getElementById('props-content')!;
     if (!selectedBody) {
-        panel.innerHTML = '<div class="empty-state">选择一个天体以编辑属性</div>';
+        panel.innerHTML = `<div class="empty-state">${tr('Select a body to edit properties', '选择一个天体以编辑属性')}</div>`;
         return;
     }
 
     const body = selectedBody;
     const pc = getPlanetColor(body.planetClass);
-    const typeNames: Record<string, string> = { star: '恒星', planet: '行星', moon: '卫星' };
+    const typeNames: Record<string, string> = { star: tr('Star', '恒星'), planet: tr('Planet', '行星'), moon: tr('Moon', '卫星') };
 
     let html = '';
 
@@ -1926,44 +1931,44 @@ function updatePropertiesPanel() {
     html += `<div style="margin-bottom:12px">`;
     html += `<span class="prop-badge ${body.bodyType}">${typeNames[body.bodyType]}</span>`;
     if (body.homePlanet || body.startingPlanet) {
-        html += ` <span class="prop-badge home">母星</span>`;
+        html += ` <span class="prop-badge home">${tr('Home', '母星')}</span>`;
     }
     html += `</div>`;
 
     // Basic info
     html += `<div class="prop-group">`;
-    html += `<div class="prop-group-title">基本信息</div>`;
+    html += `<div class="prop-group-title">${tr('Basic info', '基本信息')}</div>`;
     if (body.name) {
-        html += propRow('名称', `<input class="prop-input" type="text" value="${body.name}" title="${getLoc(body.name)}" data-prop="name" data-line="${body.line}" style="width:120px;text-align:left" />`);
+        html += propRow(tr('Name', '名称'), `<input class="prop-input" type="text" value="${body.name}" title="${getLoc(body.name)}" data-prop="name" data-line="${body.line}" style="width:120px;text-align:left" />`);
     }
-    html += propRow('星球类型', `<span class="prop-value" style="color:${getBodyColor(body, allSystems[currentSystemIndex]?.starClass ?? '')}" title="${body.planetClass}">${getLoc(body.planetClass, pc.name)}</span>`);
-    html += propRow('类型代码', `<div class="class-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="class-search" type="text" value="${body.planetClass}" data-prop="class" data-line="${body.line}" autocomplete="off" style="width:100%;text-align:left" /></div>`);
+    html += propRow(tr('Planet class', '星球类型'), `<span class="prop-value" style="color:${getBodyColor(body, allSystems[currentSystemIndex]?.starClass ?? '')}" title="${body.planetClass}">${getLoc(body.planetClass, pc.name)}</span>`);
+    html += propRow(tr('Class code', '类型代码'), `<div class="class-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="class-search" type="text" value="${body.planetClass}" data-prop="class" data-line="${body.line}" autocomplete="off" style="width:100%;text-align:left" /></div>`);
     html += `</div>`;
 
     // Orbit
     html += `<div class="prop-group">`;
-    html += `<div class="prop-group-title">轨道参数</div>`;
-    html += propRowVOR('轨道距离', 'orbit_distance', body.orbitDistance, body.line);
-    html += propRowVOR('轨道角度', 'orbit_angle', body.orbitAngle, body.line);
+    html += `<div class="prop-group-title">${tr('Orbit parameters', '轨道参数')}</div>`;
+    html += propRowVOR(tr('Orbit distance', '轨道距离'), 'orbit_distance', body.orbitDistance, body.line);
+    html += propRowVOR(tr('Orbit angle', '轨道角度'), 'orbit_angle', body.orbitAngle, body.line);
     if (body.changeOrbit !== 0) {
-        html += propRow('轨道偏移', `<input class="prop-input" type="number" value="${body.changeOrbit}" data-prop="change_orbit" data-line="${body.line}" />`);
+        html += propRow(tr('Orbit offset', '轨道偏移'), `<input class="prop-input" type="number" value="${body.changeOrbit}" data-prop="change_orbit" data-line="${body.line}" />`);
     }
     html += `</div>`;
 
     // Size
     html += `<div class="prop-group">`;
-    html += `<div class="prop-group-title">大小与计数</div>`;
-    html += propRowVOR('大小', 'size', body.size, body.line);
-    html += propRowVOR('数量', 'count', body.count, body.line);
-    html += propRow('行星环', `<select class="prop-select" data-prop="has_ring" data-line="${body.line}"><option value="no" ${!body.hasRing ? 'selected' : ''}>否</option><option value="yes" ${body.hasRing ? 'selected' : ''}>是</option></select>`);
+    html += `<div class="prop-group-title">${tr('Size and count', '大小与计数')}</div>`;
+    html += propRowVOR(tr('Size', '大小'), 'size', body.size, body.line);
+    html += propRowVOR(tr('Count', '数量'), 'count', body.count, body.line);
+    html += propRow(tr('Planet ring', '行星环'), `<select class="prop-select" data-prop="has_ring" data-line="${body.line}"><option value="no" ${!body.hasRing ? 'selected' : ''}>${tr('No', '否')}</option><option value="yes" ${body.hasRing ? 'selected' : ''}>${tr('Yes', '是')}</option></select>`);
     html += `</div>`;
 
     // Actions
     html += `<div class="prop-group">`;
-    html += `<div class="prop-group-title">操作</div>`;
-    html += `<div class="prop-row"><button class="prop-input btn-jump-to-line" data-jump-line="${body.line}" style="width:100%;text-align:center;cursor:pointer;padding:4px 8px">跳转到源码 (行 ${body.line})</button></div>`;
+    html += `<div class="prop-group-title">${tr('Actions', '操作')}</div>`;
+    html += `<div class="prop-row"><button class="prop-input btn-jump-to-line" data-jump-line="${body.line}" style="width:100%;text-align:center;cursor:pointer;padding:4px 8px">${tr(`Jump to source (line ${body.line})`, `跳转到源码 (行 ${body.line})`)}</button></div>`;
     if (editMode) {
-        html += `<div class="prop-row" style="justify-content:center;margin-top:4px"><span style="font-size:10px;color:var(--text-muted)">${svgIcon('lightbulb')} 右键画布可添加新行星</span></div>`;
+        html += `<div class="prop-row" style="justify-content:center;margin-top:4px"><span style="font-size:10px;color:var(--text-muted)">${svgIcon('lightbulb')} ${tr('Right-click the canvas to add a planet', '右键画布可添加新行星')}</span></div>`;
     }
     html += `</div>`;
 
@@ -1976,7 +1981,7 @@ function updatePropertiesPanel() {
             const line = parseInt(input.getAttribute('data-line')!);
             let value: string | number = input.value;
             if (input.type === 'number') value = parseFloat(input.value);
-            setEditStatus('正在应用...');
+            setEditStatus(tr('Applying...', '正在应用...'));
             vscode.postMessage({
                 command: 'updateProperty',
                 line,
@@ -1993,7 +1998,7 @@ function updatePropertiesPanel() {
         select.addEventListener('change', () => {
             const prop = select.getAttribute('data-prop')!;
             const line = parseInt(select.getAttribute('data-line')!);
-            setEditStatus('正在应用...');
+            setEditStatus(tr('Applying...', '正在应用...'));
             vscode.postMessage({
                 command: 'updateProperty',
                 line,
@@ -2016,7 +2021,7 @@ function updatePropertiesPanel() {
             if (vorType === 'value') {
                 const value = clampOrbit(parseFloat(input.value) || 0);
                 input.value = String(value);
-                setEditStatus('正在应用...');
+                setEditStatus(tr('Applying...', '正在应用...'));
                 vscode.postMessage({
                     command: 'updateProperty',
                     line,
@@ -2029,7 +2034,7 @@ function updatePropertiesPanel() {
                 input.value = String(rawSelf);
                 const min = vorType === 'min' ? rawSelf : clampOrbit(parseFloat(otherInput?.value ?? '0') || 0);
                 const max = vorType === 'max' ? rawSelf : clampOrbit(parseFloat(otherInput?.value ?? '0') || 0);
-                setEditStatus('正在应用...');
+                setEditStatus(tr('Applying...', '正在应用...'));
                 vscode.postMessage({
                     command: 'updateProperty',
                     line,
@@ -2100,17 +2105,21 @@ function setupClassAutocomplete(inputEl: HTMLInputElement, dataSource: string[])
         if (matches.length === 0) { hideDD(); return; }
         
         // Grouping
+        const starGroup = tr('Stars', '恒星 (Stars)');
+        const habitableGroup = tr('Habitable', '宜居星球 (Habitable)');
+        const ringworldGroup = tr('Ringworld', '环世界 (Ringworld)');
+        const otherGroup = tr('Other', '其他 (Other)');
         const groups: Record<string, string[]> = {
-            '恒星 (Stars)': [],
-            '宜居星球 (Habitable)': [],
-            '环世界 (Ringworld)': [],
-            '其他 (Other)': []
+            [starGroup]: [],
+            [habitableGroup]: [],
+            [ringworldGroup]: [],
+            [otherGroup]: []
         };
         for (const cls of matches) {
-            if (STAR_COLORS[cls] || cls.includes('star')) groups['恒星 (Stars)']!.push(cls);
-            else if (cls.includes('ringworld') || dynamicClasses.find(c => c.name === cls)?.isRingWorld) groups['环世界 (Ringworld)']!.push(cls);
-            else if (['ideal_planet_class', 'pc_continental', 'pc_ocean', 'pc_tropical', 'pc_arid', 'pc_desert', 'pc_savannah', 'pc_alpine', 'pc_arctic', 'pc_tundra', 'pc_gaia', 'pc_relic'].includes(cls)) groups['宜居星球 (Habitable)']!.push(cls);
-            else groups['其他 (Other)']!.push(cls);
+            if (STAR_COLORS[cls] || cls.includes('star')) groups[starGroup]!.push(cls);
+            else if (cls.includes('ringworld') || dynamicClasses.find(c => c.name === cls)?.isRingWorld) groups[ringworldGroup]!.push(cls);
+            else if (['ideal_planet_class', 'pc_continental', 'pc_ocean', 'pc_tropical', 'pc_arid', 'pc_desert', 'pc_savannah', 'pc_alpine', 'pc_arctic', 'pc_tundra', 'pc_gaia', 'pc_relic'].includes(cls)) groups[habitableGroup]!.push(cls);
+            else groups[otherGroup]!.push(cls);
         }
 
         ddIndex = -1;
@@ -2234,7 +2243,7 @@ window.addEventListener('message', (event) => {
         if (msg.locDict) locDict = msg.locDict;
         buildContextMenu();
         
-        document.getElementById('title')!.textContent = `星系预览: ${msg.fileName}`;
+        document.getElementById('title')!.textContent = tr(`Solar System Preview: ${msg.fileName}`, `星系预览: ${msg.fileName}`);
 
         // Update system selector
         const select = document.getElementById('system-select') as HTMLSelectElement;
@@ -2263,7 +2272,7 @@ window.addEventListener('message', (event) => {
 
         updateInfoPanel();
         updatePropertiesPanel();
-        setEditStatus('已同步');
+        setEditStatus(tr('Synced', '已同步'));
 
         if (isFirstRender) {
             // First render: full initialization
@@ -2288,19 +2297,22 @@ function buildContextMenu() {
     const allClasses = [...hardcoded, ...dynamic].filter(c => !c.startsWith('sc_'));
 
     // Group classes
+    const starGroup = tr('Stars', '恒星 (Stars)');
+    const habitableGroup = tr('Habitable', '宜居星球 (Habitable)');
+    const otherGroup = tr('Other', '其他 (Other)');
     const groups: Record<string, string[]> = {
-        '恒星 (Stars)': [],
-        '宜居星球 (Habitable)': [],
-        '其他 (Other)': []
+        [starGroup]: [],
+        [habitableGroup]: [],
+        [otherGroup]: []
     };
 
     for (const cls of allClasses) {
         // Skip ringworld from standard groups, they have their own direct button
         if (cls.includes('ringworld') || dynamicClasses.find(c => c.name === cls)?.isRingWorld) continue;
 
-        if (STAR_COLORS[cls] || cls.includes('star')) groups['恒星 (Stars)']!.push(cls);
-        else if (['ideal_planet_class', 'pc_continental', 'pc_ocean', 'pc_tropical', 'pc_arid', 'pc_desert', 'pc_savannah', 'pc_alpine', 'pc_arctic', 'pc_tundra', 'pc_gaia', 'pc_relic'].includes(cls)) groups['宜居星球 (Habitable)']!.push(cls);
-        else groups['其他 (Other)']!.push(cls);
+        if (STAR_COLORS[cls] || cls.includes('star')) groups[starGroup]!.push(cls);
+        else if (['ideal_planet_class', 'pc_continental', 'pc_ocean', 'pc_tropical', 'pc_arid', 'pc_desert', 'pc_savannah', 'pc_alpine', 'pc_arctic', 'pc_tundra', 'pc_gaia', 'pc_relic'].includes(cls)) groups[habitableGroup]!.push(cls);
+        else groups[otherGroup]!.push(cls);
     }
 
     const buildHTML = (actionPrefix: string) => {

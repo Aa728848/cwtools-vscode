@@ -1495,40 +1495,42 @@ export class SolarSystemPanel {
             vscode.Uri.file(path.join(this._webviewRootPath, 'solarSystemPreview.js'))
         );
         const nonce = getNonce();
+        const lang = vscode.env.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
+        const title = panelText('Solar System Preview', '星系预览');
 
         return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${lang}">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${this._panel.webview.cspSource} data: https: blob:; script-src 'nonce-${nonce}'; style-src ${this._panel.webview.cspSource} 'unsafe-inline';" />
     <link href="${styleUri}" rel="stylesheet" />
-    <title>星系预览</title>
+    <title>${title}</title>
 </head>
 <body>
     <div id="toolbar">
-        <span id="title">星系预览</span>
+        <span id="title">${title}</span>
         <div id="controls">
-            <select id="system-select" title="选择星系"></select>
+            <select id="system-select" title="${panelText('Select system', '选择星系')}"></select>
             <span class="separator">|</span>
-            <button id="btn-scale-mode" title="切换可读比例 / 真实比例" aria-label="切换比例模式">可读比例</button>
+            <button id="btn-scale-mode" title="${panelText('Toggle readable / true scale', '切换可读比例 / 真实比例')}" aria-label="${panelText('Toggle scale mode', '切换比例模式')}">${panelText('Readable scale', '可读比例')}</button>
             <span class="separator">|</span>
-            <button id="btn-zoom-in" title="放大">+</button>
+            <button id="btn-zoom-in" title="${panelText('Zoom in', '放大')}">+</button>
             <span id="zoom-level">100%</span>
-            <button id="btn-zoom-out" title="缩小">−</button>
-            <button id="btn-fit" title="适应窗口">⊡</button>
-            <button id="btn-reset" title="重置视角">↻</button>
+            <button id="btn-zoom-out" title="${panelText('Zoom out', '缩小')}">−</button>
+            <button id="btn-fit" title="${panelText('Fit to window', '适应窗口')}">⊡</button>
+            <button id="btn-reset" title="${panelText('Reset view', '重置视角')}">↻</button>
             <span class="separator">|</span>
             <span id="tilt-level">55°</span>
             <span class="separator">|</span>
-            <button id="btn-edit" title="切换编辑模式 (E)" class="edit-toggle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button>
-            <button id="btn-labels" title="切换标签"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"></path><path d="M7 7h.01"></path></svg></button>
-            <button id="btn-orbits" title="切换轨道线">◎</button>
+            <button id="btn-edit" title="${panelText('Toggle edit mode (E)', '切换编辑模式 (E)')}" class="edit-toggle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button id="btn-labels" title="${panelText('Toggle labels', '切换标签')}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"></path><path d="M7 7h.01"></path></svg></button>
+            <button id="btn-orbits" title="${panelText('Toggle orbit lines', '切换轨道线')}">◎</button>
             <span class="separator">|</span>
-            <button id="btn-undo" title="撤销编辑 (Ctrl+Z)" aria-label="撤销">↶</button>
-            <button id="btn-redo" title="重做编辑" aria-label="重做">↷</button>
-            <button id="btn-save" title="保存当前文件" aria-label="保存">保存</button>
-            <span id="edit-status">已同步</span>
+            <button id="btn-undo" title="${panelText('Undo edit (Ctrl+Z)', '撤销编辑 (Ctrl+Z)')}" aria-label="${panelText('Undo', '撤销')}">↶</button>
+            <button id="btn-redo" title="${panelText('Redo edit', '重做编辑')}" aria-label="${panelText('Redo', '重做')}">↷</button>
+            <button id="btn-save" title="${panelText('Save current file', '保存当前文件')}" aria-label="${panelText('Save', '保存')}">${panelText('Save', '保存')}</button>
+            <span id="edit-status">${panelText('Synced', '已同步')}</span>
         </div>
     </div>
     <div id="main-layout">
@@ -1537,33 +1539,33 @@ export class SolarSystemPanel {
         </div>
         <div id="side-panel">
             <div id="side-panel-tabs">
-                <button id="tab-info" class="tab active">信息</button>
-                <button id="tab-properties" class="tab">属性</button>
+                <button id="tab-info" class="tab active">${panelText('Info', '信息')}</button>
+                <button id="tab-properties" class="tab">${panelText('Properties', '属性')}</button>
             </div>
             <div id="info-panel">
-                <div id="system-info">选择一个星系查看详情</div>
+                <div id="system-info">${panelText('Select a system to view details', '选择一个星系查看详情')}</div>
             </div>
             <div id="properties-panel" class="hidden">
-                <div id="props-content">选择一个天体以编辑属性</div>
+                <div id="props-content">${panelText('Select a body to edit properties', '选择一个天体以编辑属性')}</div>
             </div>
         </div>
     </div>
     <div id="tooltip" class="hidden"></div>
     <div id="context-menu" class="hidden" style="max-height: 400px; overflow-y: auto; overflow-x: hidden;">
         <div id="ctx-planets">
-            <div class="ctx-title">添加天体</div>
+            <div class="ctx-title">${panelText('Add body', '添加天体')}</div>
             <div class="ctx-content"></div>
         </div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0" id="ctx-ring-sep"></div>
-        <div id="ctx-ringworld"><button data-action="add-ringworld"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="none" stroke="#ffd700" stroke-width="2"/></svg> 环形世界</button></div>
+        <div id="ctx-ringworld"><button data-action="add-ringworld"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="none" stroke="#ffd700" stroke-width="2"/></svg> ${panelText('Ringworld', '环形世界')}</button></div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0;display:none" id="ctx-moon-sep"></div>
         <div id="ctx-moons" style="display:none">
-            <div class="ctx-title" id="ctx-moon-title">添加卫星</div>
+            <div class="ctx-title" id="ctx-moon-title">${panelText('Add moon', '添加卫星')}</div>
             <div class="ctx-content"></div>
         </div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0;display:none" id="ctx-sibling-sep"></div>
         <div id="ctx-sibling" style="display:none">
-            <div class="ctx-title" id="ctx-sibling-title">在同轨道创建</div>
+            <div class="ctx-title" id="ctx-sibling-title">${panelText('Create on same orbit', '在同轨道创建')}</div>
             <div class="ctx-content"></div>
         </div>
     </div>
@@ -1578,4 +1580,8 @@ function getNonce(): string {
     const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     for (let i = 0; i < 32; i++) t += c.charAt(Math.floor(Math.random() * c.length));
     return t;
+}
+
+function panelText(en: string, zh: string): string {
+    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
 }

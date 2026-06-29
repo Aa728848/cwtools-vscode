@@ -5,6 +5,11 @@
 import { svgIconNoMargin } from './svgIcons';
 
 const vscode = acquireVsCodeApi();
+const locale = (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh') ? 'zh-cn' : 'en';
+const isZh = locale === 'zh-cn';
+function tr(en: string, zh: string): string {
+    return isZh ? zh : en;
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -992,7 +997,7 @@ function appendLayerGroup(
     const toggle = document.createElement('button');
     toggle.className = 'layer-toggle';
     toggle.innerHTML = svgIconNoMargin('eye');
-    toggle.title = '切换整组可见性';
+    toggle.title = tr('Toggle group visibility', '切换整组可见性');
     toggle.onclick = (e) => {
         e.stopPropagation();
         const willShow = group.items.some(el => {
@@ -1080,7 +1085,7 @@ function appendLayerElement(el: GuiElement, container: HTMLElement, depth: numbe
     const toggle = document.createElement('button');
     toggle.className = 'layer-toggle';
     toggle.innerHTML = svgIconNoMargin('eye');
-    toggle.title = '切换可见性';
+    toggle.title = tr('Toggle visibility', '切换可见性');
     toggle.onclick = (e) => {
         e.stopPropagation();
         const isInSelection = editMode && selectedElements.some(s => s.el.line === el.line) && selectedElements.length > 1;
@@ -1251,11 +1256,11 @@ function updateViewportStatus(override?: GuiElement) {
         return;
     }
     if (selectedElements.length === 0) {
-        status.textContent = `未选择元素 · ${Math.round(scale * 100)}%`;
+        status.textContent = `${tr('No element selected', '未选择元素')} · ${Math.round(scale * 100)}%`;
         return;
     }
     if (selectedElements.length > 1) {
-        status.textContent = `已选择 ${selectedElements.length} 个元素 · ${Math.round(scale * 100)}%`;
+        status.textContent = `${tr(`${selectedElements.length} element(s) selected`, `已选择 ${selectedElements.length} 个元素`)} · ${Math.round(scale * 100)}%`;
         return;
     }
     const el = selectedElements[0]!.el;
@@ -1310,7 +1315,7 @@ function setupSearch() {
             }
         });
 
-        searchCount!.textContent = searchResults.length > 0 ? `找到 ${searchResults.length} 个` : '无匹配';
+        searchCount!.textContent = searchResults.length > 0 ? tr(`${searchResults.length} found`, `找到 ${searchResults.length} 个`) : tr('No matches', '无匹配');
         if (searchResults.length > 0) {
             searchIndex = 0;
             scrollToResult();
@@ -1996,7 +2001,7 @@ function updatePropertiesPanel() {
     const content = document.getElementById('props-content');
     if (!content) return;
     if (selectedElements.length === 0) {
-        content.innerHTML = '<div class="empty-state">选择一个元素以编辑属性</div>';
+        content.innerHTML = `<div class="empty-state">${tr('Select an element to edit properties', '选择一个元素以编辑属性')}</div>`;
         return;
     }
     if (selectedElements.length > 1) {
@@ -2004,11 +2009,11 @@ function updatePropertiesPanel() {
         const elems = selectedElements.map(s => s.el);
         const allSameType = elems.every(e => e.type === elems[0]!.type);
         const c = allSameType ? (COLORS[elems[0]!.type] ?? DEFAULT_COLOR) : DEFAULT_COLOR;
-        let html = `<div class="prop-summary"><div><strong>已选择 ${selectedElements.length} 个元素</strong><span>${allSameType ? elems[0]!.type : '多种类型'}</span></div></div>`;
-        html += `<div class="prop-group"><div class="prop-group-title" style="color:${c.border}">批量移动</div>`;
-        html += `<div class="prop-hint">修改值将作为偏移量应用到所有选中元素。</div>`;
-        html += propRow('偏移 X', `<input class="prop-input" type="number" data-prop="batch-offset-x" value="0" step="1" />`);
-        html += propRow('偏移 Y', `<input class="prop-input" type="number" data-prop="batch-offset-y" value="0" step="1" />`);
+        let html = `<div class="prop-summary"><div><strong>${tr(`${selectedElements.length} element(s) selected`, `已选择 ${selectedElements.length} 个元素`)}</strong><span>${allSameType ? elems[0]!.type : tr('Mixed types', '多种类型')}</span></div></div>`;
+        html += `<div class="prop-group"><div class="prop-group-title" style="color:${c.border}">${tr('Batch move', '批量移动')}</div>`;
+        html += `<div class="prop-hint">${tr('Values are applied as offsets to every selected element.', '修改值将作为偏移量应用到所有选中元素。')}</div>`;
+        html += propRow(tr('Offset X', '偏移 X'), `<input class="prop-input" type="number" data-prop="batch-offset-x" value="0" step="1" />`);
+        html += propRow(tr('Offset Y', '偏移 Y'), `<input class="prop-input" type="number" data-prop="batch-offset-y" value="0" step="1" />`);
         html += `</div>`;
         content.innerHTML = html;
 
@@ -2049,57 +2054,57 @@ function updatePropertiesPanel() {
 
     // Identity
     html += `<div class="prop-summary" style="--summary-color:${c.border}">`;
-    html += `<span class="summary-dot"></span><div><strong>${escHtml(el.name || '(unnamed)')}</strong><span>${escHtml(el.type)} · ${el.children.length} 子层</span></div>`;
+    html += `<span class="summary-dot"></span><div><strong>${escHtml(el.name || '(unnamed)')}</strong><span>${escHtml(el.type)} · ${tr(`${el.children.length} child layer(s)`, `${el.children.length} 子层`)}</span></div>`;
     html += `</div>`;
     html += `<div class="prop-group"><div class="prop-group-title" style="color:${c.border}">${c.tag}</div>`;
-    html += propRow('名称', `<input class="prop-input" data-prop="name" value="${escHtml(el.name)}" />`);
+    html += propRow(tr('Name', '名称'), `<input class="prop-input" data-prop="name" value="${escHtml(el.name)}" />`);
     html += `</div>`;
 
     // Transform
-    html += `<div class="prop-group"><div class="prop-group-title">变换</div>`;
-    html += propRow('位置', `<div class="prop-half"><input class="prop-input" type="number" data-prop="pos-x" value="${el.position.x}" step="1" /><input class="prop-input" type="number" data-prop="pos-y" value="${el.position.y}" step="1" /></div>`);
-    html += propRow('尺寸', `<div class="prop-half"><input class="prop-input" type="number" data-prop="size-w" value="${el.size.width}" step="1" /><input class="prop-input" type="number" data-prop="size-h" value="${el.size.height}" step="1" /></div>`);
+    html += `<div class="prop-group"><div class="prop-group-title">${tr('Transform', '变换')}</div>`;
+    html += propRow(tr('Position', '位置'), `<div class="prop-half"><input class="prop-input" type="number" data-prop="pos-x" value="${el.position.x}" step="1" /><input class="prop-input" type="number" data-prop="pos-y" value="${el.position.y}" step="1" /></div>`);
+    html += propRow(tr('Size', '尺寸'), `<div class="prop-half"><input class="prop-input" type="number" data-prop="size-w" value="${el.size.width}" step="1" /><input class="prop-input" type="number" data-prop="size-h" value="${el.size.height}" step="1" /></div>`);
 
     const orientations = ['', 'UPPER_LEFT', 'UPPER_RIGHT', 'LOWER_LEFT', 'LOWER_RIGHT', 'CENTER', 'CENTER_UP', 'CENTER_DOWN', 'CENTER_LEFT', 'CENTER_RIGHT'];
-    html += propRow('锚点', `<select class="prop-select" data-prop="orientation">${orientations.map(o => `<option value="${o}" ${o === normalizeOrientation(el.orientation ?? '') ? 'selected' : ''}>${o || '(无)'}</option>`).join('')}</select>`);
-    html += propRow('origo', `<select class="prop-select" data-prop="origo">${orientations.map(o => `<option value="${o}" ${o === normalizeOrientation(el.origo ?? '') ? 'selected' : ''}>${o || '(无)'}</option>`).join('')}</select>`);
+    html += propRow(tr('Anchor', '锚点'), `<select class="prop-select" data-prop="orientation">${orientations.map(o => `<option value="${o}" ${o === normalizeOrientation(el.orientation ?? '') ? 'selected' : ''}>${o || tr('(none)', '(无)')}</option>`).join('')}</select>`);
+    html += propRow('origo', `<select class="prop-select" data-prop="origo">${orientations.map(o => `<option value="${o}" ${o === normalizeOrientation(el.origo ?? '') ? 'selected' : ''}>${o || tr('(none)', '(无)')}</option>`).join('')}</select>`);
     html += `</div>`;
 
     // Visual
-    html += `<div class="prop-group"><div class="prop-group-title">视觉</div>`;
-    html += propRow('缩放', `<input class="prop-input" type="number" data-prop="scale" value="${el.scale ?? 1}" step="0.1" min="0.1" max="10" />`);
-    html += propRow('透明度', `<input class="prop-input" type="number" data-prop="alpha" value="${el.alpha ?? 1}" step="0.1" min="0" max="1" />`);
-    html += propRow('旋转', `<input class="prop-input" type="number" data-prop="rotation" value="${el.rotation ?? 0}" step="0.1" />`);
-    html += propRow('居中', `<input class="prop-checkbox" type="checkbox" data-prop="centerPosition" ${el.centerPosition ? 'checked' : ''} />`);
-    html += propRow('裁剪', `<input class="prop-checkbox" type="checkbox" data-prop="clipping" ${el.clipping ? 'checked' : ''} />`);
+    html += `<div class="prop-group"><div class="prop-group-title">${tr('Visual', '视觉')}</div>`;
+    html += propRow(tr('Scale', '缩放'), `<input class="prop-input" type="number" data-prop="scale" value="${el.scale ?? 1}" step="0.1" min="0.1" max="10" />`);
+    html += propRow(tr('Opacity', '透明度'), `<input class="prop-input" type="number" data-prop="alpha" value="${el.alpha ?? 1}" step="0.1" min="0" max="1" />`);
+    html += propRow(tr('Rotation', '旋转'), `<input class="prop-input" type="number" data-prop="rotation" value="${el.rotation ?? 0}" step="0.1" />`);
+    html += propRow(tr('Centered', '居中'), `<input class="prop-checkbox" type="checkbox" data-prop="centerPosition" ${el.centerPosition ? 'checked' : ''} />`);
+    html += propRow(tr('Clipping', '裁剪'), `<input class="prop-checkbox" type="checkbox" data-prop="clipping" ${el.clipping ? 'checked' : ''} />`);
     html += `</div>`;
 
     // Sprite
-    html += `<div class="prop-group"><div class="prop-group-title">贴图</div>`;
+    html += `<div class="prop-group"><div class="prop-group-title">${tr('Sprite', '贴图')}</div>`;
     const isContainerType = el.type === 'containerWindowType' || el.type === 'windowType';
     if (isContainerType) {
         // For containers, show the background child's sprite
         const bgChild = el.children.find(c => c.type === 'background');
         const bgSprite = bgChild?.spriteKey ?? '';
-        html += `<div class="prop-row"><span class="prop-label">背景</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="sprite-search" data-prop="sprite-select" value="${escHtml(bgSprite)}" placeholder="输入或选择背景贴图..." autocomplete="off" /></div></div>`;
+        html += `<div class="prop-row"><span class="prop-label">${tr('Background', '背景')}</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="sprite-search" data-prop="sprite-select" value="${escHtml(bgSprite)}" placeholder="${tr('Enter or choose a background sprite...', '输入或选择背景贴图...')}" autocomplete="off" /></div></div>`;
     } else {
         const currentSprite = el.spriteKey ?? '';
-        html += `<div class="prop-row"><span class="prop-label">贴图</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="sprite-search" data-prop="sprite-select" value="${escHtml(currentSprite)}" placeholder="输入或选择贴图..." autocomplete="off" /></div></div>`;
+        html += `<div class="prop-row"><span class="prop-label">${tr('Sprite', '贴图')}</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="sprite-search" data-prop="sprite-select" value="${escHtml(currentSprite)}" placeholder="${tr('Enter or choose a sprite...', '输入或选择贴图...')}" autocomplete="off" /></div></div>`;
     }
-    if (el.frame !== undefined) html += propRow('帧', `<input class="prop-input" type="number" data-prop="frame" value="${el.frame}" step="1" min="0" />`);
+    if (el.frame !== undefined) html += propRow(tr('Frame', '帧'), `<input class="prop-input" type="number" data-prop="frame" value="${el.frame}" step="1" min="0" />`);
     html += `</div>`;
 
     // Effect (only for effectButtonType)
     if (el.type === 'effectButtonType') {
         const currentEffect = (el.properties['effect'] as string) ?? '';
-        html += `<div class="prop-group"><div class="prop-group-title">效果</div>`;
-        html += `<div class="prop-row"><span class="prop-label">effect</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="effect-search" data-prop="effect-select" value="${escHtml(currentEffect)}" placeholder="输入或选择效果..." autocomplete="off" /></div></div>`;
+        html += `<div class="prop-group"><div class="prop-group-title">${tr('Effect', '效果')}</div>`;
+        html += `<div class="prop-row"><span class="prop-label">effect</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="effect-search" data-prop="effect-select" value="${escHtml(currentEffect)}" placeholder="${tr('Enter or choose an effect...', '输入或选择效果...')}" autocomplete="off" /></div></div>`;
         html += `</div>`;
     }
 
     // Info
-    html += `<div class="prop-group"><div class="prop-group-title">源码</div>`;
-    html += propRow('行号', `<span style="font-size:11px;color:#7888a8">${el.line} — ${el.endLine}</span>`);
+    html += `<div class="prop-group"><div class="prop-group-title">${tr('Source', '源码')}</div>`;
+    html += propRow(tr('Line', '行号'), `<span style="font-size:11px;color:#7888a8">${el.line} — ${el.endLine}</span>`);
     html += `</div>`;
 
     content.innerHTML = html;

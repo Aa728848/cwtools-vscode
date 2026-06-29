@@ -135,7 +135,7 @@ describe('SubAgentSandbox', () => {
 
             const result = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: 'common/events.txt' }, process.cwd());
             expect(result.allowed).to.be.false;
-            expect(result.reason).to.include('属于只读角色，禁止调用物理写入工具');
+            expect(result.reason).to.include('is read-only and cannot call file-writing tool');
         });
 
         it('locWriter 沙盒写入越权路径应该被拦截，写入本地化文件顺利放行', () => {
@@ -150,7 +150,7 @@ describe('SubAgentSandbox', () => {
             // 1) 尝试写入非本地化（非 localisation）文件，应该被拦截
             const badResult = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: 'common/events.txt' }, process.cwd());
             expect(badResult.allowed).to.be.false;
-            expect(badResult.reason).to.include('写入目标文件路径');
+            expect(badResult.reason).to.include('blocked the write');
 
             // 2) 写入本地化文件，应该允许
             const goodResult = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: 'localisation/simp_chinese.yml' }, process.cwd());
@@ -259,7 +259,7 @@ describe('SubAgentSandbox', () => {
             };
             const escape = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: 'common/buildings_evil/backdoor.txt' }, process.cwd());
             expect(escape.allowed).to.be.false;
-            expect(escape.reason).to.include('写入目标文件路径');
+            expect(escape.reason).to.include('blocked the write');
         });
 
         it('.cwtools-ai 前缀边界：拒绝 .cwtools-ai-evil，仅精确或 / 前缀放行', () => {

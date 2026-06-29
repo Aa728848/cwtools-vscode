@@ -98,7 +98,8 @@ export interface RunSummary {
  * Build a RunSummary from a list of agent steps.
  * Pure function — no DOM or vscode dependency.
  */
-export function makeRunSummary(steps: Record<string, unknown>[] | undefined, fallbackContent?: string): RunSummary {
+export function makeRunSummary(steps: Record<string, unknown>[] | undefined, fallbackContent?: string, locale: 'en' | 'zh-cn' = 'en'): RunSummary {
+    const isZh = locale === 'zh-cn';
     const all = steps || [];
     const timestamps = all.map(s => Number(s.timestamp || 0)).filter(Boolean);
     const startedAt = timestamps.length ? Math.min(...timestamps) : null;
@@ -114,7 +115,7 @@ export function makeRunSummary(steps: Record<string, unknown>[] | undefined, fal
     let orchestratorCount = 0;
     let errorCount = 0;
     let failedToolCount = 0;
-    let latestStatus = fallbackContent?.trim() ? fallbackContent.trim() : '已完成';
+    let latestStatus = fallbackContent?.trim() ? fallbackContent.trim() : (isZh ? '已完成' : 'Completed');
     const alerts: string[] = [];
     const validations: string[] = [];
 
@@ -136,18 +137,20 @@ export function makeRunSummary(steps: Record<string, unknown>[] | undefined, fal
             } else if (ORCHESTRATOR_TOOL_NAMES.has(toolName)) {
                 orchestratorCount++;
             }
-            latestStatus = file ? `正在调用 ${toolName}: ${file}` : `正在调用 ${toolName}`;
+            latestStatus = file
+                ? (isZh ? `正在调用 ${toolName}: ${file}` : `Calling ${toolName}: ${file}`)
+                : (isZh ? `正在调用 ${toolName}` : `Calling ${toolName}`);
         } else if (type === 'tool_result') {
             toolResultCount++;
             const result = step.toolResult as Record<string, unknown> | undefined;
             if (result?.success === false || result?.error) {
                 failedToolCount++;
-                const msg = String(result?.message || result?.error || `${step.toolName || '工具'} 执行失败`);
+                const msg = String(result?.message || result?.error || (isZh ? `${step.toolName || '工具'} 执行失败` : `${step.toolName || 'tool'} failed`));
                 alerts.push(msg);
             }
             latestStatus = result?.success === false || result?.error
-                ? `${step.toolName || '工具'} 返回问题`
-                : `${step.toolName || '工具'} 已返回`;
+                ? (isZh ? `${step.toolName || '工具'} 返回问题` : `${step.toolName || 'Tool'} returned an issue`)
+                : (isZh ? `${step.toolName || '工具'} 已返回` : `${step.toolName || 'Tool'} returned`);
         } else if (type === 'validation') {
             validationCount++;
             if (step.content) validations.push(String(step.content));

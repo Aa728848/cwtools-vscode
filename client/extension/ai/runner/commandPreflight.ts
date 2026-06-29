@@ -1,3 +1,5 @@
+import { aiText } from '../messages';
+
 export interface CommandSegment {
     raw: string;
     command: string;
@@ -96,7 +98,7 @@ export function preflightCommand(commandLine: string): CommandPreflightResult {
         if (!trimmed) continue;
 
         let classification: CommandSegment['classification'] = 'unknown';
-        let reason = '未识别的命令';
+        let reason = aiText('Unrecognized command', '未识别的命令');
         
         // Normalize whitespaces for analysis
         const words = trimmed.replace(/\s+/g, ' ').split(' ');
@@ -112,32 +114,32 @@ export function preflightCommand(commandLine: string): CommandPreflightResult {
         // Match classifications
         if (DESTRUCTIVE_COMMANDS.has(baseCmd) || DESTRUCTIVE_COMMANDS.has(trimmed.toLowerCase()) || isForceRecursiveRm(trimmed) || trimmed.toLowerCase().includes('del /s') || DESTRUCTIVE_POSIX_PATTERNS.some(p => p.test(trimmed))) {
             classification = 'destructive';
-            reason = '高危破坏性指令，可能导致数据丢失或系统损坏';
+            reason = aiText('High-risk destructive command that may cause data loss or system damage', '高危破坏性指令，可能导致数据丢失或系统损坏');
             riskLevel = Math.max(riskLevel, 3) as any;
             requiresEscalation = true;
             requiresPermission = true;
         } else if (INTERPRETER_COMMANDS.has(baseCmd)) {
             classification = 'interpreter';
-            reason = '动态代码/脚本解释器，具有任意代码执行风险';
+            reason = aiText('Dynamic code or script interpreter with arbitrary execution risk', '动态代码/脚本解释器，具有任意代码执行风险');
             riskLevel = Math.max(riskLevel, 2) as any;
             requiresPermission = true;
         } else if (NETWORK_COMMANDS.has(baseCmd) || NETWORK_COMMANDS.has(secondCmd)) {
             classification = 'network';
-            reason = '网络请求或远程同步指令，包含外部数据流出入';
+            reason = aiText('Network request or remote sync command with external data flow', '网络请求或远程同步指令，包含外部数据流出入');
             riskLevel = Math.max(riskLevel, 2) as any;
             requiresPermission = true;
         } else if (hasRedirect || WRITE_COMMANDS.has(baseCmd) || WRITE_COMMANDS.has(secondCmd) || WRITE_POSIX_PATTERNS.some(p => p.test(trimmed))) {
             classification = 'write';
-            reason = '写文件、修改配置或突变本地系统的指令';
+            reason = aiText('Command writes files, changes configuration, or mutates the local system', '写文件、修改配置或突变本地系统的指令');
             riskLevel = Math.max(riskLevel, 2) as any;
             requiresPermission = true;
         } else if (READONLY_COMMANDS.has(baseCmd) || READONLY_COMMANDS.has(secondCmd)) {
             classification = 'readonly';
-            reason = '只读信息收集或诊断指令，安全风险低';
+            reason = aiText('Read-only information gathering or diagnostic command with low safety risk', '只读信息收集或诊断指令，安全风险低');
         } else {
             // Default fallback
             classification = 'unknown';
-            reason = '未知或无法归类的第三方指令，按审慎原则提示确认';
+            reason = aiText('Unknown or unclassified third-party command; confirmation is required as a precaution', '未知或无法归类的第三方指令，按审慎原则提示确认');
             riskLevel = Math.max(riskLevel, 1) as any;
             requiresPermission = true;
         }
@@ -154,7 +156,10 @@ export function preflightCommand(commandLine: string): CommandPreflightResult {
     // Set blocked status for high-risk escalations unless explicitly reviewed
     const safe = !requiresEscalation;
     if (requiresEscalation) {
-        blockedReason = '由于安全沙盒策略，已拦截并强制阻断高危破坏性指令的自动执行。如确有需要，请拆分命令或请求管理员提权。';
+        blockedReason = aiText(
+            'The safety sandbox blocked automatic execution of this high-risk destructive command. If it is truly required, split the command or request elevated permission.',
+            '由于安全沙盒策略，已拦截并强制阻断高危破坏性指令的自动执行。如确有需要，请拆分命令或请求管理员提权。',
+        );
     }
 
     return {

@@ -10,7 +10,7 @@ import * as path from 'path';
 import type { WebViewMessage } from '../types';
 import type { AIChatPanelProvider } from '../chatPanel';
 import { ErrorReporter } from '../errorReporter';
-import { SOURCE } from '../messages';
+import { SOURCE, aiText } from '../messages';
 
 export async function routeWebviewMessage(
     provider: AIChatPanelProvider,
@@ -43,7 +43,7 @@ export async function routeWebviewMessage(
             break;
         case 'copyCode':
             await vs.env.clipboard.writeText(msg.code);
-            vs.window.showInformationMessage('代码已复制到剪贴板');
+            vs.window.showInformationMessage(aiText('Code copied to clipboard.', '代码已复制到剪贴板'));
             break;
         case 'resumeGeneration':
         case 'regenerate':
@@ -156,7 +156,10 @@ export async function routeWebviewMessage(
             if (planPath) {
                 void vs.commands.executeCommand('markdown.showPreview', vs.Uri.file(planPath));
             } else {
-                vs.window.showWarningMessage(`无法找到计划文件: ${path.basename(msg.filePath)}`);
+                vs.window.showWarningMessage(aiText(
+                    `Could not find plan file: ${path.basename(msg.filePath)}`,
+                    `无法找到计划文件: ${path.basename(msg.filePath)}`,
+                ));
             }
             break;
         }
@@ -175,15 +178,21 @@ export async function routeWebviewMessage(
             provider.postMessage({ type: 'floatingCardResolved', card: 'blueprint' });
             let contextStr = '';
             if (msg.annotations && msg.annotations.length > 0) {
-                contextStr = '\n\n用户批注:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
+                contextStr = `\n\n${aiText('User annotations:', '用户批注:')}\n` + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
             }
 
             if (provider.session.currentMode === 'orchestrator' || provider.session.currentMode === 'script') {
-                const prompt = '同意执行。请根据最新生成的计划，使用 `dispatch_agents` 工具将该计划分解并分配给适当的子 Agent 执行。' + contextStr;
+                const prompt = aiText(
+                    'Approved. Based on the latest generated plan, use the `dispatch_agents` tool to decompose it and assign the subtasks to suitable sub-agents.',
+                    '同意执行。请根据最新生成的计划，使用 `dispatch_agents` 工具将该计划分解并分配给适当的子 Agent 执行。',
+                ) + contextStr;
                 await provider.handleUserMessage(prompt, undefined, undefined, true, true);
             } else {
                 provider.switchMode('build');
-                const prompt = '同意执行。请根据最新生成的计划进行构建。\n\n⚠️ 重要要求：你必须首先使用 `todo_write` 工具将该计划的所有步骤转化为详细的子任务列表（即 task 线路），在开始任何 `write_file` 或其他构建操作之前完成这一步！' + contextStr;
+                const prompt = aiText(
+                    'Approved. Build according to the latest generated plan.\n\nImportant: first use the `todo_write` tool to convert every plan step into a detailed subtask list before starting any `write_file` or other build operation.',
+                    '同意执行。请根据最新生成的计划进行构建。\n\n⚠️ 重要要求：你必须首先使用 `todo_write` 工具将该计划的所有步骤转化为详细的子任务列表（即 task 线路），在开始任何 `write_file` 或其他构建操作之前完成这一步！',
+                ) + contextStr;
                 await provider.handleUserMessage(prompt, undefined, undefined, true, true);
             }
             break;
@@ -193,9 +202,12 @@ export async function routeWebviewMessage(
             provider.postMessage({ type: 'floatingCardResolved', card: 'blueprint' });
             let reviseContext = '';
             if (msg.annotations && msg.annotations.length > 0) {
-                reviseContext = '\n\n需要修改的地方批注如下:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
+                reviseContext = `\n\n${aiText('Annotations for the parts that need revision:', '需要修改的地方批注如下:')}\n` + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
             }
-            const revisePrompt = '请根据我的批注考虑改进现有的执行计划，重新完善计划。' + reviseContext;
+            const revisePrompt = aiText(
+                'Please revise and improve the existing execution plan based on my annotations.',
+                '请根据我的批注考虑改进现有的执行计划，重新完善计划。',
+            ) + reviseContext;
             await provider.handleUserMessage(revisePrompt, undefined, undefined, true, true);
             break;
         }
@@ -203,9 +215,15 @@ export async function routeWebviewMessage(
             provider.postMessage({ type: 'floatingCardResolved', card: 'walkthrough' });
             let reviseWtContext = '';
             if (msg.annotations && msg.annotations.length > 0) {
-                reviseWtContext = '\n\n针对报告中需要修改的地方，我的批注（要求）如下:\n' + msg.annotations.map((a: { section: string; note: string }) => `### 针对片段：\n${a.section}\n**要求**：${a.note}`).join('\n\n');
+                reviseWtContext = `\n\n${aiText('My annotations/requirements for the report sections that need revision:', '针对报告中需要修改的地方，我的批注（要求）如下:')}\n` + msg.annotations.map((a: { section: string; note: string }) => aiText(
+                    `### Section\n${a.section}\n**Requirement**: ${a.note}`,
+                    `### 针对片段：\n${a.section}\n**要求**：${a.note}`,
+                )).join('\n\n');
             }
-            const reviseWtPrompt = '请根据我的批注，重新修改并输出一份新的 walkthrough.md 报告。' + reviseWtContext;
+            const reviseWtPrompt = aiText(
+                'Please revise the walkthrough based on my annotations and output a new walkthrough.md report.',
+                '请根据我的批注，重新修改并输出一份新的 walkthrough.md 报告。',
+            ) + reviseWtContext;
             await provider.handleUserMessage(reviseWtPrompt, undefined, undefined, true, true);
             break;
         }
@@ -253,15 +271,22 @@ export async function routeWebviewMessage(
         case 'requestUsageStats':
             provider.postMessage({ type: 'usageStats', stats: provider.usageTracker.getStats() });
             break;
-        case 'promptClearUsageStats':
-            vs.window.showWarningMessage('确定要清空所有 Token 消耗统计吗？此操作不可逆转。', '确定清空', '取消').then(sel => {
-                if (sel === '确定清空') {
+        case 'promptClearUsageStats': {
+            const confirmClear = aiText('Clear stats', '确定清空');
+            const cancelClear = aiText('Cancel', '取消');
+            vs.window.showWarningMessage(
+                aiText('Clear all token usage statistics? This cannot be undone.', '确定要清空所有 Token 消耗统计吗？此操作不可逆转。'),
+                confirmClear,
+                cancelClear,
+            ).then(sel => {
+                if (sel === confirmClear) {
                     provider.usageTracker.clearStats();
                     provider.postMessage({ type: 'usageStats', stats: provider.usageTracker.getStats() });
-                    vs.window.showInformationMessage('Token 消耗统计已清空');
+                    vs.window.showInformationMessage(aiText('Token usage statistics cleared.', 'Token 消耗统计已清空'));
                 }
             });
             break;
+        }
         case 'clearUsageStats':
             provider.usageTracker.clearStats();
             provider.postMessage({ type: 'usageStats', stats: provider.usageTracker.getStats() });
@@ -298,7 +323,10 @@ export async function routeWebviewMessage(
 
             provider.postMessage({
                 type: 'compactedMemoryResult',
-                content: markdownContent || '✨ 暂无结构化压缩记忆数据。请先执行任何 AI 任务，系统将自动提炼并激活您的 Compacted Memory 看板！'
+                content: markdownContent || aiText(
+                    'No structured compacted memory data yet. Run any AI task first; the system will extract and activate the Compacted Memory dashboard automatically.',
+                    '✨ 暂无结构化压缩记忆数据。请先执行任何 AI 任务，系统将自动提炼并激活您的 Compacted Memory 看板！',
+                ),
             });
             break;
         }

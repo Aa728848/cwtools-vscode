@@ -10,6 +10,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { tokenize, TokenType, type Token } from './pdxTokenizer';
 
+function tr(en: string, zh: string): string {
+    return vs.env.language.toLowerCase().startsWith('zh') ? zh : en;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface PdxBlock {
@@ -363,7 +367,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     const ext = path.extname(uri.fsPath).toLowerCase();
                     const isShader = ext === '.shader' || ext === '.fxh';
                     if (isShader) {
-                        vs.window.showInformationMessage('Shader 文件不支持块级对比，已自动为您打开文件级全量对比');
+                        vs.window.showInformationMessage(tr('Shader files do not support block-level comparison. Opening a full file comparison instead.', 'Shader 文件不支持块级对比，已自动为您打开文件级全量对比'));
                         vs.commands.executeCommand('cwtools.vanillaCompare.fileDiff');
                         return;
                     }
@@ -377,17 +381,18 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                         const vanillaRoot = getGamePath(langId);
                         const vanillaFilePath = (relFilePath && vanillaRoot) ? path.join(vanillaRoot, relFilePath) : null;
                         if (vanillaFilePath && fs.existsSync(vanillaFilePath)) {
+                            const openFullDiff = tr('Open full comparison', '打开全量对比');
                             const action = await vs.window.showInformationMessage(
-                                '当前光标不在任何有效的 Paradox 代码块内，是否要进行文件级全量对比？',
-                                '打开全量对比'
+                                tr('The cursor is not inside a valid Paradox block. Open a full file comparison instead?', '当前光标不在任何有效的 Paradox 代码块内，是否要进行文件级全量对比？'),
+                                openFullDiff
                             );
-                            if (action === '打开全量对比') {
+                            if (action === openFullDiff) {
                                 vs.commands.executeCommand('cwtools.vanillaCompare.fileDiff');
                             }
                             return;
                         }
 
-                        vs.window.showInformationMessage('光标不在任何代码块内');
+                        vs.window.showInformationMessage(tr('The cursor is not inside any code block.', '光标不在任何代码块内'));
                         return;
                     }
                     startLine = modBlock.startLine;
@@ -401,14 +406,14 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 
                 const isShader = ext === '.shader' || ext === '.fxh';
                 if (isShader) {
-                    vs.window.showInformationMessage('Shader 文件不支持块级对比，已自动为您打开文件级全量对比');
+                    vs.window.showInformationMessage(tr('Shader files do not support block-level comparison. Opening a full file comparison instead.', 'Shader 文件不支持块级对比，已自动为您打开文件级全量对比'));
                     vs.commands.executeCommand('cwtools.vanillaCompare.fileDiff');
                     return;
                 }
 
                 const vanillaRoot = getGamePath(langId);
                 if (!vanillaRoot) {
-                    vs.window.showWarningMessage('未配置原版游戏路径，请在设置中配置 cwtools.cache.*');
+                    vs.window.showWarningMessage(tr('The vanilla game path is not configured. Configure cwtools.cache.* in settings.', '未配置原版游戏路径，请在设置中配置 cwtools.cache.*'));
                     return;
                 }
 
@@ -430,14 +435,14 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys, ext);
                 const identity = blockIdentity(modBlock, idKeys);
                 if (!identity) {
-                    vs.window.showInformationMessage(`无法确定当前代码块的唯一标识（缺少 id 或 name）`);
+                    vs.window.showInformationMessage(tr('Could not determine a unique identifier for the current block (missing id or name).', '无法确定当前代码块的唯一标识（缺少 id 或 name）'));
                     return;
                 }
 
                 const match = vanillaIndex.get(identity);
 
                 if (!match) {
-                    vs.window.showInformationMessage(`原版中未找到代码块: ${identity}`);
+                    vs.window.showInformationMessage(tr(`No matching block was found in vanilla: ${identity}`, `原版中未找到代码块: ${identity}`));
                     return;
                 }
 
@@ -480,7 +485,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 const langId = doc.languageId;
                 const vanillaRoot = getGamePath(langId);
                 if (!vanillaRoot) {
-                    vs.window.showWarningMessage('未配置原版游戏路径，请在设置中配置 cwtools.cache.*');
+                    vs.window.showWarningMessage(tr('The vanilla game path is not configured. Configure cwtools.cache.* in settings.', '未配置原版游戏路径，请在设置中配置 cwtools.cache.*'));
                     return;
                 }
 
@@ -542,7 +547,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 }
 
                 if (matchCount === 0) {
-                    vs.window.showInformationMessage('当前文件中未找到与原版匹配的代码块');
+                    vs.window.showInformationMessage(tr('No blocks in the current file matched vanilla.', '当前文件中未找到与原版匹配的代码块'));
                     return;
                 }
 
@@ -603,7 +608,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     const ext = path.extname(uri.fsPath).toLowerCase();
                     const isShader = ext === '.shader' || ext === '.fxh';
                     if (isShader) {
-                        vs.window.showWarningMessage('Shader 文件不支持块级迁移');
+                        vs.window.showWarningMessage(tr('Shader files do not support block-level migration.', 'Shader 文件不支持块级迁移'));
                         return;
                     }
 
@@ -612,7 +617,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     const blocks = findTopLevelBlocks(doc.getText(), idKeys);
                     modBlock = findEnclosingBlock(blocks, editor.selection.active.line);
                     if (!modBlock) {
-                        vs.window.showInformationMessage('光标不在任何代码块内');
+                        vs.window.showInformationMessage(tr('The cursor is not inside any code block.', '光标不在任何代码块内'));
                         return;
                     }
                     startLine = modBlock.startLine;
@@ -626,13 +631,13 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
 
                 const isShader = ext === '.shader' || ext === '.fxh';
                 if (isShader) {
-                    vs.window.showWarningMessage('Shader 文件不支持块级迁移');
+                    vs.window.showWarningMessage(tr('Shader files do not support block-level migration.', 'Shader 文件不支持块级迁移'));
                     return;
                 }
 
                 const vanillaRoot = getGamePath(langId);
                 if (!vanillaRoot) {
-                    vs.window.showWarningMessage('未配置原版游戏路径，请在设置中配置 cwtools.cache.*');
+                    vs.window.showWarningMessage(tr('The vanilla game path is not configured. Configure cwtools.cache.* in settings.', '未配置原版游戏路径，请在设置中配置 cwtools.cache.*'));
                     return;
                 }
 
@@ -653,18 +658,18 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys, ext);
                 const identity = blockIdentity(modBlock, idKeys);
                 if (!identity) {
-                    vs.window.showInformationMessage(`无法确定当前代码块的唯一标识（缺少 id 或 name）`);
+                    vs.window.showInformationMessage(tr('Could not determine a unique identifier for the current block (missing id or name).', '无法确定当前代码块的唯一标识（缺少 id 或 name）'));
                     return;
                 }
 
                 const match = vanillaIndex.get(identity);
                 if (!match) {
-                    vs.window.showInformationMessage(`原版中未找到代码块: ${identity}`);
+                    vs.window.showInformationMessage(tr(`No matching block was found in vanilla: ${identity}`, `原版中未找到代码块: ${identity}`));
                     return;
                 }
 
                 if (modBlock.content === match.block.content) {
-                    vs.window.showInformationMessage(`当前代码块已与原版内容一致`);
+                    vs.window.showInformationMessage(tr('The current block already matches vanilla.', '当前代码块已与原版内容一致'));
                     return;
                 }
 
@@ -675,9 +680,9 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
 
                 const success = await vs.workspace.applyEdit(edit);
                 if (success) {
-                    vs.window.showInformationMessage(`已成功从原版迁移代码块: ${identity}`);
+                    vs.window.showInformationMessage(tr(`Migrated block from vanilla: ${identity}`, `已成功从原版迁移代码块: ${identity}`));
                 } else {
-                    vs.window.showErrorMessage(`迁移代码块失败`);
+                    vs.window.showErrorMessage(tr('Failed to migrate block.', '迁移代码块失败'));
                 }
             }
         )
@@ -693,7 +698,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 const langId = doc.languageId;
                 const vanillaRoot = getGamePath(langId);
                 if (!vanillaRoot) {
-                    vs.window.showWarningMessage('未配置原版游戏路径，请在设置中配置 cwtools.cache.*');
+                    vs.window.showWarningMessage(tr('The vanilla game path is not configured. Configure cwtools.cache.* in settings.', '未配置原版游戏路径，请在设置中配置 cwtools.cache.*'));
                     return;
                 }
 
@@ -727,7 +732,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 }
 
                 if (changedBlocks.length === 0) {
-                    vs.window.showInformationMessage('当前文件中所有匹配块已与原版内容一致');
+                    vs.window.showInformationMessage(tr('All matching blocks in the current file already match vanilla.', '当前文件中所有匹配块已与原版内容一致'));
                     return;
                 }
 
@@ -735,7 +740,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     const linesChanged = item.modBlock.endLine - item.modBlock.startLine + 1;
                     return {
                         label: item.identity,
-                        description: `行: ${item.modBlock.startLine + 1}-${item.modBlock.endLine + 1} (${linesChanged}行)`,
+                        description: tr(`Lines: ${item.modBlock.startLine + 1}-${item.modBlock.endLine + 1} (${linesChanged} lines)`, `行: ${item.modBlock.startLine + 1}-${item.modBlock.endLine + 1} (${linesChanged}行)`),
                         picked: true,
                         item
                     };
@@ -743,7 +748,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
 
                 const selectedItems = await vs.window.showQuickPick(items, {
                     canPickMany: true,
-                    placeHolder: '选择要从原版迁移的代码块（默认全选）',
+                    placeHolder: tr('Select blocks to migrate from vanilla (all selected by default)', '选择要从原版迁移的代码块（默认全选）'),
                     ignoreFocusOut: true
                 });
 
@@ -752,12 +757,16 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 }
 
                 if (selectedItems.length >= 10) {
+                    const continueMigration = tr('Continue migration', '继续迁移');
                     const confirm = await vs.window.showWarningMessage(
-                        `确认要从原版迁移这 ${selectedItems.length} 个代码块吗？这将会覆盖当前文件中的对应内容。`,
+                        tr(
+                            `Migrate ${selectedItems.length} blocks from vanilla? This will overwrite the matching content in the current file.`,
+                            `确认要从原版迁移这 ${selectedItems.length} 个代码块吗？这将会覆盖当前文件中的对应内容。`,
+                        ),
                         { modal: true },
-                        '继续迁移'
+                        continueMigration
                     );
-                    if (confirm !== '继续迁移') {
+                    if (confirm !== continueMigration) {
                         return;
                     }
                 }
@@ -776,9 +785,9 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
 
                 const success = await vs.workspace.applyEdit(edit);
                 if (success) {
-                    vs.window.showInformationMessage(`已成功从原版迁移 ${selectedItems.length} 个代码块`);
+                    vs.window.showInformationMessage(tr(`Migrated ${selectedItems.length} blocks from vanilla.`, `已成功从原版迁移 ${selectedItems.length} 个代码块`));
                 } else {
-                    vs.window.showErrorMessage(`批量迁移代码块失败`);
+                    vs.window.showErrorMessage(tr('Failed to migrate blocks in bulk.', '批量迁移代码块失败'));
                 }
             }
         )

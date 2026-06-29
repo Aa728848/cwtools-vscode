@@ -17,6 +17,7 @@ import {
     resolveWorkspacePathInput,
     sanitizePathInput,
 } from '../workspaceSandbox';
+import { aiText } from '../messages';
 
 const COMMAND_SNAPSHOT_MAX_FILE_BYTES = 500_000;
 const COMMAND_SNAPSHOT_MAX_TOTAL_BYTES = 24_000_000;
@@ -687,7 +688,10 @@ export class ExternalToolHandler {
         const allowed = await this.requestPermissionWithAbort(
             onPermissionRequest, permId,
             'ignore_validation_error',
-            `AI 请求忽略（IGNORE）此 LSP 验证错误：\n\n【错误详情】：${args.errorId}\n【判断理由】：${args.reason}\n\n您是否同意将此规则永久加入本地白名单 (.cwtools-ai-memory.md) 以免除后续报错？`,
+            aiText(
+                `AI requests to ignore this LSP validation error:\n\nError details: ${args.errorId}\nReason: ${args.reason}\n\nDo you want to permanently add this rule to the local whitelist (.cwtools-ai-memory.md) to suppress future reports?`,
+                `AI 请求忽略（IGNORE）此 LSP 验证错误：\n\n【错误详情】：${args.errorId}\n【判断理由】：${args.reason}\n\n您是否同意将此规则永久加入本地白名单 (.cwtools-ai-memory.md) 以免除后续报错？`,
+            ),
             context
         );
 
@@ -733,7 +737,10 @@ export class ExternalToolHandler {
         const allowed = await this.requestPermissionWithAbort(
             onPermissionRequest, permId,
             'remove_ignored_diagnostic',
-            `AI 建议从白名单中移除被忽略的报错关键字：\n\n【关键字】：${args.diagnosticKey}\n【判断理由】：${args.reason}\n\n您是否同意将此规则从您的 .vscode 设置中移除，恢复对此关键字的报错提示？`,
+            aiText(
+                `AI suggests removing this ignored diagnostic keyword from the whitelist:\n\nKeyword: ${args.diagnosticKey}\nReason: ${args.reason}\n\nDo you want to remove this rule from your .vscode settings and restore diagnostics for this keyword?`,
+                `AI 建议从白名单中移除被忽略的报错关键字：\n\n【关键字】：${args.diagnosticKey}\n【判断理由】：${args.reason}\n\n您是否同意将此规则从您的 .vscode 设置中移除，恢复对此关键字的报错提示？`,
+            ),
             context
         );
 
@@ -965,7 +972,7 @@ export class ExternalToolHandler {
             
             if (triggeredBlock) {
                 if (args.requestEscalation) {
-                    escalationReason = `触发沙盒规则: ${triggeredBlock.source}`;
+                    escalationReason = aiText(`Sandbox rule matched: ${triggeredBlock.source}`, `触发沙盒规则: ${triggeredBlock.source}`);
                 } else {
                     return { stdout: '', stderr: `Blocked: Command execution prohibited due to matching safety pattern (${triggeredBlock.source}). If you are ABSOLUTELY sure this is required, you can retry with "requestEscalation": true to ask the user for a one-time privilege override.`, exitCode: 1 };
                 }
@@ -983,10 +990,10 @@ export class ExternalToolHandler {
             if (!cwdResolution.isTrusted && !bypassSandbox) {
                 if (cwdResolution.isWithinAnyWorkspace) {
                     if (!isAutoApproveSafeCommand) {
-                        escalationReason = escalationReason || '跨工作区工作目录访问';
+                        escalationReason = escalationReason || aiText('cross-workspace working directory access', '跨工作区工作目录访问');
                     }
                 } else if (args.requestEscalation) {
-                    escalationReason = escalationReason || '工作目录越界访问';
+                    escalationReason = escalationReason || aiText('working directory outside workspace', '工作目录越界访问');
                 } else {
                     return { stdout: '', stderr: 'Blocked: Working directory must be within the workspace root or another workspace folder. If this is required, retry with "requestEscalation": true to ask the user for a one-time privilege override.', exitCode: 1 };
                 }
@@ -998,7 +1005,7 @@ export class ExternalToolHandler {
         args.command = this.relativizeCommandPathsForCwd(args.command, cwd);
 
         if (crossWorkspacePathAccess && !isAutoApproveSafeCommand && !bypassSandbox) {
-            escalationReason = escalationReason || '跨工作区路径访问';
+            escalationReason = escalationReason || aiText('cross-workspace path access', '跨工作区路径访问');
         }
 
         // Preflight shell command segment risk analysis
@@ -1047,13 +1054,13 @@ export class ExternalToolHandler {
             };
             const description = currentEscalationReason 
                 ? `[ESCALATION] AI requests a sandbox override (${currentEscalationReason}): ${args.command}`
-                : `AI 请求执行终端命令：${args.command}`;
+                : aiText(`AI requests to run terminal command: ${args.command}`, `AI 请求执行终端命令：${args.command}`);
             
             const allowed = await this.requestPermissionWithAbort(
                 onPermissionRequest, permId, 'run_command', description, { ...context, preflight: preflightPayload } as any, args.command
             );
             if (!allowed) {
-                return { stdout: '', stderr: '用户拒绝了此命令的执行权限', exitCode: 1 };
+                return { stdout: '', stderr: aiText('User denied permission to run this command', '用户拒绝了此命令的执行权限'), exitCode: 1 };
             }
         } else if (requiresPermission) {
             return { stdout: '', stderr: 'run_command: no permission handler configured', exitCode: 1 };
@@ -1157,7 +1164,7 @@ export class ExternalToolHandler {
                 const abortedByTimeout = reason instanceof Error && reason.name === 'TimeoutError';
                 proc.kill();
                 finish({
-                    stdout: stdoutBuf.substring(0, MAX_OUTPUT) + (abortedByTimeout ? '\n[... 超时已终止]' : '\n[... 被用户中止]'),
+                    stdout: stdoutBuf.substring(0, MAX_OUTPUT) + (abortedByTimeout ? aiText('\n[... stopped after timeout]', '\n[... 超时已终止]') : aiText('\n[... stopped by user]', '\n[... 被用户中止]')),
                     stderr: stderrBuf.substring(0, 2000),
                     exitCode: -1,
                     timedOut: abortedByTimeout,
@@ -1186,7 +1193,7 @@ export class ExternalToolHandler {
                 const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
                 onStep?.({
                     type: 'orchestrator_progress',
-                    content: `run_command 正在执行中 (${elapsed}s): ${args.command.slice(0, 120)}`,
+                    content: aiText(`run_command still running (${elapsed}s): ${args.command.slice(0, 120)}`, `run_command 正在执行中 (${elapsed}s): ${args.command.slice(0, 120)}`),
                     timestamp: Date.now(),
                 });
             }, 15_000);
@@ -1194,7 +1201,7 @@ export class ExternalToolHandler {
             timer = setTimeout(() => {
                 proc.kill();
                 finish({
-                    stdout: stdoutBuf.substring(0, MAX_OUTPUT) + '\n[... 超时已终止]',
+                    stdout: stdoutBuf.substring(0, MAX_OUTPUT) + aiText('\n[... stopped after timeout]', '\n[... 超时已终止]'),
                     stderr: stderrBuf.substring(0, 2000),
                     exitCode: -1,
                     timedOut: true,
@@ -1763,11 +1770,14 @@ export class ExternalToolHandler {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
             const allowed = await this.requestPermissionWithAbort(
                 onPermissionRequest, permId, 'deploy_mod_asset',
-                `AI 请求将媒体资产部署到 Mod 工作区：\n\n【源文件】：${sourcePath}\n【目标位置】：${args.targetRelativePath}\n【覆盖现有】：${args.overwrite ? '是' : '否'}`,
+                aiText(
+                    `AI requests to deploy a media asset into the mod workspace:\n\nSource file: ${sourcePath}\nTarget path: ${args.targetRelativePath}\nOverwrite existing: ${args.overwrite ? 'yes' : 'no'}`,
+                    `AI 请求将媒体资产部署到 Mod 工作区：\n\n【源文件】：${sourcePath}\n【目标位置】：${args.targetRelativePath}\n【覆盖现有】：${args.overwrite ? '是' : '否'}`,
+                ),
                 context
             );
             if (!allowed) {
-                return { success: false, message: '用户拒绝了此资产部署请求。' };
+                return { success: false, message: aiText('User denied this asset deployment request.', '用户拒绝了此资产部署请求。') };
             }
         }
 

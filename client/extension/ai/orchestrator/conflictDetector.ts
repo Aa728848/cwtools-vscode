@@ -7,6 +7,7 @@
 
 import { Blackboard } from './blackboard';
 import { runLedger, RunLedger } from '../runner/runLedger';
+import { aiText } from '../messages';
 
 /** Conflict detection results */
 export interface ConflictResult {
@@ -53,6 +54,10 @@ export class ConflictDetector {
         const existing = blackboard.read(intentKey);
 
         if (existing && existing.authorAgentId !== agentId) {
+            const details = aiText(
+                `File ${filePath} already has a write intent declared by Agent ${existing.authorAgentId}.`,
+                `文件 ${filePath} 已被 Agent ${existing.authorAgentId} 声明写入意图`,
+            );
             const latestRunId = RunLedger.getLatestActiveRunId();
             if (latestRunId) {
                 runLedger.appendEvent(latestRunId, 'conflict_detected', {
@@ -60,14 +65,14 @@ export class ConflictDetector {
                     agentId,
                     conflictAgentId: existing.authorAgentId,
                     target: filePath,
-                    details: `文件 ${filePath} 已被 Agent ${existing.authorAgentId} 声明写入意图`
+                    details,
                 }).catch(() => {});
             }
             return {
                 hasConflict: true,
                 conflictType: 'file_write',
                 conflictAgentId: existing.authorAgentId,
-                details: `文件 ${filePath} 已被 Agent ${existing.authorAgentId} 声明写入意图`,
+                details,
             };
         }
 
@@ -90,6 +95,10 @@ export class ConflictDetector {
         const existing = blackboard.read(entityKey);
 
         if (existing && existing.authorAgentId !== agentId) {
+            const details = aiText(
+                `Entity ${entityId} has already been registered by Agent ${existing.authorAgentId}.`,
+                `实体 ${entityId} 已被 Agent ${existing.authorAgentId} 注册`,
+            );
             const latestRunId = RunLedger.getLatestActiveRunId();
             if (latestRunId) {
                 runLedger.appendEvent(latestRunId, 'conflict_detected', {
@@ -97,14 +106,14 @@ export class ConflictDetector {
                     agentId,
                     conflictAgentId: existing.authorAgentId,
                     target: entityId,
-                    details: `实体 ${entityId} 已被 Agent ${existing.authorAgentId} 注册`
+                    details,
                 }).catch(() => {});
             }
             return {
                 hasConflict: true,
                 conflictType: 'entity_id',
                 conflictAgentId: existing.authorAgentId,
-                details: `实体 ${entityId} 已被 Agent ${existing.authorAgentId} 注册`,
+                details,
             };
         }
 

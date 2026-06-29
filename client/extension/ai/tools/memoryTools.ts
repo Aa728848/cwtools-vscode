@@ -8,6 +8,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getTopicStorageDir } from '../workspacePaths';
+import { aiText } from '../messages';
 
 // ─── Context type ────────────────────────────────────────────────────────────
 
@@ -121,7 +122,7 @@ export class MemoryToolHandler {
             const resolved = await Promise.all(entries.slice(0, 50).map(resolveFileRef));
             return { found: resolved.length > 0, count: entries.length, entries: resolved };
         } else {
-            return { success: false, message: '请提供 key、prefix 或 type 参数' };
+            return { success: false, message: aiText('Please provide a key, prefix, or type argument.', '请提供 key、prefix 或 type 参数') };
         }
     }
 }

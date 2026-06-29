@@ -13,6 +13,7 @@ import * as cp from 'child_process';
 import { promisify } from 'util';
 import type { PanelSettings, HostMessage, CustomApiFormat } from './types';
 import type { AIService } from './aiService';
+import { aiText } from './messages';
 
 const execAsync = promisify(cp.exec);
 
@@ -407,7 +408,10 @@ export class ChatSettingsManager {
         }
 
         lastAISettingsWriteTime = Date.now();
-        vs.window.showInformationMessage('Eddy CWTool Code 设置已保存，部分 MCP 连接更改可能需要重载窗口生效');
+        vs.window.showInformationMessage(aiText(
+            'Eddy CWTool Code settings saved. Some MCP connection changes may require reloading the window.',
+            'Eddy CWTool Code 设置已保存，部分 MCP 连接更改可能需要重载窗口生效',
+        ));
         await this.openSettingsPage(targetSurface);
     }
 
@@ -415,12 +419,13 @@ export class ChatSettingsManager {
         if (!providerId) return;
         const { getProvider } = await import('./providers');
         const provider = getProvider(providerId);
+        const removeKeyLabel = aiText('Remove Key', '移除 Key');
         const confirmed = await vs.window.showWarningMessage(
-            `确定移除 ${provider.name} 已保存的 API Key？`,
+            aiText(`Remove the saved API key for ${provider.name}?`, `确定移除 ${provider.name} 已保存的 API Key？`),
             { modal: true },
-            '移除 Key'
+            removeKeyLabel
         );
-        if (confirmed !== '移除 Key') {
+        if (confirmed !== removeKeyLabel) {
             await this.openSettingsPage(targetSurface);
             return;
         }
@@ -428,7 +433,7 @@ export class ChatSettingsManager {
         await this.aiService.getKeyManager().deleteKey(providerId);
         await this.clearLegacyApiKeySettings();
 
-        vs.window.showInformationMessage(`${provider.name} API Key 已移除。`);
+        vs.window.showInformationMessage(aiText(`${provider.name} API key removed.`, `${provider.name} API Key 已移除。`));
         await this.openSettingsPage(targetSurface);
     }
 
@@ -461,7 +466,11 @@ export class ChatSettingsManager {
         if (models.length > 0) {
             this.postMessage({ type: 'ollamaModels', models });
         } else {
-            this.postMessage({ type: 'ollamaModels', models: [], error: '未检测到 Ollama 模型，请确认 Ollama 正在运行' });
+            this.postMessage({
+                type: 'ollamaModels',
+                models: [],
+                error: aiText('No Ollama models detected. Make sure Ollama is running.', '未检测到 Ollama 模型，请确认 Ollama 正在运行'),
+            });
         }
     }
 
@@ -476,7 +485,7 @@ export class ChatSettingsManager {
         if (!apiKey) apiKey = await this.aiService.getKeyForProvider(providerId) || '';
 
         if (!endpoint) {
-            this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: '请先填写 Endpoint' });
+            this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: aiText('Please enter an endpoint first', '请先填写 Endpoint') });
             return;
         }
 
@@ -557,7 +566,7 @@ export class ChatSettingsManager {
         if (dynamicModelsConfig[providerId]) {
             dynamicModelsConfig[providerId] = dynamicModelsConfig[providerId].filter(m => m !== modelId);
             await vscodeConfig.update('dynamicModels', dynamicModelsConfig, vs.ConfigurationTarget.Global);
-            vs.window.showInformationMessage(`✓ 已删除动态拉取的模型: ${modelId}`);
+            vs.window.showInformationMessage(aiText(`Deleted fetched model: ${modelId}`, `已删除动态拉取的模型: ${modelId}`));
             await this.openSettingsPage();
         }
     }
@@ -576,15 +585,15 @@ export class ChatSettingsManager {
         const model = settings?.model || undefined;
 
         if (!providerId) {
-            this.postMessage({ type: 'testConnectionResult', ok: false, message: '请先选择 Provider' });
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: aiText('Select a provider first', '请先选择 Provider') });
             return;
         }
         if (!endpoint) {
-            this.postMessage({ type: 'testConnectionResult', ok: false, message: '请填写 Endpoint' });
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: aiText('Enter an endpoint', '请填写 Endpoint') });
             return;
         }
         if (provider.requiresApiKey && !apiKey) {
-            this.postMessage({ type: 'testConnectionResult', ok: false, message: '请填写 API Key' });
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: aiText('Enter an API key', '请填写 API Key') });
             return;
         }
 
@@ -593,22 +602,22 @@ export class ChatSettingsManager {
                 [{ role: 'user', content: 'Hi' }],
                 { maxTokens: 5, providerId, model, apiKey, endpoint, customApiFormat }
             );
-            this.postMessage({ type: 'testConnectionResult', ok: true, message: '连接成功 ✓' });
+            this.postMessage({ type: 'testConnectionResult', ok: true, message: aiText('Connection successful', '连接成功 ✓') });
         } catch (e: unknown) {
             const raw = e instanceof Error ? e.message : String(e);
             let friendly = raw;
             if (raw.includes('fetch failed') || raw.includes('ECONNREFUSED') || raw.includes('ETIMEDOUT')) {
-                friendly = '网络连接失败 — 请检查网络或 Endpoint 地址是否正确';
+                friendly = aiText('Network connection failed - check the network or endpoint URL', '网络连接失败 — 请检查网络或 Endpoint 地址是否正确');
             } else if (raw.includes('401') || raw.includes('Unauthorized') || raw.includes('invalid_api_key')) {
-                friendly = 'API Key 无效或已过期';
+                friendly = aiText('API key is invalid or expired', 'API Key 无效或已过期');
             } else if (raw.includes('403') || raw.includes('Forbidden')) {
-                friendly = 'API Key 权限不足';
+                friendly = aiText('API key does not have sufficient permissions', 'API Key 权限不足');
             } else if (raw.includes('429')) {
-                friendly = '请求过于频繁 (429) — Key 有效 ✓';
+                friendly = aiText('Too many requests (429) - the key is valid', '请求过于频繁 (429) — Key 有效 ✓');
             } else if (raw.includes('404')) {
-                friendly = 'Endpoint 地址不存在 (404) — 请检查 URL';
+                friendly = aiText('Endpoint not found (404) - check the URL', 'Endpoint 地址不存在 (404) — 请检查 URL');
             }
-            this.postMessage({ type: 'testConnectionResult', ok: false, message: '连接失败: ' + friendly });
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: aiText('Connection failed: ', '连接失败: ') + friendly });
         }
     }
 
@@ -633,7 +642,7 @@ export class ChatSettingsManager {
 
     async installSkill(source: string): Promise<void> {
         if (!this.globalStoragePath) {
-            vs.window.showErrorMessage('无法获取插件存储路径，安装失败');
+            vs.window.showErrorMessage(aiText('Could not access extension storage path; installation failed', '无法获取插件存储路径，安装失败'));
             this.postMessage({ type: 'skillInstallComplete', success: false });
             return;
         }
@@ -650,20 +659,20 @@ export class ChatSettingsManager {
                     const skillName = path.basename(source);
                     const destDir = path.join(agentsSkillsDir, skillName);
                     await fs.promises.cp(source, destDir, { recursive: true, force: true });
-                    vs.window.showInformationMessage(`本地 Agent 技能 [${skillName}] 已成功安装`);
+                    vs.window.showInformationMessage(aiText(`Local agent skill [${skillName}] installed`, `本地 Agent 技能 [${skillName}] 已成功安装`));
                 } else {
-                    throw new Error('本地路径必须是一个包含 SKILL.md 的文件夹');
+                    throw new Error(aiText('Local path must be a folder containing SKILL.md', '本地路径必须是一个包含 SKILL.md 的文件夹'));
                 }
             } else {
                 // Run npx skills add. npx will create .agents/skills in the cwd (without -g)
                 await execAsync(`npx skills add ${source} -y`, { cwd: this.globalStoragePath });
-                vs.window.showInformationMessage(`Agent 技能 ${source} 已成功安装`);
+                vs.window.showInformationMessage(aiText(`Agent skill ${source} installed`, `Agent 技能 ${source} 已成功安装`));
             }
             this.postMessage({ type: 'skillInstallComplete', success: true });
             await this.getSkillsList();
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            vs.window.showErrorMessage(`安装失败: ${msg}`);
+            vs.window.showErrorMessage(aiText(`Installation failed: ${msg}`, `安装失败: ${msg}`));
             this.postMessage({ type: 'skillInstallComplete', success: false });
         }
     }
@@ -674,11 +683,11 @@ export class ChatSettingsManager {
             const skillPath = path.join(this.globalStoragePath, '.agents', 'skills', skill);
             if (fs.existsSync(skillPath)) {
                 await fs.promises.rm(skillPath, { recursive: true, force: true });
-                vs.window.showInformationMessage(`Agent 技能 ${skill} 已删除`);
+                vs.window.showInformationMessage(aiText(`Agent skill ${skill} deleted`, `Agent 技能 ${skill} 已删除`));
                 await this.getSkillsList();
             }
         } catch (e) {
-            vs.window.showErrorMessage(`删除失败: ${e}`);
+            vs.window.showErrorMessage(aiText(`Delete failed: ${e}`, `删除失败: ${e}`));
         }
     }
 }

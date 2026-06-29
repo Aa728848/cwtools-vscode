@@ -35,6 +35,10 @@ function getNonce(): string {
     return result;
 }
 
+function panelText(en: string, zh: string): string {
+    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
+}
+
 // ─── Panel ───────────────────────────────────────────────────────────────────
 
 export class EventChainPanel {
@@ -73,8 +77,8 @@ export class EventChainPanel {
         const webviewRootPath = path.join(extensionPath, 'bin/client/webview');
 
         const title = seedDoc
-            ? `事件链: ${path.basename(seedDoc.fileName)}`
-            : '事件链可视化';
+            ? panelText(`Event Chain: ${path.basename(seedDoc.fileName)}`, `事件链: ${path.basename(seedDoc.fileName)}`)
+            : panelText('Event Chain Visualizer', '事件链可视化');
 
         this._panel = vscode.window.createWebviewPanel(
             EventChainPanel.viewType,
@@ -123,7 +127,7 @@ export class EventChainPanel {
     private async _scanAndRender() {
         this._panel.webview.postMessage({
             command: 'loading',
-            text: '扫描事件文件...',
+            text: panelText('Scanning event files...', '扫描事件文件...'),
         });
 
         try {
@@ -162,13 +166,13 @@ export class EventChainPanel {
         if (seedIds.size === 0) {
             this._panel.webview.postMessage({
                 command: 'loading',
-                text: '当前文件不包含事件定义',
+                text: panelText('The current file does not contain event definitions.', '当前文件不包含事件定义'),
             });
             return { nodes: [], edges: [] };
         }
 
         // ── Phase 1: Parse ALL event files to build the full event graph ──────
-        this._panel.webview.postMessage({ command: 'loading', text: '扫描 events/ 文件...' });
+        this._panel.webview.postMessage({ command: 'loading', text: panelText('Scanning events/ files...', '扫描 events/ 文件...') });
 
         const eventPattern = new vscode.RelativePattern(wsRoot, '**/events/**/*.txt');
         const eventFiles = await vscode.workspace.findFiles(eventPattern, '**/node_modules/**', 500);
@@ -188,7 +192,7 @@ eventGraphs.push(graph);
 }
 }
 
-this._panel.webview.postMessage({ command: 'loading', text: '扫描 common/ 触发器...' });
+this._panel.webview.postMessage({ command: 'loading', text: panelText('Scanning common/ triggers...', '扫描 common/ 触发器...') });
 
 const commonPatterns = [
 '**/common/on_actions/**/*.txt',
@@ -259,7 +263,7 @@ eventGraphs.push(graph);
 }
 
 // ── Phase 1.5: Parse the flag preconditions in the technology definition file ─────────────────
-this._panel.webview.postMessage({ command: 'loading', text: '解析科技 flag 前置条件...' });
+this._panel.webview.postMessage({ command: 'loading', text: panelText('Resolving technology flag prerequisites...', '解析科技 flag 前置条件...') });
 const techFlagMap: TechFlagMap = new Map();
 const techPattern = new vscode.RelativePattern(wsRoot, '**/common/technology/**/*.txt');
         const techFiles = await vscode.workspace.findFiles(techPattern, '**/node_modules/**', 200);
@@ -279,12 +283,12 @@ techFlagMap.set(tech, flags);
 }
 
 // ── Phase 2: BFS-expand from seed events (shallow: depth 2) ───────────
-this._panel.webview.postMessage({ command: 'loading', text: '构建事件关系图...' });
+this._panel.webview.postMessage({ command: 'loading', text: panelText('Building event relationship graph...', '构建事件关系图...') });
 
 const eventsOnlyGraph = mergeGraphs(eventGraphs);
 
 // Build implicit connection edges (flag/technology/on_action + transitivity flag→tech→event)
-this._panel.webview.postMessage({ command: 'loading', text: '构建隐式连接关系...' });
+this._panel.webview.postMessage({ command: 'loading', text: panelText('Building implicit connections...', '构建隐式连接关系...') });
 const implicitEdges = buildImplicitEdges(eventsOnlyGraph, techFlagMap);
 eventsOnlyGraph.edges.push(...implicitEdges);
 
@@ -294,7 +298,7 @@ const subgraph = extractConnectedSubgraph(eventsOnlyGraph, seedIds, 2);
 // (Phase 3 removed: common/ scanning is now done in Phase 1 before BFS)
 
 // ── Phase 4: Resolve localization titles for non-hidden events ─────────
-this._panel.webview.postMessage({ command: 'loading', text: '解析本地化文本...' });
+this._panel.webview.postMessage({ command: 'loading', text: panelText('Resolving localisation text...', '解析本地化文本...') });
 await this._resolveLocTitles(subgraph);
 
 return subgraph;
@@ -377,7 +381,7 @@ workspaceFolders[0]!,
             editor.selection = new vscode.Selection(range.start, range.start);
             editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
         } catch {
-            vscode.window.showWarningMessage(`无法打开文件: ${file}`);
+            vscode.window.showWarningMessage(panelText(`Could not open file: ${file}`, `无法打开文件: ${file}`));
         }
     }
 
@@ -392,15 +396,17 @@ workspaceFolders[0]!,
         );
         const nonce = getNonce();
         const csp = this._panel.webview.cspSource;
+        const lang = vscode.env.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
+        const title = panelText('Event Chain Visualizer', '事件链可视化');
 
         return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${lang}">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${csp} 'unsafe-inline';" />
     <link href="${styleUri}" rel="stylesheet" />
-    <title>事件链可视化</title>
+    <title>${title}</title>
 </head>
 <body>
     <div id="toolbar">
@@ -408,46 +414,46 @@ workspaceFolders[0]!,
             <svg width="14" height="14" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
                 <path fill="#e8c840" d="M8 1L9.2 6.8 15 8l-5.8 1.2L8 15l-1.2-5.8L1 8l5.8-1.2z"/>
             </svg>
-            事件链可视化
+            ${title}
         </span>
         <div class="controls">
-            <select id="ns-filter" title="命名空间筛选" aria-label="按命名空间过滤">
-                <option value="__all__">全部命名空间</option>
+            <select id="ns-filter" title="${panelText('Namespace filter', '命名空间筛选')}" aria-label="${panelText('Filter by namespace', '按命名空间过滤')}">
+                <option value="__all__">${panelText('All namespaces', '全部命名空间')}</option>
             </select>
             <span class="separator">|</span>
-            <input type="text" id="search-input" placeholder="搜索事件 ID..." aria-label="搜索事件" />
+            <input type="text" id="search-input" placeholder="${panelText('Search event ID...', '搜索事件 ID...')}" aria-label="${panelText('Search events', '搜索事件')}" />
             <span class="separator">|</span>
-            <button id="btn-zoom-in" title="放大" aria-label="放大">+</button>
-            <button id="btn-zoom-out" title="缩小" aria-label="缩小">−</button>
-            <button id="btn-fit" title="适应窗口" aria-label="适应窗口">⊡</button>
+            <button id="btn-zoom-in" title="${panelText('Zoom in', '放大')}" aria-label="${panelText('Zoom in', '放大')}">+</button>
+            <button id="btn-zoom-out" title="${panelText('Zoom out', '缩小')}" aria-label="${panelText('Zoom out', '缩小')}">−</button>
+            <button id="btn-fit" title="${panelText('Fit to window', '适应窗口')}" aria-label="${panelText('Fit to window', '适应窗口')}">⊡</button>
         </div>
     </div>
 
     <div id="cy-container">
-        <div id="loading">扫描事件文件...</div>
+        <div id="loading">${panelText('Scanning event files...', '扫描事件文件...')}</div>
         <div id="empty-state">
             <div style="font-size:24px; opacity:0.3;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg></div>
-            <div>未发现事件定义</div>
-            <div style="font-size:10px;">请确保工作区包含 events/ 目录</div>
+            <div>${panelText('No event definitions found', '未发现事件定义')}</div>
+            <div style="font-size:10px;">${panelText('Make sure the workspace contains an events/ directory.', '请确保工作区包含 events/ 目录')}</div>
         </div>
         <div id="legend">
-            <div class="legend-title">图例</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#4caf50;"></span> 入口事件</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#42a5f5;"></span> 触发型事件</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#5d4037;border:1px dashed #8d6e63;"></span> MTTH 事件</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#e8c840;"></span> Option 边</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#4caf50;"></span> Immediate 边</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#ff9800;"></span> After 边</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#ab47bc;"></span> Effect 边</div>
+            <div class="legend-title">${panelText('Legend', '图例')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#4caf50;"></span> ${panelText('Entry event', '入口事件')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#42a5f5;"></span> ${panelText('Triggered event', '触发型事件')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#5d4037;border:1px dashed #8d6e63;"></span> ${panelText('MTTH event', 'MTTH 事件')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#e8c840;"></span> ${panelText('Option edge', 'Option 边')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#4caf50;"></span> ${panelText('Immediate edge', 'Immediate 边')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#ff9800;"></span> ${panelText('After edge', 'After 边')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#ab47bc;"></span> ${panelText('Effect edge', 'Effect 边')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#e91e63;"></span> On_action</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#00bcd4;"></span> Decision</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#ff7043;border:1px dotted #ff7043;"></span> Flag 隐式连接</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#ec407a;border:1px dotted #ec407a;"></span> on_action 隐式</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#ff7043;border:1px dotted #ff7043;"></span> ${panelText('Flag implicit connection', 'Flag 隐式连接')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#ec407a;border:1px dotted #ec407a;"></span> ${panelText('on_action implicit', 'on_action 隐式')}</div>
         </div>
         <aside id="details-panel" class="empty" aria-live="polite">
             <div class="details-empty">
-                <div class="details-empty-title">选择事件节点</div>
-                <div class="details-empty-copy">查看事件标题、来源位置，以及它在链路中的前后关系。</div>
+                <div class="details-empty-title">${panelText('Select an event node', '选择事件节点')}</div>
+                <div class="details-empty-copy">${panelText('View its title, source location, and incoming/outgoing chain relationships.', '查看事件标题、来源位置，以及它在链路中的前后关系。')}</div>
             </div>
         </aside>
     </div>

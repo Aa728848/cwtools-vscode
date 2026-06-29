@@ -31,7 +31,7 @@ import {
     getOpenCodeApiFormat,
 } from './providers';
 import { ErrorReporter } from './errorReporter';
-import { SOURCE } from './messages';
+import { SOURCE, aiText } from './messages';
 
 // ─── Module-level constants ──────────────────────────────────────────────────
 
@@ -266,7 +266,10 @@ export class AIService {
                 // Clear plaintext from settings.json
                 await cfg.update('apiKey', '', vs.ConfigurationTarget.Global);
                 vs.window.showInformationMessage(
-                    `CWTools AI: API Key 已安全迁移到 SecretStorage (${providerId})`
+                    aiText(
+                        `CWTools AI: API key was migrated securely to SecretStorage (${providerId})`,
+                        `CWTools AI: API Key 已安全迁移到 SecretStorage (${providerId})`,
+                    )
                 );
                 return legacyKey.trim();
             }
@@ -1687,7 +1690,7 @@ export class AIService {
             const ollamaEndpoint = userEndpoint || provider.endpoint;
 
             await vs.window.withProgress(
-                { location: vs.ProgressLocation.Notification, title: '正在检测 Ollama 模型...' },
+                { location: vs.ProgressLocation.Notification, title: aiText('Detecting Ollama models...', '正在检测 Ollama 模型...') },
                 async () => {
                     const detectedModels = await fetchOllamaModels(ollamaEndpoint);
 
@@ -1695,17 +1698,17 @@ export class AIService {
                         const modelItems = detectedModels.map(m => ({
                             label: m.name,
                             description: m.parameterSize ? `${m.parameterSize}` : '',
-                            detail: `大小: ${m.size}`,
+                            detail: aiText(`Size: ${m.size}`, `大小: ${m.size}`),
                         }));
                         modelItems.push({
-                            label: '$(edit) 手动输入模型名...',
+                            label: aiText('$(edit) Enter model name manually...', '$(edit) 手动输入模型名...'),
                             description: '',
                             detail: '',
                         });
 
                         const selectedModel = await vs.window.showQuickPick(modelItems, {
-                            title: `Ollama 本地模型 (检测到 ${detectedModels.length} 个)`,
-                            placeHolder: '选择一个已安装的模型...',
+                            title: aiText(`Ollama local models (${detectedModels.length} detected)`, `Ollama 本地模型 (检测到 ${detectedModels.length} 个)`),
+                            placeHolder: aiText('Choose an installed model...', '选择一个已安装的模型...'),
                         });
                         if (selectedModel) {
                             if (selectedModel.label.startsWith('$(edit)')) {
@@ -1723,7 +1726,10 @@ export class AIService {
                             }
                         }
                     } else {
-                        vs.window.showWarningMessage('未检测到 Ollama 模型。请确保 Ollama 正在运行并已拉取模型 (ollama pull model-name)。');
+                        vs.window.showWarningMessage(aiText(
+                            'No Ollama models detected. Make sure Ollama is running and you have pulled a model (ollama pull model-name).',
+                            '未检测到 Ollama 模型。请确保 Ollama 正在运行并已拉取模型 (ollama pull model-name)。',
+                        ));
                         const modelName = await vs.window.showInputBox({
                             title: 'Ollama Model Name',
                             prompt: 'Enter the model name manually',
@@ -1739,7 +1745,7 @@ export class AIService {
         } else if (providerId === 'custom') {
             const modelName = await vs.window.showInputBox({
                 title: 'Custom Model Name',
-                prompt: '输入自定义 OpenAI 兼容渠道使用的模型名',
+                prompt: aiText('Enter the model name for the custom OpenAI-compatible provider', '输入自定义 OpenAI 兼容渠道使用的模型名'),
                 placeHolder: 'model-name',
                 ignoreFocusOut: true,
             });
@@ -1753,7 +1759,7 @@ export class AIService {
             }));
 
             modelItems.push({
-                label: '$(edit) 手动输入模型名...',
+                label: aiText('$(edit) Enter model name manually...', '$(edit) 手动输入模型名...'),
                 description: '',
             });
 
@@ -1783,8 +1789,8 @@ export class AIService {
             const epInput = await vs.window.showInputBox({
                 title: providerId === 'ollama' ? 'Ollama Endpoint' : 'Custom OpenAI-Compatible Endpoint',
                 prompt: providerId === 'ollama'
-                    ? '输入 Ollama 的 API 地址 (留空使用默认 http://localhost:11434/v1)'
-                    : '输入自定义渠道的 OpenAI 兼容 API 地址，例如 https://example.com/v1',
+                    ? aiText('Enter the Ollama API endpoint (leave empty for default http://localhost:11434/v1)', '输入 Ollama 的 API 地址 (留空使用默认 http://localhost:11434/v1)')
+                    : aiText('Enter the OpenAI-compatible API endpoint for the custom provider, for example https://example.com/v1', '输入自定义渠道的 OpenAI 兼容 API 地址，例如 https://example.com/v1'),
                 placeHolder: providerId === 'ollama' ? 'http://localhost:11434/v1' : 'https://example.com/v1',
                 value: this.getEndpointForProvider(providerId),
                 ignoreFocusOut: true,
@@ -1798,8 +1804,8 @@ export class AIService {
             }
             
             const ctxInput = await vs.window.showInputBox({
-                title: '上下文大小 (tokens)',
-                prompt: '输入模型的最大上下文窗口大小 (留空使用默认值)',
+                title: aiText('Context size (tokens)', '上下文大小 (tokens)'),
+                prompt: aiText('Enter the model maximum context window size (leave empty to use default)', '输入模型的最大上下文窗口大小 (留空使用默认值)'),
                 placeHolder: String(provider.maxContextTokens || 32768),
                 ignoreFocusOut: true,
             });
@@ -1878,7 +1884,7 @@ export class AIService {
 
         const modelItems = provider.models.map(m => ({
             label: m,
-            description: m === provider.defaultModel ? '(default)' : '预设模型',
+            description: m === provider.defaultModel ? '(default)' : aiText('preset model', '预设模型'),
         }));
 
         const existingSet = new Set(provider.models);
@@ -1886,13 +1892,13 @@ export class AIService {
             if (!existingSet.has(m.id)) {
                 modelItems.push({
                     label: m.id,
-                    description: '已获取 (API)',
+                    description: aiText('fetched (API)', '已获取 (API)'),
                 });
             }
         }
 
         modelItems.push({
-            label: '$(edit) 手动输入模型名...',
+            label: aiText('$(edit) Enter model name manually...', '$(edit) 手动输入模型名...'),
             description: '',
         });
 

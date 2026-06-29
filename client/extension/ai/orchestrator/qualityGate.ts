@@ -8,6 +8,7 @@
 import type { SubAgentResult } from './types';
 import type { QualityGateResult } from './types';
 import { runLedger, RunLedger } from '../runner/runLedger';
+import { aiText } from '../messages';
 
 /** Quality gate configuration */
 export interface QualityGateConfig {
@@ -141,7 +142,7 @@ export class QualityGate {
                 diagnosticErrors: 0,
                 logicIssues: 0,
                 filesChecked: [],
-                reviewReport: '无文件修改',
+                reviewReport: aiText('No file changes', '无文件修改'),
             };
         }
 

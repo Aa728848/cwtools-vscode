@@ -16,7 +16,7 @@ import { GuiPanel } from './guiPanel';
 import { EntityPanel } from './entityPanel';
 import { ParticlePanel } from './particlePanel';
 import { classifyAssetFile } from './particleSniff';
-import { UI, SOURCE } from './ai/messages';
+import { UI, SOURCE, setAiMessageLocale } from './ai/messages';
 import { ErrorReporter } from './ai/errorReporter';
 import { SolarSystemPanel } from './solarSystemPanel';
 import { EventChainPanel } from './eventChainPanel';
@@ -866,6 +866,8 @@ async function maybeShowFirstRunExperience(options: InstallHealthOptions): Promi
 }
 
 export async function activate(context: ExtensionContext) {
+	setAiMessageLocale(vs.env.language);
+
 	if (!await removeConflictingUpstreamExtension()) {
 		return;
 	}
@@ -1271,14 +1273,17 @@ export async function activate(context: ExtensionContext) {
 		}
 		const relPath = vs.workspace.asRelativePath(editor.document.uri);
 		await chatPanelProvider.sendProgrammaticMessage(
-			`请审查当前文件 \`${relPath}\`，检查 scope 错误、逻辑问题和 CWTools 诊断警告。`
+			localize(
+				`Please review the current file \`${relPath}\` for scope errors, logic issues, and CWTools diagnostic warnings.`,
+				`请审查当前文件 \`${relPath}\`，检查 scope 错误、逻辑问题和 CWTools 诊断警告。`
+			)
 		);
 	});
 
 	safeRegisterCommand(context, "cwtools.ai.explainSelection", async () => {
 		const editor = vs.window.activeTextEditor;
 		if (!editor) {
-			vs.window.showWarningMessage('没有打开的编辑器');
+			vs.window.showWarningMessage(UI.NO_ACTIVE_EDITOR);
 			return;
 		}
 		const selection = editor.document.getText(editor.selection);
@@ -1287,19 +1292,25 @@ export async function activate(context: ExtensionContext) {
 			return;
 		}
 		await chatPanelProvider.sendProgrammaticMessage(
-			`请解释以下代码的作用、scope 链和逻辑：\n\`\`\`pdx\n${selection}\n\`\`\``
+			localize(
+				`Please explain what the following code does, including its scope chain and logic:\n\`\`\`pdx\n${selection}\n\`\`\``,
+				`请解释以下代码的作用、scope 链和逻辑：\n\`\`\`pdx\n${selection}\n\`\`\``
+			)
 		);
 	});
 
 	safeRegisterCommand(context, "cwtools.ai.fixDiagnostics", async () => {
 		const editor = vs.window.activeTextEditor;
 		if (!editor) {
-			vs.window.showWarningMessage('没有打开的编辑器');
+			vs.window.showWarningMessage(UI.NO_ACTIVE_EDITOR);
 			return;
 		}
 		const relPath = vs.workspace.asRelativePath(editor.document.uri);
 		await chatPanelProvider.sendProgrammaticMessage(
-			`请获取并修复当前文件 \`${relPath}\` 中的所有 CWTools 诊断错误。`
+			localize(
+				`Please get and fix all CWTools diagnostic errors in the current file \`${relPath}\`.`,
+				`请获取并修复当前文件 \`${relPath}\` 中的所有 CWTools 诊断错误。`
+			)
 		);
 	});
 
@@ -1364,31 +1375,34 @@ export async function activate(context: ExtensionContext) {
 		});
 
 		if (candidatesByCode.size === 0) {
-			vs.window.showInformationMessage('当前上下文中未发现任何红色报错。');
+			vs.window.showInformationMessage(localize('No error diagnostics were found in the current context.', '当前上下文中未发现任何红色报错。'));
 			return;
 		}
 
 		const qp = vs.window.createQuickPick();
 		qp.canSelectMany = true;
-		qp.title = '请选择要忽略的兼容性报错 (点击右侧图标可展开/收起具体报错)';
-		qp.placeholder = '搜索前缀或报错码 (例如: CW262)';
+		qp.title = localize(
+			'Select compatibility diagnostics to ignore (use the right-side icon to expand/collapse details)',
+			'请选择要忽略的兼容性报错 (点击右侧图标可展开/收起具体报错)'
+		);
+		qp.placeholder = localize('Search prefix or diagnostic code (for example: CW262)', '搜索前缀或报错码 (例如: CW262)');
 		
 		const globalItem: vs.QuickPickItem = {
-			label: '忽略所有兼容性报错 (全局)',
-			description: '将所有分类下的报错一键加入白名单',
+			label: localize('Ignore all compatibility diagnostics (global)', '忽略所有兼容性报错 (全局)'),
+			description: localize('Add diagnostics from all categories to the allowlist', '将所有分类下的报错一键加入白名单'),
 			alwaysShow: true
 		};
 
 		const categoryItems = new Map<string, vs.QuickPickItem>();
 		const childItemsByCode = new Map<string, vs.QuickPickItem[]>();
 		
-		const collapseButton: vs.QuickInputButton = { iconPath: new vs.ThemeIcon('chevron-down'), tooltip: '收起此分类' };
-		const expandButton: vs.QuickInputButton = { iconPath: new vs.ThemeIcon('chevron-right'), tooltip: '展开此分类查看详情' };
+		const collapseButton: vs.QuickInputButton = { iconPath: new vs.ThemeIcon('chevron-down'), tooltip: localize('Collapse this category', '收起此分类') };
+		const expandButton: vs.QuickInputButton = { iconPath: new vs.ThemeIcon('chevron-right'), tooltip: localize('Expand this category to show details', '展开此分类查看详情') };
 
 		for (const [code, keys] of candidatesByCode.entries()) {
 			const catItem: vs.QuickPickItem = {
-				label: `忽略所有 ${code} 报错`,
-				description: `共 ${keys.size} 个报错项`
+				label: localize(`Ignore all ${code} diagnostics`, `忽略所有 ${code} 报错`),
+				description: localize(`${keys.size} diagnostic item(s)`, `共 ${keys.size} 个报错项`)
 			};
 			categoryItems.set(code, catItem);
 
@@ -1396,11 +1410,18 @@ export async function activate(context: ExtensionContext) {
 			Array.from(keys).sort().forEach(key => {
 				children.push({
 					label: key,
-					description: `报错码: ${code}`
+					description: localize(`Diagnostic code: ${code}`, `报错码: ${code}`)
 				});
 			});
 			childItemsByCode.set(code, children);
 		}
+
+		const categoryCodeFromLabel = (label: string): string | undefined => {
+			const en = label.match(/^Ignore all (.+) diagnostics$/);
+			if (en && en[1]) return en[1];
+			const zh = label.match(/^忽略所有 (.+) 报错$/);
+			return zh?.[1];
+		};
 
 		// State
 		const expandedCategories = new Set<string>(); // Default to collapsed
@@ -1422,7 +1443,7 @@ export async function activate(context: ExtensionContext) {
 				
 				if (updateItems) {
 					newItems.push({
-						label: `报错码: ${code}`,
+						label: localize(`Diagnostic code: ${code}`, `报错码: ${code}`),
 						kind: vs.QuickPickItemKind.Separator
 					});
 
@@ -1467,9 +1488,8 @@ export async function activate(context: ExtensionContext) {
 		};
 
 		qp.onDidTriggerItemButton(e => {
-			const match = e.item.label.match(/忽略所有 (.+) 报错/);
-			if (match && match[1]) {
-				const code = match[1];
+			const code = categoryCodeFromLabel(e.item.label);
+			if (code) {
 				if (expandedCategories.has(code)) {
 					expandedCategories.delete(code);
 				} else {
@@ -1498,17 +1518,17 @@ export async function activate(context: ExtensionContext) {
 				}
 			} else {
 				for (const item of toggledOn) {
-					const match = item.label.match(/忽略所有 (.+) 报错/);
-					if (match && match[1]) {
-						candidatesByCode.get(match[1])?.forEach(k => internalSelected.add(k));
+					const code = categoryCodeFromLabel(item.label);
+					if (code) {
+						candidatesByCode.get(code)?.forEach(k => internalSelected.add(k));
 					} else if (item.kind !== vs.QuickPickItemKind.Separator) {
 						internalSelected.add(item.label);
 					}
 				}
 				for (const item of toggledOff) {
-					const match = item.label.match(/忽略所有 (.+) 报错/);
-					if (match && match[1]) {
-						candidatesByCode.get(match[1])?.forEach(k => internalSelected.delete(k));
+					const code = categoryCodeFromLabel(item.label);
+					if (code) {
+						candidatesByCode.get(code)?.forEach(k => internalSelected.delete(k));
 					} else if (item.kind !== vs.QuickPickItemKind.Separator) {
 						internalSelected.delete(item.label);
 					}
@@ -1523,7 +1543,10 @@ export async function activate(context: ExtensionContext) {
 			
 			const newIgnored = Array.from(internalSelected);
 			await config.update('ignoredDiagnostics', newIgnored, vs.ConfigurationTarget.Workspace);
-			vs.window.showInformationMessage(`已成功将 ${newIgnored.length} 个兼容性报错加入白名单。`);
+			vs.window.showInformationMessage(localize(
+				`Added ${newIgnored.length} compatibility diagnostic(s) to the allowlist.`,
+				`已成功将 ${newIgnored.length} 个兼容性报错加入白名单。`
+			));
 			
 			qp.dispose();
 		});

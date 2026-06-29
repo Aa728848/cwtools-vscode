@@ -10,6 +10,10 @@ import { matchesExt } from './fileExtensions';
 import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { isPathInsideOrEqual } from './pathScope';
 
+function panelText(en: string, zh: string): string {
+    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
+}
+
 // ── WebView message types ──────────────────────────────────────────────────────
 type EntityPanelMessage =
     | { command: 'goToLine'; line: number }
@@ -98,7 +102,7 @@ export class EntityPanel {
                             canSelectFolders: false,
                             canSelectMany: false,
                             filters: { 'Asset Files': ['asset'] },
-                            title: 'Open Entity Asset File / 打开实体资产文件',
+                            title: panelText('Open Entity Asset File', '打开实体资产文件'),
                         });
                         if (uris && uris[0]) {
                             const doc = await vscode.workspace.openTextDocument(uris[0]);
@@ -173,7 +177,7 @@ export class EntityPanel {
                                 ),
                             ),
                             filters: { 'PNG Image': ['png'] },
-                            title: 'Save Screenshot / 保存截图',
+                            title: panelText('Save Screenshot', '保存截图'),
                         });
                         if (uri && msg.command === 'screenshot') {
                             const buf = Buffer.from(msg.data, 'base64');
@@ -653,7 +657,10 @@ export class EntityPanel {
             }
             const targetDef = this._entityGraph.entities.get(msg.targetEntity);
             if (!targetDef) {
-                vscode.window.showErrorMessage(`[CWTools] 无法找到实体 "${msg.targetEntity}" 的定义文件。`);
+                vscode.window.showErrorMessage(panelText(
+                    `[CWTools] Could not find the definition file for entity "${msg.targetEntity}".`,
+                    `[CWTools] 无法找到实体 "${msg.targetEntity}" 的定义文件。`,
+                ));
                 return;
             }
 
@@ -665,7 +672,10 @@ export class EntityPanel {
             const isInsideWorkspace = workspaceFolders.some(wf => isPathInsideOrEqual(targetFsPath, wf.uri.fsPath));
             
             if (!isInsideWorkspace) {
-                vscode.window.showErrorMessage(`[CWTools] 跨文件写入被拦截：不允许修改位于当前工作区外部的原版或 Mod 资产文件 (${targetDef.filePath})。`);
+                vscode.window.showErrorMessage(panelText(
+                    `[CWTools] Cross-file write blocked: cannot modify vanilla or mod asset files outside the current workspace (${targetDef.filePath}).`,
+                    `[CWTools] 跨文件写入被拦截：不允许修改位于当前工作区外部的原版或 Mod 资产文件 (${targetDef.filePath})。`,
+                ));
                 return;
             }
 
@@ -673,7 +683,10 @@ export class EntityPanel {
                 doc = await vscode.workspace.openTextDocument(vscode.Uri.file(targetDef.filePath));
                 isCrossFile = true;
             } catch (e) {
-                vscode.window.showErrorMessage(`[CWTools] 无法打开实体文件: ${e}`);
+                vscode.window.showErrorMessage(panelText(
+                    `[CWTools] Could not open entity file: ${e}`,
+                    `[CWTools] 无法打开实体文件: ${e}`,
+                ));
                 return;
             }
         }
@@ -709,7 +722,10 @@ export class EntityPanel {
             }
         }
         if (entityBlockEnd < 0) {
-            vscode.window.showErrorMessage(`[CWTools] 未能在文件中定位到实体 "${targetEntityName}" 的区块。`);
+            vscode.window.showErrorMessage(panelText(
+                `[CWTools] Could not locate the block for entity "${targetEntityName}" in the file.`,
+                `[CWTools] 未能在文件中定位到实体 "${targetEntityName}" 的区块。`,
+            ));
             return;
         }
 

@@ -184,6 +184,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             accept: 'Accept',
             reject: 'Reject',
         };
+    const tr = (en: string, zh: string) => chatI18n.locale === 'zh-cn' ? zh : en;
     const vscode = acquireVsCodeApi();
     (window as any).__cwtoolsVscode = vscode;
     const chatArea = document.getElementById('chatArea') as HTMLDivElement;
@@ -371,8 +372,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const railVisible = isManagerTopicsRailMode() && !collapsed;
         button.classList.toggle('active', railVisible);
         button.setAttribute('aria-pressed', railVisible ? 'true' : 'false');
-        button.title = collapsed ? '展开话题栏' : '关闭话题栏';
-        button.setAttribute('aria-label', collapsed ? '展开话题栏' : '关闭话题栏');
+        button.title = collapsed ? tr('Expand topic rail', '展开话题栏') : tr('Close topic rail', '关闭话题栏');
+        button.setAttribute('aria-label', collapsed ? tr('Expand topic rail', '展开话题栏') : tr('Close topic rail', '关闭话题栏'));
         if (isManagerTopicsRailMode()) {
             topicsPanel.classList.remove('show');
             if (sideWorkspaceContent === topicsPanel) closeSideWorkspace();
@@ -1362,7 +1363,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'inline-edit-remove';
-        remove.setAttribute('aria-label', '移除引用');
+        remove.setAttribute('aria-label', tr('Remove reference', '移除引用'));
         remove.textContent = '×';
         remove.addEventListener('click', (e) => {
             e.preventDefault();
@@ -1393,14 +1394,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         editorCard.innerHTML = `
             <div class="inline-edit-top">
                 <span>${svgIconNoMargin('pencil')}</span>
-                <span>编辑第 ${messageIdx + 1} 条消息，发送后会从这里重新运行</span>
+                <span>${tr(`Editing message ${messageIdx + 1}; sending will rerun from here`, `编辑第 ${messageIdx + 1} 条消息，发送后会从这里重新运行`)}</span>
             </div>
             <div class="inline-edit-context-row"></div>
             <div class="inline-edit-text" contenteditable="true" role="textbox" aria-multiline="true"></div>
             <div class="inline-edit-image-row"></div>
             <div class="inline-edit-actions">
-                <button class="inline-edit-cancel" type="button">取消</button>
-                <button class="inline-edit-submit" type="button">${svgIconNoMargin('pointer')}发送</button>
+                <button class="inline-edit-cancel" type="button">${tr('Cancel', '取消')}</button>
+                <button class="inline-edit-submit" type="button">${svgIconNoMargin('pointer')}${tr('Send', '发送')}</button>
             </div>
         `;
 
@@ -1438,11 +1439,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 wrap.className = 'inline-edit-image';
                 const img = document.createElement('img');
                 img.src = src;
-                img.title = '点击放大';
+                img.title = tr('Click to enlarge', '点击放大');
                 img.addEventListener('click', () => showImageLightbox(src));
                 const remove = document.createElement('button');
                 remove.type = 'button';
-                remove.setAttribute('aria-label', '移除图片');
+                remove.setAttribute('aria-label', tr('Remove image', '移除图片'));
                 remove.textContent = '×';
                 remove.addEventListener('click', () => {
                     draftImages = draftImages.filter(item => item !== src);
@@ -1697,7 +1698,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         const cardIndex = allCards.indexOf(card);
                         
                         const titleSpan = card.querySelector('.permission-card-title');
-                        const cardTitle = titleSpan && titleSpan.textContent ? titleSpan.textContent.replace('❓ ', '').trim() : `问题 ${cardIndex + 1}`;
+                        const cardTitle = titleSpan && titleSpan.textContent ? titleSpan.textContent.replace('❓ ', '').trim() : tr(`Question ${cardIndex + 1}`, `问题 ${cardIndex + 1}`);
 
                         // Prevent double click by disabling buttons in current card
                         const allBtns = Array.from(card.querySelectorAll('button')) as HTMLButtonElement[];
@@ -1720,7 +1721,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                                     let combinedMessage = "";
                                     allCards.forEach((c, idx) => {
                                         const tSpan = c.querySelector('.permission-card-title');
-                                        const title = tSpan && tSpan.textContent ? tSpan.textContent.replace('❓ ', '').trim() : `问题 ${idx + 1}`;
+                                        const title = tSpan && tSpan.textContent ? tSpan.textContent.replace('❓ ', '').trim() : tr(`Question ${idx + 1}`, `问题 ${idx + 1}`);
                                         combinedMessage += `【${title}】: ${answers[idx]}\n`;
                                     });
                                     
@@ -2315,7 +2316,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (source) {
             const btn = document.getElementById('installSkillBtn') as HTMLButtonElement;
             btn.disabled = true;
-            btn.textContent = '安装中...';
+            btn.textContent = tr('Installing...', '安装中...');
             vscode.postMessage({ type: 'installSkill', source });
         }
     });
@@ -2586,7 +2587,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     pushUnique({
                         id: `restored:plan:${step.content}`,
                         kind: 'plan',
-                        title: step.mode === 'orchestrator' ? 'Orchestrator Plan' : step.mode === 'script' ? '脚本模式计划' : 'Implementation Plan',
+                        title: step.mode === 'orchestrator' ? 'Orchestrator Plan' : step.mode === 'script' ? tr('Script Mode Plan', '脚本模式计划') : 'Implementation Plan',
                         summary: 'Restored from chat history.',
                         filePath: step.content,
                         relPath: step.content,
@@ -2793,7 +2794,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const img = document.createElement('img');
         img.src = dataUrl;
         img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:8px;border:1px solid rgba(255,255,255,0.1);cursor:zoom-in;transition:transform 0.15s;display:block;';
-        img.title = '点击放大';
+        img.title = tr('Click to enlarge', '点击放大');
         img.addEventListener('click', () => showImageLightbox(dataUrl));
         img.addEventListener('mouseenter', () => { img.style.transform = 'scale(1.07)'; });
         img.addEventListener('mouseleave', () => { img.style.transform = ''; });
@@ -2914,7 +2915,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const jumpLatestBtn = document.createElement('button');
     jumpLatestBtn.className = 'jump-latest-btn';
     jumpLatestBtn.type = 'button';
-    jumpLatestBtn.innerHTML = `${svgIconNoMargin('pointer')} 最新消息`;
+    jumpLatestBtn.innerHTML = `${svgIconNoMargin('pointer')} ${tr('Latest message', '最新消息')}`;
     jumpLatestBtn.addEventListener('click', () => {
         scrollBottom(true);
         jumpLatestBtn.classList.remove('show');
@@ -3003,7 +3004,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             const btn = document.createElement('button');
             btn.className = 'md-codeblock-copy';
             btn.textContent = 'Copy';
-            btn.setAttribute('aria-label', '复制代码');
+            btn.setAttribute('aria-label', tr('Copy code', '复制代码'));
             btn.addEventListener('click', () => {
                 navigator.clipboard.writeText(codeEl.textContent || '').then(() => {
                     btn.textContent = '✓';
@@ -3030,7 +3031,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     hasTask = true;
                     const checked = !!checkedMatch;
                     const prefix = checked ? checkedMatch![0] : uncheckedMatch![0];
-                    li.innerHTML = `<input type="checkbox" class="task-checkbox" ${checked ? 'checked' : ''} disabled aria-label="${checked ? '已完成' : '未完成'}">` +
+                    li.innerHTML = `<input type="checkbox" class="task-checkbox" ${checked ? 'checked' : ''} disabled aria-label="${checked ? tr('Done', '已完成') : tr('Not done', '未完成')}">` +
                         text.substring(prefix.length);
                 }
             }
@@ -3053,6 +3054,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const extractStepFile = _fmtExtractStepFile;
 
     function makeRunSummary(steps: any[] | undefined, fallbackContent?: string): RunSummary {
+        const isZh = chatI18n.locale === 'zh-cn';
         const all = steps || [];
         const timestamps = all.map(s => Number(s.timestamp || 0)).filter(Boolean);
         const startedAt = timestamps.length ? Math.min(...timestamps) : null;
@@ -3068,7 +3070,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         let orchestratorCount = 0;
         let errorCount = 0;
         let failedToolCount = 0;
-        let latestStatus = fallbackContent?.trim() ? fallbackContent.trim() : '已完成';
+        let latestStatus = fallbackContent?.trim() ? fallbackContent.trim() : (isZh ? '已完成' : 'Completed');
         const alerts: string[] = [];
         const validations: string[] = [];
 
@@ -3090,18 +3092,20 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 } else if (ORCHESTRATOR_TOOL_NAMES.has(toolName)) {
                     orchestratorCount++;
                 }
-                latestStatus = file ? `正在调用 ${toolName}: ${file}` : `正在调用 ${toolName}`;
+                latestStatus = file
+                    ? (isZh ? `正在调用 ${toolName}: ${file}` : `Calling ${toolName}: ${file}`)
+                    : (isZh ? `正在调用 ${toolName}` : `Calling ${toolName}`);
             } else if (type === 'tool_result') {
                 toolResultCount++;
                 const result = step.toolResult as any;
                 if (result?.success === false || result?.error) {
                     failedToolCount++;
-                    const msg = String(result?.message || result?.error || `${step.toolName || '工具'} 执行失败`);
+                    const msg = String(result?.message || result?.error || (isZh ? `${step.toolName || '工具'} 执行失败` : `${step.toolName || 'tool'} failed`));
                     alerts.push(msg);
                 }
                 latestStatus = result?.success === false || result?.error
-                    ? `${step.toolName || '工具'} 返回问题`
-                    : `${step.toolName || '工具'} 已返回`;
+                    ? (isZh ? `${step.toolName || '工具'} 返回问题` : `${step.toolName || 'Tool'} returned an issue`)
+                    : (isZh ? `${step.toolName || '工具'} 已返回` : `${step.toolName || 'Tool'} returned`);
             } else if (type === 'validation') {
                 validationCount++;
                 if (step.content) validations.push(String(step.content));
@@ -3143,16 +3147,21 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function renderRunSummaryHtml(summary: RunSummary, live = false): string {
+        const isZh = chatI18n.locale === 'zh-cn';
         const severity = summary.errorCount > 0 || summary.failedToolCount > 0 ? 'error'
             : summary.validationCount > 0 ? 'ok'
             : summary.hasOrchestrator ? 'orch'
             : 'normal';
-        const title = live ? '正在执行' : severity === 'error' ? '执行完成，有问题需要查看' : '执行完成';
-        const duration = summary.durationMs > 0 ? formatDuration(summary.durationMs) : (live ? '进行中' : '短任务');
-        const fileText = summary.changedFiles.length > 0 ? summary.changedFiles.join(', ') : '无文件改动';
+        const title = live
+            ? (isZh ? '正在执行' : 'Running')
+            : severity === 'error'
+                ? (isZh ? '执行完成，有问题需要查看' : 'Run completed with issues')
+                : (isZh ? '执行完成' : 'Run complete');
+        const duration = summary.durationMs > 0 ? formatDuration(summary.durationMs) : (live ? (isZh ? '进行中' : 'running') : (isZh ? '短任务' : 'short task'));
+        const fileText = summary.changedFiles.length > 0 ? summary.changedFiles.join(', ') : (isZh ? '无文件改动' : 'No file changes');
         const toolText = summary.topTools.length > 0
             ? summary.topTools.map(t => `${t.name} ${t.count}×`).join(' · ')
-            : '未调用工具';
+            : (isZh ? '未调用工具' : 'No tools called');
         const status = summary.latestStatus.length > 110 ? summary.latestStatus.slice(0, 110) + '...' : summary.latestStatus;
         const alertHtml = summary.alerts.length > 0
             ? `<div class="run-summary-alerts">${summary.alerts.map(a => `<div>${svgIconNoMargin('warning')} ${escapeHtml(a.length > 160 ? a.slice(0, 160) + '...' : a)}</div>`).join('')}</div>`
@@ -3170,11 +3179,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     <span class="run-summary-duration">${escapeHtml(duration)}</span>
                 </div>
                 <div class="run-summary-metrics">
-                    <span>${svgIconNoMargin('gear')} ${summary.toolCallCount} 工具</span>
-                    <span>${svgIconNoMargin('edit')} ${summary.writeCount} 写入</span>
-                    <span>${svgIconNoMargin('search')} ${summary.readCount} 读取</span>
-                    <span>${svgIconNoMargin('stethoscope')} ${summary.validationCount} 验证</span>
-                    ${summary.errorCount + summary.failedToolCount > 0 ? `<span class="run-summary-danger">${svgIconNoMargin('x')} ${summary.errorCount + summary.failedToolCount} 问题</span>` : ''}
+                    <span>${svgIconNoMargin('gear')} ${summary.toolCallCount} ${isZh ? '工具' : 'tools'}</span>
+                    <span>${svgIconNoMargin('edit')} ${summary.writeCount} ${isZh ? '写入' : 'writes'}</span>
+                    <span>${svgIconNoMargin('search')} ${summary.readCount} ${isZh ? '读取' : 'reads'}</span>
+                    <span>${svgIconNoMargin('stethoscope')} ${summary.validationCount} ${isZh ? '验证' : 'validations'}</span>
+                    ${summary.errorCount + summary.failedToolCount > 0 ? `<span class="run-summary-danger">${svgIconNoMargin('x')} ${summary.errorCount + summary.failedToolCount} ${isZh ? '问题' : 'issues'}</span>` : ''}
                 </div>
                 <div class="run-summary-foot">
                     <span class="run-summary-files" title="${escapeHtml(fileText)}">${escapeHtml(fileText)}</span>
@@ -3240,8 +3249,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         header.innerHTML = `
             <span class="process-panel-chevron"></span>
             ${svgIconNoMargin('layers')}
-            <span class="process-title">探索过程</span>
-            <span class="process-meta">${thinkingSteps.length} 思考 · ${toolCalls.length} 工具 · ${textDeltas.length} 文本</span>
+            <span class="process-title">${tr('Process', '探索过程')}</span>
+            <span class="process-meta">${thinkingSteps.length} ${tr('thoughts', '思考')} · ${toolCalls.length} ${tr('tools', '工具')} · ${textDeltas.length} ${tr('text', '文本')}</span>
             <span class="process-countdown"></span>
         `;
         header.addEventListener('click', () => {
@@ -3269,7 +3278,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const estTokens = Math.ceil(thinkText.length / 4);
                 const thinking = document.createElement('details');
                 thinking.className = 'process-section process-thinking';
-                thinking.innerHTML = `<summary>${svgIconNoMargin('messageSquare')} 思考详情 <span>~${formatNum(estTokens)} tokens</span></summary>`;
+                thinking.innerHTML = `<summary>${svgIconNoMargin('messageSquare')} ${tr('Thinking details', '思考详情')} <span>~${formatNum(estTokens)} tokens</span></summary>`;
                 const thinkingBody = document.createElement('div');
                 thinkingBody.className = 'thinking-body markdown-body';
                 thinkingBody.innerHTML = renderMarkdown(thinkText);
@@ -3283,7 +3292,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             if (text) {
                 const textBlock = document.createElement('details');
                 textBlock.className = 'process-section process-text';
-                textBlock.innerHTML = `<summary>${svgIconNoMargin('file')} 过程文本 <span>${textDeltas.length} chunks</span></summary>`;
+                textBlock.innerHTML = `<summary>${svgIconNoMargin('file')} ${tr('Process text', '过程文本')} <span>${textDeltas.length} chunks</span></summary>`;
                 const textBody = document.createElement('div');
                 textBody.className = 'thinking-body process-text-body markdown-body';
                 textBody.innerHTML = renderMarkdown(text);
@@ -3293,15 +3302,16 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
 
         if (toolCalls.length > 0) {
+            const isZh = chatI18n.locale === 'zh-cn';
             const tools = document.createElement('details');
             tools.className = 'process-section process-tools';
             tools.open = hasFailedTool;
-            tools.innerHTML = `<summary>${svgIconNoMargin('gear')} 工具详情 <span>${toolCalls.length} 次调用${hasFailedTool ? ' · 有失败' : ''}</span></summary>`;
+            tools.innerHTML = `<summary>${svgIconNoMargin('gear')} ${isZh ? '工具详情' : 'Tool details'} <span>${toolCalls.length} ${isZh ? '次调用' : 'call(s)'}${hasFailedTool ? ` · ${isZh ? '有失败' : 'failed'}` : ''}</span></summary>`;
 
-            const pairOpts = { showDuration: true, showParams: true, showDiff: true };
+            const pairOpts = { showDuration: true, showParams: true, showDiff: true, locale: chatI18n.locale };
 
             // Use grouped rendering when ≥3 tool calls (Stage B integration)
-            const groups = groupToolCalls(toolCalls, toolResults);
+            const groups = groupToolCalls(toolCalls, toolResults, chatI18n.locale);
             if (groups) {
                 const timelineDiv = document.createElement('div');
                 timelineDiv.className = 'tool-timeline process-tool-timeline tool-timeline-grouped';
@@ -3346,7 +3356,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             const hitRate = totalHit > 0 ? ((totalHit / (totalHit + totalCreated)) * 100).toFixed(1) : '0.0';
             const cacheSummary = document.createElement('div');
             cacheSummary.className = 'process-cache-summary';
-            cacheSummary.innerHTML = `${svgIconNoMargin('check')} Prefix Cache 汇总 (${cacheStatsSteps.length} 次)：命中 ${totalHit.toLocaleString()} tokens (${hitRate}%)，创建 ${totalCreated.toLocaleString()} tokens，节省约 ¥${totalSaved.toFixed(4)}`;
+            cacheSummary.innerHTML = chatI18n.locale === 'zh-cn'
+                ? `${svgIconNoMargin('check')} Prefix Cache 汇总 (${cacheStatsSteps.length} 次)：命中 ${totalHit.toLocaleString()} tokens (${hitRate}%)，创建 ${totalCreated.toLocaleString()} tokens，节省约 ¥${totalSaved.toFixed(4)}`
+                : `${svgIconNoMargin('check')} Prefix cache summary (${cacheStatsSteps.length} call(s)): hit ${totalHit.toLocaleString()} tokens (${hitRate}%), created ${totalCreated.toLocaleString()} tokens, saved about ¥${totalSaved.toFixed(4)}`;
             stack.appendChild(cacheSummary);
         }
 
@@ -3367,7 +3379,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const collapseBtn = document.createElement('button');
         collapseBtn.type = 'button';
         collapseBtn.className = 'process-collapse-btn';
-        collapseBtn.innerHTML = svgIconNoMargin('x') + ' 收起';
+        collapseBtn.innerHTML = svgIconNoMargin('x') + ' ' + tr('Collapse', '收起');
         collapseBtn.style.display = isExpanded ? '' : 'none';
         collapseBtn.addEventListener('click', () => {
             userToggled = true;
@@ -3526,9 +3538,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             const uniqueId = `subview-${agentId.replace(/[^a-zA-Z0-9_-]/g, '_')}-${msgTime || 'sub'}`;
             const agentSummary = makeRunSummary(groupSteps);
             const agentStatusClass = agentSummary.errorCount + agentSummary.failedToolCount > 0 ? 'lane-failed' : 'lane-done';
-            const agentFiles = agentSummary.changedFiles.length > 0 ? ` · ${agentSummary.changedFiles.length} 文件` : '';
-            const agentDuration = agentSummary.durationMs > 0 ? formatDuration(agentSummary.durationMs) : '短任务';
-            const agentTopTool = agentSummary.topTools[0]?.name || '无工具';
+            const agentFiles = agentSummary.changedFiles.length > 0 ? ` · ${agentSummary.changedFiles.length} ${tr('file(s)', '文件')}` : '';
+            const agentDuration = agentSummary.durationMs > 0 ? formatDuration(agentSummary.durationMs) : tr('short task', '短任务');
+            const agentTopTool = agentSummary.topTools[0]?.name || tr('no tool', '无工具');
             
             const card = document.createElement('div');
             card.className = `orch-lane ${agentStatusClass} subagent-card`;
@@ -3536,15 +3548,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             card.innerHTML = `
                 <div class="lane-header">
                     <span class="lane-icon">${svgIconNoMargin('bot')}</span>
-                    <span class="lane-role">子任务: ${escapeHtml(agentId)}</span>
+                    <span class="lane-role">${tr('Subtask', '子任务')}: ${escapeHtml(agentId)}</span>
                     <span class="lane-status" style="margin-left:auto;">›</span>
                 </div>
-                <div class="lane-status-text">${agentSummary.toolCallCount} 工具${agentFiles}${agentSummary.failedToolCount ? ` · ${agentSummary.failedToolCount} 失败` : ''}</div>
+                <div class="lane-status-text">${agentSummary.toolCallCount} ${tr('tools', '工具')}${agentFiles}${agentSummary.failedToolCount ? ` · ${agentSummary.failedToolCount} ${tr('failed', '失败')}` : ''}</div>
                 <div class="lane-meta">
                     <span>${escapeHtml(agentDuration)}</span>
                     <span>${escapeHtml(agentTopTool)}</span>
-                    ${agentSummary.readCount ? `<span>${agentSummary.readCount} 读取</span>` : ''}
-                    ${agentSummary.writeCount ? `<span>${agentSummary.writeCount} 写入</span>` : ''}
+                    ${agentSummary.readCount ? `<span>${agentSummary.readCount} ${tr('reads', '读取')}</span>` : ''}
+                    ${agentSummary.writeCount ? `<span>${agentSummary.writeCount} ${tr('writes', '写入')}</span>` : ''}
                 </div>
             `;
             div.appendChild(card);
@@ -3554,14 +3566,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             fullscreen.className = 'subagent-fullscreen-view';
             fullscreen.innerHTML = `
                 <div class="subagent-header">
-                    <button class="subagent-back-btn" data-target-id="${uniqueId}">‹ 返回</button>
+                    <button class="subagent-back-btn" data-target-id="${uniqueId}">‹ ${tr('Back', '返回')}</button>
                     <div class="subagent-title-wrap">
-                        <span class="subagent-title">子代理: ${escapeHtml(agentId)}</span>
+                        <span class="subagent-title">${tr('Subagent', '子代理')}: ${escapeHtml(agentId)}</span>
                         <span class="subagent-subtitle">${escapeHtml(agentSummary.latestStatus)}</span>
                     </div>
                     <div class="subagent-header-metrics">
                         <span>${escapeHtml(agentDuration)}</span>
-                        <span>${agentSummary.toolCallCount} 工具</span>
+                        <span>${agentSummary.toolCallCount} ${tr('tools', '工具')}</span>
                     </div>
                 </div>
                 <div class="subagent-body"></div>
@@ -3764,9 +3776,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const statusText = card.querySelector('.lane-status-text') as HTMLElement | null;
         if (statusText) {
             const livePrefix = state.isComplete
-                ? (finalText || summary.latestStatus || '完成')
+                ? (finalText || summary.latestStatus || tr('Complete', '完成'))
                 : idleMs >= 2 * 60 * 1000
-                    ? `等待 ${formatDuration(idleMs)} · ${summary.latestStatus}`
+                    ? tr(`Waiting ${formatDuration(idleMs)} · ${summary.latestStatus}`, `等待 ${formatDuration(idleMs)} · ${summary.latestStatus}`)
                     : summary.latestStatus;
             statusText.textContent = livePrefix.length > 100 ? livePrefix.slice(0, 100) + '...' : livePrefix;
         }
@@ -3878,7 +3890,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         div.appendChild(hdr);
         const summary = document.createElement('div');
         summary.className = 'live-run-summary-anchor';
-        summary.innerHTML = renderRunSummaryHtml(makeRunSummary([], '准备中'), true);
+        summary.innerHTML = renderRunSummaryHtml(makeRunSummary([], chatI18n.locale === 'zh-cn' ? '准备中' : 'Preparing'), true);
         div.appendChild(summary);
 
         return div;
@@ -4015,10 +4027,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     const failed = blocked || /fail|error|失败|错误|超时|中止/i.test(s.content || '');
                     card.classList.add(blocked ? 'lane-blocked' : failed ? 'lane-failed' : 'lane-done');
                     const statusText = card.querySelector('.lane-status-text');
-                    if (statusText) statusText.textContent = s.content || '完成';
+                    if (statusText) statusText.textContent = s.content || tr('Complete', '完成');
                 }
             }
-            updateSubagentCard(state, s.content || '完成');
+            updateSubagentCard(state, s.content || tr('Complete', '完成'));
             // Terminate all active streaming states - the child agent has completed and there will be no new steps
             // 1. Terminate the Thinking block: stop the spinning indicator
             if (state.liveThinkBlock) {
@@ -4061,7 +4073,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 state.liveThinkBlock = document.createElement('details');
                 state.liveThinkBlock.className = 'process-section process-thinking live-thinking-block'; (state.liveThinkBlock as HTMLDetailsElement).open = false;
                 state.liveThinkSum = document.createElement('summary');
-                state.liveThinkSum.innerHTML = '<span class="think-pulse spinning"></span>思考详情...';
+                state.liveThinkSum.innerHTML = `<span class="think-pulse spinning"></span>${tr('Thinking details...', '思考详情...')}`;
                 state.liveThinkBlock.appendChild(state.liveThinkSum);
                 state.liveThinkBody = document.createElement('div');
                 state.liveThinkBody.className = 'thinking-body markdown-body';
@@ -4090,7 +4102,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 section.className = 'process-section process-text live-process-text';
                 section.open = false;
                 const summary = document.createElement('summary');
-                summary.innerHTML = buildLiveProcessSummaryHtml('file', '过程文本', 'streaming');
+                summary.innerHTML = buildLiveProcessSummaryHtml('file', tr('Process text', '过程文本'), 'streaming');
                 section.appendChild(summary);
                 state.liveTextProcessBody = document.createElement('div');
                 state.liveTextProcessBody.className = 'thinking-body process-text-body markdown-body stream-cursor';
@@ -4115,7 +4127,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 toolSection.className = 'process-section process-tools live-process-tools';
                 toolSection.open = false;
                 const summary = document.createElement('summary');
-                summary.innerHTML = buildLiveProcessSummaryHtml('gear', '工具详情', '实时调用');
+                summary.innerHTML = buildLiveProcessSummaryHtml(
+                    'gear',
+                    chatI18n.locale === 'zh-cn' ? '工具详情' : 'Tool details',
+                    chatI18n.locale === 'zh-cn' ? '实时调用' : 'Live calls',
+                );
                 toolSection.appendChild(summary);
                 state.liveToolTimeline = document.createElement('div');
                 state.liveToolTimeline.className = 'tool-timeline process-tool-timeline live-tool-timeline';
@@ -4124,8 +4140,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
             const stepIdx = s.stepIndex || (state.liveToolTimeline.querySelectorAll('.tool-pair').length + 1);
             const toolMeta = state.liveToolTimeline.closest('.process-tools')?.querySelector('.process-meta');
-            if (toolMeta) toolMeta.textContent = `${stepIdx} 次调用`;
-            const pairDiv = createToolPairElement(buildToolPairHtml(s as RendererStep, undefined, { stepIndex: stepIdx, showDuration: false }));
+            if (toolMeta) toolMeta.textContent = chatI18n.locale === 'zh-cn' ? `${stepIdx} 次调用` : `${stepIdx} call(s)`;
+            const pairDiv = createToolPairElement(buildToolPairHtml(s as RendererStep, undefined, {
+                stepIndex: stepIdx,
+                showDuration: false,
+                locale: chatI18n.locale,
+            }));
             if (!pairDiv) return;
             pairDiv.dataset.tool = s.toolName || '';
             pairDiv.dataset.callIdx = String(stepIdx);
@@ -4157,7 +4177,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 // Append new pair into collapse too
                 collapseEl.appendChild(pairDiv);
                 const insideCount = collapseEl.querySelectorAll('.tool-pair').length;
-                (collapseEl.querySelector('summary') as HTMLElement).textContent = `+${insideCount} more tool calls`;
+                (collapseEl.querySelector('summary') as HTMLElement).textContent = chatI18n.locale === 'zh-cn'
+                    ? `+${insideCount} 个更多工具调用`
+                    : `+${insideCount} more tool calls`;
                 // Default collapsed — only auto-open if the user has manually opened it
                 if ((collapseEl as HTMLElement).dataset.userOpened) {
                     collapseEl.open = true;
@@ -4185,6 +4207,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         stepIndex: stepIdx,
                         showDuration: true,
                         showDiff: true,
+                        locale: chatI18n.locale,
                     }));
                     if (updatedPair) {
                         pair.className = updatedPair.className;
@@ -4251,13 +4274,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
 
         if (action === 'allow') {
-            btn.textContent = '✓ 已允许';
+            btn.textContent = tr('✓ Allowed', '✓ 已允许');
             vscode.postMessage({ type: 'permissionResponse', permissionId: permId, allowed: true });
         } else if (action === 'deny') {
-            btn.textContent = '✗ 已拒绝';
+            btn.textContent = tr('✗ Denied', '✗ 已拒绝');
             vscode.postMessage({ type: 'permissionResponse', permissionId: permId, allowed: false });
         } else if (action === 'always') {
-            btn.textContent = '✓ 已一直允许';
+            btn.textContent = tr('✓ Always allowed', '✓ 已一直允许');
             vscode.postMessage({ type: 'permissionResponse', permissionId: permId, allowed: true, alwaysAllow: true });
         }
     });
@@ -4294,7 +4317,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             const img = document.createElement('img');
             img.src = src;
             img.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid rgba(255,255,255,0.12);cursor:zoom-in;transition:transform 0.15s;';
-            img.title = '点击放大';
+            img.title = tr('Click to enlarge', '点击放大');
             img.addEventListener('click', () => showImageLightbox(src));
             img.addEventListener('mouseenter', () => { img.style.transform = 'scale(1.07)'; });
             img.addEventListener('mouseleave', () => { img.style.transform = ''; });
@@ -4408,17 +4431,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             const editBtn = document.createElement('button');
             editBtn.className = 'message-action-btn edit-resend-btn';
             editBtn.type = 'button';
-            editBtn.title = '编辑并重新发送';
-            editBtn.setAttribute('aria-label', '编辑并重新发送此消息');
-            editBtn.innerHTML = `${svgIconNoMargin('pencil')}<span>编辑重发</span>`;
+            editBtn.title = tr('Edit and resend', '编辑并重新发送');
+            editBtn.setAttribute('aria-label', tr('Edit and resend this message', '编辑并重新发送此消息'));
+            editBtn.innerHTML = `${svgIconNoMargin('pencil')}<span>${tr('Edit resend', '编辑重发')}</span>`;
             editBtn.addEventListener('click', () => beginEditMessage(msgIdx));
 
             const rb = document.createElement('button');
             rb.className = 'message-action-btn retract-btn';
             rb.type = 'button';
-            rb.title = '回滚到此处';
-            rb.setAttribute('aria-label', '回滚到此消息之前并恢复输入');
-            rb.innerHTML = `${svgIconNoMargin('refresh')}<span>回滚</span>`;
+            rb.title = tr('Roll back to here', '回滚到此处');
+            rb.setAttribute('aria-label', tr('Roll back before this message and restore input', '回滚到此消息之前并恢复输入'));
+            rb.innerHTML = `${svgIconNoMargin('refresh')}<span>${tr('Rollback', '回滚')}</span>`;
             rb.addEventListener('click', () => showRetractConfirm(msgIdx));
 
             actions.appendChild(editBtn);
@@ -4443,15 +4466,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         overlay.className = 'retract-confirm';
         overlay.innerHTML = `
             <div class="retract-confirm-box">
-                <div class="retract-confirm-title">回滚到这条消息之前？</div>
+                <div class="retract-confirm-title">${tr('Roll back before this message?', '回滚到这条消息之前？')}</div>
                 <div class="retract-confirm-hint">
-                    <div>将删除这条用户消息以及之后的 AI 回复，并尝试恢复这些回复产生的文件改动。</div>
-                    <div>完成后会把原消息放回输入框，包含 ${contextCount} 个引用和 ${imageCount} 张图片。</div>
-                    <div class="retract-confirm-note">文件恢复依赖当前会话快照；无法恢复的项目会在完成后提示。</div>
+                    <div>${tr('This will delete this user message and later AI replies, then try to restore file changes produced by those replies.', '将删除这条用户消息以及之后的 AI 回复，并尝试恢复这些回复产生的文件改动。')}</div>
+                    <div>${tr(`The original message will be restored to the input with ${contextCount} reference(s) and ${imageCount} image(s).`, `完成后会把原消息放回输入框，包含 ${contextCount} 个引用和 ${imageCount} 张图片。`)}</div>
+                    <div class="retract-confirm-note">${tr('File restore depends on the current topic snapshot; anything that cannot be restored will be reported after completion.', '文件恢复依赖当前会话快照；无法恢复的项目会在完成后提示。')}</div>
                 </div>
                 <div class="retract-confirm-btns">
-                    <button class="retract-ok" type="button">回滚并恢复输入</button>
-                    <button class="retract-cancel" type="button">取消</button>
+                    <button class="retract-ok" type="button">${tr('Rollback and restore input', '回滚并恢复输入')}</button>
+                    <button class="retract-cancel" type="button">${tr('Cancel', '取消')}</button>
                 </div>
             </div>`;
         overlay.querySelector('.retract-ok')!.addEventListener('click', () => {
@@ -4492,12 +4515,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const filesListHTML = (cardInfo.filesRequested || []).map((f: string) => `<li>${escapeHtml(f.split(/[\\/]/).pop() || f)}</li>`).join('');
         card.innerHTML =
             '<div class="diff-card-header">' +
-            svgIcon('edit') + '请求批量应用更改 (' + (cardInfo.filesRequested?.length || 0) + ' 个文件):' +
+            svgIcon('edit') + tr(`Request to apply batch changes (${cardInfo.filesRequested?.length || 0} file(s)):`, `请求批量应用更改 (${cardInfo.filesRequested?.length || 0} 个文件):`) +
             '<ul style="margin: 4px 0; padding-left: 16px; font-size: 11px; font-family: monospace; opacity: 0.8; max-height: 60px; overflow-y: auto;">' + filesListHTML + '</ul>' +
-            '<span class="diff-card-hint">所有的修改会在内存中隔离准备</span></div>' +
+            `<span class="diff-card-hint">${tr('All changes are prepared in memory first', '所有的修改会在内存中隔离准备')}</span></div>` +
             '<div class="diff-card-actions">' +
-            '<button class="diff-accept-btn" data-txid="' + safeId + '">' + svgIcon('check') + '接受批量提交</button>' +
-            '<button class="diff-reject-btn" data-txid="' + safeId + '">' + svgIcon('x') + '拒绝</button>' +
+            '<button class="diff-accept-btn" data-txid="' + safeId + '">' + svgIcon('check') + tr('Accept batch commit', '接受批量提交') + '</button>' +
+            '<button class="diff-reject-btn" data-txid="' + safeId + '">' + svgIcon('x') + tr('Reject', '拒绝') + '</button>' +
             '</div>';
             
         const actions = card.querySelector('.diff-card-actions') as HTMLElement | null;
@@ -4505,19 +4528,19 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             const previewBtn = document.createElement('button');
             previewBtn.className = 'diff-preview-btn';
             previewBtn.type = 'button';
-            previewBtn.innerHTML = svgIcon('search') + '查看详情';
+            previewBtn.innerHTML = svgIcon('search') + tr('View details', '查看详情');
             previewBtn.style.display = 'none';
             actions.insertBefore(previewBtn, actions.firstChild);
         }
         (card.querySelector('.diff-accept-btn') as HTMLButtonElement).addEventListener('click', function () {
             this.disabled = true; (card.querySelector('.diff-reject-btn') as HTMLButtonElement).disabled = true;
-            this.innerHTML = svgIcon('check') + '已接受';
+            this.innerHTML = svgIcon('check') + tr('Accepted', '已接受');
             vscode.postMessage({ type: 'approveTransaction', txId: cardInfo.id });
             dismissCard(div, 800);
         });
         (card.querySelector('.diff-reject-btn') as HTMLButtonElement).addEventListener('click', function () {
             this.disabled = true; (card.querySelector('.diff-accept-btn') as HTMLButtonElement).disabled = true;
-            this.textContent = '已拒绝';
+            this.textContent = tr('Rejected', '已拒绝');
             vscode.postMessage({ type: 'rejectTransaction', txId: cardInfo.id });
             dismissCard(div, 800);
         });
@@ -4526,7 +4549,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             const previewBtn = document.createElement('button');
             previewBtn.className = 'diff-preview-btn';
             previewBtn.type = 'button';
-            previewBtn.innerHTML = svgIcon('search') + '查看详情';
+            previewBtn.innerHTML = svgIcon('search') + tr('View details', '查看详情');
             previewBtn.style.display = 'none';
             pendingActions.insertBefore(previewBtn, pendingActions.firstChild);
         }
@@ -4563,21 +4586,23 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         };
         const openPendingDiff = () => openDiffInSideWorkspace(
             [diffFile],
-            isNewFile ? '新建文件' : '文件修改',
+            isNewFile ? tr('New file', '新建文件') : tr('File change', '文件修改'),
             { pending: { messageId, isNewFile } },
         );
-        const hint = isNewFile ? '新文件已在编辑器中打开，请确认内容后决定' : '文件对比已在 VSCode 差异编辑器中打开';
+        const hint = isNewFile
+            ? tr('The new file has been opened in the editor; review it before deciding', '新文件已在编辑器中打开，请确认内容后决定')
+            : tr('The file comparison has been opened in the VS Code diff editor', '文件对比已在 VSCode 差异编辑器中打开');
         card.innerHTML =
             '<div class="diff-card-header">' +
-            svgIcon('edit') + '请求' + (isNewFile ? '创建' : '修改') + ': <strong>' + escapeHtml(fileName) + '</strong>' +
+            svgIcon('edit') + tr(`Request to ${isNewFile ? 'create' : 'modify'}: `, `请求${isNewFile ? '创建' : '修改'}: `) + '<strong>' + escapeHtml(fileName) + '</strong>' +
             '<span class="diff-card-hint">' + hint + '</span></div>' +
             '<div class="diff-card-actions">' +
-            '<button class="diff-accept-btn" data-msgid="' + safeId + '">' + svgIcon('check') + '接受</button>' +
-            '<button class="diff-reject-btn" data-msgid="' + safeId + '">' + svgIcon('x') + '拒绝</button>' +
+            '<button class="diff-accept-btn" data-msgid="' + safeId + '">' + svgIcon('check') + tr('Accept', '接受') + '</button>' +
+            '<button class="diff-reject-btn" data-msgid="' + safeId + '">' + svgIcon('x') + tr('Reject', '拒绝') + '</button>' +
             '</div>';
         (card.querySelector('.diff-accept-btn') as HTMLButtonElement).addEventListener('click', function () {
             this.disabled = true; (card.querySelector('.diff-reject-btn') as HTMLButtonElement).disabled = true;
-            this.innerHTML = svgIcon('check') + '已接受';
+            this.innerHTML = svgIcon('check') + tr('Accepted', '已接受');
             vscode.postMessage({ type: 'confirmWriteFile', messageId });
             removePendingSideDiffEntry(messageId);
             refreshSideDiffWorkspaceAfterRemoval();
@@ -4585,7 +4610,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         });
         (card.querySelector('.diff-reject-btn') as HTMLButtonElement).addEventListener('click', function () {
             this.disabled = true; (card.querySelector('.diff-accept-btn') as HTMLButtonElement).disabled = true;
-            this.textContent = '已拒绝';
+            this.textContent = tr('Rejected', '已拒绝');
             vscode.postMessage({ type: 'cancelWriteFile', messageId });
             removePendingSideDiffEntry(messageId);
             refreshSideDiffWorkspaceAfterRemoval();
@@ -4596,7 +4621,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             const previewBtn = document.createElement('button');
             previewBtn.className = 'diff-preview-btn';
             previewBtn.type = 'button';
-            previewBtn.innerHTML = svgIcon('search') + '查看详情';
+            previewBtn.innerHTML = svgIcon('search') + tr('View details', '查看详情');
             previewBtn.addEventListener('click', openPendingDiff);
             pendingActions.insertBefore(previewBtn, pendingActions.firstChild);
         }
@@ -4754,13 +4779,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const safeId = escapeHtml(permissionId);
         
         let actionsHtml = `<div class="permission-card-actions">` +
-            `<button class="permission-allow-btn" data-permid="${safeId}">${svgIcon('check')}允许</button>` +
-            `<button class="permission-deny-btn" data-permid="${safeId}">${svgIcon('x')}拒绝</button>`;
+            `<button class="permission-allow-btn" data-permid="${safeId}">${svgIcon('check')}${tr('Allow', '允许')}</button>` +
+            `<button class="permission-deny-btn" data-permid="${safeId}">${svgIcon('x')}${tr('Deny', '拒绝')}</button>`;
             
         if (tool === 'run_command' && allowAlways) {
             const isHighRisk = preflight && preflight.riskLevel > 1;
-            const labelText = isHighRisk ? '本次对话一直允许' : (preflight && preflight.riskLevel <= 1 ? '一直允许 (只读前缀)' : '一直允许');
-            const titleText = isHighRisk ? '当前会话期间一直允许相同类型的高风险指令' : '当前会话期间一直允许相同类型的只读指令';
+            const labelText = isHighRisk
+                ? tr('Always allow this chat', '本次对话一直允许')
+                : (preflight && preflight.riskLevel <= 1 ? tr('Always allow (read-only prefix)', '一直允许 (只读前缀)') : tr('Always allow', '一直允许'));
+            const titleText = isHighRisk
+                ? tr('Always allow the same kind of high-risk command during this chat', '当前会话期间一直允许相同类型的高风险指令')
+                : tr('Always allow the same kind of read-only command during this chat', '当前会话期间一直允许相同类型的只读指令');
             actionsHtml += `<button class="permission-always-btn" data-permid="${safeId}" style="margin-left:auto; font-size:0.8em; opacity:0.9" title="${escapeHtml(titleText)}">${svgIcon('check')}${labelText}</button>`;
         }
         actionsHtml += `</div>`;
@@ -4769,18 +4798,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         let preflightHtml = '';
         if (preflight) {
             const riskMap: Record<number, { text: string, color: string, bg: string }> = {
-                0: { text: '低风险 (Low Risk)', color: '#4caf50', bg: 'rgba(76,175,80,0.1)' },
-                1: { text: '中风险 (Medium Risk)', color: '#ff9800', bg: 'rgba(255,152,0,0.1)' },
-                2: { text: '高风险 (High Risk / Escalation)', color: '#f44336', bg: 'rgba(244,67,54,0.1)' }
+                0: { text: tr('Low Risk', '低风险 (Low Risk)'), color: '#4caf50', bg: 'rgba(76,175,80,0.1)' },
+                1: { text: tr('Medium Risk', '中风险 (Medium Risk)'), color: '#ff9800', bg: 'rgba(255,152,0,0.1)' },
+                2: { text: tr('High Risk / Escalation', '高风险 (High Risk / Escalation)'), color: '#f44336', bg: 'rgba(244,67,54,0.1)' }
             };
-            const risk = riskMap[preflight.riskLevel] || riskMap[1] || { text: '中风险 (Medium Risk)', color: '#ff9800', bg: 'rgba(255,152,0,0.1)' };
+            const risk = riskMap[preflight.riskLevel] || riskMap[1] || { text: tr('Medium Risk', '中风险 (Medium Risk)'), color: '#ff9800', bg: 'rgba(255,152,0,0.1)' };
             
             const classLabels: Record<string, string> = {
-                read: '只读查询',
-                write: '写入修改',
-                network: '网络访问',
-                script: '内联执行',
-                destructive: '高危破坏'
+                read: tr('Read-only query', '只读查询'),
+                write: tr('File write/change', '写入修改'),
+                network: tr('Network access', '网络访问'),
+                script: tr('Inline execution', '内联执行'),
+                destructive: tr('Destructive operation', '高危破坏')
             };
             const badges = (preflight.classification || []).map((c: string) => 
                 `<span class="preflight-badge" style="background:var(--vscode-badge-background,rgba(128,128,128,0.1)); color:var(--vscode-badge-foreground); padding:2px 6px; border-radius:3px; font-size:10px; font-weight:600; margin-right:4px;">[${classLabels[c] || c}]</span>`
@@ -4793,11 +4822,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             preflightHtml = 
                 `<div class="preflight-assessment-panel" style="margin-top:8px; border:1px solid var(--border, rgba(128,128,128,0.2)); border-radius:4px; padding:8px; background:var(--vscode-editor-background, #1e1e1e); text-align:left;">` +
                 `<div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border, rgba(128,128,128,0.1)); padding-bottom:4px; margin-bottom:6px;">` +
-                `<span style="font-weight:600; font-size:11px; color:var(--vscode-descriptionForeground, #a0a0a0);">🛡️ AI 安全预检评估</span>` +
+                `<span style="font-weight:600; font-size:11px; color:var(--vscode-descriptionForeground, #a0a0a0);">🛡️ ${tr('AI safety preflight', 'AI 安全预检评估')}</span>` +
                 `<span style="color:${risk.color}; background:${risk.bg}; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:bold;">${risk.text}</span>` +
                 `</div>` +
                 `<div style="margin-bottom:6px;">${badges}</div>` +
-                (preflight.cwd ? `<div style="font-size:10px; opacity:0.7; font-family:monospace; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">工作区: ${escapeHtml(preflight.cwd)}</div>` : '') +
+                (preflight.cwd ? `<div style="font-size:10px; opacity:0.7; font-family:monospace; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${tr('Workspace', '工作区')}: ${escapeHtml(preflight.cwd)}</div>` : '') +
                 (details ? `<ul style="margin:4px 0 0 0; padding-left:14px; color:var(--vscode-editor-foreground);">${details}</ul>` : '') +
                 `</div>`;
         }
@@ -4818,7 +4847,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             const alwaysBtn = div.querySelector('.permission-always-btn') as HTMLButtonElement;
             if (alwaysBtn) alwaysBtn.disabled = true;
             
-            this.innerHTML = svgIcon('check') + '已允许';
+            this.innerHTML = svgIcon('check') + tr('Allowed', '已允许');
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true });
             dismissCard(div, 400, () => {
                 floatingPermissionIds.delete(permissionId);
@@ -4834,7 +4863,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             const alwaysBtn = div.querySelector('.permission-always-btn') as HTMLButtonElement;
             if (alwaysBtn) alwaysBtn.disabled = true;
             
-            this.textContent = '已拒绝';
+            this.textContent = tr('Denied', '已拒绝');
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: false });
             dismissCard(div, 400, () => {
                 floatingPermissionIds.delete(permissionId);
@@ -4852,7 +4881,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const allowBtn = div.querySelector('.permission-allow-btn') as HTMLButtonElement;
                 if (allowBtn) allowBtn.disabled = true;
                 
-                this.innerHTML = svgIcon('check') + '已一直允许';
+                this.innerHTML = svgIcon('check') + tr('Always allowed', '已一直允许');
                 vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true, alwaysAllow: true });
                 dismissCard(div, 400, () => {
                     floatingPermissionIds.delete(permissionId);
@@ -4957,7 +4986,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
                 const r = msg.result;
                 const completedMsg = buildAssistantMessage(
-                    r.explanation || (r.steps && r.steps.length ? '' : '完成'),
+                    r.explanation || (r.steps && r.steps.length ? '' : tr('Complete', '完成')),
                     r.steps,
                     Date.now()
                 );
@@ -5032,10 +5061,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     const resumeBtn = document.createElement('button');
                     resumeBtn.className = 'resume-btn';
                     resumeBtn.style.cssText = 'margin-top: 10px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 13px;';
-                    resumeBtn.innerHTML = svgIcon('refresh') + ' 恢复执行 (Resume)';
+                    resumeBtn.innerHTML = svgIcon('refresh') + tr(' Resume', ' 恢复执行 (Resume)');
                     resumeBtn.addEventListener('click', () => {
                         resumeBtn.disabled = true;
-                        resumeBtn.innerHTML = svgIcon('refresh') + ' 恢复中...';
+                        resumeBtn.innerHTML = svgIcon('refresh') + tr(' Resuming...', ' 恢复中...');
                         vscode.postMessage({ type: 'resumeGeneration' });
                     });
                     
@@ -5130,7 +5159,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const notif = document.createElement('div');
                 notif.className = 'special-step';
                 notif.style.cssText = 'padding:6px 0;opacity:0.6;font-size:11px;';
-                notif.innerHTML = `${svgIconNoMargin('gitBranch')} 已从此处分叉为新话题: ${escapeHtml(msg.title)}`;
+                notif.innerHTML = `${svgIconNoMargin('gitBranch')} ${tr('Forked a new topic from here', '已从此处分叉为新话题')}: ${escapeHtml(msg.title)}`;
                 chatArea.appendChild(notif);
                 scrollBottom();
                 break;
@@ -5271,7 +5300,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (list) {
                     list.innerHTML = '';
                     if (!msg.skills || msg.skills.length === 0) {
-                        list.innerHTML = '<div style="opacity:0.5; font-size:11px;">暂无本地技能</div>';
+                        list.innerHTML = `<div style="opacity:0.5; font-size:11px;">${tr('No local skills', '暂无本地技能')}</div>`;
                     } else {
                         msg.skills.forEach((skill: string) => {
                             const row = document.createElement('div');
@@ -5279,7 +5308,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                             row.style.justifyContent = 'space-between';
                             row.style.alignItems = 'center';
                             row.innerHTML = `<span style="font-family:monospace;">${escapeHtml(skill)}</span>
-                                <button class="detect-btn" data-skill="${escapeHtml(skill)}" style="padding:0 6px; width:auto; border-radius:4px;" title="删除此技能">${svgIconNoMargin('trash')}</button>`;
+                                <button class="detect-btn" data-skill="${escapeHtml(skill)}" style="padding:0 6px; width:auto; border-radius:4px;" title="${tr('Delete this skill', '删除此技能')}">${svgIconNoMargin('trash')}</button>`;
                             row.querySelector('button')!.addEventListener('click', (e) => {
                                 const btn = e.currentTarget as HTMLButtonElement;
                                 btn.disabled = true; btn.textContent = '...';
@@ -5296,7 +5325,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const btn = document.getElementById('installSkillBtn') as HTMLButtonElement;
                 if (btn) {
                     btn.disabled = false;
-                    btn.textContent = '安装/导入';
+                    btn.textContent = tr('Install/import', '安装/导入');
                 }
                 const input = document.getElementById('skillSourceInput') as HTMLInputElement;
                 if (input && msg.success) input.value = '';
@@ -5322,15 +5351,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'ollamaModels': {
                 const db = document.getElementById('detectBtn') as HTMLButtonElement | null;
-                if (db) { db.disabled = false; db.innerHTML = svgIcon('search') + '检测'; }
+                if (db) { db.disabled = false; db.innerHTML = svgIcon('search') + tr('Detect', '检测'); }
                 if (msg.error) { document.getElementById('modelHint')!.textContent = msg.error; }
                 else { settingsOllamaModels = msg.models; updateModelUI((document.getElementById('settingsProvider') as HTMLSelectElement).value, '', msg.models); }
                 break;
             }
             case 'apiModelsFetched': {
                 const fb = document.getElementById('fetchApiModelsBtn') as HTMLButtonElement | null;
-                if (fb) { fb.disabled = false; fb.innerHTML = svgIcon('cloud') + '拉取支持的模型'; }
-                if (msg.error) { document.getElementById('apiKeyStatus')!.textContent = '获取失败: ' + msg.error; document.getElementById('apiKeyStatus')!.style.color = '#ff9800'; }
+                if (fb) { fb.disabled = false; fb.innerHTML = svgIcon('cloud') + tr('Fetch supported models', '拉取支持的模型'); }
+                if (msg.error) { document.getElementById('apiKeyStatus')!.textContent = tr('Fetch failed: ', '获取失败: ') + msg.error; document.getElementById('apiKeyStatus')!.style.color = '#ff9800'; }
                 else {
                     const p = settingsProviders.find(p => p.id === msg.providerId);
                     if (p && msg.models && msg.models.length > 0) {
@@ -5343,8 +5372,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         }
                         updateModelUI(msg.providerId, getSelectedModel(), null);
                         const ctxInfo = msg.ctxNote ? ` ${msg.ctxNote}` : '';
-                        document.getElementById('modelHint')!.textContent = `成功从端点加载了 ${newModels.length} 个模型！${ctxInfo}`;
-                        document.getElementById('apiKeyStatus')!.innerHTML = svgIcon('check') + '已成功获取模型';
+                        document.getElementById('modelHint')!.textContent = tr(`Loaded ${newModels.length} model(s) from endpoint.`, `成功从端点加载了 ${newModels.length} 个模型！`) + ctxInfo;
+                        document.getElementById('apiKeyStatus')!.innerHTML = svgIcon('check') + tr('Models fetched successfully', '已成功获取模型');
                         document.getElementById('apiKeyStatus')!.style.color = '#4caf50';
                     }
                 }
@@ -5364,7 +5393,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (!c) break;
 
                 if (!stats || stats.totalTokens === 0) {
-                    c.innerHTML = '<div style="opacity:0.6; text-align:center; padding: 10px;">暂无 Token 消耗数据</div>';
+                    c.innerHTML = `<div style="opacity:0.6; text-align:center; padding: 10px;">${tr('No token usage data yet', '暂无 Token 消耗数据')}</div>`;
                     break;
                 }
 
@@ -5372,15 +5401,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
                 // ── Summary ──
                 html += `<div style="margin-bottom: 10px; font-weight: 600; font-size: 13px;">
-                    总计消耗: <span style="color:var(--accent);">${stats.totalTokens.toLocaleString()}</span> tokens<br>
-                    预估成本: <span style="color:#4caf50;">¥${typeof stats.totalCostCny === 'number' ? stats.totalCostCny.toFixed(2) : '0.00'}</span><br>
-                    ${(stats.cacheStats && stats.cacheStats.totalCachedTokens > 0) ? `累计缓存命中: <span style="color:var(--vscode-charts-green, #388a34);">${stats.cacheStats.totalCachedTokens.toLocaleString()}</span> tokens <span style="font-size:11px; opacity:0.6;">(命中率 ${stats.cacheStats.cacheHitRate.toFixed(1)}%, 约省 ¥${stats.cacheStats.estimatedSavingsCny.toFixed(2)})</span><br>` : ''}
-                    <span style="font-size:11px; opacity:0.6;">共 ${stats.totalCalls ?? 0} 次调用</span>
+                    ${tr('Total tokens', '总计消耗')}: <span style="color:var(--accent);">${stats.totalTokens.toLocaleString()}</span> tokens<br>
+                    ${tr('Estimated cost', '预估成本')}: <span style="color:#4caf50;">¥${typeof stats.totalCostCny === 'number' ? stats.totalCostCny.toFixed(2) : '0.00'}</span><br>
+                    ${(stats.cacheStats && stats.cacheStats.totalCachedTokens > 0) ? `${tr('Total cache hits', '累计缓存命中')}: <span style="color:var(--vscode-charts-green, #388a34);">${stats.cacheStats.totalCachedTokens.toLocaleString()}</span> tokens <span style="font-size:11px; opacity:0.6;">(${tr('hit rate', '命中率')} ${stats.cacheStats.cacheHitRate.toFixed(1)}%, ${tr('saved about', '约省')} ¥${stats.cacheStats.estimatedSavingsCny.toFixed(2)})</span><br>` : ''}
+                    <span style="font-size:11px; opacity:0.6;">${tr(`${stats.totalCalls ?? 0} call(s)`, `共 ${stats.totalCalls ?? 0} 次调用`)}</span>
                 </div>`;
 
                 // ── Provider breakdown ──
                 html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px; margin-bottom: 10px;">';
-                html += '<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">按 Provider</div>';
+                html += `<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">${tr('By provider', '按 Provider')}</div>`;
                 for (const [providerId, pStats] of Object.entries(stats.byProvider || {})) {
                     html += `<div style="display:flex; justify-content:space-between; margin-bottom: 3px;">
                                 <span style="opacity:0.8;">${providerId}</span>
@@ -5392,14 +5421,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 // ── Model distribution ──
                 if (stats.modelDistribution && stats.modelDistribution.length > 0) {
                     html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px; margin-bottom: 10px;">';
-                    html += '<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">模型分布</div>';
+                    html += `<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">${tr('Model distribution', '模型分布')}</div>`;
                     for (const m of stats.modelDistribution) {
                         const barWidth = Math.max(2, m.percentage);
                         const shortModel = m.model.length > 24 ? m.model.slice(0, 22) + '…' : m.model;
                         html += `<div style="margin-bottom: 5px;">
                             <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;">
                                 <span title="${m.model}" style="opacity:0.85;">${shortModel}</span>
-                                <span style="opacity:0.6;">${m.percentage}% · ${m.callCount} 次</span>
+                                <span style="opacity:0.6;">${m.percentage}% · ${tr(`${m.callCount} calls`, `${m.callCount} 次`)}</span>
                             </div>
                             <div style="background:var(--border); border-radius:3px; height:6px; overflow:hidden;">
                                 <div style="width:${barWidth}%; height:100%; background:var(--accent); border-radius:3px; transition:width 0.3s;"></div>
@@ -5414,13 +5443,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     const recent = stats.dailyStats.slice(0, 14);
                     const maxTokens = Math.max(...recent.map((d: any) => d.tokens), 1);
                     html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px;">';
-                    html += '<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">近期趋势 (每日)</div>';
+                    html += `<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">${tr('Recent trend (daily)', '近期趋势 (每日)')}</div>`;
                     html += '<div style="display:flex; justify-content:flex-end; align-items:flex-end; gap:4px; height:60px;">';
                     // Show in chronological order (reverse since dailyStats is desc)
                     for (const d of [...recent].reverse()) {
                         const h = Math.max(3, Math.round((d.tokens / maxTokens) * 56));
                         const dayLabel = d.date.slice(5); // MM-DD
-                        html += `<div title="${d.date}: ${d.tokens.toLocaleString()} tokens, ${d.callCount} 次调用, ¥${d.costCny.toFixed(2)}" style="flex:1; min-width:12px; max-width:28px;">
+                        html += `<div title="${d.date}: ${d.tokens.toLocaleString()} tokens, ${tr(`${d.callCount} calls`, `${d.callCount} 次调用`)}, ¥${d.costCny.toFixed(2)}" style="flex:1; min-width:12px; max-width:28px;">
                             <div style="background:var(--accent); opacity:0.7; height:${h}px; border-radius:2px 2px 0 0;"></div>
                             <div style="font-size:7px; text-align:center; opacity:0.4; margin-top:1px; overflow:hidden; white-space:nowrap;">${dayLabel}</div>
                         </div>`;
@@ -5431,7 +5460,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 // ── Batch 4.2: Tool frequency ──
                 if (stats.toolFrequency && stats.toolFrequency.length > 0) {
                     html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px; margin-bottom: 10px;">';
-                    html += '<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">工具使用频率</div>';
+                    html += `<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">${tr('Tool usage frequency', '工具使用频率')}</div>`;
                     const topTools = stats.toolFrequency.slice(0, 8);
                     for (const t of topTools) {
                         const barW = Math.max(2, t.percentage);
@@ -5452,7 +5481,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (stats.avgResponseMs && stats.avgResponseMs > 0) {
                     const avgSec = (stats.avgResponseMs / 1000).toFixed(1);
                     html += `<div style="border-top: 1px dashed var(--border); padding-top: 6px; font-size:11px; opacity:0.7;">
-                        平均响应时间: <b>${avgSec}s</b> (${stats.avgResponseMs}ms)
+                        ${tr('Average response time', '平均响应时间')}: <b>${avgSec}s</b> (${stats.avgResponseMs}ms)
                     </div>`;
                 }
 
@@ -5473,11 +5502,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 }
                 // Build progress summary header (use SVG icon instead of emoji)
                 const phaseLabels: Record<string, string> = {
-                    planning: `${svgIconNoMargin('clipboard')} 规划中`,
-                    executing: `${svgIconNoMargin('zap')} 执行中`,
-                    reviewing: `${svgIconNoMargin('search')} 审查中`,
-                    complete: `${svgIconNoMargin('check')} 已完成`,
-                    failed: `${svgIconNoMargin('x')} 失败`,
+                    planning: `${svgIconNoMargin('clipboard')} ${tr('Planning', '规划中')}`,
+                    executing: `${svgIconNoMargin('zap')} ${tr('Executing', '执行中')}`,
+                    reviewing: `${svgIconNoMargin('search')} ${tr('Reviewing', '审查中')}`,
+                    complete: `${svgIconNoMargin('check')} ${tr('Complete', '已完成')}`,
+                    failed: `${svgIconNoMargin('x')} ${tr('Failed', '失败')}`,
                 };
                 const phaseCls = p.phase === 'complete' ? 'phase-complete' : p.phase === 'failed' ? 'phase-failed' : 'phase-active';
                 const pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
@@ -5490,7 +5519,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
                 let html = `<div class="orch-header">
                     <span class="orch-phase ${phaseCls}">${phaseLabels[p.phase] || p.phase}</span>
-                    <span class="orch-progress-text">${p.done}/${p.total} 完成 · ${pct}%</span>
+                    <span class="orch-progress-text">${p.done}/${p.total} ${tr('complete', '完成')} · ${pct}%</span>
                 </div>
                 <div class="orch-kpis">
                     <span>${svgIconNoMargin('refresh')} ${laneStats.running || 0} running</span>
@@ -5564,12 +5593,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 card.innerHTML = `
                     <div class="plan-file-icon">${svgIconNoMargin(isOrchestratorPlan ? 'bot' : 'clipboard')}</div>
                     <div class="plan-file-info">
-                        <div class="plan-file-title">${isScriptPlan ? '脚本模式流水线计划已导出' : isOrchestratorPlan ? '多 Agent 执行计划已导出' : '计划已导出'}</div>
+                        <div class="plan-file-title">${isScriptPlan ? tr('Script pipeline plan exported', '脚本模式流水线计划已导出') : isOrchestratorPlan ? tr('Multi-agent execution plan exported', '多 Agent 执行计划已导出') : tr('Plan exported', '计划已导出')}</div>
                         <div class="plan-file-path">${escapeHtml(msg.relPath)}</div>
-                        <div class="plan-file-hint">${isScriptPlan ? '确认后将按动态流水线进入 dispatch_agents 并行执行。' : isOrchestratorPlan ? '确认后将进入 dispatch_agents 并行执行。' : '确认后将切换到构建执行。'}</div>
+                        <div class="plan-file-hint">${isScriptPlan ? tr('After confirmation, dispatch_agents will run the dynamic pipeline in parallel.', '确认后将按动态流水线进入 dispatch_agents 并行执行。') : isOrchestratorPlan ? tr('After confirmation, dispatch_agents will run this in parallel.', '确认后将进入 dispatch_agents 并行执行。') : tr('After confirmation, execution will switch to build mode.', '确认后将切换到构建执行。')}</div>
                     </div>
                     <div class="plan-file-actions">
-                        <button class="plan-open-btn" data-path="${escapeHtml(msg.filePath)}">${svgIconNoMargin('folder')} 打开文件</button>
+                        <button class="plan-open-btn" data-path="${escapeHtml(msg.filePath)}">${svgIconNoMargin('folder')} ${tr('Open file', '打开文件')}</button>
                     </div>`;
                 (card.querySelector('.plan-open-btn') as HTMLElement).addEventListener('click', e => {
                     vscode.postMessage({ type: 'openPlanFile', filePath: (e.currentTarget as HTMLElement).dataset.path });
@@ -5621,11 +5650,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 card.innerHTML = `
                     <div class="plan-file-icon">${svgIconNoMargin('flag')}</div>
                     <div class="plan-file-info">
-                        <div class="plan-file-title">Walkthrough 报告已导出</div>
+                        <div class="plan-file-title">${tr('Walkthrough report exported', 'Walkthrough 报告已导出')}</div>
                         <div class="plan-file-path">${escapeHtml(msg.relPath)}</div>
                     </div>
                     <div class="plan-file-actions">
-                        <button class="plan-open-btn" data-path="${escapeHtml(msg.filePath)}">${svgIconNoMargin('folder')} 打开文件</button>
+                        <button class="plan-open-btn" data-path="${escapeHtml(msg.filePath)}">${svgIconNoMargin('folder')} ${tr('Open file', '打开文件')}</button>
                     </div>`;
                 (card.querySelector('.plan-open-btn') as HTMLElement).addEventListener('click', e => {
                     vscode.postMessage({ type: 'openPlanFile', filePath: (e.currentTarget as HTMLElement).dataset.path });
@@ -5642,11 +5671,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 card.innerHTML = `
                     <div class="plan-file-icon">${svgIconNoMargin('layers')}</div>
                     <div class="plan-file-info">
-                        <div class="plan-file-title">设计蓝图已导出</div>
+                        <div class="plan-file-title">${tr('Blueprint exported', '设计蓝图已导出')}</div>
                         <div class="plan-file-path">${escapeHtml(msg.relPath)}</div>
                     </div>
                     <div class="plan-file-actions">
-                        <button class="plan-open-btn" data-path="${escapeHtml(msg.filePath)}">${svgIconNoMargin('folder')} 打开文件</button>
+                        <button class="plan-open-btn" data-path="${escapeHtml(msg.filePath)}">${svgIconNoMargin('folder')} ${tr('Open file', '打开文件')}</button>
                     </div>`;
                 (card.querySelector('.plan-open-btn') as HTMLElement).addEventListener('click', e => {
                     vscode.postMessage({ type: 'openPlanFile', filePath: (e.currentTarget as HTMLElement).dataset.path });
@@ -5745,7 +5774,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     // Completely replace the label with token + cost info
                     const label = document.getElementById('tokenUsageLabel');
                     if (label) {
-                        const cacheText = u.cachedTokens ? `, <span style="display:inline-flex; align-items:center; gap:2px; vertical-align:middle; color:var(--vscode-charts-green, #388a34); margin-top:-2px;">${svgIconNoMargin('zap')} ${formatNum(u.cachedTokens)} 缓存</span>` : '';
+                        const cacheText = u.cachedTokens ? `, <span style="display:inline-flex; align-items:center; gap:2px; vertical-align:middle; color:var(--vscode-charts-green, #388a34); margin-top:-2px;">${svgIconNoMargin('zap')} ${formatNum(u.cachedTokens)} ${tr('cached', '缓存')}</span>` : '';
                         const base = `~${formatNum(gaugeUsage)} / ${formatNum(contextLimit)} tokens` + cacheText;
                         const cost = u.estimatedCostCny > 0
                             ? '  ·  ' + (u.estimatedCostCny < 0.01 ? '<¥0.01' : '¥' + u.estimatedCostCny.toFixed(2))
@@ -5890,10 +5919,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const titleBtn = document.getElementById('currentTopicTitle') as HTMLButtonElement | null;
         const renameBtn = document.getElementById('currentTopicRename') as HTMLButtonElement | null;
         const chip = document.getElementById('currentTopicChip') as HTMLElement | null;
-        const label = currentTopicTitle || '新话题';
+        const label = currentTopicTitle || tr('New topic', '新话题');
         if (titleBtn) {
             titleBtn.textContent = label;
-            titleBtn.title = currentTopicId ? `重命名：${label}` : '发送第一条消息后创建话题';
+            titleBtn.title = currentTopicId ? tr(`Rename: ${label}`, `重命名：${label}`) : tr('A topic is created after the first message', '发送第一条消息后创建话题');
             titleBtn.disabled = !currentTopicId;
         }
         if (renameBtn) {
@@ -5920,7 +5949,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         input.className = 'topic-rename-input';
         input.value = originalTitle;
         input.maxLength = 120;
-        input.setAttribute('aria-label', '话题名称');
+        input.setAttribute('aria-label', tr('Topic name', '话题名称'));
 
         let cancelled = false;
         const finish = (commit: boolean) => {
@@ -6024,7 +6053,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         qms.innerHTML = '';
         if (models.length > 0) {
             for (const m of models) { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; opt.selected = m === current.model; qms.appendChild(opt); }
-        } else { const opt = document.createElement('option'); opt.value = current.model || ''; opt.textContent = current.model || '(未设置)'; qms.appendChild(opt); }
+        } else { const opt = document.createElement('option'); opt.value = current.model || ''; opt.textContent = current.model || tr('(not set)', '(未设置)'); qms.appendChild(opt); }
         renderQuickModelMenu();
     }
 
@@ -6110,7 +6139,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const sel = document.getElementById('settingsProvider') as HTMLSelectElement;
         sel.innerHTML = providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         const inlineSel = document.getElementById('inlineProvider') as HTMLSelectElement;
-        inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.inlineCompletion?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+        inlineSel.innerHTML = `<option value="">${tr('- Same as chat -', '- 与对话相同 -')}</option>` + providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.inlineCompletion?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         (document.getElementById('settingsApiKey') as HTMLInputElement).value = '';
         (document.getElementById('settingsEndpoint') as HTMLInputElement).value = current.endpoint || '';
         const customFormatSel = document.getElementById('customApiFormat') as HTMLSelectElement | null;
@@ -6160,7 +6189,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             if (!provSel || !modSel) return;
 
             // Populate the supplier dropdown
-            provSel.innerHTML = '<option value="__inherit__">继承主设置</option>'
+            provSel.innerHTML = `<option value="__inherit__">${tr('Inherit main settings', '继承主设置')}</option>`
                 + providers.map((p: any) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
 
             const saved = savedAgentModels[role];
@@ -6174,7 +6203,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const models: string[] = pid === 'ollama'
                     ? (ollamaModels || []).map((m: any) => m.name)
                     : (provDef ? provDef.models : []);
-                modSel.innerHTML = '<option value="__inherit__">继承主设置</option>'
+                modSel.innerHTML = `<option value="__inherit__">${tr('Inherit main settings', '继承主设置')}</option>`
                     + models.map(m => `<option value="${m}">${escapeHtml(m)}</option>`).join('');
             };
 
@@ -6188,7 +6217,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             // Linked update model drop-down when supplier changes
             provSel.addEventListener('change', () => {
                 if (provSel.value === '__inherit__') {
-                    modSel.innerHTML = '<option value="__inherit__">继承主设置</option>';
+                    modSel.innerHTML = `<option value="__inherit__">${tr('Inherit main settings', '继承主设置')}</option>`;
                 } else {
                     fillModels(provSel.value);
                 }
@@ -6206,7 +6235,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             
             let html = '';
             if (chatSupportsFIM) {
-                html += '<option value="">- 与对话相同 -</option>';
+                html += `<option value="">${tr('- Same as chat -', '- 与对话相同 -')}</option>`;
             }
             html += filteredProviders.map((p: any) => '<option value="' + p.id + '"' + (p.id === currentPid ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
             
@@ -6335,12 +6364,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
         group.style.display = '';
         
-        if (p && p.hasKey) { status.innerHTML = svgIcon('check') + '已配置 API Key'; status.style.color = '#4caf50'; }
-        else { status.innerHTML = svgIcon('warning') + '尚未配置 API Key'; status.style.color = '#ff9800'; }
+        if (p && p.hasKey) { status.innerHTML = svgIcon('check') + tr('API key configured', '已配置 API Key'); status.style.color = '#4caf50'; }
+        else { status.innerHTML = svgIcon('warning') + tr('API key not configured', '尚未配置 API Key'); status.style.color = '#ff9800'; }
         if (deleteBtn) deleteBtn.disabled = !(p && p.hasKey);
         
         if (p && p.registerUrl) {
-            providerHint.innerHTML = `<a href="${p.registerUrl}" style="color:var(--vscode-textLink-foreground);">申请 API Key 地址</a>`;
+            providerHint.innerHTML = `<a href="${p.registerUrl}" style="color:var(--vscode-textLink-foreground);">${tr('Get an API key', '申请 API Key 地址')}</a>`;
         } else {
             providerHint.innerHTML = '';
         }
@@ -6406,16 +6435,16 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             document.getElementById('apiKeyGroup')!.style.display = 'none';
             if (ollamaModels && ollamaModels.length > 0) {
                 currentDropdownOpts = ollamaModels.map((m: any) => m.name);
-                modelHint.textContent = '已检测到 ' + ollamaModels.length + ' 个本地模型';
-            } else { currentDropdownOpts = []; modelHint.textContent = '点击「检测」获取 Ollama 模型'; }
+                modelHint.textContent = tr(`Detected ${ollamaModels.length} local model(s)`, `已检测到 ${ollamaModels.length} 个本地模型`);
+            } else { currentDropdownOpts = []; modelHint.textContent = tr('Click "Detect" to get Ollama models', '点击「检测」获取 Ollama 模型'); }
             detectBtn.style.display = '';
         } else if (provider && provider.models.length > 0) {
             currentDropdownOpts = provider.models;
-            modelHint.textContent = '可选择下拉项，或直接输入自定义模型名';
+            modelHint.textContent = tr('Choose from the dropdown or enter a custom model name', '可选择下拉项，或直接输入自定义模型名');
             detectBtn.style.display = 'none';
         } else if (providerId === 'custom') {
             currentDropdownOpts = [];
-            modelHint.textContent = '输入自定义渠道支持的模型名，或用 API Key 和 Endpoint 拉取模型';
+            modelHint.textContent = tr('Enter a model supported by the custom endpoint, or fetch models with an API key and endpoint', '输入自定义渠道支持的模型名，或用 API Key 和 Endpoint 拉取模型');
             detectBtn.style.display = 'none';
         } else { currentDropdownOpts = []; modelHint.textContent = ''; detectBtn.style.display = 'none'; }
 
@@ -6456,7 +6485,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             if (!ep.value) ep.placeholder = examples[format] ?? examples['openai-chat-completions'] ?? '';
             return;
         }
-        if (provider && hint && ep) { hint.textContent = '默认: ' + (provider.defaultEndpoint || '由 provider 决定'); if (!ep.value) ep.placeholder = provider.defaultEndpoint || '留空使用默认'; }
+        if (provider && hint && ep) {
+            hint.textContent = tr('Default: ', '默认: ') + (provider.defaultEndpoint || tr('decided by provider', '由 provider 决定'));
+            if (!ep.value) ep.placeholder = provider.defaultEndpoint || tr('Leave empty to use default', '留空使用默认');
+        }
     }
 
     function onEndpointChange() {
@@ -6468,14 +6500,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             settingsOllamaModels = [];
             document.getElementById('settingsModelSelect')!.style.display = 'none';
             document.getElementById('settingsModelInput')!.style.display = '';
-            document.getElementById('modelHint')!.textContent = '端点已更改，点击「检测」重新获取模型';
+            document.getElementById('modelHint')!.textContent = tr('Endpoint changed. Click "Detect" to fetch models again.', '端点已更改，点击「检测」重新获取模型');
         }
     }
 
     function detectOllamaModels() {
         const btn = document.getElementById('detectBtn') as HTMLButtonElement; const ep = (document.getElementById('settingsEndpoint') as HTMLInputElement).value.trim();
-        btn.disabled = true; btn.textContent = '检测中...';
-        document.getElementById('modelHint')!.textContent = '正在连接 Ollama...';
+        btn.disabled = true; btn.textContent = tr('Detecting...', '检测中...');
+        document.getElementById('modelHint')!.textContent = tr('Connecting to Ollama...', '正在连接 Ollama...');
         vscode.postMessage({ type: 'detectOllamaModels', endpoint: ep || 'http://localhost:11434/v1' });
     }
 
@@ -6521,12 +6553,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
         div.innerHTML = `
             <div class="mcp-row">
-                <input class="settings-input mcp-name" type="text" placeholder="Server 名称" value="${escapeHtml(server.name || '')}" style="flex:1" />
+                <input class="settings-input mcp-name" type="text" placeholder="${tr('Server name', 'Server 名称')}" value="${escapeHtml(server.name || '')}" style="flex:1" />
                 <select class="settings-select mcp-type" style="width:90px">
                     <option value="stdio" ${(t.type || 'stdio') === 'stdio' ? 'selected' : ''}>stdio</option>
                     <option value="sse" ${t.type === 'sse' ? 'selected' : ''}>sse</option>
                 </select>
-                <button class="mcp-delete-btn" title="删除">${svgIconNoMargin('trash')}</button>
+                <button class="mcp-delete-btn" title="${tr('Delete', '删除')}">${svgIconNoMargin('trash')}</button>
             </div>
             <div class="mcp-transport-content"></div>
         `;
@@ -6538,13 +6570,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         function renderTransport() {
             if (typeSel.value === 'stdio') {
                 contentDiv.innerHTML = `
-                    <input class="settings-input mcp-command" type="text" placeholder="Command (例如: uvx, npx)" value="${(t.type || 'stdio') === 'stdio' ? escapeHtml(t.command || '') : ''}" />
-                    <input class="settings-input mcp-args" type="text" placeholder="Args (空格分隔)" value="${(t.type || 'stdio') === 'stdio' && t.args ? escapeHtml(t.args.join(' ')) : ''}" style="margin-top:4px" />
-                    <textarea class="settings-input mcp-env" rows="3" placeholder="环境变量 (每行 KEY=VALUE，# 开头为注释)" style="margin-top:4px; font-family:monospace; font-size:11px; resize:vertical">${escapeHtml(envToText(serverEnv))}</textarea>
+                    <input class="settings-input mcp-command" type="text" placeholder="${tr('Command (for example: uvx, npx)', 'Command (例如: uvx, npx)')}" value="${(t.type || 'stdio') === 'stdio' ? escapeHtml(t.command || '') : ''}" />
+                    <input class="settings-input mcp-args" type="text" placeholder="${tr('Args (space-separated)', 'Args (空格分隔)')}" value="${(t.type || 'stdio') === 'stdio' && t.args ? escapeHtml(t.args.join(' ')) : ''}" style="margin-top:4px" />
+                    <textarea class="settings-input mcp-env" rows="3" placeholder="${tr('Environment variables (KEY=VALUE per line, # starts a comment)', '环境变量 (每行 KEY=VALUE，# 开头为注释)')}" style="margin-top:4px; font-family:monospace; font-size:11px; resize:vertical">${escapeHtml(envToText(serverEnv))}</textarea>
                 `;
             } else {
                 contentDiv.innerHTML = `
-                    <input class="settings-input mcp-url" type="text" placeholder="SSE URL (例如: http://localhost:3000/sse)" value="${t.type === 'sse' ? escapeHtml(t.url || '') : ''}" />
+                    <input class="settings-input mcp-url" type="text" placeholder="${tr('SSE URL (for example: http://localhost:3000/sse)', 'SSE URL (例如: http://localhost:3000/sse)')}" value="${t.type === 'sse' ? escapeHtml(t.url || '') : ''}" />
                 `;
             }
         }
@@ -6570,7 +6602,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (keyInput) keyInput.value = '';
         const status = document.getElementById('apiKeyStatus');
         if (status) {
-            status.textContent = '正在移除 API Key...';
+            status.textContent = tr('Removing API key...', '正在移除 API Key...');
             status.style.color = 'inherit';
         }
         vscode.postMessage({ type: 'deleteApiKey', providerId });
@@ -6578,8 +6610,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function fetchApiModels() {
         const btn = document.getElementById('fetchApiModelsBtn') as HTMLButtonElement;
-        btn.disabled = true; btn.textContent = '拉取中...';
-        document.getElementById('apiKeyStatus')!.textContent = '正在发起网络请求拉取支持模型...';
+        btn.disabled = true; btn.textContent = tr('Fetching...', '拉取中...');
+        document.getElementById('apiKeyStatus')!.textContent = tr('Sending network request to fetch supported models...', '正在发起网络请求拉取支持模型...');
         document.getElementById('apiKeyStatus')!.style.color = 'inherit';
         vscode.postMessage({
             type: 'fetchApiModels',
@@ -6606,7 +6638,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const btn = document.getElementById('saveSettingsBtn') as HTMLButtonElement | null;
         if (btn) {
             const originalText = btn.textContent;
-            btn.textContent = '✔ 已保存';
+            btn.textContent = tr('✔ Saved', '✔ 已保存');
             btn.style.backgroundColor = '#28a745';
             setTimeout(() => {
                 btn.textContent = originalText;
@@ -6683,8 +6715,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function testConnection() {
-        const tr = document.getElementById('testResult');
-        if (tr) { tr.className = 'test-result'; tr.textContent = '测试中...'; tr.style.display = 'block'; }
+        const resultEl = document.getElementById('testResult');
+        if (resultEl) { resultEl.className = 'test-result'; resultEl.textContent = tr('Testing...', '测试中...'); resultEl.style.display = 'block'; }
         vscode.postMessage({
             type: 'testConnection', settings: {
                 provider: (document.getElementById('settingsProvider') as HTMLSelectElement).value,

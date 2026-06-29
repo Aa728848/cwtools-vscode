@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import { budgetToolResult, compactMessagesInPlace, TOOL_RESULT_BUDGET_BASE } from '../../extension/ai/contextBudget';
+import { setAiMessageLocale } from '../../extension/ai/messages';
 import type { ChatMessage } from '../../extension/ai/types';
 
 // ─── TOOL_RESULT_BUDGET_BASE constant ────────────────────────────────────────
@@ -23,7 +24,18 @@ describe('budgetToolResult', () => {
         const obj = { success: true, content: 'x'.repeat(2000) };
         const result = budgetToolResult(obj, 500);
         expect(result.length).to.be.lessThan(600); // 500 + suffix length
-        expect(result).to.include('[... 已截断');
+        expect(result).to.include('[... truncated');
+    });
+
+    it('truncates content field with Chinese locale', () => {
+        setAiMessageLocale('zh-cn');
+        try {
+            const obj = { success: true, content: 'x'.repeat(2000) };
+            const result = budgetToolResult(obj, 500);
+            expect(result).to.include('[... 已截断');
+        } finally {
+            setAiMessageLocale('en');
+        }
     });
 
     it('handles string input', () => {
@@ -40,7 +52,7 @@ describe('budgetToolResult', () => {
         const longStr = 'a'.repeat(5000);
         const result = budgetToolResult(longStr, 1000);
         expect(result.length).to.be.lessThan(1200);
-        expect(result).to.include('[... 已截断');
+        expect(result).to.include('[... truncated');
     });
 
     // ── read_file optimization ──────────────────────────────────────────────

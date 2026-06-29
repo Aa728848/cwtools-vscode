@@ -37,7 +37,7 @@ import { ChatTopicManager } from './chatTopics';
 import { generateInitFile } from './chatInit';
 import { ChatSettingsManager } from './chatSettings';
 import { ErrorReporter } from './errorReporter';
-import { UI, SOURCE } from './messages';
+import { UI, SOURCE, aiText } from './messages';
 import { ContextReferenceManager } from './contextReferences';
 import { AgentSessionCoordinator } from './agentSessionCoordinator';
 import { runLedger, type AgentRunEvent } from './runner/runLedger';
@@ -536,23 +536,23 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (tasks.length === 0) return '';
 
         const lines = [
-            '## 多 Agent 执行计划',
+            aiText('## Orchestrator Dispatch Plan', '## 多 Agent 执行计划'),
             '',
-            '当前协调模式已提交的 DAG 子任务如下：',
+            aiText('The current coordination mode submitted the following DAG subtasks:', '当前协调模式已提交的 DAG 子任务如下：'),
             '',
         ];
 
         for (const task of tasks) {
             const deps = task.dependencies.length > 0
                 ? task.dependencies.map(d => `\`${d}\``).join(', ')
-                : '无';
+                : aiText('none', '无');
             const contextFiles = task.contextFiles.length > 0
                 ? task.contextFiles.map(c => `\`${c}\``).join(', ')
-                : '无';
+                : aiText('none', '无');
             lines.push(`- \`${task.id}\` (${task.agentType})`);
-            lines.push(`  - 依赖: ${deps}`);
-            lines.push(`  - 上下文: ${contextFiles}`);
-            lines.push(`  - 任务: ${task.prompt}`);
+            lines.push(aiText(`  - Dependencies: ${deps}`, `  - 依赖: ${deps}`));
+            lines.push(aiText(`  - Context: ${contextFiles}`, `  - 上下文: ${contextFiles}`));
+            lines.push(aiText(`  - Task: ${task.prompt}`, `  - 任务: ${task.prompt}`));
         }
 
         return lines.join('\n');
@@ -584,7 +584,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const task = rawTask as Record<string, unknown>;
                 const id = this.shortPlainText(task.id, 80) || `task_${tasks.length + 1}`;
                 const agentType = this.shortPlainText(task.agentType, 40) || 'agent';
-                const prompt = this.shortPlainText(task.prompt, 320) || '未提供任务描述';
+                const prompt = this.shortPlainText(task.prompt, 320) || aiText('No task description provided', '未提供任务描述');
                 const dependencies = Array.isArray(task.dependencies)
                     ? task.dependencies.map(d => this.shortPlainText(d, 80)).filter(Boolean)
                     : [];
@@ -648,9 +648,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private buildDispatchEscalationMarkdown(clarifications: Array<{ id: string; clarification: string }>): string {
         const lines = [
-            '## 子任务上报给父 Agent 的待决事项',
+            aiText('## Subtask Items Pending Parent-Agent Decision', '## 子任务上报给父 Agent 的待决事项'),
             '',
-            '以下事项来自子 Agent。父 Agent 应先依据已批准计划、上下文和保守默认原则自行决策；只有无法安全决断时，才向用户发起澄清。',
+            aiText(
+                'The following items came from sub-agents. The parent agent should first decide from the approved plan, available context, and conservative defaults; ask the user only when it cannot decide safely.',
+                '以下事项来自子 Agent。父 Agent 应先依据已批准计划、上下文和保守默认原则自行决策；只有无法安全决断时，才向用户发起澄清。',
+            ),
             '',
         ];
 
@@ -693,7 +696,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (!config.enabled) {
             this.postMessage({
                 type: 'generationError',
-                error: 'AI 功能未启用。请先点击⚙配置 AI Provider。',
+                error: aiText('AI is not enabled. Click the gear icon to configure an AI provider first.', 'AI 功能未启用。请先点击⚙配置 AI Provider。'),
             });
             return;
         }
@@ -759,7 +762,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // Only record the first snapshot for each file (earliest = true "before" state)
             if (!messageSnapshots.some(s => s.filePath === filePath)) {
                 if (previousContent && previousContent.length > 500000) {
-                    vs.window.showWarningMessage(`文件 ${path.basename(filePath)} 过大 (>${previousContent.length} 字符)。为防止内存耗尽，此文件的撤回快照未保存。`);
+                    vs.window.showWarningMessage(aiText(
+                        `File ${path.basename(filePath)} is too large (> ${previousContent.length} characters). Its rollback snapshot was not saved to avoid memory exhaustion.`,
+                        `文件 ${path.basename(filePath)} 过大 (>${previousContent.length} 字符)。为防止内存耗尽，此文件的撤回快照未保存。`,
+                    ));
                     messageSnapshots.push({ filePath, previousContent: null, _tooLarge: true });
                 } else {
                     messageSnapshots.push({ filePath, previousContent });
@@ -851,7 +857,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.postMessage({ type: 'generationComplete', result: { ...uiResult, explanation: '', code: '' } });
                 this.topicManager.addHistoryMessage({
                     role: 'assistant',
-                    content: '计划已生成，已在批注视图中打开',
+                    content: aiText('The plan has been generated and opened in the annotations view.', '计划已生成，已在批注视图中打开'),
                     timestamp: Date.now(),
                     steps: uiSteps,
                 });
@@ -967,7 +973,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public async editAndResendMessage(messageIndex: number, text: string, images?: string[], contexts?: ContextItem[]): Promise<void> {
         if (!this.topicManager.currentTopic) return;
         if (this._isGenerating) {
-            vs.window.showWarningMessage('请先等待当前 AI 运行结束，或取消生成后再编辑重发。');
+            vs.window.showWarningMessage(aiText('Wait for the current AI run to finish, or cancel it before editing and resending.', '请先等待当前 AI 运行结束，或取消生成后再编辑重发。'));
             return;
         }
         const retracted = await this.retractMessage(messageIndex, { restoreInput: false, notify: false });
@@ -979,16 +985,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public async retractMessage(messageIndex: number, options: { restoreInput?: boolean; notify?: boolean } = {}): Promise<boolean> {
         if (!this.topicManager.currentTopic) return false;
         if (this._isGenerating) {
-            vs.window.showWarningMessage('请先等待当前 AI 运行结束，或取消生成后再回滚消息。');
+            vs.window.showWarningMessage(aiText('Wait for the current AI run to finish, or cancel it before rolling back the message.', '请先等待当前 AI 运行结束，或取消生成后再回滚消息。'));
             return false;
         }
         if (!Number.isInteger(messageIndex) || messageIndex < 0 || messageIndex >= this.topicManager.currentTopic.messages.length) {
-            vs.window.showWarningMessage('无法回滚：消息位置已经失效。');
+            vs.window.showWarningMessage(aiText('Cannot roll back: the message position is no longer valid.', '无法回滚：消息位置已经失效。'));
             return false;
         }
         const messageToRestore = this.topicManager.currentTopic.messages[messageIndex];
         if (messageToRestore?.role !== 'user') {
-            vs.window.showWarningMessage('只能从用户消息开始回滚。');
+            vs.window.showWarningMessage(aiText('Rollback can only start from a user message.', '只能从用户消息开始回滚。'));
             return false;
         }
         const shouldRestoreInput = options.restoreInput !== false;
@@ -1091,12 +1097,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         if (shouldNotify) {
             const filePart = skippedFiles > 0
-                ? `已恢复 ${restoredFileCount} 个文件，${skippedFiles} 个文件未能恢复。`
+                ? aiText(`${restoredFileCount} file(s) restored; ${skippedFiles} file(s) could not be restored.`, `已恢复 ${restoredFileCount} 个文件，${skippedFiles} 个文件未能恢复。`)
                 : restoredFileCount > 0
-                    ? `已恢复 ${restoredFileCount} 个文件。`
-                    : '没有需要恢复的文件快照。';
-            const inputPart = restoredInput ? '原消息已恢复到输入框。' : '';
-            vs.window.showInformationMessage(`已回滚到该消息之前。${filePart}${inputPart}`);
+                    ? aiText(`${restoredFileCount} file(s) restored.`, `已恢复 ${restoredFileCount} 个文件。`)
+                    : aiText('No file snapshots needed restoration.', '没有需要恢复的文件快照。');
+            const inputPart = restoredInput ? aiText(' The original message was restored to the input box.', '原消息已恢复到输入框。') : '';
+            vs.window.showInformationMessage(aiText(`Rolled back to before this message. ${filePart}${inputPart}`, `已回滚到该消息之前。${filePart}${inputPart}`));
         }
         return true;
     }
@@ -1243,7 +1249,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // Shared path compatibility: if the stored filePath does not exist, try to find it in a candidate location
             const resolvedPath = this.resolveArtifactFilePath(artifact.filePath);
             if (!resolvedPath) {
-                vs.window.showWarningMessage(`无法找到文件: ${path.basename(artifact.filePath)}`);
+                vs.window.showWarningMessage(aiText(`Could not find file: ${path.basename(artifact.filePath)}`, `无法找到文件: ${path.basename(artifact.filePath)}`));
                 return;
             }
             const uri = vs.Uri.file(resolvedPath);
@@ -1828,24 +1834,26 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             await vs.commands.executeCommand('vscode.diff',
                 originalUri,
                 previewUri,
-                `AI 代码变更预览 - ${path.basename(document.uri.fsPath)}`,
+                aiText(`AI Code Change Preview - ${path.basename(document.uri.fsPath)}`, `AI 代码变更预览 - ${path.basename(document.uri.fsPath)}`),
                 { preview: true }
             );
 
             // Ask for confirmation
+            const acceptLabel = aiText('Accept', '✓ 接受');
+            const rejectLabel = aiText('Reject', '✗ 拒绝');
             const action = await vs.window.showInformationMessage(
-                '是否接受 AI 生成的代码变更？',
+                aiText('Accept the AI-generated code change?', '是否接受 AI 生成的代码变更？'),
                 { modal: false },
-                '✓ 接受',
-                '✗ 拒绝'
+                acceptLabel,
+                rejectLabel
             );
 
-            if (action === '✓ 接受') {
+            if (action === acceptLabel) {
                 // Apply the edit
                 const edit = new vs.WorkspaceEdit();
                 edit.insert(document.uri, new vs.Position(insertLine + 1, 0), code + '\n');
                 await vs.workspace.applyEdit(edit);
-                vs.window.showInformationMessage('代码已插入');
+                vs.window.showInformationMessage(aiText('Code inserted.', '代码已插入'));
             } else {
                 vs.window.showInformationMessage(UI.INSERT_CANCELLED);
             }
@@ -1895,7 +1903,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 await this.agentRunner.clearResumeState(topicId);
                 return;
             }
-            this.postMessage({ type: 'generationError', error: '当前会话包含未完成的任务快照。', canResume: true });
+            this.postMessage({ type: 'generationError', error: aiText('This topic contains an unfinished task snapshot.', '当前会话包含未完成的任务快照。'), canResume: true });
         }
     }
 
@@ -2711,9 +2719,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     await fs.promises.mkdir(path.dirname(wtPath), { recursive: true });
                     await fs.promises.writeFile(wtPath, mdContent, 'utf-8');
                     this._recordFileSnapshot(wtPath);
-                    ErrorReporter.debug(SOURCE.CHAT_PANEL, `Orchestrator 任务结束：已自动合成并补全 walkthrough.md 报告，路径: ${wtPath}`);
+                    ErrorReporter.debug(SOURCE.CHAT_PANEL, aiText(
+                        `Orchestrator run finished: synthesized walkthrough.md report at ${wtPath}`,
+                        `Orchestrator 任务结束：已自动合成并补全 walkthrough.md 报告，路径: ${wtPath}`,
+                    ));
                 } catch (err) {
-                    ErrorReporter.warn(SOURCE.CHAT_PANEL, '自动生成 Orchestrator walkthrough.md 失败', err);
+                    ErrorReporter.warn(SOURCE.CHAT_PANEL, aiText('Failed to auto-generate orchestrator walkthrough.md', '自动生成 Orchestrator walkthrough.md 失败'), err);
                 }
             }
         }
@@ -2748,8 +2759,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     private buildOrchestratorWalkthroughMarkdown(dispatchResults: Array<Record<string, any>>, result: GenerationResult, runEvents: AgentRunEvent[] = []): string {
-        const title = "Multi-Agent Coordination Walkthrough (多 Agent 协作全局报告)";
-        const topicTitle = this.topicManager.currentTopic?.title || "PDXScript 多 Agent 协作任务";
+        const title = aiText('Multi-Agent Coordination Walkthrough', 'Multi-Agent Coordination Walkthrough (多 Agent 协作全局报告)');
+        const topicTitle = this.topicManager.currentTopic?.title || aiText('PDXScript multi-agent coordination task', 'PDXScript 多 Agent 协作任务');
         const topicId = this.topicManager.currentTopic?.id || 'default';
         const workspaceRoot = getProjectWorkspaceRoot();
         const taskLookup = new Map(this.extractDispatchTasks(result).map(task => [task.id, task]));
@@ -2795,18 +2806,21 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 preview = preview.slice(0, lineBreak).trimEnd();
             }
             preview = trimIncompleteMarkdownTail(preview);
-            return `${preview}\n\n_内容较长，已自动压缩：显示前 ${preview.length} / ${text.length} 字符。_`;
+            return `${preview}\n\n${aiText(
+                `_Content was long and has been compacted automatically: showing the first ${preview.length} / ${text.length} characters._`,
+                `_内容较长，已自动压缩：显示前 ${preview.length} / ${text.length} 字符。_`,
+            )}`;
         };
         const tableCell = (value: unknown, maxLength = 140): string => {
             const text = this.shortPlainText(value, maxLength).replace(/\|/g, '\\|');
             return text || '-';
         };
         const listValue = (value: unknown, maxLength = 120): string => {
-            if (!Array.isArray(value) || value.length === 0) return '无';
+            if (!Array.isArray(value) || value.length === 0) return aiText('none', '无');
             const items = value
                 .map(item => this.shortPlainText(item, maxLength))
                 .filter(Boolean);
-            return items.length > 0 ? items.map(item => `\`${item}\``).join(', ') : '无';
+            return items.length > 0 ? items.map(item => `\`${item}\``).join(', ') : aiText('none', '无');
         };
         const fileLink = (file: string): string => {
             const absPath = path.isAbsolute(file) ? file : path.join(workspaceRoot, file);
@@ -2855,17 +2869,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const ledgerFiles = Array.from(ledgerFileChanges.get(id) ?? []);
                 const files = Array.from(new Set([...resultFiles, ...ledgerFiles]));
                 const status = agent.success
-                    ? '✅ 成功'
+                    ? aiText('Success', '✅ 成功')
                     : agent.needsClarification
-                        ? '⚠️ 待决'
+                        ? aiText('Pending', '⚠️ 待决')
                         : agent.error
-                            ? '❌ 失败'
-                            : '未知';
+                            ? aiText('Failed', '❌ 失败')
+                            : aiText('Unknown', '未知');
                 const resultSummary = agent.success
-                    ? (agent.outputSummary || agent.summary || '子 Agent 已完成分配任务，但未返回详细摘要。')
+                    ? (agent.outputSummary || agent.summary || aiText('The sub-agent completed its assigned task but did not return a detailed summary.', '子 Agent 已完成分配任务，但未返回详细摘要。'))
                     : agent.needsClarification
-                        ? (agent.clarification || agent.error || '子 Agent 请求父 Agent 决策。')
-                        : (agent.error || '子 Agent 未返回成功结果。');
+                        ? (agent.clarification || agent.error || aiText('The sub-agent requested a parent-agent decision.', '子 Agent 请求父 Agent 决策。'))
+                        : (agent.error || aiText('The sub-agent did not return a successful result.', '子 Agent 未返回成功结果。'));
 
                 for (const file of files) {
                     if (recordFile(id, file)) totalFilesCount++;
@@ -2877,21 +2891,21 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     `### Agent ${id} (${role})`,
                     '',
                     `- **Batch**: ${batchIndex + 1}`,
-                    `- **状态**: ${status}`,
-                    `- **职责/任务**: ${markdownText(agent.prompt || task?.prompt, 1200) || '未记录任务说明。'}`,
-                    `- **依赖**: ${listValue(agent.dependencies || task?.dependencies)}`,
-                    `- **上下文文件**: ${listValue(task?.contextFiles)}`,
-                    `- **计划文件**: ${listValue(agent.plannedFiles)}`,
-                    `- **计划对象**: ${listValue(agent.plannedEntities)}`,
-                    `- **步骤数**: ${Number(agent.stepCount || 0)}`,
-                    `- **Token 消耗**: ${Number(agent.tokenUsed || 0)}`,
+                    aiText(`- **Status**: ${status}`, `- **状态**: ${status}`),
+                    aiText(`- **Role / task**: ${markdownText(agent.prompt || task?.prompt, 1200) || 'No task description recorded.'}`, `- **职责/任务**: ${markdownText(agent.prompt || task?.prompt, 1200) || '未记录任务说明。'}`),
+                    aiText(`- **Dependencies**: ${listValue(agent.dependencies || task?.dependencies)}`, `- **依赖**: ${listValue(agent.dependencies || task?.dependencies)}`),
+                    aiText(`- **Context files**: ${listValue(task?.contextFiles)}`, `- **上下文文件**: ${listValue(task?.contextFiles)}`),
+                    aiText(`- **Planned files**: ${listValue(agent.plannedFiles)}`, `- **计划文件**: ${listValue(agent.plannedFiles)}`),
+                    aiText(`- **Planned entities**: ${listValue(agent.plannedEntities)}`, `- **计划对象**: ${listValue(agent.plannedEntities)}`),
+                    aiText(`- **Step count**: ${Number(agent.stepCount || 0)}`, `- **步骤数**: ${Number(agent.stepCount || 0)}`),
+                    aiText(`- **Token usage**: ${Number(agent.tokenUsed || 0)}`, `- **Token 消耗**: ${Number(agent.tokenUsed || 0)}`),
                     '',
-                    '#### 子 Agent 工作总结',
-                    markdownText(resultSummary, 2400) || '未记录详细输出。',
+                    aiText('#### Sub-Agent Work Summary', '#### 子 Agent 工作总结'),
+                    markdownText(resultSummary, 2400) || aiText('No detailed output recorded.', '未记录详细输出。'),
                 ];
 
                 if (files.length > 0) {
-                    agentLines.push('', '#### 文件产出');
+                    agentLines.push('', aiText('#### File Outputs', '#### 文件产出'));
                     agentLines.push(...files.map(file => `- ${fileLink(file)}`));
                 }
 
@@ -2911,48 +2925,57 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const displayPath = agentIds.size > 0
                 ? Array.from(agentIds).join(', ')
                 : 'unknown';
-            return `- ${fileLink(file)}，来源 Agent: ${displayPath}`;
+            return aiText(`- ${fileLink(file)}, source agent: ${displayPath}`, `- ${fileLink(file)}，来源 Agent: ${displayPath}`);
         });
 
         const lines = [
             `# ${title}`,
             '',
             '> [!NOTE]',
-            '> 本报告由父级主 Agent 在所有 dispatch_agents 批次完成后统一生成，用于汇总每个子 Agent 的职责、执行过程、产出摘要和文件变更，避免只保留最后一个子 Agent 的结果。',
+            aiText(
+                '> This report was generated by the parent agent after all dispatch_agents batches completed. It summarizes each sub-agent role, execution, output summary, and file changes so the final record does not only reflect the last completed sub-agent.',
+                '> 本报告由父级主 Agent 在所有 dispatch_agents 批次完成后统一生成，用于汇总每个子 Agent 的职责、执行过程、产出摘要和文件变更，避免只保留最后一个子 Agent 的结果。',
+            ),
             '',
-            '## 任务背景 (Topic Background)',
-            `- **当前主题**: ${topicTitle}`,
-            `- **调度批次**: ${dispatchResults.length}`,
-            `- **子 Agent 数量**: ${totalAgents}`,
-            `- **总 Token**: ${tokenTotal}`,
-            `- **估算成本**: ¥${costTotal.toFixed(4)}`,
+            aiText('## Topic Background', '## 任务背景 (Topic Background)'),
+            aiText(`- **Current topic**: ${topicTitle}`, `- **当前主题**: ${topicTitle}`),
+            aiText(`- **Dispatch batches**: ${dispatchResults.length}`, `- **调度批次**: ${dispatchResults.length}`),
+            aiText(`- **Sub-agents**: ${totalAgents}`, `- **子 Agent 数量**: ${totalAgents}`),
+            aiText(`- **Total tokens**: ${tokenTotal}`, `- **总 Token**: ${tokenTotal}`),
+            aiText(`- **Estimated cost**: ¥${costTotal.toFixed(4)}`, `- **估算成本**: ¥${costTotal.toFixed(4)}`),
             '',
-            '## 主 Agent 全局总结 (Parent Agent Global Summary)',
-            markdownText(result.explanation, 1800) || '父级主 Agent 已完成多 Agent 协调，并基于调度结果生成全局 Walkthrough。',
+            aiText('## Parent Agent Global Summary', '## 主 Agent 全局总结 (Parent Agent Global Summary)'),
+            markdownText(result.explanation, 1800) || aiText('The parent agent completed multi-agent coordination and generated this walkthrough from the dispatch results.', '父级主 Agent 已完成多 Agent 协调，并基于调度结果生成全局 Walkthrough。'),
             '',
-            '## 协作节点执行列表 (Agent Execution Manifest)',
-            '| Batch | 子任务 ID | 角色类型 | 执行状态 | 变更文件数 | Token 消耗 | 结果说明 |',
+            aiText('## Agent Execution Manifest', '## 协作节点执行列表 (Agent Execution Manifest)'),
+            aiText('| Batch | Subtask ID | Role | Status | Changed Files | Token Usage | Result |', '| Batch | 子任务 ID | 角色类型 | 执行状态 | 变更文件数 | Token 消耗 | 结果说明 |'),
             '| :--- | :--- | :--- | :--- | ---: | ---: | :--- |',
-            ...(manifestRows.length > 0 ? manifestRows : ['| - | - | - | - | 0 | 0 | 未记录子 Agent 结果 |']),
+            ...(manifestRows.length > 0 ? manifestRows : [aiText('| - | - | - | - | 0 | 0 | No sub-agent result recorded |', '| - | - | - | - | 0 | 0 | 未记录子 Agent 结果 |')]),
             '',
-            '## 调度批次总结 (Dispatch Batch Summaries)',
-            batchSections.length > 0 ? batchSections.join('\n\n') : '未记录批次级摘要。',
+            aiText('## Dispatch Batch Summaries', '## 调度批次总结 (Dispatch Batch Summaries)'),
+            batchSections.length > 0 ? batchSections.join('\n\n') : aiText('No batch-level summary recorded.', '未记录批次级摘要。'),
             '',
-            '## 每个子 Agent 的工作总结 (Per-Agent Work Summaries)',
-            agentSections.length > 0 ? agentSections.join('\n\n') : '未记录子 Agent 工作总结。',
+            aiText('## Per-Agent Work Summaries', '## 每个子 Agent 的工作总结 (Per-Agent Work Summaries)'),
+            agentSections.length > 0 ? agentSections.join('\n\n') : aiText('No sub-agent work summary recorded.', '未记录子 Agent 工作总结。'),
             '',
-            '## 文件变更总览 (File Changes Summary)',
-            `本次多 Agent 协作共记录 **${totalFilesCount}** 个文件写入事件，涉及 **${changedFiles.size}** 个唯一文件。`,
+            aiText('## File Changes Summary', '## 文件变更总览 (File Changes Summary)'),
+            aiText(
+                `This multi-agent run recorded **${totalFilesCount}** file-write event(s), touching **${changedFiles.size}** unique file(s).`,
+                `本次多 Agent 协作共记录 **${totalFilesCount}** 个文件写入事件，涉及 **${changedFiles.size}** 个唯一文件。`,
+            ),
             '',
-            changedFileLines.length > 0 ? changedFileLines.join('\n') : '未记录子 Agent 文件变更。',
+            changedFileLines.length > 0 ? changedFileLines.join('\n') : aiText('No sub-agent file changes recorded.', '未记录子 Agent 文件变更。'),
             '',
-            '## 验证与质量把关 (Verification & Quality Gate)',
-            `- **失败节点**: ${failedNodes.size > 0 ? Array.from(failedNodes).map(id => `\`${id}\``).join(', ') : '无'}`,
-            `- **取消节点**: ${cancelledNodes.size > 0 ? Array.from(cancelledNodes).map(id => `\`${id}\``).join(', ') : '无'}`,
-            '- **主 Agent 职责**: 以全局视角审查所有子 Agent 结果，确认各部分产出能够组成完整任务交付，而不是只采用最后完成节点的总结。',
+            aiText('## Verification & Quality Gate', '## 验证与质量把关 (Verification & Quality Gate)'),
+            aiText(`- **Failed nodes**: ${failedNodes.size > 0 ? Array.from(failedNodes).map(id => `\`${id}\``).join(', ') : 'none'}`, `- **失败节点**: ${failedNodes.size > 0 ? Array.from(failedNodes).map(id => `\`${id}\``).join(', ') : '无'}`),
+            aiText(`- **Cancelled nodes**: ${cancelledNodes.size > 0 ? Array.from(cancelledNodes).map(id => `\`${id}\``).join(', ') : 'none'}`, `- **取消节点**: ${cancelledNodes.size > 0 ? Array.from(cancelledNodes).map(id => `\`${id}\``).join(', ') : '无'}`),
+            aiText('- **Parent-agent responsibility**: Review all sub-agent results globally and confirm that the parts form a complete delivery, rather than accepting only the final node summary.', '- **主 Agent 职责**: 以全局视角审查所有子 Agent 结果，确认各部分产出能够组成完整任务交付，而不是只采用最后完成节点的总结。'),
             '',
             '---',
-            `*报告由 Eddy CWTool AI 协调器在多 Agent 协作结束后生成并存档于 \`.cwtools-ai/${topicId}/walkthrough.md\`。*`,
+            aiText(
+                `*Generated by the Eddy CWTool AI coordinator after multi-agent collaboration and archived at \`.cwtools-ai/${topicId}/walkthrough.md\`.*`,
+                `*报告由 Eddy CWTool AI 协调器在多 Agent 协作结束后生成并存档于 \`.cwtools-ai/${topicId}/walkthrough.md\`。*`,
+            ),
         ];
 
         return lines.join('\n');

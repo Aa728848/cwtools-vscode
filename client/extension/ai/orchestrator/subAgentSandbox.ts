@@ -7,6 +7,7 @@ import { getAgentToolTargetFiles } from '../runner/toolScheduler';
 import { FILE_SCOPED_WRITE_TOOLS, MUTATING_TOOLS, SUB_AGENT_EXCLUDES } from '../tools/registry';
 import { isPathInsideOrEqual, foldPathCase } from '../workspaceSandbox';
 import { clampWriteScopeToRoots } from '../runner/policyEngine';
+import { aiText } from '../messages';
 
 /**
  * Orchestrator 子 Agent 物理沙盒隔离规范 (Sub-Agent Sandbox)
@@ -155,14 +156,20 @@ export function enforceSubAgentSafety(
         }
         return {
             allowed: false,
-            reason: `子 Agent 沙盒已拒绝执行敏感特权工具 '${toolName}'`
+            reason: aiText(
+                `The sub-agent sandbox rejected privileged tool '${toolName}'.`,
+                `子 Agent 沙盒已拒绝执行敏感特权工具 '${toolName}'`,
+            ),
         };
     }
 
     if (sandbox.writeScope && sandbox.writeScope.length === 0 && MUTATING_TOOLS.has(toolName) && !FILE_SCOPED_WRITE_TOOLS.has(toolName)) {
         return {
             allowed: false,
-            reason: `子任务角色 '${sandbox.role}' (${sandbox.mode}) 属于只读角色，禁止调用会修改状态的工具 '${toolName}'`
+            reason: aiText(
+                `Subtask role '${sandbox.role}' (${sandbox.mode}) is read-only and cannot call mutating tool '${toolName}'.`,
+                `子任务角色 '${sandbox.role}' (${sandbox.mode}) 属于只读角色，禁止调用会修改状态的工具 '${toolName}'`,
+            ),
         };
     }
 
@@ -183,7 +190,10 @@ export function enforceSubAgentSafety(
             }
             return {
                 allowed: false,
-                reason: `子任务角色 '${sandbox.role}' (${sandbox.mode}) 属于只读角色，禁止调用物理写入工具 '${toolName}'`
+                reason: aiText(
+                    `Subtask role '${sandbox.role}' (${sandbox.mode}) is read-only and cannot call file-writing tool '${toolName}'.`,
+                    `子任务角色 '${sandbox.role}' (${sandbox.mode}) 属于只读角色，禁止调用物理写入工具 '${toolName}'`,
+                ),
             };
         }
 
@@ -204,7 +214,10 @@ export function enforceSubAgentSafety(
             if (invalidTarget) {
                 return {
                     allowed: false,
-                    reason: `子 Agent 沙盒物理拦截：多文件写入目标 '${invalidTarget}' 不在许可的作用域范围 [${sandbox.writeScope.join(', ')}] 内，拒绝操作。`
+                    reason: aiText(
+                        `Sub-agent sandbox blocked the multi-file write: target '${invalidTarget}' is outside the allowed write scopes [${sandbox.writeScope.join(', ')}].`,
+                        `子 Agent 沙盒物理拦截：多文件写入目标 '${invalidTarget}' 不在许可的作用域范围 [${sandbox.writeScope.join(', ')}] 内，拒绝操作。`,
+                    ),
                 };
             }
         }
@@ -214,7 +227,10 @@ export function enforceSubAgentSafety(
             if (!targetMatchesWriteScope(targetFile, sandbox.writeScope, workspaceRoot)) {
                 return {
                     allowed: false,
-                    reason: `子 Agent 沙盒物理拦截：写入目标文件路径 '${targetFile}' 不在许可的作用域范围 [${sandbox.writeScope.join(', ')}] 内，拒绝操作。`
+                    reason: aiText(
+                        `Sub-agent sandbox blocked the write: target file '${targetFile}' is outside the allowed write scopes [${sandbox.writeScope.join(', ')}].`,
+                        `子 Agent 沙盒物理拦截：写入目标文件路径 '${targetFile}' 不在许可的作用域范围 [${sandbox.writeScope.join(', ')}] 内，拒绝操作。`,
+                    ),
                 };
             }
         }

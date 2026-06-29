@@ -10,7 +10,7 @@
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 import { Icons, svgIconNoMargin } from './svgIcons';
-import { groupToolCalls, categoryClass, getToolDynamicPhrase, type ToolGroup } from './chat/toolPhrases';
+import { groupToolCalls, categoryClass, getToolDynamicPhrase, type ToolGroup, type ToolPhraseLocale } from './chat/toolPhrases';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -79,6 +79,8 @@ export interface ToolPairOptions {
     stepIndex?: number;
     /** Max diff lines to render inline (default: 20) */
     maxDiffLines?: number;
+    /** UI locale for user-visible labels. Defaults to English. */
+    locale?: ToolPhraseLocale;
 }
 
 // ── Tool icon map (text-only, no SVG — SVG injected by WebView consumer) ─────
@@ -337,6 +339,8 @@ export function buildToolPairHtml(
     const toolName: string = callStep.toolName || '';
     const args = (callStep.toolArgs || {}) as Record<string, unknown>;
     const icon = TOOL_ICON_LABELS[callStep.type === 'permission_request' ? 'permission_request' : toolName] || '⚙';
+    const locale = opts?.locale ?? 'en';
+    const isZh = locale === 'zh-cn';
     const showDuration = opts?.showDuration ?? true;
     const showParams = opts?.showParams ?? false;
     const showDiff = opts?.showDiff ?? false;
@@ -353,17 +357,17 @@ export function buildToolPairHtml(
         html += `<span class="tp-name">${escapeHtml(toolName)}</span>`;
         html += `<span class="tp-file">${cmd}</span>`;
         html += `<div class="tp-perm-actions">`;
-        html += `<button class="tp-perm-btn tp-perm-allow" data-perm="${escapeHtml(permId)}" data-action="allow">允许</button>`;
-        html += `<button class="tp-perm-btn tp-perm-deny" data-perm="${escapeHtml(permId)}" data-action="deny">拒绝</button>`;
+        html += `<button class="tp-perm-btn tp-perm-allow" data-perm="${escapeHtml(permId)}" data-action="allow">${isZh ? '允许' : 'Allow'}</button>`;
+        html += `<button class="tp-perm-btn tp-perm-deny" data-perm="${escapeHtml(permId)}" data-action="deny">${isZh ? '拒绝' : 'Deny'}</button>`;
         if (callStep.allowAlways) {
-            html += `<button class="tp-perm-btn tp-perm-always" data-perm="${escapeHtml(permId)}" data-action="always">始终允许</button>`;
+            html += `<button class="tp-perm-btn tp-perm-always" data-perm="${escapeHtml(permId)}" data-action="always">${isZh ? '始终允许' : 'Always allow'}</button>`;
         }
         html += `</div></div>`;
         return html;
     }
 
     // ── Standard tool call ──
-    const dynPhrase = getToolDynamicPhrase(toolName, args);
+    const dynPhrase = getToolDynamicPhrase(toolName, args, locale);
     const displayLabel = resultStep ? dynPhrase.label : dynPhrase.loadingLabel;
     const summary = summarizeToolArgs(toolName, args, paramLen);
 
@@ -471,7 +475,8 @@ function stepPhase(type: string): 'thinking' | 'tool' | 'text' | 'special' {
 export function buildAssistantMessageHtml(
     content: string,
     classified: ClassifiedSteps,
-    msgTime?: number
+    msgTime?: number,
+    locale: ToolPhraseLocale = 'en',
 ): string {
     // Intercept and group steps with agentId
     const mainClassified: ClassifiedSteps = {
@@ -550,10 +555,11 @@ export function buildAssistantMessageHtml(
             showDuration: true,
             showParams: true,
             showDiff: true,
+            locale,
         };
 
         // Try grouped rendering (≥3 tool calls)
-        const groups = groupToolCalls(toolCallBuf, toolResultBuf);
+        const groups = groupToolCalls(toolCallBuf, toolResultBuf, locale);
         if (groups) {
             html += '<div class="tool-timeline tool-timeline-grouped">';
             const idxRef = { value: globalToolIdx };
@@ -606,24 +612,27 @@ export function buildAssistantMessageHtml(
                 const createdPct = total > 0 ? (created / total) * 100 : 0;
                 const missPct = total > 0 ? (miss / total) * 100 : 0;
 
-                let statsHtml = `<div class="cache-sparkline" title="缓存命中: ${cached} (${cachedPct.toFixed(1)}%) | 缓存新建: ${created} (${createdPct.toFixed(1)}%) | 穿透/未命中: ${miss} (${missPct.toFixed(1)}%)">`;
+                const cacheTitle = locale === 'zh-cn'
+                    ? `缓存命中: ${cached} (${cachedPct.toFixed(1)}%) | 缓存新建: ${created} (${createdPct.toFixed(1)}%) | 穿透/未命中: ${miss} (${missPct.toFixed(1)}%)`
+                    : `Cache hit: ${cached} (${cachedPct.toFixed(1)}%) | Cache created: ${created} (${createdPct.toFixed(1)}%) | Miss: ${miss} (${missPct.toFixed(1)}%)`;
+                let statsHtml = `<div class="cache-sparkline" title="${escapeHtml(cacheTitle)}">`;
                 if (cachedPct > 0) statsHtml += `<div class="spark-bar spark-hit" style="width: ${cachedPct}%"></div>`;
                 if (createdPct > 0) statsHtml += `<div class="spark-bar spark-create" style="width: ${createdPct}%"></div>`;
                 if (missPct > 0) statsHtml += `<div class="spark-bar spark-miss" style="width: ${missPct}%"></div>`;
                 statsHtml += `</div>`;
 
                 let labelHtml = `<span class="cache-label-group">`;
-                if (cached > 0) labelHtml += `<span class="c-lbl c-hit">命 ${cached}</span>`;
-                if (created > 0) labelHtml += `<span class="c-lbl c-create">新 ${created}</span>`;
-                if (miss > 0) labelHtml += `<span class="c-lbl c-miss">漏 ${miss}</span>`;
+                if (cached > 0) labelHtml += `<span class="c-lbl c-hit">${locale === 'zh-cn' ? '命' : 'hit'} ${cached}</span>`;
+                if (created > 0) labelHtml += `<span class="c-lbl c-create">${locale === 'zh-cn' ? '新' : 'new'} ${created}</span>`;
+                if (miss > 0) labelHtml += `<span class="c-lbl c-miss">${locale === 'zh-cn' ? '漏' : 'miss'} ${miss}</span>`;
                 labelHtml += `</span>`;
 
                 html += `<div class="special-step cache_stats">` +
                             `<span class="ss-icon">⚡</span> ` +
-                            `<span class="cache-title">缓存效能</span>` +
+                            `<span class="cache-title">${locale === 'zh-cn' ? '缓存效能' : 'Cache efficiency'}</span>` +
                             `${statsHtml}` +
                             `${labelHtml}` +
-                            `<span class="cache-savings" style="margin-left:auto;">省 ¥${(cs.savedCostCny || 0).toFixed(4)}</span>` +
+                            `<span class="cache-savings" style="margin-left:auto;">${locale === 'zh-cn' ? '省' : 'saved'} ¥${(cs.savedCostCny || 0).toFixed(4)}</span>` +
                         `</div>`;
                 continue;
             }
@@ -674,14 +683,17 @@ export function buildAssistantMessageHtml(
 
     // Recursively render all child Agent independent boxes
     for (const [agentId, groupClassified] of subAgentGroups.entries()) {
-        const innerHtml = buildAssistantMessageHtml('', groupClassified, msgTime);
+        const innerHtml = buildAssistantMessageHtml('', groupClassified, msgTime, locale);
         const uniqueId = `subview-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        const subtaskLabel = locale === 'zh-cn' ? '子任务' : 'Subtask';
+        const backLabel = locale === 'zh-cn' ? '返回' : 'Back';
+        const subagentLabel = locale === 'zh-cn' ? '子代理' : 'Subagent';
         
         // Card representation in the main timeline
         html += `<div class="orch-lane subagent-card" data-target-id="${uniqueId}">
                     <div class="lane-header">
                         <span class="lane-icon">${svgIconNoMargin('bot')}</span>
-                        <span class="lane-role">子任务: ${escapeHtml(agentId)}</span>
+                        <span class="lane-role">${subtaskLabel}: ${escapeHtml(agentId)}</span>
                         <span class="lane-status" style="margin-left:auto;">›</span>
                     </div>
                  </div>`;
@@ -689,8 +701,8 @@ export function buildAssistantMessageHtml(
         // Hidden fullscreen container
         html += `<div id="${uniqueId}" class="subagent-fullscreen-view">
                     <div class="subagent-header">
-                        <button class="subagent-back-btn" data-target-id="${uniqueId}">‹ 返回</button>
-                        <span class="subagent-title">子代理: ${escapeHtml(agentId)}</span>
+                        <button class="subagent-back-btn" data-target-id="${uniqueId}">‹ ${backLabel}</button>
+                        <span class="subagent-title">${subagentLabel}: ${escapeHtml(agentId)}</span>
                     </div>
                     <div class="subagent-body">
                         ${innerHtml}

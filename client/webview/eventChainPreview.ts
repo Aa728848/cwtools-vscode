@@ -65,6 +65,8 @@ const statsBar = document.getElementById('stats-bar')!;
 const nsSelect = document.getElementById('ns-filter') as HTMLSelectElement;
 const searchInput = document.getElementById('search-input') as HTMLInputElement;
 const detailPanel = document.getElementById('details-panel') as HTMLDivElement | null;
+const locale = (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh') ? 'zh-cn' : 'en';
+const t = (en: string, zh: string) => locale === 'zh-cn' ? zh : en;
 
 const cy = cytoscape({
     container,
@@ -315,9 +317,9 @@ function edgeTypeLabel(edgeType: EventEdge['edgeType'] | string): string {
         case 'on_action': return 'On action';
         case 'decision': return 'Decision';
         case 'scripted': return 'Scripted';
-        case 'flag': return 'Flag 隐式';
-        case 'on_action_implicit': return 'On action 隐式';
-        default: return '未知关系';
+        case 'flag': return t('Flag implicit', 'Flag 隐式');
+        case 'on_action_implicit': return t('On action implicit', 'On action 隐式');
+        default: return t('Unknown relation', '未知关系');
     }
 }
 
@@ -359,12 +361,12 @@ function clearSelection() {
 }
 
 function getNodeKind(data: Record<string, unknown>): string {
-    if (data.isExternal) return '外部入口';
-    if (data.isOrphan) return '外部引用';
-    if (data.hasMTTH) return 'MTTH 事件';
-    if (data.isEntry) return '入口事件';
-    if (data.isTriggered) return '触发型事件';
-    return '事件';
+    if (data.isExternal) return t('External entry', '外部入口');
+    if (data.isOrphan) return t('External reference', '外部引用');
+    if (data.hasMTTH) return t('MTTH event', 'MTTH 事件');
+    if (data.isEntry) return t('Entry event', '入口事件');
+    if (data.isTriggered) return t('Triggered event', '触发型事件');
+    return t('Event', '事件');
 }
 
 function updateDetails(node: cytoscape.NodeSingular | null) {
@@ -374,8 +376,8 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
         detailPanel.classList.add('empty');
         detailPanel.innerHTML = `
             <div class="details-empty">
-                <div class="details-empty-title">选择事件节点</div>
-                <div class="details-empty-copy">查看事件标题、来源位置，以及它在链路中的前后关系。</div>
+                <div class="details-empty-title">${t('Select an event node', '选择事件节点')}</div>
+                <div class="details-empty-copy">${t('View the event title, source location, and incoming/outgoing chain relations.', '查看事件标题、来源位置，以及它在链路中的前后关系。')}</div>
             </div>
         `;
         return;
@@ -386,30 +388,30 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
     const outgoing = node.outgoers('edge').length;
     const canOpen = Boolean(data.file && data.line);
     const badges = [
-        data.isEntry ? '入口' : '',
-        data.isTriggered ? '触发型' : '',
-        data.isHidden ? '隐藏' : '',
+        data.isEntry ? t('Entry', '入口') : '',
+        data.isTriggered ? t('Triggered', '触发型') : '',
+        data.isHidden ? t('Hidden', '隐藏') : '',
         data.hasMTTH ? 'MTTH' : '',
-        data.isExternal || data.isOrphan ? '图外引用' : '',
+        data.isExternal || data.isOrphan ? t('External reference', '图外引用') : '',
     ].filter(Boolean);
 
     detailPanel.classList.remove('empty');
     detailPanel.innerHTML = `
         <div class="details-header">
             <div class="details-kicker">${escapeHtml(getNodeKind(data))}</div>
-            <button type="button" class="details-icon-button" data-clear-selection title="清除选择" aria-label="清除选择">×</button>
+            <button type="button" class="details-icon-button" data-clear-selection title="${t('Clear selection', '清除选择')}" aria-label="${t('Clear selection', '清除选择')}">×</button>
         </div>
         <div class="details-title">${escapeHtml(data.id)}</div>
         ${data.title ? `<div class="details-subtitle">${escapeHtml(data.title)}</div>` : ''}
         ${badges.length > 0 ? `<div class="details-badges">${badges.map(badge => `<span>${escapeHtml(badge)}</span>`).join('')}</div>` : ''}
         <dl class="details-list">
-            <div><dt>类型</dt><dd>${escapeHtml(data.eventType || 'unknown')}</dd></div>
-            <div><dt>命名空间</dt><dd>${escapeHtml(data.namespace || '-')}</dd></div>
-            <div><dt>来源</dt><dd>${canOpen ? `${escapeHtml(data.file)}:${escapeHtml(data.line)}` : '图外引用'}</dd></div>
-            <div><dt>关系</dt><dd>${incoming} 个前序 / ${outgoing} 个后续</dd></div>
+            <div><dt>${t('Type', '类型')}</dt><dd>${escapeHtml(data.eventType || 'unknown')}</dd></div>
+            <div><dt>${t('Namespace', '命名空间')}</dt><dd>${escapeHtml(data.namespace || '-')}</dd></div>
+            <div><dt>${t('Source', '来源')}</dt><dd>${canOpen ? `${escapeHtml(data.file)}:${escapeHtml(data.line)}` : t('External reference', '图外引用')}</dd></div>
+            <div><dt>${t('Relations', '关系')}</dt><dd>${t(`${incoming} incoming / ${outgoing} outgoing`, `${incoming} 个前序 / ${outgoing} 个后续`)}</dd></div>
         </dl>
         <div class="details-actions">
-            <button type="button" data-open-source ${canOpen ? '' : 'disabled'}>打开源文件</button>
+            <button type="button" data-open-source ${canOpen ? '' : 'disabled'}>${t('Open source file', '打开源文件')}</button>
         </div>
     `;
 }
@@ -559,7 +561,7 @@ function showTooltip(node: cytoscape.NodeSingular) {
         <div class="tt-id">${escapeHtml(data.id)}</div>
         <div class="tt-type">${escapeHtml(getNodeKind(data))} · ${escapeHtml(data.eventType || 'unknown')}</div>
         ${data.title ? `<div class="tt-title">${escapeHtml(data.title)}</div>` : ''}
-        <div class="tt-file">${data.file && data.line ? `${escapeHtml(data.file)}:${escapeHtml(data.line)}` : '图外引用'}</div>
+        <div class="tt-file">${data.file && data.line ? `${escapeHtml(data.file)}:${escapeHtml(data.line)}` : t('External reference', '图外引用')}</div>
     `;
     document.body.appendChild(tooltip);
 
@@ -727,9 +729,9 @@ function renderGraph() {
 
     // Update stats
     statsBar.innerHTML = `
-        <span>节点: ${nodes.length}</span>
-        <span>边: ${edges.length}</span>
-        <span>命名空间: ${currentNamespace === '__all__' ? '全部' : currentNamespace}</span>
+        <span>${t('Nodes', '节点')}: ${nodes.length}</span>
+        <span>${t('Edges', '边')}: ${edges.length}</span>
+        <span>${t('Namespace', '命名空间')}: ${currentNamespace === '__all__' ? t('All', '全部') : currentNamespace}</span>
     `;
 }
 
@@ -746,7 +748,7 @@ window.addEventListener('message', (event) => {
 
             // Populate namespace filter
             const namespaces = [...new Set(fullGraph.nodes.map(n => n.namespace))].sort();
-            nsSelect.innerHTML = '<option value="__all__">全部命名空间</option>';
+            nsSelect.innerHTML = `<option value="__all__">${t('All namespaces', '全部命名空间')}</option>`;
             for (const ns of namespaces) {
                 const opt = document.createElement('option');
                 opt.value = ns;
@@ -759,7 +761,7 @@ window.addEventListener('message', (event) => {
         }
         case 'loading': {
             loadingEl.classList.remove('hidden');
-            loadingEl.textContent = msg.text || '扫描事件文件...';
+            loadingEl.textContent = msg.text || t('Scanning event files...', '扫描事件文件...');
             break;
         }
     }

@@ -18,6 +18,10 @@ import type {
 
 const TEXTURE_CANDIDATE_LIMIT = 3000;
 
+function panelText(en: string, zh: string): string {
+    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
+}
+
 type ParticlePanelMessage =
     | { command: 'selectEffect'; index: number }
     | { command: 'dirtyState'; dirty: boolean }
@@ -143,7 +147,7 @@ export class ParticlePanel {
             canSelectFolders: false,
             canSelectMany: false,
             filters: { 'Asset Files': ['asset'] },
-            title: 'Open Particle Asset File / 打开粒子资产文件',
+            title: panelText('Open Particle Asset File', '打开粒子资产文件'),
         });
         if (!uris?.[0]) return;
         const doc = await vscode.workspace.openTextDocument(uris[0]);
@@ -159,7 +163,7 @@ export class ParticlePanel {
         const uri = await vscode.window.showSaveDialog({
             defaultUri: vscode.Uri.file(path.join(path.dirname(doc?.uri.fsPath ?? ''), `${path.basename(doc?.uri.fsPath ?? 'particle', '.asset')}_particle.png`)),
             filters: { 'PNG Image': ['png'] },
-            title: 'Save Particle Screenshot / 保存粒子截图',
+            title: panelText('Save Particle Screenshot', '保存粒子截图'),
         });
         if (!uri) return;
         await fs.promises.writeFile(uri.fsPath, Buffer.from(data, 'base64'));
@@ -229,7 +233,7 @@ export class ParticlePanel {
             const candidate = await vscode.window.showSaveDialog({
                 defaultUri,
                 filters: { 'Asset Files': ['asset'] },
-            title: 'Save Particle Asset Copy / 保存粒子资产副本',
+                title: panelText('Save Particle Asset Copy', '保存粒子资产副本'),
             });
             if (!candidate) return undefined;
             if (this._isEditableFile(candidate.fsPath)) {

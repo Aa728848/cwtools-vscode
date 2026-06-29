@@ -323,6 +323,19 @@ describe('buildToolPairHtml', () => {
         };
         const html = buildToolPairHtml(step, undefined, { stepIndex: 5 });
         expect(html).to.include('perm_1');
+        expect(html).to.include('Allow');
+        expect(html).to.include('Deny');
+    });
+
+    it('renders permission_request inline buttons in Chinese locale', () => {
+        const step = {
+            type: 'permission_request' as const,
+            content: 'stellaris_linter check',
+            toolName: 'run_command',
+            permissionId: 'perm_1',
+            timestamp: 1
+        };
+        const html = buildToolPairHtml(step, undefined, { stepIndex: 5, locale: 'zh-cn' });
         expect(html).to.include('允许');
         expect(html).to.include('拒绝');
     });

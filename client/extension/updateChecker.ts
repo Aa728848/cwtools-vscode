@@ -6,6 +6,10 @@ import * as os from 'os';
 import { execFile } from 'child_process';
 import { ErrorReporter } from './ai/errorReporter';
 
+function tr(en: string, zh: string): string {
+    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
+}
+
 export interface UpdateInstallContext {
     reinstallCurrentVersion: boolean;
     vsixPath: string;
@@ -30,7 +34,7 @@ export async function checkForUpdates(context: vscode.ExtensionContext, installH
     try {
         const release = await vscode.window.withProgress({
             location: vscode.ProgressLocation.Window,
-            title: '正在检查 CWTools 更新...'
+            title: tr('Checking for CWTools updates...', '正在检查 CWTools 更新...')
         }, async () => {
             return await fetchLatestRelease();
         });
@@ -57,7 +61,10 @@ export async function checkForUpdates(context: vscode.ExtensionContext, installH
         const knownAssetUpdate = context.globalState.get<string>(stateKeyKnownAssetUpdate);
 
         let needsUpdate = false;
-        let promptMessage = `CWTools 发现新版本 (v${latestVersion})，是否立即安装并更新？`;
+        let promptMessage = tr(
+            `CWTools found a new version (v${latestVersion}). Install and update now?`,
+            `CWTools 发现新版本 (v${latestVersion})，是否立即安装并更新？`,
+        );
 
         if (isNewerVersion(currentVersion, latestVersion)) {
             const ignoredVersion = context.globalState.get<string>(stateKeyIgnoreVersion);
@@ -69,7 +76,10 @@ export async function checkForUpdates(context: vscode.ExtensionContext, installH
                 await context.globalState.update(stateKeyKnownAssetUpdate, latestAssetUpdate);
             } else if (latestAssetUpdate > knownAssetUpdate) {
                 needsUpdate = true;
-                promptMessage = `CWTools 当前版本 (v${currentVersion}) 在 GitHub 上有文件替换更新，是否重新安装修复？`;
+                promptMessage = tr(
+                    `CWTools v${currentVersion} has a replacement VSIX on GitHub. Reinstall to repair it?`,
+                    `CWTools 当前版本 (v${currentVersion}) 在 GitHub 上有文件替换更新，是否重新安装修复？`,
+                );
             }
         }
 
@@ -77,12 +87,14 @@ export async function checkForUpdates(context: vscode.ExtensionContext, installH
             const releaseUrl = release.html_url || 'https://github.com/Aa728848/cwtools-vscode/releases/latest';
             const reinstallCurrentVersion = compareVersions(currentVersion, latestVersion) === 0;
             
+            const updateNow = tr('Update now', '立即更新');
+            const ignoreUpdate = tr('Ignore this update', '忽略此更新');
             void Promise.resolve(vscode.window.showInformationMessage(
                 promptMessage,
-                '立即更新',
-                '忽略此更新'
+                updateNow,
+                ignoreUpdate
             )).then(async selection => {
-                if (selection === '立即更新') {
+                if (selection === updateNow) {
                     if (vsixDownloadUrl) {
                         const installed = await downloadAndInstallUpdate(
                             vsixDownloadUrl,
@@ -97,7 +109,7 @@ export async function checkForUpdates(context: vscode.ExtensionContext, installH
                     } else {
                         void vscode.env.openExternal(vscode.Uri.parse(releaseUrl));
                     }
-                } else if (selection === '忽略此更新') {
+                } else if (selection === ignoreUpdate) {
                     if (reinstallCurrentVersion) {
                         await context.globalState.update(stateKeyKnownAssetUpdate, latestAssetUpdate);
                     } else {
@@ -122,7 +134,7 @@ async function downloadAndInstallUpdate(
 
     return vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
-        title: '正在下载 CWTools 更新...',
+        title: tr('Downloading CWTools update...', '正在下载 CWTools 更新...'),
         cancellable: true
     }, async (progress, token) => {
         const tmpPath = path.join(os.tmpdir(), `cwtools-update-${Date.now()}.vsix`);
@@ -133,25 +145,26 @@ async function downloadAndInstallUpdate(
             }
             try {
                 const hostname = new URL(url).hostname;
-                progress.report({ message: `通过 ${hostname} 创建连接...` });
+                progress.report({ message: tr(`Connecting through ${hostname}...`, `通过 ${hostname} 创建连接...`) });
                 await downloadFile(url, tmpPath, progress, token);
                 
                 // Download successful
-                progress.report({ message: '下载完成，正在安装...' });
+                progress.report({ message: tr('Download complete, installing...', '下载完成，正在安装...') });
                 if (reinstallCurrentVersion && installHooks.beforeInstall) {
-                    progress.report({ message: '正在停止语言服务以释放安装文件...' });
+                    progress.report({ message: tr('Stopping the language service to release installed files...', '正在停止语言服务以释放安装文件...') });
                 }
                 await installHooks.beforeInstall?.({ reinstallCurrentVersion, vsixPath: tmpPath });
                 await installDownloadedUpdate(tmpPath, extensionId, reinstallCurrentVersion);
                 
-                void vscode.window.showInformationMessage('CWTools 已成功更新安装！', '重新加载窗口').then(sel => {
-                    if (sel === '重新加载窗口') {
+                const reloadWindow = tr('Reload Window', '重新加载窗口');
+                void vscode.window.showInformationMessage(tr('CWTools was updated successfully.', 'CWTools 已成功更新安装！'), reloadWindow).then(sel => {
+                    if (sel === reloadWindow) {
                         void vscode.commands.executeCommand('workbench.action.reloadWindow');
                     }
                 });
                 return true; // Exit after successful installation
             } catch (err: any) {
-                ErrorReporter.warn('UpdateChecker', `下载或安装失败 [${url}]`, err);
+                ErrorReporter.warn('UpdateChecker', tr(`Download or install failed [${url}]`, `下载或安装失败 [${url}]`), err);
                 if (fs.existsSync(tmpPath)) {
                     fs.unlinkSync(tmpPath);
                 }
@@ -159,8 +172,12 @@ async function downloadAndInstallUpdate(
         }
         
         if (!token.isCancellationRequested) {
-            void vscode.window.showErrorMessage('CWTools 更新自动下载或安装失败，请前往网页下载并手动导入。', '前往下载').then(sel => {
-                if (sel === '前往下载') {
+            const openDownload = tr('Open download page', '前往下载');
+            void vscode.window.showErrorMessage(
+                tr('CWTools could not download or install the update automatically. Open the release page and import it manually.', 'CWTools 更新自动下载或安装失败，请前往网页下载并手动导入。'),
+                openDownload,
+            ).then(sel => {
+                if (sel === openDownload) {
                     void vscode.env.openExternal(vscode.Uri.parse(fallbackUrl));
                 }
             });
@@ -408,7 +425,7 @@ function downloadFile(url: string, dest: string, progress: vscode.Progress<{ mes
                             increment: inc 
                         });
                     } else {
-                        progress.report({ message: `已下载 ${(downloadedBytes / 1024 / 1024).toFixed(1)}MB` });
+                        progress.report({ message: tr(`Downloaded ${(downloadedBytes / 1024 / 1024).toFixed(1)}MB`, `已下载 ${(downloadedBytes / 1024 / 1024).toFixed(1)}MB`) });
                     }
                 });
 

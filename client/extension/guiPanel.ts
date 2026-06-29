@@ -949,69 +949,71 @@ export class GuiPanel {
         const styleUri = this._panel.webview.asWebviewUri(vscode.Uri.file(path.join(this._webviewRootPath, 'guiPreview.css')));
         const scriptUri = this._panel.webview.asWebviewUri(vscode.Uri.file(path.join(this._webviewRootPath, 'guiPreview.js')));
         const nonce = getNonce();
+        const lang = vscode.env.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
+        const title = panelText('GUI Preview', 'GUI 预览');
         return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${lang}">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${this._panel.webview.cspSource} https: data:; script-src 'nonce-${nonce}'; style-src ${this._panel.webview.cspSource} 'unsafe-inline';" />
     <link href="${styleUri}" rel="stylesheet" />
-    <title>GUI 预览</title>
+    <title>${title}</title>
 </head>
 <body>
     <div id="toolbar">
         <div id="title-area">
-            <span id="title">GUI 预览</span>
-            <span id="title-status">未选择元素</span>
+            <span id="title">${title}</span>
+            <span id="title-status">${panelText('No element selected', '未选择元素')}</span>
         </div>
         <div id="controls">
-            <button id="btn-edit" title="切换编辑模式 (E)" class="edit-toggle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button id="btn-edit" title="${panelText('Toggle edit mode (E)', '切换编辑模式 (E)')}" class="edit-toggle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button>
             <span class="separator">|</span>
-            <button id="btn-zoom-in" title="放大">+</button>
+            <button id="btn-zoom-in" title="${panelText('Zoom in', '放大')}">+</button>
             <span id="zoom-level">100%</span>
-            <button id="btn-zoom-out" title="缩小">−</button>
-            <button id="btn-fit" title="适应窗口">⊡</button>
-            <button id="btn-reset" title="重置">↻</button>
-            <button id="btn-preview" title="预览模式 (隐藏边框)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
-            <button id="btn-anim" title="播放精灵动画">▶</button>
-            <select id="resolution-select" title="预览分辨率">
-                <option value="auto">自适应</option>
+            <button id="btn-zoom-out" title="${panelText('Zoom out', '缩小')}">−</button>
+            <button id="btn-fit" title="${panelText('Fit to window', '适应窗口')}">⊡</button>
+            <button id="btn-reset" title="${panelText('Reset', '重置')}">↻</button>
+            <button id="btn-preview" title="${panelText('Preview mode (hide outlines)', '预览模式 (隐藏边框)')}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+            <button id="btn-anim" title="${panelText('Play sprite animation', '播放精灵动画')}">▶</button>
+            <select id="resolution-select" title="${panelText('Preview resolution', '预览分辨率')}">
+                <option value="auto">${panelText('Auto fit', '自适应')}</option>
                 <option value="1920x1080">1080p</option>
                 <option value="2560x1440">1440p</option>
                 <option value="3840x2160">4K</option>
             </select>
-            <button id="btn-search" title="搜索元素 (Ctrl+F)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>
-            <button id="btn-layers" title="切换图层面板" class="active">☰</button>
+            <button id="btn-search" title="${panelText('Search elements (Ctrl+F)', '搜索元素 (Ctrl+F)')}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>
+            <button id="btn-layers" title="${panelText('Toggle layers panel', '切换图层面板')}" class="active">☰</button>
             <span class="separator edit-only">|</span>
-            <button id="btn-align-left" title="左对齐" class="edit-only align-btn" disabled>⬅</button>
-            <button id="btn-align-hcenter" title="水平居中" class="edit-only align-btn" disabled>⬌</button>
-            <button id="btn-align-right" title="右对齐" class="edit-only align-btn" disabled>➡</button>
-            <button id="btn-align-top" title="上对齐" class="edit-only align-btn" disabled>⬆</button>
-            <button id="btn-align-vcenter" title="垂直居中" class="edit-only align-btn" disabled>⬍</button>
-            <button id="btn-align-bottom" title="下对齐" class="edit-only align-btn" disabled>⬇</button>
+            <button id="btn-align-left" title="${panelText('Align left', '左对齐')}" class="edit-only align-btn" disabled>⬅</button>
+            <button id="btn-align-hcenter" title="${panelText('Center horizontally', '水平居中')}" class="edit-only align-btn" disabled>⬌</button>
+            <button id="btn-align-right" title="${panelText('Align right', '右对齐')}" class="edit-only align-btn" disabled>➡</button>
+            <button id="btn-align-top" title="${panelText('Align top', '上对齐')}" class="edit-only align-btn" disabled>⬆</button>
+            <button id="btn-align-vcenter" title="${panelText('Center vertically', '垂直居中')}" class="edit-only align-btn" disabled>⬍</button>
+            <button id="btn-align-bottom" title="${panelText('Align bottom', '下对齐')}" class="edit-only align-btn" disabled>⬇</button>
         </div>
     </div>
     <div id="search-bar" class="hidden">
-        <input id="search-input" type="text" placeholder="搜索元素名称..." />
+        <input id="search-input" type="text" placeholder="${panelText('Search element name...', '搜索元素名称...')}" />
         <span id="search-count"></span>
-        <button id="search-prev" title="上一个">↑</button>
-        <button id="search-next" title="下一个">↓</button>
-        <button id="search-close" title="关闭">✕</button>
+        <button id="search-prev" title="${panelText('Previous', '上一个')}">↑</button>
+        <button id="search-next" title="${panelText('Next', '下一个')}">↓</button>
+        <button id="search-close" title="${panelText('Close', '关闭')}">✕</button>
     </div>
     <div id="edit-context-menu" class="hidden">
-        <button data-action="add-container">+ 容器窗口</button>
-        <button data-action="add-background">+ 背景</button>
-        <button data-action="add-icon">+ 图标</button>
-        <button data-action="add-button">+ 按钮</button>
-        <button data-action="add-effectbutton">+ 效果按钮</button>
-        <button data-action="add-guibutton">+ GUI按钮</button>
-        <button data-action="add-text">+ 文本框</button>
+        <button data-action="add-container">+ ${panelText('Container window', '容器窗口')}</button>
+        <button data-action="add-background">+ ${panelText('Background', '背景')}</button>
+        <button data-action="add-icon">+ ${panelText('Icon', '图标')}</button>
+        <button data-action="add-button">+ ${panelText('Button', '按钮')}</button>
+        <button data-action="add-effectbutton">+ ${panelText('Effect button', '效果按钮')}</button>
+        <button data-action="add-guibutton">+ ${panelText('GUI button', 'GUI按钮')}</button>
+        <button data-action="add-text">+ ${panelText('Text box', '文本框')}</button>
         <hr />
-        <button data-action="duplicate">复制 (Ctrl+D)</button>
-        <button data-action="delete">删除 (Del)</button>
+        <button data-action="duplicate">${panelText('Duplicate (Ctrl+D)', '复制 (Ctrl+D)')}</button>
+        <button data-action="delete">${panelText('Delete (Del)', '删除 (Del)')}</button>
         <hr />
-        <button data-action="reparent">移入容器 (P)</button>
-        <button data-action="unparent">移出容器 (Shift+P)</button>
+        <button data-action="reparent">${panelText('Move into container (P)', '移入容器 (P)')}</button>
+        <button data-action="unparent">${panelText('Move out of container (Shift+P)', '移出容器 (Shift+P)')}</button>
     </div>
     <div id="main-layout">
         <div id="viewport">
@@ -1022,19 +1024,19 @@ export class GuiPanel {
         </div>
         <div id="side-panel">
             <div id="side-panel-tabs">
-                <button id="tab-layers" class="tab active">图层</button>
-                <button id="tab-properties" class="tab">属性</button>
+                <button id="tab-layers" class="tab active">${panelText('Layers', '图层')}</button>
+                <button id="tab-properties" class="tab">${panelText('Properties', '属性')}</button>
             </div>
             <div id="layers-panel">
                 <div id="layers-header">
-                    <span>图层</span>
-                    <button id="layers-collapse-all" title="全部折叠">▾</button>
-                    <button id="layers-expand-all" title="全部展开">▸</button>
+                    <span>${panelText('Layers', '图层')}</span>
+                    <button id="layers-collapse-all" title="${panelText('Collapse all', '全部折叠')}">▾</button>
+                    <button id="layers-expand-all" title="${panelText('Expand all', '全部展开')}">▸</button>
                 </div>
                 <div id="layers-tree"></div>
             </div>
             <div id="properties-panel" class="hidden">
-                <div id="props-content">选择一个元素以编辑属性</div>
+                <div id="props-content">${panelText('Select an element to edit properties', '选择一个元素以编辑属性')}</div>
             </div>
         </div>
     </div>
@@ -1050,4 +1052,8 @@ function getNonce(): string {
     const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     for (let i = 0; i < 32; i++) t += c.charAt(Math.floor(Math.random() * c.length));
     return t;
+}
+
+function panelText(en: string, zh: string): string {
+    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
 }

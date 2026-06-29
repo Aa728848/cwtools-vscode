@@ -4,7 +4,7 @@ import { ChatMessage, contentToString } from '../types';
 import { AIService } from '../aiService';
 import { getProjectWorkspaceRoot } from '../workspacePaths';
 import { ErrorReporter } from '../errorReporter';
-import { SOURCE } from '../messages';
+import { SOURCE, aiText } from '../messages';
 
 /**
  * 结构化历史状态记忆概况接口 (Phase 4 核心契约)
@@ -53,12 +53,15 @@ export async function compactHistory(
     aiService: AIService,
     abortSignal?: AbortSignal
 ): Promise<CompactedSummary> {
-    ErrorReporter.debug(SOURCE.AGENT_RUNNER, `开始执行历史状态压缩 (Phase 4 Compact History): runId=${runId}`);
+    ErrorReporter.debug(SOURCE.AGENT_RUNNER, aiText(
+        `Starting history compaction (Phase 4 Compact History): runId=${runId}`,
+        `开始执行历史状态压缩 (Phase 4 Compact History): runId=${runId}`,
+    ));
     
     // 1. 整理 ledger 极简事件流水以作为 LLM 概括依据，控制 input 体积
     const eventSummaries = ledgerEvents.map(e => {
         const timeStr = new Date(e.timestamp || Date.now()).toLocaleTimeString();
-        return `[${timeStr}] 事件: ${e.type || 'unknown'}, 状态: ${e.payload?.status || 'no_status'}${e.payload?.tool ? `, 工具: ${e.payload.tool}` : ''}${e.payload?.error ? `, 异常: ${e.payload.error}` : ''}`;
+        return `[${timeStr}] ${aiText('event', '事件')}: ${e.type || 'unknown'}, ${aiText('status', '状态')}: ${e.payload?.status || 'no_status'}${e.payload?.tool ? `, ${aiText('tool', '工具')}: ${e.payload.tool}` : ''}${e.payload?.error ? `, ${aiText('error', '异常')}: ${e.payload.error}` : ''}`;
     }).slice(-15); // 仅抓取最近 15 条以防撑爆
 
     // 2. 整理最近的对话尾部
@@ -68,7 +71,33 @@ export async function compactHistory(
     }).slice(-6).join('\n\n');
 
     // 3. 构建高纯度压缩 Prompt，强制 LLM 输出极其严格的 JSON 结构
-    const systemPrompt = `你是一个极其严谨的 CWTools 事务记忆分析专家。
+    const systemPrompt = aiText(`You are a rigorous CWTools transaction-memory analyst.
+Your only task is to analyze the provided [CWTools conversation history] and [transaction event stream], then extract the core context checkpoints and memory needed for continued system development.
+Remove obsolete, duplicated, or non-actionable chatter. Keep only the following eleven contract dimensions.
+
+You must output a **pure JSON object** matching this TypeScript shape. Do not include Markdown fences, prefixes, or suffixes.
+
+TypeScript shape:
+\`\`\`ts
+interface CompactedSummary {
+  goal: string; // highest-level development goal for this conversation
+  constraints: string[]; // explicit user constraints or architectural hazards discovered in code
+  done: string[]; // completed and verified subtasks/modules
+  inProgress: string[]; // work currently underway or still incomplete
+  blocked: string[]; // current blockers, compile errors, or clarification needs
+  decisions: string[]; // irreversible technical/design decisions made during the task
+  nextSteps: string[]; // direct next development steps required to reach the goal
+  criticalContext: string[]; // essential technical details from code diagnostics, LSP, or file analysis
+  relevantFiles: Array<{ path: string; reason: string }>; // important related files and why they matter
+  artifactRefs: string[]; // local paths to large output files or intermediate artifacts
+  lastStableRunEventId: string; // last stable ledger event id (use "evt_latest" if needed)
+}
+\`\`\`
+
+Rules:
+1. Avoid parse ambiguity. Every JSON field must be a concrete string or array.
+2. Never use placeholders. If nextSteps is empty, infer the next compile/test commands.
+3. Output only the JSON string.`, `你是一个极其严谨的 CWTools 事务记忆分析专家。
 你的唯一任务是：分析以下给出的 [CWTools 会话历史] 和 [事务事件流水]，提取出系统开发所必须保持的“核心上下文断点与记忆”。
 请务必剔除已经作废、重复和无实际开发意义的废话，只保留以下十一个维度核心契约。
 
@@ -94,15 +123,21 @@ interface CompactedSummary {
 注意：
 1. 绝对不要产生任何解析死角，JSON 中的每一项都必须是明确的字符串或数组。
 2. 绝对不能使用 placeholder，如果 nextSteps 为空，请预测下一步需要执行的代码编译和测试指令。
-3. 请仅输出 JSON 字符串！`;
+3. 请仅输出 JSON 字符串！`);
 
-    const userPrompt = `=== 近期事务事件流水 ===
+    const userPrompt = aiText(`=== Recent Transaction Event Stream ===
+${eventSummaries.join('\n')}
+
+=== Recent Chat Context Tail ===
+${recentChatPreview}
+
+Summarize immediately and output a pure JSON string.`, `=== 近期事务事件流水 ===
 ${eventSummaries.join('\n')}
 
 === 近期聊天上下文尾部 ===
 ${recentChatPreview}
 
-请立刻归纳提炼，输出纯 JSON 字符串！`;
+请立刻归纳提炼，输出纯 JSON 字符串！`);
 
     const summaryMessages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
@@ -123,17 +158,23 @@ ${recentChatPreview}
         try {
             parsed = parseAndCleanJson(rawText);
         } catch {
-            ErrorReporter.warn(SOURCE.AGENT_RUNNER, `压缩生成的 JSON 存在语法残缺，尝试自愈解析中...`);
+            ErrorReporter.warn(SOURCE.AGENT_RUNNER, aiText(
+                'Compaction returned malformed JSON; attempting self-repair...',
+                '压缩生成的 JSON 存在语法残缺，尝试自愈解析中...',
+            ));
             parsed = attemptJsonSelfRepair(rawText);
         }
 
         if (!parsed) {
-            throw new Error(`无法从 LLM 返回内容中自愈提炼出有效的 CompactedSummary！`);
+            throw new Error(aiText(
+                'Could not recover a valid CompactedSummary from the LLM response.',
+                '无法从 LLM 返回内容中自愈提炼出有效的 CompactedSummary！',
+            ));
         }
 
         // 规范化字段补齐，杜绝 null 导致的 TS 越界
         const finalSummary: CompactedSummary = {
-            goal: parsed.goal || '完成当前开发任务',
+            goal: parsed.goal || aiText('Complete the current development task', '完成当前开发任务'),
             constraints: Array.isArray(parsed.constraints) ? parsed.constraints : [],
             done: Array.isArray(parsed.done) ? parsed.done : [],
             inProgress: Array.isArray(parsed.inProgress) ? parsed.inProgress : [],
@@ -154,7 +195,46 @@ ${recentChatPreview}
         fs.writeFileSync(jsonPath, JSON.stringify(finalSummary, null, 2), 'utf-8');
         
         // 渲染极其精美的 markdown 概况供前台直接阅读和 Inspector 时间线加载
-        const mdContent = `# 🧠 CWTools AI Agent 历史状态记忆与压缩看板 (Compacted Memory)
+        const mdContent = aiText(`# CWTools AI Agent Compacted Memory
+
+> **Current run**: [${runId}] | **Generated at**: ${new Date().toLocaleString()}
+
+---
+
+## Goal
+${finalSummary.goal}
+
+## Constraints
+${finalSummary.constraints.map(c => `- ${c}`).join('\n') || '*No special constraints recorded*'}
+
+## Next Steps
+${finalSummary.nextSteps.map(n => `- \`${n}\``).join('\n')}
+
+---
+
+## Relevant Files
+${finalSummary.relevantFiles.map(f => `- **${path.basename(f.path)}** (reason: ${f.reason})  
+  Path: [${f.path}](file:///${f.path.replace(/\\/g, '/')})`).join('\n') || '*No relevant files recorded*'}
+
+## Work State
+- **Done**:
+${finalSummary.done.map(d => `  - [x] ${d}`).join('\n') || '  *No completed work recorded*'}
+- **In Progress**:
+${finalSummary.inProgress.map(i => `  - [ ] ${i}`).join('\n') || '  *No in-progress work recorded*'}
+- **Blocked**:
+${finalSummary.blocked.map(b => `  - [!] ${b}`).join('\n') || '  *No blockers recorded*'}
+
+---
+
+## Decisions
+${finalSummary.decisions.map(d => `- ${d}`).join('\n') || '*No major decisions recorded*'}
+
+## Critical Context
+${finalSummary.criticalContext.map(cx => `- ${cx}`).join('\n') || '*No critical context recorded*'}
+
+---
+*Ledger stable point: \`${finalSummary.lastStableRunEventId}\`*
+`, `# 🧠 CWTools AI Agent 历史状态记忆与压缩看板 (Compacted Memory)
 
 > **当前运行**: [${runId}] | **分析时刻**: ${new Date().toLocaleString()}
 
@@ -193,16 +273,22 @@ ${finalSummary.criticalContext.map(cx => `- ${cx}`).join('\n') || '*无核心细
 
 ---
 *Ledger 稳定点指向: \`${finalSummary.lastStableRunEventId}\`*
-`;
+`);
         fs.writeFileSync(mdPath, mdContent, 'utf-8');
-        ErrorReporter.debug(SOURCE.AGENT_RUNNER, `历史状态压缩已持久化: ${jsonPath}`);
+        ErrorReporter.debug(SOURCE.AGENT_RUNNER, aiText(
+            `Compacted history persisted: ${jsonPath}`,
+            `历史状态压缩已持久化: ${jsonPath}`,
+        ));
         
         return finalSummary;
     } catch (err: any) {
-        ErrorReporter.warn(SOURCE.AGENT_RUNNER, `历史压缩执行失败，退回到兜底状态: ${err.message}`);
+        ErrorReporter.warn(SOURCE.AGENT_RUNNER, aiText(
+            `History compaction failed; falling back to a minimal state: ${err.message}`,
+            `历史压缩执行失败，退回到兜底状态: ${err.message}`,
+        ));
         // 返回最低限度兜底以防止死锁
         return {
-            goal: '持续推进任务开发',
+            goal: aiText('Continue the development task', '持续推进任务开发'),
             constraints: [],
             done: [],
             inProgress: [],
@@ -288,7 +374,7 @@ function attemptJsonSelfRepair(text: string): any {
                     if (pathMatch) {
                         result.relevantFiles.push({
                             path: pathMatch[1],
-                            reason: reasonMatch ? reasonMatch[1] : '核心关联文件'
+                            reason: reasonMatch ? reasonMatch[1] : aiText('Core related file', '核心关联文件')
                         });
                     }
                 }

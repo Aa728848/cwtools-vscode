@@ -114,11 +114,11 @@
 本插件随包分发一个**只读**的 MCP 服务，把 CWTools 的 PDX 语义能力（验证 ID、查语法、查作用域、全项目诊断、定义/引用、补全、scripted effects/triggers/enums/modifiers/variables、实体信息，共 21 个只读工具）开放给任意 MCP 客户端。文件写入仍由你的 Agent 自带环境完成。
 
 * **零配置自动探测**：MCP 自动发现已安装插件的 LSP server、解压规则与 globalStorage 原版缓存——无需手填路径。连接时还会下发工作流 `instructions`，引导模型在 Paradox 项目里优先用工具核实而非凭记忆。
-* **版本无关稳定路径**：插件激活时把 MCP 同步到 `globalStorage/foreverskywalker.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs`（不含版本号），配置指向它即可**自动跟随插件更新**。
+* **版本无关稳定路径**：插件激活时把 MCP 同步到 `globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs`（不含版本号），配置指向它即可**自动跟随插件更新**。
 * **在 Codex 中一键安装**（也可直接让 Codex 自己运行这条命令）：
 
 ```sh
-codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/foreverskywalker.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs" --game stellaris --stdio
+codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --game stellaris --stdio
 ```
 
   macOS/Linux 把路径换成对应的 `globalStorage` 位置。等价的 `~/.codex/config.toml` 手写配置、`--rules`/`--cache`/`--game-path` 高级选项与 Claude Code 接入方式，详见 [packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md)。

@@ -6,9 +6,12 @@ import { vanillaCacheFileName } from 'cwtools-shared';
 // The VS Code cwtools extension stores its built vanilla cache + extracted rules
 // under globalStorage. When the user doesn't pass --cache, reuse that dir so the
 // MCP rides on the cache the extension already built.
-const PRIMARY_EXTENSION_DIR = 'foreverskywalker.eddy-stellaris-cwt';
-const LEGACY_EXTENSION_DIR = 'eddy.eddy-stellaris-cwt';
-const EXTENSION_DIRS = [PRIMARY_EXTENSION_DIR, LEGACY_EXTENSION_DIR];
+const PRIMARY_EXTENSION_DIR = 'foreverskywalker.foreverskywalker-stellaris-cwtools';
+const LEGACY_EXTENSION_DIRS = [
+  'foreverskywalker.eddy-stellaris-cwt',
+  'eddy.eddy-stellaris-cwt',
+];
+const EXTENSION_DIRS = [PRIMARY_EXTENSION_DIR, ...LEGACY_EXTENSION_DIRS];
 const VSCODE_APP_DIRS = ['Code', 'Code - Insiders', 'VSCodium', 'Cursor'];
 
 function globalStorageBases(): string[] {
@@ -50,8 +53,7 @@ function extensionInstallRoots(): string[] {
   );
 }
 
-// Newest installed foreverskywalker.eddy-stellaris-cwt-<version> extension dir,
-// falling back to legacy eddy.eddy-stellaris-cwt-<version>, else undefined.
+// Newest installed extension dir, falling back to legacy extension IDs, else undefined.
 export function detectInstalledExtensionDir(): string | undefined {
   let best: { dir: string; version: string; priority: number } | undefined;
   for (const root of extensionInstallRoots()) {

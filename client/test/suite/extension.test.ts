@@ -19,7 +19,7 @@ suite("Extension Tests", () => {
 
 suite(`Debug Integration Test: `, function() {
 	test('Extension should be present', () => {
-		assert.ok(vscode.extensions.getExtension('ForeverSkywalker.eddy-stellaris-cwt'));
+		assert.ok(vscode.extensions.getExtension('ForeverSkywalker.foreverskywalker-stellaris-cwtools'));
 	});
 
 	test('should activate', async function () {
@@ -34,7 +34,7 @@ suite(`Debug Integration Test: `, function() {
 
 	test('Extension activation status', async function () {
 		this.timeout(1 * 60 * 1000);
-		const extension = vscode.extensions.getExtension('ForeverSkywalker.eddy-stellaris-cwt');
+		const extension = vscode.extensions.getExtension('ForeverSkywalker.foreverskywalker-stellaris-cwtools');
 		assert.ok(extension, 'Extension should be found');
 
 		// Test activation status
@@ -94,7 +94,7 @@ suite(`Debug Integration Test: `, function() {
 			// Test that language configurations are set
 			// This is harder to test directly, but we can verify the extension activated
 			// and the language server client should be initialized
-			const extension = vscode.extensions.getExtension('ForeverSkywalker.eddy-stellaris-cwt');
+			const extension = vscode.extensions.getExtension('ForeverSkywalker.foreverskywalker-stellaris-cwtools');
 			assert.ok(extension?.isActive, 'Extension should be active');
 
 			// The extension exports might be undefined due to server startup issues in test env

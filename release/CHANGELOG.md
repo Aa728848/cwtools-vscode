@@ -2,6 +2,9 @@
 
 ## [2.7.2] - 2026-06-29
 
+### Marketplace identity
+- **[Publish]** Changed the Marketplace extension name to `foreverskywalker-stellaris-cwtools` and added first-run globalStorage migration from legacy IDs (`foreverskywalker.eddy-stellaris-cwt`, `eddy.eddy-stellaris-cwt`).
+
 ### 📦 本地化更新
 - **[本地化] 中英文本地化支持**：添加了项目主要文档（README.md、CONTRIBUTING.md、ARCHITECTURE.md）的英文版本。
 

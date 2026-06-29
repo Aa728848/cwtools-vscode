@@ -218,15 +218,23 @@ if ($Install) {
             # The upstream extension starts the same F# language server and must not
             # remain installed alongside this fork. VSIX manifests cannot declare
             # conflicting extensions, so enforce the replacement in this install flow.
-            $ConflictingExtensionId = "tboby.cwtools-vscode"
+            $ConflictingExtensionIds = @(
+                "foreverskywalker.eddy-stellaris-cwt",
+                "ForeverSkywalker.eddy-stellaris-cwt",
+                "Eddy.eddy-stellaris-cwt",
+                "tboby.cwtools-vscode"
+            )
             $InstalledExtensions = @(code --list-extensions 2>$null)
-            if ($LASTEXITCODE -eq 0 -and $InstalledExtensions -contains $ConflictingExtensionId) {
-                Write-Host "[*] Removing conflicting extension: $ConflictingExtensionId ..." -ForegroundColor Yellow
-                code --uninstall-extension $ConflictingExtensionId
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "[OK] Conflicting upstream CWTools extension was uninstalled." -ForegroundColor Green
-                } else {
-                    Write-Warning "Could not uninstall $ConflictingExtensionId automatically. Run: code --uninstall-extension $ConflictingExtensionId"
+            if ($LASTEXITCODE -eq 0) {
+                foreach ($ConflictingExtensionId in $ConflictingExtensionIds) {
+                    if ($InstalledExtensions -notcontains $ConflictingExtensionId) { continue }
+                    Write-Host "[*] Removing conflicting extension: $ConflictingExtensionId ..." -ForegroundColor Yellow
+                    code --uninstall-extension $ConflictingExtensionId
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Host "[OK] Conflicting CWTools extension was uninstalled: $ConflictingExtensionId" -ForegroundColor Green
+                    } else {
+                        Write-Warning "Could not uninstall $ConflictingExtensionId automatically. Run: code --uninstall-extension $ConflictingExtensionId"
+                    }
                 }
             } elseif ($LASTEXITCODE -ne 0) {
                 Write-Warning "Could not inspect installed extensions; skipped the CWTools conflict check."

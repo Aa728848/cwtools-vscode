@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 export async function activate() {
-  const ext = vscode.extensions.getExtension('ForeverSkywalker.eddy-stellaris-cwt')!;
+  const ext = vscode.extensions.getExtension('ForeverSkywalker.foreverskywalker-stellaris-cwtools')!;
   try {
     await ext.activate();
     return ext.exports;

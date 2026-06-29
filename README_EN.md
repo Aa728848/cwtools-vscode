@@ -159,10 +159,10 @@ flowchart LR
 ### 🔌 7. Out-of-the-Box MCP Server (for Codex / Claude Code)
 This extension bundles a **read-only** Model Context Protocol (MCP) server, offering 21 read-only semantic tools of CWTools (syntax check, scope queries, definitions, references, diagnostics, scripted triggers/effects/enums) to external agents.
 * **Zero Config**: The server automatically detects installed server binaries, configurations, and game caches in globalStorage.
-* **Stable Version-Independent Path**: Activated plugins copy the script to `globalStorage/eddy.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs` to survive version upgrades.
+* **Stable Version-Independent Path**: Activated plugins copy the script to `globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs` to survive version upgrades.
 * **Install in Codex**:
   ```sh
-  codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/eddy.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs" --game stellaris --stdio
+  codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --game stellaris --stdio
   ```
   Change paths accordingly on macOS/Linux. For configuration details, see [packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md).
 

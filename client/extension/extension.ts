@@ -42,9 +42,17 @@ export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
 let fileExplorer: FileExplorer;
 
-const CONFLICTING_EXTENSION_IDS = ['Eddy.eddy-stellaris-cwt', 'tboby.cwtools-vscode'];
-const LEGACY_GLOBAL_STORAGE_IDS = ['eddy.eddy-stellaris-cwt'];
-const PUBLISHER_MIGRATION_MARKER = '.publisher-migration-from-eddy.done';
+const CONFLICTING_EXTENSION_IDS = [
+	'foreverskywalker.eddy-stellaris-cwt',
+	'ForeverSkywalker.eddy-stellaris-cwt',
+	'Eddy.eddy-stellaris-cwt',
+	'tboby.cwtools-vscode',
+];
+const LEGACY_GLOBAL_STORAGE_IDS = [
+	'foreverskywalker.eddy-stellaris-cwt',
+	'eddy.eddy-stellaris-cwt',
+];
+const PUBLISHER_MIGRATION_MARKER = '.storage-migration-from-legacy-extension-ids.done';
 const LEGACY_GLOBAL_STORAGE_ENTRIES = [
 	'.cwtools',
 	'.agents',
@@ -956,13 +964,14 @@ async function maybeShowFirstRunExperience(options: InstallHealthOptions): Promi
 export async function activate(context: ExtensionContext) {
 	setAiMessageLocale(vs.env.language);
 
+	await migrateLegacyPublisherGlobalStorage(context).catch((e) =>
+		ErrorReporter.warn('Extension', 'Failed to migrate legacy publisher globalStorage', e)
+	);
+
 	if (!await removeConflictingExtensions()) {
 		return;
 	}
 
-	await migrateLegacyPublisherGlobalStorage(context).catch((e) =>
-		ErrorReporter.warn('Extension', 'Failed to migrate legacy publisher globalStorage', e)
-	);
 	void migrateLegacyConfiguration(context);
 	context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
 		if (e.affectsConfiguration(LEGACY_SETTINGS_NAMESPACE)) {

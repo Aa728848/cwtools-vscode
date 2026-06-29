@@ -99,7 +99,7 @@ suite('LSP Hover Tests', function () {
 
         // Activate the extension first
         await activate();
-        extension = vscode.extensions.getExtension('ForeverSkywalker.eddy-stellaris-cwt')!;
+        extension = vscode.extensions.getExtension('ForeverSkywalker.foreverskywalker-stellaris-cwtools')!;
         assert.ok(extension?.isActive, 'Extension should be active');
 
         // Open a test document to check LSP readiness

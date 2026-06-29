@@ -17,7 +17,7 @@ const vscodeStub = {
         uriScheme: 'vscode',
     },
     extensions: {
-        getExtension: () => ({ extensionPath: 'C:\\Users\\A\\.vscode\\extensions\\foreverskywalker.eddy-stellaris-cwt-2.7.0' }),
+        getExtension: () => ({ extensionPath: 'C:\\Users\\A\\.vscode\\extensions\\foreverskywalker.foreverskywalker-stellaris-cwtools-2.7.0' }),
     },
     Uri: {
         file: (filePath: string) => ({ fsPath: filePath }),
@@ -57,17 +57,17 @@ describe('Update checker release metadata', () => {
             published_at: '2026-06-28T04:07:05Z',
             assets: [
                 {
-                    name: 'eddy-stellaris-cwt-2.7.1.vsix',
+                    name: 'foreverskywalker-stellaris-cwtools-2.7.1.vsix',
                     updated_at: '2026-06-28T14:21:37Z',
-                    browser_download_url: 'https://example.test/eddy-stellaris-cwt-2.7.1.vsix',
+                    browser_download_url: 'https://example.test/foreverskywalker-stellaris-cwtools-2.7.1.vsix',
                 },
             ],
         });
 
         expect(selected).to.deep.equal({
-            name: 'eddy-stellaris-cwt-2.7.1.vsix',
+            name: 'foreverskywalker-stellaris-cwtools-2.7.1.vsix',
             version: '2.7.1',
-            downloadUrl: 'https://example.test/eddy-stellaris-cwt-2.7.1.vsix',
+            downloadUrl: 'https://example.test/foreverskywalker-stellaris-cwtools-2.7.1.vsix',
             updatedAt: '2026-06-28T14:21:37Z',
         });
     });
@@ -77,12 +77,12 @@ describe('Update checker release metadata', () => {
             tag_name: '2.7.0',
             assets: [
                 {
-                    name: 'eddy-stellaris-cwt-2.7.1.vsix',
+                    name: 'foreverskywalker-stellaris-cwtools-2.7.1.vsix',
                     updated_at: '2026-06-28T14:21:37Z',
                     browser_download_url: 'https://example.test/2.7.1.vsix',
                 },
                 {
-                    name: 'eddy-stellaris-cwt-2.7.2.vsix',
+                    name: 'foreverskywalker-stellaris-cwtools-2.7.2.vsix',
                     updated_at: '2026-06-28T14:22:37Z',
                     browser_download_url: 'https://example.test/2.7.2.vsix',
                 },
@@ -99,8 +99,8 @@ describe('Update checker release metadata', () => {
             published_at: '2026-06-28T04:07:05Z',
             assets: [
                 {
-                    name: 'eddy-stellaris-cwt.vsix',
-                    browser_download_url: 'https://example.test/eddy-stellaris-cwt.vsix',
+                    name: 'foreverskywalker-stellaris-cwtools.vsix',
+                    browser_download_url: 'https://example.test/foreverskywalker-stellaris-cwtools.vsix',
                 },
             ],
         });
@@ -110,9 +110,9 @@ describe('Update checker release metadata', () => {
     });
 
     it('extracts the rightmost semver from VSIX asset names', () => {
-        expect(extractVsixVersion('eddy-stellaris-cwt-2.7.1.vsix')).to.equal('2.7.1');
-        expect(extractVsixVersion('eddy-1.0.0-stellaris-cwt-2.7.1.vsix')).to.equal('2.7.1');
-        expect(extractVsixVersion('eddy-stellaris-cwt.zip')).to.equal(undefined);
+        expect(extractVsixVersion('foreverskywalker-stellaris-cwtools-2.7.1.vsix')).to.equal('2.7.1');
+        expect(extractVsixVersion('eddy-1.0.0-stellaris-cwtools-2.7.1.vsix')).to.equal('2.7.1');
+        expect(extractVsixVersion('foreverskywalker-stellaris-cwtools.zip')).to.equal(undefined);
     });
 });
 
@@ -134,7 +134,7 @@ describe('Update checker installation', () => {
     });
 
     it('reinstalls a same-version VSIX through one forced external CLI install', async () => {
-        await installDownloadedUpdate('C:\\Temp\\cwtools-update.vsix', 'foreverskywalker.eddy-stellaris-cwt', true);
+        await installDownloadedUpdate('C:\\Temp\\cwtools-update.vsix', 'foreverskywalker.foreverskywalker-stellaris-cwtools', true);
 
         expect(commandCalls).to.deep.equal([]);
         expect(cliCalls).to.have.length(1);
@@ -145,7 +145,7 @@ describe('Update checker installation', () => {
     });
 
     it('installs a newer-version VSIX without uninstalling first', async () => {
-        await installDownloadedUpdate('C:\\Temp\\cwtools-update.vsix', 'foreverskywalker.eddy-stellaris-cwt', false);
+        await installDownloadedUpdate('C:\\Temp\\cwtools-update.vsix', 'foreverskywalker.foreverskywalker-stellaris-cwtools', false);
 
         expect(commandCalls).to.deep.equal([
             {

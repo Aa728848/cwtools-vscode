@@ -10,13 +10,13 @@
 
 ```
 # 稳定路径（推荐——跨版本永不变化）：
-<globalStorage>/foreverskywalker.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs
-#   Windows: %APPDATA%/Code/User/globalStorage/foreverskywalker.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs
-#   macOS:   ~/Library/Application Support/Code/User/globalStorage/foreverskywalker.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs
-#   Linux:   ~/.config/Code/User/globalStorage/foreverskywalker.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs
+<globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs
+#   Windows: %APPDATA%/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs
+#   macOS:   ~/Library/Application Support/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs
+#   Linux:   ~/.config/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs
 
 # 带版本号的路径（位于扩展目录内，每次发布都会变化）：
-<vscode-extensions>/foreverskywalker.eddy-stellaris-cwt-<version>/bin/mcp/cwtools-mcp.cjs
+<vscode-extensions>/foreverskywalker.foreverskywalker-stellaris-cwtools-<version>/bin/mcp/cwtools-mcp.cjs
 ```
 
 外部 agent 用 `node` 运行它。它会自动探测已安装扩展的服务器二进制文件
@@ -80,7 +80,7 @@ Codex 从 `~/.codex/config.toml` 读取 MCP 服务器（`[mcp_servers.<name>]`�
 最快的方式——让 Codex 用一条命令替你添加，指向**稳定的 globalStorage 路径**（无版本号，可在更新后继续使用）：
 
 ```sh
-codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/foreverskywalker.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs" --game stellaris --stdio
+codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --game stellaris --stdio
 ```
 
 （macOS/Linux：将路径替换为你所在平台的 `globalStorage` 位置。）你也可以直接让 Codex 自己运行那条
@@ -90,7 +90,7 @@ codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/foreverskywalke
 [mcp_servers.cwtools]
 command = "node"
 args = [
-  "C:/Users/<you>/AppData/Roaming/Code/User/globalStorage/foreverskywalker.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs",
+  "C:/Users/<you>/AppData/Roaming/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs",
   "--game", "stellaris",
   "--stdio",
 ]

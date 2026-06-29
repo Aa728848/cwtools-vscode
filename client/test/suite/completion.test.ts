@@ -91,7 +91,7 @@ suite('LSP Completion Tests', function () {
         setupLSPErrorMonitoring();
         await activate();
 
-        const extension = vscode.extensions.getExtension('Eddy.eddy-stellaris-cwt')!;
+        const extension = vscode.extensions.getExtension('ForeverSkywalker.eddy-stellaris-cwt')!;
         assert.ok(extension?.isActive, 'Extension should be active');
 
         const document = await openAndGetTestDocument();

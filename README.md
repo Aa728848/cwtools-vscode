@@ -48,57 +48,7 @@
 
 以下为项目的整体模块交互与数据流拓扑，清晰展现了各层级之间的隔离屏障与通信管道：
 
-```mermaid
-flowchart LR
-    %% 前端沙盒层
-    subgraph Webview ["Webview 隔离前端 (HTML / JS / Three.js)"]
-        UI["智能对话 & 任务看板\nchatPanel.ts"]
-        Canvas["GUI 实时画布预览\nguiPreview.ts"]
-        TD3D["星系/实体/粒子 3D 渲染\nentityPreview.ts / particlePreview.ts"]
-        Graph["科技/事件依赖拓扑\ntechTreePreview.ts"]
-    end
-
-    %% VS Code 宿主层
-    subgraph VSCode ["VS Code 扩展宿主 (运行中枢与 AI 协处理器)"]
-        Extension["命令注册与激活\nextension.ts"]
-        GP["游戏 Profile 注册\ngameProfiles.ts"]
-        IDX["本地化与全局索引\nIndexService.ts"]
-        AI["多 Agent 协同核心\nagentRunner.ts"]
-        Queue["安全锁写入队列\nPartitionedWriteQueue"]
-    end
-
-    %% .NET 编译器后端
-    subgraph Backend [".NET 9 / F# 编译器后端"]
-        LSP["LSP 极速解析器\nsrc/Main.exe"]
-        Lib["CWTools F# 解析库\nsubmodules/cwtools"]
-    end
-
-    %% 前端与宿主双向事件管道
-    UI <-->|postMessage 事件流| Extension
-    Canvas <-->|postMessage 事件流| Extension
-    TD3D <-->|postMessage 事件流| Extension
-    Graph <-->|postMessage 事件流| Extension
-
-    %% 宿主内部协同
-    Extension --> GP
-    Extension --> IDX
-    Extension --> AI
-    AI --> IDX
-    AI --> Queue
-    Queue -->|顺序写入锁保护| IDX
-
-    %% 宿主与后端语言服务通信
-    Extension <-->|LSP JSON-RPC 通信| LSP
-    LSP --> Lib
-
-    %% 样式表定制
-    classDef vscode fill:#1e1e24,stroke:#007acc,stroke-width:2px,color:#fff;
-    classDef webview fill:#2d2d30,stroke:#2b8a3e,stroke-width:2px,color:#fff;
-    classDef backend fill:#171717,stroke:#512bd4,stroke-width:2px,color:#fff;
-    class VSCode,Extension,GP,IDX,AI,Queue vscode;
-    class Webview,UI,Canvas,TD3D,Graph webview;
-    class Backend,LSP,Lib backend;
-```
+![System architecture overview](docs/system-architecture.png)
 
 ---
 
@@ -164,11 +114,11 @@ flowchart LR
 本插件随包分发一个**只读**的 MCP 服务，把 CWTools 的 PDX 语义能力（验证 ID、查语法、查作用域、全项目诊断、定义/引用、补全、scripted effects/triggers/enums/modifiers/variables、实体信息，共 21 个只读工具）开放给任意 MCP 客户端。文件写入仍由你的 Agent 自带环境完成。
 
 * **零配置自动探测**：MCP 自动发现已安装插件的 LSP server、解压规则与 globalStorage 原版缓存——无需手填路径。连接时还会下发工作流 `instructions`，引导模型在 Paradox 项目里优先用工具核实而非凭记忆。
-* **版本无关稳定路径**：插件激活时把 MCP 同步到 `globalStorage/eddy.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs`（不含版本号），配置指向它即可**自动跟随插件更新**。
+* **版本无关稳定路径**：插件激活时把 MCP 同步到 `globalStorage/foreverskywalker.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs`（不含版本号），配置指向它即可**自动跟随插件更新**。
 * **在 Codex 中一键安装**（也可直接让 Codex 自己运行这条命令）：
 
 ```sh
-codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/eddy.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs" --game stellaris --stdio
+codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/foreverskywalker.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs" --game stellaris --stdio
 ```
 
   macOS/Linux 把路径换成对应的 `globalStorage` 位置。等价的 `~/.codex/config.toml` 手写配置、`--rules`/`--cache`/`--game-path` 高级选项与 Claude Code 接入方式，详见 [packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md)。

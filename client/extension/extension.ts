@@ -41,30 +41,117 @@ export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
 let fileExplorer: FileExplorer;
 
-const CONFLICTING_UPSTREAM_EXTENSION_ID = 'tboby.cwtools-vscode';
+const CONFLICTING_EXTENSION_IDS = ['Eddy.eddy-stellaris-cwt', 'tboby.cwtools-vscode'];
+const LEGACY_GLOBAL_STORAGE_IDS = ['eddy.eddy-stellaris-cwt'];
+const PUBLISHER_MIGRATION_MARKER = '.publisher-migration-from-eddy.done';
+const LEGACY_GLOBAL_STORAGE_ENTRIES = [
+	'.cwtools',
+	'.agents',
+	'ai-chat-topics.json',
+] as const;
+
+function legacyPublisherStoragePaths(context: ExtensionContext): string[] {
+	const currentStorage = context.globalStorageUri.fsPath;
+	const currentParent = path.dirname(currentStorage);
+	const currentResolved = path.resolve(currentStorage).toLowerCase();
+	return LEGACY_GLOBAL_STORAGE_IDS
+		.map(legacyId => path.join(currentParent, legacyId))
+		.filter(legacyStorage => path.resolve(legacyStorage).toLowerCase() !== currentResolved);
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+	try {
+		await fs.promises.access(filePath);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function copyMissingStorageEntries(source: string, target: string): Promise<void> {
+	const stat = await fs.promises.lstat(source);
+	if (stat.isSymbolicLink()) {
+		return;
+	}
+
+	if (stat.isDirectory()) {
+		await fs.promises.mkdir(target, { recursive: true });
+		const entries = await fs.promises.readdir(source, { withFileTypes: true });
+		for (const entry of entries) {
+			await copyMissingStorageEntries(
+				path.join(source, entry.name),
+				path.join(target, entry.name)
+			);
+		}
+		return;
+	}
+
+	if (!stat.isFile() || await pathExists(target)) {
+		return;
+	}
+
+	await fs.promises.mkdir(path.dirname(target), { recursive: true });
+	await fs.promises.copyFile(source, target);
+}
+
+async function migrateLegacyPublisherGlobalStorage(context: ExtensionContext): Promise<void> {
+	const currentStorage = context.globalStorageUri.fsPath;
+	const markerPath = path.join(currentStorage, PUBLISHER_MIGRATION_MARKER);
+	if (await pathExists(markerPath)) {
+		return;
+	}
+
+	const copied: string[] = [];
+
+	for (const legacyStorage of legacyPublisherStoragePaths(context)) {
+		if (!(await pathExists(legacyStorage))) {
+			continue;
+		}
+
+		await fs.promises.mkdir(currentStorage, { recursive: true });
+		for (const entry of LEGACY_GLOBAL_STORAGE_ENTRIES) {
+			const source = path.join(legacyStorage, entry);
+			if (!(await pathExists(source))) {
+				continue;
+			}
+			await copyMissingStorageEntries(source, path.join(currentStorage, entry));
+			copied.push(entry);
+		}
+	}
+
+	if (copied.length > 0) {
+		await fs.promises.writeFile(
+			markerPath,
+			JSON.stringify({ migratedAt: new Date().toISOString(), copied: Array.from(new Set(copied)) }, null, 2),
+			'utf-8'
+		);
+		ErrorReporter.debug('Extension', `Migrated legacy publisher globalStorage entries: ${Array.from(new Set(copied)).join(', ')}`);
+	}
+}
 
 /**
- * Remove the upstream extension before this fork starts its language server.
+ * Remove extensions that would start a competing CWTools language server.
  * VSIX manifests have no supported way to declare mutually exclusive extensions,
  * so UI/Marketplace installs need this activation-time fallback. Returning false
  * keeps this extension dormant until the window is reloaded.
  */
-async function removeConflictingUpstreamExtension(): Promise<boolean> {
-	if (!vs.extensions.getExtension(CONFLICTING_UPSTREAM_EXTENSION_ID)) {
+async function removeConflictingExtensions(): Promise<boolean> {
+	const conflictingExtensionId = CONFLICTING_EXTENSION_IDS.find(extensionId => vs.extensions.getExtension(extensionId));
+	if (!conflictingExtensionId) {
 		return true;
 	}
 
 	try {
 		await commands.executeCommand(
 			'workbench.extensions.uninstallExtension',
-			CONFLICTING_UPSTREAM_EXTENSION_ID
+			conflictingExtensionId
 		);
 
 		const reloadAction = localize('Reload Window', '重新加载窗口');
 		const choice = await window.showInformationMessage(
 			localize(
-				'The conflicting upstream CWTools extension was uninstalled. Reload the window to finish switching to Eddy\'s Stellaris CWTools.',
-				'已自动卸载冲突的原版 CWTools 插件。请重新加载窗口以完成切换。'
+				`The conflicting CWTools extension (${conflictingExtensionId}) was uninstalled. Reload the window to finish switching to Eddy's Stellaris CWTools.`,
+				`已自动卸载冲突的 CWTools 插件 (${conflictingExtensionId})。请重新加载窗口以完成切换。`
 			),
 			reloadAction
 		);
@@ -74,11 +161,11 @@ async function removeConflictingUpstreamExtension(): Promise<boolean> {
 	} catch (error) {
 		await window.showErrorMessage(
 			localize(
-				`Could not uninstall ${CONFLICTING_UPSTREAM_EXTENSION_ID}. This extension will stay inactive to avoid starting two CWTools servers. Uninstall the upstream extension manually and reload the window.`,
-				`无法卸载 ${CONFLICTING_UPSTREAM_EXTENSION_ID}。为避免同时启动两个 CWTools 服务，当前插件本次不会启动。请手动卸载原插件并重新加载窗口。`
+				`Could not uninstall ${conflictingExtensionId}. This extension will stay inactive to avoid starting two CWTools servers. Uninstall the conflicting extension manually and reload the window.`,
+				`无法卸载 ${conflictingExtensionId}。为避免同时启动两个 CWTools 服务，当前插件本次不会启动。请手动卸载冲突插件并重新加载窗口。`
 			)
 		);
-		ErrorReporter.warn('Extension', 'Failed to remove conflicting upstream extension', error);
+		ErrorReporter.warn('Extension', `Failed to remove conflicting extension ${conflictingExtensionId}`, error);
 	}
 
 	return false;
@@ -868,9 +955,13 @@ async function maybeShowFirstRunExperience(options: InstallHealthOptions): Promi
 export async function activate(context: ExtensionContext) {
 	setAiMessageLocale(vs.env.language);
 
-	if (!await removeConflictingUpstreamExtension()) {
+	if (!await removeConflictingExtensions()) {
 		return;
 	}
+
+	await migrateLegacyPublisherGlobalStorage(context).catch((e) =>
+		ErrorReporter.warn('Extension', 'Failed to migrate legacy publisher globalStorage', e)
+	);
 
 	// Background check for extension updates
 	await checkForUpdates(context, {
@@ -1122,8 +1213,13 @@ export async function activate(context: ExtensionContext) {
 		try {
 			const bundledMcp = path.join(context.extensionPath, 'bin', 'mcp', 'cwtools-mcp.cjs');
 			if (fs.existsSync(bundledMcp)) {
-				await fs.promises.mkdir(stableMcpDir, { recursive: true });
-				await fs.promises.copyFile(bundledMcp, stableMcpPath);
+				const legacyMcpPaths = legacyPublisherStoragePaths(context)
+					.filter(legacyStorage => fs.existsSync(legacyStorage))
+					.map(legacyStorage => path.join(legacyStorage, 'mcp', 'cwtools-mcp.cjs'));
+				for (const targetMcpPath of [stableMcpPath, ...legacyMcpPaths]) {
+					await fs.promises.mkdir(path.dirname(targetMcpPath), { recursive: true });
+					await fs.promises.copyFile(bundledMcp, targetMcpPath);
+				}
 				ErrorReporter.debug('Extension', `Synced MCP server to stable path ${stableMcpPath}`);
 			}
 		} catch (e) {

@@ -1,3 +1,5 @@
 .cwtools/
 **/*.js.map
 bin/client/test
+.vsixmanifest
+*.vsix

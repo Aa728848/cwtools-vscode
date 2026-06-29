@@ -7,13 +7,16 @@
     "license": "MIT",
     "version": "2.7.2",
     "preview": true,
-    "publisher": "Eddy",
+    "publisher": "ForeverSkywalker",
     "icon": "docs/stellaris.png",
     "repository": {
         "type": "git",
         "url": "https://github.com/Aa728848/cwtools-vscode"
     },
-    "homepage": "https://github.com/cwtools/cwtools-vscode",
+    "bugs": {
+        "url": "https://github.com/Aa728848/cwtools-vscode/issues"
+    },
+    "homepage": "https://github.com/Aa728848/cwtools-vscode",
     "engines": {
         "vscode": "^1.90.0"
     },

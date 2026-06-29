@@ -17,7 +17,7 @@ const vscodeStub = {
         uriScheme: 'vscode',
     },
     extensions: {
-        getExtension: () => ({ extensionPath: 'C:\\Users\\A\\.vscode\\extensions\\eddy.eddy-stellaris-cwt-2.7.0' }),
+        getExtension: () => ({ extensionPath: 'C:\\Users\\A\\.vscode\\extensions\\foreverskywalker.eddy-stellaris-cwt-2.7.0' }),
     },
     Uri: {
         file: (filePath: string) => ({ fsPath: filePath }),
@@ -134,7 +134,7 @@ describe('Update checker installation', () => {
     });
 
     it('reinstalls a same-version VSIX through one forced external CLI install', async () => {
-        await installDownloadedUpdate('C:\\Temp\\cwtools-update.vsix', 'eddy.eddy-stellaris-cwt', true);
+        await installDownloadedUpdate('C:\\Temp\\cwtools-update.vsix', 'foreverskywalker.eddy-stellaris-cwt', true);
 
         expect(commandCalls).to.deep.equal([]);
         expect(cliCalls).to.have.length(1);
@@ -145,7 +145,7 @@ describe('Update checker installation', () => {
     });
 
     it('installs a newer-version VSIX without uninstalling first', async () => {
-        await installDownloadedUpdate('C:\\Temp\\cwtools-update.vsix', 'eddy.eddy-stellaris-cwt', false);
+        await installDownloadedUpdate('C:\\Temp\\cwtools-update.vsix', 'foreverskywalker.eddy-stellaris-cwt', false);
 
         expect(commandCalls).to.deep.equal([
             {

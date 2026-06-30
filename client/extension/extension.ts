@@ -1184,6 +1184,39 @@ export async function activate(context: ExtensionContext) {
 		await vs.commands.executeCommand('editor.action.showReferences', uri, position, locations);
 	});
 
+	safeRegisterCommand(context, 'cwtools.definitionInjection.changeMode', async (uriStr: string, lineArg: number, mode: string) => {
+		const uri = vs.Uri.parse(uriStr);
+		const line = Number(lineArg);
+		const newMode = String(mode || '').toUpperCase();
+		const supportedModes = new Set(['INJECT', 'REPLACE', 'TRY_INJECT', 'TRY_REPLACE', 'INJECT_OR_CREATE', 'REPLACE_OR_CREATE']);
+		if (!supportedModes.has(newMode)) {
+			void vs.window.showWarningMessage(localize(`Unsupported definition injection mode: ${newMode}`, `不支持的定义注入模式：${newMode}`));
+			return;
+		}
+
+		const document = await vs.workspace.openTextDocument(uri);
+		if (!Number.isInteger(line) || line < 0 || line >= document.lineCount) {
+			return;
+		}
+
+		const textLine = document.lineAt(line).text;
+		const match = textLine.match(/^(\s*)(INJECT|REPLACE|TRY_INJECT|TRY_REPLACE|INJECT_OR_CREATE|REPLACE_OR_CREATE):([A-Za-z0-9_.:-]+)\s*=/i);
+		if (!match) {
+			void vs.window.showWarningMessage(localize('No definition injection key was found on this line.', '此行没有找到定义注入键。'));
+			return;
+		}
+
+		const oldMode = match[2] ?? '';
+		if (oldMode.toUpperCase() === newMode) {
+			return;
+		}
+
+		const start = (match[1] ?? '').length;
+		const edit = new vs.WorkspaceEdit();
+		edit.replace(uri, new vs.Range(line, start, line, start + oldMode.length), newMode);
+		await vs.workspace.applyEdit(edit);
+	});
+
 
 	class CwtoolsProvider implements vs.TextDocumentContentProvider {
 		private disposables: Disposable[] = [];

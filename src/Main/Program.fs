@@ -32,6 +32,58 @@ let private inlayLocalVarPattern =
         @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
         System.Text.RegularExpressions.RegexOptions.Multiline ||| System.Text.RegularExpressions.RegexOptions.Compiled)
 
+let private definitionInjectionKeyPattern =
+    System.Text.RegularExpressions.Regex(
+        @"^\s*(INJECT|REPLACE|TRY_INJECT|TRY_REPLACE|INJECT_OR_CREATE|REPLACE_OR_CREATE):([A-Za-z0-9_.:-]+)\s*=",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
+
+type private DefinitionInjectionKeyInfo =
+    { mode: string
+      target: string
+      line: int
+      keyStart: int
+      keyEnd: int
+      modeStart: int
+      modeEnd: int
+      targetStart: int
+      targetEnd: int }
+
+let private tryDefinitionInjectionKeyAtLine (fileText: string) (line: int) =
+    let lines = fileText.Replace("\r\n", "\n").Split('\n')
+    if line < 0 || line >= lines.Length then
+        None
+    else
+        let lineText = lines.[line]
+        let m = definitionInjectionKeyPattern.Match(lineText)
+        if not m.Success then
+            None
+        else
+            let modeGroup = m.Groups.[1]
+            let targetGroup = m.Groups.[2]
+            Some
+                { mode = modeGroup.Value.ToUpperInvariant()
+                  target = targetGroup.Value
+                  line = line
+                  keyStart = modeGroup.Index
+                  keyEnd = targetGroup.Index + targetGroup.Length
+                  modeStart = modeGroup.Index
+                  modeEnd = modeGroup.Index + modeGroup.Length
+                  targetStart = targetGroup.Index
+                  targetEnd = targetGroup.Index + targetGroup.Length }
+
+let private tryFindDefinitionInjectionTarget (game: IGame) (target: string) =
+    game.Types()
+    |> Map.toSeq
+    |> Seq.collect (fun (typeName, infos) ->
+        infos
+        |> Seq.choose (fun tdi ->
+            if String.Equals(tdi.id, target, StringComparison.OrdinalIgnoreCase) then
+                Some(typeName, tdi)
+            else
+                None))
+    |> Seq.sortBy (fun (typeName, tdi) -> tdi.range.FileName, typeName)
+    |> Seq.tryHead
+
 let private paradoxColorPattern =
     System.Text.RegularExpressions.Regex(
         @"§[RGBYWHETLMSP!]",
@@ -4436,6 +4488,14 @@ type Server(client: ILanguageClient) =
                                 fileContent
                                 p.position.line
                                 p.position.character
+                            |> Option.orElseWith (fun () ->
+                                match tryDefinitionInjectionKeyAtLine fileContent p.position.line with
+                                | Some info when
+                                    p.position.character >= info.keyStart
+                                    && p.position.character <= info.keyEnd
+                                    ->
+                                    tryFindDefinitionInjectionTarget game info.target |> Option.map (fun (_, tdi) -> tdi.range)
+                                | _ -> None)
 
                         match gototype with
                         | Some goto ->
@@ -4691,10 +4751,31 @@ type Server(client: ILanguageClient) =
                             else
                                 []
 
+                        let definitionInjectionModeActions =
+                            let fileText = docs.GetText(FileInfo(path)) |> Option.defaultValue ""
+                            match tryDefinitionInjectionKeyAtLine fileText p.range.start.line with
+                            | Some info when p.range.start.character <= info.keyEnd && p.range.``end``.character >= info.keyStart ->
+                                [ "INJECT"
+                                  "REPLACE"
+                                  "TRY_INJECT"
+                                  "TRY_REPLACE"
+                                  "INJECT_OR_CREATE"
+                                  "REPLACE_OR_CREATE" ]
+                                |> List.filter (fun mode -> not (String.Equals(mode, info.mode, StringComparison.OrdinalIgnoreCase)))
+                                |> List.map (fun mode ->
+                                    { title = $"Change definition injection mode to %s{mode}"
+                                      command = "cwtools.definitionInjection.changeMode"
+                                      arguments =
+                                        [ JsonValue.String(p.textDocument.uri.ToString())
+                                          JsonValue.Number(decimal info.line)
+                                          JsonValue.String mode ] })
+                            | _ -> []
+
                         match les with
-                        | [] -> ces
+                        | [] -> ces @ definitionInjectionModeActions
                         | _ ->
                             ces
+                            @ definitionInjectionModeActions
                             @ [ { title = "Generate localisation .yml for this file"
                                   command = "genlocfile"
                                   arguments = [ p.textDocument.uri.LocalPath |> JsonValue.String ] }
@@ -5046,9 +5127,28 @@ type Server(client: ILanguageClient) =
                                                 paddingRight = true
                                             }
                                         | None -> ()
+
+                                let tryAddDefinitionInjectionHint (n: CWTools.Process.Node) =
+                                    if n.Position.FileName = targetPath then
+                                        let line = int n.Position.StartLine - 1
+                                        match tryDefinitionInjectionKeyAtLine fileText line with
+                                        | Some info when String.Equals(n.Key, info.mode + ":" + info.target, StringComparison.OrdinalIgnoreCase) ->
+                                            let label =
+                                                match tryFindDefinitionInjectionTarget game info.target with
+                                                | Some(typeName, _) -> sprintf "=> %s" typeName
+                                                | None -> "=> target not found"
+
+                                            hints.Add {
+                                                position = { line = line; character = info.keyEnd }
+                                                label = label
+                                                paddingLeft = true
+                                                paddingRight = true
+                                            }
+                                        | _ -> ()
         
                                 let rec visitNode (n: CWTools.Process.Node) =
                                     if n.Position.FileName = targetPath then
+                                        tryAddDefinitionInjectionHint n
                                         tryAddLocHintAt (getKeyEndPos n.Key n.Position) (nodeLocCandidates n)
                                     n.Leaves |> Seq.iter (fun l ->
                                         if l.Position.FileName = targetPath then

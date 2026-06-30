@@ -13,7 +13,7 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const releaseDir = path.join(root, 'release');
 const readmeEnPath = path.join(root, 'README_EN.md');
-const readmeZhPath = path.join(root, 'README.md');
+const readmeZhPath = path.join(root, 'README_ZH.md');
 const releaseReadmePath = path.join(releaseDir, 'README.md');
 
 function readRequired(filePath) {

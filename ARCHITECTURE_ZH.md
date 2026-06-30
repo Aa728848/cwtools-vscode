@@ -1,369 +1,10 @@
-# Architecture / 架构文档
-
-[English](#english) | [中文](#zh-cn) | [Project Overview / 项目介绍](README.md)
-
-> This default architecture entry is bilingual for GitHub readers and linked contributor workflows.
->
-> 此默认架构入口面向 GitHub 阅读与贡献流程，提供英文与简体中文两套内容。
-
-<a id="english"></a>
-
-## English
-
-### Architecture Documentation
-
-This document describes the current architecture, module boundaries, data flows, and maintenance constraints of **Stellaris Language Serves**. The project is a VS Code extension designed for Paradox game modding, primarily enhancing language services, visual previews, and AI-assisted development for Stellaris.
-
-Version numbers are not maintained redundantly here. The sources of truth are `package.json` at the root and `release/package.json`, which are checked for consistency by the release gate.
-
-#### Overall Structure
-
-The system is composed of four runtime layers and two shared platform capabilities:
-
-1. VS Code Extension Host: `client/extension/`
-2. AI Agent Subsystem: `client/extension/ai/`
-3. Webview Sandbox UI: `client/webview/`
-4. .NET/F# Language Server: `src/LSP/` and `src/Main/`
-5. Shared Platform Capabilities: `client/extension/gameProfiles.ts` and `client/extension/indexing/`
-6. Out-of-the-Box MCP Server: `packages/cwtools-shared/` and `packages/cwtools-mcp/` (a read-only semantic service bundled with the extension for external agents like Codex or Claude Code, see the "Out-of-the-Box MCP Server" section)
-
-```mermaid
-flowchart TD
-    VS["VS Code Extension Host\nclient/extension"]
-    GP["GameProfile Platform\ngameProfiles.ts"]
-    IDX["Shared Index Layer\nclient/extension/indexing"]
-    AI["AI Agent\nclient/extension/ai"]
-    WV["Webview Sandbox\nclient/webview"]
-    LSP["CWTools Server\nsrc/Main + src/LSP"]
-    CW["CWTools F# library\nsubmodules/cwtools"]
-    MCP["MCP Server (read-only)\npackages/cwtools-mcp"]
-    EXT["External Agents\nCodex / Claude Code"]
-
-    VS --> GP
-    VS --> IDX
-    VS --> AI
-    VS <-->|postMessage| WV
-    VS <-->|LSP JSON-RPC over stdio| LSP
-    AI --> IDX
-    LSP --> CW
-    EXT <-->|MCP stdio| MCP
-    MCP -->|spawns / LSP JSON-RPC| LSP
-```
-
-Webviews communicate with the Extension Host exclusively via `postMessage`. They cannot access `vscode`, Node.js, `fs`, `path`, or `require()` directly.
-
-#### Extension Host
-
-`client/extension/` runs in the VS Code Extension Host process. It is responsible for command registration, LSP client lifecycle, filesystem access, Webview panel hosting, AI panel hosting, and assembling shared platform services.
-
-| File | Purpose |
-| --- | --- |
-| `extension.ts` | Extension entry point, registers commands, starts the Language Server, and instantiates shared services |
-| `gameProfiles.ts` | Multi-game profile registry, path conventions, feature toggles, and installation detection metadata |
-| `indexing/indexService.ts` | Shared incremental index service |
-| `indexing/locParser.ts` | Pure parser and query helper for localization YML files |
-| `indexing/workspaceSymbolParser.ts` | PDXScript / asset / gui symbol parser, queries, and reference extractor |
-| `codeActions.ts` | Code Actions for AI diagnostic repairs, explanations, and batch fixes |
-| `diagnosticI18n.ts` | Client-side diagnostic translation: Chinese translation + fix advice, `source` normalization, and ignore-key matching |
-| `fileExtensions.ts` | Case-insensitive extension matching helpers (`matchesExt`, `GRAPHICS_EXTS`) shared by UI and AI layers |
-| `fsCaseInsensitive.ts` | Case-insensitive path resolution (used for unresolved resource references on Linux/macOS) |
-| `pathScope.ts` | Neutral path containment helpers (`isPathInsideOrEqual` / `foldPathCase`) shared by UI and AI sandboxes |
-| `guiPanel.ts` / `guiParser.ts` | `.gui` file parser and Canvas preview host |
-| `solarSystemPanel.ts` / `solarSystemParser.ts` | 星系 (Solar system) previewer for `solar_system_initializers/` |
-| `eventChainPanel.ts` / `eventChainParser.ts` | Event chain scanner, subgraph extraction, and code jumps |
-| `techTreePanel.ts` / `techTreeParser.ts` | Tech tree scanner, filtering, and dependency graphs |
-| `entityPanel.ts` / `entityAssetParser.ts` | `.asset` entity model preview host and resource parsing |
-| `particlePanel.ts` / `particleAssetParser.ts` / `particleAssetSerializer.ts` | Stellaris `particle={}` preview/editor host, span parsing, and write-back |
-| `graphicsFeatures.ts` | Graphics resource editor capabilities |
-| `ddsDecoder.ts` | DDS/TGA decoding support |
-| `locDecorations.ts` | Localization hover, definitions, and decorations backed by `IndexService` |
-| `fileExplorer.ts` | Custom Mod file tree view |
-| `vanillaCompare.ts` | Compare with vanilla files and migrate code blocks |
-| `updateChecker.ts` | Update check logic |
-| `pdxTokenizer.ts` | Shared PDX script tokenizer |
-| `exprEval.ts` | Safe math expression evaluation for `@[...]` |
-
-#### Shared Platform & Indexing Layer
-
-##### GameProfile Platform
-
-`gameProfiles.ts` consolidates multi-game differences into profiles instead of scattering them in extensions, indexing, and AI modules. A profile describes language IDs, file extensions, vanilla cache configuration keys, localization directories and encodings, script/GUI/GFX directory structures, preview features, AI knowledge mapping, and Steam installation detection metadata.
-
-The extension entry point, indexing layer, and AI game knowledge should prioritize game profile helper functions.
-
-##### IndexService
-
-`IndexService` is a shared knowledge layer used by both editor features and AI tools:
-
-- Localization keys are indexed during activation for hover, definitions, and AI lookups.
-- Heavier workspace/vanilla symbol indexes are lazy-loaded via `ensureWorkspaceSymbolsReady()` to avoid slow startup.
-- The symbol layer supports `.txt`, `.gfx`, `.asset`, `.gui`, storing `origin`, `updatedAt`, `fileVersion`, and light references.
-- File system watchers incrementally update `.yml` and symbol files; symbol indexes are garbage-collected when idle.
-- The AI consumes these indexes via `query_localisation_index` and `query_workspace_index`.
-
-The core constraint of this layer is: if the shared index can answer the query, do not force consumers to scan the workspace again.
-
-#### AI Agent Subsystem
-
-AI code is located in `client/extension/ai/`, consisting of the chat host, model providers, prompt builders, tool registries, workflows, reasoning loops, and multi-agent coordination.
-
-##### Core Data Flow
-
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant Chat as chatPanel.ts
-    participant Runner as agentRunner.ts
-    participant Service as aiService.ts
-    participant Tools as agentTools.ts
-    participant Index as IndexService
-    participant LSP as LSP
-
-    User->>Chat: sendMessage
-    Chat->>Runner: runAgent(mode, workflowId, context)
-    Runner->>Service: chat/completion request
-    Service-->>Runner: text + tool calls
-    Runner->>Tools: execute tools
-    Tools->>Index: optional shared-index queries
-    Tools->>LSP: optional LSP/deep queries
-    Tools-->>Runner: tool results
-    Runner-->>Chat: agent steps + artifacts + final result
-    Chat-->>User: render messages/workflows/artifacts
-```
-
-##### Core Files
-
-| File | Purpose |
-| --- | --- |
-| `agentRunner.ts` | Reasoning loops, tool permissions, workflow execution, context compression, checkpointing, and model fallbacks |
-| `agentTools.ts` | Tool dispatching, execution timeouts, shared blackboard, and orchestrator tool entry |
-| `aiService.ts` | Multi-provider HTTP/SSE clients, request formatting, fallback policies, and custom wire formats (`customApiFormat`) |
-| `promptBuilder.ts` / `prompt/sections/` | Prompt builder facade, project context, and mode system instructions |
-| `providers.ts` / `providers/models/` | Provider registry, default models, capabilities, pricing, and prompt caching discounts |
-| `types.ts` | Messages, tools, modes, contexts, Artifacts, and setting schemas |
-| `runnerPolicy.ts` | Mode-based tool exclusions, iteration limits, and sub-agent output token budgets |
-| `planModeGuard.ts` | Plan-mode write guards: limits writes to implementation plans and plan/blueprint/walkthrough output files; provides read-only `git_ops` checks (`validateGitOpsForMode`) |
-| `projectProfile.ts` | `/init` workspace scanning, project profile generation, and encoding/language detection |
-| `chatInit.ts` | Command handler for `/init`, triggers profile generation and renders `CWTOOLS.md` |
-| `gameKnowledge.ts` | Paradox script rule-bases for 9 games mapped by language ID |
-| `skills.ts` | Skill index loader (`SKILL.md` for built-in, user, or project scopes) and `run_skill` execution |
-| `memoryParser.ts` | Topic-scoped `.cwtools-ai/<topicId>/.cwtools-ai-memory.md` long-term memory read/write and pruning |
-| `workspacePaths.ts` | Resolves AI data directories (`.cwtools-ai/`), topic and scratch directories |
-| `workspaceSandbox.ts` | Input path cleaning, scope classification (project, workspace, outside, etc.), and trust checks |
-| `usageTracker.ts` | Persists cumulative token usages, costs, and prompt cache stats across sessions |
-| `diffEngine.ts` | Structural diff engine |
-| `fileCache.ts` | Bounded file content cache |
-| `errorReporter.ts` | Structured error logging (fatal, warn, debug) |
-| `contextBudget.ts` | Token budgets and tool output truncation rules |
-| `contextReferences.ts` | `@file`, `@folder`, `@symbol`, and `@blackboard` context reference resolvers |
-| `chat/bridge.ts` | Webview-to-extension IPC message handler |
-| `agentSessionCoordinator.ts` | Tracks state, modes, workflows, and live steps between Chat and Agent Manager UIs |
-| `agentUiBroadcaster.ts` | Broadcasts state changes to multiple Webviews |
-| `artifactStore.ts` | Session-level storage, sorting, and lifecycle management for Artifacts |
-| `chatPanel.ts` / `chatHtml.ts` | Chat host panel and HTML injection template |
-| `chatSettings.ts` / `chatTopics.ts` | UI preferences and session topic persistence |
-| `workflowRegistry.ts` / `workflowI18n.ts` | Workflow metadata, allowed tools, validation targets, and localization |
-| `inlineProvider.ts` | AI inline (FIM) code completions |
-| `mcpClient.ts` | Model Context Protocol client over stdio/SSE |
-| `toolCallParser.ts` / `jsonRepair.ts` | Loose JSON repairs and fallback tool-call extraction for non-standard models |
-
-##### Runner Pipeline (`runner/`)
-
-| File | Purpose |
-| --- | --- |
-| `compaction.ts` | Chat history compaction and context management helpers |
-| `checkpoint.ts` | V2 resume states and synthetic tool call repairs for interrupted generations |
-| `writeCoordinator.ts` | Koordinations entry for `PartitionedWriteQueue` and read-after-write blockades |
-| `fallbackPolicy.ts` | Model fallbacks and retries on rate limits or failures |
-| `cancellation.ts` | LLM generation abort tracking and exceptions |
-| `stepEmitter.ts` | Broadcasts streaming tokens and agent status updates |
-| `toolScheduler.ts` | Concurrency scheduling and target-file lock acquisitions |
-| `toolInvocation.ts` | Normalizes raw LLM actions to validated `ToolInvocation` envelopes with risk metadata |
-| `commandPreflight.ts` | Command string tokenization and risk level auditing for terminal actions |
-| `permissionPolicy.ts` | Resolves low-risk automatic grants and scopes via `cwdScope` |
-| `policyEngine.ts` | Hierarchical permission resolution and sandbox shadow audits |
-| `autoReviewer.ts` | Read-only automated LLM reviewer: caches decisions, falls back safely to user prompts |
-| `shellEnv.ts` | White-lists environment variables for child processes |
-| `runLedger.ts` | Appends agent steps to JSONL and serves as raw data for timelines |
-| `runReducers.ts` | Pure event projection reducers: reconstructs run topologies, stats, and timelines |
-| `runReplay.ts` | Tool mock replayer (Mode A: uses historic inputs to answer LLM calls) |
-| `readTracker.ts` | Hash-based integrity tracking (mtime + SHA-256) to ensure reads precede writes |
-| `contextMemory.ts` | Summarizes compacted contexts |
-| `doomLoopDetector.ts` | Detects semantic looping inside reasoning chains |
-
-##### Tool Subsystem (`tools/`)
-
-| File | Purpose |
-| --- | --- |
-| `definitions.ts` | JSON schemas for all available AI tools |
-| `registry.ts` | Fact sheet mapping tools to mode gates, read/write flags, risks, and locks |
-| `permissions.ts` | Access checks and sandboxes |
-| `argRepair.ts` | Parameter repairs prior to execution |
-| `externalTools.ts` | Shell execution and process management handlers |
-| `fileTools.ts` | File reads, writes, and local edits |
-| `lspTools.ts` | Deep semantic lookups and language server actions |
-| `diagnosticMetadata.ts` | Categorization and hints for `analyze_diagnostic_error` |
-| `memoryTools.ts` | Workspace and session memory actions |
-| `replacerSuite.ts` | Fuzzy string search & replace engine utilizing 10 progressive algorithms |
-| `schemaFlatten.ts` | Schema flattener and restorer (`nestArguments()`) for weak tools implementations |
-
-##### Agent Modes and Workflows
-
-`AgentMode` options are defined in `client/extension/ai/types.ts`:
-```text
-build | plan | explore | general | utility | review | script |
-gui_expert | script_reviewer | loc_translator | loc_writer | orchestrator
-```
-
-`general` is retained for backwards compatibility; `utility` handles generic workspace tasks; `script` is the high-throughput Paradox script mode orchestrating up to 8 sub-agents concurrently.
-
-`workflowRegistry.ts` contains:
-
-| Workflow | Mode | Purpose |
-| --- | --- | --- |
-| `diagnostic-fix` | `build` | Repair CWTools diagnostics |
-| `loc-generation` | `build` | Generate missing localization entries |
-| `event-chain-design` | `plan` | Architect event topologies |
-| `rules-sync-review` | `review` | Verify rules after synchronizations |
-| `asset-wiring` | `build` | Repair broken sprite and sound file links |
-
-The Runner restricts tools based on the active workflow and appends supplementary prompts.
-
-##### Tool Constraints
-
-- `tools/registry.ts` is the single source of truth for tool properties (`effect`, `riskLevel`, `concurrencyClass`).
-- Writes to `.yml` localization files must call `write_localisation`, not generic text replacers.
-- `edit_file` leverages a 10-step fuzzy match pipeline.
-- `apply_patch`, `multi_replace_file_content`, and `ast_mutate` are retired. Internal execution routes them to `edit_file` or `replace_lines`.
-- Reads of a file queue behind pending writes via `writeCoordinator.afterCurrentWrites`.
-- Multi-agent systems use `dispatch_agents`, `query_blackboard`, and `merge_results`. Sub-agents are sandboxed in `orchestrator/subAgentSandbox.ts`.
-
-##### Orchestrator
-
-The orchestrator structures DAG sub-tasks, schedules parallel processes, shares memory through blackboards, and reviews outputs.
-
-| File | Purpose |
-| --- | --- |
-| `agentRegistry.ts` | Configures sub-agent modes, systems, and tokens budgets |
-| `blackboard.ts` | Shared thread-safe dictionary supporting regex queries |
-| `taskGraphEngine.ts` | DAG construction, cycle detection, and topological execution ordering |
-| `parallelExecutor.ts` | Schedules independent tasks concurrently |
-| `orchestrator.ts` | Entry point, context injectors, and review integration |
-| `conflictDetector.ts` | Scans blackboards for overlapping write target intents |
-| `qualityGate.ts` | Auto-review pipeline feeding verification feedback back to agents |
-| `subAgentSandbox.ts` | Sets sandboxes to restrict paths and tools for sub-agents |
-| `worktreeManager.ts` | Isolates tasks in separate git worktrees (optional) |
-
-##### Reducers, Checkpoints, and Replays
-
-- `runReducers.ts` scans events list sequentially to build state snapshots without side-effects.
-- `checkpoint.ts` builds V2 resume states, injecting artificial tool outputs for interrupted runs.
-- `runReplay.ts` runs Mode A replays matching historic outputs based on canonical tool arguments.
-- `readTracker.ts` blocks write attempts if files were modified externally since their last read.
-
-#### Out-of-the-Box MCP Server
-
-The packages `packages/cwtools-shared` and `packages/cwtools-mcp` implement a **read-only** Model Context Protocol (MCP) server. It exports 21 semantic tools of CWTools to external hosts.
-
-##### Scope & Structure
-
-- `cwtools-shared` (host-independent core): generated schemas, file security checks, rules loading, and readiness trackers. It does not import `vscode` or extension APIs.
-- `cwtools-mcp` (adaptation layer): launches `CWTools Server`, connects via JSON-RPC, resolves configurations in user profiles, and exposes stdio transports.
-
-##### Rules & Caches
-
-- MCP tools return `vanillaCache` presence warnings or `readiness.ready=false` annotations to notify client models if parses are still loading.
-- Workspaces aggregate errors via `cwtools.ai.getAllDiagnostics` instead of single-file evaluations.
-- MCP is bundled to `release/bin/mcp/cwtools-mcp.cjs`.
-
-#### Webview Layer
-
-`client/webview/` contains the code compiled for the sandboxed frontend.
-
-| Webview | Entry | Purpose |
-| --- | --- | --- |
-| Chat | `chatPanel.ts` | Conversation UI, workflow cards, configurations, and inline diffs |
-| Manager | `agentManager.ts` | Run list logs, token dashboards, and task graphs |
-| GUI | `guiPreview.ts` | Canvas render, drag modifiers, and GFX maps |
-| Space | `solarSystemPreview.ts` | 3D solar orbits editing |
-| Network | `eventChainPreview.ts` | Interactive Cytoscape graphs for event files |
-| Tech | `techTreePreview.ts` | Cytoscape technology pre-requisites mapping |
-| Entity | `entityPreview.ts` | Three.js renderer for mesh, textures, and skeleton animations |
-| Particles | `particlePreview.ts` | Three.js particle simulators and curve plots |
-
-#### F# / .NET Language Server
-
-The backend runs on .NET 10.
-
-- **Completion locks**: Autocompletions call `TryEnterReadLock` with a 150ms timeout. Out-of-time runs fallback to stale caches.
-- **Incremental refreshes**: Saves under scripted definitions bypass full database indexing, updating only altered files and type dictionaries instantly (gated by `experimental`).
-- **Shader parsing**: Renders tokens and declarations. Uses brace counts for nesting rather than simple regex.
-
-#### Build System
-
-`package.json` contains:
-- `npm run compile`: Compiles TypeScript and bundles Webviews.
-- `npm run lint`: Runs ESLint 9 checks.
-- `npm run test:unit`: Runs TS unit tests.
-- `npm run verify`: Triggers compiler, linter, tests, and release gates.
-
-#### Critical Design Constraints
-
-##### Webview Sandbox
-Webviews are completely sandboxed. **Node.js (fs, path) and vscode APIs cannot be imported**.
-- **I/O inside Host**: File operations and ReadTracker execution happen inside the Extension Host.
-- **IPC Handlers**: Frontends delegate file queries and changes to the Host via `postMessage`.
-
-##### Write Concurrency
-`PartitionedWriteQueue` serializes edits per file. Multi-file actions acquire locks in dictionary path order to prevent deadlocks.
-
-##### Command Sanitization
-`run_command` commands are tokenized in `runner/commandPreflight.ts`. Path traversals are blocked using `path.relative`.
-
-##### Context Metrics
-`agentRunner.ts` extracts cache hits (`usage.cached_tokens`, etc.) and pricing calculations. The frontend displays these inside a 3-bar sparkline.
-
-#### Directory Overview
-
-```text
-cwtools-vscode/
-  client/
-    extension/
-      ai/
-        orchestrator/         Multi-agent coordination
-        runner/               Compaction, checkpointing, read tracking
-        chat/                 IPC bridge
-        tools/                Definitions, replacer engines
-        prompt/
-          sections/           System prompt strings
-        providers/
-          models/             Models metadata & pricing
-        agentRunner.ts        Reasoning execution
-        agentTools.ts         Tools routers
-        aiService.ts          LLM requester
-        projectProfile.ts     Project indexing
-      indexing/               Localization parser & indexes
-      gameProfiles.ts         Game profiles specifications
-      diagnosticI18n.ts       Chinese translations for errors
-    webview/
-      chat/                 Chat sub-modules
-      messageRenderer.ts      Prompt cache metrics rendering
-      entityPreview.ts        Three.js meshes
-```
-
----
-
-<a id="zh-cn"></a>
-
-## 中文
-
-### 架构文档
+# 架构文档
 
 本文档描述 **Stellaris Language Serves** 的当前架构、模块边界、数据流和维护约束。项目是一个面向 Paradox 游戏 Modding 的 VS Code 扩展，主要增强 Stellaris 的语言服务、可视化预览和 AI 辅助开发能力。
 
 版本号不在架构文档中重复维护；源码与发布清单分别以根目录 `package.json` 和 `release/package.json` 为准，并由 release gate 检查一致性。
 
-#### 总体结构
+## 总体结构
 
 系统由四个运行层和两个共享平台能力组成：
 
@@ -399,7 +40,7 @@ flowchart TD
 
 Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访问 `vscode`、Node.js、`fs`、`path` 或 `require()`。
 
-#### Extension Host
+## Extension Host
 
 `client/extension/` 运行在 VS Code 扩展宿主进程中，负责命令注册、LSP 客户端、文件系统访问、Webview 面板宿主、AI 面板宿主，以及共享平台能力的装配。
 
@@ -430,15 +71,15 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 | `pdxTokenizer.ts` | PDX 脚本共享分词器 |
 | `exprEval.ts` | `@[...]` 数学表达式安全求值 |
 
-#### 共享平台与索引层
+## 共享平台与索引层
 
-##### GameProfile 平台
+### GameProfile 平台
 
 `gameProfiles.ts` 把多游戏差异集中到 profile 中，而不是散落在 extension、索引和 AI 代码里。profile 描述语言 ID、扩展名、原版缓存配置键、本地化目录与编码、脚本/GUI/GFX 目录约定、预览能力、AI 知识块映射和 Steam 安装探测元数据。
 
 扩展入口、索引层和 AI 游戏知识都应优先消费 profile helper。
 
-##### IndexService
+### IndexService
 
 `IndexService` 是 editor features 和 AI tools 共用的知识层：
 
@@ -450,11 +91,11 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 
 该层的核心约束是：当共享索引能回答问题时，不要让每个消费者各自重新扫描工作区。
 
-#### AI Agent 子系统
+## AI Agent 子系统
 
 AI 代码位于 `client/extension/ai/`，由聊天宿主、模型提供商、提示词构建、工具系统、workflow 系统、执行循环和多 Agent 协作层组成。
 
-##### 核心数据流
+### 核心数据流
 
 ```mermaid
 sequenceDiagram
@@ -478,7 +119,7 @@ sequenceDiagram
     Chat-->>User: render messages/workflows/artifacts
 ```
 
-##### 核心文件
+### 核心文件
 
 | 文件 | 作用 |
 | --- | --- |
@@ -514,7 +155,7 @@ sequenceDiagram
 | `mcpClient.ts` | MCP stdio/SSE 客户端 |
 | `toolCallParser.ts` / `jsonRepair.ts` | 非标准工具调用和不完整 JSON 修复 |
 
-##### Runner 执行管线（`runner/`）
+### Runner 执行管线（`runner/`）
 
 | 文件 | 作用 |
 | --- | --- |
@@ -538,7 +179,7 @@ sequenceDiagram
 | `contextMemory.ts` | LLM 驱动的结构化历史压缩 |
 | `doomLoopDetector.ts` | 防循环语义检测 |
 
-##### 工具系统（`tools/`）
+### 工具系统（`tools/`）
 
 | 文件 | 作用 |
 | --- | --- |
@@ -554,7 +195,7 @@ sequenceDiagram
 | `replacerSuite.ts` | 10 策略模糊替换引擎（Levenshtein、块锚定、Jaccard 相似度等） |
 | `schemaFlatten.ts` | 深层 schema 自动展平及 `nestArguments()` 反向还原 |
 
-##### Agent 模式与 Workflow
+### Agent 模式与 Workflow
 
 `AgentMode` 定义在 `client/extension/ai/types.ts`：
 
@@ -577,7 +218,7 @@ gui_expert | script_reviewer | loc_translator | loc_writer | orchestrator
 
 Runner 会在模式工具集基础上应用 workflow tool policy，并把 workflow prompt supplement 注入系统提示词。聊天 UI 通过 `workflowViewModel.ts`、`workflowI18n.ts` 和 webview workflow 模块展示 workflow、阶段和验证要求。
 
-##### 工具系统
+### 工具系统
 
 工具定义集中在 `client/extension/ai/tools/definitions.ts`。新增工具时必须同步更新：
 
@@ -605,7 +246,7 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 - 当前多 Agent 调度工具是 `dispatch_agents`，配套 `query_blackboard` 和 `merge_results`。
 - `run_skill` 工具按需加载 `SKILL.md` 正文；`skills.ts` 负责索引、`promptBuilder.ts` 只注入精简技能索引，正文不进入基础 prompt。
 
-##### Orchestrator
+### Orchestrator
 
 `client/extension/ai/orchestrator/` 管理 DAG 子任务、多 Agent 并行、共享黑板、冲突检测和质量门。
 
@@ -623,7 +264,7 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 
 已注册角色包括 `explorer`、`architect`、`builder`、`locWriter`、`reviewer`、`assetGen`、`guiExpert` 和 `locTranslator`。
 
-##### Run Ledger、Checkpoint 与 Compacted Memory
+### Run Ledger、Checkpoint 与 Compacted Memory
 
 `runner/runLedger.ts` 提供单例 `RunLedger`，把每次 Agent 运行抽象为 `AgentRunRecord` + 追加式 `AgentRunEvent` 序列流。事件用 per-run 单调递增的 `sequence` 排序，落盘到 `.cwtools-ai/<topic>/runs/<runId>/events.jsonl`，并通过 `runSnapshot` 消息广播到聊天与 Agent Manager 面板。
 
@@ -631,7 +272,7 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 
 `runner/contextMemory.ts` 产出结构化 `CompactedSummary`，由 `promptBuilder.ts` 在恢复时注入。Agent Manager 的 `runTimeline.ts` 和 `runInspector.ts` 消费 run snapshot 展示事件时间轴和单事件详情。
 
-##### Run Reducers
+### Run Reducers
 
 `runner/runReducers.ts` 包含纯函数式的事件投影 reducer，对 `AgentRunEvent[]` 做单遍扫描产出不可变快照：
 
@@ -643,7 +284,7 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 
 Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新增事件类型时必须更新对应 reducer。
 
-##### Run Replay
+### Run Replay
 
 `runner/runReplay.ts` 支持对已记录的 Agent 运行进行回放：
 
@@ -652,7 +293,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 - `ReplaySession` 按 `(toolName, canonicalize(args))` 索引工具结果。
 - `maybeServeFromReplay` 供工具执行器短路。
 
-##### ReadTracker
+### ReadTracker
 
 `runner/readTracker.ts` 在 Extension Host 中跟踪每个文件的读取状态（mtime + SHA-256 hash），提供三个核心操作：
 
@@ -662,12 +303,12 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 严禁在 Webview 中使用此模块。
 
-##### Workspace Paths 与 Sandbox
+### Workspace Paths 与 Sandbox
 
 - `workspacePaths.ts` 解析 AI 存储根目录（`.cwtools-ai/`），支持多 workspace folder 场景下的 topic 目录、scratch 目录和多候选路径。
 - `workspaceSandbox.ts` 负责路径输入清洗（去引号、去 code span、去自然语言前缀）、workspace folder 别名解析、`.cwtools-ai` 路径别名解析、以及四级作用域分类（`project`/`ai`/`workspace`/`outside`）和信任判定。
 
-##### Runner Policy
+### Runner Policy
 
 `runnerPolicy.ts` 集中管理：
 
@@ -676,7 +317,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 - `resolveRunMaxOutputTokens` — slim sub-agent 的输出 token 预算
 - `MODE_ITERATION_LIMITS` — 每种模式的 min/base/cap 配置
 
-##### Project Profile 与 `/init`
+### Project Profile 与 `/init`
 
 `projectProfile.ts` 处理 `/init` 命令的项目扫描逻辑：
 
@@ -688,15 +329,15 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 `chatInit.ts` 是 `/init` 命令的入口处理器，负责调用 `projectProfile.ts` 生成 profile 并渲染 `CWTOOLS.md`。
 
-##### Game Knowledge
+### Game Knowledge
 
 `gameKnowledge.ts` 为 9 款 Paradox 游戏提供 PDXScript 知识块（Stellaris、HOI4、EU4、CK2、CK3、VIC2、VIC3、Imperator、EU5），外加一个通用 Paradox 回退。`promptBuilder.ts` 通过 `getGameKnowledge(languageId)` 动态选择注入。Stellaris 知识块包含 `common/` 各目录的覆盖/加载顺序规则（LIOS/FIOS/FIXES/DUPL/NO）和可选作用域操作符 `scope?` 的说明。
 
-##### Skills
+### Skills
 
 `skills.ts` 索引三类作用域的 `SKILL.md` 文件（built-in / user / project），解析其 frontmatter（`name`、`description`、可选 `runAs` / `allowedTools`）。`promptBuilder.ts` 通过 `buildSkillIndexPrompt` 只把精简的技能索引注入系统提示词，受 `SKILL_INDEX_CHAR_LIMIT` 限制；完整技能正文由 `run_skill` 工具按需加载（`loadSkill`，受 `SKILL_BODY_CHAR_LIMIT` 限制），避免长期占用上下文预算。
 
-##### Memory Parser
+### Memory Parser
 
 `memoryParser.ts` 管理 topic 级长期记忆文件 `.cwtools-ai/<topicId>/.cwtools-ai-memory.md`（旧的工作区根目录 `.cwtools-ai-memory.md` 仍作为读取回退，新写入一律落到 topic 路径）：
 
@@ -704,11 +345,11 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 - 追加新记忆条目（含日期和优先级标签），自动创建 topic 目录
 - 超出 `MAX_MEMORY_CHARS`（~4000 字符）时按优先级自动裁剪
 
-##### Usage Tracker
+### Usage Tracker
 
 `usageTracker.ts` 跨会话持久化累计 token 用量、成本和缓存统计数据。被设置概览和 Agent Manager 仪表盘消费。
 
-##### Replacer Suite
+### Replacer Suite
 
 `tools/replacerSuite.ts` 提供 10 种递进式模糊字符串替换策略，经 `FileToolHandler.replace()` 供 `edit_file` 工具与内部 hunk 应用消费：
 
@@ -725,43 +366,43 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 匹配失败时 `findNearestMatch` 返回最佳部分匹配信息，帮助 AI 自我纠正。`stripLineNumberPrefixes` 可剥离 `read_file` 输出的 `N | ` 行号前缀，并作为 `fuzzyReplace` 的回退匹配策略。
 
-##### Schema Flatten
+### Schema Flatten
 
 `tools/schemaFlatten.ts` 为弱工具调用能力的 Provider 自动展平深层嵌套的 tool schema（深度 > 2 或叶子 > 10 时触发），执行工具前由 `nestArguments()` 反向还原为嵌套结构。
 
-#### 通用 MCP 服务
+## 通用 MCP 服务
 
 `packages/cwtools-shared/` 与 `packages/cwtools-mcp/` 是两个 npm workspace 子包，构成一个**只读**的 Model Context Protocol 服务，把本项目的 PDX 语义能力（类型/规则/作用域/诊断/定义引用/补全/深层语义）平台化输出给 Codex、Claude Code 等外部 Agent。文件写入不由 MCP 负责，交给宿主 Agent 自带环境。
 
-##### 分层与边界
+### 分层与边界
 
 - `cwtools-shared`（无 VS Code 依赖的核心）：生成式工具 schema、`HostServices` 接口、路径/规则安全、vanilla 缓存与加载就绪（readiness）标注、游戏知识。它不 import `vscode`、`vscode-languageclient`、webview 或 extension context。
 - `cwtools-mcp`（薄适配层）：CLI、stdio/HTTP transport、`NodeHostServices`、`LspProcessHost`（拉起 `CWTools Server` 并走 LSP JSON-RPC）、`vscodeCache.ts`（探测已安装插件的 server 二进制、解压规则与 globalStorage 原版缓存）。经 esbuild 打成单文件自包含 `cwtools-mcp.cjs`。
 
-##### 工具集与单一事实源
+### 工具集与单一事实源
 
 - 首期工具为 **21 个只读工具**（`cwtools-shared/src/tools/names.ts`）：`query_types`/`query_rules`/`query_scope`/`get_diagnostics`/`analyze_diagnostic_error`/`query_project_profile`/`query_workspace_index`/`query_localisation_index`/`get_pdx_block`/`get_completion_at`/`document_symbols`/`workspace_symbols`/`query_definition`/`query_definition_by_name`/`query_references`，以及深层语义 `query_scripted_effects`/`query_scripted_triggers`/`query_enums`/`query_static_modifiers`/`query_variables`/`get_entity_info`。
 - schema 由 `tools/generate-mcp-schema.cjs` 从上游 `definitions.ts` + `registry.ts` 生成到 `cwtools-shared/src/generated/mcpTools.ts`，**不手写**；白名单同时存在于 `names.ts` 与生成脚本，须保持一致，contract 测试检测漂移。
 - 共享 dispatcher（`tools/toolHandlers.ts`）把每个工具路由到对应 `cwtools.ai.*` LSP 命令或 host 调用。新增语义能力必须先在 `src/LSP`/`src/Main` 增加 `cwtools.ai.*` 命令（只读命令同时登记到 `LanguageServer.fs` 的 `isReadCmd`），再在 dispatcher 接线，不在 MCP 内重写 CWTools 语义。
 
-##### 只读、结果标注与自描述
+### 只读、结果标注与自描述
 
 - `cwtools-mcp` 的 `createToolCallHandler` 对任何非白名单（写）工具返回 `tool_not_available`，确保纯只读面。
 - 受 vanilla 影响的工具结果附 `vanillaCache`（`available`/`source`/`reason`），缺原版缓存时带 warning；依赖 game 加载的工具在加载未完成时返回 `status: "loading"` + `readiness.ready=false`，避免把"尚未加载"误读成"查无此物"。
 - 连接时下发 server `instructions`（`server.ts`），引导模型在 Paradox/群星项目里优先用工具验证 ID、查语法、查诊断。
 
-##### 后端、规则与缓存依赖
+### 后端、规则与缓存依赖
 
 - 全工作区诊断由新增的 `cwtools.ai.getAllDiagnostics` 命令聚合 server 端 `fileDiagnosticStates`（`get_diagnostics` 不带文件时走它，而非只返回 freshness）。
 - 规则源优先级：`--rules <dir|zip>` > 已装插件解压规则 > dev 仓库 `submodules/…/config` > 打包 `*-rules.zip`（zip 自动解压复用）。
 - 原版缓存：`--cache <dir>` 显式指定，或自动探测插件 globalStorage 的 `<game>.cwb`；缺失时可用 `--game-path` 让 server 首次构建。
 
-##### 分发与版本跟随
+### 分发与版本跟随
 
 - `package.ps1` 把 MCP bundle 打到 `release/bin/mcp/cwtools-mcp.cjs` 并随 VSIX 分发；`extension.ts` 激活时把它复制到**版本无关稳定路径** `globalStorage/eddy.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs`，外部 Agent 指向该路径即自动跟随插件更新。
 - VS Code 对同版本号 `--force` 重装不替换文件；交付 MCP 改动需升版本号（根 `package.json` + `release/package.json` + CHANGELOG 同步）。
 
-#### Webview 层
+## Webview 层
 
 `client/webview/` 编译为浏览器端脚本。Rollup 打包 8 个入口：
 
@@ -786,7 +427,7 @@ Webview 维护规则：
 - 动画支持 `prefers-reduced-motion`。
 - WebGL/Three.js 必须在销毁时释放资源。
 
-#### F# / .NET 后端
+## F# / .NET 后端
 
 后端使用 .NET 10。`global.json` 当前固定 SDK `10.0.301`，允许 `latestMinor` roll-forward。
 
@@ -800,7 +441,7 @@ Webview 维护规则：
 
 `src/Main/Main.fsproj` 默认引用 `submodules/cwtools/CWTools/CWTools.fsproj`。如需使用本地 CWTools，可在 `src/Main/cwtools.local.props` 中设置 `UseLocalCwtools=True` 和 `CwtoolsPath`。项目使用 `RuntimeIdentifiers`（复数）声明 `win-x64`/`linux-x64`/`osx-x64`，无 RID 的普通 `dotnet build` 也能成功；文件系统比较按平台条件化（仅 Windows 用 `OrdinalIgnoreCase`）。
 
-##### 诊断、格式化与补全降级
+### 诊断、格式化与补全降级
 
 - **诊断元数据**：服务端发布的每条 `Diagnostic` 携带 `codeDescription`（指向 `docs/diagnostic-codes.md#<code>` 的 URL）和 LSP `tags`（Deprecated/Unnecessary）。`docs/diagnostic-codes.md` 是中英双语的 CWxxx 错误码参考，标题锚点与错误码一一对应。
 - **客户端诊断增强**：`client/extension/diagnosticI18n.ts` 在 LSP middleware 中把英文校验消息替换为中文翻译 + 修复建议（非中文环境追加英文 💡 建议行），由 `cwtools.ai.enhancedDiagnostics` 开关控制；ignore-list 匹配在增强之前针对原始服务端消息执行。
@@ -811,7 +452,7 @@ Webview 维护规则：
 - **RevalidateRequest**：编辑 `inline_scripts/` 定义文件保存后，绕过防抖立即重新校验其调用方文件。
 - **自定义 scripted 类型增量刷新**：编辑/保存 `common/scripted_triggers/`、`common/scripted_effects/`、`common/script_values/` 下的定义文件时，绕开整库全量 `RefreshCaches`，改走增量类型补丁——`IGame.RefreshScriptedTypes` 经 `RulesManager.RefreshScriptedTypes` 按 `range.FileName` 滤除旧 `typeDefInfo` 条目、对改动实体单趟 `getTypesFromDefinitions`、仅对改动的 typeKey 增量重建 `tempTypeMap`（只重建这些类型的 `createStringSet` trie，其余类型复用已有 StringSet，不再整表 `typeMapFromTypeDefInfo`，逐键语义与全量一致），并复用 `buildServices` 重建补全/校验/Info 三服务；删除文件走 `IGame.RemoveScriptedTypes`（含 `ResourceManager.RemoveFile`）。调用方重校验复用类型引用反向索引（`TypeReferenceIndex` / `FindAllRefsByType`），并把当前打开的其它文件排入重校验队列。该路径由 `experimental` 开关门控、在 `gameStateLock` 写锁内执行，遇异常/非白名单类型/连续 25 次后回退全量；`inline_scripts`（非 `type[...]` 叶子类型）不进增量白名单，仍走全量 + 调用方重校验（见上一条）。
 
-##### Shader 支持
+### Shader 支持
 
 Shader 支持覆盖 `.shader` 和 `.fxh`，涉及：
 
@@ -827,11 +468,11 @@ Shader 支持覆盖 `.shader` 和 `.fxh`，涉及：
 - 字符串区间扫描要保留转义双引号 `\"` 的处理。
 - 尽量把 shader parsing helper 留在 `PdxShaderFeatures.fs`，避免让 `Program.fs` 堆积大量顶级定义。
 
-##### Vanilla Compare
+### Vanilla Compare
 
 `client/extension/vanillaCompare.ts` 支持全文件 diff、光标所在块迁移（`migrateBlockFromVanilla`）和文件级批量迁移（`migrateChangedFromVanilla`）。块识别依赖 game profile 的目录和标识约定。应用多个 `WorkspaceEdit` 时应按起始行从后往前替换，避免前面的替换改变后续块的行号。
 
-#### 构建系统
+## 构建系统
 
 根目录 `package.json`：
 
@@ -864,7 +505,7 @@ dotnet build src/Main/
 > 注意：`build/Program.fs` 中的 Fake 构建系统为上游遗留代码。当前推荐使用 `npm run compile` 和 `package.ps1`。
 
 
-#### 打包
+## 打包
 
 打包流程记录在 `.agents/workflows/package.md`。当前 release 包从 `release/package.json` 生成，并在 `release/` 目录中执行：
 
@@ -878,9 +519,9 @@ npx @vscode/vsce package
 
 打包时会将 `submodules/cwtools-stellaris-config/config/` 压缩为 `release/rules/stellaris-rules.zip` 作为 fallback 规则（正常情况下通过 GitHub 拉取规则，仅在网络不可用时启用此 fallback）。F# 服务端使用 `System.IO.Compression.ZipFile` 直接从内存读取 ZIP 内容，无需解压到磁盘。
 
-#### 关键设计约束
+## 关键设计约束
 
-##### Webview 隔离
+### Webview 隔离
 
 Webview 与 Extension Host 是完全隔离的运行环境。Webview 运行在受限的 Chromium 沙盒中，**禁止在前端引入任何 Node.js 原生 API（如 fs、path）或 vscode 模块**。
 
@@ -888,35 +529,35 @@ Webview 与 Extension Host 是完全隔离的运行环境。Webview 运行在受
 - **底层 I/O 收敛到 Host**：多文件并发写入和 ReadTracker 的 I/O 跟踪逻辑只在 Extension Host 中执行，不在 Webview 边界内。
 - **文件操作代理化**：Webview 前端（ChatPanel、AgentManager）是纯数据驱动的展示层。需要读取/监控工作区文件元数据、文件树或发起写操作时，前端通过 `vscode.postMessage` 异步 IPC 委托给 Host，由 Host 做安全校验后返回数据，避免前端直接触达宿主文件系统。
 
-##### 写入并发
+### 写入并发
 
 `PartitionedWriteQueue` 按目标文件串行化写入，不同文件可并行。多文件写入应按路径字典序获取锁，避免 AB/BA 死锁。
 
-##### 工具并发与风险
+### 工具并发与风险
 
 `tools/registry.ts` 为每个工具派生 `effect`、`riskLevel` 和 `concurrencyClass`。`runner/toolInvocation.ts` 把模型 tool call 封装为带 `invocationId` 的 `ToolInvocation`，`runner/toolScheduler.ts` 据此按类分配并发额度并对 per-file-write 工具按目标文件互斥。
 
-##### 权限与命令安全
+### 权限与命令安全
 
 `run_command` 命令进入执行前先由 `runner/commandPreflight.ts` 分词分类；`runner/permissionPolicy.ts` 用 `path.relative` 做严格的 `cwdScope` 父子目录判定，只放行预批准的低风险命令，其余必须经由用户授权。
 
-##### 子 Agent 沙盒
+### 子 Agent 沙盒
 
 `orchestrator/subAgentSandbox.ts` 在分派每个子任务时构造 `SubAgentSandbox`：默认排除高危/交互式特权工具，对只读/计划角色禁用写工具，并根据角色与 `taskNode.plannedFiles` 收紧 `writeScope`。路径包含判定复用 `pathScope.ts` 的 `isPathInsideOrEqual`/`foldPathCase`（仅 Windows 折叠大小写）。`plannedFiles` 全部为本地化 `.yml` 的子任务会额外屏蔽通用写工具、只允许 `write_localisation`，且 `dispatch_agents` 会把此类任务自动升级为 `loc_writer` 角色。`enforceSubAgentSafety` 在 Host 层做最终拦截。
 
-##### 运行账本与恢复
+### 运行账本与恢复
 
 每次 Agent 运行通过 `runner/runLedger.ts` 写入 `AgentRunRecord` 与 `AgentRunEvent` 序列。`runner/checkpoint.ts` 保存 V2 resume state，`runner/contextMemory.ts` 产出结构化压缩摘要，前端通过 `runSnapshot` 展示实时状态。
 
-##### 本地化写入
+### 本地化写入
 
 本地化文件通常需要 BOM、语言头和 key 更新语义。AI 工具层强制使用 `write_localisation`，不要用通用文本替换写 `.yml`。
 
-##### 共享索引优先
+### 共享索引优先
 
 共享索引已经承担 localisation 和 workspace symbol 查询。新的消费者优先复用 `IndexService`，而不是各自新增目录遍历和全文扫描。
 
-##### Provider 兼容
+### Provider 兼容
 
 `aiService.ts` 负责不同 Provider 的请求兼容：
 
@@ -928,7 +569,7 @@ Webview 与 Extension Host 是完全隔离的运行环境。Webview 运行在受
 - 不支持 `tool_choice` 的 Provider 会进行请求清理。
 - 模型定价与上下文窗口支持 `providerId:model` 作用域键（如 `openrouter:*`），`getModelPricing` / `getModelContextTokens` 优先匹配 Provider 级条目再回退裸模型名。
 
-##### 内存和性能
+### 内存和性能
 
 项目会扫描大型 Mod 和原版资源：
 
@@ -937,7 +578,7 @@ Webview 与 Extension Host 是完全隔离的运行环境。Webview 运行在受
 - Webview 大列表使用虚拟化或 `content-visibility`。
 - Three.js、纹理、worker 和事件监听器必须显式清理。
 
-##### 错误处理与 i18n
+### 错误处理与 i18n
 
 Extension/AI 代码优先使用 `ErrorReporter`，避免裸 `console.error`。用户可见中文文本尽量集中在：
 
@@ -948,7 +589,7 @@ Extension/AI 代码优先使用 `ErrorReporter`，避免裸 `console.error`。�
 
 CWTools 诊断消息的中文化不走上述模块：F# 服务端硬编码英文文本，由 `client/extension/diagnosticI18n.ts` 在 LSP middleware 中按消息形态 + CW 错误码翻译并附加修复建议（见"诊断、格式化与补全降级"一节）。
 
-##### 前缀缓存（Prompt Cache）度量与展现
+### 前缀缓存（Prompt Cache）度量与展现
 
 系统对前缀缓存做计量、成本核算和 UI 展现：
 
@@ -966,7 +607,7 @@ CWTools 诊断消息的中文化不走上述模块：F# 服务端硬编码英文
    - **会话仪表盘（Context Gauge）**：聊天面板顶部的上下文进度条拦截 `tokenUsage` 消息，实时在标签上覆写当前会话的缓存字样。
    - **SVG 图标**：缓存相关 UI（仪表盘、运行管理器卡片）使用内联 SVG 矢量图标而非裸 Emoji，支持亮暗色主题自适应与垂直对齐。
 
-#### 目录概览
+## 目录概览
 
 ```text
 cwtools-vscode/

@@ -131,6 +131,19 @@ check('Release README includes English and Chinese overview sections', () => {
         && readme.includes('## 中文');
 });
 
+check('GitHub README and architecture docs are bilingual and up to date', () => {
+    try {
+        execSync('node tools/build-github-docs.js --check', { cwd: ROOT, stdio: 'pipe', timeout: 30000 });
+        return true;
+    } catch (e) {
+        const stdout = e.stdout ? e.stdout.toString().trim() : '';
+        const stderr = e.stderr ? e.stderr.toString().trim() : '';
+        if (stdout) console.log(`    ${stdout}`);
+        if (stderr) console.log(`    ${stderr}`);
+        return false;
+    }
+});
+
 // ── 4. No Secrets or Localhost URLs ─────────────────────────────────────────
 
 check('No hardcoded localhost URLs or API keys in extension source', () => {

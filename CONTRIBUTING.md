@@ -8,11 +8,11 @@
 | --- | --- | --- |
 | Node.js | 20.x 或更高 | TypeScript 编译、Rollup Webview 打包 |
 | npm | 10.x 或更高 | 依赖安装和脚本运行 |
-| .NET SDK | 9.0.x | F# 语言服务器和 `CWTools Server` 构建 |
+| .NET SDK | 10.0.x | F# 语言服务器和 `CWTools Server` 构建 |
 | VS Code | 1.90 或更高 | 扩展开发宿主和测试 |
 | Git | 最新稳定版 | 源码和子模块管理 |
 
-仓库的 `global.json` 当前指定 .NET SDK `9.0.300`，并允许 `latestMinor` roll-forward。
+仓库的 `global.json` 当前指定 .NET SDK `10.0.301`，并允许 `latestMinor` roll-forward。
 
 ## 克隆和安装
 

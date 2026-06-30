@@ -185,6 +185,13 @@ if (-not $SkipClient) {
 
 # 6. Package VSIX Universal Bundle
 Write-Host "[6/6] Packaging universal VSIX bundle..." -ForegroundColor Yellow
+$ReadmeBuilder = Join-Path $PSScriptRoot "tools/build-release-readme.js"
+Write-Host ">>> Generating bilingual release README..." -ForegroundColor Cyan
+node $ReadmeBuilder
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Failed to generate bilingual release README!"
+    exit $LASTEXITCODE
+}
 Push-Location release
 npx @vscode/vsce package
 $VsceExitCode = $LASTEXITCODE

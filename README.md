@@ -1,9 +1,9 @@
 # 🌌 Stellaris Language Serves
 
-[![Built with F#](https://img.shields.io/badge/backend-F%23%20%2F%20.NET%209-blue.svg?style=flat-square)](https://dotnet.microsoft.com/)
+[![Built with F#](https://img.shields.io/badge/backend-F%23%20%2F%20.NET%2010-blue.svg?style=flat-square)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen.svg?style=flat-square)]()
 
-**Stellaris Language Serves** 是专为 Paradox 游戏 Modding（以 **Stellaris (群星)** 为核心）打造的顶级、现代化集成开发环境（IDE）级 VS Code 扩展。它基于上游的 [CWTools](https://github.com/cwtools/cwtools-vscode) 进行了深度的重构与定制开发，融合了**超高性能的 .NET 9 后端**、**极富表现力的 Webview 沙盒可视化引擎**，以及**前沿的自主多 Agent AI 协处理器**。
+**Stellaris Language Serves** 是专为 Paradox 游戏 Modding（以 **Stellaris (群星)** 为核心）打造的顶级、现代化集成开发环境（IDE）级 VS Code 扩展。它基于上游的 [CWTools](https://github.com/cwtools/cwtools-vscode) 进行了深度的重构与定制开发，融合了**超高性能的 .NET 10 后端**、**极富表现力的 Webview 沙盒可视化引擎**，以及**前沿的自主多 Agent AI 协处理器**。
 
 > [!NOTE]
 > 本项目不仅是一个语法高亮与校验工具，而是一个集成了 3D 渲染、实时 GUI 画布、多 Agent 并行流水线及高精密迁移对比的**现代化 Mod 协同开发中枢**。
@@ -13,7 +13,7 @@
 ## 🚀 核心技术四大支柱
 
 ### ⚡ 1. 超高性能语言服务引擎 (High-Performance LSP)
-基于 **.NET 9** 和 **F#** 深度定制的 CWTools LSP 服务端，作为整个插件的计算底座，为庞大的 Mod 代码提供了毫秒级的极致响应。
+基于 **.NET 10** 和 **F#** 深度定制的 CWTools LSP 服务端，作为整个插件的计算底座，为庞大的 Mod 代码提供了毫秒级的极致响应。
 - **极致的并发性能**：重构了 `LanguageServer` 读写锁机制，只读请求（如悬浮预览、自动补全、跳转定义）多线程共享并发执行；变更写入操作（如文件修改）持独占锁串行执行，彻底告别慢查询导致的死锁或界面卡顿。
 - **O(1) 定位查找**：`DocumentStore` 摒弃了传统的 $O(N)$ 遍历，采用**惰性重建行偏移缓存**技术，将 Hover 和 Go-To-Definition 的查找时间直接压缩至 $O(1)$，对拥有数十万行代码的超大型 Mod 文件实现即时定位。
 - **语义校验与宏求值**：支持深度语法分析，甚至能对复杂的宏表达式 `@[...]` 以及 `value:xxx|` 进行实时求值，在编辑器行内无缝显示本地化文本（CodeLens）及 `inline_script` 文件悬浮预览。
@@ -57,7 +57,7 @@
 ### 运行要求
 - **操作系统**：Windows / macOS / Linux
 - **VS Code 版本**：1.90.0 或更高版本
-- **.NET 运行时**：本地开发编译需要安装 [.NET 9.0 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
+- **.NET 运行时**：本地开发编译需要安装 [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 
 ### 安装步骤
 1. 在 Release 页面下载最新的 `.vsix` 打包文件。

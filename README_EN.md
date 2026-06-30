@@ -1,9 +1,9 @@
 # 🌌 Stellaris Language Serves
 
-[![Built with F#](https://img.shields.io/badge/backend-F%23%20%2F%20.NET%209-blue.svg?style=flat-square)](https://dotnet.microsoft.com/)
+[![Built with F#](https://img.shields.io/badge/backend-F%23%20%2F%20.NET%2010-blue.svg?style=flat-square)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen.svg?style=flat-square)]()
 
-**Stellaris Language Serves** is a premier, modern IDE-grade VS Code extension custom-built for Paradox game modding, centered around **Stellaris**. Based on the upstream [CWTools](https://github.com/cwtools/cwtools-vscode), it undergoes deep refactoring and customization, combining a **high-performance .NET 9 backend**, an **expressive Webview sandbox visualization engine**, and a **cutting-edge autonomous multi-agent AI coprocessor**.
+**Stellaris Language Serves** is a premier, modern IDE-grade VS Code extension custom-built for Paradox game modding, centered around **Stellaris**. Based on the upstream [CWTools](https://github.com/cwtools/cwtools-vscode), it undergoes deep refactoring and customization, combining a **high-performance .NET 10 backend**, an **expressive Webview sandbox visualization engine**, and a **cutting-edge autonomous multi-agent AI coprocessor**.
 
 > [!NOTE]
 > This project is not merely a syntax highlighter and validator; it is a **modern collaborative mod development hub** integrating 3D rendering, a real-time GUI canvas, a multi-agent parallel pipeline, and high-precision migration comparison.
@@ -13,7 +13,7 @@
 ## 🚀 Four Pillars of Core Technology
 
 ### ⚡ 1. High-Performance LSP (Language Server Protocol)
-The CWTools LSP server, customized using **.NET 9** and **F#**, serves as the computation base of the entire extension, providing millisecond-level responsiveness for massive mod codebases.
+The CWTools LSP server, customized using **.NET 10** and **F#**, serves as the computation base of the entire extension, providing millisecond-level responsiveness for massive mod codebases.
 - **Extreme Concurrent Performance**: Refactored the `LanguageServer` read-write lock mechanism. Read-only requests (hover preview, autocompletion, go-to-definition) execute concurrently across multiple threads; write modifications acquire exclusive locks sequentially, eliminating deadlocks or interface lagging.
 - **O(1) Definition Search**: The `DocumentStore` abandons traditional $O(N)$ traversals, adopting **lazy line offset cache reconstruction** to compress Hover and Go-To-Definition search times to $O(1)$, realizing instantaneous positioning even for large mod files with hundreds of thousands of lines of code.
 - **Semantic Validation & Macro Evaluation**: Supports deep syntax analysis, including real-time evaluation of complex macro expressions `@[...]` and `value:xxx|`, displaying localized texts in-line (CodeLens) and allowing hover previews of `inline_script` files.
@@ -68,7 +68,7 @@ flowchart LR
     end
 
     %% .NET Compiler Backend
-    subgraph Backend [".NET 9 / F# Backend"]
+    subgraph Backend [".NET 10 / F# Backend"]
         LSP["LSP Server\nsrc/Main.exe"]
         Lib["CWTools F# Library\nsubmodules/cwtools"]
     end
@@ -106,7 +106,7 @@ flowchart LR
 ### Prerequisites
 - **OS**: Windows / macOS / Linux
 - **VS Code**: 1.90.0 or higher
-- **.NET Runtime**: [.NET 9.0 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) is required for local building/development.
+- **.NET Runtime**: [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) is required for local building/development.
 
 ### Installation Steps
 1. Download the latest `.vsix` package from the Releases page.

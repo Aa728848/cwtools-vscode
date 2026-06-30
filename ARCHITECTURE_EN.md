@@ -281,7 +281,7 @@ The packages `packages/cwtools-shared` and `packages/cwtools-mcp` implement a **
 
 ## F# / .NET Language Server
 
-The backend runs on .NET 9.
+The backend runs on .NET 10.
 
 - **Completion locks**: Autocompletions call `TryEnterReadLock` with a 150ms timeout. Out-of-time runs fallback to stale caches.
 - **Incremental refreshes**: Saves under scripted definitions bypass full database indexing, updating only altered files and type dictionaries instantly (gated by `experimental`).

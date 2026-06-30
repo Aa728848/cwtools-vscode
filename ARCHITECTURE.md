@@ -429,7 +429,7 @@ Webview 维护规则：
 
 ## F# / .NET 后端
 
-后端使用 .NET 9。`global.json` 当前固定 SDK `9.0.300`，允许 `latestMinor` roll-forward。
+后端使用 .NET 10。`global.json` 当前固定 SDK `10.0.301`，允许 `latestMinor` roll-forward。
 
 | 路径 | 作用 |
 | --- | --- |

@@ -121,6 +121,16 @@ for (const pair of REQUIRED_PAIRS) {
     });
 }
 
+check('Release README includes English and Chinese overview sections', () => {
+    const releaseReadmePath = path.join(RELEASE, 'README.md');
+    if (!fs.existsSync(releaseReadmePath)) return false;
+    const readme = fs.readFileSync(releaseReadmePath, 'utf-8');
+    return readme.includes('<a id="english"></a>')
+        && readme.includes('<a id="zh-cn"></a>')
+        && readme.includes('## English')
+        && readme.includes('## 中文');
+});
+
 // ── 4. No Secrets or Localhost URLs ─────────────────────────────────────────
 
 check('No hardcoded localhost URLs or API keys in extension source', () => {
@@ -221,31 +231,48 @@ check('Release manifest (release/package.json) is valid JSON', () => {
 
 // ── 8. NLS Key Completeness ─────────────────────────────────────────────────
 
-check('NLS keys: package.nls.json and package.nls.zh.json in sync', () => {
-    const nlsEnPath = path.join(RELEASE, 'package.nls.json');
-    const nlsZhPath = path.join(RELEASE, 'package.nls.zh.json');
+check('NLS locale: Simplified Chinese manifest exists', () => {
+    return fs.existsSync(path.join(RELEASE, 'package.nls.zh-cn.json'));
+});
 
-    if (!fs.existsSync(nlsEnPath) || !fs.existsSync(nlsZhPath)) {
+check('NLS keys: all package.nls locale files are in sync', () => {
+    const nlsEnPath = path.join(RELEASE, 'package.nls.json');
+
+    if (!fs.existsSync(nlsEnPath)) {
         console.log('    NLS files not found in release/');
         return 'warn';
     }
 
     const nlsEn = JSON.parse(fs.readFileSync(nlsEnPath, 'utf-8'));
-    const nlsZh = JSON.parse(fs.readFileSync(nlsZhPath, 'utf-8'));
     const enKeys = new Set(Object.keys(nlsEn));
-    const zhKeys = new Set(Object.keys(nlsZh));
+    const localeFiles = fs.readdirSync(RELEASE)
+        .filter(file => /^package\.nls\..+\.json$/.test(file))
+        .sort();
 
-    const missingInZh = [...enKeys].filter(k => !zhKeys.has(k));
-    const missingInEn = [...zhKeys].filter(k => !enKeys.has(k));
-
-    if (missingInZh.length > 0) {
-        console.log(`    Missing in zh: ${missingInZh.slice(0, 5).join(', ')}${missingInZh.length > 5 ? ` (+${missingInZh.length - 5} more)` : ''}`);
-    }
-    if (missingInEn.length > 0) {
-        console.log(`    Extra in zh (not in en): ${missingInEn.slice(0, 5).join(', ')}${missingInEn.length > 5 ? ` (+${missingInEn.length - 5} more)` : ''}`);
+    if (localeFiles.length === 0) {
+        console.log('    No localized package.nls.*.json files found in release/');
+        return 'warn';
     }
 
-    return missingInZh.length === 0 && missingInEn.length === 0;
+    let ok = true;
+    for (const localeFile of localeFiles) {
+        const localePath = path.join(RELEASE, localeFile);
+        const nlsLocale = JSON.parse(fs.readFileSync(localePath, 'utf-8'));
+        const localeKeys = new Set(Object.keys(nlsLocale));
+        const missingInLocale = [...enKeys].filter(k => !localeKeys.has(k));
+        const missingInEn = [...localeKeys].filter(k => !enKeys.has(k));
+
+        if (missingInLocale.length > 0) {
+            console.log(`    Missing in ${localeFile}: ${missingInLocale.slice(0, 5).join(', ')}${missingInLocale.length > 5 ? ` (+${missingInLocale.length - 5} more)` : ''}`);
+            ok = false;
+        }
+        if (missingInEn.length > 0) {
+            console.log(`    Extra in ${localeFile} (not in en): ${missingInEn.slice(0, 5).join(', ')}${missingInEn.length > 5 ? ` (+${missingInEn.length - 5} more)` : ''}`);
+            ok = false;
+        }
+    }
+
+    return ok;
 });
 
 check('NLS keys: manifest references exist in NLS files', () => {

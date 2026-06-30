@@ -16,7 +16,7 @@ The main runtime layers are:
   runner, orchestrator, project profile, game knowledge, memory, and prompt
   construction.
 - `client/webview/`: browser-sandboxed Webview UIs bundled by Rollup.
-- `src/LSP/` and `src/Main/`: .NET 9 / F# language server protocol layer and
+- `src/LSP/` and `src/Main/`: .NET 10 / F# language server protocol layer and
   `CWTools Server` executable.
 - `packages/cwtools-shared/` and `packages/cwtools-mcp/`: standalone, read-only
   **MCP server** (npm workspaces) that re-exports the PDX semantic tools to
@@ -493,7 +493,7 @@ Webviews run in a browser sandbox. They cannot access Node.js, `fs`, `path`,
 
 ## F# And Shader Notes
 
-`global.json` pins .NET SDK `9.0.300` with `latestMinor` roll-forward.
+`global.json` pins .NET SDK `10.0.301` with `latestMinor` roll-forward.
 `src/Main/Main.fsproj` lists `RuntimeIdentifiers` for `win-x64`, `linux-x64`,
 and `osx-x64`; a plain `dotnet build` works without an explicit RID.
 

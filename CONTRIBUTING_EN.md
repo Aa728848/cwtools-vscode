@@ -8,11 +8,11 @@ Thank you for your interest in **Stellaris Language Serves**. This document is f
 | --- | --- | --- |
 | Node.js | 20.x or higher | TypeScript compilation, Rollup Webview bundling |
 | npm | 10.x or higher | Dependency installation and scripts execution |
-| .NET SDK | 9.0.x | F# Language Server and `CWTools Server` build |
+| .NET SDK | 10.0.x | F# Language Server and `CWTools Server` build |
 | VS Code | 1.90 or higher | Extension development host and testing |
 | Git | Latest stable | Source code and submodule management |
 
-The repository's `global.json` currently specifies .NET SDK version `9.0.300` and allows `latestMinor` roll-forward.
+The repository's `global.json` currently specifies .NET SDK version `10.0.301` and allows `latestMinor` roll-forward.
 
 ## Clone and Install
 

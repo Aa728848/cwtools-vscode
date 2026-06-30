@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.7.7] - 2026-06-30
+
+### MCP
+- **[MCP] 严格且动态的工作区匹配 (Strict dynamic workspace matching)**：桥接模式现在会从 MCP roots、会话环境变量或 cwd 动态发现客户端工作区，并要求它与扩展宿主 bridge 暴露的 `workspaceRoot` 一致；不一致时返回 `bridge_unavailable`，避免误用另一个项目的诊断、索引和定义。`--workspace` 仅作为无法暴露按项目 root 的客户端的可选覆盖项。
+  English: Bridge mode now discovers the client workspace dynamically from MCP roots, session environment variables, or cwd, and requires it to match the extension bridge `workspaceRoot`; mismatches return `bridge_unavailable` to avoid answering from another project. `--workspace` is only an optional override for clients that cannot expose a per-project root.
+
 ## [2.7.6] - 2026-06-30
 
 ### MCP

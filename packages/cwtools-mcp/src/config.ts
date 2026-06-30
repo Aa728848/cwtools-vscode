@@ -158,8 +158,8 @@ function readValue(argv: string[], index: number, flag: string): string {
 export function helpText(): string {
   return [
     'Usage:',
-    '  cwtools-mcp [--stdio] [--bridge-manifest <path>]',
-    '  cwtools-mcp --http [--host 127.0.0.1] [--port 3000] [--bridge-manifest <path>]',
+    '  cwtools-mcp [--stdio] [--bridge-manifest <path>] [--workspace <path>]',
+    '  cwtools-mcp --http [--host 127.0.0.1] [--port 3000] [--bridge-manifest <path>] [--workspace <path>]',
     '  cwtools-mcp --standalone --workspace <path> [--game stellaris] [--stdio] [--server-path <path>]',
     '  cwtools-mcp --standalone --workspace <path> --http [--host 127.0.0.1] [--port 3000]',
     '  cwtools-mcp --standalone --workspace <path> --enable-writes',
@@ -168,8 +168,10 @@ export function helpText(): string {
     'Default bridge mode:',
     '  The script connects to the extension-host MCP bridge written by the active',
     '  VS Code-compatible host next to this script as bridge-manifest.json. It does',
-    '  not start a second CWTools language server. If the compatible host is closed',
-    '  or the workspace is not active, tool calls return an actionable unavailable error.',
+    '  not start a second CWTools language server. The client workspace (MCP roots,',
+    '  environment workspace, cwd, or --workspace when supplied) must match the bridge',
+    '  workspace exactly. If the compatible host is closed or the workspace does not',
+    '  match, tool calls return an actionable unavailable error.',
     '  Use --standalone only when you intentionally want the legacy self-hosted LSP mode.',
     '',
     'Vanilla data (needed for vanilla IDs and correct mod-vs-vanilla diagnostics):',

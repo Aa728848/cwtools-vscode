@@ -23,6 +23,14 @@ inside the active VS Code-compatible extension host and reuses that host's:
 
 This keeps memory use low and makes MCP diagnostics match the IDE.
 
+Bridge mode is deliberately strict about project identity without requiring a
+project path in global MCP settings. By default, the proxy discovers the current
+client workspace from MCP roots, known per-session environment variables, or the
+MCP process cwd. That workspace must match the `workspaceRoot` served by the
+extension bridge. If they do not match, tool calls return `bridge_unavailable`
+instead of silently answering from a different project. `--workspace` remains an
+optional override for clients that cannot expose a per-project root.
+
 The extension writes both files below into the current host's own
 `globalStorage/mcp/` directory when the project is active:
 
@@ -80,9 +88,10 @@ Or merge it into an existing config with a Node one-liner:
 node -e "const fs=require('fs'),os=require('os'),path=require('path');const p=path.join(os.homedir(),'.gemini','config','mcp_config.json');const s=process.argv[1];const cfg=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,'utf8')):{};cfg.mcpServers={...(cfg.mcpServers||{}),cwtools:{command:'node',args:[s,'--stdio']}};fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,JSON.stringify(cfg,null,2)+'\n')" "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs"
 ```
 
-If the compatible host is closed, the workspace is not active, or the manifest is
-stale, tool calls return `bridge_unavailable` with recovery instructions. The
-proxy intentionally does not silently fall back to a separate language server.
+If the compatible host is closed, the workspace is not active, the manifest is
+stale, or the client workspace differs from the bridge workspace, tool
+calls return `bridge_unavailable` with recovery instructions. The proxy
+intentionally does not silently fall back to a separate language server.
 
 ### Optional Standalone Mode
 
@@ -157,6 +166,12 @@ bridge，并复用该宿主中的：
 
 这样可以降低内存占用，并让 MCP 诊断数量与 IDE 保持一致。
 
+Bridge 模式会严格校验项目身份，但不要求把项目路径写死到全局 MCP 设置里。默认情况下，
+代理会从 MCP roots、已知的按会话注入的环境变量或 MCP 进程 cwd 推断当前客户端工作区。
+这个工作区必须与扩展 bridge 暴露的 `workspaceRoot` 一致。不一致时工具调用会返回
+`bridge_unavailable`，不会静默使用另一个项目回答。`--workspace` 只保留给无法暴露
+按项目 root 的客户端作为可选覆盖项。
+
 项目激活时，扩展会把下面两个文件写入当前宿主自己的 `globalStorage/mcp/`
 目录：
 
@@ -212,8 +227,8 @@ server 条目：
 node -e "const fs=require('fs'),os=require('os'),path=require('path');const p=path.join(os.homedir(),'.gemini','config','mcp_config.json');const s=process.argv[1];const cfg=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,'utf8')):{};cfg.mcpServers={...(cfg.mcpServers||{}),cwtools:{command:'node',args:[s,'--stdio']}};fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,JSON.stringify(cfg,null,2)+'\n')" "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs"
 ```
 
-如果兼容宿主未打开、工作区未激活或 manifest 已失效，工具调用会返回
-`bridge_unavailable` 和恢复说明。代理不会静默回退并启动单独的语言服务。
+如果兼容宿主未打开、工作区未激活、manifest 已失效，或客户端工作区与 bridge
+工作区不一致，工具调用会返回 `bridge_unavailable` 和恢复说明。代理不会静默回退并启动单独的语言服务。
 
 ### 可选 Standalone 模式
 

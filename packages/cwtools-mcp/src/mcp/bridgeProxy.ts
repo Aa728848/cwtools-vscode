@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
@@ -82,7 +83,7 @@ export function createBridgeProxyMcpServer(config: CwtoolsMcpConfig): Server {
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     try {
-      return await bridgeRpc<McpListToolsResult>(config, 'tools/list', {});
+      return await bridgeRpc<McpListToolsResult>(config, server, 'tools/list', {});
     } catch {
       return { tools: listRegisteredTools() };
     }
@@ -90,7 +91,7 @@ export function createBridgeProxyMcpServer(config: CwtoolsMcpConfig): Server {
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     try {
-      return await bridgeRpc<McpListResourcesResult>(config, 'resources/list', {});
+      return await bridgeRpc<McpListResourcesResult>(config, server, 'resources/list', {});
     } catch {
       return { resources: listResources() };
     }
@@ -98,7 +99,7 @@ export function createBridgeProxyMcpServer(config: CwtoolsMcpConfig): Server {
 
   server.setRequestHandler(ReadResourceRequestSchema, async request => {
     try {
-      return await bridgeRpc<McpReadResourceResult>(config, 'resources/read', {
+      return await bridgeRpc<McpReadResourceResult>(config, server, 'resources/read', {
         uri: request.params.uri,
       });
     } catch (error) {
@@ -119,7 +120,7 @@ export function createBridgeProxyMcpServer(config: CwtoolsMcpConfig): Server {
       const args = request.params.arguments && typeof request.params.arguments === 'object'
         ? request.params.arguments as Record<string, unknown>
         : {};
-      const result = await bridgeRpc<McpCallToolResult>(config, 'tools/call', {
+      const result = await bridgeRpc<McpCallToolResult>(config, server, 'tools/call', {
         name: request.params.name,
         arguments: args,
       });
@@ -134,10 +135,11 @@ export function createBridgeProxyMcpServer(config: CwtoolsMcpConfig): Server {
 
 async function bridgeRpc<T>(
   config: CwtoolsMcpConfig,
+  server: Server,
   method: string,
   params: Record<string, unknown>,
 ): Promise<T> {
-  const manifest = readBridgeManifest(config);
+  const manifest = await readBridgeManifest(config, server);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30_000);
   try {
@@ -168,7 +170,7 @@ async function bridgeRpc<T>(
   }
 }
 
-function readBridgeManifest(config: CwtoolsMcpConfig): BridgeManifest {
+async function readBridgeManifest(config: CwtoolsMcpConfig, server: Server): Promise<BridgeManifest> {
   const manifestPath = resolveBridgeManifestPath(config);
   let parsed: BridgeManifest;
   try {
@@ -190,13 +192,80 @@ function readBridgeManifest(config: CwtoolsMcpConfig): BridgeManifest {
   if (!parsed.rpcUrl || !parsed.token) {
     throw new Error(`CWTools MCP bridge manifest at ${manifestPath} is missing rpcUrl/token.`);
   }
-  if (config.workspaceRootExplicit && !samePath(config.workspaceRoot, parsed.workspaceRoot)) {
-    throw new Error(
-      `CWTools MCP bridge workspace mismatch. Requested ${path.resolve(config.workspaceRoot)}, ` +
-      `but the active extension bridge serves ${parsed.workspaceRoot}.`,
-    );
-  }
+  const expected = await resolveExpectedWorkspace(config, server);
+  assertBridgeWorkspaceMatches(expected.roots, parsed.workspaceRoot, expected.source);
   return parsed;
+}
+
+interface ExpectedWorkspace {
+  roots: string[];
+  source: string;
+}
+
+async function resolveExpectedWorkspace(config: CwtoolsMcpConfig, server: Server): Promise<ExpectedWorkspace> {
+  if (config.workspaceRootExplicit) {
+    return { roots: [config.workspaceRoot], source: '--workspace' };
+  }
+
+  const clientRoots = await readClientWorkspaceRoots(server);
+  if (clientRoots.length > 0) {
+    return { roots: clientRoots, source: 'MCP client roots' };
+  }
+
+  const envRoot = process.env.CLAUDE_PROJECT_DIR || process.env.CWTOOLS_MCP_WORKSPACE;
+  if (envRoot) {
+    return { roots: [envRoot], source: 'environment workspace' };
+  }
+
+  return { roots: [config.workspaceRoot], source: 'MCP process cwd' };
+}
+
+async function readClientWorkspaceRoots(server: Server): Promise<string[]> {
+  if (!server.getClientCapabilities()?.roots) return [];
+  try {
+    const result = await server.listRoots(undefined, { timeout: 1_000 });
+    const roots = result.roots
+      .map(root => rootUriToPath(root.uri))
+      .filter((root): root is string => !!root);
+    return uniquePaths(roots);
+  } catch {
+    return [];
+  }
+}
+
+function rootUriToPath(uri: string): string | undefined {
+  try {
+    const parsed = new URL(uri);
+    if (parsed.protocol !== 'file:') return undefined;
+    return fileURLToPath(parsed);
+  } catch {
+    return undefined;
+  }
+}
+
+function uniquePaths(roots: string[]): string[] {
+  const result: string[] = [];
+  for (const root of roots) {
+    if (!result.some(existing => samePath(existing, root))) {
+      result.push(root);
+    }
+  }
+  return result;
+}
+
+export function assertBridgeWorkspaceMatches(
+  expectedWorkspaceRoot: string | string[],
+  servedWorkspaceRoot: string,
+  source = 'MCP process workspace',
+): void {
+  const expectedRoots = Array.isArray(expectedWorkspaceRoot) ? expectedWorkspaceRoot : [expectedWorkspaceRoot];
+  if (expectedRoots.some(expected => samePath(expected, servedWorkspaceRoot))) return;
+  const expected = expectedRoots.map(root => path.resolve(root)).join(', ');
+  throw new Error(
+    `CWTools MCP bridge workspace mismatch. ${source} expects ${expected}, ` +
+    `but the active extension bridge serves ${servedWorkspaceRoot}. ` +
+    'Open the same project in the compatible host, or make sure the MCP client exposes its current workspace roots/cwd.',
+  );
 }
 
 function resolveBridgeManifestPath(config: CwtoolsMcpConfig): string {

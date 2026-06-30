@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import * as path from 'path';
 import {
   createUnavailableDiagnosticsHost,
   createUnavailableLspHost,
@@ -8,6 +9,7 @@ import {
   type VanillaCacheStatus,
 } from 'cwtools-shared';
 import { parseCliArgs } from '../config';
+import { assertBridgeWorkspaceMatches } from '../mcp/bridgeProxy';
 import { createToolCallHandler } from '../mcp/toolHandlers';
 
 describe('MCP vanilla cache contract', () => {
@@ -38,6 +40,15 @@ describe('MCP vanilla cache contract', () => {
 
     const manifest = parseCliArgs(['--bridge-manifest', 'bridge-manifest.json']);
     expect(manifest.bridgeManifestPath).to.match(/bridge-manifest\.json$/);
+  });
+
+  it('requires the MCP process workspace and extension bridge workspace to match', () => {
+    const workspace = path.join(process.cwd(), 'mod-a');
+    expect(() => assertBridgeWorkspaceMatches(workspace, workspace)).to.not.throw();
+    expect(() => assertBridgeWorkspaceMatches([path.join(process.cwd(), 'mod-b'), workspace], workspace, 'MCP client roots'))
+      .to.not.throw();
+    expect(() => assertBridgeWorkspaceMatches(workspace, path.join(process.cwd(), 'mod-b')))
+      .to.throw(/bridge workspace mismatch/);
   });
 
   it('annotates vanilla-dependent results with the host cache status and a warning when mod-only', async () => {

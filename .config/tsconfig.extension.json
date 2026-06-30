@@ -1,6 +1,7 @@
 {
 	"extends": "../tsconfig.json",
 	"exclude": [
-		"../client/webview/*.ts"
+		"../client/test/**",
+		"../client/webview/**"
 	]
 }

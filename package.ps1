@@ -106,6 +106,11 @@ if (-not $SkipClient) {
 # 4. Compile Webview and Copy CSS Assets
 if (-not $SkipClient) {
     Write-Host "[3/6] Bundling Webview scripts (Rollup)..." -ForegroundColor Yellow
+    $WebviewOutDir = Join-Path $PSScriptRoot "release/bin/client/webview"
+    if (Test-Path $WebviewOutDir) {
+        Remove-Item -LiteralPath $WebviewOutDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $WebviewOutDir -Force | Out-Null
     npx rollup -c
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Rollup bundling failed!"

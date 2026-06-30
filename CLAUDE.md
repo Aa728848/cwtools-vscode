@@ -249,8 +249,10 @@ checks.
 - After related code changes, maintain matching documentation when applicable,
   such as `CHANGELOG.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, `README.md`, and
   feature docs.
-- Put user-visible Chinese text in the existing message/i18n modules when
-  practical: `client/extension/ai/messages.ts`,
+- Internationalization is required for user-visible copy. Add or update both
+  English and Chinese strings when changing commands, settings, diagnostics,
+  chat/workflow UI, Webviews, and release-facing docs. Prefer the existing
+  message/i18n modules: `client/extension/ai/messages.ts`,
   `client/extension/ai/workflowI18n.ts`, and `client/webview/chat/i18n.ts`.
 - Do not hard-code Webview colors; use VS Code theme variables.
 - Preserve localisation encoding/BOM expectations when writing `.yml` files.

@@ -1,9 +1,14 @@
 # Changelog
 
-## [2.7.5] - 2026-06-30
+## [2.7.6] - 2026-06-30
 
 ### MCP
-- **[MCP] Extension-host bridge mode**: `cwtools-mcp` now defaults to a lightweight proxy that connects to the active VS Code-compatible extension host through `globalStorage/mcp/bridge-manifest.json`, reusing the IDE language client and Problems diagnostics instead of starting a second CWTools Server. Legacy self-hosted LSP mode is still available with `--standalone`.
+- **[MCP] 扩展宿主桥接模式 (Extension-host bridge mode)**：`cwtools-mcp` 现在默认采用轻量级代理模式，通过 `globalStorage/mcp/bridge-manifest.json` 连接到当前活跃的、与 VS Code 兼容的扩展宿主，复用 IDE 语言客户端和“问题”面板诊断信息（Problems diagnostics），从而避免启动第二个 CWTools 服务端（CWTools Server）。传统的自托管 LSP 模式仍可通过 `--standalone` 参数使用。
+  English: `cwtools-mcp` now defaults to a lightweight proxy that connects to the active VS Code-compatible extension host through `globalStorage/mcp/bridge-manifest.json`, reusing the IDE language client and Problems diagnostics instead of starting a second CWTools Server. Legacy self-hosted LSP mode is still available with `--standalone`.
+- **[文档 / Docs]** `packages/cwtools-mcp/README.md` 现在已支持双语，并包含了 Codex、Claude Code 和 Antigravity 的配置示例。
+  English: `packages/cwtools-mcp/README.md` is now bilingual and includes setup examples for Codex, Claude Code, and Antigravity.
+
+## [2.7.5] - 2026-06-30
 
 ### ⚙️ 框架升级
 - **[迁移] 迁移至NET10**。

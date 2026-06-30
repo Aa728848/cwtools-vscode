@@ -46,6 +46,11 @@
                 "embeddedLanguages": {
                     "source.hlsl": "hlsl"
                 }
+            },
+            {
+                "language": "stellaris-localisation",
+                "scopeName": "source.stellaris-localisation",
+                "path": "./syntaxes/stellaris-localisation.tmLanguage.json"
             }
         ],
         "views": {
@@ -1083,6 +1088,21 @@
         },
         "languages": [
             {
+                "id": "stellaris-localisation",
+                "aliases": [
+                    "Stellaris Localisation",
+                    "Stellaris Localization",
+                    "pdx-localisation"
+                ],
+                "filenamePatterns": [
+                    "**/localisation/**/*.yml",
+                    "**/localization/**/*.yml",
+                    "**/localisation_synced/**/*.yml",
+                    "**/*_l_*.yml"
+                ],
+                "configuration": "./language-configuration-localisation.json"
+            },
+            {
                 "id": "stellaris",
                 "aliases": [
                     "",
@@ -1457,13 +1477,29 @@
                 "editor.autoIndent": "none",
                 "editor.wordWrap": "on"
             },
+            "[stellaris-localisation]": {
+                "files.autoGuessEncoding": true,
+                "files.encoding": "utf8bom",
+                "editor.insertSpaces": true,
+                "editor.autoIndent": "none",
+                "editor.wordWrap": "on",
+                "editor.quickSuggestions": {
+                    "other": true,
+                    "comments": false,
+                    "strings": true
+                }
+            },
             "[paradox]": {
                 "editor.formatOnPaste": true
             },
             "editor.rename.enablePreview": true,
             "files.associations": {
                 "*.shader": "pdx-shader",
-                "*.fxh": "pdx-shader"
+                "*.fxh": "pdx-shader",
+                "**/localisation/**/*.yml": "stellaris-localisation",
+                "**/localization/**/*.yml": "stellaris-localisation",
+                "**/localisation_synced/**/*.yml": "stellaris-localisation",
+                "**/*_l_*.yml": "stellaris-localisation"
             }
         }
     },
@@ -1472,7 +1508,6 @@
         "vscode-languageclient": "^9.0.1"
     },
     "extensionPack": [
-        "tboby.paradox-syntax",
-        "anthonyj.stellaris-localisation-syntax"
+        "tboby.paradox-syntax"
     ]
 }

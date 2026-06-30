@@ -1,0 +1,129 @@
+{
+    "name": "Stellaris Localisation",
+    "scopeName": "source.stellaris-localisation",
+    "fileTypes": [
+        "yml"
+    ],
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#language-header"
+        },
+        {
+            "include": "#localisation-entry"
+        },
+        {
+            "include": "#strings"
+        },
+        {
+            "include": "#inline-markup"
+        }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.number-sign.stellaris-localisation",
+                    "match": "#.*$"
+                }
+            ]
+        },
+        "language-header": {
+            "patterns": [
+                {
+                    "name": "meta.language-header.stellaris-localisation",
+                    "match": "^\\s*(l_[A-Za-z][A-Za-z0-9_]*)\\s*(:)\\s*$",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.section.language.stellaris-localisation"
+                        },
+                        "2": {
+                            "name": "punctuation.separator.key-value.stellaris-localisation"
+                        }
+                    }
+                }
+            ]
+        },
+        "localisation-entry": {
+            "patterns": [
+                {
+                    "name": "meta.localisation-entry.stellaris-localisation",
+                    "begin": "^\\s*([A-Za-z0-9_.-]+)(\\s*)(:)(\\d+)?(?=\\s|$)",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "entity.name.tag.localisation-key.stellaris-localisation"
+                        },
+                        "3": {
+                            "name": "punctuation.separator.key-value.stellaris-localisation"
+                        },
+                        "4": {
+                            "name": "constant.numeric.version.stellaris-localisation"
+                        }
+                    },
+                    "end": "$",
+                    "patterns": [
+                        {
+                            "include": "#strings"
+                        },
+                        {
+                            "include": "#inline-markup"
+                        },
+                        {
+                            "include": "#comments"
+                        }
+                    ]
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "name": "string.quoted.double.stellaris-localisation",
+                    "begin": "\"",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "punctuation.definition.string.begin.stellaris-localisation"
+                        }
+                    },
+                    "end": "\"",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.definition.string.end.stellaris-localisation"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#inline-markup"
+                        }
+                    ]
+                }
+            ]
+        },
+        "inline-markup": {
+            "patterns": [
+                {
+                    "name": "constant.character.escape.stellaris-localisation",
+                    "match": "\\\\."
+                },
+                {
+                    "name": "constant.character.format.color.stellaris-localisation",
+                    "match": "\\u00a7[A-Za-z0-9!%-]"
+                },
+                {
+                    "name": "constant.character.icon.stellaris-localisation",
+                    "match": "\\u00a3[A-Za-z0-9_.-]+\\u00a3?"
+                },
+                {
+                    "name": "variable.other.localisation-reference.stellaris-localisation",
+                    "match": "\\$[A-Za-z0-9_.:/|+-]+\\$"
+                },
+                {
+                    "name": "support.function.scope-expression.stellaris-localisation",
+                    "match": "\\[[^\\]\\r\\n]+\\]"
+                }
+            ]
+        }
+    }
+}

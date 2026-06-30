@@ -37,6 +37,7 @@ import { getProjectWorkspaceRoot } from './ai/workspacePaths';
 import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
 import type { GameProfile } from './gameProfiles';
 import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService';
+import { McpBridgeServer } from './ai/mcpBridgeServer';
 
 export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
@@ -1251,6 +1252,19 @@ export async function activate(context: ExtensionContext) {
 	const workspaceRoot = getProjectWorkspaceRoot();
 	// AgentToolExecutor gets a lazy getter so it can be registered before client starts
 	const toolExecutor = new AgentToolExecutor(() => defaultClient, workspaceRoot, indexService, context.globalStorageUri.fsPath, context.extensionPath);
+	const legacyMcpDirs = legacyPublisherStoragePaths(context)
+		.filter(legacyStorage => fs.existsSync(legacyStorage))
+		.map(legacyStorage => path.join(legacyStorage, 'mcp'));
+	const mcpBridge = new McpBridgeServer({
+		context,
+		toolExecutor,
+		workspaceRoot,
+		additionalManifestDirs: legacyMcpDirs,
+	});
+	context.subscriptions.push(mcpBridge);
+	void mcpBridge.start().catch(e =>
+		ErrorReporter.warn('MCP', 'Failed to start extension-host MCP bridge', e)
+	);
 	const promptBuilder = new PromptBuilder(workspaceRoot, context.globalStorageUri.fsPath, context.extensionPath);
 	const agentRunner = new AgentRunner(aiService, toolExecutor, promptBuilder);
 	const usageTracker = new UsageTracker(context);

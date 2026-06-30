@@ -27,6 +27,19 @@ describe('MCP vanilla cache contract', () => {
     expect(() => parseCliArgs(['--workspace=.', '--rules=/r/stellaris-rules.ZIP'])).to.throw(/must be a directory/);
   });
 
+  it('defaults to extension bridge mode and makes standalone explicit', () => {
+    const bridge = parseCliArgs(['--stdio']);
+    expect(bridge.standalone).to.equal(false);
+    expect(bridge.workspaceRootExplicit).to.equal(false);
+
+    const standalone = parseCliArgs(['--standalone', '--workspace', '.']);
+    expect(standalone.standalone).to.equal(true);
+    expect(standalone.workspaceRootExplicit).to.equal(true);
+
+    const manifest = parseCliArgs(['--bridge-manifest', 'bridge-manifest.json']);
+    expect(manifest.bridgeManifestPath).to.match(/bridge-manifest\.json$/);
+  });
+
   it('annotates vanilla-dependent results with the host cache status and a warning when mod-only', async () => {
     const status: VanillaCacheStatus = { available: false, source: 'mod_only', reason: 'no cache' };
     const dispatcher: SharedToolDispatcher = async () => ({ ok: true, status: 'ready', source: 'test', data: {} });

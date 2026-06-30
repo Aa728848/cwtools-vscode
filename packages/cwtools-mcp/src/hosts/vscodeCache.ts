@@ -3,16 +3,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { vanillaCacheFileName } from 'cwtools-shared';
 
-// The VS Code cwtools extension stores its built vanilla cache + extracted rules
-// under globalStorage. When the user doesn't pass --cache, reuse that dir so the
-// MCP rides on the cache the extension already built.
+// VS Code-compatible hosts store the extension's built vanilla cache + extracted
+// rules under globalStorage. In standalone mode, when the user doesn't pass
+// --cache, reuse that dir so the MCP rides on a cache the extension already built.
 const PRIMARY_EXTENSION_DIR = 'foreverskywalker.foreverskywalker-stellaris-cwtools';
 const LEGACY_EXTENSION_DIRS = [
   'foreverskywalker.eddy-stellaris-cwt',
   'eddy.eddy-stellaris-cwt',
 ];
 const EXTENSION_DIRS = [PRIMARY_EXTENSION_DIR, ...LEGACY_EXTENSION_DIRS];
-const VSCODE_APP_DIRS = ['Code', 'Code - Insiders', 'VSCodium', 'Cursor'];
+const VSCODE_APP_DIRS = ['Code', 'Code - Insiders', 'VSCodium', 'Cursor', 'Antigravity'];
 
 function globalStorageBases(): string[] {
   const home = os.homedir();
@@ -48,7 +48,7 @@ export function detectExtensionCacheDir(game: string | undefined): string | unde
 // user already installed, with no dev checkout required.
 function extensionInstallRoots(): string[] {
   const home = os.homedir();
-  return ['.vscode', '.vscode-insiders', '.vscode-oss', '.cursor', '.vscode-server'].map(d =>
+  return ['.vscode', '.vscode-insiders', '.vscode-oss', '.cursor', '.vscode-server', '.antigravity'].map(d =>
     path.join(home, d, 'extensions'),
   );
 }

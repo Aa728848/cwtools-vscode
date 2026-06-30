@@ -13,6 +13,9 @@ export interface CwtoolsMcpConfig {
   // Explicit CWT rules *directory* overriding auto-detection. Must be a directory
   // (a .zip is rejected) — the server loads rules from a folder, not an archive.
   rulesPath?: string;
+  // Extension-host bridge manifest. Defaults to bridge-manifest.json next to
+  // the launched cwtools-mcp script, which is where the extension writes it.
+  bridgeManifestPath?: string;
   stdio: boolean;
   http: boolean;
   host: string;
@@ -20,6 +23,8 @@ export interface CwtoolsMcpConfig {
   enableWrites: boolean;
   allowedTools: string[];
   forceStart: boolean;
+  standalone: boolean;
+  workspaceRootExplicit: boolean;
 }
 
 export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
@@ -32,6 +37,8 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
     enableWrites: false,
     allowedTools: [],
     forceStart: false,
+    standalone: false,
+    workspaceRootExplicit: false,
   };
 
   for (let index = 0; index < argv.length; index++) {
@@ -39,6 +46,7 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
     switch (arg) {
       case '--workspace':
         config.workspaceRoot = path.resolve(readValue(argv, ++index, arg));
+        config.workspaceRootExplicit = true;
         break;
       case '--game':
         config.game = readValue(argv, ++index, arg);
@@ -54,6 +62,9 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
         break;
       case '--rules':
         config.rulesPath = resolveRulesPath(readValue(argv, ++index, arg));
+        break;
+      case '--bridge-manifest':
+        config.bridgeManifestPath = path.resolve(readValue(argv, ++index, arg));
         break;
       case '--stdio':
         config.stdio = true;
@@ -75,6 +86,9 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
       case '--force-start':
         config.forceStart = true;
         break;
+      case '--standalone':
+        config.standalone = true;
+        break;
       case '--allow-tool':
         config.allowedTools.push(readValue(argv, ++index, arg));
         break;
@@ -86,6 +100,7 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
           config.allowedTools.push(arg.slice('--allow-tool='.length));
         } else if (arg?.startsWith('--workspace=')) {
           config.workspaceRoot = path.resolve(arg.slice('--workspace='.length));
+          config.workspaceRootExplicit = true;
         } else if (arg?.startsWith('--game=')) {
           config.game = arg.slice('--game='.length);
         } else if (arg?.startsWith('--server-path=')) {
@@ -96,6 +111,8 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
           config.cachePath = path.resolve(arg.slice('--cache='.length));
         } else if (arg?.startsWith('--rules=')) {
           config.rulesPath = resolveRulesPath(arg.slice('--rules='.length));
+        } else if (arg?.startsWith('--bridge-manifest=')) {
+          config.bridgeManifestPath = path.resolve(arg.slice('--bridge-manifest='.length));
         } else if (arg?.startsWith('--host=')) {
           config.host = arg.slice('--host='.length);
         } else if (arg?.startsWith('--port=')) {
@@ -103,6 +120,8 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
         } else if (arg === '--http') {
           config.http = true;
           config.stdio = false;
+        } else if (arg === '--standalone') {
+          config.standalone = true;
         } else {
           throw new Error(`Unknown argument: ${arg}\n\n${helpText()}`);
         }
@@ -139,10 +158,19 @@ function readValue(argv: string[], index: number, flag: string): string {
 export function helpText(): string {
   return [
     'Usage:',
-    '  cwtools-mcp --workspace <path> [--game stellaris] [--stdio] [--server-path <path>]',
-    '  cwtools-mcp --workspace <path> --http [--host 127.0.0.1] [--port 3000]',
-    '  cwtools-mcp --workspace <path> --enable-writes',
-    '  cwtools-mcp --workspace <path> --enable-writes --allow-tool write_localisation --allow-tool edit_pdx_block',
+    '  cwtools-mcp [--stdio] [--bridge-manifest <path>]',
+    '  cwtools-mcp --http [--host 127.0.0.1] [--port 3000] [--bridge-manifest <path>]',
+    '  cwtools-mcp --standalone --workspace <path> [--game stellaris] [--stdio] [--server-path <path>]',
+    '  cwtools-mcp --standalone --workspace <path> --http [--host 127.0.0.1] [--port 3000]',
+    '  cwtools-mcp --standalone --workspace <path> --enable-writes',
+    '  cwtools-mcp --standalone --workspace <path> --enable-writes --allow-tool write_localisation --allow-tool edit_pdx_block',
+    '',
+    'Default bridge mode:',
+    '  The script connects to the extension-host MCP bridge written by the active',
+    '  VS Code-compatible host next to this script as bridge-manifest.json. It does',
+    '  not start a second CWTools language server. If the compatible host is closed',
+    '  or the workspace is not active, tool calls return an actionable unavailable error.',
+    '  Use --standalone only when you intentionally want the legacy self-hosted LSP mode.',
     '',
     'Vanilla data (needed for vanilla IDs and correct mod-vs-vanilla diagnostics):',
     '  (auto)              If neither flag is given, the VS Code cwtools extension cache',

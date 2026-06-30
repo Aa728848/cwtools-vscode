@@ -1,113 +1,262 @@
 # cwtools-mcp
 
-为 CWTools 语义化 Mod 制作辅助提供的 MCP 服务器。
+[English](#english) | [中文](#zh-cn)
 
-## 随 VS Code 扩展一同发布
+<a id="english"></a>
 
-打包后的构建会作为单个自包含文件捆绑进扩展。扩展在激活时还会将其复制到 globalStorage
-中的一个**与版本无关的稳定路径**，这样外部 agent 就能指向一个会随扩展更新持续生效的位置，
-无需修改版本号：
+## English
 
+CWTools MCP is the external-agent entry point for this extension's Paradox /
+Stellaris semantic tools.
+
+### Default Mode: Extension Bridge
+
+By default, `cwtools-mcp` is a lightweight MCP proxy. It does **not** start a
+second `CWTools Server` process. Instead, it connects to the MCP bridge started
+inside the active VS Code-compatible extension host and reuses that host's:
+
+- existing CWTools language client;
+- current workspace root;
+- Problems diagnostics from the IDE;
+- rules/cache/localisation/user settings;
+- shared indexes and AI read tools.
+
+This keeps memory use low and makes MCP diagnostics match the IDE.
+
+The extension writes both files below into the current host's own
+`globalStorage/mcp/` directory when the project is active:
+
+```text
+cwtools-mcp.cjs
+bridge-manifest.json
 ```
-# 稳定路径（推荐——跨版本永不变化）：
-<globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs
-#   Windows: %APPDATA%/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs
-#   macOS:   ~/Library/Application Support/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs
-#   Linux:   ~/.config/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs
 
-# 带版本号的路径（位于扩展目录内，每次发布都会变化）：
-<vscode-extensions>/foreverskywalker.foreverskywalker-stellaris-cwtools-<version>/bin/mcp/cwtools-mcp.cjs
-```
+External agents should run the `cwtools-mcp.cjs` copied by the same host they are
+using. The proxy reads `bridge-manifest.json` next to itself. This is host-name
+agnostic: VS Code, Cursor, VSCodium, Antigravity, and other compatible hosts all
+work as long as they support the VS Code extension APIs and activate this
+extension.
 
-外部 agent 用 `node` 运行它。它会自动探测已安装扩展的服务器二进制文件
-（`bin/server/<platform>/CWTools Server`）、解压出的规则以及 globalStorage 中的原版缓存
-——因此无需开发环境检出，也无需额外参数。它是**只读**的：文件写入交由宿主 agent 自身的环境处理。
+### Quick Setup
 
-## 用法
+Use the `globalStorage` path from the compatible host where the extension is
+active. The placeholder below means the directory that contains the host's
+`foreverskywalker.foreverskywalker-stellaris-cwtools` global storage folder.
 
-Stdio 传输（开发环境检出）：
+#### Codex
 
 ```sh
-cwtools-mcp --workspace /path/to/mod --game stellaris --stdio
+codex mcp add cwtools -- node "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --stdio
 ```
 
-可流式 HTTP 传输：
+#### Claude Code
 
 ```sh
-cwtools-mcp --workspace /path/to/mod --game stellaris --http --host 127.0.0.1 --port 3000
+claude mcp add cwtools --scope user -- node "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --stdio
 ```
 
-HTTP MCP 端点为 `/mcp`；在 `/healthz` 提供了一个轻量级健康检查。
+#### Antigravity
 
-## 原版游戏数据
+Antigravity reads MCP servers from `~/.gemini/config/mcp_config.json`. Add this
+server entry:
 
-CWTools 的语义结果会将你的 Mod 与**原版游戏缓存**结合。没有它，服务器仍可运行，但结果仅限
-Mod 自身：原版 ID 不会出现，且 Mod 中对原版定义的引用会被报告为未定义错误。请提供以下之一：
+```json
+{
+  "mcpServers": {
+    "cwtools": {
+      "command": "node",
+      "args": [
+        "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs",
+        "--stdio"
+      ]
+    }
+  }
+}
+```
+
+Or merge it into an existing config with a Node one-liner:
 
 ```sh
-# 从原版安装目录构建缓存（首次运行较慢，之后会缓存）
-cwtools-mcp --workspace /path/to/mod --game stellaris --game-path "/path/to/Stellaris"
-
-# 复用预构建的 <game>.cwb 缓存目录（例如 VS Code 扩展的 globalStorage/.cwtools）
-cwtools-mcp --workspace /path/to/mod --game stellaris --cache "/path/to/.cwtools"
+node -e "const fs=require('fs'),os=require('os'),path=require('path');const p=path.join(os.homedir(),'.gemini','config','mcp_config.json');const s=process.argv[1];const cfg=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,'utf8')):{};cfg.mcpServers={...(cfg.mcpServers||{}),cwtools:{command:'node',args:[s,'--stdio']}};fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,JSON.stringify(cfg,null,2)+'\n')" "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs"
 ```
 
-当目录同时包含 `<game>.cwb` 缓存和解压出的规则时（正如 VS Code 扩展的 globalStorage），
-单独使用 `--cache` 即可；`--game-path` 仅在需要从零构建缓存时才需要。
+If the compatible host is closed, the workspace is not active, or the manifest is
+stale, tool calls return `bridge_unavailable` with recovery instructions. The
+proxy intentionally does not silently fall back to a separate language server.
 
-如果两个参数都未给出，MCP 会**自动探测 globalStorage 中的 VS Code cwtools 扩展缓存**
-（`Code`/`Code - Insiders`/`VSCodium`/`Cursor`）并复用它——所以只要你在扩展中至少打开过一次
-该项目，就无需任何缓存参数。
+### Optional Standalone Mode
 
-当找不到任何缓存时，依赖原版的工具结果会带上 `vanillaCache.available = false` 以及一条警告，
-这样客户端就不会把仅含 Mod 的答案当作完整答案。
-
-## 规则来源
-
-默认情况下，MCP 直接读取已安装扩展拉取到 globalStorage 中的规则目录。若要覆盖，请用 `--rules` 指向一个规则**目录**：
+Use standalone mode only when you explicitly want the legacy behavior: the MCP
+process starts its own CWTools language server and builds its own diagnostic
+state.
 
 ```sh
-cwtools-mcp --workspace /path/to/mod --game stellaris --rules /path/to/rules-dir --stdio
+cwtools-mcp --standalone --workspace /path/to/mod --game stellaris --stdio
 ```
 
-优先级：`--rules <目录>` > 已安装扩展拉取的规则 > 开发环境检出（`submodules/…/config`）。
-
-MCP 不使用捆绑的 `*-rules.zip`，也不会解压任何东西——规则必须是真实目录。`--rules` 传入 `.zip` 会直接报错。若以上来源都没有，校验能力将受限（请安装扩展或传 `--rules`）。
-
-## 在 Codex 中使用
-
-Codex 从 `~/.codex/config.toml` 读取 MCP 服务器（`[mcp_servers.<name>]`，与 Codex IDE 扩展共享）。
-最快的方式——让 Codex 用一条命令替你添加，指向**稳定的 globalStorage 路径**（无版本号，可在更新后继续使用）：
+HTTP transport is available in both modes:
 
 ```sh
-codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --game stellaris --stdio
+cwtools-mcp --http --host 127.0.0.1 --port 3000
+cwtools-mcp --standalone --workspace /path/to/mod --http --host 127.0.0.1 --port 3000
 ```
 
-（macOS/Linux：将路径替换为你所在平台的 `globalStorage` 位置。）你也可以直接让 Codex 自己运行那条
-`codex mcp add …` 命令。等效的手动 TOML 配置：
+### Standalone Rules And Vanilla Cache
 
-```toml
-[mcp_servers.cwtools]
-command = "node"
-args = [
-  "C:/Users/<you>/AppData/Roaming/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs",
-  "--game", "stellaris",
-  "--stdio",
-]
-startup_timeout_sec = 30
-tool_timeout_sec = 120
+These options apply to standalone mode:
+
+```sh
+cwtools-mcp --standalone --workspace /path/to/mod --game stellaris --game-path "/path/to/Stellaris"
+cwtools-mcp --standalone --workspace /path/to/mod --game stellaris --cache "/path/to/.cwtools"
+cwtools-mcp --standalone --workspace /path/to/mod --game stellaris --rules "/path/to/rules/config"
 ```
 
-使用稳定的 globalStorage 路径意味着扩展更新时配置永不变化（扩展会在激活时把 bundle 重新同步到那里）。
-省略 `--workspace` 可分析 Codex 启动服务器时所在的目录（其 cwd）；将 GUI 中的「工作目录」留空，
-让它跟随当前打开的项目。在 TOML 中请使用正斜杠。启动一个 Codex 会话并运行 `/mcp`，确认服务器及其
-21 个只读工具已连接——服务器还会发送 `instructions`，告诉模型何时使用它们。
+When standalone mode lacks a vanilla `.cwb` cache or `--game-path`, vanilla IDs
+may be absent and diagnostics can differ from the IDE. Bridge mode avoids this by
+using the active extension host's loaded state.
 
-依赖加载的结果（类型/作用域/规则/定义/诊断查询）会带有一个 `readiness` 字段。在项目仍在加载期间，
-它们会返回 `status: "loading"` 和 `readiness.ready = false`，而不是一个具有误导性的空答案
-——请轮询直到 `readiness.ready` 为 true（若有预构建缓存，仅需几秒）。
+### Tools
 
-## 工具
+The MCP surface remains read-only. It exposes the generated CWTools semantic
+tools such as:
 
-本包暴露了为 CWTools 读取工具、诊断、项目/profile 知识、补全和符号导航生成的 schema，
-另外还提供用于本地化和 PDX 块替换的受保护写入工具。
+- `query_types`
+- `query_rules`
+- `query_scope`
+- `get_diagnostics`
+- `query_workspace_index`
+- `query_localisation_index`
+- `get_pdx_block`
+- completion, document/workspace symbols, definition and reference lookup
+- deep semantic queries for scripted effects/triggers, enums, static modifiers,
+  variables, and entity info
+
+File edits are intentionally not exposed through this MCP server. External agents
+should edit files through their own environment and then call MCP diagnostics or
+semantic tools again.
+
+---
+
+<a id="zh-cn"></a>
+
+## 中文
+
+CWTools MCP 是本扩展提供给外部 Agent 的 Paradox / Stellaris 语义工具入口。
+
+### 默认模式：插件内 Bridge
+
+默认情况下，`cwtools-mcp` 是一个轻量 MCP 代理。它**不会**再启动第二个
+`CWTools Server` 进程，而是连接当前已激活的 VS Code 兼容宿主内的 MCP
+bridge，并复用该宿主中的：
+
+- 已有 CWTools 语言客户端；
+- 当前工作区根目录；
+- IDE Problems 面板诊断；
+- rules/cache/localisation/用户设置；
+- 共享索引和 AI 只读工具。
+
+这样可以降低内存占用，并让 MCP 诊断数量与 IDE 保持一致。
+
+项目激活时，扩展会把下面两个文件写入当前宿主自己的 `globalStorage/mcp/`
+目录：
+
+```text
+cwtools-mcp.cjs
+bridge-manifest.json
+```
+
+外部 Agent 应运行同一个宿主复制出来的 `cwtools-mcp.cjs`。代理会读取同目录的
+`bridge-manifest.json`。这条主路径不依赖宿主目录名：VS Code、Cursor、
+VSCodium、Antigravity，以及其他兼容 VS Code 扩展 API 的宿主都可以使用。
+
+### 快速接入
+
+请使用实际运行扩展的兼容宿主自己的 `globalStorage` 路径。下面的
+`<host-globalStorage>` 代表该宿主下
+`foreverskywalker.foreverskywalker-stellaris-cwtools` 全局存储目录所在位置。
+
+#### Codex
+
+```sh
+codex mcp add cwtools -- node "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --stdio
+```
+
+#### Claude Code
+
+```sh
+claude mcp add cwtools --scope user -- node "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --stdio
+```
+
+#### Antigravity
+
+Antigravity 从 `~/.gemini/config/mcp_config.json` 读取 MCP 服务器。添加下面这个
+server 条目：
+
+```json
+{
+  "mcpServers": {
+    "cwtools": {
+      "command": "node",
+      "args": [
+        "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs",
+        "--stdio"
+      ]
+    }
+  }
+}
+```
+
+也可以用下面的 Node 一行命令合并进已有配置，不会覆盖其他 MCP server：
+
+```sh
+node -e "const fs=require('fs'),os=require('os'),path=require('path');const p=path.join(os.homedir(),'.gemini','config','mcp_config.json');const s=process.argv[1];const cfg=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,'utf8')):{};cfg.mcpServers={...(cfg.mcpServers||{}),cwtools:{command:'node',args:[s,'--stdio']}};fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,JSON.stringify(cfg,null,2)+'\n')" "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs"
+```
+
+如果兼容宿主未打开、工作区未激活或 manifest 已失效，工具调用会返回
+`bridge_unavailable` 和恢复说明。代理不会静默回退并启动单独的语言服务。
+
+### 可选 Standalone 模式
+
+只有在明确需要旧行为时才使用 standalone 模式：MCP 进程会自行启动一份 CWTools
+语言服务器并构建独立诊断状态。
+
+```sh
+cwtools-mcp --standalone --workspace /path/to/mod --game stellaris --stdio
+```
+
+两种模式都支持 HTTP transport：
+
+```sh
+cwtools-mcp --http --host 127.0.0.1 --port 3000
+cwtools-mcp --standalone --workspace /path/to/mod --http --host 127.0.0.1 --port 3000
+```
+
+### Standalone 的规则与原版缓存
+
+下面这些参数只适用于 standalone 模式：
+
+```sh
+cwtools-mcp --standalone --workspace /path/to/mod --game stellaris --game-path "/path/to/Stellaris"
+cwtools-mcp --standalone --workspace /path/to/mod --game stellaris --cache "/path/to/.cwtools"
+cwtools-mcp --standalone --workspace /path/to/mod --game stellaris --rules "/path/to/rules/config"
+```
+
+如果 standalone 模式缺少 vanilla `.cwb` 缓存或 `--game-path`，原版 ID 可能缺失，
+诊断也可能与 IDE 不一致。Bridge 模式通过复用当前扩展宿主的已加载状态来避免这个问题。
+
+### 工具
+
+MCP 入口仍保持只读。它暴露生成出来的 CWTools 语义工具，例如：
+
+- `query_types`
+- `query_rules`
+- `query_scope`
+- `get_diagnostics`
+- `query_workspace_index`
+- `query_localisation_index`
+- `get_pdx_block`
+- 补全、document/workspace symbols、定义和引用查询
+- scripted effects/triggers、enums、static modifiers、variables、entity info 等深层语义查询
+
+文件写入不会通过这个 MCP server 暴露。外部 Agent 应使用自己的环境编辑文件，
+然后再调用 MCP 诊断或语义工具复查。

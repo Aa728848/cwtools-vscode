@@ -2,6 +2,9 @@
 
 ## [2.7.5] - 2026-06-30
 
+### MCP
+- **[MCP] Extension-host bridge mode**: `cwtools-mcp` now defaults to a lightweight proxy that connects to the active VS Code-compatible extension host through `globalStorage/mcp/bridge-manifest.json`, reusing the IDE language client and Problems diagnostics instead of starting a second CWTools Server. Legacy self-hosted LSP mode is still available with `--standalone`.
+
 ### ⚙️ 框架升级
 - **[迁移] 迁移至NET10**。
 

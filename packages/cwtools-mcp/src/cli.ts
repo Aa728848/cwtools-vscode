@@ -3,6 +3,7 @@
 import type { HostServices } from 'cwtools-shared';
 import { parseCliArgs } from './config';
 import { createNodeHostServices } from './hosts/nodeHostServices';
+import { createBridgeProxyMcpServer } from './mcp/bridgeProxy';
 import { runHttpTransport } from './mcp/transportHttp';
 import { runStdioTransport } from './mcp/transportStdio';
 import { createCwtoolsMcpServer } from './server';
@@ -42,6 +43,18 @@ function installLifecycle(host: HostServices, stdio: boolean): void {
 
 async function main(): Promise<void> {
   const config = parseCliArgs(process.argv.slice(2));
+  if (!config.standalone) {
+    if (config.http) {
+      await runHttpTransport(() => createBridgeProxyMcpServer(config), { host: config.host, port: config.port });
+    } else if (config.stdio) {
+      const server = createBridgeProxyMcpServer(config);
+      await runStdioTransport(server);
+    } else {
+      throw new Error('No MCP transport selected. Use --stdio or --http.');
+    }
+    return;
+  }
+
   const host = createNodeHostServices(config);
   installLifecycle(host, !!config.stdio && !config.http);
   if (config.http) {

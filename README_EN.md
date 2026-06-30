@@ -158,13 +158,18 @@ flowchart LR
 
 ### 🔌 7. Out-of-the-Box MCP Server (for Codex / Claude Code)
 This extension bundles a **read-only** Model Context Protocol (MCP) server, offering 21 read-only semantic tools of CWTools (syntax check, scope queries, definitions, references, diagnostics, scripted triggers/effects/enums) to external agents.
-* **Zero Config**: The server automatically detects installed server binaries, configurations, and game caches in globalStorage.
-* **Stable Version-Independent Path**: Activated plugins copy the script to `globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs` to survive version upgrades.
-* **Install in Codex**:
+* **Extension-Host Bridge by Default**: The MCP entry script connects to the active VS Code-compatible host (VS Code, Cursor, VSCodium, Antigravity, etc.) through `globalStorage/mcp/bridge-manifest.json`, reusing the IDE's existing CWTools language client and Problems diagnostics instead of starting a second server.
+* **Stable Version-Independent Path**: Activated plugins copy the proxy script to `globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs` to survive version upgrades. Legacy standalone mode is still available with `--standalone`.
+* **Codex**:
   ```sh
-  codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --game stellaris --stdio
+  codex mcp add cwtools -- node "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --stdio
   ```
-  Change paths accordingly on macOS/Linux. For configuration details, see [packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md).
+* **Claude Code**:
+  ```sh
+  claude mcp add cwtools --scope user -- node "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --stdio
+  ```
+* **Antigravity**: add `cwtools` to `~/.gemini/config/mcp_config.json` with `"command": "node"` and `"args": ["<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs", "--stdio"]`.
+  Use the `globalStorage` path from the compatible host where the extension is active. For configuration details, see [packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md).
 
 ---
 

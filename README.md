@@ -2,6 +2,10 @@
 
 [English](#english) | [中文](#zh-cn) | [Architecture / 架构文档](ARCHITECTURE.md)
 
+> GitHub renders this file as the repository overview. The full introduction is provided below in both English and Simplified Chinese.
+>
+> GitHub 默认渲染此文件作为项目介绍。下方同时提供英文与简体中文全文。
+
 <a id="english"></a>
 
 ## English
@@ -166,13 +170,18 @@ flowchart LR
 
 ##### 🔌 7. Out-of-the-Box MCP Server (for Codex / Claude Code)
 This extension bundles a **read-only** Model Context Protocol (MCP) server, offering 21 read-only semantic tools of CWTools (syntax check, scope queries, definitions, references, diagnostics, scripted triggers/effects/enums) to external agents.
-* **Zero Config**: The server automatically detects installed server binaries, configurations, and game caches in globalStorage.
-* **Stable Version-Independent Path**: Activated plugins copy the script to `globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs` to survive version upgrades.
-* **Install in Codex**:
+* **Extension-Host Bridge by Default**: The MCP entry script connects to the active VS Code-compatible host (VS Code, Cursor, VSCodium, Antigravity, etc.) through `globalStorage/mcp/bridge-manifest.json`, reusing the IDE's existing CWTools language client and Problems diagnostics instead of starting a second server.
+* **Stable Version-Independent Path**: Activated plugins copy the proxy script to `globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs` to survive version upgrades. Legacy standalone mode is still available with `--standalone`.
+* **Codex**:
   ```sh
-  codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --game stellaris --stdio
+  codex mcp add cwtools -- node "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --stdio
   ```
-  Change paths accordingly on macOS/Linux. For configuration details, see [packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md).
+* **Claude Code**:
+  ```sh
+  claude mcp add cwtools --scope user -- node "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --stdio
+  ```
+* **Antigravity**: add `cwtools` to `~/.gemini/config/mcp_config.json` with `"command": "node"` and `"args": ["<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs", "--stdio"]`.
+  Use the `globalStorage` path from the compatible host where the extension is active. For configuration details, see [packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md).
 
 ---
 
@@ -342,15 +351,23 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
 ##### 🔌 7. 通用 MCP 服务（供 Codex / Claude Code 调用）
 本插件随包分发一个**只读**的 MCP 服务，把 CWTools 的 PDX 语义能力（验证 ID、查语法、查作用域、全项目诊断、定义/引用、补全、scripted effects/triggers/enums/modifiers/variables、实体信息，共 21 个只读工具）开放给任意 MCP 客户端。文件写入仍由你的 Agent 自带环境完成。
 
-* **零配置自动探测**：MCP 自动发现已安装插件的 LSP server、解压规则与 globalStorage 原版缓存——无需手填路径。连接时还会下发工作流 `instructions`，引导模型在 Paradox 项目里优先用工具核实而非凭记忆。
-* **版本无关稳定路径**：插件激活时把 MCP 同步到 `globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs`（不含版本号），配置指向它即可**自动跟随插件更新**。
-* **在 Codex 中一键安装**（也可直接让 Codex 自己运行这条命令）：
+* **默认复用插件内服务**：MCP 入口脚本会通过 `globalStorage/mcp/bridge-manifest.json` 连接当前已激活的 VS Code 兼容宿主（VS Code / Cursor / VSCodium / Antigravity 等），复用 IDE 中已有的 CWTools LSP 与 Problems 诊断，不再额外启动第二个重型服务。
+* **版本无关稳定路径**：插件激活时把 MCP 代理脚本同步到 `globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs`（不含版本号），配置指向它即可**自动跟随插件更新**。旧的独立 LSP 模式仍可用 `--standalone` 显式启用。
+* **Codex**：
 
 ```sh
-codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --game stellaris --stdio
+codex mcp add cwtools -- node "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --stdio
 ```
 
-  macOS/Linux 把路径换成对应的 `globalStorage` 位置。等价的 `~/.codex/config.toml` 手写配置、`--rules`/`--cache`/`--game-path` 高级选项与 Claude Code 接入方式，详见 [packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md)。
+* **Claude Code**：
+
+```sh
+claude mcp add cwtools --scope user -- node "<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs" --stdio
+```
+
+* **Antigravity**：在 `~/.gemini/config/mcp_config.json` 中添加 `cwtools`，内容为 `"command": "node"` 和 `"args": ["<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs", "--stdio"]`。
+
+  请使用实际运行插件的兼容宿主自己的 `globalStorage` 路径。等价的 `~/.codex/config.toml` 手写配置、`--standalone`/`--rules`/`--cache`/`--game-path` 高级选项与 Claude Code 接入方式，详见 [packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md)。
 
 ---
 

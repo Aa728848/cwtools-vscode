@@ -66,6 +66,11 @@ const LEGACY_GLOBAL_STORAGE_ENTRIES = [
 	'.agents',
 	'ai-chat-topics.json',
 ] as const;
+const AUTO_DETECTED_LOC_LANGUAGE_KEY = 'stellarisLanguageServices.localisation.languages.autoDetected';
+
+interface AutoDetectedLocLanguageState {
+	languages: string[];
+}
 
 function legacyPublisherStoragePaths(context: ExtensionContext): string[] {
 	const currentStorage = context.globalStorageUri.fsPath;
@@ -2391,9 +2396,9 @@ export async function activate(context: ExtensionContext) {
 		}
 	}
 
-	// ── Auto-detect localization language when user hasn't explicitly configured it ──
+	// ── Auto-default localization language from VS Code UI language ──
 	if (isKnownGameLanguageId(languageId)) {
-		await autoDetectLocLanguage();
+		await autoDetectLocLanguage(context);
 	}
 
 	// ── Mod folder target game selection guidance and auto-association ──
@@ -2441,84 +2446,98 @@ export async function activate(context: ExtensionContext) {
 	await init(languageId, isVanillaFolder);
 }
 
+function normaliseLocLanguageSetting(value: readonly string[] | undefined): string[] | undefined {
+	if (value === undefined) return undefined;
+	return value.filter((item): item is string => typeof item === 'string');
+}
+
+function sameLocLanguageSetting(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+	const left = normaliseLocLanguageSetting(a);
+	const right = normaliseLocLanguageSetting(b);
+	if (!left || !right || left.length !== right.length) return false;
+	return left.every((item, index) => item.trim().toLowerCase() === right[index]!.trim().toLowerCase());
+}
+
+function hasLocLanguageSetting(value: readonly string[] | undefined): boolean {
+	return value !== undefined;
+}
+
+function defaultLocLanguagesForUi(): string[] {
+	return isChineseLocale() ? ['Chinese'] : ['English'];
+}
+
 /**
- * Scans the workspace's localisation directories to determine which language
- * has the most YML files. If `stellarisLanguageServices.localisation.languages` has never been
- * explicitly set by the user (i.e., it's still using the package.json default),
- * this function automatically sets it to the detected language.
- *
- * This helps mod authors whose primary language isn't English: they no longer
- * need to manually configure the validation language.
+ * Chooses the default validation language from the VS Code UI language.
+ * Chinese VS Code uses Chinese; every other UI language falls back to English.
+ * User-configured values still win over this automatic default.
  */
-async function autoDetectLocLanguage(): Promise<void> {
+async function autoDetectLocLanguage(context: ExtensionContext): Promise<void> {
 	const config = workspace.getConfiguration('stellarisLanguageServices');
 	const inspected = config.inspect<string[]>('localisation.languages');
+	const trackedAuto = context.workspaceState.get<AutoDetectedLocLanguageState>(AUTO_DETECTED_LOC_LANGUAGE_KEY);
+	const trackedLanguages = trackedAuto?.languages;
+	const desiredLanguages = defaultLocLanguagesForUi();
 
-	// If the user has explicitly set this at any level, respect their choice
-	if (inspected?.globalValue || inspected?.workspaceValue || inspected?.workspaceFolderValue) {
+	if (trackedLanguages && sameLocLanguageSetting(inspected?.workspaceValue, trackedLanguages)) {
+		if (hasLocLanguageSetting(inspected?.globalValue) || hasLocLanguageSetting(inspected?.workspaceFolderValue)) {
+			await config.update('localisation.languages', undefined, vs.ConfigurationTarget.Workspace);
+			await context.workspaceState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, undefined);
+			ErrorReporter.debug('Extension', 'Cleared auto-managed localisation language so explicit user settings can apply');
+			return;
+		}
+
+		if (sameLocLanguageSetting(inspected?.workspaceValue, desiredLanguages)) {
+			return;
+		}
+
+		if (sameLocLanguageSetting(desiredLanguages, ['English'])) {
+			await config.update('localisation.languages', undefined, vs.ConfigurationTarget.Workspace);
+			await context.workspaceState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, undefined);
+			ErrorReporter.debug('Extension', 'Cleared auto-managed localisation language; English is the default for non-Chinese UI');
+			return;
+		}
+
+		await config.update('localisation.languages', desiredLanguages, vs.ConfigurationTarget.Workspace);
+		await context.workspaceState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, { languages: desiredLanguages });
+		ErrorReporter.debug('Extension', `Auto-managed localisation language: ${desiredLanguages.join(', ')}`);
 		return;
 	}
 
-	const wsFolders = workspace.workspaceFolders;
-	if (!wsFolders || wsFolders.length === 0) return;
-
-	// Mapping: setting value → file name tag (used in *l_<tag>.yml patterns)
-	const langTagMap: Array<[string, string]> = [
-		['English', 'english'],
-		['French', 'french'],
-		['German', 'german'],
-		['Spanish', 'spanish'],
-		['Russian', 'russian'],
-		['Braz_Por', 'braz_por'],
-		['Polish', 'polish'],
-		['Chinese', 'simp_chinese'],
-		['Korean', 'korean'],
-		['Japanese', 'japanese'],
-		['Turkish', 'turkish'],
-	];
-
-	try {
-		const wsRoot = wsFolders[0]!;
-		const counts = new Map<string, number>();
-
-		for (const [settingName] of langTagMap) counts.set(settingName, 0);
-		const pattern = new vs.RelativePattern(
-			wsRoot,
-			'**/{localisation,localisation_synced,localization}/**/*l_*.yml'
-		);
-		const files = await workspace.findFiles(pattern, '**/{node_modules,.git,.vscode,.vscode-test,.cwtools-ai}/**', 5000);
-		for (const file of files) {
-			const basename = path.basename(file.fsPath).toLowerCase();
-			for (const [settingName, fileTag] of langTagMap) {
-				if (basename.endsWith(`l_${fileTag}.yml`)) {
-					counts.set(settingName, (counts.get(settingName) ?? 0) + 1);
-					break;
-				}
-			}
-		}
-
-		// Find the language with the most files
-		let bestLang = 'English';
-		let bestCount = 0;
-		for (const [lang, count] of counts) {
-			if (count > bestCount) {
-				bestCount = count;
-				bestLang = lang;
-			}
-		}
-
-		// Only override if we found localisation files and the best language isn't English
-		// (since English is already the default)
-		if (bestCount > 0 && bestLang !== 'English') {
-			await config.update('localisation.languages', [bestLang], vs.ConfigurationTarget.Workspace);
-			ErrorReporter.debug('Extension', `Auto-detected localisation language: ${bestLang} (${bestCount} files)`);
-		}
-	} catch (e) {
-		// Non-critical — if detection fails, just use the default
-		ErrorReporter.debug('Extension', 'Failed to auto-detect localisation language', e);
+	if (trackedLanguages) {
+		await context.workspaceState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, undefined);
+		return;
 	}
-}
 
+	if (
+		hasLocLanguageSetting(inspected?.workspaceValue)
+		&& hasLocLanguageSetting(inspected?.globalValue)
+		&& !sameLocLanguageSetting(inspected?.globalValue, inspected?.workspaceValue)
+	) {
+		await config.update('localisation.languages', undefined, vs.ConfigurationTarget.Workspace);
+		ErrorReporter.debug('Extension', 'Cleared workspace localisation language so the user setting can apply');
+		return;
+	}
+
+	if (
+		hasLocLanguageSetting(inspected?.globalValue)
+		|| hasLocLanguageSetting(inspected?.workspaceFolderValue)
+	) {
+		return;
+	}
+
+	if (hasLocLanguageSetting(inspected?.workspaceValue)) {
+		return;
+	}
+
+	if (sameLocLanguageSetting(desiredLanguages, ['English'])) {
+		return;
+	}
+
+	await config.update('localisation.languages', desiredLanguages, vs.ConfigurationTarget.Workspace);
+	await context.workspaceState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, { languages: desiredLanguages });
+	ErrorReporter.debug('Extension', `Auto-managed localisation language: ${desiredLanguages.join(', ')}`);
+	return;
+}
 
 export async function reloadExtension(prompt: string, buttonText?: string, force?: boolean) {
 	const restartAction = buttonText || "Restart";

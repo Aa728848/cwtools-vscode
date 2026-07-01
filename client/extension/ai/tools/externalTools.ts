@@ -1620,7 +1620,7 @@ export class ExternalToolHandler {
         // Build ImageMagick command
         const magickBin = this.getImageMagickBin();
         const compression = args.compression ?? 'dxt5';
-        const mipmaps = args.generateMipmaps !== false; // default true
+        const mipmaps = args.generateMipmaps === true; // default false
 
         // ImageMagick DDS defines
         let ddsDefines = '';

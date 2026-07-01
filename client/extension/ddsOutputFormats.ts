@@ -9,10 +9,10 @@ export interface DdsOutputFormat {
 }
 
 export const DDS_OUTPUT_FORMATS: readonly DdsOutputFormat[] = [
-	{ id: 'dxt5', compression: 'dxt5', mipmaps: true, label: 'BC3 / DXT5' },
-	{ id: 'dxt1', compression: 'dxt1', mipmaps: true, label: 'BC1 / DXT1' },
-	{ id: 'dxt3', compression: 'dxt3', mipmaps: true, label: 'BC2 / DXT3' },
-	{ id: 'rgba', compression: 'none', mipmaps: true, label: 'RGBA uncompressed' },
+	{ id: 'dxt5', compression: 'dxt5', mipmaps: false, label: 'BC3 / DXT5' },
+	{ id: 'dxt1', compression: 'dxt1', mipmaps: false, label: 'BC1 / DXT1' },
+	{ id: 'dxt3', compression: 'dxt3', mipmaps: false, label: 'BC2 / DXT3' },
+	{ id: 'rgba', compression: 'none', mipmaps: false, label: 'RGBA uncompressed' },
 ];
 
 export const DEFAULT_DDS_OUTPUT_FORMAT = DDS_OUTPUT_FORMATS[0]!;

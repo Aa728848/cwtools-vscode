@@ -78,26 +78,26 @@ const DDS_FORMAT_DETAILS: Record<DdsOutputFormatId, { descriptionEn: string; des
 	dxt5: {
 		descriptionEn: 'Recommended for UI, icons, and sprites with alpha',
 		descriptionZh: '推荐：适合带透明通道的 UI、图标、精灵',
-		detailEn: 'Compressed BC3/DXT5 DDS with mipmaps. This matches the previous default conversion.',
-		detailZh: '带 mipmaps 的 BC3/DXT5 压缩 DDS。等同于之前的默认转换格式。',
+		detailEn: 'Compressed BC3/DXT5 DDS without mipmaps. This is the default conversion format.',
+		detailZh: '不带 mipmaps 的 BC3/DXT5 压缩 DDS。这是默认转换格式。',
 	},
 	dxt1: {
 		descriptionEn: 'Opaque textures, smaller output',
 		descriptionZh: '不透明贴图，输出更小',
-		detailEn: 'Compressed BC1/DXT1 DDS with mipmaps. Do not use when the texture needs smooth alpha.',
-		detailZh: '带 mipmaps 的 BC1/DXT1 压缩 DDS。需要平滑透明通道时不要使用。',
+		detailEn: 'Compressed BC1/DXT1 DDS without mipmaps. Do not use when the texture needs smooth alpha.',
+		detailZh: '不带 mipmaps 的 BC1/DXT1 压缩 DDS。需要平滑透明通道时不要使用。',
 	},
 	dxt3: {
 		descriptionEn: 'Legacy explicit alpha',
 		descriptionZh: '旧式显式透明通道',
-		detailEn: 'Compressed BC2/DXT3 DDS with mipmaps. Useful only for assets that specifically expect DXT3.',
-		detailZh: '带 mipmaps 的 BC2/DXT3 压缩 DDS。仅在资源明确需要 DXT3 时使用。',
+		detailEn: 'Compressed BC2/DXT3 DDS without mipmaps. Useful only for assets that specifically expect DXT3.',
+		detailZh: '不带 mipmaps 的 BC2/DXT3 压缩 DDS。仅在资源明确需要 DXT3 时使用。',
 	},
 	rgba: {
 		descriptionEn: 'Uncompressed, largest output',
 		descriptionZh: '不压缩，输出最大',
-		detailEn: 'Uncompressed DDS with mipmaps. Use when compression artifacts are unacceptable.',
-		detailZh: '带 mipmaps 的未压缩 DDS。压缩失真不可接受时使用。',
+		detailEn: 'Uncompressed DDS without mipmaps. Use when compression artifacts are unacceptable.',
+		detailZh: '不带 mipmaps 的未压缩 DDS。压缩失真不可接受时使用。',
 	},
 };
 

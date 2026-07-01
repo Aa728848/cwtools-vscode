@@ -830,14 +830,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'convert_image_to_dds',
-            description: 'Convert a PNG/JPG/TGA image to DDS format (required by Clausewitz engine for icons, sprites, and textures). Uses ImageMagick. Supports DXT5/BC3, DXT1/BC1, DXT3/BC2, and uncompressed DDS output with mipmaps. Requires ImageMagick installed and accessible. Custom path can be set via stellarisLanguageServices.ai.imageMagickPath setting.',
+            description: 'Convert a PNG/JPG/TGA image to DDS format (required by Clausewitz engine for icons, sprites, and textures). Uses ImageMagick. Supports DXT5/BC3, DXT1/BC1, DXT3/BC2, and uncompressed DDS output. Mipmaps are disabled by default. Requires ImageMagick installed and accessible. Custom path can be set via stellarisLanguageServices.ai.imageMagickPath setting.',
             parameters: {
                 type: 'object',
                 properties: {
                     sourcePath: { type: 'string', description: 'Absolute path to the source image file (PNG, JPG, or TGA).' },
                     outputDir: { type: 'string', description: 'Directory to write the converted DDS file to. Can be absolute or relative to workspace root (e.g. "gfx/interface/icons/").' },
                     compression: { type: 'string', enum: ['dxt5', 'dxt1', 'dxt3', 'none'], description: 'DDS compression type. "dxt5" (default): supports alpha channel, use for most icons. "dxt1": no alpha, smaller file size. "dxt3": legacy explicit alpha. "none": uncompressed.' },
-                    generateMipmaps: { type: 'boolean', description: 'Whether to generate mipmaps (default true). Required for most in-game textures.' },
+                    generateMipmaps: { type: 'boolean', description: 'Whether to generate mipmaps (default false).' },
                 },
                 required: ['sourcePath'],
             },

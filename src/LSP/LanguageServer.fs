@@ -11,7 +11,8 @@ open LSP.Json.Ser
 open JsonExtensions
 
 let gameStateLock = new ReaderWriterLockSlim()
-let mutable completionLockTimeoutMs = 300
+let mutable completionLockTimeoutMs = 80
+let mutable completionImmediateFallback: (CompletionParams -> CompletionList option) option = None
 let mutable completionTimeoutFallback: (CompletionParams -> CompletionList option) option = None
 
 let private jsonWriteOptions =
@@ -400,18 +401,28 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                     processQueue.Add(ProcessNotification(method, task, needsWriteLock))
                 | Parser.RequestMessage(id, method, json) ->
                     let parsed = Parser.parseRequest (method, json)
-                    let task, isReadOnly = processRequest parsed
-                    let lockFallback =
+                    let immediateFallback =
                         match parsed with
                         | Completion p ->
-                            Some(fun () ->
-                                completionTimeoutFallback
-                                |> Option.bind (fun provider -> provider p)
-                                |> serializeCompletionListOption)
+                            completionImmediateFallback
+                            |> Option.bind (fun provider -> provider p)
+                            |> serializeCompletionListOption
                         | _ -> None
-                    let cancel = new CancellationTokenSource()
-                    processQueue.Add(ProcessRequest(id, task, cancel, isReadOnly, lockFallback))
-                    pendingRequests[id] <- cancel
+                    match immediateFallback with
+                    | Some result -> respond (send, id, result)
+                    | None ->
+                        let task, isReadOnly = processRequest parsed
+                        let lockFallback =
+                            match parsed with
+                            | Completion p ->
+                                Some(fun () ->
+                                    completionTimeoutFallback
+                                    |> Option.bind (fun provider -> provider p)
+                                    |> serializeCompletionListOption)
+                            | _ -> None
+                        let cancel = new CancellationTokenSource()
+                        processQueue.Add(ProcessRequest(id, task, cancel, isReadOnly, lockFallback))
+                        pendingRequests[id] <- cancel
                 | Parser.ResponseMessage(id, result) -> responseAgent.Post(Response(id, result))
 
             processQueue.Add(Quit)

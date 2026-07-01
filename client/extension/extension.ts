@@ -39,7 +39,6 @@ import { registerImageTools } from './imageTools';
 import { registerLocalisationAiCommands } from './localisationAiCommands';
 import { registerSpecialPathCommands } from './specialPaths';
 import { registerInspectionOverviewCommand } from './inspectionOverview';
-import { LEGACY_SETTINGS_NAMESPACE, migrateLegacyConfiguration } from './configurationMigration';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
 import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
 import type { GameProfile } from './gameProfiles';
@@ -70,6 +69,7 @@ const AUTO_DETECTED_LOC_LANGUAGE_KEY = 'stellarisLanguageServices.localisation.l
 
 interface AutoDetectedLocLanguageState {
 	languages: string[];
+	disabled?: boolean;
 }
 
 function legacyPublisherStoragePaths(context: ExtensionContext): string[] {
@@ -1011,13 +1011,6 @@ export async function activate(context: ExtensionContext) {
 	if (!await removeConflictingExtensions()) {
 		return;
 	}
-
-	void migrateLegacyConfiguration(context);
-	context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
-		if (e.affectsConfiguration(LEGACY_SETTINGS_NAMESPACE)) {
-			void migrateLegacyConfiguration(context);
-		}
-	}));
 
 	// Run update checks in the background so slow GitHub/network responses never block LSP startup.
 	void checkForUpdates(context, {
@@ -2478,6 +2471,10 @@ async function autoDetectLocLanguage(context: ExtensionContext): Promise<void> {
 	const trackedLanguages = trackedAuto?.languages;
 	const desiredLanguages = defaultLocLanguagesForUi();
 
+	if (trackedAuto?.disabled) {
+		return;
+	}
+
 	if (trackedLanguages && sameLocLanguageSetting(inspected?.workspaceValue, trackedLanguages)) {
 		if (hasLocLanguageSetting(inspected?.globalValue) || hasLocLanguageSetting(inspected?.workspaceFolderValue)) {
 			await config.update('localisation.languages', undefined, vs.ConfigurationTarget.Workspace);
@@ -2504,7 +2501,7 @@ async function autoDetectLocLanguage(context: ExtensionContext): Promise<void> {
 	}
 
 	if (trackedLanguages) {
-		await context.workspaceState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, undefined);
+		await context.workspaceState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, { languages: [], disabled: true });
 		return;
 	}
 

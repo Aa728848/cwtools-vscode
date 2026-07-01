@@ -242,7 +242,9 @@ let private isLocalisationDefinitionPath (filePath: string) =
     || normalized.Contains("/localization/")
 
 let private isNavigableDefinitionRange (r: range) =
-    not (String.IsNullOrWhiteSpace r.FileName)
+    r.StartLine > 0
+    && r.EndLine > 0
+    && not (String.IsNullOrWhiteSpace r.FileName)
 
 let private tryFindDescriptorRoot (filePath: string) =
     let rec loop (dir: DirectoryInfo) =
@@ -298,6 +300,52 @@ let private isAllowedDefinitionTarget (sourcePath: string) (targetPath: string) 
 
 let private normalizeDefinitionSymbol (symbol: string) =
     symbol.Trim().Trim('"')
+
+let private scriptedVariableNamePattern =
+    System.Text.RegularExpressions.Regex(
+        @"^@?[A-Za-z_][A-Za-z0-9_$]*$",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private scriptedVariableDefinitionPattern =
+    System.Text.RegularExpressions.Regex(
+        @"^\s*(@[A-Za-z_][A-Za-z0-9_$]*)\s*=",
+        System.Text.RegularExpressions.RegexOptions.Multiline ||| System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private tryScriptedVariableNameFromSymbol (symbol: string) =
+    let normalized = normalizeDefinitionSymbol symbol
+    if scriptedVariableNamePattern.IsMatch normalized then
+        if normalized.StartsWith("@", StringComparison.Ordinal) then
+            Some normalized
+        else
+            Some("@" + normalized)
+    else
+        None
+
+let private rangeFromTextSpan filePath (text: string) start length =
+    let safeStart = max 0 (min start text.Length)
+    let safeLength = max 0 (min length (text.Length - safeStart))
+    let before = text.Substring(0, safeStart)
+    let line = (before |> Seq.filter ((=) '\n') |> Seq.length) + 1
+    let lastLineBreak = before.LastIndexOf('\n')
+    let column = if lastLineBreak < 0 then safeStart else safeStart - lastLineBreak - 1
+    mkRange filePath (mkPos line column) (mkPos line (column + safeLength))
+
+let private tryScriptedVariableDefinitionInText filePath (text: string) (variableName: string) =
+    scriptedVariableDefinitionPattern.Matches(text)
+    |> Seq.cast<System.Text.RegularExpressions.Match>
+    |> Seq.tryPick (fun m ->
+        let nameGroup = m.Groups.[1]
+        if String.Equals(nameGroup.Value, variableName, StringComparison.OrdinalIgnoreCase) then
+            Some(rangeFromTextSpan filePath text nameGroup.Index nameGroup.Length)
+        else
+            None)
+
+let private isScriptedVariablesPath (filePath: string) (logicalPath: string) =
+    let isMatch (pathValue: string) =
+        let normalized = pathValue.Replace('\\', '/')
+        normalized.Contains("common/scripted_variables/", StringComparison.OrdinalIgnoreCase)
+
+    isMatch filePath || isMatch logicalPath
 
 let private tryScriptValueNameFromSymbol (symbol: string) =
     let valuePrefix = "value:"
@@ -413,6 +461,7 @@ let private tryDefinitionSymbolAt (sourceText: string) (line: int) (character: i
                 let isSymbolChar c =
                     Char.IsLetterOrDigit c
                     || c = '_'
+                    || c = '$'
                     || c = '.'
                     || c = ':'
                     || c = '@'
@@ -524,6 +573,81 @@ let private tryCodeDefinitionBySymbol
         else
             fromTypes
 
+let private tryTypeDefinitionBySymbol (game: IGame) (sourcePath: string) (typeNames: string list) (symbol: string) =
+    let needle = normalizeDefinitionSymbol symbol
+    let sameSymbol value =
+        String.Equals(normalizeDefinitionSymbol value, needle, StringComparison.OrdinalIgnoreCase)
+    let isAllowedType typeName =
+        typeNames |> List.exists (fun allowed -> String.Equals(typeName, allowed, StringComparison.OrdinalIgnoreCase))
+    let isCodeRange (r: range) =
+        isNavigableDefinitionRange r
+        && not (isLocalisationDefinitionPath r.FileName)
+        && isAllowedDefinitionTarget sourcePath r.FileName
+
+    if String.IsNullOrWhiteSpace needle then None
+    else
+        game.Types()
+        |> Map.toSeq
+        |> Seq.filter (fun (typeName, _) -> isAllowedType typeName)
+        |> Seq.tryPick (fun (_, infos) ->
+            infos
+            |> Array.tryPick (fun tdi ->
+                if isCodeRange tdi.range && sameSymbol tdi.id then Some tdi.range else None))
+
+let private isKnownSyntheticModifierSymbol (game: IGame) (symbol: string) =
+    let needle = normalizeDefinitionSymbol symbol
+    if String.IsNullOrWhiteSpace needle then
+        false
+    else
+        game.Types()
+        |> Map.tryFind "modifier"
+        |> Option.defaultValue [||]
+        |> Array.exists (fun tdi ->
+            String.Equals(normalizeDefinitionSymbol tdi.id, needle, StringComparison.OrdinalIgnoreCase)
+            && not (isNavigableDefinitionRange tdi.range))
+
+let private tryScriptedVariableDefinitionBySymbol
+    (gameDispatcher: IGameDispatcher)
+    (game: IGame)
+    (sourcePath: string)
+    (sourceText: string)
+    (symbol: string)
+    =
+    let rec tryFindInNode (variableName: string) (node: CWTools.Process.Node) =
+        node.Leaves
+        |> Seq.tryPick (fun leaf ->
+            if String.Equals(leaf.Key, variableName, StringComparison.OrdinalIgnoreCase)
+               && isNavigableDefinitionRange leaf.Position then
+                Some leaf.Position
+            else
+                None)
+        |> Option.orElseWith (fun () ->
+            node.Nodes |> Seq.tryPick (tryFindInNode variableName))
+
+    tryScriptedVariableNameFromSymbol symbol
+    |> Option.bind (fun variableName ->
+        tryScriptedVariableDefinitionInText sourcePath sourceText variableName
+        |> Option.orElseWith (fun () ->
+            let hasGlobalDefinition =
+                game.ScriptedVariables()
+                |> List.exists (fun (name, _) -> String.Equals(name, variableName, StringComparison.OrdinalIgnoreCase))
+
+            if not hasGlobalDefinition then
+                None
+            else
+                let visitor =
+                    { new IGameVisitor<_> with
+                        member _.Visit game =
+                            game.AllEntities()
+                            |> Seq.tryPick (fun struct (entity, _) ->
+                                if isScriptedVariablesPath entity.filepath entity.logicalpath
+                                   && isAllowedDefinitionTarget sourcePath entity.filepath then
+                                    tryFindInNode variableName entity.entity
+                                else
+                                    None) }
+
+                gameDispatcher.Dispatch visitor |> Option.flatten))
+
 let private preferCodeDefinitionOverLocalisation
     (gameDispatcher: IGameDispatcher)
     (game: IGame)
@@ -536,14 +660,27 @@ let private preferCodeDefinitionOverLocalisation
     match candidate with
     | Some target when not (isNavigableDefinitionRange target) ->
         tryDefinitionSymbolAt sourceText line character
-        |> Option.bind (tryCodeDefinitionBySymbol gameDispatcher game sourcePath)
+        |> Option.bind (fun symbol ->
+            tryScriptedVariableDefinitionBySymbol gameDispatcher game sourcePath sourceText symbol
+            |> Option.orElseWith (fun () -> tryTypeDefinitionBySymbol game sourcePath [ "scripted_action" ] symbol)
+            |> Option.orElseWith (fun () ->
+                if isKnownSyntheticModifierSymbol game symbol then
+                    None
+                else
+                    tryCodeDefinitionBySymbol gameDispatcher game sourcePath symbol))
     | Some target when isLocalisationDefinitionPath target.FileName ->
         // GoToType already resolved to a loc file - return it directly.
         candidate
     | None ->
         tryDefinitionSymbolAt sourceText line character
-        |> Option.filter (tryScriptValueNameFromSymbol >> Option.isSome)
-        |> Option.bind (tryCodeDefinitionBySymbol gameDispatcher game sourcePath)
+        |> Option.bind (fun symbol ->
+            tryScriptedVariableDefinitionBySymbol gameDispatcher game sourcePath sourceText symbol
+            |> Option.orElseWith (fun () -> tryTypeDefinitionBySymbol game sourcePath [ "scripted_action" ] symbol)
+            |> Option.orElseWith (fun () ->
+                if tryScriptValueNameFromSymbol symbol |> Option.isSome then
+                    tryCodeDefinitionBySymbol gameDispatcher game sourcePath symbol
+                else
+                    None))
     | _ -> candidate |> Option.filter isNavigableDefinitionRange
 
 [<assembly: AssemblyDescription("CWTools language server for PDXScript")>]

@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.7.9] - 2026-07-01
+
+### 解析器更新 / Parser Updates
+- **[解析器] 支持了 inline_scipt 路径上的表达式识别**
+  English: Supported parser functionality for inline_scipt expressions on the path.
+
 ## [2.7.8] - 2026-07-01
 
 ### 解析器更新 / Parser Updates

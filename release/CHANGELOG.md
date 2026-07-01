@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.7.8] - 2026-07-01
+
+### 解析器更新 / Parser Updates
+- **[解析器] 支持了EU5和VIC3的解析器功能**
+  English: Supported parser functionality for EU5 and VIC3.
+
 ## [2.7.7] - 2026-06-30
 
 ### MCP

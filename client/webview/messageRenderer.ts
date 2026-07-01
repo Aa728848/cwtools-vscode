@@ -101,6 +101,7 @@ const TOOL_ICON_LABELS: Record<string, string> = {
 
 const DEFAULT_MAX_DIFF_LINES = 20;
 const DEFAULT_PARAM_PREVIEW_LEN = 40;
+const LOCALISATION_PREVIEW_CHARS = 360;
 
 // ── Core Pure Functions ──────────────────────────────────────────────────────
 
@@ -124,6 +125,128 @@ export function formatDuration(ms: number): string {
     const minutes = Math.floor(ms / 60000);
     const seconds = Math.round((ms % 60000) / 1000);
     return `${minutes}m ${seconds}s`;
+}
+
+interface LocalisationPromptCard {
+    task: 'polish' | 'translate';
+    file: string;
+    startLine: number;
+    endLine: number;
+    languageId: string;
+    targetLanguage?: string;
+    snippet: string;
+}
+
+function parseLocalisationPromptCard(text: string): LocalisationPromptCard | undefined {
+    const normalized = String(text || '').replace(/\r\n?/g, '\n').trim();
+    if (!normalized) return undefined;
+
+    const firstLine = normalized.split('\n', 1)[0]?.trim() || '';
+    let task: LocalisationPromptCard['task'];
+    let targetLanguage: string | undefined;
+    if (firstLine === 'Polish the selected Stellaris localisation text in its current language without changing gameplay meaning.') {
+        task = 'polish';
+    } else {
+        const translateMatch = /^Translate the selected Stellaris localisation text into (.+?)\.$/.exec(firstLine);
+        if (!translateMatch) return undefined;
+        task = 'translate';
+        targetLanguage = translateMatch[1]?.trim() || undefined;
+    }
+
+    const fileLine = /^File:\s*`([^`]+)`$/m.exec(normalized);
+    const languageLine = /^Language ID:\s*`([^`]+)`$/m.exec(normalized);
+    const snippetBlock = /```(?:yaml|yml)?\n([\s\S]*?)\n```/.exec(normalized);
+    if (!fileLine || !languageLine || !snippetBlock) return undefined;
+
+    const rangeMatch = /^(.*):(\d+)-(\d+)$/.exec(fileLine[1] || '');
+    if (!rangeMatch) return undefined;
+
+    const startLine = Number(rangeMatch[2]);
+    const endLine = Number(rangeMatch[3]);
+    if (!Number.isFinite(startLine) || !Number.isFinite(endLine)) return undefined;
+
+    return {
+        task,
+        file: rangeMatch[1] || '',
+        startLine,
+        endLine,
+        languageId: languageLine[1] || '',
+        targetLanguage,
+        snippet: snippetBlock[1] || '',
+    };
+}
+
+function trimLocalisationPreview(text: string): string {
+    if (text.length <= LOCALISATION_PREVIEW_CHARS) return text;
+    return `${text.slice(0, LOCALISATION_PREVIEW_CHARS).trimEnd()}\n...`;
+}
+
+function pluralEn(count: number, singular: string, plural: string): string {
+    return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function basename(file: string): string {
+    return file.split(/[\\/]/).pop() || file;
+}
+
+/**
+ * Build a compact card for generated localisation AI prompts.
+ * Returns an empty string for ordinary user messages.
+ */
+export function buildLocalisationPromptCardHtml(text: string, locale: ToolPhraseLocale = 'en'): string {
+    const card = parseLocalisationPromptCard(text);
+    if (!card) return '';
+
+    const isZh = locale === 'zh-cn';
+    const lineCount = card.snippet ? card.snippet.split('\n').length : 0;
+    const charCount = card.snippet.length;
+    const range = card.startLine === card.endLine ? `L${card.startLine}` : `L${card.startLine}-L${card.endLine}`;
+    const title = card.task === 'translate'
+        ? (isZh ? 'AI: \u7ffb\u8bd1\u672c\u5730\u5316' : 'AI: Translate Localisation')
+        : (isZh ? 'AI: \u6da6\u8272\u672c\u5730\u5316' : 'AI: Polish Localisation');
+    const subtitle = card.task === 'translate'
+        ? (isZh
+            ? `\u7ffb\u8bd1\u9009\u4e2d\u7684 Stellaris \u672c\u5730\u5316\u6587\u672c${card.targetLanguage ? ` \u5230 ${card.targetLanguage}` : ''}`
+            : `Translate selected Stellaris localisation${card.targetLanguage ? ` into ${card.targetLanguage}` : ''}`)
+        : (isZh
+            ? '\u6da6\u8272\u9009\u4e2d\u7684 Stellaris \u672c\u5730\u5316\u6587\u672c\uff0c\u4fdd\u6301\u73a9\u6cd5\u542b\u4e49'
+            : 'Polish selected Stellaris localisation without changing meaning');
+    const action = card.task === 'translate'
+        ? (card.targetLanguage || (isZh ? '\u7ffb\u8bd1' : 'Translate'))
+        : (isZh ? '\u6da6\u8272' : 'Polish');
+    const selectionSummary = isZh
+        ? `${lineCount} \u884c / ${charCount} \u5b57`
+        : `${pluralEn(lineCount, 'line', 'lines')} / ${pluralEn(charCount, 'char', 'chars')}`;
+    const preview = trimLocalisationPreview(card.snippet);
+    const meta = [
+        [isZh ? '\u6587\u4ef6' : 'File', basename(card.file), card.file],
+        [isZh ? '\u8303\u56f4' : 'Range', range, `${card.file}:${card.startLine}-${card.endLine}`],
+        [isZh ? '\u8bed\u8a00' : 'Language', card.languageId, card.languageId],
+        [isZh ? '\u9009\u533a' : 'Selection', selectionSummary, selectionSummary],
+    ];
+
+    return `<div class="localisation-task-card">` +
+        `<div class="localisation-task-head">` +
+            `<span class="localisation-task-icon">${svgIconNoMargin(card.task === 'translate' ? 'book' : 'sparkles')}</span>` +
+            `<span class="localisation-task-title-block">` +
+                `<span class="localisation-task-title">${escapeHtml(title)}</span>` +
+                `<span class="localisation-task-subtitle">${escapeHtml(subtitle)}</span>` +
+            `</span>` +
+            `<span class="localisation-task-action">${escapeHtml(action)}</span>` +
+        `</div>` +
+        `<div class="localisation-task-meta">` +
+            meta.map(([label, value, titleValue]) =>
+                `<span class="localisation-task-chip" title="${escapeHtml(titleValue)}">` +
+                    `<span class="localisation-task-chip-label">${escapeHtml(label)}</span>` +
+                    `<span class="localisation-task-chip-value">${escapeHtml(value)}</span>` +
+                `</span>`
+            ).join('') +
+        `</div>` +
+        `<div class="localisation-task-preview-wrap">` +
+            `<div class="localisation-task-preview-label">${escapeHtml(isZh ? '\u9884\u89c8' : 'Preview')}</div>` +
+            `<div class="localisation-task-preview">${escapeHtml(preview)}</div>` +
+        `</div>` +
+    `</div>`;
 }
 
 /**

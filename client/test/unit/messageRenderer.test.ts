@@ -7,6 +7,7 @@ import {
     buildToolPairHtml,
     buildThinkingBlockHtml,
     buildAssistantMessageHtml,
+    buildLocalisationPromptCardHtml,
     escapeHtml,
 } from '../../webview/messageRenderer';
 
@@ -105,6 +106,58 @@ describe('summarizeToolArgs', () => {
 });
 
 // ─── classifySteps ───────────────────────────────────────────────────────────
+
+describe('buildLocalisationPromptCardHtml', () => {
+    it('renders polish prompts as compact cards without invariant instruction text', () => {
+        const prompt = [
+            'Polish the selected Stellaris localisation text in its current language without changing gameplay meaning.',
+            'File: `localisation/simp_chinese/exe_modifier_l_simp_chinese.yml:33-33`',
+            'Language ID: `stellaris-localisation`',
+            'Keep the project local-first and use this extension\'s own CWTools/Stellaris rules as the source of truth.',
+            'Preserve localisation keys, version markers such as `:0`, indentation, comments, escape sequences, variables like `$KEY$`, scripted bracket expressions like `[Root.GetName]`, icons like `拢energy拢`, and colour codes like `搂Y...搂!`.',
+            'When editing `.yml` localisation, preserve the existing language header and encoding/BOM expectations and use the localisation-safe write path.',
+            'Prefer clearer, consistent in-game phrasing. Do not translate identifiers or placeholders.',
+            'Apply the change to the selected file/range when it is safe; otherwise explain the exact replacement.',
+            '',
+            '```yaml',
+            'my_key:0 "Some text"',
+            '```',
+        ].join('\n');
+
+        const html = buildLocalisationPromptCardHtml(prompt, 'en');
+        expect(html).to.include('localisation-task-card');
+        expect(html).to.include('AI: Polish Localisation');
+        expect(html).to.include('exe_modifier_l_simp_chinese.yml');
+        expect(html).to.include('L33');
+        expect(html).to.include('stellaris-localisation');
+        expect(html).to.include('my_key:0');
+        expect(html).to.not.include('Preserve localisation keys');
+    });
+
+    it('renders translate prompts with target language', () => {
+        const prompt = [
+            'Translate the selected Stellaris localisation text into Simplified Chinese.',
+            'File: `localisation/english/test_l_english.yml:10-12`',
+            'Language ID: `stellaris-localisation`',
+            'Keep the project local-first and use this extension\'s own CWTools/Stellaris rules as the source of truth.',
+            '',
+            '```yaml',
+            'my_key:0 "Some text"',
+            'other_key:0 "More text"',
+            '```',
+        ].join('\n');
+
+        const html = buildLocalisationPromptCardHtml(prompt, 'en');
+        expect(html).to.include('AI: Translate Localisation');
+        expect(html).to.include('Simplified Chinese');
+        expect(html).to.include('L10-L12');
+        expect(html).to.include('2 lines');
+    });
+
+    it('ignores ordinary user messages', () => {
+        expect(buildLocalisationPromptCardHtml('please polish this paragraph', 'en')).to.equal('');
+    });
+});
 
 describe('classifySteps', () => {
     it('separates text_delta from thinking steps', () => {

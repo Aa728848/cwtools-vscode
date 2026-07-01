@@ -1,5 +1,5 @@
 import { Icons, svgIcon, svgIconNoMargin, svgIconColored } from './svgIcons';
-import { routeLiveStep, buildToolPairHtml, buildToolGroupHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
+import { routeLiveStep, buildToolPairHtml, buildToolGroupHtml, buildLocalisationPromptCardHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
 import { groupToolCalls } from './chat/toolPhrases';
 import {
     escapeHtml as _fmtEscapeHtml,
@@ -4373,6 +4373,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const bubble = document.createElement('div');
         bubble.className = 'msg-bubble user-bubble';
 
+        const localisationCardHtml = buildLocalisationPromptCardHtml(text, chatI18n.locale);
+        if (localisationCardHtml) {
+            bubble.classList.add('localisation-task-bubble');
+            bubble.innerHTML = localisationCardHtml;
+        } else {
         const structuredChips = buildContextChipRow(contexts);
         if (structuredChips) bubble.appendChild(structuredChips);
         
@@ -4413,6 +4418,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             bubble.appendChild(textNode);
         } else if (!structuredChips && !foundAny) {
             bubble.textContent = text;
+        }
         }
 
         // M6 fix: display image thumbnails from the actual images array

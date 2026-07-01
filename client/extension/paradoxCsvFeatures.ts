@@ -1,5 +1,7 @@
 import * as vs from 'vscode';
 import {
+	adjustParadoxCsvColumnCount,
+	analyzeParadoxCsvRows,
 	blankParadoxCsvRow,
 	columnIndexAtCharacter,
 	countParadoxCsvColumns,
@@ -70,11 +72,80 @@ function fullDocumentRange(document: vs.TextDocument): vs.Range {
 	return new vs.Range(new vs.Position(0, 0), lastLine.range.end);
 }
 
+function updateCsvDiagnostics(collection: vs.DiagnosticCollection, document: vs.TextDocument): void {
+	if (!isCsvDocument(document)) {
+		collection.delete(document.uri);
+		return;
+	}
+
+	const diagnostics = analyzeParadoxCsvRows(document.getText()).map(issue => {
+		const line = Math.min(issue.line, document.lineCount - 1);
+		const lineRange = document.lineAt(line).range;
+		const diagnostic = new vs.Diagnostic(
+			lineRange,
+			issue.code === 'columnCount'
+				? localize(
+					`CSV row has ${issue.actualColumns} columns; expected ${issue.expectedColumns}.`,
+					`CSV 行有 ${issue.actualColumns} 列；预期为 ${issue.expectedColumns} 列。`,
+				)
+				: localize(
+					'CSV row has an unterminated quoted cell.',
+					'CSV 行包含未闭合的引号单元格。',
+				),
+			vs.DiagnosticSeverity.Warning,
+		) as vs.Diagnostic & { expectedColumns?: number };
+		diagnostic.source = 'Paradox CSV';
+		diagnostic.code = issue.code === 'columnCount'
+			? 'paradoxCsv.columnCount'
+			: 'paradoxCsv.unterminatedQuote';
+		diagnostic.expectedColumns = issue.expectedColumns;
+		return diagnostic;
+	});
+
+	collection.set(document.uri, diagnostics);
+}
+
+class ParadoxCsvCodeActionProvider implements vs.CodeActionProvider {
+	static readonly metadata: vs.CodeActionProviderMetadata = {
+		providedCodeActionKinds: [vs.CodeActionKind.QuickFix],
+	};
+
+	provideCodeActions(document: vs.TextDocument, _range: vs.Range, context: vs.CodeActionContext): vs.CodeAction[] {
+		if (!isCsvDocument(document)) return [];
+
+		const actions: vs.CodeAction[] = [];
+		for (const diagnostic of context.diagnostics) {
+			if (diagnostic.code !== 'paradoxCsv.columnCount') continue;
+			const expectedColumns = (diagnostic as vs.Diagnostic & { expectedColumns?: number }).expectedColumns;
+			if (!expectedColumns) continue;
+
+			const line = diagnostic.range.start.line;
+			const original = document.lineAt(line).text;
+			const fixed = adjustParadoxCsvColumnCount(original, expectedColumns);
+			if (fixed === original) continue;
+
+			const action = new vs.CodeAction(
+				localize(
+					`Match row to ${expectedColumns} CSV columns`,
+					`调整为 ${expectedColumns} 列 CSV 行`,
+				),
+				vs.CodeActionKind.QuickFix,
+			);
+			action.diagnostics = [diagnostic];
+			action.isPreferred = true;
+			action.edit = new vs.WorkspaceEdit();
+			action.edit.replace(document.uri, document.lineAt(line).range, fixed);
+			actions.push(action);
+		}
+		return actions;
+	}
+}
+
 function ensureCsvEditor(editor: vs.TextEditor): boolean {
 	if (isCsvDocument(editor.document)) return true;
 	void vs.window.showWarningMessage(localize(
 		'Open a Paradox CSV file before using this command.',
-		'\u8bf7\u5148\u6253\u5f00 Paradox CSV \u6587\u4ef6\u518d\u4f7f\u7528\u6b64\u547d\u4ee4\u3002',
+		'请先打开 Paradox CSV 文件再使用此命令。',
 	));
 	return false;
 }
@@ -106,7 +177,7 @@ function rewriteColumns(editor: vs.TextEditor, edit: vs.TextEditorEdit, mutate: 
 	if (!changed) {
 		void vs.window.showInformationMessage(localize(
 			'No CSV data rows were changed.',
-			'\u6ca1\u6709 CSV \u6570\u636e\u884c\u88ab\u4fee\u6539\u3002',
+			'没有 CSV 数据行被修改。',
 		));
 		return;
 	}
@@ -115,7 +186,22 @@ function rewriteColumns(editor: vs.TextEditor, edit: vs.TextEditorEdit, mutate: 
 }
 
 export function registerParadoxCsvFeatures(context: vs.ExtensionContext): void {
+	const diagnostics = vs.languages.createDiagnosticCollection('paradox-csv');
+	context.subscriptions.push(diagnostics);
+
+	for (const document of vs.workspace.textDocuments) {
+		updateCsvDiagnostics(diagnostics, document);
+	}
+
 	context.subscriptions.push(
+		vs.workspace.onDidOpenTextDocument(document => updateCsvDiagnostics(diagnostics, document)),
+		vs.workspace.onDidChangeTextDocument(event => updateCsvDiagnostics(diagnostics, event.document)),
+		vs.workspace.onDidCloseTextDocument(document => diagnostics.delete(document.uri)),
+		vs.languages.registerCodeActionsProvider(
+			[{ scheme: 'file', language: LANGUAGE_ID }, { scheme: 'file', pattern: '**/*.csv' }],
+			new ParadoxCsvCodeActionProvider(),
+			ParadoxCsvCodeActionProvider.metadata,
+		),
 		vs.commands.registerTextEditorCommand('cwtools.csv.insertRowAbove', (editor, edit) => {
 			insertRow(editor, edit, 'above');
 		}),
@@ -142,4 +228,3 @@ export function registerParadoxCsvFeatures(context: vs.ExtensionContext): void {
 		}),
 	);
 }
-

@@ -170,6 +170,46 @@
                     "command": "cwtools.vanillaCompare.migrateChangedFromVanilla",
                     "when": "(resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh) \u0026\u0026 inDiffEditor \u0026\u0026 cwtools.vanillaCompare.activeComparison",
                     "group": "navigation@3"
+                },
+                {
+                    "command": "cwtools.rules.manageConfigGroups",
+                    "when": "true",
+                    "group": "navigation@4"
+                },
+                {
+                    "command": "cwtools.openSpecialPath",
+                    "when": "true",
+                    "group": "navigation@5"
+                },
+                {
+                    "command": "cwtools.diagnostics.openInspectionOverview",
+                    "when": "true",
+                    "group": "navigation@6"
+                },
+                {
+                    "command": "cwtools.images.convertToPng",
+                    "when": "resourceExtname == .dds || resourceExtname == .tga || resourceExtname == .jpg || resourceExtname == .jpeg || resourceExtname == .bmp",
+                    "group": "navigation@7"
+                },
+                {
+                    "command": "cwtools.images.convertToDds",
+                    "when": "resourceExtname == .png || resourceExtname == .jpg || resourceExtname == .jpeg || resourceExtname == .tga || resourceExtname == .bmp",
+                    "group": "navigation@8"
+                },
+                {
+                    "command": "cwtools.images.editExternally",
+                    "when": "resourceExtname == .dds || resourceExtname == .tga || resourceExtname == .png || resourceExtname == .jpg || resourceExtname == .jpeg || resourceExtname == .bmp",
+                    "group": "navigation@9"
+                },
+                {
+                    "command": "cwtools.localisation.translateSelection",
+                    "when": "resourceExtname == .yml && editorHasSelection",
+                    "group": "navigation@7"
+                },
+                {
+                    "command": "cwtools.localisation.polishSelection",
+                    "when": "resourceExtname == .yml && editorHasSelection",
+                    "group": "navigation@8"
                 }
             ],
             "editor/context": [
@@ -189,9 +229,29 @@
                     "group": "stellaris@0"
                 },
                 {
+                    "command": "cwtools.localisation.translateSelection",
+                    "when": "resourceExtname == .yml",
+                    "group": "stellaris@1"
+                },
+                {
+                    "command": "cwtools.localisation.polishSelection",
+                    "when": "resourceExtname == .yml",
+                    "group": "stellaris@2"
+                },
+                {
                     "command": "cwtools.goToRelatedLocalisations",
                     "when": "resourceExtname == .txt || resourceExtname == .gui || resourceExtname == .asset || resourceExtname == .yml",
                     "group": "stellaris@3"
+                },
+                {
+                    "command": "cwtools.goToRelatedDefinitions",
+                    "when": "resourceExtname == .txt || resourceExtname == .gui || resourceExtname == .gfx || resourceExtname == .asset || resourceExtname == .yml",
+                    "group": "stellaris@4"
+                },
+                {
+                    "command": "cwtools.goToRelatedImages",
+                    "when": "resourceExtname == .txt || resourceExtname == .gui || resourceExtname == .gfx || resourceExtname == .asset || resourceExtname == .yml",
+                    "group": "stellaris@5"
                 },
                 {
                     "command": "cwtools.csv.insertRowAbove",
@@ -222,6 +282,23 @@
                     "command": "cwtools.csv.removeColumn",
                     "when": "resourceExtname == .csv",
                     "group": "paradoxCsv@6"
+                }
+            ],
+            "explorer/context": [
+                {
+                    "command": "cwtools.images.convertToPng",
+                    "when": "resourceExtname == .dds || resourceExtname == .tga || resourceExtname == .jpg || resourceExtname == .jpeg || resourceExtname == .bmp",
+                    "group": "paradoxImages@1"
+                },
+                {
+                    "command": "cwtools.images.convertToDds",
+                    "when": "resourceExtname == .png || resourceExtname == .jpg || resourceExtname == .jpeg || resourceExtname == .tga || resourceExtname == .bmp",
+                    "group": "paradoxImages@2"
+                },
+                {
+                    "command": "cwtools.images.editExternally",
+                    "when": "resourceExtname == .dds || resourceExtname == .tga || resourceExtname == .png || resourceExtname == .jpg || resourceExtname == .jpeg || resourceExtname == .bmp",
+                    "group": "paradoxImages@3"
                 }
             ]
         },
@@ -270,6 +347,66 @@
                 "icon": "$(folder-opened)"
             },
             {
+                "command": "cwtools.openSpecialPath",
+                "title": "%commands.stellarisLanguageServices.openSpecialPath.title%",
+                "category": "Stellaris",
+                "icon": "$(folder-library)"
+            },
+            {
+                "command": "cwtools.copySpecialPath",
+                "title": "%commands.stellarisLanguageServices.copySpecialPath.title%",
+                "category": "Stellaris",
+                "icon": "$(copy)"
+            },
+            {
+                "command": "cwtools.launchGameInSteam",
+                "title": "%commands.stellarisLanguageServices.launchGameInSteam.title%",
+                "category": "Stellaris",
+                "icon": "$(play)"
+            },
+            {
+                "command": "cwtools.images.convertToPng",
+                "title": "%commands.stellarisLanguageServices.images.convertToPng.title%",
+                "category": "Paradox Images",
+                "icon": "$(file-media)"
+            },
+            {
+                "command": "cwtools.images.convertToDds",
+                "title": "%commands.stellarisLanguageServices.images.convertToDds.title%",
+                "category": "Paradox Images",
+                "icon": "$(file-media)"
+            },
+            {
+                "command": "cwtools.images.editExternally",
+                "title": "%commands.stellarisLanguageServices.images.editExternally.title%",
+                "category": "Paradox Images",
+                "icon": "$(go-to-file)"
+            },
+            {
+                "command": "cwtools.images.configureImageMagickPath",
+                "title": "%commands.stellarisLanguageServices.images.configureImageMagickPath.title%",
+                "category": "Paradox Images",
+                "icon": "$(gear)"
+            },
+            {
+                "command": "cwtools.images.checkImageMagick",
+                "title": "%commands.stellarisLanguageServices.images.checkImageMagick.title%",
+                "category": "Paradox Images",
+                "icon": "$(check)"
+            },
+            {
+                "command": "cwtools.rules.manageConfigGroups",
+                "title": "%commands.stellarisLanguageServices.rules.manageConfigGroups.title%",
+                "category": "CWTools",
+                "icon": "$(settings-gear)"
+            },
+            {
+                "command": "cwtools.diagnostics.openInspectionOverview",
+                "title": "%commands.stellarisLanguageServices.diagnostics.openInspectionOverview.title%",
+                "category": "CWTools",
+                "icon": "$(list-tree)"
+            },
+            {
                 "command": "listAllFiles",
                 "title": "%commands.listAllFiles.title%",
                 "category": "Stellaris"
@@ -304,6 +441,18 @@
                 "title": "%commands.stellarisLanguageServices.goToRelatedLocalisations.title%",
                 "category": "Paradox",
                 "icon": "$(references)"
+            },
+            {
+                "command": "cwtools.goToRelatedDefinitions",
+                "title": "%commands.stellarisLanguageServices.goToRelatedDefinitions.title%",
+                "category": "Paradox",
+                "icon": "$(symbol-class)"
+            },
+            {
+                "command": "cwtools.goToRelatedImages",
+                "title": "%commands.stellarisLanguageServices.goToRelatedImages.title%",
+                "category": "Paradox",
+                "icon": "$(file-media)"
             },
             {
                 "command": "cwtools.csv.insertRowAbove",
@@ -386,6 +535,18 @@
                 "command": "cwtools.ai.selectModel",
                 "title": "%commands.stellarisLanguageServices.ai.selectModel.title%",
                 "category": "Stellaris AI"
+            },
+            {
+                "command": "cwtools.localisation.translateSelection",
+                "title": "%commands.stellarisLanguageServices.localisation.translateSelection.title%",
+                "category": "Stellaris AI",
+                "icon": "$(globe)"
+            },
+            {
+                "command": "cwtools.localisation.polishSelection",
+                "title": "%commands.stellarisLanguageServices.localisation.polishSelection.title%",
+                "category": "Stellaris AI",
+                "icon": "$(sparkle)"
             },
             {
                 "command": "cwtools.ai.reviewFile",
@@ -630,6 +791,12 @@
                     ],
                     "default": "latest",
                     "description": "%configuration.stellarisLanguageServices.rules_version.description%"
+                },
+                "stellarisLanguageServices.rules_remote_url": {
+                    "scope": "window",
+                    "type": "string",
+                    "default": "",
+                    "description": "%configuration.stellarisLanguageServices.rules_remote_url.description%"
                 },
                 "stellarisLanguageServices.rules_folder": {
                     "scope": "window",
@@ -1078,6 +1245,18 @@
                     "type": "string",
                     "default": "",
                     "description": "%configuration.stellarisLanguageServices.ai.exaApiKey.description%"
+                },
+                "stellarisLanguageServices.ai.imageMagickPath": {
+                    "scope": "window",
+                    "type": "string",
+                    "default": "",
+                    "description": "%configuration.stellarisLanguageServices.ai.imageMagickPath.description%"
+                },
+                "stellarisLanguageServices.ai.ffmpegPath": {
+                    "scope": "window",
+                    "type": "string",
+                    "default": "",
+                    "description": "%configuration.stellarisLanguageServices.ai.ffmpegPath.description%"
                 },
                 "stellarisLanguageServices.ai.mcp.servers": {
                     "scope": "window",

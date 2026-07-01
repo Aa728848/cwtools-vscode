@@ -19,6 +19,7 @@ const FALLBACK_CONFIGURATION_SUFFIXES = [
     'showInlineText',
     'logging.diagnostic',
     'rules_version',
+    'rules_remote_url',
     'rules_folder',
     'ignore_patterns',
     'cache.eu4',

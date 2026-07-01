@@ -1,11 +1,15 @@
 import { expect } from 'chai';
 import {
     parseLocFile,
+    parseLocalisationLine,
     detectLocLanguage,
     addEntriesToIndex,
     removeFileFromIndex,
     queryLocIndex,
+    stripLocalisationColorMarkers,
+    tokenizeLocalisationRichText,
 } from '../../extension/indexing/locParser';
+import { getLocalisationCompletionContext } from '../../extension/localisationCompletions';
 import type { LocEntry } from '../../extension/indexing/indexService';
 
 const SAMPLE_LOC = `\uFEFFl_english:
@@ -60,6 +64,51 @@ building_kuat_command_center_auto:0 "Command Center"
 `, '/test.yml');
         expect(entries).to.have.lengthOf(1);
         expect(entries[0]!.value).to.equal('Resource Center');
+    });
+
+    it('parses escaped quotes and keeps # inside quoted values', () => {
+        const entries = parseLocFile(`l_english:
+ quoted_key:0 "A \\"quoted\\" # value" # trailing comment
+`, '/test.yml');
+        expect(entries).to.have.lengthOf(1);
+        expect(entries[0]!.value).to.equal('A "quoted" # value');
+    });
+
+    it('parses localisation line value offsets for editor decorations', () => {
+        const parsed = parseLocalisationLine(' my_key:0 "§Y$PLANET|Y$§! £energy£ [Root.GetName]" # comment');
+        expect(parsed).to.not.equal(undefined);
+        expect(parsed!.key).to.equal('my_key');
+        expect(parsed!.version).to.equal('0');
+        expect(parsed!.rawValue).to.equal('§Y$PLANET|Y$§! £energy£ [Root.GetName]');
+        expect(parsed!.valueStart).to.equal(' my_key:0 "'.length);
+        expect(parsed!.valueEnd).to.equal(parsed!.valueStart + parsed!.rawValue.length);
+    });
+
+    it('tokenizes rich localisation text for colors, icons, references, concepts, and variables', () => {
+        const text = '§Y$PLANET|Y$§! £energy|Y£ [Root.GetName] [\'concept_test\' Concept] @scripted_var';
+        const tokens = tokenizeLocalisationRichText(text, 10);
+
+        expect(tokens.some(token => token.type === 'colorMarker' && token.text === '§Y')).to.be.true;
+        expect(tokens.some(token => token.type === 'colorRange' && token.colorCode === '§Y' && token.text === '$PLANET|Y$')).to.be.true;
+        expect(tokens.some(token => token.type === 'parameter' && token.text === '$PLANET|Y$')).to.be.true;
+        expect(tokens.some(token => token.type === 'icon' && token.text === '£energy|Y£')).to.be.true;
+        expect(tokens.some(token => token.type === 'scopeExpression' && token.text === '[Root.GetName]')).to.be.true;
+        expect(tokens.some(token => token.type === 'concept' && token.text === '[\'concept_test\' Concept]')).to.be.true;
+        expect(tokens.some(token => token.type === 'scriptedVariable' && token.text === '@scripted_var')).to.be.true;
+    });
+
+    it('strips all localisation color markers for plain hover previews', () => {
+        expect(stripLocalisationColorMarkers('§HHeader§! and §Oorange§!')).to.equal('Header and orange');
+    });
+
+    it('detects localisation completion contexts only inside values', () => {
+        const line = ' my_key:0 "§Y$PLANET| [Root. £energy" # §R comment';
+
+        expect(getLocalisationCompletionContext(line, line.indexOf('§Y') + 1)!.kind).to.equal('colorMarker');
+        expect(getLocalisationCompletionContext(line, line.indexOf('$PLANET|') + '$PLANET|'.length)!.kind).to.equal('colorArgument');
+        expect(getLocalisationCompletionContext(line, line.indexOf('[Root.') + '[Root.'.length)!.kind).to.equal('command');
+        expect(getLocalisationCompletionContext(line, line.indexOf('£energy') + '£energy'.length)!.kind).to.equal('icon');
+        expect(getLocalisationCompletionContext(line, line.indexOf('# §R') + '# §'.length)).to.equal(undefined);
     });
 
     it('detects language from header', () => {

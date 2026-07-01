@@ -1583,7 +1583,7 @@ export class ExternalToolHandler {
     async convertImageToDds(args: {
         sourcePath: string;
         outputDir?: string;
-        compression?: 'dxt5' | 'dxt1' | 'none';
+        compression?: 'dxt5' | 'dxt1' | 'dxt3' | 'none';
         generateMipmaps?: boolean;
     }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; outputFile?: string }> {
         if (!(await this.ensureImageMagickAvailable())) {
@@ -1628,6 +1628,8 @@ export class ExternalToolHandler {
             ddsDefines = '-define dds:compression=dxt5';
         } else if (compression === 'dxt1') {
             ddsDefines = '-define dds:compression=dxt1';
+        } else if (compression === 'dxt3') {
+            ddsDefines = '-define dds:compression=dxt3';
         } else {
             ddsDefines = '-define dds:compression=none';
         }

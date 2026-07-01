@@ -1245,6 +1245,7 @@ type Server(client: ILanguageClient) =
 
     // Fallback paths for scripted variables hover (user configurable)
 
+    let mutable defaultRemoteRepoPath: string option = None
     let mutable remoteRepoPath: string option = None
     let mutable bundledRulesPath: string option = None
 
@@ -3115,8 +3116,8 @@ type Server(client: ILanguageClient) =
                     rulesStatus <- "fallback"
                     let warningMsg =
                         uiText
-                            (sprintf "Failed to update CWTools rules for %A from the remote repository. Using cached, bundled, or workspace rules instead. Run 'CWTools: Run Installation Health Check' if validation looks incomplete." activeGame)
-                            (sprintf "Failed to update CWTools rules for %A from the remote repository. Using cached, bundled, or workspace rules instead. Run 'CWTools: Run Installation Health Check' if validation looks incomplete." activeGame)
+                            (sprintf "Failed to update CWTools rules for %A from the remote repository. Using cached rules, or bundled fallback only if it is newer than the stale cache. Run 'CWTools: Run Installation Health Check' if validation looks incomplete." activeGame)
+                            (sprintf "Failed to update CWTools rules for %A from the remote repository. Using cached rules, or bundled fallback only if it is newer than the stale cache. Run 'CWTools: Run Installation Health Check' if validation looks incomplete." activeGame)
                     logWarning warningMsg
                     client.ShowMessage(
                         { ``type`` = MessageType.Warning
@@ -3126,8 +3127,8 @@ type Server(client: ILanguageClient) =
                     rulesStatus <- "missing"
                     let errorMsg =
                         uiText
-                            (sprintf "Failed to update or load CWTools rules for %A. No cached or bundled fallback rules were found at %s. Reinstall the VSIX or run the package script again, then run 'CWTools: Run Installation Health Check'." activeGame cp)
-                            (sprintf "Failed to update or load CWTools rules for %A. No cached or bundled fallback rules were found at %s. Reinstall the VSIX or run the package script again, then run 'CWTools: Run Installation Health Check'." activeGame cp)
+                            (sprintf "Failed to update or load CWTools rules for %A. No usable remote cache was found at %s, and bundled fallback was not applicable. Reinstall the VSIX or run the package script again, then run 'CWTools: Run Installation Health Check'." activeGame cp)
+                            (sprintf "Failed to update or load CWTools rules for %A. No usable remote cache was found at %s, and bundled fallback was not applicable. Reinstall the VSIX or run the package script again, then run 'CWTools: Run Installation Health Check'." activeGame cp)
                     rulesError <- Some errorMsg
                     logError errorMsg
                     client.ShowMessage(
@@ -3786,9 +3787,17 @@ type Server(client: ILanguageClient) =
                         | _ -> ()
                     | _ -> ()
 
+                    match opt.Item("defaultRepoPath") with
+                    | JsonValue.String x ->
+                        logInfo $"default repo path %A{x}"
+                        defaultRemoteRepoPath <- Some x
+                    | _ -> ()
+
                     match opt.Item("repoPath") with
                     | JsonValue.String x ->
                         logInfo $"repo path %A{x}"
+                        if defaultRemoteRepoPath.IsNone then
+                            defaultRemoteRepoPath <- Some x
                         remoteRepoPath <- Some x
                     | _ -> ()
 
@@ -3825,7 +3834,9 @@ type Server(client: ILanguageClient) =
                         | "manual" ->
                             useManualRules <- true
                             rulesChannel <- "manual"
-                        | x -> rulesChannel <- x
+                        | x ->
+                            useManualRules <- false
+                            rulesChannel <- x
                     | _ -> ()
 
                 | None -> ()
@@ -4012,6 +4023,28 @@ type Server(client: ILanguageClient) =
                 if dontLoadPatterns <> excludePatterns then
                     dontLoadPatterns <- excludePatterns
                     requiresReload <- true
+
+                match configValue ["rules_version"] with
+                | JsonValue.String x ->
+                    let newUseManualRules = x = "manual"
+                    if useManualRules <> newUseManualRules then
+                        useManualRules <- newUseManualRules
+                        requiresReload <- true
+                    if rulesChannel <> x then
+                        rulesChannel <- x
+                        requiresReload <- true
+                | _ -> ()
+
+                match configValue ["rules_remote_url"] with
+                | JsonValue.String x ->
+                    let trimmed = x.Trim()
+                    let newRemoteRepoPath =
+                        if String.IsNullOrWhiteSpace trimmed then defaultRemoteRepoPath
+                        else Some trimmed
+                    if remoteRepoPath <> newRemoteRepoPath then
+                        remoteRepoPath <- newRemoteRepoPath
+                        requiresReload <- true
+                | _ -> ()
 
                 match configValue ["trace"; "server"] with
                 | JsonValue.String "messages"

@@ -6,6 +6,18 @@
 - **[解析器] 支持了EU5和VIC3的解析器功能**
   English: Supported parser functionality for EU5 and VIC3.
 
+### Local VS Code Tooling / 本地 VS Code 工具
+- **[CSV]** Added Paradox CSV language support, row/column edit commands, diagnostics, and quick fixes for malformed row widths.
+  中文：新增 Paradox CSV 语言支持、行列编辑命令、诊断，以及行列数异常的快速修复。
+- **[Navigation]** Added related localisation, definition, and image lookup commands backed by the workspace index/local files.
+  中文：新增关联本地化、定义与图片跳转命令，基于工作区索引和本地文件实现。
+- **[Rules]** Added rules source management for remote rules, a user-specified local rules folder, and bundled fallback rules. Remote rules can use a custom Git URL; manual mode reads only the selected local folder; bundled fallback is used only when remote update fails and the cache is older than the bundled rules.
+  中文：新增规则来源管理：远程规则、用户指定的本地规则目录、内置备用规则。远程规则支持自定义 Git 链接；manual 模式只读取选定的本地目录；内置备用仅在远程更新失败且缓存落后于内置规则时使用。
+- **[Assets & AI]** Added local image conversion helpers, local path/Steam helpers, AI localisation translate/polish commands, and a VS Code-native inspection overview. Stellaris validation rules remain sourced from this project's own local CWTools rules.
+  中文：新增本地图片转换、本地路径/Steam 辅助入口、AI 本地化翻译/润色命令，以及 VS Code 原生检查概览；Stellaris 校验规则仍以本项目自己的本地 CWTools 规则为准。
+- **[UX]** Added setup-page and editor-title entry buttons for rules, local paths, inspection overview, image conversion/editing, and selected localisation AI actions.
+  中文：为规则、本地路径、检查概览、图片转换/编辑，以及选中本地化文本的 AI 操作补充安装页与编辑器标题栏入口按钮。
+
 ## [2.7.7] - 2026-06-30
 
 ### MCP

@@ -462,7 +462,6 @@ function detectEncoding(files: string[]): string {
 
 function detectVanillaCache(root: string): ProjectProfile['validation']['vanillaCache'] {
     const candidates = [
-        path.join(root, '.cwtools'),
         path.join(root, '.cwtools-ai'),
         path.join(root, 'submodules', 'cwtools-stellaris-config'),
     ];

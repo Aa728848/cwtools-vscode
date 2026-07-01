@@ -724,8 +724,9 @@ export class LspToolHandler {
         }
         
         const cwtoolsConfig = vs.workspace.getConfiguration('stellarisLanguageServices');
+        const rulesVersion = cwtoolsConfig.get<string>('rules_version', 'latest');
         const customRulesFolder = cwtoolsConfig.get<string>('rules_folder');
-        if (customRulesFolder) {
+        if (rulesVersion === 'manual' && customRulesFolder) {
             configPaths.push(customRulesFolder);
         }
 

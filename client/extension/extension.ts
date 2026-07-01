@@ -34,6 +34,11 @@ import { registerPdxIndentFormatter } from './pdxIndentFormatter';
 import { registerTexturePreviewEditor } from './texturePreviewEditor';
 import { registerParadoxCsvFeatures } from './paradoxCsvFeatures';
 import { registerRelatedResourceFeatures } from './relatedResources';
+import { registerRulesConfigGroupCommands } from './rulesConfigGroups';
+import { registerImageTools } from './imageTools';
+import { registerLocalisationAiCommands } from './localisationAiCommands';
+import { registerSpecialPathCommands } from './specialPaths';
+import { registerInspectionOverviewCommand } from './inspectionOverview';
 import { LEGACY_SETTINGS_NAMESPACE, migrateLegacyConfiguration } from './configurationMigration';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
 import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
@@ -194,7 +199,7 @@ function safeRegisterCommand(context: ExtensionContext, commandId: string, handl
 	context.subscriptions.push(disposable);
 }
 
-type RulesSourceName = 'Manual' | 'Cache' | 'Bundled' | 'Workspace' | 'Missing';
+type RulesSourceName = 'Manual' | 'Remote' | 'Bundled' | 'Missing';
 
 interface RulesSourceStatus {
 	source: RulesSourceName;
@@ -227,11 +232,16 @@ function rulesSourceLabel(source: RulesSourceName): string {
 	if (!isChineseLocale()) return source;
 	switch (source) {
 		case 'Manual': return '手动';
-		case 'Cache': return '缓存';
+		case 'Remote': return '远程';
 		case 'Bundled': return '内置';
-		case 'Workspace': return '工作区';
 		case 'Missing': return '缺失';
 	}
+}
+
+function getConfiguredRulesRemoteUrl(languageId: string): string {
+	const config = workspace.getConfiguration('stellarisLanguageServices');
+	const customUrl = config.get<string>('rules_remote_url', '')?.trim();
+	return customUrl || getRulesRemoteUrl(languageId);
 }
 
 function isKnownGameLanguageId(languageId?: string | null): languageId is string {
@@ -626,25 +636,19 @@ function inferLanguageIdFromWorkspace(): string | undefined {
 	return configuredProfiles.length === 1 ? configuredProfiles[0]!.id : undefined;
 }
 
-function getRulesSourceStatus(languageId: string, cacheDir: string, bundledRulesPath: string): RulesSourceStatus {
+function getRulesSourceStatus(languageId: string, cacheDir: string, _bundledRulesPath: string): RulesSourceStatus {
 	const config = workspace.getConfiguration('stellarisLanguageServices');
 	const rulesVersion = config.get<string>('rules_version', 'latest');
 	const manualRulesFolder = config.get<string>('rules_folder', '')?.trim();
-	if (rulesVersion === 'manual' && manualRulesFolder) {
+	if (rulesVersion === 'manual') {
 		const fileCount = countRuleFiles(manualRulesFolder);
 		if (fileCount > 0) return { source: 'Manual', path: manualRulesFolder, fileCount };
+		return { source: 'Missing', path: manualRulesFolder || undefined, fileCount: 0 };
 	}
 
 	const cachedRulesPath = path.join(cacheDir, languageId);
 	const cachedCount = countRuleFiles(cachedRulesPath);
-	if (cachedCount > 0) return { source: 'Cache', path: cachedRulesPath, fileCount: cachedCount };
-
-	const bundledCount = countRuleFiles(bundledRulesPath);
-	if (bundledCount > 0) return { source: 'Bundled', path: bundledRulesPath, fileCount: bundledCount };
-
-	const workspaceRulesPath = firstWorkspacePath() ? path.join(firstWorkspacePath()!, '.cwtools') : undefined;
-	const workspaceCount = countRuleFiles(workspaceRulesPath);
-	if (workspaceCount > 0) return { source: 'Workspace', path: workspaceRulesPath, fileCount: workspaceCount };
+	if (cachedCount > 0) return { source: 'Remote', path: cachedRulesPath, fileCount: cachedCount };
 
 	return { source: 'Missing', fileCount: 0 };
 }
@@ -784,7 +788,10 @@ function buildInstallHealth(options: InstallHealthOptions) {
 			name: localize('Validation rules', '校验规则'),
 			ok: rules.source !== 'Missing',
 			detail: rules.source === 'Missing'
-				? localize('No cached, bundled, manual, or workspace rules were found.', '未找到缓存、内置、手动或工作区规则。')
+				? localize(
+					'No active CWTools rules were found. latest/stable need a remote rules cache; bundled fallback is only used after a failed remote update when it is newer than the cache. manual needs a local rules folder.',
+					'未找到当前可用的 CWTools 规则。latest/stable 需要远程规则缓存；内置备用规则只会在远程更新失败且比缓存更新时使用。manual 需要本地规则目录。'
+				)
 				: localize(
 					`${source} rules: ${rules.fileCount} files${rules.path ? ` at ${rules.path}` : ''}.`,
 					`${source}规则：${rules.fileCount} 个文件${rules.path ? `，位置：${rules.path}` : ''}。`
@@ -799,7 +806,12 @@ function buildInstallHealth(options: InstallHealthOptions) {
 			detail: options.rulesRemoteUrl
 				? localize(`Remote rules: ${options.rulesRemoteUrl}`, `远程规则：${options.rulesRemoteUrl}`)
 				: localize('No remote rules repository is configured for the detected game type.', '当前识别的游戏类型没有配置远程规则仓库。'),
-			action: options.rulesRemoteUrl ? undefined : localize('Select the target game folder or use manual/workspace rules.', '请选择目标游戏目录，或使用手动/工作区规则。'),
+			action: options.rulesRemoteUrl
+				? undefined
+				: localize(
+					'Select the target game folder or switch to manual and choose a local rules folder.',
+					'请选择目标游戏目录，或切换到 manual 并选择本地规则目录。'
+				),
 		},
 		profile
 			? {
@@ -894,6 +906,11 @@ function renderSetupHtml(options: InstallHealthOptions): string {
 			</div>
 			<div class="toolbar">
 				<button data-command="selectGameFolder">${escapeHtml(localize('Select Game Folder', '选择游戏目录'))}</button>
+				<button class="secondary" data-command="rules">${escapeHtml(localize('Manage Rules', '管理规则'))}</button>
+				<button class="secondary" data-command="paths">${escapeHtml(localize('Local Paths', '本地路径'))}</button>
+				<button class="secondary" data-command="copyPath">${escapeHtml(localize('Copy Path', '复制路径'))}</button>
+				<button class="secondary" data-command="inspection">${escapeHtml(localize('Inspection Overview', '检查概览'))}</button>
+				<button class="secondary" data-command="imageMagick">${escapeHtml(localize('Check ImageMagick', '检查 ImageMagick'))}</button>
 				<button class="secondary" data-command="reload">${escapeHtml(localize('Reload CWTools', '重新加载 CWTools'))}</button>
 				<button class="secondary" data-command="settings">${escapeHtml(localize('Open Settings', '打开设置'))}</button>
 				<button class="secondary" data-command="refresh">${escapeHtml(localize('Refresh', '刷新'))}</button>
@@ -922,6 +939,21 @@ async function showSetupPanel(options: InstallHealthOptions): Promise<void> {
 		switch (message?.command) {
 			case 'selectGameFolder':
 				await selectGameFolderFlow(options.languageId);
+				break;
+			case 'rules':
+				await commands.executeCommand('cwtools.rules.manageConfigGroups');
+				break;
+			case 'paths':
+				await commands.executeCommand('cwtools.openSpecialPath');
+				break;
+			case 'copyPath':
+				await commands.executeCommand('cwtools.copySpecialPath');
+				break;
+			case 'inspection':
+				await commands.executeCommand('cwtools.diagnostics.openInspectionOverview');
+				break;
+			case 'imageMagick':
+				await commands.executeCommand('cwtools.images.checkImageMagick');
 				break;
 			case 'reload':
 				await reloadExtension(localize('Reload CWTools now?', '现在重新加载 CWTools 吗？'), localize('Reload', '重新加载'));
@@ -1005,6 +1037,7 @@ export async function activate(context: ExtensionContext) {
 	registerIndexedWorkspaceSymbols(context, indexService);
 	registerParadoxCsvFeatures(context);
 	registerRelatedResourceFeatures(context, indexService);
+	registerInspectionOverviewCommand(context);
 
 	// Register completion provider for @ constants in .gui, .asset, .gfx files
 	context.subscriptions.push(
@@ -1426,6 +1459,7 @@ export async function activate(context: ExtensionContext) {
 	safeRegisterCommand(context, "cwtools.ai.selectModel", async () => {
 		await aiService.selectModelCommand();
 	});
+	registerLocalisationAiCommands(context, (message: string) => chatPanelProvider.sendProgrammaticMessage(message));
 
 	// ── Quick AI commands (keyboard shortcuts / command palette) ──────────
 	safeRegisterCommand(context, "cwtools.ai.reviewFile", async () => {
@@ -1746,6 +1780,7 @@ export async function activate(context: ExtensionContext) {
 	// ── Graphics Features: DDS hover preview, GFX sprite goto, room completion ──
 	registerTexturePreviewEditor(context);
 	registerGraphicsFeatures(context);
+	registerImageTools(context);
 
 	// ── Vanilla Code Comparison: block-level and file-level diff against vanilla game ──
 	registerVanillaCompare(context);
@@ -1781,9 +1816,24 @@ export async function activate(context: ExtensionContext) {
 		}
 		
 		const repoPathStr = getRulesRemoteUrl(language);
-		const repoPath = repoPathStr;
+		const defaultRepoPath = repoPathStr;
+		const repoPath = getConfiguredRulesRemoteUrl(language);
 		const bundledRulesPath = resolveBundledRulesPath(context, language);
 		ErrorReporter.debug('Extension', `Language: ${language}, repo: ${repoPath}`);
+		registerRulesConfigGroupCommands(context, () => ({
+			languageId: language,
+			cacheDir,
+			bundledRulesPath,
+			defaultRemoteRulesUrl: defaultRepoPath,
+			remoteRulesUrl: getConfiguredRulesRemoteUrl(language),
+		}));
+		registerSpecialPathCommands(context, () => ({
+			languageId: language,
+			cacheDir,
+			bundledRulesPath,
+			globalStoragePath: context.globalStorageUri.fsPath,
+			getSteamLibraryPaths,
+		}));
 
 		// If the extension is launched in debug mode then the debug server options are used
 		// Otherwise the run options are used
@@ -1858,6 +1908,7 @@ export async function activate(context: ExtensionContext) {
 				rulesCache: cacheDir,
 				bundledRulesPath: bundledRulesPath,
 				rules_version: workspace.getConfiguration('stellarisLanguageServices').get('rules_version'),
+				defaultRepoPath: defaultRepoPath,
 				repoPath: repoPath,
 				diagnosticLogging: workspace.getConfiguration('stellarisLanguageServices').get('logging.diagnostic')
 			},
@@ -2022,7 +2073,7 @@ export async function activate(context: ExtensionContext) {
 			languageId: language,
 			cacheDir,
 			bundledRulesPath,
-			rulesRemoteUrl: repoPath,
+			rulesRemoteUrl: getConfiguredRulesRemoteUrl(language),
 			serverExe,
 			isVanillaFolder,
 			clientStarted,
@@ -2050,6 +2101,7 @@ export async function activate(context: ExtensionContext) {
 			if (
 				e.affectsConfiguration('stellarisLanguageServices.rules_version') ||
 				e.affectsConfiguration('stellarisLanguageServices.rules_folder') ||
+				e.affectsConfiguration('stellarisLanguageServices.rules_remote_url') ||
 				(profile ? e.affectsConfiguration(profile.cacheSettingKey) : false)
 			) {
 				updateRulesStatusBar();

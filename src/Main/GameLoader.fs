@@ -131,11 +131,10 @@ let private shouldPreferBundledRules (cachePath: string option) (bundledRulesFol
         | _ -> false
     | _ -> false
 
-let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder _preferBundledRules =
+let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder preferBundledRules =
     let manualConfigFiles =
         match useManualRules, manualRulesFolder with
         | true, Some rf when Directory.Exists rf -> getRuleFilesFromFolder rf
-        | true, _ when Directory.Exists "./.cwtools" -> getRuleFilesFromFolder "./.cwtools"
         | _ -> []
 
     let cachedConfigFiles =
@@ -150,23 +149,19 @@ let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder
         | Some path, false -> readConfigFiles (getRuleFilesFromFolder path)
         | _ -> []
 
-    let workspaceConfigFiles =
-        match useManualRules with
-        | false when Directory.Exists "./.cwtools" -> getRuleFilesFromFolder "./.cwtools"
-        | _ -> []
-
     let useNewerBundledRules =
-        not useManualRules
+        preferBundledRules
+        && not useManualRules
         && cachedConfigFiles.Length > 0
         && bundledConfigFiles.Length > 0
         && shouldPreferBundledRules cachePath bundledRulesFolder
 
     let configFiles =
         if manualConfigFiles.Length > 0 then readConfigFiles manualConfigFiles
+        elif useManualRules then []
         elif useNewerBundledRules then bundledConfigFiles
         elif cachedConfigFiles.Length > 0 then readConfigFiles cachedConfigFiles
-        elif bundledConfigFiles.Length > 0 then bundledConfigFiles
-        else readConfigFiles workspaceConfigFiles
+        else []
 
     configFiles
 

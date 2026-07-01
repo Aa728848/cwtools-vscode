@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
 	blankParadoxCsvRow,
+	adjustParadoxCsvColumnCount,
+	analyzeParadoxCsvRows,
 	columnIndexAtCharacter,
 	insertParadoxCsvColumn,
 	isParadoxCsvDataLine,
@@ -65,6 +67,24 @@ describe('Paradox CSV utilities', () => {
 		expect(blankParadoxCsvRow(3)).to.equal(';;');
 		expect(blankParadoxCsvRow(0)).to.equal('');
 	});
+
+	it('analyzes malformed rows and column count drift', () => {
+		const issues = analyzeParadoxCsvRows([
+			'# comment',
+			'name;value;flag',
+			'one;two',
+			'"unterminated;row',
+		].join('\n'));
+
+		expect(issues).to.have.lengthOf(2);
+		expect(issues[0]).to.include({ line: 2, code: 'columnCount', actualColumns: 2, expectedColumns: 3 });
+		expect(issues[1]).to.include({ line: 3, code: 'unterminatedQuote' });
+	});
+
+	it('adjusts rows to a target column count', () => {
+		expect(adjustParadoxCsvColumnCount('a;b', 4)).to.equal('a;b;;');
+		expect(adjustParadoxCsvColumnCount('a;b;c;d', 2)).to.equal('a;b');
+	});
 });
 
 describe('Paradox CSV grammar and language configuration', () => {
@@ -84,4 +104,3 @@ describe('Paradox CSV grammar and language configuration', () => {
 		expect(config.wordPattern).to.contain(';');
 	});
 });
-

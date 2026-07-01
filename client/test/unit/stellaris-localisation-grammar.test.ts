@@ -88,7 +88,10 @@ describe('Stellaris Localisation Grammar & Language Configuration', () => {
         expect(byName('constant.character.format.color.stellaris-localisation').test('\u00a7Y')).to.be.true;
         expect(byName('constant.character.format.color.stellaris-localisation').test('\u00a7!')).to.be.true;
         expect(byName('constant.character.icon.stellaris-localisation').test('\u00a3energy\u00a3')).to.be.true;
+        expect(byName('constant.character.icon.stellaris-localisation').test('\u00a3energy|Y\u00a3')).to.be.true;
         expect(byName('variable.other.localisation-reference.stellaris-localisation').test('$PLANET|Y$')).to.be.true;
+        expect(byName('variable.other.scripted-variable.stellaris-localisation').test('@scripted_var')).to.be.true;
+        expect(byName('entity.name.concept.stellaris-localisation').test('[\'concept_test\' Concept text]')).to.be.true;
         expect(byName('support.function.scope-expression.stellaris-localisation').test('[Root.GetName]')).to.be.true;
     });
 

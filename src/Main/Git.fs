@@ -1,6 +1,7 @@
 module Main.Git
 
 open LibGit2Sharp
+open System
 open System.IO
 open System.Linq
 open CWTools.Utilities.Utils
@@ -12,7 +13,23 @@ let rec initOrUpdateRules repoPath gameCacheDir stable first =
         Directory.CreateDirectory gameCacheDir |> ignore
 
     try
-        let isRepo = Repository.IsValid gameCacheDir
+        let mutable isRepo = Repository.IsValid gameCacheDir
+
+        let shouldReplaceCache =
+            if isRepo then
+                use existingGit = new Repository(gameCacheDir)
+                match existingGit.Network.Remotes["origin"] with
+                | null -> false
+                | existingRemote ->
+                    not (String.Equals(existingRemote.Url, repoPath, StringComparison.OrdinalIgnoreCase))
+            else
+                false
+
+        if shouldReplaceCache then
+            logInfo $"cwtools rules remote changed; rebuilding rules cache from %s{repoPath}"
+            Directory.Delete(gameCacheDir, true)
+            Directory.CreateDirectory(gameCacheDir) |> ignore
+            isRepo <- false
 
         if isRepo then
             ()
@@ -20,22 +37,34 @@ let rec initOrUpdateRules repoPath gameCacheDir stable first =
             Repository.Clone(repoPath, gameCacheDir) |> ignore
 
         let git = new Repository(gameCacheDir)
-        let remote = git.Network.Remotes["origin"]
+        let remote =
+            match git.Network.Remotes["origin"] with
+            | null -> git.Network.Remotes.Add("origin", repoPath)
+            | existingRemote -> existingRemote
         let refSpecs = remote.FetchRefSpecs.Select(fun x -> x.Specification)
         Commands.Fetch(git, remote.Name, refSpecs, null, "")
         let currentHash = git.Head.Tip.Sha
         logInfo $"cwtools current rules version: %A{currentHash}"
+
+        let remoteBranch =
+            [ "origin/master"; "origin/main" ]
+            |> Seq.tryPick (fun branchName ->
+                match git.Branches[branchName] with
+                | null -> None
+                | branch -> Some branch)
+            |> Option.defaultWith (fun () ->
+                failwith "Could not find a fetched origin/master or origin/main branch for CWTools rules.")
 
         match stable with
         | true ->
             let describeOptions = DescribeOptions()
             describeOptions.Strategy <- DescribeStrategy.Tags
             describeOptions.MinimumCommitIdAbbreviatedSize <- 0
-            let tag = git.Describe(git.Branches["origin/master"].Tip, describeOptions)
+            let tag = git.Describe(remoteBranch.Tip, describeOptions)
             let checkoutOptions = CheckoutOptions()
             checkoutOptions.CheckoutModifiers <- CheckoutModifiers.Force
             Commands.Checkout(git, tag, checkoutOptions) |> ignore
-        | false -> git.Reset(ResetMode.Hard, git.Branches["origin/master"].Tip)
+        | false -> git.Reset(ResetMode.Hard, remoteBranch.Tip)
 
         let newHash = git.Head.Tip.Sha
         logInfo $"cwtools new rules version: %A{newHash}"

@@ -49,10 +49,6 @@ function resolveCwtConfigDir(languageId: string): string | null {
     };
     const game = langToGame[languageId];
     if (!game) return null;
-    for (const wf of vs.workspace.workspaceFolders ?? []) {
-        const wsConfig = path.join(wf.uri.fsPath, '.cwtools', game, 'config');
-        if (fs.existsSync(wsConfig)) return wsConfig;
-    }
     const submodulePath = path.join(__dirname, '..', '..', '..', 'submodules', `cwtools-${game}-config`, 'config');
     if (fs.existsSync(submodulePath)) return submodulePath;
     return null;
@@ -121,20 +117,8 @@ function getGamePath(languageId: string): string | null {
     let targetLang = languageId;
     if (!LANG_TO_CACHE_KEY[targetLang]) {
         const possibleGames = ['stellaris', 'hoi4', 'eu4', 'ck3', 'vic3', 'imperator', 'ck2', 'vic2', 'eu5'];
-        
-        // 1. Try to infer the game from the workspace .cwtools rules configuration folders
-        for (const game of possibleGames) {
-            for (const wf of vs.workspace.workspaceFolders ?? []) {
-                const wsConfig = path.join(wf.uri.fsPath, '.cwtools', game, 'config');
-                if (fs.existsSync(wsConfig)) {
-                    targetLang = game;
-                    break;
-                }
-            }
-            if (targetLang !== languageId) break;
-        }
 
-        // 2. Try to infer from visible text editors with a known Paradox language ID
+        // 1. Try to infer from visible text editors with a known Paradox language ID
         if (targetLang === languageId) {
             for (const editor of vs.window.visibleTextEditors) {
                 const lang = editor.document.languageId;
@@ -145,7 +129,7 @@ function getGamePath(languageId: string): string | null {
             }
         }
 
-        // 3. Try to locate the vanilla path that actually contains a 'gfx/FX' folder
+        // 2. Try to locate the vanilla path that actually contains a 'gfx/FX' folder
         if (targetLang === languageId) {
             const config = vs.workspace.getConfiguration('stellarisLanguageServices');
             for (const game of possibleGames) {

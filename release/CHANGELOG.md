@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.0] - 2026-07-02
+
+### 优化与更新 / Optimization & Updates
+- **[优化] 提升参数解析器性能并优化内存占用**
+  English: Improved parameter parser performance and optimized memory usage.
+
 ## [2.7.9] - 2026-07-01
 
 ### 解析器更新 / Parser Updates

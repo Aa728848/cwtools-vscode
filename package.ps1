@@ -190,19 +190,23 @@ if (-not $SkipClient) {
 
 # 6. Package VSIX Universal Bundle
 Write-Host "[6/6] Packaging universal VSIX bundle..." -ForegroundColor Yellow
-$GithubDocsBuilder = Join-Path $PSScriptRoot "tools/build-github-docs.js"
-Write-Host ">>> Generating bilingual GitHub documentation..." -ForegroundColor Cyan
-node $GithubDocsBuilder
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to generate bilingual GitHub documentation!"
-    exit $LASTEXITCODE
-}
-$ReadmeBuilder = Join-Path $PSScriptRoot "tools/build-release-readme.js"
-Write-Host ">>> Generating bilingual release README..." -ForegroundColor Cyan
-node $ReadmeBuilder
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to generate bilingual release README!"
-    exit $LASTEXITCODE
+if (-not $SkipDocs) {
+    $GithubDocsBuilder = Join-Path $PSScriptRoot "tools/build-github-docs.js"
+    Write-Host ">>> Generating bilingual GitHub documentation..." -ForegroundColor Cyan
+    node $GithubDocsBuilder
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to generate bilingual GitHub documentation!"
+        exit $LASTEXITCODE
+    }
+    $ReadmeBuilder = Join-Path $PSScriptRoot "tools/build-release-readme.js"
+    Write-Host ">>> Generating bilingual release README..." -ForegroundColor Cyan
+    node $ReadmeBuilder
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to generate bilingual release README!"
+        exit $LASTEXITCODE
+    }
+} else {
+    Write-Host ">>> Skipping bilingual documentation generation." -ForegroundColor Gray
 }
 Push-Location release
 npx @vscode/vsce package

@@ -70,10 +70,6 @@ function compose(doc) {
 
 ${links}
 
-> ${doc.noteEn}
->
-> ${doc.noteZh}
-
 <a id="english"></a>
 
 ## English

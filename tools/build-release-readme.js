@@ -48,10 +48,6 @@ const output = `# Stellaris Language Serves
 
 [English](#english) | [中文](#zh-cn)
 
-> This VSIX overview intentionally includes both English and Simplified Chinese because VS Code renders one packaged \`README.md\` in the extension details page.
->
-> 由于 VS Code 扩展详情页只渲染打包内的一份 \`README.md\`，因此这里同时提供英文与简体中文介绍。
-
 <a id="english"></a>
 
 ## English

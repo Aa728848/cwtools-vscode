@@ -2,10 +2,6 @@
 
 [English](#english) | [中文](#zh-cn) | [Architecture / 架构文档](ARCHITECTURE.md)
 
-> GitHub renders this file as the repository overview. The full introduction is provided below in both English and Simplified Chinese.
->
-> GitHub 默认渲染此文件作为项目介绍。下方同时提供英文与简体中文全文。
-
 <a id="english"></a>
 
 ## English

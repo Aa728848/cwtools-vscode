@@ -1,0 +1,68 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Paradox CSV",
+    "scopeName": "source.paradox-csv",
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#strings"
+        },
+        {
+            "include": "#delimiters"
+        },
+        {
+            "include": "#booleans"
+        },
+        {
+            "include": "#numbers"
+        }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.metadata.paradox-csv",
+                    "match": "^\\s*##.*$"
+                },
+                {
+                    "name": "comment.line.number-sign.paradox-csv",
+                    "match": "^\\s*#.*$"
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "name": "string.quoted.double.paradox-csv",
+                    "match": "\"(?:\"\"|[^\"])*\""
+                }
+            ]
+        },
+        "delimiters": {
+            "patterns": [
+                {
+                    "name": "punctuation.separator.semicolon.paradox-csv",
+                    "match": ";"
+                }
+            ]
+        },
+        "booleans": {
+            "patterns": [
+                {
+                    "name": "constant.language.boolean.paradox-csv",
+                    "match": "\\b(?:yes|no)\\b"
+                }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "name": "constant.numeric.paradox-csv",
+                    "match": "\\b-?\\d+(?:\\.\\d+)?\\b"
+                }
+            ]
+        }
+    }
+}

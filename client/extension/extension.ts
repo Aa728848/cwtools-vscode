@@ -32,6 +32,8 @@ import { isImagePathLinkText, registerGraphicsFeatures } from './graphicsFeature
 import { registerVanillaCompare } from './vanillaCompare';
 import { registerPdxIndentFormatter } from './pdxIndentFormatter';
 import { registerTexturePreviewEditor } from './texturePreviewEditor';
+import { registerParadoxCsvFeatures } from './paradoxCsvFeatures';
+import { registerRelatedResourceFeatures } from './relatedResources';
 import { LEGACY_SETTINGS_NAMESPACE, migrateLegacyConfiguration } from './configurationMigration';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
 import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
@@ -1001,6 +1003,8 @@ export async function activate(context: ExtensionContext) {
 	// Register localization enhancements (§ color highlighting, $REF$ hover/goto)
 	registerLocalizationFeatures(context, indexService);
 	registerIndexedWorkspaceSymbols(context, indexService);
+	registerParadoxCsvFeatures(context);
+	registerRelatedResourceFeatures(context, indexService);
 
 	// Register completion provider for @ constants in .gui, .asset, .gfx files
 	context.subscriptions.push(

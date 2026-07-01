@@ -51,6 +51,11 @@
                 "language": "stellaris-localisation",
                 "scopeName": "source.stellaris-localisation",
                 "path": "./syntaxes/stellaris-localisation.tmLanguage.json"
+            },
+            {
+                "language": "paradox-csv",
+                "scopeName": "source.paradox-csv",
+                "path": "./syntaxes/paradox-csv.tmLanguage.json"
             }
         ],
         "views": {
@@ -182,6 +187,41 @@
                     "command": "cwtools.ai.sendSelectionToChat",
                     "when": "editorHasSelection",
                     "group": "stellaris@0"
+                },
+                {
+                    "command": "cwtools.goToRelatedLocalisations",
+                    "when": "resourceExtname == .txt || resourceExtname == .gui || resourceExtname == .asset || resourceExtname == .yml",
+                    "group": "stellaris@3"
+                },
+                {
+                    "command": "cwtools.csv.insertRowAbove",
+                    "when": "resourceExtname == .csv",
+                    "group": "paradoxCsv@1"
+                },
+                {
+                    "command": "cwtools.csv.insertRowBelow",
+                    "when": "resourceExtname == .csv",
+                    "group": "paradoxCsv@2"
+                },
+                {
+                    "command": "cwtools.csv.insertColumnLeft",
+                    "when": "resourceExtname == .csv",
+                    "group": "paradoxCsv@3"
+                },
+                {
+                    "command": "cwtools.csv.insertColumnRight",
+                    "when": "resourceExtname == .csv",
+                    "group": "paradoxCsv@4"
+                },
+                {
+                    "command": "cwtools.csv.removeRow",
+                    "when": "resourceExtname == .csv",
+                    "group": "paradoxCsv@5"
+                },
+                {
+                    "command": "cwtools.csv.removeColumn",
+                    "when": "resourceExtname == .csv",
+                    "group": "paradoxCsv@6"
                 }
             ]
         },
@@ -258,6 +298,48 @@
                 "command": "exportTypes",
                 "title": "%commands.exportTypes.title%",
                 "category": "Stellaris"
+            },
+            {
+                "command": "cwtools.goToRelatedLocalisations",
+                "title": "%commands.stellarisLanguageServices.goToRelatedLocalisations.title%",
+                "category": "Paradox",
+                "icon": "$(references)"
+            },
+            {
+                "command": "cwtools.csv.insertRowAbove",
+                "title": "%commands.stellarisLanguageServices.csv.insertRowAbove.title%",
+                "category": "Paradox CSV",
+                "icon": "$(add)"
+            },
+            {
+                "command": "cwtools.csv.insertRowBelow",
+                "title": "%commands.stellarisLanguageServices.csv.insertRowBelow.title%",
+                "category": "Paradox CSV",
+                "icon": "$(add)"
+            },
+            {
+                "command": "cwtools.csv.insertColumnLeft",
+                "title": "%commands.stellarisLanguageServices.csv.insertColumnLeft.title%",
+                "category": "Paradox CSV",
+                "icon": "$(add)"
+            },
+            {
+                "command": "cwtools.csv.insertColumnRight",
+                "title": "%commands.stellarisLanguageServices.csv.insertColumnRight.title%",
+                "category": "Paradox CSV",
+                "icon": "$(add)"
+            },
+            {
+                "command": "cwtools.csv.removeRow",
+                "title": "%commands.stellarisLanguageServices.csv.removeRow.title%",
+                "category": "Paradox CSV",
+                "icon": "$(trash)"
+            },
+            {
+                "command": "cwtools.csv.removeColumn",
+                "title": "%commands.stellarisLanguageServices.csv.removeColumn.title%",
+                "category": "Paradox CSV",
+                "icon": "$(trash)"
             },
             {
                 "command": "cwtools.toggleInlineTextOn",
@@ -1103,6 +1185,17 @@
                 "configuration": "./language-configuration-localisation.json"
             },
             {
+                "id": "paradox-csv",
+                "aliases": [
+                    "Paradox CSV",
+                    "PDX CSV"
+                ],
+                "filenamePatterns": [
+                    "**/{common,history,map,localisation,localization,localisation_synced}/**/*.csv"
+                ],
+                "configuration": "./language-configuration-paradox-csv.json"
+            },
+            {
                 "id": "stellaris",
                 "aliases": [
                     "",
@@ -1489,6 +1582,15 @@
                     "strings": true
                 }
             },
+            "[paradox-csv]": {
+                "files.autoGuessEncoding": true,
+                "editor.wordWrap": "off",
+                "editor.quickSuggestions": {
+                    "other": false,
+                    "comments": false,
+                    "strings": false
+                }
+            },
             "[paradox]": {
                 "editor.formatOnPaste": true
             },
@@ -1499,7 +1601,8 @@
                 "**/localisation/**/*.yml": "stellaris-localisation",
                 "**/localization/**/*.yml": "stellaris-localisation",
                 "**/localisation_synced/**/*.yml": "stellaris-localisation",
-                "**/*_l_*.yml": "stellaris-localisation"
+                "**/*_l_*.yml": "stellaris-localisation",
+                "**/{common,history,map,localisation,localization,localisation_synced}/**/*.csv": "paradox-csv"
             }
         }
     },

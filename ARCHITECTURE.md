@@ -2,10 +2,6 @@
 
 [English](#english) | [中文](#zh-cn) | [Project Overview / 项目介绍](README.md)
 
-> This default architecture entry is bilingual for GitHub readers and linked contributor workflows.
->
-> 此默认架构入口面向 GitHub 阅读与贡献流程，提供英文与简体中文两套内容。
-
 <a id="english"></a>
 
 ## English

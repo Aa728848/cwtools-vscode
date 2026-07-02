@@ -1,6 +1,6 @@
 # CWT Rule Configuration Guide / CWT 规则配置开发指南
 
-[English](#english) | [中文](#zh-cn) | [Contribution Guide / 贡献指南](../CONTRIBUTING.md) | [Architecture / 架构文档](../ARCHITECTURE.md)
+[English](#english) | [中文](#zh-cn) | [Project Overview / 项目介绍](../README.md) | [Contribution Guide / 贡献指南](../CONTRIBUTING.md) | [Architecture / 架构文档](../ARCHITECTURE.md) | [Diagnostic Codes / 诊断码](diagnostic-codes.md)
 
 This document is the project guide for the CWT rule language and for authoring
 Paradox rule configuration consumed by this extension, the CWTools server, and

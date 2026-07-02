@@ -39,7 +39,7 @@ function marketplaceReadme(markdown) {
 
     output = output.replace(
         /^\[English\]\(#english\).*$/m,
-        '[English](#english) | [中文](#zh-cn)'
+        '[English](#english) | [中文](#zh-cn) | [CWT Rule Guide / CWT 规则指南](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/cwt-rule-config.md) | [Diagnostic Codes / 诊断码](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/diagnostic-codes.md)'
     );
 
     output = output.replaceAll(
@@ -55,6 +55,11 @@ function marketplaceReadme(markdown) {
     output = output.replaceAll(
         '(docs/cwt-rule-config.md)',
         '(https://github.com/Aa728848/cwtools-vscode/blob/master/docs/cwt-rule-config.md)'
+    );
+
+    output = output.replaceAll(
+        '(docs/diagnostic-codes.md)',
+        '(https://github.com/Aa728848/cwtools-vscode/blob/master/docs/diagnostic-codes.md)'
     );
 
     return normalize(output);

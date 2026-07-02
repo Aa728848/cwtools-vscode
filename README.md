@@ -1,10 +1,6 @@
 # Stellaris Language Serves
 
-[English](#english) | [中文](#zh-cn) | [Contribution Guide / 贡献指南](CONTRIBUTING.md) | [Architecture / 架构文档](ARCHITECTURE.md) | [AI Agent Guide](AGENTS.md)
-
-This README is the single bilingual source of truth for the project overview.
-
-本文档是项目介绍的唯一双语事实源。
+[English](#english) | [中文](#zh-cn) | [Contribution Guide / 贡献指南](CONTRIBUTING.md) | [Architecture / 架构文档](ARCHITECTURE.md) | [CWT Rule Guide / CWT 规则指南](docs/cwt-rule-config.md) | [Diagnostic Codes / 诊断码](docs/diagnostic-codes.md) | [AI Agent Guide](AGENTS.md)
 
 <a id="english"></a>
 

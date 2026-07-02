@@ -1,22 +1,6 @@
 # Architecture / 架构文档
 
-[English](#english) | [中文](#zh-cn) | [Project Overview / 项目介绍](README.md) | [Contribution Guide / 贡献指南](CONTRIBUTING.md) | [AI Agent Guide](AGENTS.md)
-
-This file is the bilingual architecture entry point. Keep architectural
-background, module boundaries, data flow, and long-lived design constraints here.
-Operational checklists for AI agents belong in `AGENTS.md`; human setup,
-debugging, PR, and packaging workflow belongs in `CONTRIBUTING.md`.
-
-When changing architecture documentation, avoid maintaining the same fact in many
-places. This file is the single bilingual source of truth; language-specific
-architecture copies are intentionally not maintained.
-
-本文档是双语架构入口。架构背景、模块边界、数据流和长期设计约束放在这里；
-AI Agent 操作清单放在 `AGENTS.md`；贡献者环境、调试、PR 和打包流程放在
-`CONTRIBUTING.md`。
-
-更新架构文档时，尽量避免在多处重复维护同一事实。本文档是唯一双语事实源；
-不再维护单语架构副本。
+[English](#english) | [中文](#zh-cn) | [Project Overview / 项目介绍](README.md) | [Contribution Guide / 贡献指南](CONTRIBUTING.md) | [CWT Rule Guide / CWT 规则指南](docs/cwt-rule-config.md) | [Diagnostic Codes / 诊断码](docs/diagnostic-codes.md) | [AI Agent Guide](AGENTS.md)
 
 <a id="english"></a>
 

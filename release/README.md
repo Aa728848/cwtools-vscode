@@ -1,10 +1,6 @@
 # Stellaris Language Serves
 
-[English](#english) | [中文](#zh-cn)
-
-This README is the single bilingual source of truth for the project overview.
-
-本文档是项目介绍的唯一双语事实源。
+[English](#english) | [中文](#zh-cn) | [CWT Rule Guide / CWT 规则指南](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/cwt-rule-config.md) | [Diagnostic Codes / 诊断码](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/diagnostic-codes.md)
 
 <a id="english"></a>
 

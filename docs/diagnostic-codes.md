@@ -1,5 +1,7 @@
 # CWTools Diagnostic Codes / 验证错误码说明
 
+[Project Overview / 项目介绍](../README.md) | [Contribution Guide / 贡献指南](../CONTRIBUTING.md) | [Architecture / 架构文档](../ARCHITECTURE.md) | [CWT Rule Guide / CWT 规则指南](cwt-rule-config.md)
+
 Reference for the `CWxxx` error codes reported by CWTools validation. Each
 section heading is the error code, so diagnostics link here directly via the
 error-code link in the Problems panel.

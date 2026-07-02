@@ -1,10 +1,6 @@
 # Contribution Guide / 贡献指南
 
-[English](#english) | [中文](#zh-cn) | [Project Overview / 项目介绍](README.md) | [Architecture / 架构文档](ARCHITECTURE.md) | [AI Agent Guide](AGENTS.md)
-
-This is the single bilingual source of truth for contributor workflow. Keep setup, debugging, PR, verification, and packaging instructions here; keep architecture background in `ARCHITECTURE.md` and AI-agent operating rules in `AGENTS.md`.
-
-本文档是贡献者工作流的唯一双语事实源。环境准备、调试、PR、验证与打包说明放在这里；架构背景放在 `ARCHITECTURE.md`，AI Agent 操作规则放在 `AGENTS.md`。
+[English](#english) | [中文](#zh-cn) | [Project Overview / 项目介绍](README.md) | [Architecture / 架构文档](ARCHITECTURE.md) | [CWT Rule Guide / CWT 规则指南](docs/cwt-rule-config.md) | [Diagnostic Codes / 诊断码](docs/diagnostic-codes.md) | [AI Agent Guide](AGENTS.md)
 
 <a id="english"></a>
 

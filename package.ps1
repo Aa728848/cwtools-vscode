@@ -43,11 +43,8 @@ if ($Version) {
     Write-Host "[*] Updating version to $Version ..." -ForegroundColor Yellow
     $PackageJsonPath = Join-Path $PSScriptRoot "release/package.json"
     if (Test-Path $PackageJsonPath) {
-        $JsonContent = Get-Content -Path $PackageJsonPath -Raw | ConvertFrom-Json
-        $OldVersion = $JsonContent.version
-        $JsonContent.version = $Version
-        $JsonText = $JsonContent | ConvertTo-Json -Depth 100
-        [System.IO.File]::WriteAllText($PackageJsonPath, $JsonText)
+        $OldVersion = (Get-Content -Path $PackageJsonPath -Raw | ConvertFrom-Json).version
+        node -e 'const fs = require(''fs''); const file = process.argv[1]; const pkg = JSON.parse(fs.readFileSync(file, ''utf8'')); pkg.version = process.argv[2]; fs.writeFileSync(file, JSON.stringify(pkg, null, 4) + ''\n'', ''utf8'');' $PackageJsonPath $Version
         Write-Host "[OK] Successfully updated release/package.json: $OldVersion -> $Version" -ForegroundColor Green
         Write-Host "[!] Remember to log the updates in release/CHANGELOG.md!" -ForegroundColor Yellow
     } else {

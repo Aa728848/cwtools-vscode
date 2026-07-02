@@ -202,27 +202,27 @@ export function buildLocalisationPromptCardHtml(text: string, locale: ToolPhrase
     const charCount = card.snippet.length;
     const range = card.startLine === card.endLine ? `L${card.startLine}` : `L${card.startLine}-L${card.endLine}`;
     const title = card.task === 'translate'
-        ? (isZh ? 'AI: \u7ffb\u8bd1\u672c\u5730\u5316' : 'AI: Translate Localisation')
-        : (isZh ? 'AI: \u6da6\u8272\u672c\u5730\u5316' : 'AI: Polish Localisation');
+        ? (isZh ? 'AI: 翻译本地化' : 'AI: Translate Localisation')
+        : (isZh ? 'AI: 润色本地化' : 'AI: Polish Localisation');
     const subtitle = card.task === 'translate'
         ? (isZh
-            ? `\u7ffb\u8bd1\u9009\u4e2d\u7684 Stellaris \u672c\u5730\u5316\u6587\u672c${card.targetLanguage ? ` \u5230 ${card.targetLanguage}` : ''}`
+            ? `翻译选中的 Stellaris 本地化文本${card.targetLanguage ? ` 到 ${card.targetLanguage}` : ''}`
             : `Translate selected Stellaris localisation${card.targetLanguage ? ` into ${card.targetLanguage}` : ''}`)
         : (isZh
-            ? '\u6da6\u8272\u9009\u4e2d\u7684 Stellaris \u672c\u5730\u5316\u6587\u672c\uff0c\u4fdd\u6301\u73a9\u6cd5\u542b\u4e49'
+            ? '润色选中的 Stellaris 本地化文本，保持玩法含义'
             : 'Polish selected Stellaris localisation without changing meaning');
     const action = card.task === 'translate'
-        ? (card.targetLanguage || (isZh ? '\u7ffb\u8bd1' : 'Translate'))
-        : (isZh ? '\u6da6\u8272' : 'Polish');
+        ? (card.targetLanguage || (isZh ? '翻译' : 'Translate'))
+        : (isZh ? '润色' : 'Polish');
     const selectionSummary = isZh
-        ? `${lineCount} \u884c / ${charCount} \u5b57`
+        ? `${lineCount} 行 / ${charCount} 字`
         : `${pluralEn(lineCount, 'line', 'lines')} / ${pluralEn(charCount, 'char', 'chars')}`;
     const preview = trimLocalisationPreview(card.snippet);
     const meta = [
-        [isZh ? '\u6587\u4ef6' : 'File', basename(card.file), card.file],
-        [isZh ? '\u8303\u56f4' : 'Range', range, `${card.file}:${card.startLine}-${card.endLine}`],
-        [isZh ? '\u8bed\u8a00' : 'Language', card.languageId, card.languageId],
-        [isZh ? '\u9009\u533a' : 'Selection', selectionSummary, selectionSummary],
+        [isZh ? '文件' : 'File', basename(card.file), card.file],
+        [isZh ? '范围' : 'Range', range, `${card.file}:${card.startLine}-${card.endLine}`],
+        [isZh ? '语言' : 'Language', card.languageId, card.languageId],
+        [isZh ? '选区' : 'Selection', selectionSummary, selectionSummary],
     ];
 
     return `<div class="localisation-task-card">` +
@@ -243,7 +243,7 @@ export function buildLocalisationPromptCardHtml(text: string, locale: ToolPhrase
             ).join('') +
         `</div>` +
         `<div class="localisation-task-preview-wrap">` +
-            `<div class="localisation-task-preview-label">${escapeHtml(isZh ? '\u9884\u89c8' : 'Preview')}</div>` +
+            `<div class="localisation-task-preview-label">${escapeHtml(isZh ? '预览' : 'Preview')}</div>` +
             `<div class="localisation-task-preview">${escapeHtml(preview)}</div>` +
         `</div>` +
     `</div>`;

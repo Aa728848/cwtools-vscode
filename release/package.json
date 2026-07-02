@@ -138,17 +138,17 @@
                 },
                 {
                     "command": "cwtools.previewSolarSystem",
-                    "when": "resourceExtname == .txt \u0026\u0026 resourcePath =~ /solar_system_initializers/",
+                    "when": "resourceExtname == .txt && resourcePath =~ /solar_system_initializers/",
                     "group": "navigation"
                 },
                 {
                     "command": "cwtools.visualizeEventChain",
-                    "when": "resourceExtname == .txt \u0026\u0026 resourcePath =~ /events/",
+                    "when": "resourceExtname == .txt && resourcePath =~ /events/",
                     "group": "navigation"
                 },
                 {
                     "command": "cwtools.visualizeTechTree",
-                    "when": "resourceExtname == .txt \u0026\u0026 resourcePath =~ /technology/",
+                    "when": "resourceExtname == .txt && resourcePath =~ /technology/",
                     "group": "navigation"
                 },
                 {
@@ -168,7 +168,7 @@
                 },
                 {
                     "command": "cwtools.vanillaCompare.migrateChangedFromVanilla",
-                    "when": "(resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh) \u0026\u0026 inDiffEditor \u0026\u0026 cwtools.vanillaCompare.activeComparison",
+                    "when": "(resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh) && inDiffEditor && cwtools.vanillaCompare.activeComparison",
                     "group": "navigation@3"
                 },
                 {
@@ -203,12 +203,12 @@
                 },
                 {
                     "command": "cwtools.localisation.translateSelection",
-                    "when": "resourceExtname == .yml \u0026\u0026 editorHasSelection",
+                    "when": "resourceExtname == .yml && editorHasSelection",
                     "group": "navigation@7"
                 },
                 {
                     "command": "cwtools.localisation.polishSelection",
-                    "when": "resourceExtname == .yml \u0026\u0026 editorHasSelection",
+                    "when": "resourceExtname == .yml && editorHasSelection",
                     "group": "navigation@8"
                 }
             ],
@@ -630,24 +630,24 @@
             {
                 "command": "-acceptRenameInput",
                 "key": "enter",
-                "when": "renameInputVisible \u0026\u0026 editorTextFocus \u0026\u0026 !isComposing"
+                "when": "renameInputVisible && editorTextFocus && !isComposing"
             },
             {
                 "command": "acceptRenameInputWithPreview",
                 "key": "enter",
-                "when": "renameInputVisible \u0026\u0026 editorTextFocus \u0026\u0026 !isComposing \u0026\u0026 config.editor.rename.enablePreview"
+                "when": "renameInputVisible && editorTextFocus && !isComposing && config.editor.rename.enablePreview"
             },
             {
                 "command": "-acceptRenameInputWithPreview",
                 "key": "ctrl+enter",
                 "mac": "cmd+enter",
-                "when": "renameInputVisible \u0026\u0026 editorTextFocus \u0026\u0026 !isComposing \u0026\u0026 config.editor.rename.enablePreview"
+                "when": "renameInputVisible && editorTextFocus && !isComposing && config.editor.rename.enablePreview"
             },
             {
                 "command": "acceptRenameInput",
                 "key": "ctrl+enter",
                 "mac": "cmd+enter",
-                "when": "renameInputVisible \u0026\u0026 editorTextFocus \u0026\u0026 !isComposing"
+                "when": "renameInputVisible && editorTextFocus && !isComposing"
             },
             {
                 "command": "cwtools.ai.reviewFile",

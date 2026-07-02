@@ -157,6 +157,18 @@ describe('webview smoke checks', () => {
         expect(stat.size).to.be.greaterThan(1000);
     });
 
+    it('gui preview runtime CSS is bundled with its webview script', () => {
+        const host = fs.readFileSync(path.join(root, 'client/extension/guiPanel.ts'), 'utf8');
+        const rollup = fs.readFileSync(path.join(root, 'rollup.config.mjs'), 'utf8');
+        const css = fs.readFileSync(path.join(root, 'client/webview/guiPreview.css'), 'utf8');
+
+        expect(host).to.include("path.join(this._webviewRootPath, 'guiPreview.css')");
+        expect(rollup).to.include("copyFile('client/webview/guiPreview.css', 'release/bin/client/webview/guiPreview.css')");
+        expect(css).to.include('#toolbar');
+        expect(css).to.include('#main-layout');
+        expect(css).to.include('#search-bar.hidden { display: none; }');
+    });
+
     it('agent manager shell wiring exists', () => {
         const managerHtml = fs.readFileSync(path.join(root, 'client/extension/ai/agentManagerHtml.ts'), 'utf8');
         const managerCss = fs.readFileSync(path.join(root, 'client/webview/agentManager.css'), 'utf8');

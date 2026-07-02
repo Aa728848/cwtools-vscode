@@ -33,6 +33,7 @@ export default [
                     exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
                 }
             }),
+            copyFile('client/webview/guiPreview.css', 'release/bin/client/webview/guiPreview.css'),
         ],
     },
     // Solar System Preview webview bundle

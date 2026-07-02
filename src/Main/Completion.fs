@@ -23,6 +23,14 @@ let private paramExtractPattern =
         @"\$([A-Za-z_][A-Za-z0-9_]*)(?:\|([^$]*))?\$",
         System.Text.RegularExpressions.RegexOptions.Compiled)
 
+let private numericCompletionLiteralPattern =
+    System.Text.RegularExpressions.Regex(
+        @"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private isNumericCompletionLiteral (label: string) =
+    numericCompletionLiteralPattern.IsMatch(label.Trim())
+
 let private userParamPattern =
     System.Text.RegularExpressions.Regex(
         @"\|([A-Za-z_][A-Za-z0-9_]*)[:=]([^\|]+)",
@@ -145,7 +153,7 @@ let private tryGetScriptValueMacroParams (game: IGame) (docs: DocumentStore) (fi
 
 let private paramValueContextPattern =
     System.Text.RegularExpressions.Regex(
-        @"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*""?[^\s""={}]*$",
+        @"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(""?)?([^\s""={}]*)$",
         System.Text.RegularExpressions.RegexOptions.Compiled)
 
 let private inlineScriptPathPattern =
@@ -239,31 +247,113 @@ let private tryFindParamDefinitionFile (game: IGame) (callKey: string) (text: st
                 |> Array.tryFind (fun t -> String.Equals(t.id, callKey, StringComparison.OrdinalIgnoreCase)))
             |> Option.map (fun t -> t.range.FileName))
 
-/// Find the first `field = $PARAM$` (or `$PARAM|default$`) usage in the definition text;
-/// returns a pos inside the value token plus the declared default value, if any.
-let private tryFindParamValueUsage (defText: string) (paramKey: string) =
+let private trySliceNamedDefinitionBlock (text: string) (callKey: string) =
     let pattern =
-        "=\\s*\"?\\$" + System.Text.RegularExpressions.Regex.Escape(paramKey) + "(\\|[^$\\r\\n]*)?\\$"
+        @"(?m)^\s*" + System.Text.RegularExpressions.Regex.Escape(callKey) + @"\s*="
 
     let m =
         System.Text.RegularExpressions.Regex.Match(
-            defText,
+            text,
             pattern,
             System.Text.RegularExpressions.RegexOptions.None)
 
     if not m.Success then None
     else
-        let dollarIdx = defText.IndexOf('$', m.Index)
-        let struct (line0, col0) = lineColOfOffset defText dollarIdx
+        let braceIdx = text.IndexOf('{', m.Index)
+        if braceIdx < 0 then None
+        else
+            let mutable depth = 0
+            let mutable i = braceIdx
+            let mutable blockEnd = -1
 
-        let defaultValue =
-            if m.Groups.[1].Success then Some(m.Groups.[1].Value.TrimStart('|')) else None
+            while blockEnd < 0 && i < text.Length do
+                match text.[i] with
+                | '{' -> depth <- depth + 1
+                | '}' ->
+                    depth <- depth - 1
+                    if depth = 0 then blockEnd <- i
+                | _ -> ()
 
-        Some(PosHelper.fromZ line0 (col0 + 1), defaultValue)
+                i <- i + 1
+
+            let endExclusive = if blockEnd >= 0 then blockEnd + 1 else text.Length
+            Some(text.Substring(m.Index, endExclusive - m.Index))
+
+type private ParamValueUsage =
+    { positions: pos list
+      defaultValue: string option
+      startOffset: int
+      endOffset: int
+      isKeyUsage: bool }
+
+let private isWholeParamBoundary c =
+    Char.IsWhiteSpace c
+    || c = '='
+    || c = '<'
+    || c = '>'
+    || c = '{'
+    || c = '}'
+    || c = ','
+    || c = '('
+    || c = ')'
+    || c = '['
+    || c = ']'
+    || c = '"'
+    || c = '\''
+    || c = '\n'
+    || c = '\r'
+
+let private isWholeParamToken (text: string) (startIdx: int) (endIdxExclusive: int) =
+    let leftOk =
+        startIdx <= 0 || isWholeParamBoundary text.[startIdx - 1]
+
+    let rightOk =
+        endIdxExclusive >= text.Length || isWholeParamBoundary text.[endIdxExclusive]
+
+    leftOk && rightOk
+
+let private tryNextNonWhitespace (text: string) (startIdx: int) =
+    let mutable i = startIdx
+    while i < text.Length && Char.IsWhiteSpace text.[i] do
+        i <- i + 1
+
+    if i < text.Length then Some text.[i] else None
+
+/// Find complete `$PARAM$` (or `$PARAM|default$`) uses that occupy a whole
+/// PDX token. Embedded fragments such as `foo_$PARAM$_bar` cannot be safely
+/// projected to a concrete rule slot, so they are ignored.
+let private findParamValueUsages (defText: string) (paramKey: string) =
+    [ for m in paramExtractPattern.Matches(defText) do
+          if
+              m.Success
+              && String.Equals(m.Groups.[1].Value, paramKey, StringComparison.OrdinalIgnoreCase)
+              && isWholeParamToken defText m.Index (m.Index + m.Length)
+          then
+              let struct (line0, col0) = lineColOfOffset defText m.Index
+
+              let defaultValue =
+                  if m.Groups.[2].Success then
+                      let value = m.Groups.[2].Value
+                      if value = "" then None else Some value
+                  else
+                      None
+
+              { positions = [ PosHelper.fromZ line0 (col0 + 1); PosHelper.fromZ line0 col0 ]
+                defaultValue = defaultValue
+                startOffset = m.Index
+                endOffset = m.Index + m.Length
+                isKeyUsage = tryNextNonWhitespace defText (m.Index + m.Length) = Some '=' } ]
 
 let private paramValueMaxItems = 5000
 
-let private tryGetParameterValueCompletion (game: IGame) (docs: DocumentStore) (filetext: string) (position: pos) =
+let private tryGetParameterValueCompletion
+    (game: IGame)
+    (docs: DocumentStore)
+    (currentFilePath: string)
+    (filetext: string)
+    (position: pos)
+    (supportsInsertReplaceEdit: bool)
+    =
     try
         let textBeforeCursor = getTextBeforeCursor filetext position
         let contextMatch = paramValueContextPattern.Match(textBeforeCursor)
@@ -271,6 +361,45 @@ let private tryGetParameterValueCompletion (game: IGame) (docs: DocumentStore) (
         if not contextMatch.Success then None
         else
             let paramKey = contextMatch.Groups.[1].Value
+            let hasOpeningQuote = contextMatch.Groups.[2].Success && contextMatch.Groups.[2].Value = "\""
+            let typedPrefix =
+                if contextMatch.Groups.[3].Success then contextMatch.Groups.[3].Value else ""
+
+            let wantsVariableValue = typedPrefix.StartsWith("@", StringComparison.Ordinal)
+
+            let createInsertText (label: string) =
+                if hasOpeningQuote then label
+                elif label.Contains ' ' then $"\"{label}\""
+                else label
+
+            let valueTextEdit (newText: string) =
+                if supportsInsertReplaceEdit then
+                    let targetLine = getLineAt filetext (position.Line - 1)
+                    let replaceStart = Math.Max(0, position.Column - typedPrefix.Length)
+                    let isValueChar c =
+                        not (
+                            Char.IsWhiteSpace c
+                            || c = '"'
+                            || c = '='
+                            || c = '{'
+                            || c = '}'
+                        )
+
+                    let mutable replaceEnd = Math.Min(position.Column, targetLine.Length)
+                    while replaceEnd < targetLine.Length && isValueChar targetLine.[replaceEnd] do
+                        replaceEnd <- replaceEnd + 1
+
+                    let range =
+                        { start = { line = position.Line - 1; character = replaceStart }
+                          ``end`` = { line = position.Line - 1; character = replaceEnd } }
+
+                    Some { newText = newText; insert = range; replace = range }
+                else
+                    None
+
+            let filterTextFor forceTypedPrefix (label: string) =
+                if forceTypedPrefix && typedPrefix <> "" then Some typedPrefix else Some label
+
             let cursorOff = absoluteOffsetOf filetext position
 
             match tryFindEnclosingCall filetext cursorOff with
@@ -281,9 +410,18 @@ let private tryGetParameterValueCompletion (game: IGame) (docs: DocumentStore) (
                 | Some defFile ->
                     tryReadTypeFileText docs defFile
                     |> Option.bind (fun defText ->
-                        tryFindParamValueUsage defText paramKey
-                        |> Option.bind (fun (defPos, defaultValue) ->
-                            let responses = game.Complete defPos defFile defText
+                        let defText =
+                            if callKey.Equals("inline_script", StringComparison.OrdinalIgnoreCase) then
+                                defText
+                            else
+                                trySliceNamedDefinitionBlock defText callKey
+                                |> Option.defaultValue defText
+
+                        let usages = findParamValueUsages defText paramKey
+
+                        if usages.IsEmpty then
+                            None
+                        else
 
                             let toKind (c: CompletionCategory) =
                                 match c with
@@ -293,47 +431,143 @@ let private tryGetParameterValueCompletion (game: IGame) (docs: DocumentStore) (
                                 | CompletionCategory.Variable -> CompletionItemKind.Variable
                                 | _ -> CompletionItemKind.Value
 
-                            let seen = HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                            let items = ResizeArray<CompletionItem>()
+                            let buildItems responses =
+                                let seen = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                                let items = ResizeArray<CompletionItem>()
+                                let mutable responseAdded = false
 
-                            match defaultValue with
-                            | Some dv when dv <> "" && seen.Add dv ->
-                                items.Add
-                                    { defaultCompletionItem with
-                                        label = dv
-                                        kind = Some CompletionItemKind.Value
-                                        sortText = Some "0000000"
-                                        documentation =
-                                            Some
-                                                { kind = MarkupKind.Markdown
-                                                  value = $"Default value of `${paramKey}$`" } }
-                            | _ -> ()
+                                let rawDefaultValues =
+                                    usages
+                                    |> List.choose _.defaultValue
+                                    |> List.filter (fun dv -> dv <> "")
 
-                            for resp in responses do
-                                if items.Count < paramValueMaxItems then
-                                    let label, desc, kind =
-                                        match resp with
-                                        | CompletionResponse.Simple(l, _, k) -> l, None, k
-                                        | CompletionResponse.Detailed(l, d, _, k) -> l, d, k
-                                        | CompletionResponse.Snippet(l, _, d, _, k) -> l, d, k
+                                let defaultValues =
+                                    rawDefaultValues
+                                    |> List.filter (fun dv ->
+                                        not (isNumericCompletionLiteral dv)
+                                        && (not wantsVariableValue
+                                            || dv.StartsWith("@", StringComparison.Ordinal)))
 
-                                    if
-                                        label <> ""
-                                        && not (label.StartsWith("$", StringComparison.Ordinal))
-                                        && seen.Add label
-                                    then
+                                let rawResponseValues =
+                                    responses
+                                    |> Seq.choose (fun resp ->
+                                        let label, desc, kind =
+                                            match resp with
+                                            | CompletionResponse.Simple(l, _, k) -> l, None, k
+                                            | CompletionResponse.Detailed(l, d, _, k) -> l, d, k
+                                            | CompletionResponse.Snippet(l, _, d, _, k) -> l, d, k
+
+                                        if label <> "" && not (label.StartsWith("$", StringComparison.Ordinal)) then
+                                            Some(label, desc, kind)
+                                        else
+                                            None)
+                                    |> Seq.toList
+
+                                let responseValues =
+                                    rawResponseValues
+                                    |> List.filter (fun (label, _, _) -> not (isNumericCompletionLiteral label))
+
+                                let forceTypedPrefix =
+                                    typedPrefix <> ""
+                                    && not (
+                                        (defaultValues
+                                         |> List.exists (fun label ->
+                                             label.StartsWith(typedPrefix, StringComparison.OrdinalIgnoreCase)))
+                                        || (responseValues
+                                            |> List.exists (fun (label, _, _) ->
+                                                label.StartsWith(typedPrefix, StringComparison.OrdinalIgnoreCase)))
+                                    )
+
+                                for dv in defaultValues do
+                                    if seen.Add dv then
+                                        let insertText = createInsertText dv
                                         items.Add
                                             { defaultCompletionItem with
-                                                label = label
-                                                kind = Some(toKind kind)
+                                                label = dv
+                                                kind = Some CompletionItemKind.Value
                                                 insertText =
-                                                    if label.Contains ' ' then Some $"\"{label}\"" else None
+                                                    if supportsInsertReplaceEdit || insertText = dv then None else Some insertText
+                                                filterText = filterTextFor forceTypedPrefix dv
+                                                textEdit = valueTextEdit insertText
+                                                sortText = Some "0000000"
                                                 documentation =
-                                                    desc
-                                                    |> Option.map (fun d ->
-                                                        { kind = MarkupKind.Markdown; value = d }) }
+                                                    Some
+                                                        { kind = MarkupKind.Markdown
+                                                          value = $"Default value of `${paramKey}$`" } }
 
-                            if items.Count = 0 then None else Some(List.ofSeq items)))
+                                for label, desc, kind in responseValues do
+                                    if items.Count < paramValueMaxItems then
+                                        if seen.Add label then
+                                            let insertText = createInsertText label
+                                            responseAdded <- true
+                                            items.Add
+                                                { defaultCompletionItem with
+                                                    label = label
+                                                    kind = Some(toKind kind)
+                                                    insertText =
+                                                        if supportsInsertReplaceEdit || insertText = label then None else Some insertText
+                                                    filterText = filterTextFor forceTypedPrefix label
+                                                    textEdit = valueTextEdit insertText
+                                                    documentation =
+                                                        desc
+                                                        |> Option.map (fun d ->
+                                                            { kind = MarkupKind.Markdown; value = d }) }
+
+                                if items.Count = 0 then
+                                    if rawDefaultValues.Length > 0 || rawResponseValues.Length > 0 then
+                                        Some([], true)
+                                    else
+                                        None
+                                else
+                                    Some(List.ofSeq items, responseAdded)
+
+                            let definitionAttempts =
+                                usages
+                                |> List.collect (fun usage ->
+                                    let direct =
+                                        usage.positions
+                                        |> List.map (fun p -> struct (defFile, defText, p))
+
+                                    let syntheticText =
+                                        defText
+                                            .Remove(usage.startOffset, usage.endOffset - usage.startOffset)
+                                            .Insert(usage.startOffset, typedPrefix)
+
+                                    let struct (line0, col0) =
+                                        lineColOfOffset syntheticText (usage.startOffset + typedPrefix.Length)
+
+                                    let synthetic =
+                                        struct (defFile, syntheticText, PosHelper.fromZ line0 col0)
+
+                                    if wantsVariableValue then [ synthetic ] else direct @ [ synthetic ])
+
+                            let callSiteAttempts =
+                                if usages |> List.exists (fun u -> u.isKeyUsage) then
+                                    [ struct (currentFilePath, filetext, position) ]
+                                else
+                                    []
+
+                            let completionAttempts = definitionAttempts @ callSiteAttempts
+
+                            let mutable defaultOnlyItems = None
+                            let mutable filteredOnlyItems = None
+
+                            completionAttempts
+                            |> List.tryPick (fun struct (completionFile, completionText, completionPos) ->
+                                let responses = game.Complete completionPos completionFile completionText
+                                match buildItems responses with
+                                | Some([], true) ->
+                                    if filteredOnlyItems.IsNone then
+                                        filteredOnlyItems <- Some []
+                                    None
+                                | Some(items, true) -> Some items
+                                | Some(items, false) ->
+                                    if defaultOnlyItems.IsNone then
+                                        defaultOnlyItems <- Some items
+                                    None
+                                | None -> None)
+                            |> Option.orElseWith (fun () -> defaultOnlyItems)
+                            |> Option.orElseWith (fun () -> filteredOnlyItems))
     with _ ->
         None
 
@@ -883,6 +1117,16 @@ let completion
         logInfo $"{p} {position}"
 
         let textBeforeCursor = getTextBeforeCursor filetext position
+        let currentFilePath =
+            let u = p.textDocument.uri
+
+            if
+                RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                && u.LocalPath.StartsWith "/"
+            then
+                u.LocalPath.Substring(1)
+            else
+                u.LocalPath
 
         let getRawItems () =
             checkPartialCompletionCache p filetext (fun () ->
@@ -921,7 +1165,8 @@ let completion
             | None ->
                 // Parameter / inline_script value completion: when the cursor is at
                 // `PARAM = <cursor>` inside a call, proxy to the definition's `$PARAM$` slot.
-                let paramValueItems = tryGetParameterValueCompletion game docs filetext position
+                let paramValueItems =
+                    tryGetParameterValueCompletion game docs currentFilePath filetext position supportsInsertReplaceEdit
 
                 if paramValueItems.IsSome then
                     logInfo $"completion param-value time %i{stopwatch.ElapsedMilliseconds}ms"

@@ -584,10 +584,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             return;
         }
         if (cached) {
-            const wasCompact = cached.content.classList.contains('ap-compact');
-            const wasApproved = cached.content.classList.contains('ap-approved');
-            const approvedButtonHtml = cached.content.querySelector<HTMLElement>('.ap-approve-btn')?.innerHTML || '';
-            const approvedHintText = cached.content.querySelector<HTMLElement>('.ap-header-hint')?.textContent || '';
             const updater = (cached.content as HTMLElement & { __cwtoolsUpdateAnnotationCard?: (nextPanel: any) => void }).__cwtoolsUpdateAnnotationCard;
             if (typeof updater === 'function' && panel.annotationOptions) {
                 updater(panel.annotationOptions);
@@ -595,24 +591,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 cached.content.className = panel.content.className;
                 cached.content.replaceChildren(...Array.from(panel.content.childNodes));
             }
-            cached.content.classList.toggle('ap-compact', wasCompact);
-            cached.content.classList.toggle('ap-approved', wasApproved);
             const header = cached.content.querySelector<HTMLElement>('.ap-header');
             if (header && isManagerShell()) {
                 header.tabIndex = 0;
                 header.setAttribute('role', 'button');
                 header.setAttribute('aria-expanded', cached.content.classList.contains('ap-compact') ? 'false' : 'true');
-            }
-            if (wasApproved) {
-                const approveBtn = cached.content.querySelector<HTMLButtonElement>('.ap-approve-btn');
-                const submitBtn = cached.content.querySelector<HTMLButtonElement>('.ap-submit-btn');
-                const headerHint = cached.content.querySelector<HTMLElement>('.ap-header-hint');
-                if (approveBtn) {
-                    if (approvedButtonHtml) approveBtn.innerHTML = approvedButtonHtml;
-                    approveBtn.disabled = true;
-                }
-                if (submitBtn) submitBtn.disabled = true;
-                if (headerHint && approvedHintText) headerHint.textContent = approvedHintText;
             }
             const nextPanel = {
                 ...panel,
@@ -1053,6 +1036,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function textFromComposerNode(node: Node): string {
         if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
+        if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+            return Array.from(node.childNodes).map(textFromComposerNode).join('');
+        }
         if (!(node instanceof HTMLElement)) return '';
         if (node.classList.contains('reference-chip')) return ' ';
         if (node.tagName === 'BR') return '\n';
@@ -1547,18 +1533,69 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return null;
     }
 
+    function getComposerTextBeforeRange(range: Range): string {
+        if (!isRangeInsideInput(range)) return '';
+        const before = document.createRange();
+        before.selectNodeContents(activeComposerEl);
+        before.setEnd(range.startContainer, range.startOffset);
+        return textFromComposerNode(before.cloneContents());
+    }
+
+    function nodeChildIndex(node: Node): number {
+        if (!node.parentNode) return 0;
+        return Array.prototype.indexOf.call(node.parentNode.childNodes, node);
+    }
+
+    function domPointForComposerTextOffset(offset: number): { node: Node; offset: number } {
+        let remaining = Math.max(0, offset);
+
+        const walk = (node: Node): { node: Node; offset: number } | null => {
+            if (node.nodeType === Node.TEXT_NODE) {
+                const text = node.textContent || '';
+                if (remaining <= text.length) return { node, offset: remaining };
+                remaining -= text.length;
+                return null;
+            }
+
+            if (node instanceof HTMLElement && (node.classList.contains('reference-chip') || node.tagName === 'BR')) {
+                const parent = node.parentNode || activeComposerEl;
+                const index = nodeChildIndex(node);
+                if (remaining <= 1) return { node: parent, offset: index + (remaining > 0 ? 1 : 0) };
+                remaining -= 1;
+                return null;
+            }
+
+            for (const child of Array.from(node.childNodes)) {
+                const result = walk(child);
+                if (result) return result;
+            }
+
+            if (node instanceof HTMLElement && node !== activeComposerEl && (node.tagName === 'DIV' || node.tagName === 'P')) {
+                const parent = node.parentNode || activeComposerEl;
+                const index = nodeChildIndex(node);
+                if (remaining <= 1) return { node: parent, offset: index + 1 };
+                remaining -= 1;
+            }
+
+            return null;
+        };
+
+        return walk(activeComposerEl) || { node: activeComposerEl, offset: activeComposerEl.childNodes.length };
+    }
+
     function getAtTriggerBeforeCaret(): { range: Range; filter: string } | null {
         const caretRange = getActiveInputRange();
-        const match = getLastTextNodeBeforeCaret(caretRange);
-        if (!match || match.offset <= 0) return null;
-        const value = match.node.textContent || '';
-        const atIdx = value.lastIndexOf('@', Math.max(0, match.offset - 1));
+        if (!isRangeInsideInput(caretRange)) return null;
+        const value = getComposerTextBeforeRange(caretRange);
+        if (!value) return null;
+        const atIdx = value.lastIndexOf('@');
         if (atIdx < 0) return null;
-        const filter = value.slice(atIdx + 1, match.offset);
+        const filter = value.slice(atIdx + 1);
         if (/[\s\n]/.test(filter)) return null;
         const triggerRange = document.createRange();
-        triggerRange.setStart(match.node, atIdx);
-        triggerRange.setEnd(match.node, match.offset);
+        const start = domPointForComposerTextOffset(atIdx);
+        triggerRange.setStart(start.node, start.offset);
+        triggerRange.setEnd(caretRange.startContainer, caretRange.startOffset);
         return { range: triggerRange, filter };
     }
 
@@ -1681,9 +1718,97 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         });
     });
 
+    function questionCardsIn(container: HTMLElement): HTMLElement[] {
+        return Array.from(container.querySelectorAll('.question-card')) as HTMLElement[];
+    }
+
+    function questionCardTitle(card: HTMLElement, index: number): string {
+        const titleSpan = card.querySelector('.permission-card-title');
+        const title = titleSpan?.textContent?.replace(/^✓\s*/, '').trim();
+        return title || tr(`Question ${index + 1}`, `问题 ${index + 1}`);
+    }
+
+    function isCustomQuestionAnswer(text: string): boolean {
+        return /^(other|custom|其它|其他|自定义)$/i.test(text.trim());
+    }
+
+    function ensureQuestionOtherInput(card: HTMLElement): HTMLTextAreaElement {
+        let textarea = card.querySelector<HTMLTextAreaElement>('.question-other-input');
+        if (textarea) return textarea;
+        textarea = document.createElement('textarea');
+        textarea.className = 'question-other-input';
+        textarea.rows = 2;
+        textarea.placeholder = tr('Type your answer...', '输入你的回答...');
+        const actions = card.querySelector('.permission-card-actions') as HTMLElement | null;
+        actions?.appendChild(textarea);
+        return textarea;
+    }
+
+    function selectedQuestionAnswer(card: HTMLElement): string {
+        const raw = card.dataset.answer || '';
+        if (!isCustomQuestionAnswer(raw)) return raw.trim();
+        return card.querySelector<HTMLTextAreaElement>('.question-other-input')?.value.trim() || '';
+    }
+
+    function updateQuestionWizardSubmit(container: HTMLElement): void {
+        const cards = questionCardsIn(container);
+        const answered = cards.filter(card => selectedQuestionAnswer(card)).length;
+        const submitBtn = container.querySelector<HTMLButtonElement>('.question-submit-btn');
+        const count = container.querySelector<HTMLElement>('.question-wizard-count');
+        if (count) count.textContent = tr(`${answered}/${cards.length} answered`, `已回答 ${answered}/${cards.length}`);
+        if (submitBtn) submitBtn.disabled = answered !== cards.length || cards.length === 0 || isGenerating;
+    }
+
+    function buildQuestionAnswersMessage(container: HTMLElement): string {
+        const answers = questionCardsIn(container).map((card, idx) =>
+            `【${questionCardTitle(card, idx)}】: ${selectedQuestionAnswer(card)}`
+        );
+        return [
+            tr(
+                'I answered all clarification questions. Please continue from the planning phase using these answers, and do not ask more clarification questions unless something is still genuinely blocked.',
+                '我已回答全部澄清问题。请根据这些回答继续进入计划阶段，除非仍然确实受阻，否则不要继续提问。',
+            ),
+            '',
+            answers.join('\n'),
+        ].join('\n');
+    }
+
+    function submitQuestionWizard(container: HTMLElement): void {
+        updateQuestionWizardSubmit(container);
+        const submitBtn = container.querySelector<HTMLButtonElement>('.question-submit-btn');
+        if (submitBtn?.disabled) return;
+        const text = buildQuestionAnswersMessage(container);
+        if (!text.trim()) return;
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = svgIcon('check') + tr('Submitting...', '正在提交...');
+        }
+        setChatEmptyState(false);
+        vscode.postMessage({ type: 'sendMessage', text });
+        dismissCard(container, 0, () => {
+            isShowingFloatingCard = false;
+            processFloatingCardQueue();
+        });
+    }
+
+    document.body.addEventListener('input', e => {
+        const target = e.target as HTMLElement;
+        const inputEl = target.closest('.question-other-input') as HTMLTextAreaElement | null;
+        if (!inputEl) return;
+        const container = inputEl.closest('.question-wizard-container') as HTMLElement | null;
+        if (container) updateQuestionWizardSubmit(container);
+    });
+
     // ── Dynamic Event Delegation for AI Options ─────────────────────────────────
     document.body.addEventListener('click', e => {
         const target = e.target as HTMLElement;
+        const questionSubmitBtn = target.closest('.question-submit-btn') as HTMLButtonElement | null;
+        if (questionSubmitBtn) {
+            const container = questionSubmitBtn.closest('.question-wizard-container') as HTMLElement | null;
+            if (container) submitQuestionWizard(container);
+            return;
+        }
+
         const btn = target.closest('.ai-option-btn') as HTMLElement;
         if (btn) {
             const text = btn.getAttribute('data-suggest');
@@ -1691,6 +1816,43 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 // Check if this is part of a question-card wizard
                 const card = btn.closest('.question-card') as HTMLElement;
                 if (card) {
+                    const wizardContainer = card.closest('.question-wizard-container') as HTMLElement | null;
+                    if (wizardContainer) {
+                        const optionBtns = Array.from(card.querySelectorAll('.ai-option-btn')) as HTMLElement[];
+                        optionBtns.forEach(optionBtn => {
+                            const selected = optionBtn === btn;
+                            optionBtn.classList.toggle('selected', selected);
+                            optionBtn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+                        });
+                        card.dataset.answer = text;
+                        const otherInput = ensureQuestionOtherInput(card);
+                        const customAnswer = isCustomQuestionAnswer(text);
+                        otherInput.style.display = customAnswer ? 'block' : 'none';
+                        if (customAnswer) {
+                            otherInput.focus();
+                        } else {
+                            otherInput.value = '';
+                        }
+                        updateQuestionWizardSubmit(wizardContainer);
+                        return;
+                    }
+
+                    const inlineQuestionContainer = card.closest('.message.assistant') as HTMLElement | null;
+                    if (inlineQuestionContainer) {
+                        const allCards = questionCardsIn(inlineQuestionContainer);
+                        const cardIndex = Math.max(0, allCards.indexOf(card));
+                        const formattedText = [
+                            tr(
+                                'I answered the clarification question. Please continue using this answer.',
+                                '我已回答澄清问题。请根据这个回答继续。',
+                            ),
+                            '',
+                            `【${questionCardTitle(card, cardIndex)}】: ${text}`,
+                        ].join('\n');
+                        vscode.postMessage({ type: 'sendMessage', text: formattedText });
+                        return;
+                    }
+
                     const container = card.closest('.question-wizard-container') as HTMLElement 
                                    || card.closest('.message.assistant') as HTMLElement;
                     if (container) {
@@ -5004,12 +5166,23 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (allQCards.length > 0) {
                     const wizardDiv = document.createElement('div');
                     wizardDiv.className = 'question-wizard-container';
+                    wizardDiv.innerHTML = `
+                        <div class="question-wizard-header">
+                            <div class="question-wizard-title">${svgIcon('question')}${tr('Clarification questions', '澄清问题')}</div>
+                            <div class="question-wizard-count"></div>
+                        </div>
+                        <div class="question-wizard-list"></div>
+                        <div class="question-wizard-footer">
+                            <button class="question-submit-btn" disabled>${svgIcon('check')}${tr('Submit answers', '提交回答')}</button>
+                        </div>`;
+                    const list = wizardDiv.querySelector('.question-wizard-list') as HTMLElement;
                     allQCards.forEach((c, idx) => {
                         c.parentNode?.removeChild(c);
-                        wizardDiv.appendChild(c);
-                        // Reset display to only show the first one
-                        c.style.display = idx === 0 ? 'block' : 'none';
+                        c.dataset.qindex = String(idx);
+                        c.style.display = 'block';
+                        list.appendChild(c);
                     });
+                    updateQuestionWizardSubmit(wizardDiv);
                     floatingCardQueue.push(wizardDiv);
                     if (!isShowingFloatingCard) processFloatingCardQueue();
                 }

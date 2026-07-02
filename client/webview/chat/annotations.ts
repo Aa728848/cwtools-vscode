@@ -39,6 +39,7 @@ interface AnnotationEntry {
 }
 
 export function createAnnotationCard(options: AnnotationCardOptions): HTMLElement {
+    let currentOptions = options;
     const annotations: AnnotationEntry[] = [];
     const wrap = document.createElement('div');
     wrap.className = `annotatable-plan ${options.className}`;
@@ -84,20 +85,20 @@ export function createAnnotationCard(options: AnnotationCardOptions): HTMLElemen
     });
 
     const updateSubmitBtn = (): void => {
-        submitBtn.innerHTML = submitLabel(options.labels.submit, annotations.length);
+        submitBtn.innerHTML = submitLabel(currentOptions.labels.submit, annotations.length);
         submitBtn.disabled = annotations.length === 0;
     };
 
     approveBtn.addEventListener('click', () => {
-        if (options.approveMessageType) {
-            options.postMessage({
-                ...(options.approvePayload || {}),
-                type: options.approveMessageType,
+        if (currentOptions.approveMessageType) {
+            currentOptions.postMessage({
+                ...(currentOptions.approvePayload || {}),
+                type: currentOptions.approveMessageType,
                 annotations: annotationPayload(annotations),
             });
         }
-        options.onApprove?.(wrap);
-        approveBtn.innerHTML = svgIcon('check') + escapeHtml(options.labels.approved);
+        currentOptions.onApprove?.(wrap);
+        approveBtn.innerHTML = svgIcon('check') + escapeHtml(currentOptions.labels.approved);
         approveBtn.disabled = true;
         submitBtn.disabled = true;
         if (document.body.classList.contains('agent-manager-shell')) {
@@ -105,22 +106,22 @@ export function createAnnotationCard(options: AnnotationCardOptions): HTMLElemen
             header.tabIndex = 0;
             header.setAttribute('role', 'button');
             header.setAttribute('aria-expanded', 'false');
-            if (headerHint) headerHint.textContent = options.labels.approved;
+            if (headerHint) headerHint.textContent = currentOptions.labels.approved;
             return;
         }
-        options.dismissCard(wrap, 400);
+        currentOptions.dismissCard(wrap, 400);
     });
 
     submitBtn.addEventListener('click', () => {
-        if (annotations.length === 0 || !options.reviseMessageType) return;
-        options.postMessage({
-            ...(options.revisePayload || {}),
-            type: options.reviseMessageType,
+        if (annotations.length === 0 || !currentOptions.reviseMessageType) return;
+        currentOptions.postMessage({
+            ...(currentOptions.revisePayload || {}),
+            type: currentOptions.reviseMessageType,
             annotations: annotationPayload(annotations),
         });
-        submitBtn.innerHTML = svgIcon('check') + escapeHtml(options.labels.submitted);
+        submitBtn.innerHTML = svgIcon('check') + escapeHtml(currentOptions.labels.submitted);
         submitBtn.disabled = true;
-        if (options.disableApproveOnSubmit) approveBtn.disabled = true;
+        if (currentOptions.disableApproveOnSubmit) approveBtn.disabled = true;
     });
 
     const sectionsWrap = document.createElement('div');
@@ -138,12 +139,25 @@ export function createAnnotationCard(options: AnnotationCardOptions): HTMLElemen
     renderSections(options.sections, options.labels, options.renderMarkdown);
     wrap.appendChild(sectionsWrap);
     (wrap as HTMLElement & { __cwtoolsUpdateAnnotationCard?: (nextOptions: AnnotationCardOptions) => void }).__cwtoolsUpdateAnnotationCard = (nextOptions: AnnotationCardOptions) => {
+        currentOptions = nextOptions;
+        annotations.length = 0;
         const titleEl = header.querySelector<HTMLElement>('.ap-header-title');
         if (titleEl) titleEl.innerHTML = `${svgIcon(nextOptions.icon as any)}${escapeHtml(nextOptions.labels.title)}`;
-        if (headerHint && !wrap.classList.contains('ap-approved')) {
-            headerHint.textContent = nextOptions.labels.hint;
-        }
+        if (headerHint) headerHint.textContent = nextOptions.labels.hint;
         wrap.className = `annotatable-plan ${nextOptions.className}`;
+        approveBtn.innerHTML = svgIcon(nextOptions.approveIcon as any || 'check') + escapeHtml(nextOptions.labels.approve);
+        approveBtn.disabled = false;
+        submitBtn.innerHTML = submitLabel(nextOptions.labels.submit, 0);
+        submitBtn.disabled = true;
+        if (isManagerCard()) {
+            header.tabIndex = 0;
+            header.setAttribute('role', 'button');
+            header.setAttribute('aria-expanded', 'true');
+        } else {
+            header.removeAttribute('tabindex');
+            header.removeAttribute('role');
+            header.removeAttribute('aria-expanded');
+        }
         renderSections(nextOptions.sections, nextOptions.labels, nextOptions.renderMarkdown);
         updateSubmitBtn();
     };

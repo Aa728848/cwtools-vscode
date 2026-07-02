@@ -117,6 +117,39 @@ describe('webview smoke checks', () => {
         expect(script).to.include('clearTopicWorkspaceState();');
     });
 
+    it('annotation panel reuse resets stale approval state for new plans', () => {
+        const annotations = fs.readFileSync(path.join(root, 'client/webview/chat/annotations.ts'), 'utf8');
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+
+        expect(annotations).to.include('let currentOptions = options;');
+        expect(annotations).to.include('annotations.length = 0;');
+        expect(annotations).to.include('approveBtn.disabled = false;');
+        expect(annotations).to.include('submitBtn.disabled = true;');
+        expect(script).to.not.include('wasApproved');
+        expect(script).to.not.include('approvedButtonHtml');
+    });
+
+    it('question cards batch answers before resuming the agent', () => {
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
+
+        expect(script).to.include('function buildQuestionAnswersMessage');
+        expect(script).to.include("vscode.postMessage({ type: 'sendMessage', text });");
+        expect(script).to.include("c.style.display = 'block';");
+        expect(script).to.include('question-submit-btn');
+        expect(css).to.include('.question-wizard-list');
+        expect(css).to.include('.question-other-input');
+    });
+
+    it('mention replacement can resolve pasted text split across DOM nodes', () => {
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+
+        expect(script).to.include('function getComposerTextBeforeRange');
+        expect(script).to.include('function domPointForComposerTextOffset');
+        expect(script).to.include('textFromComposerNode(before.cloneContents())');
+        expect(script).to.include('triggerRange.setStart(start.node, start.offset);');
+    });
+
     it('release bundle exists and is non-empty after compile', () => {
         const bundlePath = path.join(root, 'release/bin/client/webview/chatPanel.js');
         const stat = fs.statSync(bundlePath);

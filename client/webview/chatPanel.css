@@ -800,7 +800,42 @@ body.chat-empty .composer-menu, body.chat-empty .model-menu { top: calc(100% + 6
 /* ── Floating Card Area ── */
 .floating-card-area { position: fixed; left: 12px; right: 12px; bottom: calc(var(--composer-popup-bottom) + 2px); width: min(calc(100vw - 24px), var(--chat-column-width)); max-width: var(--chat-column-width); margin: 0 auto; display: flex; flex-direction: column; gap: 8px; z-index: 190; pointer-events: none; }
 .floating-card-area:empty { display: none; }
-.question-wizard-container { pointer-events: auto; width: 100%; }
+.question-wizard-container {
+    pointer-events: auto;
+    width: 100%;
+    max-height: min(72vh, 680px);
+    overflow-y: auto;
+    border: 1px solid rgba(100, 149, 237, 0.45);
+    border-radius: 9px;
+    background: var(--bg);
+    box-shadow: 0 16px 36px rgba(0,0,0,0.36);
+}
+.question-wizard-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    background: color-mix(in srgb, var(--bg) 86%, cornflowerblue);
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.question-wizard-title { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 700; }
+.question-wizard-count { font-size: 11px; opacity: 0.68; white-space: nowrap; }
+.question-wizard-list { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+.question-wizard-footer {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    justify-content: flex-end;
+    padding: 9px 10px;
+    background: color-mix(in srgb, var(--bg) 90%, black);
+    border-top: 1px solid rgba(255,255,255,0.07);
+}
+.question-submit-btn { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 5px; padding: 6px 12px; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+.question-submit-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* ── Permission request card ── */
 .permission-card { pointer-events: auto; border: 1px solid rgba(217,160,32,0.78); border-radius: 9px; overflow: hidden; margin: 0; background: color-mix(in srgb, var(--bg) 86%, #2d2614); box-shadow: 0 16px 36px rgba(0,0,0,0.36); }
@@ -851,6 +886,25 @@ body.chat-empty .composer-menu, body.chat-empty .model-menu { top: calc(100% + 6
     background: rgba(100, 149, 237, 0.18) !important;
     border-color: rgba(100, 149, 237, 0.5) !important;
     transform: translateX(2px);
+}
+.question-card .ai-option-btn.selected {
+    background: color-mix(in srgb, var(--vscode-button-background) 26%, transparent) !important;
+    border-color: var(--vscode-button-background) !important;
+}
+.question-other-input {
+    display: none;
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    min-height: 54px;
+    margin-top: 5px;
+    padding: 7px 9px;
+    border-radius: 6px;
+    border: 1px solid rgba(100, 149, 237, 0.35);
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    font-family: var(--vscode-font-family);
+    font-size: 12px;
 }
 @keyframes questionPulse {
     0% { box-shadow: 0 0 0 1px rgba(100,149,237,0.15), 0 4px 16px rgba(0,0,0,0.25); }

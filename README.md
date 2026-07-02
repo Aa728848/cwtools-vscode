@@ -1,6 +1,10 @@
 # Stellaris Language Serves
 
-[English](#english) | [中文](#zh-cn) | [Architecture / 架构文档](ARCHITECTURE.md)
+[English](#english) | [中文](#zh-cn) | [Contribution Guide / 贡献指南](CONTRIBUTING.md) | [Architecture / 架构文档](ARCHITECTURE.md) | [AI Agent Guide](AGENTS.md)
+
+This README is the single bilingual source of truth for the project overview.
+
+本文档是项目介绍的唯一双语事实源。
 
 <a id="english"></a>
 
@@ -56,56 +60,7 @@ A powerful tool for updating mods to new Paradox game patches.
 
 Below is the overall module interaction and data flow topology:
 
-```mermaid
-flowchart LR
-    %% Frontend Sandbox
-    subgraph Webview ["Webview Sandbox Frontend (HTML / JS / Three.js)"]
-        UI["Intelligent Chat & Task Board\nchatPanel.ts"]
-        Canvas["GUI Real-time Canvas Preview\nguiPreview.ts"]
-        TD3D["System/Entity/Particle 3D Rendering\nentityPreview.ts / particlePreview.ts"]
-        Graph["Tech/Event Dependency Topology\ntechTreePreview.ts"]
-    end
-
-    %% VS Code Host
-    subgraph VSCode ["VS Code Extension Host (Extension Host & AI Coprocessor)"]
-        Extension["Activation & Registration\nextension.ts"]
-        GP["Game Profile Registry\ngameProfiles.ts"]
-        IDX["Localisation & Global Index\nIndexService.ts"]
-        AI["Multi-Agent Runner Core\nagentRunner.ts"]
-        Queue["Write Queue with Lock\nPartitionedWriteQueue"]
-    end
-
-    %% .NET Compiler Backend
-    subgraph Backend [".NET 10 / F# Backend"]
-        LSP["LSP Server\nsrc/Main.exe"]
-        Lib["CWTools F# Library\nsubmodules/cwtools"]
-    end
-
-    %% IPC Pipelines
-    UI <-->|postMessage events| Extension
-    Canvas <-->|postMessage events| Extension
-    TD3D <-->|postMessage events| Extension
-    Graph <-->|postMessage events| Extension
-
-    %% Host Internals
-    Extension --> GP
-    Extension --> IDX
-    Extension --> AI
-    AI --> IDX
-    AI --> Queue
-    Queue -->|sequential write lock| IDX
-
-    %% Host <-> LSP
-    Extension <-->|LSP JSON-RPC over stdio| LSP
-    LSP --> Lib
-
-    classDef vscode fill:#1e1e24,stroke:#007acc,stroke-width:2px,color:#fff;
-    classDef webview fill:#2d2d30,stroke:#2b8a3e,stroke-width:2px,color:#fff;
-    classDef backend fill:#171717,stroke:#512bd4,stroke-width:2px,color:#fff;
-    class VSCode,Extension,GP,IDX,AI,Queue vscode;
-    class Webview,UI,Canvas,TD3D,Graph webview;
-    class Backend,LSP,Lib backend;
-```
+![System architecture overview](docs/system-architecture.png)
 
 ---
 
@@ -213,13 +168,31 @@ npm run generate:mcp-schema
 npm run test:contracts
 ```
 
+For CWT rule authoring, see [CWT Rule Configuration Guide](docs/cwt-rule-config.md).
+
+##### Submodules
+This repository uses two submodules with different roles:
+
+- `submodules/cwtools/`: upstream CWTools F# library used by the language server
+  for parsing, validation, game semantics, shader support, and scripted-type
+  refresh behavior.
+- `submodules/cwtools-stellaris-config/`: Stellaris CWT rule configuration data.
+  Rules sync tooling compares it against game `script_documentation` logs and
+  vanilla `common/`; packaging uses its `config/` directory as the fallback
+  rules bundle.
+
 ##### 📦 Extension Packaging
-To package the extension into a cross-platform VSIX file, run this inside the `release/` directory:
+To package the extension into a cross-platform VSIX file, prefer the root scripts:
 ```bash
-npx @vscode/vsce package
+npm run pack         # full package
+npm run pack:install # package and install locally
+npm run pack:quick   # skip server rebuild, package and install locally
 ```
-> [!IMPORTANT]
-> For packaging details, see [.agents/workflows/package.md](file:///c:/Users/A/Documents/cwtools-vscode/.agents/workflows/package.md) or use `package.ps1`.
+
+`npm run build:docs` validates the single-source bilingual docs and builds
+`release/README.md` from this README. For the full packaging workflow, see
+[.agents/workflows/package.md](./.agents/workflows/package.md) or use
+`package.ps1` directly.
 
 ---
 
@@ -400,13 +373,26 @@ npm run generate:mcp-schema  # 从上游工具定义重生成 MCP schema
 npm run test:contracts       # MCP 合约测试（schema 漂移 / 只读 / 路由）
 ```
 
+CWT 规则编写说明见 [CWT 规则配置开发指南](docs/cwt-rule-config.md)。
+
+##### 子模块
+本仓库使用两个职责不同的子模块：
+
+- `submodules/cwtools/`：上游 CWTools F# 库，供语言服务器复用解析、校验、游戏语义、Shader 支持和 scripted type 增量刷新等能力。
+- `submodules/cwtools-stellaris-config/`：Stellaris CWT 规则配置数据。规则同步工具会把它与游戏 `script_documentation` 日志和原版 `common/` 对比；打包时使用其中的 `config/` 目录作为 fallback 规则包来源。
+
 ##### 📦 插件打包
-如需将插件打包为跨平台的通用发布版本，请在 `release/` 目录中运行：
+如需将插件打包为跨平台的通用发布版本，优先在根目录使用脚本：
 ```bash
-npx @vscode/vsce package
+npm run pack         # 完整打包
+npm run pack:install # 打包并安装到本机 VS Code
+npm run pack:quick   # 跳过服务端重编译，快速打包并安装
 ```
-> [!IMPORTANT]
-> 打包具体步骤请参阅 [.agents/workflows/package.md](file:///c:/Users/A/Documents/cwtools-vscode/.agents/workflows/package.md)，也可以使用 `package.ps1` 进行打包。
+
+`npm run build:docs` 会校验单一双语主文档，并从本 README 生成
+`release/README.md`。完整打包流程见
+[.agents/workflows/package.md](./.agents/workflows/package.md)，也可以直接使用
+`package.ps1`。
 
 ---
 

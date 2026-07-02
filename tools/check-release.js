@@ -131,7 +131,7 @@ check('Release README includes English and Chinese overview sections', () => {
         && readme.includes('## 中文');
 });
 
-check('GitHub README and architecture docs are bilingual and up to date', () => {
+check('Single-source bilingual docs are valid', () => {
     try {
         execSync('node tools/build-github-docs.js --check', { cwd: ROOT, stdio: 'pipe', timeout: 30000 });
         return true;

@@ -1,6 +1,22 @@
 # Architecture / 架构文档
 
-[English](#english) | [中文](#zh-cn) | [Project Overview / 项目介绍](README.md)
+[English](#english) | [中文](#zh-cn) | [Project Overview / 项目介绍](README.md) | [Contribution Guide / 贡献指南](CONTRIBUTING.md) | [AI Agent Guide](AGENTS.md)
+
+This file is the bilingual architecture entry point. Keep architectural
+background, module boundaries, data flow, and long-lived design constraints here.
+Operational checklists for AI agents belong in `AGENTS.md`; human setup,
+debugging, PR, and packaging workflow belongs in `CONTRIBUTING.md`.
+
+When changing architecture documentation, avoid maintaining the same fact in many
+places. This file is the single bilingual source of truth; language-specific
+architecture copies are intentionally not maintained.
+
+本文档是双语架构入口。架构背景、模块边界、数据流和长期设计约束放在这里；
+AI Agent 操作清单放在 `AGENTS.md`；贡献者环境、调试、PR 和打包流程放在
+`CONTRIBUTING.md`。
+
+更新架构文档时，尽量避免在多处重复维护同一事实。本文档是唯一双语事实源；
+不再维护单语架构副本。
 
 <a id="english"></a>
 
@@ -14,7 +30,8 @@ Version numbers are not maintained redundantly here. The sources of truth are `p
 
 #### Overall Structure
 
-The system is composed of four runtime layers and two shared platform capabilities:
+The system is composed of four runtime layers, two shared platform capabilities,
+and two submodule data/code sources:
 
 1. VS Code Extension Host: `client/extension/`
 2. AI Agent Subsystem: `client/extension/ai/`
@@ -22,6 +39,7 @@ The system is composed of four runtime layers and two shared platform capabiliti
 4. .NET/F# Language Server: `src/LSP/` and `src/Main/`
 5. Shared Platform Capabilities: `client/extension/gameProfiles.ts` and `client/extension/indexing/`
 6. Out-of-the-Box MCP Server: `packages/cwtools-shared/` and `packages/cwtools-mcp/` (a read-only semantic service bundled with the extension for external agents like Codex or Claude Code, see the "Out-of-the-Box MCP Server" section)
+7. Submodules: `submodules/cwtools/` for the upstream F# library and `submodules/cwtools-stellaris-config/` for Stellaris CWT rules/config data
 
 ```mermaid
 flowchart TD
@@ -32,6 +50,7 @@ flowchart TD
     WV["Webview Sandbox\nclient/webview"]
     LSP["CWTools Server\nsrc/Main + src/LSP"]
     CW["CWTools F# library\nsubmodules/cwtools"]
+    RULES["Stellaris CWT rules\nsubmodules/cwtools-stellaris-config"]
     MCP["MCP Server (read-only)\npackages/cwtools-mcp"]
     EXT["External Agents\nCodex / Claude Code"]
 
@@ -42,6 +61,7 @@ flowchart TD
     VS <-->|LSP JSON-RPC over stdio| LSP
     AI --> IDX
     LSP --> CW
+    LSP --> RULES
     EXT <-->|MCP stdio| MCP
     MCP -->|spawns / LSP JSON-RPC| LSP
 ```
@@ -98,6 +118,20 @@ The extension entry point, indexing layer, and AI game knowledge should prioriti
 - The AI consumes these indexes via `query_localisation_index` and `query_workspace_index`.
 
 The core constraint of this layer is: if the shared index can answer the query, do not force consumers to scan the workspace again.
+
+#### Submodules
+
+The repository depends on two submodules with different responsibilities:
+
+| Submodule | Role |
+| --- | --- |
+| `submodules/cwtools/` | Upstream CWTools F# library. The language server depends on it for parsing, validation, game model semantics, shader analysis, and scripted-type refresh behavior. |
+| `submodules/cwtools-stellaris-config/` | Stellaris CWT rule/config data. Rules sync tooling compares it with game `script_documentation` logs and vanilla `common/`; packaging zips its `config/` directory into the fallback rules bundle. |
+
+The first submodule is executable/library semantics; the second is rules data.
+Keep that distinction visible in commits and PR descriptions.
+
+For practical rule authoring guidance, see `docs/cwt-rule-config.md`.
 
 #### AI Agent Subsystem
 
@@ -361,7 +395,7 @@ cwtools-vscode/
 
 #### 总体结构
 
-系统由四个运行层和两个共享平台能力组成：
+系统由四个运行层、两个共享平台能力和两个子模块代码/数据源组成：
 
 1. VS Code Extension Host：`client/extension/`
 2. AI Agent 子系统：`client/extension/ai/`
@@ -369,6 +403,7 @@ cwtools-vscode/
 4. .NET/F# 语言服务器：`src/LSP/` 与 `src/Main/`
 5. 共享平台能力：`client/extension/gameProfiles.ts` 与 `client/extension/indexing/`
 6. 通用 MCP 服务：`packages/cwtools-shared/` 与 `packages/cwtools-mcp/`（随插件分发的只读语义服务，供 Codex / Claude Code 等外部 Agent 调用，见「通用 MCP 服务」一节）
+7. 子模块：`submodules/cwtools/` 提供上游 F# 库，`submodules/cwtools-stellaris-config/` 提供 Stellaris CWT 规则/配置数据
 
 ```mermaid
 flowchart TD
@@ -379,6 +414,7 @@ flowchart TD
     WV["Webview Sandbox\nclient/webview"]
     LSP["CWTools Server\nsrc/Main + src/LSP"]
     CW["CWTools F# library\nsubmodules/cwtools"]
+    RULES["Stellaris CWT rules\nsubmodules/cwtools-stellaris-config"]
     MCP["MCP Server (read-only)\npackages/cwtools-mcp"]
     EXT["External Agents\nCodex / Claude Code"]
 
@@ -389,6 +425,7 @@ flowchart TD
     VS <-->|LSP JSON-RPC over stdio| LSP
     AI --> IDX
     LSP --> CW
+    LSP --> RULES
     EXT <-->|MCP stdio| MCP
     MCP -->|spawns / LSP JSON-RPC| LSP
 ```
@@ -445,6 +482,19 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 - AI 通过 `query_localisation_index` 和 `query_workspace_index` 消费共享索引。
 
 该层的核心约束是：当共享索引能回答问题时，不要让每个消费者各自重新扫描工作区。
+
+#### 子模块
+
+仓库依赖两个职责不同的子模块：
+
+| 子模块 | 作用 |
+| --- | --- |
+| `submodules/cwtools/` | 上游 CWTools F# 库。语言服务器依赖它完成解析、校验、游戏模型语义、Shader 分析和 scripted type 刷新行为。 |
+| `submodules/cwtools-stellaris-config/` | Stellaris CWT 规则/配置数据。规则同步工具会把它与游戏 `script_documentation` 日志和原版 `common/` 对比；打包时会将其中的 `config/` 目录压缩为 fallback 规则包。 |
+
+前者是可执行/库语义，后者是规则数据。提交和 PR 说明中应保持这个边界清晰。
+
+实际编写规则时，请参阅 `docs/cwt-rule-config.md`。
 
 #### AI Agent 子系统
 
@@ -793,6 +843,7 @@ Webview 维护规则：
 | `src/Languages/` | 本地化资源 |
 | `src/CSharpExtensions/` | C# 辅助扩展 |
 | `submodules/cwtools/` | 上游 CWTools F# 库子模块 |
+| `submodules/cwtools-stellaris-config/` | Stellaris CWT 规则配置数据子模块 |
 
 `src/Main/Main.fsproj` 默认引用 `submodules/cwtools/CWTools/CWTools.fsproj`。如需使用本地 CWTools，可在 `src/Main/cwtools.local.props` 中设置 `UseLocalCwtools=True` 和 `CwtoolsPath`。项目使用 `RuntimeIdentifiers`（复数）声明 `win-x64`/`linux-x64`/`osx-x64`，无 RID 的普通 `dotnet build` 也能成功；文件系统比较按平台条件化（仅 Windows 用 `OrdinalIgnoreCase`）。
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Build the VSIX overview README.
+ * Build the VSIX overview README from the root bilingual README.md.
  *
  * VS Code renders a single README.md in the extension details page, while
- * package.nls*.json only localizes manifest contribution strings. Keep the
- * packaged overview bilingual by composing the English and Chinese root docs.
+ * package.nls*.json only localizes manifest contribution strings. The root
+ * README.md is the single bilingual source of truth.
  */
 
 const fs = require('fs');
@@ -12,57 +12,57 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const releaseDir = path.join(root, 'release');
-const readmeEnPath = path.join(root, 'README_EN.md');
-const readmeZhPath = path.join(root, 'README_ZH.md');
+const sourceReadmePath = path.join(root, 'README.md');
 const releaseReadmePath = path.join(releaseDir, 'README.md');
+
+function normalize(markdown) {
+    return markdown.replace(/\r\n/g, '\n').trimEnd() + '\n';
+}
 
 function readRequired(filePath) {
     if (!fs.existsSync(filePath)) {
         throw new Error(`Required README source not found: ${path.relative(root, filePath)}`);
     }
-    return fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
+    return normalize(fs.readFileSync(filePath, 'utf8'));
 }
 
-function demoteHeadings(markdown) {
-    let inFence = false;
-    return markdown
-        .split('\n')
-        .map(line => {
-            if (/^\s*```/.test(line)) {
-                inFence = !inFence;
-                return line;
-            }
-            if (!inFence && /^(#{1,5})(\s+)/.test(line)) {
-                return line.replace(/^(#{1,5})(\s+)/, '#$1$2');
-            }
-            return line;
-        })
-        .join('\n')
-        .trim();
+function validateBilingualReadme(markdown) {
+    for (const marker of ['<a id="english"></a>', '<a id="zh-cn"></a>', '## English', '## 中文']) {
+        if (!markdown.includes(marker)) {
+            throw new Error(`README.md is missing bilingual marker: ${marker}`);
+        }
+    }
 }
 
-const english = demoteHeadings(readRequired(readmeEnPath));
-const chinese = demoteHeadings(readRequired(readmeZhPath));
+function marketplaceReadme(markdown) {
+    let output = markdown;
 
-const output = `# Stellaris Language Serves
+    output = output.replace(
+        /^\[English\]\(#english\).*$/m,
+        '[English](#english) | [中文](#zh-cn)'
+    );
 
-[English](#english) | [中文](#zh-cn)
+    output = output.replaceAll(
+        '[packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md)',
+        '[packages/cwtools-mcp/README.md](https://github.com/Aa728848/cwtools-vscode/blob/master/packages/cwtools-mcp/README.md)'
+    );
 
-<a id="english"></a>
+    output = output.replaceAll(
+        '[.agents/workflows/package.md](./.agents/workflows/package.md)',
+        '[.agents/workflows/package.md](https://github.com/Aa728848/cwtools-vscode/blob/master/.agents/workflows/package.md)'
+    );
 
-## English
+    output = output.replaceAll(
+        '(docs/cwt-rule-config.md)',
+        '(https://github.com/Aa728848/cwtools-vscode/blob/master/docs/cwt-rule-config.md)'
+    );
 
-${english}
+    return normalize(output);
+}
 
----
-
-<a id="zh-cn"></a>
-
-## 中文
-
-${chinese}
-`;
+const source = readRequired(sourceReadmePath);
+validateBilingualReadme(source);
 
 fs.mkdirSync(releaseDir, { recursive: true });
-fs.writeFileSync(releaseReadmePath, output.replace(/\n/g, '\r\n'), 'utf8');
-console.log(`Built bilingual release README: ${path.relative(root, releaseReadmePath)}`);
+fs.writeFileSync(releaseReadmePath, marketplaceReadme(source).replace(/\n/g, '\r\n'), 'utf8');
+console.log(`Built release README from root README.md: ${path.relative(root, releaseReadmePath)}`);

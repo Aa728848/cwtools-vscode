@@ -1474,6 +1474,34 @@ export async function activate(context: ExtensionContext) {
 	context.subscriptions.push(workspace.onDidChangeTextDocument(e => {
 		toolExecutor.invalidateCacheForFile(e.document.uri.fsPath);
 	}));
+	// Backspacing never auto-triggers completion in VS Code (only typed word characters do),
+	// so a mistyped character inside an @variable token would dead-end the suggestion list.
+	// Re-open it when a small deletion leaves the cursor inside an @token. Similarly, typing
+	// the space in `key = ` never triggers either, so value suggestions (parameter values,
+	// enums) would only appear via Ctrl+Space — pull the list up when a space lands after '='.
+	context.subscriptions.push(workspace.onDidChangeTextDocument(e => {
+		if (e.contentChanges.length !== 1) return;
+		const change = e.contentChanges[0];
+		if (!change) return;
+		const isSmallDeletion = change.text === '' && change.rangeLength >= 1 && change.rangeLength <= 2;
+		const isSpaceInsert = change.text === ' ' && change.rangeLength === 0;
+		if (!isSmallDeletion && !isSpaceInsert) return;
+		if (!gameLanguages.includes(e.document.languageId)) return;
+		const pos = change.range.start;
+		setTimeout(() => {
+			const editor = vs.window.activeTextEditor;
+			if (!editor || editor.document !== e.document) return;
+			const cursor = editor.selection.active;
+			if (cursor.line !== pos.line) return;
+			const textBefore = editor.document.lineAt(cursor.line).text.substring(0, cursor.character);
+			const shouldTrigger = isSmallDeletion
+				? /@[A-Za-z0-9_]*$/.test(textBefore)
+				: /=\s+$/.test(textBefore);
+			if (shouldTrigger) {
+				void vs.commands.executeCommand('editor.action.triggerSuggest');
+			}
+		}, 0);
+	}));
 	// Fix #8: reuse shared gameLanguages instead of duplicate gameLanguages2
 	const docSelector2 = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
 	const inlineProvider = new AIInlineCompletionProvider(aiService, promptBuilder, usageTracker);

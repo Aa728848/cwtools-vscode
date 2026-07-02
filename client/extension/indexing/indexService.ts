@@ -144,13 +144,10 @@ export class IndexService implements vscode.Disposable {
 			this._fileWatcher.onDidDelete(uri => this._onFileDeleted(uri));
 			this._disposables.push(this._fileWatcher);
 
-			this._symbolFileWatcher = vscode.workspace.createFileSystemWatcher(
-				'**/*.{txt,gfx,asset,gui}'
-			);
-			this._symbolFileWatcher.onDidChange(uri => this._onFileChanged(uri));
-			this._symbolFileWatcher.onDidCreate(uri => this._onFileChanged(uri));
-			this._symbolFileWatcher.onDidDelete(uri => this._onFileDeleted(uri));
-			this._disposables.push(this._symbolFileWatcher);
+			// The broad symbol watcher (**/*.{txt,gfx,asset,gui}) is created lazily together
+			// with the symbol index (see _ensureSymbolFileWatcher): while the index is not
+			// built its events are no-ops anyway, and keeping the workspace-wide watcher
+			// alive costs the file-watcher host on every save.
 
 			// Keep activation lightweight. Localisation powers editor hovers/definitions,
 			// while the heavier workspace/vanilla symbol index is built lazily by AI tools.
@@ -202,6 +199,8 @@ export class IndexService implements vscode.Disposable {
 			}
 		}
 
+		// Start watching before the scan so changes made during the build are not missed.
+		this._ensureSymbolFileWatcher();
 		this._workspaceSymbolBuildPromise = this._buildWorkspaceSymbolIndex(includeVanilla);
 		try {
 			await this._workspaceSymbolBuildPromise;
@@ -464,6 +463,22 @@ export class IndexService implements vscode.Disposable {
 		this.removeFile(uri);
 	}
 
+	/** Create the broad symbol watcher on demand; lives only while the symbol index does. */
+	private _ensureSymbolFileWatcher(): void {
+		if (this._symbolFileWatcher) return;
+		this._symbolFileWatcher = vscode.workspace.createFileSystemWatcher(
+			'**/*.{txt,gfx,asset,gui}'
+		);
+		this._symbolFileWatcher.onDidChange(uri => this._onFileChanged(uri));
+		this._symbolFileWatcher.onDidCreate(uri => this._onFileChanged(uri));
+		this._symbolFileWatcher.onDidDelete(uri => this._onFileDeleted(uri));
+	}
+
+	private _disposeSymbolFileWatcher(): void {
+		this._symbolFileWatcher?.dispose();
+		this._symbolFileWatcher = undefined;
+	}
+
 	/**
 	 * Batch pending file changes and process them after a debounce window.
 	 * Multiple rapid saves/changes to different files are coalesced.
@@ -537,6 +552,7 @@ export class IndexService implements vscode.Disposable {
 		this._workspaceSymbolFileVersions.clear();
 		this._workspaceSymbolStatus = 'idle';
 		this._workspaceSymbolsIncludeVanilla = false;
+		this._disposeSymbolFileWatcher();
 		ErrorReporter.debug(
 			'IndexService',
 			`Evicted ${evictedSymbols} workspace symbols after ${Math.round(idleMs / 1000)}s idle`
@@ -548,6 +564,7 @@ export class IndexService implements vscode.Disposable {
 	dispose(): void {
 		if (this._debounceTimer) clearTimeout(this._debounceTimer);
 		if (this._idleEvictionTimer) clearTimeout(this._idleEvictionTimer);
+		this._disposeSymbolFileWatcher();
 		for (const d of this._disposables) {
 			d.dispose();
 		}

@@ -137,6 +137,206 @@ let private tryGetScriptValueMacroParams (game: IGame) (docs: DocumentStore) (fi
 
                     if values.IsEmpty then None else Some values)))
 
+// ─── Parameter value completion ──────────────────────────────────────────────
+// When the cursor sits at `PARAM = <cursor>` inside a call to a scripted
+// effect/trigger/value or inline_script, proxy the completion request to the
+// `field = $PARAM$` usage site inside the definition. The rules engine then
+// supplies exactly the values valid for that slot, including scope handling.
+
+let private paramValueContextPattern =
+    System.Text.RegularExpressions.Regex(
+        @"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*""?[^\s""={}]*$",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private inlineScriptPathPattern =
+    System.Text.RegularExpressions.Regex(
+        @"\bscript\s*=\s*""?([\w\./\-]+)",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private absoluteOffsetOf (text: string) (position: pos) =
+    let mutable idx = 0
+    let mutable currentLine = 0
+    while currentLine < position.Line - 1 && idx < text.Length do
+        if text.[idx] = '\n' then currentLine <- currentLine + 1
+        idx <- idx + 1
+    Math.Min(idx + Math.Max(0, position.Column), text.Length)
+
+let private lineColOfOffset (text: string) (offset: int) =
+    let mutable line = 0
+    let mutable lineStart = 0
+    for i in 0 .. offset - 1 do
+        if text.[i] = '\n' then
+            line <- line + 1
+            lineStart <- i + 1
+    struct (line, offset - lineStart)
+
+/// Best-effort backwards scan to the innermost unmatched '{'; returns the clause key
+/// before it and the brace offset. Strings/comments are not tracked, which is
+/// acceptable for PDX script where braces inside strings are rare.
+let private tryFindEnclosingCall (text: string) (fromOffset: int) =
+    let mutable depth = 0
+    let mutable i = fromOffset - 1
+    let mutable braceIdx = -1
+    while braceIdx < 0 && i >= 0 do
+        (match text.[i] with
+         | '}' -> depth <- depth + 1
+         | '{' -> if depth = 0 then braceIdx <- i else depth <- depth - 1
+         | _ -> ())
+        i <- i - 1
+    if braceIdx < 0 then None
+    else
+        let mutable j = braceIdx - 1
+        while j >= 0 && Char.IsWhiteSpace text.[j] do j <- j - 1
+        if j < 0 || text.[j] <> '=' then None
+        else
+            j <- j - 1
+            while j >= 0 && Char.IsWhiteSpace text.[j] do j <- j - 1
+            let keyEnd = j
+            let isKeyChar c =
+                Char.IsLetterOrDigit c || c = '_' || c = '.' || c = ':' || c = '@' || c = '-'
+            while j >= 0 && isKeyChar text.[j] do j <- j - 1
+            if keyEnd > j then Some(text.Substring(j + 1, keyEnd - j), braceIdx) else None
+
+let private tryFindParamDefinitionFile (game: IGame) (callKey: string) (text: string) (braceOffset: int) =
+    if callKey.Equals("inline_script", StringComparison.OrdinalIgnoreCase) then
+        // Resolve the inline script's definition file from its `script = <path>` field.
+        let blockEnd =
+            let mutable depth = 0
+            let mutable i = braceOffset
+            let mutable e = -1
+            while e < 0 && i < text.Length do
+                (match text.[i] with
+                 | '{' -> depth <- depth + 1
+                 | '}' ->
+                     depth <- depth - 1
+                     if depth = 0 then e <- i
+                 | _ -> ())
+                i <- i + 1
+            if e < 0 then text.Length else e
+
+        let blockText = text.Substring(braceOffset, blockEnd - braceOffset)
+        let m = inlineScriptPathPattern.Match(blockText)
+        if not m.Success then None
+        else
+            let rel = "common/inline_scripts/" + m.Groups.[1].Value.Replace('\\', '/') + ".txt"
+            game.AllFiles()
+            |> List.tryPick (fun r ->
+                match r with
+                | EntityResource(f, e) when
+                    e.logicalpath.Replace('\\', '/').EndsWith(rel, StringComparison.OrdinalIgnoreCase)
+                    ->
+                    Some f
+                | _ -> None)
+    else
+        let types = game.Types()
+
+        [ "scripted_effect"; "scripted_trigger"; "script_value" ]
+        |> List.tryPick (fun typeName ->
+            types
+            |> Map.tryFind typeName
+            |> Option.bind (fun defs ->
+                defs
+                |> Array.tryFind (fun t -> String.Equals(t.id, callKey, StringComparison.OrdinalIgnoreCase)))
+            |> Option.map (fun t -> t.range.FileName))
+
+/// Find the first `field = $PARAM$` (or `$PARAM|default$`) usage in the definition text;
+/// returns a pos inside the value token plus the declared default value, if any.
+let private tryFindParamValueUsage (defText: string) (paramKey: string) =
+    let pattern =
+        "=\\s*\"?\\$" + System.Text.RegularExpressions.Regex.Escape(paramKey) + "(\\|[^$\\r\\n]*)?\\$"
+
+    let m =
+        System.Text.RegularExpressions.Regex.Match(
+            defText,
+            pattern,
+            System.Text.RegularExpressions.RegexOptions.None)
+
+    if not m.Success then None
+    else
+        let dollarIdx = defText.IndexOf('$', m.Index)
+        let struct (line0, col0) = lineColOfOffset defText dollarIdx
+
+        let defaultValue =
+            if m.Groups.[1].Success then Some(m.Groups.[1].Value.TrimStart('|')) else None
+
+        Some(PosHelper.fromZ line0 (col0 + 1), defaultValue)
+
+let private paramValueMaxItems = 5000
+
+let private tryGetParameterValueCompletion (game: IGame) (docs: DocumentStore) (filetext: string) (position: pos) =
+    try
+        let textBeforeCursor = getTextBeforeCursor filetext position
+        let contextMatch = paramValueContextPattern.Match(textBeforeCursor)
+
+        if not contextMatch.Success then None
+        else
+            let paramKey = contextMatch.Groups.[1].Value
+            let cursorOff = absoluteOffsetOf filetext position
+
+            match tryFindEnclosingCall filetext cursorOff with
+            | None -> None
+            | Some(callKey, braceOffset) ->
+                match tryFindParamDefinitionFile game callKey filetext braceOffset with
+                | None -> None
+                | Some defFile ->
+                    tryReadTypeFileText docs defFile
+                    |> Option.bind (fun defText ->
+                        tryFindParamValueUsage defText paramKey
+                        |> Option.bind (fun (defPos, defaultValue) ->
+                            let responses = game.Complete defPos defFile defText
+
+                            let toKind (c: CompletionCategory) =
+                                match c with
+                                | CompletionCategory.Link -> CompletionItemKind.Method
+                                | CompletionCategory.Value -> CompletionItemKind.Value
+                                | CompletionCategory.Global -> CompletionItemKind.Constant
+                                | CompletionCategory.Variable -> CompletionItemKind.Variable
+                                | _ -> CompletionItemKind.Value
+
+                            let seen = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                            let items = ResizeArray<CompletionItem>()
+
+                            match defaultValue with
+                            | Some dv when dv <> "" && seen.Add dv ->
+                                items.Add
+                                    { defaultCompletionItem with
+                                        label = dv
+                                        kind = Some CompletionItemKind.Value
+                                        sortText = Some "0000000"
+                                        documentation =
+                                            Some
+                                                { kind = MarkupKind.Markdown
+                                                  value = $"Default value of `${paramKey}$`" } }
+                            | _ -> ()
+
+                            for resp in responses do
+                                if items.Count < paramValueMaxItems then
+                                    let label, desc, kind =
+                                        match resp with
+                                        | CompletionResponse.Simple(l, _, k) -> l, None, k
+                                        | CompletionResponse.Detailed(l, d, _, k) -> l, d, k
+                                        | CompletionResponse.Snippet(l, _, d, _, k) -> l, d, k
+
+                                    if
+                                        label <> ""
+                                        && not (label.StartsWith("$", StringComparison.Ordinal))
+                                        && seen.Add label
+                                    then
+                                        items.Add
+                                            { defaultCompletionItem with
+                                                label = label
+                                                kind = Some(toKind kind)
+                                                insertText =
+                                                    if label.Contains ' ' then Some $"\"{label}\"" else None
+                                                documentation =
+                                                    desc
+                                                    |> Option.map (fun d ->
+                                                        { kind = MarkupKind.Markdown; value = d }) }
+
+                            if items.Count = 0 then None else Some(List.ofSeq items)))
+    with _ ->
+        None
+
 let private completionPrefixFromTextBeforeCursor (textBeforeCursor: string) =
     let boundary = textBeforeCursor.LastIndexOfAny(completionPrefixBoundaries)
     let token =
@@ -459,8 +659,29 @@ let checkPartialCompletionCache (p: CompletionParams) (filetext: string) genItem
         | _ -> false
 
     if isIncompleteRetry then
+        // Incomplete-list retries fire while the user extends the same token, so the raw
+        // candidate set for the slot is unchanged — match on (uri, line) only and let the
+        // caller re-filter by the longer prefix instead of recomputing the candidates.
         match lock completionPartialCacheLock (fun () -> completionPartialCache) with
-        | Some(cachedKey, cachedItems) when cachedKey = key -> cachedItems :> seq<_>
+        | Some(cachedKey, cachedItems) when cachedKey.uri = key.uri && cachedKey.line = key.line ->
+            // Cached items carry textEdit ranges anchored at the original request's cursor;
+            // re-anchor them to the current cursor or VS Code rejects the items and closes
+            // the completion list after a couple of keystrokes.
+            let insertRange, replaceRange =
+                computeCompletionRanges filetext (p.position.line + 1) p.position.character
+
+            cachedItems
+            |> List.map (fun item ->
+                match item.textEdit with
+                | Some te ->
+                    { item with
+                        textEdit =
+                            Some
+                                { te with
+                                    insert = insertRange
+                                    replace = replaceRange } }
+                | None -> item)
+            :> seq<_>
         | _ ->
             let items = genItems () |> Seq.toList
             lock completionPartialCacheLock (fun () -> completionPartialCache <- Some(key, items))
@@ -698,15 +919,36 @@ let completion
                 logInfo $"completion script-value params time %i{stopwatch.ElapsedMilliseconds}ms"
                 Some { isIncomplete = false; items = paramItems }
             | None ->
+                // Parameter / inline_script value completion: when the cursor is at
+                // `PARAM = <cursor>` inside a call, proxy to the definition's `$PARAM$` slot.
+                let paramValueItems = tryGetParameterValueCompletion game docs filetext position
+
+                if paramValueItems.IsSome then
+                    logInfo $"completion param-value time %i{stopwatch.ElapsedMilliseconds}ms"
+
+                    Some
+                        { isIncomplete = false
+                          items = paramValueItems.Value }
+                else
+
                 // Normal (non-script_value) completion path
                 let items = getRawItems () |> Seq.toArray
                 logInfo $"completion items time %i{stopwatch.ElapsedMilliseconds}ms"
 
                 let prefixSoFar = completionPrefixFromTextBeforeCursor textBeforeCursor
 
+                // '@' scripted-variable tokens: always narrow server-side and mark the list
+                // incomplete so each keystroke re-requests. VS Code's client-side fuzzy filter
+                // matches scattered characters inside long variable names, so large @-variable
+                // sets never visibly narrow without server-side prefix filtering.
+                let atVariableToken =
+                    match prefixSoFar with
+                    | Some p -> p.StartsWith("@", StringComparison.Ordinal)
+                    | None -> false
+
                 // Single-pass: materialize once, then dedup + filter + count in one pass
                 let itemCount = items.Length
-                let partialReturn = itemCount > 2000
+                let partialReturn = itemCount > 2000 || atVariableToken
 
                 // Single-pass dedup + filter using HashSet
                 let seen = HashSet<struct (string * MarkupContent option)>()
@@ -727,6 +969,21 @@ let completion
                             let key = struct (item.label, item.documentation)
                             if seen.Add(key) then
                                 dedupedItems.Add(item)
+
+                // '@' token with no prefix match (typo): keep the widget alive by returning
+                // the full variable list with filterText pinned to the typed token, so VS Code
+                // does not dismiss the list — backspacing then resumes narrowing normally.
+                if atVariableToken && dedupedItems.Count = 0 then
+                    let typedToken = prefixSoFar |> Option.defaultValue "@"
+
+                    for i in 0 .. items.Length - 1 do
+                        let item = items.[i]
+
+                        if item.label.StartsWith("@", StringComparison.Ordinal) then
+                            let key = struct (item.label, item.documentation)
+
+                            if seen.Add(key) then
+                                dedupedItems.Add { item with filterText = Some typedToken }
 
                 let optimised = optimiseCompletion dedupedItems
                 let itemsList = optimised |> Seq.toList

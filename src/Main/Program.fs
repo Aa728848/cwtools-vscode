@@ -2493,6 +2493,56 @@ type Server(client: ILanguageClient) =
             |> Array.toList)
         |> List.distinct
 
+    /// Top-level assignment keys of a PDX file, lowercased and sorted. In the scripted
+    /// dirs these are exactly the definition names, so comparing this signature against
+    /// the type index detects whether an edit actually changed the definition set —
+    /// body-only edits can then skip the incremental type refresh entirely.
+    let topLevelDefinitionKeySignature (text: string) =
+        let keys = ResizeArray<string>()
+        let mutable depth = 0
+        let mutable i = 0
+        let n = text.Length
+
+        while i < n do
+            let c = text.[i]
+
+            if c = '#' then
+                while i < n && text.[i] <> '\n' do
+                    i <- i + 1
+            elif c = '"' then
+                i <- i + 1
+                while i < n && text.[i] <> '"' && text.[i] <> '\n' do
+                    i <- i + 1
+                i <- i + 1
+            elif c = '{' then
+                depth <- depth + 1
+                i <- i + 1
+            elif c = '}' then
+                depth <- max 0 (depth - 1)
+                i <- i + 1
+            elif depth = 0 && (Char.IsLetter c || c = '_') then
+                let start = i
+
+                while i < n
+                      && (Char.IsLetterOrDigit text.[i]
+                          || text.[i] = '_'
+                          || text.[i] = '.'
+                          || text.[i] = ':') do
+                    i <- i + 1
+
+                let token = text.Substring(start, i - start)
+                let mutable j = i
+
+                while j < n && (text.[j] = ' ' || text.[j] = '\t') do
+                    j <- j + 1
+
+                if j < n && text.[j] = '=' then
+                    keys.Add(token.ToLowerInvariant())
+            else
+                i <- i + 1
+
+        keys |> Seq.sort |> List.ofSeq
+
     let scriptedDefinitionsForFiles (game: IGame) (files: string list) =
         typeDefinitionsForFiles game files
         |> List.filter (fun (typeName, _) -> scriptedTypeKeys |> List.contains typeName)
@@ -2707,21 +2757,59 @@ type Server(client: ILanguageClient) =
                 | Some game ->
                     let allocBeforeUpdate = GC.GetTotalAllocatedBytes(false)
 
+                    // In the incremental scripted pipeline the deep validation pass runs
+                    // post-commit under the READ lock, so the write-locked first pass only
+                    // needs the shallow update — this keeps save-time write locks short.
+                    let deferDeepValidation =
+                        canTryIncrementalTypeRefresh && not fastDefinitionIndex
+
+                    // Body-only edits keep the definition set identical; the type index and
+                    // the service rebuild behind it only matter when a definition is added,
+                    // removed, or renamed. Saves (deep lint) always run the full pipeline.
+                    let newDefinitionSignature =
+                        if canTryIncrementalTypeRefresh && shallowAnalyze then
+                            filetext |> Option.map topLevelDefinitionKeySignature
+                        else
+                            None
+
                     gameStateLock.EnterWriteLock()
-                    let updateErrors, priorCallFiles, gameRefAtUpdate =
+                    let updateErrors, priorCallFiles, skipIncrementalRefresh, gameRefAtUpdate =
                         try
-                            let prior =
+                            let priorDefs =
                                 if canTryIncrementalTypeRefresh then
-                                    referenceFilesForDefinitions game (typeDefinitionsForFiles game [ name ])
+                                    typeDefinitionsForFiles game [ name ]
                                 else
                                     []
-                            let errs = game.UpdateFile shallowAnalyze name filetext
-                            errs, prior, (match gameObj with Some g -> g | None -> game)
+
+                            let skip =
+                                match newDefinitionSignature with
+                                | Some newSignature ->
+                                    let priorSignature =
+                                        priorDefs
+                                        |> List.filter (fun (typeName, _) ->
+                                            scriptedTypeKeys |> List.contains typeName)
+                                        |> List.map (fun (_, id) -> id.ToLowerInvariant())
+                                        |> List.sort
+
+                                    newSignature = priorSignature
+                                | None -> false
+
+                            let prior =
+                                if canTryIncrementalTypeRefresh && not skip then
+                                    referenceFilesForDefinitions game priorDefs
+                                else
+                                    []
+
+                            let errs = game.UpdateFile (shallowAnalyze || deferDeepValidation) name filetext
+                            errs, prior, skip, (match gameObj with Some g -> g | None -> game)
                         finally
                             gameStateLock.ExitWriteLock()
 
+                    if skipIncrementalRefresh then
+                        monitorLog Refresh $"RefreshIncrementalTypes skipped (definitions unchanged) file={name}"
+
                     let staged =
-                        if canTryIncrementalTypeRefresh then
+                        if canTryIncrementalTypeRefresh && not skipIncrementalRefresh then
                             gameStateLock.EnterReadLock()
                             try
                                 try game.PrepareScriptedTypes [ name ]
@@ -2734,7 +2822,7 @@ type Server(client: ILanguageClient) =
                             None
 
                     let mutable incrementalCommitSucceeded = false
-                    if canTryIncrementalTypeRefresh then
+                    if canTryIncrementalTypeRefresh && not skipIncrementalRefresh then
                         gameStateLock.EnterWriteLock()
                         try
                             let gameStillCurrent =
@@ -2757,28 +2845,6 @@ type Server(client: ILanguageClient) =
                                 incrementalScriptedPatchCount <- incrementalScriptedPatchCount + 1
                                 clearTypeCaches ()
                                 markFileStale name "types"
-                                (try
-                                    locCache.Clear()
-                                    for fileName, errors in
-                                        game.LocalisationErrors(true, false) |> List.groupBy _.range.FileName do
-                                        locCache.[fileName] <- errors
-                                    evictIfNeeded locCache
-                                 with e -> logDiag $"Incremental loc-error refresh failed for {name}: {e.Message}")
-                                let currentCallFiles =
-                                    referenceFilesForDefinitions game (typeDefinitionsForFiles game [ name ])
-                                let revalidateFiles =
-                                    (if fastDefinitionIndex then [ name ] else []) @ priorCallFiles @ currentCallFiles
-                                    |> List.filter (fun file -> normaliseCachePath file <> normaliseCachePath name)
-                                    |> List.distinctBy normaliseCachePath
-                                let revalidateFiles =
-                                    if fastDefinitionIndex then
-                                        name :: revalidateFiles
-                                        |> List.distinctBy normaliseCachePath
-                                    else
-                                        revalidateFiles
-                                if not revalidateFiles.IsEmpty then
-                                    scheduleDeferredDynamicRevalidation revalidateFiles
-                                monitorLog Refresh $"RefreshIncrementalTypes file={name} patches={incrementalScriptedPatchCount} refs={revalidateFiles.Length}"
 
                                 if incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount then
                                     needsTypeRefresh <- true
@@ -2795,11 +2861,45 @@ type Server(client: ILanguageClient) =
                         finally
                             gameStateLock.ExitWriteLock()
 
+                    if incrementalCommitSucceeded then
+                        // Loc-error recompute and call-site collection only read game state;
+                        // running them under the shared read lock keeps completion responsive
+                        // instead of blocking it behind a long write lock.
+                        gameStateLock.EnterReadLock()
+                        try
+                            (try
+                                locCache.Clear()
+                                for fileName, errors in
+                                    game.LocalisationErrors(true, false) |> List.groupBy _.range.FileName do
+                                    locCache.[fileName] <- errors
+                                evictIfNeeded locCache
+                             with e -> logDiag $"Incremental loc-error refresh failed for {name}: {e.Message}")
+                            let currentCallFiles =
+                                referenceFilesForDefinitions game (typeDefinitionsForFiles game [ name ])
+                            let revalidateFiles =
+                                (if fastDefinitionIndex then [ name ] else []) @ priorCallFiles @ currentCallFiles
+                                |> List.filter (fun file -> normaliseCachePath file <> normaliseCachePath name)
+                                |> List.distinctBy normaliseCachePath
+                            let revalidateFiles =
+                                if fastDefinitionIndex then
+                                    name :: revalidateFiles
+                                    |> List.distinctBy normaliseCachePath
+                                else
+                                    revalidateFiles
+                            if not revalidateFiles.IsEmpty then
+                                scheduleDeferredDynamicRevalidation revalidateFiles
+                            monitorLog Refresh $"RefreshIncrementalTypes file={name} patches={incrementalScriptedPatchCount} refs={revalidateFiles.Length}"
+                        finally
+                            gameStateLock.ExitReadLock()
+
                     let updateErrors =
-                        if incrementalCommitSucceeded && not fastDefinitionIndex then
-                            gameStateLock.EnterWriteLock()
-                            try game.UpdateFile false name filetext
-                            finally gameStateLock.ExitWriteLock()
+                        if deferDeepValidation && (incrementalCommitSucceeded || not shallowAnalyze) then
+                            // The VFS already holds the new text from the earlier UpdateFile, so
+                            // the deep (re-)validation only reads; the shared read lock lets
+                            // completion requests run alongside it.
+                            gameStateLock.EnterReadLock()
+                            try game.ValidateFile false name
+                            finally gameStateLock.ExitReadLock()
                         else
                             updateErrors
 
@@ -3005,13 +3105,44 @@ type Server(client: ILanguageClient) =
                     || forceGlobalRefresh
                     || (not (isCompletionActive ()) && quietEnough && cooldownElapsed))
             let mutable didGlobalWork = false
+            // Staged full refresh (experimental): run the heavy rules rebuild under a read
+            // lock against a lookup clone so completion/hover stay responsive, then commit
+            // by swapping references under the write lock below. Falls back to the fully
+            // locked RefreshCaches when preparation fails or a commit guard trips.
+            let stagedRefresh =
+                if doRefresh && experimental then
+                    gameStateLock.EnterReadLock()
+                    try
+                        try
+                            game.PrepareRefreshCaches()
+                        with e ->
+                            logDiag $"PrepareRefreshCaches failed, falling back to locked refresh: {e.Message}"
+                            None
+                    finally
+                        gameStateLock.ExitReadLock()
+                else
+                    None
             gameStateLock.EnterWriteLock()
             try
                 if doRefresh then
-                    game.RefreshCaches()
+                    let stagedCommitted =
+                        match stagedRefresh with
+                        | Some staged ->
+                            try
+                                game.CommitRefreshCaches staged
+                            with e ->
+                                logDiag $"CommitRefreshCaches failed, falling back to locked refresh: {e.Message}"
+                                false
+                        | None -> false
+
+                    if not stagedCommitted then
+                        game.RefreshCaches()
                     let allocAfterRefresh = GC.GetTotalAllocatedBytes(false)
-                    refreshStatus <- if forceGlobalRefresh then "refresh_caches_forced" else "refresh_caches"
-                    monitorLog Refresh $"RefreshCaches allocDeltaMB={(allocAfterRefresh - allocBefore) / 1048576L} force={forceGlobalRefresh} skipLimit={skipLimitReached} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
+                    refreshStatus <-
+                        if stagedCommitted then "refresh_caches_staged"
+                        elif forceGlobalRefresh then "refresh_caches_forced"
+                        else "refresh_caches"
+                    monitorLog Refresh $"RefreshCaches allocDeltaMB={(allocAfterRefresh - allocBefore) / 1048576L} staged={stagedCommitted} force={forceGlobalRefresh} skipLimit={skipLimitReached} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                     perfRefreshCachesCount <- perfRefreshCachesCount + 1
                     didGlobalWork <- true
                     // Non-blocking, non-compacting reclaim. The previous blocking compacting
@@ -4194,7 +4325,9 @@ type Server(client: ILanguageClient) =
 
                 let triggerChars = LSP.Types.defaultCompletionOptions.triggerCharacters
                 logInfo (sprintf "Server initializing. Completion trigger chars configured: %A" triggerChars)
-                let caps = [ "."; "|"; "$" ]
+                // '=' pops value completion right at `key =` — without it, parameter/enum
+                // value suggestions only appear via Ctrl+Space or a lucky first letter.
+                let caps = [ "."; "|"; "$"; "=" ]
                 logInfo (sprintf "Sending capabilities with completion trigger chars: %A" caps)
 
                 return

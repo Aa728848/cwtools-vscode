@@ -548,8 +548,36 @@ server flag.
   the three services (`RuleValidationService` / `InfoService` /
   `CompletionService`); `ResourceManager.RemoveFile` removes a file from the VFS.
   Per-key construction is identical to the full path, so output is byte-equivalent.
+- `buildServices` reuses reference-identity caches for `varMap`, the shared
+  `aliasKeyMap` (`RulesHelpers.computeAliasKeyMap`, passed to all three services
+  via `aliasKeyMapOverride`), and the `RulesWrapper`; they invalidate when
+  `refreshConfig` replaces the source maps. `CompletionService` materializes
+  per-type value lists on demand into a trie-keyed `ConditionalWeakTable`
+  (`CompletionValueListCache`) so unchanged types stay warm across service
+  rebuilds; `InfoService.invertedTypeMap` is lazy and pre-warmed via
+  `WarmTypeLocalisationIndex()` in the read-locked prepare paths; snippet
+  bodies are cached per rule-array reference (`snippetBodyCache`) — do not
+  re-eagerize these in the per-save path. In `Program.fs`, keep the loc-error
+  recompute and the deep (re-)validation under the READ lock: the incremental
+  pipeline's first `UpdateFile` is intentionally shallow (`deferDeepValidation`),
+  and body-only edits (top-level definition signature unchanged,
+  `topLevelDefinitionKeySignature`) skip the prepare/commit pipeline entirely —
+  only definition add/rename/remove and saves rebuild services.
+- `src/Main/Completion.fs` proxies parameter-value completion
+  (`tryGetParameterValueCompletion`): `PARAM = <cursor>` inside a scripted
+  effect/trigger/value or inline_script call resolves the definition, finds the
+  `field = $PARAM$` slot, and calls `game.Complete` at that position.
 - Must run inside the `gameStateLock` write lock. Falls back to a full refresh on
   `false`/exception, on non-whitelisted types, or after 25 consecutive patches.
+- Full `RefreshCaches` from `delayedAnalyze` is staged when `experimental` is on:
+  `IGame.PrepareRefreshCaches` runs the whole `refreshConfig` under a READ lock
+  against a `Lookup.ShallowClone()` (RulesManager temporarily points its internal
+  mutable `lookup` at the clone; temp state is snapshot-restored), and
+  `CommitRefreshCaches` swaps under the write lock after ReferenceEquals guards on
+  `typeDefInfo`/`varDefInfo`/`configRules` (`AbsorbFieldsFrom` keeps the lookup's
+  object identity). Guard failure or exception falls back to the locked
+  `RefreshCaches`. Do not mutate the shared lookup between prepare and commit
+  without going through a path the guards can see.
 - `isDynamicDefinitionPath` (4 dirs, incl. `inline_scripts/`) drives call-site
   revalidation and is a SEPARATE predicate from the incremental whitelist — do not
   merge them. `inline_scripts` is intentionally excluded from the fast path (it is

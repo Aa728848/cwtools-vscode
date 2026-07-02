@@ -1,16 +1,38 @@
 # Changelog
 
-## [2.8.1] - 2026-07-02
-
-### 修复 / Fixes
-- **[修复] 扩展不再在任意工作区启动 CWTools 语言服务**：仅当检测到 Paradox 证据（原版目录、Mod 描述文件、可识别游戏语言）时启动，其余工作区等到打开游戏文件或执行 CWTools 引导命令时再启动。
-  English: The language server now starts only in workspaces with Paradox evidence (vanilla install, mod descriptor, or a detected game language); other workspaces defer startup until a game file is opened or a CWTools bootstrap command is run.
-- **[修复] "CWTools 安装配置"页面不再反复自动弹出**：整机只自动打开一次，且仅在 Paradox 工作区弹出；仍可通过状态栏或 `CWTools: Open Setup` 手动打开。
-  English: The "CWTools Setup" page now auto-opens only once per machine and only in Paradox workspaces; it remains available from the status bar or `CWTools: Open Setup`.
+## [2.8.2] - 2026-07-02
 
 ### 优化与更新 / Optimization & Updates
-- **[优化] 提升参数解析器性能并优化内存占用**
+- **[修复] `@` 变量补全作用域与退格重拉问题**：改为服务端逐键前缀过滤；候选严格区分全局（`common/scripted_variables/`）与当前文件局部变量；支持退格删除自动重拉补全列表。
+  English: Fixed `@` variable completion scope & backspacing issues: Implemented per-keystroke server-side filtering; restricted candidates to globals (`common/scripted_variables/`) and current file's locals; auto-trigger completion on backspace.
+- **[优化] 减少编辑正文时的类型索引重建**：仅在编辑/增删顶层定义时触发索引刷新，普通正文编辑连续打字不再触发缓存清空。
+  English: Avoid redundant type index rebuilds while typing: Skips the incremental refresh pipeline for body-only edits; saves or definition updates still refresh immediately.
+- **[功能] 支持脚本与 inline_script 参数值的智能补全**：调用参数时自动根据定义中的使用位置代理补全其合法取值；`=` 加入补全触发字符、`= ` 后输空格自动拉起列表，无需 Ctrl+Space。
+  English: Smart value completion for scripted/inline_script parameters: Proxies parameter values to their definition usage context to provide valid candidates; `=` is now a trigger character and typing the space after `=` pulls the list up automatically, no Ctrl+Space needed.
+- **[优化] 加快补全弹出速度并缩短保存写锁**：缓存类型片段补全的 snippet 主体；增量保存首轮更新降级为浅层更新。
+  English: Faster completion popup and shorter save locks: Cached snippet bodies for clause completions; optimized incremental save updates to be shallow initially.
+- **[修复] 连续编辑后补全列表卡顿数秒的问题**：使用弱表缓存复用补全列表；预热本地化映射并把重算和深度校验移出写锁。
+  English: 1s+ completion stall after continuous edits: Reused completion lists via weak-table caches; moved localisation pre-warming and deep validation off the write lock.
+- **[优化] 避免全量类型刷新阻塞补全与悬停**：在读锁下重建 Lookup 克隆体并在写锁中快速交换引用，使刷新期间相关服务依然可用。
+  English: Avoid blocking completions during full type refreshes: Rebuilt lookup indices under a read lock and performed reference swaps under the write lock to keep completion/hover responsive.
+- **[优化] 降低连续保存时的补全延迟**：按引用缓存并复用变量和规则结构；对补全列表与校验倒排表进行惰性构建。
+  English: Lower completion latency on frequent saves: Reused cached variable and rule structures; lazily built completion lists and validation maps.
+- **[优化] 懒加载并自动回收工作区符号文件监视器**：减少保存时主机的多余唤醒。
+  English: Lazily create and reclaim the workspace symbol file watcher to reduce redundant extension-host wakeups on save.
+- **[优化] 提升参数解析器性能并降低内存占用**。
   English: Improved parameter parser performance and optimized memory usage.
+
+
+
+## [2.8.1] - 2026-07-01
+
+### 修复 / Fixes
+- **[修复] 优化语言服务启动条件**：仅在检测到 Paradox 游戏或 Mod 项目证据时启动，其余工作区延迟至打开相关文件或手动引导时加载。
+  English: [Fix] Optimize language server startup conditions: Starts only in workspaces with Paradox/mod evidence; defers loading for other workspaces until a game file is opened or manually triggered.
+- **[修复] 限制安装配置页自动弹出**：整机仅在 Paradox 工作区自动打开一次，依然支持手动命令打开。
+  English: [Fix] Restrict auto-popup of setup page: Opens automatically only once per machine in Paradox workspaces; manual open remains available.
+
+  
 
 ## [2.7.9] - 2026-07-01
 

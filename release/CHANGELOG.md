@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.3] - 2026-07-02
+
+### 修复 / Fixes
+- **[修复] 修复 AI 卡片的错误**。
+  English: [Fix] Fixed errors with AI cards.
+
 ## [2.8.2] - 2026-07-02
 
 ### 优化与更新 / Optimization & Updates

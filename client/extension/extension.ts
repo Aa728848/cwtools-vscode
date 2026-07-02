@@ -552,6 +552,36 @@ function hasWorkspaceModDescriptor(rootPath: string): boolean {
 	return false;
 }
 
+// Directories that mark a Paradox game/mod content root. Path-name text (e.g.
+// "stellaris" in the folder path) is deliberately not enough to start the
+// language server.
+const PARADOX_CONTENT_DIRS = new Set([
+	'common', 'events', 'history', 'map', 'map_data', 'prescripted_countries',
+	'localisation', 'localisation_synced', 'localization', 'interface', 'gfx',
+]);
+
+function workspaceHasParadoxStructure(rootPath: string): boolean {
+	try {
+		for (const entry of fs.readdirSync(rootPath, { withFileTypes: true })) {
+			if (entry.isDirectory() && PARADOX_CONTENT_DIRS.has(entry.name.toLowerCase())) {
+				return true;
+			}
+		}
+	} catch {
+		// Ignore unreadable workspaces
+	}
+	for (const profile of getAllProfiles()) {
+		const configuredPath = getConfiguredGamePath(profile.id);
+		if (!configuredPath) continue;
+		const root = normalizedPath(rootPath);
+		const configured = normalizedPath(configuredPath);
+		if (root === configured || root.startsWith(configured + path.sep) || configured.startsWith(root + path.sep)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 function readWorkspaceGameDescriptor(rootPath: string): string {
 	const chunks: string[] = [];
 	const candidates = [
@@ -626,6 +656,11 @@ function inferLanguageIdFromWorkspace(): string | undefined {
 	const rootPath = firstWorkspacePath();
 	if (!rootPath) return undefined;
 	if (isCwtRuleWorkspace(rootPath)) return undefined;
+	// Structural evidence decides WHETHER this is a Paradox workspace; scoring
+	// below only decides WHICH game.
+	if (!hasWorkspaceModDescriptor(rootPath) && !workspaceHasParadoxStructure(rootPath)) {
+		return undefined;
+	}
 	const descriptorText = readWorkspaceGameDescriptor(rootPath);
 	const scores = getAllProfiles()
 		.map(profile => ({ id: profile.id, score: scoreWorkspaceForGame(rootPath, descriptorText, profile) }))
@@ -974,9 +1009,11 @@ async function showSetupPanel(options: InstallHealthOptions): Promise<void> {
 }
 
 async function maybeShowFirstRunExperience(options: InstallHealthOptions): Promise<void> {
-	const version = options.context.extension.packageJSON?.version ?? 'dev';
-	const shownKey = `stellarisLanguageServices.setupPanel.shown.${version}`;
-	if (!options.context.globalState.get<boolean>(shownKey)) {
+	// Auto-open the setup panel only once per machine
+	const isParadoxWorkspace = options.isVanillaFolder || isKnownGameLanguageId(options.languageId);
+	const shownKey = 'stellarisLanguageServices.setupPanel.shown';
+	const shownForOlderVersion = options.context.globalState.keys().some(key => key.startsWith(`${shownKey}.`));
+	if (isParadoxWorkspace && !shownForOlderVersion && !options.context.globalState.get<boolean>(shownKey)) {
 		await options.context.globalState.update(shownKey, true);
 		await showSetupPanel(options);
 	}
@@ -2319,7 +2356,13 @@ export async function activate(context: ExtensionContext) {
 		guessedLanguageId = null;
 	}
 	if (!isKnownGameLanguageId(guessedLanguageId)) {
-		guessedLanguageId = await getLanguageIdFallback();
+		// The marker-file guess opens a .txt whose languageId can resolve to a
+		// game via global associations; only trust it in structured workspaces.
+		const detectionRoot = firstWorkspacePath();
+		const structuredWorkspace = detectionRoot
+			? hasWorkspaceModDescriptor(detectionRoot) || workspaceHasParadoxStructure(detectionRoot)
+			: false;
+		guessedLanguageId = structuredWorkspace ? await getLanguageIdFallback() : null;
 	}
 
 	if (isKnownGameLanguageId(guessedLanguageId)) {
@@ -2395,48 +2438,92 @@ export async function activate(context: ExtensionContext) {
 	}
 
 	// ── Mod folder target game selection guidance and auto-association ──
-	if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
-		const rootPath = workspace.workspaceFolders[0]!.uri.fsPath;
-		if (hasWorkspaceModDescriptor(rootPath)) {
-			if (languageId === "paradox") {
-				const gamePromptKey = "stellarisLanguageServices.gamePathPrompted.paradox";
-				if (!context.globalState.get<boolean>(gamePromptKey)) {
-					void context.globalState.update(gamePromptKey, true);
-					void window.showInformationMessage(
-						localize(
-							'Detected a Mod descriptor in workspace, but the target game type is undetermined. Select your target game platform now?',
-							'检测到当前工作区包含 Mod 描述文件，但尚未确定目标游戏类型。是否现在指定你的目标游戏平台？'
-						),
-						localize('Select Game', '选择游戏'),
-						localize('Later', '稍后')
-					).then(async (choice) => {
-						if (choice === localize('Select Game', '选择游戏')) {
-							await selectGameFolderFlow();
-						}
-					});
-				}
-			} else if (isKnownGameLanguageId(languageId)) {
-				// If the game type was successfully determined (either via scoring or fallback),
-				// automatically sync workspace-level file associations so that editor themes/syntax highlights instantly work.
-				const filesConfig = workspace.getConfiguration('files');
-				const associations = filesConfig.get<Record<string, string>>('associations') || {};
-				const extensionsToAssociate = ['*.txt', '*.gui', '*.gfx', '*.asset'];
-				let needsUpdate = false;
-				const updatedAssociations = { ...associations };
-				for (const ext of extensionsToAssociate) {
-					if (updatedAssociations[ext] !== languageId) {
-						updatedAssociations[ext] = languageId;
-						needsUpdate = true;
+	const workspaceRootPath = workspace.workspaceFolders && workspace.workspaceFolders.length > 0
+		? workspace.workspaceFolders[0]!.uri.fsPath
+		: undefined;
+	const hasModDescriptor = workspaceRootPath ? hasWorkspaceModDescriptor(workspaceRootPath) : false;
+	if (hasModDescriptor) {
+		if (languageId === "paradox") {
+			const gamePromptKey = "stellarisLanguageServices.gamePathPrompted.paradox";
+			if (!context.globalState.get<boolean>(gamePromptKey)) {
+				void context.globalState.update(gamePromptKey, true);
+				void window.showInformationMessage(
+					localize(
+						'Detected a Mod descriptor in workspace, but the target game type is undetermined. Select your target game platform now?',
+						'检测到当前工作区包含 Mod 描述文件，但尚未确定目标游戏类型。是否现在指定你的目标游戏平台？'
+					),
+					localize('Select Game', '选择游戏'),
+					localize('Later', '稍后')
+				).then(async (choice) => {
+					if (choice === localize('Select Game', '选择游戏')) {
+						await selectGameFolderFlow();
 					}
+				});
+			}
+		} else if (isKnownGameLanguageId(languageId)) {
+			// If the game type was successfully determined (either via scoring or fallback),
+			// automatically sync workspace-level file associations so that editor themes/syntax highlights instantly work.
+			const filesConfig = workspace.getConfiguration('files');
+			const associations = filesConfig.get<Record<string, string>>('associations') || {};
+			const extensionsToAssociate = ['*.txt', '*.gui', '*.gfx', '*.asset'];
+			let needsUpdate = false;
+			const updatedAssociations = { ...associations };
+			for (const ext of extensionsToAssociate) {
+				if (updatedAssociations[ext] !== languageId) {
+					updatedAssociations[ext] = languageId;
+					needsUpdate = true;
 				}
-				if (needsUpdate) {
-					void filesConfig.update('associations', updatedAssociations, false);
-				}
+			}
+			if (needsUpdate) {
+				void filesConfig.update('associations', updatedAssociations, false);
 			}
 		}
 	}
 
-	await init(languageId, isVanillaFolder);
+	// ── Gate the language server on actual Paradox evidence ──
+	// `!workspaceRootPath` keeps legacy behavior for single-file windows.
+	const looksLikeParadoxWorkspace =
+		isVanillaFolder || hasModDescriptor || isKnownGameLanguageId(languageId) || !workspaceRootPath;
+	ErrorReporter.debug('Extension', `Startup gate: start=${looksLikeParadoxWorkspace} vanilla=${isVanillaFolder} descriptor=${hasModDescriptor} language=${languageId}`);
+	if (looksLikeParadoxWorkspace) {
+		await init(languageId, isVanillaFolder);
+		return;
+	}
+
+	ErrorReporter.debug('Extension', 'No Paradox project detected in this workspace; deferring CWTools language server start');
+	let lazyStartPromise: Promise<void> | undefined;
+	const lazyListeners: Disposable[] = [];
+	const startLazily = (language: string): Promise<void> => {
+		lazyStartPromise ??= (async () => {
+			for (const listener of lazyListeners) {
+				try { listener.dispose(); } catch { /* ignore */ }
+			}
+			await init(language, isVanillaFolder);
+		})();
+		return lazyStartPromise;
+	};
+	const maybeStartForEditor = (editor: vs.TextEditor | undefined) => {
+		const doc = editor?.document;
+		if (!doc || doc.uri.scheme !== 'file') return;
+		// CWT rule files are not evidence of a game workspace.
+		if (doc.uri.fsPath.toLowerCase().endsWith('.cwt')) return;
+		if (isKnownGameLanguageId(doc.languageId)) {
+			void startLazily(doc.languageId);
+		} else if (doc.languageId === 'pdx-shader') {
+			void startLazily(languageId);
+		}
+	};
+	lazyListeners.push(window.onDidChangeActiveTextEditor(maybeStartForEditor));
+	context.subscriptions.push(...lazyListeners);
+	maybeStartForEditor(window.activeTextEditor);
+	// Bootstrap commands start the server first, then re-dispatch to the real
+	// handler registered by init.
+	for (const commandId of ['cwtools.openSetup', 'cwtools.runInstallationDoctor', 'cwtools.selectGameFolder']) {
+		safeRegisterCommand(context, commandId, async () => {
+			await startLazily(languageId);
+			await commands.executeCommand(commandId);
+		});
+	}
 }
 
 function normaliseLocLanguageSetting(value: readonly string[] | undefined): string[] | undefined {

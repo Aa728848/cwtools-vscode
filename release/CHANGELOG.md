@@ -1,6 +1,12 @@
 # Changelog
 
-## [2.8.0] - 2026-07-02
+## [2.8.1] - 2026-07-02
+
+### 修复 / Fixes
+- **[修复] 扩展不再在任意工作区启动 CWTools 语言服务**：仅当检测到 Paradox 证据（原版目录、Mod 描述文件、可识别游戏语言）时启动，其余工作区等到打开游戏文件或执行 CWTools 引导命令时再启动。
+  English: The language server now starts only in workspaces with Paradox evidence (vanilla install, mod descriptor, or a detected game language); other workspaces defer startup until a game file is opened or a CWTools bootstrap command is run.
+- **[修复] "CWTools 安装配置"页面不再反复自动弹出**：整机只自动打开一次，且仅在 Paradox 工作区弹出；仍可通过状态栏或 `CWTools: Open Setup` 手动打开。
+  English: The "CWTools Setup" page now auto-opens only once per machine and only in Paradox workspaces; it remains available from the status bar or `CWTools: Open Setup`.
 
 ### 优化与更新 / Optimization & Updates
 - **[优化] 提升参数解析器性能并优化内存占用**

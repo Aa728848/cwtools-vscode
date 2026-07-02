@@ -242,6 +242,9 @@ checks.
 
 - Prefer existing helpers and local patterns over new abstractions.
 - Keep changes scoped to the requested behavior.
+- Keep code comments and CHANGELOG entries concise: comment only non-obvious
+  constraints in one or two sentences; a CHANGELOG entry is one short bilingual
+  line stating the user-visible change, without implementation detail.
 - Prefer structured reads (`IndexService`, LSP/deep queries, document symbols,
   `get_pdx_block`) before raw workspace scans or shell commands.
 - Add bounded caches for data that can grow with workspace or vanilla size.

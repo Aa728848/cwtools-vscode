@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.8.5] - 2026-07-03
+
+### 功能与修复 / Features & Fixes
+- **[功能] 新增默认主题**。
+  English: [Feature] Added a new default theme.
+- **[修复] 修复了 inline 的验证顺序**。
+  English: [Fix] Fixed validation order for inline elements.
+
 ## [2.8.3] - 2026-07-02
 
 ### 修复 / Fixes

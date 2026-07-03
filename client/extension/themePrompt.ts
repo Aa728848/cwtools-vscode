@@ -1,4 +1,4 @@
-export const STELLARIS_DARK_MODERN_THEME_NAME = 'Stellaris Dark Modern';
+export const DEFAULT_DARK_MODERN_THEME_NAME = 'Default Dark Modern';
 export const DARK_2026_THEME_PROMPT_KEY = 'stellarisLanguageServices.themePrompt.dark2026';
 
 interface ConfigurationLike {
@@ -26,7 +26,7 @@ function themePromptLocalize(envLanguage: string, en: string, zh: string): strin
 
 export function isDark2026ColorTheme(themeName: string | undefined | null): boolean {
 	const normalized = (themeName ?? '').trim().toLowerCase();
-	if (!normalized || normalized === STELLARIS_DARK_MODERN_THEME_NAME.toLowerCase()) {
+	if (!normalized || normalized === DEFAULT_DARK_MODERN_THEME_NAME.toLowerCase()) {
 		return false;
 	}
 
@@ -34,7 +34,7 @@ export function isDark2026ColorTheme(themeName: string | undefined | null): bool
 		&& (normalized.includes('dark') || normalized.includes('深色'));
 }
 
-export async function maybePromptForStellarisDarkModernTheme(services: ThemePromptServices): Promise<void> {
+export async function maybePromptForDefaultDarkModernTheme(services: ThemePromptServices): Promise<void> {
 	const config = services.getConfiguration('workbench');
 	const currentTheme = config.get<string>('colorTheme', '');
 	if (!isDark2026ColorTheme(currentTheme)) {
@@ -52,8 +52,8 @@ export async function maybePromptForStellarisDarkModernTheme(services: ThemeProm
 	const choice = await services.showInformationMessage(
 		themePromptLocalize(
 			services.envLanguage,
-			'The current 2026 Dark theme may make Paradox script highlighting hard to read. Switch to Stellaris Dark Modern?',
-			'当前 2026 深色主题可能导致 Paradox 脚本高亮不够清晰。是否切换到 Stellaris 现代深色？'
+			'The current 2026 Dark theme may make Paradox script highlighting hard to read. Switch to VS Code\'s Default Dark Modern theme?',
+			'当前 2026 深色主题可能导致 Paradox 脚本高亮不够清晰。是否切换到 VS Code 的现代深色主题？'
 		),
 		switchTheme,
 		later
@@ -64,8 +64,8 @@ export async function maybePromptForStellarisDarkModernTheme(services: ThemeProm
 	}
 
 	try {
-		await config.update('colorTheme', STELLARIS_DARK_MODERN_THEME_NAME, services.configurationTargetGlobal);
+		await config.update('colorTheme', DEFAULT_DARK_MODERN_THEME_NAME, services.configurationTargetGlobal);
 	} catch (error) {
-		services.warn('Failed to switch to the bundled Stellaris Dark Modern theme', error);
+		services.warn('Failed to switch to the Default Dark Modern theme', error);
 	}
 }

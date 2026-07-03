@@ -44,7 +44,7 @@ import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileB
 import type { GameProfile } from './gameProfiles';
 import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService';
 import { McpBridgeServer } from './ai/mcpBridgeServer';
-import { maybePromptForStellarisDarkModernTheme } from './themePrompt';
+import { maybePromptForDefaultDarkModernTheme } from './themePrompt';
 
 export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
@@ -1010,7 +1010,7 @@ async function showSetupPanel(options: InstallHealthOptions): Promise<void> {
 }
 
 async function maybeShowFirstRunExperience(options: InstallHealthOptions): Promise<void> {
-	await maybePromptForStellarisDarkModernTheme({
+	await maybePromptForDefaultDarkModernTheme({
 		envLanguage: vs.env.language,
 		configurationTargetGlobal: vs.ConfigurationTarget.Global,
 		globalState: options.context.globalState,

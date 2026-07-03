@@ -39,7 +39,7 @@ let private definitionInjectionKeyPattern =
 
 let private inlineScriptParameterPattern =
     System.Text.RegularExpressions.Regex(
-        @"\$[A-Za-z0-9_.:-]+\$|\|[A-Za-z0-9_.:-]+\|",
+        @"\$[A-Za-z0-9_.:-]+(?:\|[A-Za-z0-9_.:-]+)?\$|\|[A-Za-z0-9_.:-]+\|",
         System.Text.RegularExpressions.RegexOptions.Compiled)
 
 type private DefinitionInjectionKeyInfo =
@@ -930,7 +930,10 @@ let computeScriptTokens (game: IGame<_>) (filePath: string) (fileText: string) =
                     let tokenType =
                         if m.Value.StartsWith("$", StringComparison.Ordinal) then 4
                         else 12
-                    verifyAndAdd line (col + m.Index) m.Length tokenType
+                    if tokenType = 4 then
+                        verifyAndAdd line (col + m.Index) m.Length tokenType
+                    else
+                        verifyAndAdd line (col + m.Index + 1) (m.Length - 2) tokenType
                     segmentStart <- m.Index + m.Length
                 if segmentStart < value.Length then
                     verifyAndAdd line (col + segmentStart) (value.Length - segmentStart) fallbackTokenType

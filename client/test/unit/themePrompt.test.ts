@@ -1,9 +1,9 @@
 import { expect } from 'chai';
 import {
 	DARK_2026_THEME_PROMPT_KEY,
-	STELLARIS_DARK_MODERN_THEME_NAME,
+	DEFAULT_DARK_MODERN_THEME_NAME,
 	isDark2026ColorTheme,
-	maybePromptForStellarisDarkModernTheme,
+	maybePromptForDefaultDarkModernTheme,
 	type ThemePromptServices,
 } from '../../extension/themePrompt';
 
@@ -48,22 +48,22 @@ describe('themePrompt', () => {
 		expect(isDark2026ColorTheme('2026 Dark')).to.equal(true);
 		expect(isDark2026ColorTheme('2026 深色')).to.equal(true);
 		expect(isDark2026ColorTheme('Default Dark Modern')).to.equal(false);
-		expect(isDark2026ColorTheme(STELLARIS_DARK_MODERN_THEME_NAME)).to.equal(false);
+		expect(isDark2026ColorTheme(DEFAULT_DARK_MODERN_THEME_NAME)).to.equal(false);
 		expect(isDark2026ColorTheme('2026 Light')).to.equal(false);
 	});
 
-	it('prompts once and switches to the bundled Stellaris theme when accepted', async () => {
+	it('prompts once and switches to the Default Dark Modern theme when accepted', async () => {
 		const services = createServices('2026 Dark', 'Switch Theme');
 
-		await maybePromptForStellarisDarkModernTheme(services);
-		await maybePromptForStellarisDarkModernTheme(services);
+		await maybePromptForDefaultDarkModernTheme(services);
+		await maybePromptForDefaultDarkModernTheme(services);
 
 		expect(services.prompts).to.have.lengthOf(1);
 		expect(services.state.get(DARK_2026_THEME_PROMPT_KEY)).to.equal(true);
 		expect(services.updates).to.deep.equal([
 			{
 				key: 'colorTheme',
-				value: STELLARIS_DARK_MODERN_THEME_NAME,
+				value: DEFAULT_DARK_MODERN_THEME_NAME,
 				target: services.configurationTargetGlobal,
 			},
 		]);
@@ -72,7 +72,7 @@ describe('themePrompt', () => {
 	it('does not prompt for non-2026 themes', async () => {
 		const services = createServices('Default Dark Modern', 'Switch Theme');
 
-		await maybePromptForStellarisDarkModernTheme(services);
+		await maybePromptForDefaultDarkModernTheme(services);
 
 		expect(services.prompts).to.have.lengthOf(0);
 		expect(services.updates).to.have.lengthOf(0);

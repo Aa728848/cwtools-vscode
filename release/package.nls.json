@@ -1,7 +1,6 @@
 {
   "extension.displayName": "Stellaris Language Serves",
   "extension.description": "Language services, previews, validation, and AI-assisted tooling for Stellaris mod development.",
-  "themes.stellarisDarkModern.label": "Stellaris Dark Modern",
   "views.loadedFiles.name": "Loaded files",
   "views.stellarisLanguageServices.aiChat.name": "AI Assistant",
   "customEditors.stellarisLanguageServices.texturePreview.displayName": "DDS/TGA Texture Preview",

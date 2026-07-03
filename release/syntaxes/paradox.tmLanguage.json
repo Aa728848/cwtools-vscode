@@ -156,7 +156,7 @@
 			"patterns": [
 				{
 					"name": "variable.parameter.placeholder.paradox",
-					"match": "(\\$)([A-Za-z0-9_.:-]+)(\\$)",
+					"match": "(\\$)([A-Za-z0-9_.:-]+(?:\\|[A-Za-z0-9_.:-]+)?)(\\$)",
 					"captures": {
 						"1": {
 							"name": "punctuation.definition.parameter.begin.paradox"

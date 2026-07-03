@@ -58,6 +58,14 @@
                 "path": "./syntaxes/paradox-csv.tmLanguage.json"
             }
         ],
+        "themes": [
+            {
+                "id": "Stellaris Dark Modern",
+                "label": "%themes.stellarisDarkModern.label%",
+                "uiTheme": "vs-dark",
+                "path": "./themes/stellaris-dark-modern.json"
+            }
+        ],
         "views": {
             "explorer": [
                 {

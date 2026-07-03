@@ -2682,6 +2682,7 @@ type Server(client: ILanguageClient) =
                 && (not shallowAnalyze || fastDefinitionIndex)
                 && incrementalTypeRefreshEnabled ()
                 && isTypeDefiningPath name
+                && not (isInlineScriptDefinitionPath name)
 
             // Mark type refresh needed ONLY if the file was EDITED (not just opened).
             // Opening a file does not change its content, so the type/enum index is still valid.

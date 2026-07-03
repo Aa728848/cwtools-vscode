@@ -1,6 +1,7 @@
 {
   "extension.displayName": "Stellaris语言服务",
   "extension.description": "面向 Stellaris Mod 开发的语言服务、预览、校验与 AI 辅助工具集",
+  "themes.stellarisDarkModern.label": "Stellaris 现代深色",
   "views.loadedFiles.name": "已加载文件",
   "views.stellarisLanguageServices.aiChat.name": "AI 助手",
   "customEditors.stellarisLanguageServices.texturePreview.displayName": "DDS/TGA 贴图预览",

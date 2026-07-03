@@ -44,6 +44,7 @@ import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileB
 import type { GameProfile } from './gameProfiles';
 import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService';
 import { McpBridgeServer } from './ai/mcpBridgeServer';
+import { maybePromptForStellarisDarkModernTheme } from './themePrompt';
 
 export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
@@ -1009,6 +1010,15 @@ async function showSetupPanel(options: InstallHealthOptions): Promise<void> {
 }
 
 async function maybeShowFirstRunExperience(options: InstallHealthOptions): Promise<void> {
+	await maybePromptForStellarisDarkModernTheme({
+		envLanguage: vs.env.language,
+		configurationTargetGlobal: vs.ConfigurationTarget.Global,
+		globalState: options.context.globalState,
+		getConfiguration: (section) => workspace.getConfiguration(section),
+		showInformationMessage: (message, ...items) => window.showInformationMessage(message, ...items),
+		warn: (message, error) => ErrorReporter.warn('Extension', message, error),
+	});
+
 	// Auto-open the setup panel only once per machine
 	const isParadoxWorkspace = options.isVanillaFolder || isKnownGameLanguageId(options.languageId);
 	const shownKey = 'stellarisLanguageServices.setupPanel.shown';

@@ -199,6 +199,30 @@
       }
     },
     {
+      "name": "Inline script parameter placeholders",
+      "scope": [
+        "variable.parameter.paradox",
+        "variable.parameter.placeholder.paradox",
+        "punctuation.definition.parameter.begin.paradox",
+        "punctuation.definition.parameter.end.paradox"
+      ],
+      "settings": {
+        "foreground": "#C586C0"
+      }
+    },
+    {
+      "name": "Inline script parameter calls",
+      "scope": [
+        "support.function.parameter-call.paradox",
+        "variable.parameter.call.paradox",
+        "punctuation.definition.parameter-call.begin.paradox",
+        "punctuation.definition.parameter-call.end.paradox"
+      ],
+      "settings": {
+        "foreground": "#D7BA7D"
+      }
+    },
+    {
       "name": "Operators and punctuation",
       "scope": [
         "keyword.operator",
@@ -224,13 +248,43 @@
     "macro": "#DCDCAA",
     "variable": "#9CDCFE",
     "parameter": "#9CDCFE",
+    "parameter:stellaris": "#C586C0",
+    "parameter:hoi4": "#C586C0",
+    "parameter:eu4": "#C586C0",
+    "parameter:ck2": "#C586C0",
+    "parameter:imperator": "#C586C0",
+    "parameter:vic2": "#C586C0",
+    "parameter:ck3": "#C586C0",
+    "parameter:vic3": "#C586C0",
+    "parameter:eu5": "#C586C0",
+    "parameter:paradox": "#C586C0",
     "property": "#9CDCFE",
     "enumMember": "#4FC1FF",
     "keyword": "#C586C0",
     "number": "#B5CEA8",
     "string": "#CE9178",
+    "string:stellaris": "#9CDCFE",
+    "string:hoi4": "#9CDCFE",
+    "string:eu4": "#9CDCFE",
+    "string:ck2": "#9CDCFE",
+    "string:imperator": "#9CDCFE",
+    "string:vic2": "#9CDCFE",
+    "string:ck3": "#9CDCFE",
+    "string:vic3": "#9CDCFE",
+    "string:eu5": "#9CDCFE",
+    "string:paradox": "#9CDCFE",
     "comment": "#6A9955",
     "operator": "#D4D4D4",
+    "macro:stellaris": "#D7BA7D",
+    "macro:hoi4": "#D7BA7D",
+    "macro:eu4": "#D7BA7D",
+    "macro:ck2": "#D7BA7D",
+    "macro:imperator": "#D7BA7D",
+    "macro:vic2": "#D7BA7D",
+    "macro:ck3": "#D7BA7D",
+    "macro:vic3": "#D7BA7D",
+    "macro:eu5": "#D7BA7D",
+    "macro:paradox": "#D7BA7D",
     "decorator": "#DCDCAA"
   }
 }

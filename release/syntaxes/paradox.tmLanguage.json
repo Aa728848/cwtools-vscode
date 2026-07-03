@@ -152,6 +152,40 @@
 				}
 			]
 		},
+		"parameters": {
+			"patterns": [
+				{
+					"name": "variable.parameter.placeholder.paradox",
+					"match": "(\\$)([A-Za-z0-9_.:-]+)(\\$)",
+					"captures": {
+						"1": {
+							"name": "punctuation.definition.parameter.begin.paradox"
+						},
+						"2": {
+							"name": "variable.parameter.paradox"
+						},
+						"3": {
+							"name": "punctuation.definition.parameter.end.paradox"
+						}
+					}
+				},
+				{
+					"name": "support.function.parameter-call.paradox",
+					"match": "(\\|)([A-Za-z0-9_.:-]+)(\\|)",
+					"captures": {
+						"1": {
+							"name": "punctuation.definition.parameter-call.begin.paradox"
+						},
+						"2": {
+							"name": "variable.parameter.call.paradox"
+						},
+						"3": {
+							"name": "punctuation.definition.parameter-call.end.paradox"
+						}
+					}
+				}
+			]
+		},
 		"comment": {
 			"patterns": [
 				{
@@ -197,6 +231,9 @@
 				},
 				{
 				"include": "#comment"
+				},
+				{
+				"include": "#parameters"
 				},
 				{
 				"include": "#id"

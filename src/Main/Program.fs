@@ -37,6 +37,11 @@ let private definitionInjectionKeyPattern =
         @"^\s*(INJECT|REPLACE|TRY_INJECT|TRY_REPLACE|INJECT_OR_CREATE|REPLACE_OR_CREATE):([A-Za-z0-9_.:-]+)\s*=",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
 
+let private inlineScriptParameterPattern =
+    System.Text.RegularExpressions.Regex(
+        @"\$[A-Za-z0-9_.:-]+\$|\|[A-Za-z0-9_.:-]+\|",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
 type private DefinitionInjectionKeyInfo =
     { mode: string
       target: string
@@ -912,6 +917,23 @@ let computeScriptTokens (game: IGame<_>) (filePath: string) (fileText: string) =
                 srcLine.IndexOf(value, safeStart)
             else
                 -1
+        let addValueTokens (line: int) (col: int) (value: string) (fallbackTokenType: int) =
+            let matches = inlineScriptParameterPattern.Matches(value)
+            if matches.Count = 0 then
+                verifyAndAdd line col value.Length fallbackTokenType
+            else
+                let mutable segmentStart = 0
+                for i = 0 to matches.Count - 1 do
+                    let m = matches.[i]
+                    if m.Index > segmentStart then
+                        verifyAndAdd line (col + segmentStart) (m.Index - segmentStart) fallbackTokenType
+                    let tokenType =
+                        if m.Value.StartsWith("$", StringComparison.Ordinal) then 4
+                        else 12
+                    verifyAndAdd line (col + m.Index) m.Length tokenType
+                    segmentStart <- m.Index + m.Length
+                if segmentStart < value.Length then
+                    verifyAndAdd line (col + segmentStart) (value.Length - segmentStart) fallbackTokenType
         let rec visitNode (n: CWTools.Process.Node) =
             n.Leaves |> Seq.iter (fun l ->
                 if l.Position.FileName = filePath then
@@ -959,7 +981,7 @@ let computeScriptTokens (game: IGame<_>) (filePath: string) (fileText: string) =
                                     let idx = tryIndexOfFrom srcLine searchVal searchFrom
                                     if idx >= 0 then idx else -1
                             if actualValCol >= 0 then
-                                verifyAndAdd valLine actualValCol searchVal.Length valType
+                                addValueTokens valLine actualValCol searchVal valType
             )
             n.LeafValues |> Seq.iter (fun lv ->
                 if lv.Position.FileName = filePath then
@@ -973,7 +995,7 @@ let computeScriptTokens (game: IGame<_>) (filePath: string) (fileText: string) =
                             elif rawVal.StartsWith("$") && rawVal.EndsWith("$") then 4
                             elif rawVal = "yes" || rawVal = "no" then 7
                             else 6
-                        verifyAndAdd line col valLen valType
+                        addValueTokens line col (rawVal.Trim('"')) valType
             )
             n.Nodes |> Seq.iter (fun childNode ->
                 if childNode.Position.FileName = filePath then

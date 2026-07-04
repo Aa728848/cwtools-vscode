@@ -41,25 +41,21 @@ export const STELLARIS_KNOWLEDGE = `
 - Do not assume a later command has already run for an earlier command. For example, \`save_event_target_as\`, flag/variable setup, or scope preparation must appear before the command that uses it.
 - When repairing diagnostics, preserve meaningful statement order; do not sort, hoist, or move commands across setup/use boundaries unless you have verified the gameplay semantics.
 
-## Override & Load-Order Semantics (CRITICAL — USE ACTIVE CWT RULES)
-**Do not assume "last file wins".** Stellaris resolves conflicts differently per path and sometimes per entry. The path-to-mode mapping is not hard-coded in this prompt; it comes from the active CWT \`priorities\` rules currently loaded by the language server.
+## Override & Load-Order Semantics (CRITICAL - USE ACTIVE CWT RULES)
+**Do not assume "last file wins".** Stellaris resolves conflicts differently per path and sometimes per entry. Neither the path-to-mode mapping nor the meaning of each mode is hard-coded in this prompt; both come from the active CWT rules currently loaded by the language server.
 
-Before advising on vanilla overrides, call \`query_override_modes({ path: "common/ship_sizes/00_ship_sizes.txt" })\` for the target file or directory. The server returns the longest matching active rule path and mode (\`LIOS\`, \`FIOS\`, \`DUPL\`, or \`NO\`).
+Before advising on vanilla overrides, call \`query_override_modes({ path: "common/ship_sizes/00_ship_sizes.txt" })\` for the target file or directory. The server returns:
+- \`matched\` + \`matchedModeInfo\`: the longest matching active rule path, its mode (\`LIOS\`, \`FIOS\`, \`DUPL\`, \`NO\`, \`MERGE\`, ...), and that mode's documentation.
+- \`modeInfo\`: the full legend: every mode's \`name\` and \`description\` (meaning / who wins by default / how to override vanilla), sourced from the CWT \`override_modes_info\` block.
 
-| Mode | Meaning | Who wins by default | How to override vanilla |
-|------|---------|---------------------|--------------------------|
-| **LIOS** | Last In, Only Served | The **last**-loaded definition of a key | Redefine the same key — your mod loads after vanilla, so it wins. The intuitive case. |
-| **FIOS** | First In, Only Served | The **first**-loaded definition (so **vanilla wins** by default!) | Your file must load **before** the vanilla file — name it to sort earlier (e.g. \`00_\`/\`!\` prefix). Simply redefining a key in a normal file does **NOT** override; vanilla keeps priority. |
-| **DUPL** | Duplicates kept | **Both** entries are kept (additive/merge) — can corrupt the entity | Usually you must override the **entire file** (replace whole file by same path), not add a same-key entry. |
-| **NO** | Cannot individually overwrite | Existing entries cannot be replaced at all | Replace the **whole file**. For some (e.g. \`on_actions\`) new entries **merge** with existing ones rather than overwrite. |
+Read the mode semantics from \`modeInfo\` / \`matchedModeInfo\` instead of relying on memory or any background assumption. The descriptions below are NOT duplicated here on purpose; they are maintained in the CWT rules so they stay in sync with the active configuration.
 
 ### Operating rules for the Agent
-1. **NEVER tell the user to "just redefine the key in a new file, it overrides vanilla" without first calling \`query_override_modes\` for the target path.** For FIOS/DUPL/NO paths that advice is wrong and the override will silently fail or error.
-2. For **FIOS** targets, the correct guidance is to **name the file so it sorts before the vanilla file** (or replace the whole file), not to rely on load order.
-3. For **DUPL / NO** targets, instruct the user to **replace the entire vanilla file** (same relative path/filename) rather than add a single same-key entry.
-4. For **on_actions**, remember entries **merge** — to extend vanilla behaviour, add a new \`on_actions\` block with the same on_action name (its contents are appended); to *remove* vanilla behaviour you must overwrite the whole file.
-5. If \`query_override_modes\` returns no match, say the active CWT rules do not define an override mode for that path and verify with local examples/diagnostics instead of guessing.
-6. Static knowledge in this prompt is background guidance. If it conflicts with \`query_override_modes\`, \`query_rules\` \`hardFacts\`, LSP completion/diagnostics, or verified current-version examples, prefer the verified local evidence and state the conflict.
+1. **NEVER tell the user to "just redefine the key in a new file, it overrides vanilla" without first calling \`query_override_modes\` for the target path and reading \`matchedModeInfo\`.** For FIOS/DUPL/NO/MERGE paths that advice is often wrong and the override will silently fail or error.
+2. Follow the \`description\` returned for the matched mode verbatim for the correct override strategy (e.g. sort the file earlier for FIOS, replace the whole file for DUPL/NO, add entries to merge for MERGE/on_actions).
+3. For **on_actions**, entries **merge**; to extend vanilla behaviour, add a new \`on_actions\` block with the same on_action name (its contents are appended); to *remove* vanilla behaviour you must overwrite the whole file.
+4. If \`query_override_modes\` returns no \`matched\`, say the active CWT rules do not define an override mode for that path and verify with local examples/diagnostics instead of guessing. If \`matched\` exists but \`matchedModeInfo\` is absent, use the returned \`strategy\` as the active mode but say that this mode lacks CWT documentation and verify the override strategy before giving final advice.
+5. Static knowledge in this prompt is background guidance. If it conflicts with \`query_override_modes\` (\`matched\`/\`matchedModeInfo\`/\`modeInfo\`), \`query_rules\` \`hardFacts\`, LSP completion/diagnostics, or verified current-version examples, prefer the verified local evidence and state the conflict.
 
 ## Strict Adherence to query_rules Schema (CRITICAL)
 PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.

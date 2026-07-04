@@ -508,6 +508,9 @@ export class LspToolHandler {
     }
 
     async queryOverrideModes(args: { path?: string; limit?: number }): Promise<unknown> {
+        // Response includes `modes` (path-to-strategy), `matched`/`matchedModeInfo` for the
+        // longest-prefix path match, and `modeInfo` (full legend: each mode's name+description
+        // from the CWT `override_modes_info` block). The raw JSON is passed through unchanged.
         const cacheKey = `overrideModes:${JSON.stringify([args.path ?? '', args.limit ?? 250])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {

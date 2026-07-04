@@ -668,6 +668,7 @@ modifier_categories = {
 | Block | Meaning | Support |
 | --- | --- | --- |
 | `priorities` | File override strategy metadata; path keys also drive editor hover override-mode display. | Jomini/Modern; path-prefix matching uses the longest configured path |
+| `override_modes_info` | Optional legend documenting each override strategy (`LIOS`, `FIOS`, `DUPL`, `NO`, `MERGE`, `UNKNOWN`, ...): `name` tag plus plain-text `## ` comment descriptions inside each mode block (meaning / who wins by default / how to override vanilla). Avoid option-style `=` examples in those description comments. Surfaced to the AI agent via `query_override_modes` -> `modeInfo` / `matchedModeInfo`. | Jomini/Modern; parsed from `## ` comments |
 | `system_scopes` | Metadata for `This`, `Root`, `Prev`, `From`, etc. | Jomini/Modern |
 | `locales` | Locale ids and language codes. | Jomini/Modern |
 | `database_object_types` | Metadata for `$database_object`. | Jomini/Modern |
@@ -1470,6 +1471,7 @@ modifier_categories = {
 | 块 | 含义 | 支持 |
 | --- | --- | --- |
 | `priorities` | 文件覆盖策略元数据；路径键也用于编辑器 hover 的覆盖模式显示。 | Jomini/Modern；路径前缀匹配采用最长配置路径 |
+| `override_modes_info` | 可选的覆盖策略图例，说明每个策略（`LIOS`、`FIOS`、`DUPL`、`NO`、`MERGE`、`UNKNOWN` 等）：每个模式块内的 `name` 标签加上纯文本 `## ` 注释描述（含义 / 默认谁胜出 / 如何覆盖原版）。这些描述注释中避免写成带 `=` 的 option 风格示例。通过 `query_override_modes` -> `modeInfo` / `matchedModeInfo` 提供给 AI 代理。 | Jomini/Modern；从 `## ` 注释解析 |
 | `system_scopes` | `This`、`Root`、`Prev`、`From` 等系统作用域元数据。 | Jomini/Modern |
 | `locales` | locale id 和语言代码。 | Jomini/Modern |
 | `database_object_types` | `$database_object` 的元数据。 | Jomini/Modern |

@@ -720,7 +720,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ##### Game Knowledge
 
-`gameKnowledge.ts` 为 9 款 Paradox 游戏提供 PDXScript 知识块（Stellaris、HOI4、EU4、CK2、CK3、VIC2、VIC3、Imperator、EU5），外加一个通用 Paradox 回退。`promptBuilder.ts` 通过 `getGameKnowledge(languageId)` 动态选择注入。Stellaris 知识块包含 `common/` 各目录的覆盖/加载顺序规则（LIOS/FIOS/DUPL/NO）和可选作用域操作符 `scope?` 的说明。
+`gameKnowledge.ts` 为 9 款 Paradox 游戏提供 PDXScript 知识块（Stellaris、HOI4、EU4、CK2、CK3、VIC2、VIC3、Imperator、EU5），外加一个通用 Paradox 回退。`promptBuilder.ts` 通过 `getGameKnowledge(languageId)` 动态选择注入。Stellaris 知识块包含 `common/` 各目录的覆盖/加载顺序规则（LIOS/FIOS/DUPL/NO/MERGE/UNKNOWN）和可选作用域操作符 `scope?` 的说明。覆盖模式的具体含义（谁默认胜出、如何覆盖原版）不再以静态文本硬编码在提示词中，而是定义在 CWT `override_modes_info` 块中，由 Agent 通过 `query_override_modes`（返回 `modeInfo` / `matchedModeInfo`）动态获取。
 
 ##### Skills
 

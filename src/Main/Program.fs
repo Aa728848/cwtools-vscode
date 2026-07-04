@@ -7277,6 +7277,16 @@ type Server(client: ILanguageClient) =
                                     [| "path", JsonValue.String priority.path
                                        "strategy", JsonValue.String priority.strategy |]
 
+                            let modeInfoToJson (info: CWTools.Rules.ConfigOverrideModeInfo) =
+                                JsonValue.Record
+                                    [| yield "id", JsonValue.String info.id
+                                       match info.name with
+                                       | Some name -> yield "name", JsonValue.String name
+                                       | None -> ()
+                                       match info.description with
+                                       | Some desc -> yield "description", JsonValue.String desc
+                                       | None -> () |]
+
                             let result =
                                 match gameObj with
                                 | Some g ->
@@ -7286,15 +7296,35 @@ type Server(client: ILanguageClient) =
                                         |> Array.truncate limitVal
                                         |> Array.map priorityToJson
 
+                                    let modeInfos = g.OverrideModesInfo()
+
+                                    let modeInfoArr =
+                                        modeInfos |> Array.map modeInfoToJson
+
+                                    let modeInfoByStrategy =
+                                        let table =
+                                            System.Collections.Generic.Dictionary<string, CWTools.Rules.ConfigOverrideModeInfo>(
+                                                StringComparer.OrdinalIgnoreCase)
+
+                                        for modeInfo in modeInfos do
+                                            table.[modeInfo.id] <- modeInfo
+
+                                        table
+
                                     let fields =
                                         [ yield "ok", JsonValue.Boolean true
                                           yield "source", JsonValue.String "activeRules"
                                           yield "modes", JsonValue.Array modesArr
+                                          yield "modeInfo", JsonValue.Array modeInfoArr
                                           yield "totalCount", JsonValue.Number(decimal modes.Length)
                                           match pathArg with
                                           | Some path ->
                                               match g.OverrideModeAtPath path with
-                                              | Some matched -> yield "matched", priorityToJson matched
+                                              | Some matched ->
+                                                  yield "matched", priorityToJson matched
+                                                  match modeInfoByStrategy.TryGetValue(matched.strategy) with
+                                                  | true, info -> yield "matchedModeInfo", modeInfoToJson info
+                                                  | false, _ -> ()
                                               | None -> yield "matched", JsonValue.Null
                                           | None -> () ]
                                         |> Array.ofList

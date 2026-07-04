@@ -143,7 +143,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_override_modes',
-            description: 'Query path override/load-order modes from the active CWT rules currently loaded by the language server. Use this before advising how to override vanilla files; do not rely on hard-coded prompt tables.',
+            description: 'Query path override/load-order modes from the active CWT rules currently loaded by the language server. Use this before advising how to override vanilla files; do not rely on hard-coded prompt tables. The response includes: `modes` (path to strategy mapping, truncated to `limit`), `matched` and `matchedModeInfo` (longest-prefix match for `path` plus the documentation for that mode), and `modeInfo` (the full legend of every mode `name` and `description` - meaning / who wins by default / how to override vanilla - sourced from the CWT `override_modes_info` block). Read mode semantics from `modeInfo` / `matchedModeInfo` rather than from prompt text.',
             parameters: {
                 type: 'object',
                 properties: {

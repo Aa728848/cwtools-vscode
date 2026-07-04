@@ -37,8 +37,15 @@ describe('game knowledge', () => {
         const knowledge = getGameKnowledge('stellaris');
 
         expect(knowledge).to.include('query_override_modes');
-        expect(knowledge).to.include('active CWT `priorities` rules');
+        expect(knowledge).to.include('active CWT');
+        expect(knowledge).to.include('modeInfo');
+        expect(knowledge).to.include('matchedModeInfo');
+        expect(knowledge).to.include('override_modes_info');
+        // The per-mode meaning table is no longer hard-coded in the prompt;
+        // it is sourced from the CWT `override_modes_info` block via the tool.
         expect(knowledge).to.not.include('### Per-folder resolution');
         expect(knowledge).to.not.include('verified-against-the-table reference');
+        expect(knowledge).to.not.include('| **LIOS** | Last In, Only Served |');
+        expect(knowledge).to.not.include('| **FIOS** | First In, Only Served |');
     });
 });

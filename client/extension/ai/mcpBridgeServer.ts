@@ -17,6 +17,7 @@ const MAX_REQUEST_BYTES = 1024 * 1024;
 const MCP_BRIDGE_TOOL_NAMES = [
     'query_types',
     'query_rules',
+    'query_override_modes',
     'query_scope',
     'get_diagnostics',
     'analyze_diagnostic_error',

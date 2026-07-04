@@ -32,4 +32,13 @@ describe('game knowledge', () => {
         expect(knowledge).to.include('NOT = { ... }');
         expect(knowledge).to.include('key != value');
     });
+
+    it('uses active CWT rules for Stellaris override modes', () => {
+        const knowledge = getGameKnowledge('stellaris');
+
+        expect(knowledge).to.include('query_override_modes');
+        expect(knowledge).to.include('active CWT `priorities` rules');
+        expect(knowledge).to.not.include('### Per-folder resolution');
+        expect(knowledge).to.not.include('verified-against-the-table reference');
+    });
 });

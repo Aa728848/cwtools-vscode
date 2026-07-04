@@ -507,6 +507,21 @@ export class LspToolHandler {
         }
     }
 
+    async queryOverrideModes(args: { path?: string; limit?: number }): Promise<unknown> {
+        const cacheKey = `overrideModes:${JSON.stringify([args.path ?? '', args.limit ?? 250])}`;
+        return this.cachedLspRead(cacheKey, async () => {
+            try {
+                const raw = await this.lspRequest(
+                    'cwtools.ai.queryOverrideModes',
+                    [args.path ?? '', args.limit ?? 250],
+                ) as any;
+                return raw ?? { ok: false, error: 'No response.' };
+            } catch (e) {
+                return { ok: false, error: String(e) };
+            }
+        });
+    }
+
     // - queryTypes -
 
     async queryTypes(args: { typeName: string; filter?: string; limit?: number; vanillaOnly?: boolean }): Promise<QueryTypesResult> {

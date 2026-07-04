@@ -142,6 +142,21 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'query_override_modes',
+            description: 'Query path override/load-order modes from the active CWT rules currently loaded by the language server. Use this before advising how to override vanilla files; do not rely on hard-coded prompt tables.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    path: { type: 'string', description: 'Optional file or directory path to match, e.g. "common/ship_sizes/00_ship_sizes.txt" or an absolute workspace path. The server uses longest configured path prefix.' },
+                    limit: { type: 'number', description: 'Maximum modes to return when listing all active modes. Default 250.' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'search_rule_capabilities',
             description: 'Search CWT/LSP rule evidence by intent and scope capability instead of guessing a rule name. Use this when you know what you want to do (for example iterate ships from fleet scope, fire a carrier event, pick a random planet) but do not know the exact trigger/effect/scope_change name. Returns ranked candidates with hardFacts and semanticHints; validate the selected rule before writing.',
             parameters: {

@@ -667,7 +667,7 @@ modifier_categories = {
 
 | Block | Meaning | Support |
 | --- | --- | --- |
-| `priorities` | File override strategy metadata. | Jomini/Modern; may be used by modern loaders |
+| `priorities` | File override strategy metadata; path keys also drive editor hover override-mode display. | Jomini/Modern; path-prefix matching uses the longest configured path |
 | `system_scopes` | Metadata for `This`, `Root`, `Prev`, `From`, etc. | Jomini/Modern |
 | `locales` | Locale ids and language codes. | Jomini/Modern |
 | `database_object_types` | Metadata for `$database_object`. | Jomini/Modern |
@@ -1469,7 +1469,7 @@ modifier_categories = {
 
 | 块 | 含义 | 支持 |
 | --- | --- | --- |
-| `priorities` | 文件覆盖策略元数据。 | Jomini/Modern；可被现代加载器使用 |
+| `priorities` | 文件覆盖策略元数据；路径键也用于编辑器 hover 的覆盖模式显示。 | Jomini/Modern；路径前缀匹配采用最长配置路径 |
 | `system_scopes` | `This`、`Root`、`Prev`、`From` 等系统作用域元数据。 | Jomini/Modern |
 | `locales` | locale id 和语言代码。 | Jomini/Modern |
 | `database_object_types` | `$database_object` 的元数据。 | Jomini/Modern |

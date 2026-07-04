@@ -149,6 +149,18 @@ module LanguageServerFeatures =
                 let lochover =
                     lochoverFromInfo locMap symbolInfo unescapedWord
 
+                let nonEmptyString text =
+                    if String.IsNullOrWhiteSpace text then None else Some text
+
+                let overrideModeHover =
+                    game.OverrideModeAtPath path
+                    |> Option.bind (fun priority ->
+                        let strategy = priority.strategy.Trim()
+                        if strategy = "" then
+                            None
+                        else
+                            Some(sprintf "**Path override mode**: `%s`\n\nMatched path: `%s`" strategy priority.path))
+
                 let scopesExtra =
                     match scopeContext with
                     | None -> ""
@@ -212,7 +224,11 @@ module LanguageServerFeatures =
                         else None)
 
                 let text =
-                    [| inlineScriptPreview |> Option.orElse docStringOrEffect; lochover; Some scopesExtra; variableHover |]
+                    [| overrideModeHover
+                       (inlineScriptPreview |> Option.orElse docStringOrEffect)
+                       lochover
+                       nonEmptyString scopesExtra
+                       variableHover |]
                     |> Array.choose id
                     |> (fun a -> String.Join("\n\n***\n\n", a))
 

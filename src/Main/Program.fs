@@ -3093,10 +3093,16 @@ type Server(client: ILanguageClient) =
                 []
 
         let callFiles =
-            (priorDiagnostics
-             |> List.filter (fun (d: Diagnostic) -> d.code = Some "CW274D")
-             |> List.collect (fun d -> d.relatedInformation)
-             |> List.map (fun ri -> getPathFromDoc ri.location.uri))
+            (if isEditAction then
+                 // Previous CW274D hints are only a source of stale call sites
+                 // after the definition itself changed. A RevalidateRequest is
+                 // already consuming that work and must not schedule itself.
+                 priorDiagnostics
+                 |> List.filter (fun (d: Diagnostic) -> d.code = Some "CW274D")
+                 |> List.collect (fun d -> d.relatedInformation)
+                 |> List.map (fun ri -> getPathFromDoc ri.location.uri)
+             else
+                 [])
             @ indexedCallFiles
             @ refreshedInlineCallFiles
             |> List.distinctBy normaliseCachePath
@@ -4406,6 +4412,7 @@ type Server(client: ILanguageClient) =
                                           "cwtools.ai.getEntityInfo"
                                           "cwtools.ai.queryStaticModifiers"
                                           "cwtools.ai.queryVariables"
+                                          "cwtools.ai.queryOverrideModes"
                                           "cwtools.ai.getDiagnosticsFresh"
                                           "cwtools.ai.waitDiagnosticsFresh"
                                           "cwtools.ai.getValidationStatus"
@@ -7247,6 +7254,55 @@ type Server(client: ILanguageClient) =
                                            "ok",         JsonValue.Boolean true |]
                                 | None ->
                                     JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                            Some result
+
+                        // - cwtools.ai.queryOverrideModes -
+                        // Returns path override/load-order modes from the active CWT rules currently loaded by the server.
+                        | { command = "cwtools.ai.queryOverrideModes"
+                            arguments = rest } ->
+                            let pathArg =
+                                rest
+                                |> List.tryItem 0
+                                |> Option.bind (function JsonValue.String s when s.Trim() <> "" -> Some(s.Trim()) | _ -> None)
+
+                            let limitVal =
+                                rest
+                                |> List.tryItem 1
+                                |> Option.bind (function JsonValue.Number n -> Some(int n) | _ -> None)
+                                |> Option.defaultValue 250
+                                |> fun value -> max 0 (min 1000 value)
+
+                            let priorityToJson (priority: CWTools.Rules.ConfigPriority) =
+                                JsonValue.Record
+                                    [| "path", JsonValue.String priority.path
+                                       "strategy", JsonValue.String priority.strategy |]
+
+                            let result =
+                                match gameObj with
+                                | Some g ->
+                                    let modes = g.OverrideModes()
+                                    let modesArr =
+                                        modes
+                                        |> Array.truncate limitVal
+                                        |> Array.map priorityToJson
+
+                                    let fields =
+                                        [ yield "ok", JsonValue.Boolean true
+                                          yield "source", JsonValue.String "activeRules"
+                                          yield "modes", JsonValue.Array modesArr
+                                          yield "totalCount", JsonValue.Number(decimal modes.Length)
+                                          match pathArg with
+                                          | Some path ->
+                                              match g.OverrideModeAtPath path with
+                                              | Some matched -> yield "matched", priorityToJson matched
+                                              | None -> yield "matched", JsonValue.Null
+                                          | None -> () ]
+                                        |> Array.ofList
+
+                                    JsonValue.Record fields
+                                | None ->
+                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+
                             Some result
 
                         // - cwtools.ai.getEntityInfo -

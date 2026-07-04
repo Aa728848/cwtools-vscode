@@ -900,6 +900,7 @@ export type AgentToolName =
     | 'query_project_profile'
     | 'run_skill'
     | 'query_rules'
+    | 'query_override_modes'
     | 'search_rule_capabilities'
     | 'explain_scope'
     | 'parse_pdx_fragment'

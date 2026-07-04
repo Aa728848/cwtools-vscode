@@ -41,35 +41,25 @@ export const STELLARIS_KNOWLEDGE = `
 - Do not assume a later command has already run for an earlier command. For example, \`save_event_target_as\`, flag/variable setup, or scope preparation must appear before the command that uses it.
 - When repairing diagnostics, preserve meaningful statement order; do not sort, hoist, or move commands across setup/use boundaries unless you have verified the gameplay semantics.
 
-## Override & Load-Order Semantics (CRITICAL — DO NOT ASSUME "LAST FILE WINS")
-**The single most common misconception is that every file/entry is overridden by the last one loaded.** This is FALSE. Stellaris resolves conflicts differently **per folder, and sometimes per entry**. Mods load AFTER vanilla, and later mods after earlier ones (alphabetically by filename within a folder, then by mod load order). Whether "your version" wins depends on the folder's resolution mode:
+## Override & Load-Order Semantics (CRITICAL — USE ACTIVE CWT RULES)
+**Do not assume "last file wins".** Stellaris resolves conflicts differently per path and sometimes per entry. The path-to-mode mapping is not hard-coded in this prompt; it comes from the active CWT \`priorities\` rules currently loaded by the language server.
+
+Before advising on vanilla overrides, call \`query_override_modes({ path: "common/ship_sizes/00_ship_sizes.txt" })\` for the target file or directory. The server returns the longest matching active rule path and mode (\`LIOS\`, \`FIOS\`, \`DUPL\`, or \`NO\`).
 
 | Mode | Meaning | Who wins by default | How to override vanilla |
 |------|---------|---------------------|--------------------------|
 | **LIOS** | Last In, Only Served | The **last**-loaded definition of a key | Redefine the same key — your mod loads after vanilla, so it wins. The intuitive case. |
 | **FIOS** | First In, Only Served | The **first**-loaded definition (so **vanilla wins** by default!) | Your file must load **before** the vanilla file — name it to sort earlier (e.g. \`00_\`/\`!\` prefix). Simply redefining a key in a normal file does **NOT** override; vanilla keeps priority. |
-| **FIXES** | First wins, error logged | The first definition; later duplicate keys are rejected with an "already exists" error | Replace the original file or out-sort it. Redefining the key logs an error and your version is **ignored**. |
 | **DUPL** | Duplicates kept | **Both** entries are kept (additive/merge) — can corrupt the entity | Usually you must override the **entire file** (replace whole file by same path), not add a same-key entry. |
 | **NO** | Cannot individually overwrite | Existing entries cannot be replaced at all | Replace the **whole file**. For some (e.g. \`on_actions\`) new entries **merge** with existing ones rather than overwrite. |
 
-### Per-folder resolution (verified-against-the-table reference — confirm before relying on it)
-- **LIOS (redefine the key, your file wins)** — most \`common/\` definitions: \`buildings\`, \`districts\`, \`technology\`*, \`traditions\`, \`tradition_categories\`, \`ascension_perks\`, \`edicts\`, \`policies\`, \`decisions\`, \`relics\`, \`armies\`, \`anomalies\`, \`archaeological_site_types\`, \`bombardment_stances\`, \`country_types\`, \`crisis_levels\`, \`crisis_objectives\`, \`deposits\`, \`deposit_categories\`, \`economic_categories\`, \`espionage_assets\`, \`ethics\`, \`event_chains\`, \`first_contact\`, \`game_rules\`, \`governments/civics\`, \`intel_categories\`, \`intel_levels\`, \`leader_classes\`, \`mandates\`, \`megastructures\`, \`message_types\`, \`personalities\`, \`pop_factions\`, \`pop_faction_types\`, \`pop_jobs\`, \`resolutions\`, \`resolution_categories\`, \`script_values\`, \`scripted_triggers\`, \`scripted_modifiers\`, \`sector_types\`, \`ship_types\`, \`species_archetypes\`, \`species_classes\`, \`species_rights\`, \`starbase_buildings\`, \`starbase_levels\`, \`starbase_modules\`, \`starbase_types\`, \`star_classes\`, \`static_modifiers\`, \`war_goals\`.
-- **FIOS (vanilla wins unless you out-sort the filename earlier)** — \`governments\` & \`governments/authorities\` (specific override impossible — entire override only), \`pop_jobs\`-style tag overrides, \`ship_sizes\`, \`ship_behaviors\`, \`diplomatic_actions\`, \`solar_system_initializers\`, \`special_projects\`, \`colony_automation\`, \`component_slot_templates\`, \`scripted_loc\`, \`start_screen_messages\` (first valid entry per location is used, rest discarded).
-- **FIXES (first wins, "already exists" error if you redefine)** — \`scripted_effects\`, \`component_sets\`, \`component_templates\`, \`global_ship_designs\`.
-- **DUPL (both kept — override the whole file)** — \`name_lists\`, \`strategic_resources\` (must replace the whole file or the name breaks), \`planet_classes\` (DUPL breaks habitability modifiers if partially overwritten), \`inline_scripts\`, \`observation_station_missions\`.
-- **NO / merge-only (cannot overwrite a single entry)** — \`section_templates\` ("Duplicate section template found" — replace the whole file), \`on_actions\` (cannot modify existing entries; new entries are **merged** with the same-named entry — so to change vanilla behaviour you append, you do not redefine), \`traits\` (entire override only).
-- **\`defines\`**: redefine the specific define, **but the enclosing block must be included as well** (e.g. wrap your override in its \`NGameplay = { ... }\` block).
-- **Localisation / events / interface / fonts**: generally LIOS (last loaded wins). Events are usually LIOS but be careful — verify per case.
-
-\\* \`technology\` is mostly LIOS in practice but emits a DUPL-type "already exists" error; to fully override you may need to also carry the \`potential\` block from the vanilla entry.
-
 ### Operating rules for the Agent
-1. **NEVER tell the user to "just redefine the key in a new file, it overrides vanilla" without first checking the folder's resolution mode.** For FIOS/FIXES/DUPL/NO folders that advice is wrong and the override will silently fail or error.
+1. **NEVER tell the user to "just redefine the key in a new file, it overrides vanilla" without first calling \`query_override_modes\` for the target path.** For FIOS/DUPL/NO paths that advice is wrong and the override will silently fail or error.
 2. For **FIOS** targets, the correct guidance is to **name the file so it sorts before the vanilla file** (or replace the whole file), not to rely on load order.
 3. For **DUPL / NO** targets, instruct the user to **replace the entire vanilla file** (same relative path/filename) rather than add a single same-key entry.
 4. For **on_actions**, remember entries **merge** — to extend vanilla behaviour, add a new \`on_actions\` block with the same on_action name (its contents are appended); to *remove* vanilla behaviour you must overwrite the whole file.
-5. This table is from community testing and is **not exhaustive or guaranteed per version** ("not everything could be tested extensively"). When override behaviour matters, **verify** against the project's CWT rules, vanilla file layout, and the user's game version before finalizing; state the resolution mode you are assuming.
-6. Static knowledge in this prompt is background guidance. If it conflicts with \`query_rules\` \`hardFacts\`, LSP completion/diagnostics, or verified current-version examples, prefer the verified local evidence and state the conflict.
+5. If \`query_override_modes\` returns no match, say the active CWT rules do not define an override mode for that path and verify with local examples/diagnostics instead of guessing.
+6. Static knowledge in this prompt is background guidance. If it conflicts with \`query_override_modes\`, \`query_rules\` \`hardFacts\`, LSP completion/diagnostics, or verified current-version examples, prefer the verified local evidence and state the conflict.
 
 ## Strict Adherence to query_rules Schema (CRITICAL)
 PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.

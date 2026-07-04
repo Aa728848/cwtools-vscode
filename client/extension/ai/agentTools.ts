@@ -45,6 +45,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_workspace_index: 45_000,
     query_project_profile: 5_000,
     query_rules: 45_000,
+    query_override_modes: 45_000,
     search_rule_capabilities: 45_000,
     explain_scope: 45_000,
     parse_pdx_fragment: 45_000,
@@ -634,6 +635,8 @@ export class AgentToolExecutor {
                 result = this.runSkill(args); break;
             case 'query_rules':
                 result = await this.lspHandler.queryRules(args as any); break;
+            case 'query_override_modes':
+                result = await this.lspHandler.queryOverrideModes(args as any); break;
             case 'search_rule_capabilities':
                 result = await this.lspHandler.searchRuleCapabilities(args as any); break;
             case 'explain_scope':

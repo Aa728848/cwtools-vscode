@@ -334,6 +334,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 | "cwtools.ai.getEntityInfo"
                 | "cwtools.ai.queryStaticModifiers"
                 | "cwtools.ai.queryVariables"
+                | "cwtools.ai.queryOverrideModes"
                 | "cwtools.ai.getDiagnosticsFresh"
                 | "cwtools.ai.getAllDiagnostics"
                 | "cwtools.ai.waitDiagnosticsFresh"

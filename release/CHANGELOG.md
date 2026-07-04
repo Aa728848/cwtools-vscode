@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.8.8] - 2026-07-05
+
+### AI 规则语义与 LSP 证据 / AI Rule Semantics & LSP Evidence
+- **[AI] 规则查询语义增强**：`query_rules` 现在会从 CWT 规则、`scope_changes.cwt`、`trigger_docs.log`、`scopes.cwt`、CWT 注释与 `modifiers.log` 中返回结构化 `hardFacts` 与 `semanticHints`，让 AI 区分“合法语法/作用域事实”和“文档语义提示”。
+  English: `query_rules` now returns structured `hardFacts` and `semanticHints` from CWT rules, `scope_changes.cwt`, `trigger_docs.log`, `scopes.cwt`, CWT comments, and `modifiers.log`, so AI can separate legality facts from documentation hints.
+- **[AI] 新增规则能力发现工具**：新增 `search_rule_capabilities`、`explain_scope`、`parse_pdx_fragment`，支持按意图、当前作用域和目标作用域查找合法 trigger/effect/scope_change；例如“舰队中遍历舰船”会优先定位到 `every_owned_ship`。
+  English: Added `search_rule_capabilities`, `explain_scope`, and `parse_pdx_fragment` to discover legal trigger/effect/scope_change rules by intent and scope; for example, iterating ships from fleet scope now ranks `every_owned_ship` correctly.
+- **[AI] 静态知识优先级修正**：静态知识库现在只作为背景指导；当它与 `query_rules.hardFacts`、LSP completion/diagnostics 或当前规则库证据冲突时，AI 应优先采用本地可验证规则证据。
+  English: Static knowledge is now explicitly background guidance; when it conflicts with `query_rules.hardFacts`, LSP completion/diagnostics, or current rule evidence, AI should prefer verified local evidence.
+- **[MCP] 多游戏规则源对齐**：MCP 与内置 AI 工具现在会优先读取当前游戏的规则目录，并支持显式规则目录、项目 profile、当前 game 的 `.cwtools`/release/submodule 规则源，避免非 Stellaris 项目误用 Stellaris fallback。
+  English: MCP and built-in AI tools now prefer the active game's rules source, including explicit rules folders, project profiles, and current-game `.cwtools`/release/submodule rules, preventing non-Stellaris projects from accidentally using Stellaris fallback rules.
+- **[修复] 规则源为空时不再误判作用域非法**：当没有加载到 `scopes.cwt` 或 CWT 规则文件时，`explain_scope`、`query_rules`、`search_rule_capabilities` 会返回明确的规则源缺失提示，而不是声称 `Fleet` 等作用域不存在。
+  English: When no `scopes.cwt` or CWT rule files are loaded, `explain_scope`, `query_rules`, and `search_rule_capabilities` now report an empty rules source instead of claiming scopes such as `Fleet` are invalid.
+- **[修复] 规则获取只使用主扩展来源**：AI/MCP 规则与缓存发现现在只读取 `ForeverSkywalker.foreverskywalker-stellaris-cwtools`，不再从旧的 `eddy-stellaris-cwt`、`tboby.cwtools-vscode` 或 `cwtools.cwtools-vscode` 目录获取过期规则。
+  English: AI/MCP rule and cache discovery now uses only `ForeverSkywalker.foreverskywalker-stellaris-cwtools`, avoiding stale rules from legacy `eddy-stellaris-cwt`, `tboby.cwtools-vscode`, or `cwtools.cwtools-vscode` directories.
+
 ## [2.8.5] - 2026-07-03
 
 ### 功能与修复 / Features & Fixes

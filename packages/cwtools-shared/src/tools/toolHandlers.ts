@@ -1,7 +1,11 @@
 import * as path from 'path';
 import type { HostServices } from '../host/hostServices';
 import { analyzeDiagnosticKnowledge } from '../knowledge/diagnosticRouting';
-import { queryRulesWithHost } from '../knowledge/rules';
+import {
+  explainScopeWithHost,
+  queryRulesWithHost,
+  searchRuleCapabilitiesWithHost,
+} from '../knowledge/rules';
 import { queryProjectProfileWithHost } from '../project/profile';
 import { editPdxBlockWithHost } from '../safety/pdxEdit';
 import { writeLocalisationWithHost } from '../safety/localisation';
@@ -185,6 +189,28 @@ export const defaultSharedToolDispatcher: SharedToolDispatcher = async (host, na
         name: typeof args.name === 'string' ? args.name : undefined,
         scope: typeof args.scope === 'string' ? args.scope : undefined,
       });
+
+    case 'search_rule_capabilities':
+      return searchRuleCapabilitiesWithHost(host, {
+        intent: typeof args.intent === 'string' ? args.intent : undefined,
+        category: typeof args.category === 'string' ? args.category as never : undefined,
+        currentScope: typeof args.currentScope === 'string' ? args.currentScope : undefined,
+        desiredPushScope: typeof args.desiredPushScope === 'string' ? args.desiredPushScope : undefined,
+        limit: typeof args.limit === 'number' ? args.limit : undefined,
+      });
+
+    case 'explain_scope':
+      return explainScopeWithHost(host, {
+        scope: String(args.scope ?? ''),
+      });
+
+    case 'parse_pdx_fragment':
+      return executeLspTool(
+        host,
+        'cwtools.ai.parseFragment',
+        [String(args.code ?? '')],
+        'Start the CWTools LSP process or connect this host to an existing language server.',
+      );
 
     case 'query_scripted_effects':
       return executeLspTool(

@@ -8,6 +8,9 @@ const repoRoot = path.resolve(__dirname, '..');
 const mcpToolNames = [
   'query_types',
   'query_rules',
+  'search_rule_capabilities',
+  'explain_scope',
+  'parse_pdx_fragment',
   'query_scope',
   'get_diagnostics',
   'analyze_diagnostic_error',

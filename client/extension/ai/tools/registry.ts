@@ -3,7 +3,7 @@ import { TOOL_DEFINITIONS as SCHEMA_DEFINITIONS } from './definitions';
 import { analyzeSchema, flattenSchema } from './schemaFlatten';
 
 export type AgentToolName =
-    | 'query_scope' | 'query_types' | 'query_rules' | 'remove_ignored_diagnostic'
+    | 'query_scope' | 'query_types' | 'query_rules' | 'search_rule_capabilities' | 'explain_scope' | 'parse_pdx_fragment' | 'remove_ignored_diagnostic'
     | 'query_localisation_index' | 'query_workspace_index' | 'query_project_profile' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'edit_pdx_block' | 'query_references'
     | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
@@ -58,7 +58,7 @@ export const TOOL_REGISTRY = new Map<AgentToolName, ToolRegistryEntry>();
 
 // Categories to help assign modes
 const BASE_READ: AgentToolName[] = [
-    'query_scope', 'query_types', 'query_rules', 'query_localisation_index', 'query_workspace_index', 'query_references',
+    'query_scope', 'query_types', 'query_rules', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'query_references',
     'query_project_profile', 'run_skill', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory', 'glob_files',
     'lsp_operation', 'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name',
@@ -122,7 +122,7 @@ const LOC_MODES = new Set([
     'read_file', 'write_file',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
     'workspace_symbols', 'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_lsp_status', 'get_diagnostics',
-    'query_types', 'query_rules', 'query_references', 'todo_write', 'write_localisation', 'git_ops',
+    'query_types', 'query_rules', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'todo_write', 'write_localisation', 'git_ops',
     'analyze_diagnostic_error', 'save_workflow'
 ]);
 const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...NETWORK, 'set_memory', 'get_memory', 'search_memory', 'todo_write', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);

@@ -26,6 +26,9 @@ const COMMON_PDX_CARDS: GameKnowledgeCard[] = [
     facts: [
       'Verify game identifiers through LSP or indexed tools before writing them.',
       'Use query_rules for trigger/effect syntax instead of inventing parameters.',
+      'Use search_rule_capabilities when intent is known but the exact rule name is not.',
+      'Treat semanticHints as retrieval guidance; legality comes from hardFacts and validation.',
+      'Use parse_pdx_fragment for syntax-only fragment checks before final diagnostics.',
       'Use write_localisation for .yml localisation writes.',
     ],
   },

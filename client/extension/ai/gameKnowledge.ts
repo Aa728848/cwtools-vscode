@@ -69,10 +69,13 @@ export const STELLARIS_KNOWLEDGE = `
 3. For **DUPL / NO** targets, instruct the user to **replace the entire vanilla file** (same relative path/filename) rather than add a single same-key entry.
 4. For **on_actions**, remember entries **merge** — to extend vanilla behaviour, add a new \`on_actions\` block with the same on_action name (its contents are appended); to *remove* vanilla behaviour you must overwrite the whole file.
 5. This table is from community testing and is **not exhaustive or guaranteed per version** ("not everything could be tested extensively"). When override behaviour matters, **verify** against the project's CWT rules, vanilla file layout, and the user's game version before finalizing; state the resolution mode you are assuming.
+6. Static knowledge in this prompt is background guidance. If it conflicts with \`query_rules\` \`hardFacts\`, LSP completion/diagnostics, or verified current-version examples, prefer the verified local evidence and state the conflict.
 
 ## Strict Adherence to query_rules Schema (CRITICAL)
 PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.
 - **Do NOT Guess**: If unsure about parameters, you MUST use \`query_rules\` before writing code.
+- **Use capability search before inventing names**: If you know the intent but not the exact rule name (for example "iterate ships from fleet scope"), use \`search_rule_capabilities\` with currentScope/desiredPushScope instead of guessing an effect name.
+- **Hard facts vs semantic hints**: \`query_rules\` returns \`hardFacts\` from CWT structure and optional \`semanticHints\` from docs/comments. Use \`semanticHints\` only to find candidates; legality comes from \`hardFacts\`, completions, diagnostics, parse checks, and verified examples.
 - **Never Invent Parameters**: Do NOT add arbitrary properties (like \`multiply\`, \`add\`, \`limit\`, \`count\`) into a block unless explicitly listed.
 - **Interpreting Syntax**:
   - If syntax is \`yes/no\` or \`bool\`, use \`trigger = yes\`.
@@ -125,6 +128,9 @@ CWT/LSP evidence is authoritative for syntax, types, scopes, enum values, and di
 | Locate vanilla event file | \`workspace_symbols("distar.001")\` | Returns file path |
 | Discover valid values at a position | \`get_completion_at(file, line, col)\` | Returns LSP completions |
 | Find effect/trigger signature | \`query_rules("effect", "add_modifier")\` | Returns syntax |
+| Find the right rule for an intent | \`search_rule_capabilities(intent, currentScope, desiredPushScope)\` | Ranks legal candidates without guessing names |
+| Understand a scope alias/subscope | \`explain_scope("Carrier")\` | Reads aliases and subscope hints from scopes.cwt |
+| Check a draft fragment syntax | \`parse_pdx_fragment(code)\` | Parser/brace sanity check before writing |
 | Find what uses a vanilla ID | \`query_references("tech_lasers_1")\` | All references |
 
 **Rules**: always use the \`filter\` parameter with \`query_types\`. For archetype design, bounded vanilla reads are allowed only after an indexed/exact lookup identifies a concrete example; prefer \`get_entity_info\`, \`document_symbols\`, and \`get_pdx_block\` before any raw \`read_file\`.
@@ -625,6 +631,8 @@ export const PARADOX_KNOWLEDGE = `
 ## Strict Adherence to query_rules Schema (CRITICAL)
 PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.
 - **Do NOT Guess**: If unsure about parameters, you MUST use \`query_rules\` before writing code.
+- If you know the intent but not the exact rule name, use \`search_rule_capabilities\` with currentScope/desiredPushScope before inventing trigger/effect names.
+- Treat \`semanticHints\` from docs/comments as retrieval hints only. Legality comes from \`hardFacts\`, completions, diagnostics, parse checks, and verified examples.
 - **Never Invent Parameters**: Do NOT add arbitrary properties (like \`multiply\`, \`add\`, \`limit\`, \`count\`) into a block unless explicitly listed.
 - **Interpreting Syntax**:
   - If syntax is \`yes/no\` or \`bool\`, use \`trigger = yes\`.
@@ -637,6 +645,7 @@ PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the 
 ## Vanilla Query Strategy
 Use CWTools LSP tools (\`query_types\`, \`query_rules\`, \`workspace_symbols\`) for all game construct lookups.
 Do NOT rely on memory — always verify with the LSP server.
+Static knowledge is background guidance only; prefer \`query_rules\` \`hardFacts\`, \`search_rule_capabilities\`, LSP completion/diagnostics, and verified current-version examples when they disagree.
 `;
 
 // ─── Game ID → Knowledge Mapping ─────────────────────────────────────────────

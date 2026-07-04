@@ -15,6 +15,9 @@ export interface LspReadiness {
 export const LOAD_DEPENDENT_TOOLS: ReadonlySet<string> = new Set([
   'query_types',
   'query_rules',
+  'search_rule_capabilities',
+  'explain_scope',
+  'parse_pdx_fragment',
   'query_scope',
   'get_completion_at',
   'query_definition',

@@ -127,7 +127,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_rules',
-            description: 'Query syntax rules for triggers, effects, scope changes, or modifiers. Returns valid syntax, parameters, and scopes. Fuzzy-matches if exact name not found.',
+            description: 'Query syntax rules for triggers, effects, scope changes, or modifiers from CWT/LSP-backed rule evidence. Returns hardFacts (legal syntax/scopes/push_scope/type filters) plus semanticHints from trigger_docs.log/scopes.cwt comments. Treat semanticHints as search guidance, not proof of legality. Fuzzy-matches if exact name not found.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -136,6 +136,52 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     scope: { type: 'string', description: 'Filter by supported scope (e.g. "planet", "country"). Optional, but heavily recommended. Use query_scope to find your current context first.' },
                 },
                 required: ['category'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'search_rule_capabilities',
+            description: 'Search CWT/LSP rule evidence by intent and scope capability instead of guessing a rule name. Use this when you know what you want to do (for example iterate ships from fleet scope, fire a carrier event, pick a random planet) but do not know the exact trigger/effect/scope_change name. Returns ranked candidates with hardFacts and semanticHints; validate the selected rule before writing.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    intent: { type: 'string', description: 'Natural-language intent, English or Chinese, e.g. "iterate ships in fleet" or "查询舰队中的舰船".' },
+                    category: { type: 'string', enum: ['trigger', 'effect', 'scope_change', 'modifier', 'all'], description: 'Optional rule category filter. Use scope_change when searching for every_/random_/ordered_ scope iteration effects.' },
+                    currentScope: { type: 'string', description: 'Optional current CWT scope such as fleet, country, planet, ship. Use query_scope first when editing an existing file.' },
+                    desiredPushScope: { type: 'string', description: 'Optional desired resulting scope, e.g. ship when looking for an iterator that enters ship scope.' },
+                    limit: { type: 'number', description: 'Maximum candidates to return. Default 10, max 50.' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'explain_scope',
+            description: 'Explain a CWT scope from scopes.cwt, including aliases, is_subscope_of, source location, and semantic hints. Use this to understand scopes like Carrier before deciding whether an event/effect rule applies. Scope descriptions are hints, not legality proof.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    scope: { type: 'string', description: 'Scope or alias to explain, e.g. Carrier, carrier, fleet, ship, planet.' },
+                },
+                required: ['scope'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'parse_pdx_fragment',
+            description: 'Parse a PDXScript fragment through the CWTools language server without writing a file. Use this for quick syntax, brace, and recovery checks after selecting rules. This is not a full semantic validation substitute; final project edits still need get_diagnostics/completions or verified examples.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    code: { type: 'string', description: 'PDXScript fragment text to parse.' },
+                },
+                required: ['code'],
             },
         },
     },

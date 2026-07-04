@@ -45,6 +45,9 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_workspace_index: 45_000,
     query_project_profile: 5_000,
     query_rules: 45_000,
+    search_rule_capabilities: 45_000,
+    explain_scope: 45_000,
+    parse_pdx_fragment: 45_000,
     query_references: 45_000,
     get_lsp_status: 10_000,
     get_diagnostics: 45_000,
@@ -631,6 +634,12 @@ export class AgentToolExecutor {
                 result = this.runSkill(args); break;
             case 'query_rules':
                 result = await this.lspHandler.queryRules(args as any); break;
+            case 'search_rule_capabilities':
+                result = await this.lspHandler.searchRuleCapabilities(args as any); break;
+            case 'explain_scope':
+                result = await this.lspHandler.explainScope(args as any); break;
+            case 'parse_pdx_fragment':
+                result = await this.lspHandler.parsePdxFragment(args as any); break;
             case 'query_references':
                 result = await this.lspHandler.queryReferences(args as any); break;
             // validate_code - REMOVED: replaced by get_diagnostics + edit_file inline diagnostics

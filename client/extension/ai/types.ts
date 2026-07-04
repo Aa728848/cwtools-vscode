@@ -396,12 +396,87 @@ export interface RuleInfo {
     description: string;
     scopes: string[];
     syntax: string;
+    category?: QueryRulesArgs['category'];
+    sourceFile?: string;
+    sourceLine?: number;
+    hardFacts?: {
+        category: QueryRulesArgs['category'];
+        supportedScopes?: string[];
+        pushScope?: string;
+        typeKeyFilter?: string;
+        syntax?: string;
+        cwtSource?: {
+            file: string;
+            line: number;
+        };
+    };
+    semanticHints?: Array<{
+        text: string;
+        source: 'trigger_docs.log' | 'scopes.cwt' | 'cwt-comment' | 'modifiers.log';
+        file?: string;
+        line?: number;
+        confidence: 'hint';
+    }>;
 }
 
 export interface QueryRulesResult {
     rules: RuleInfo[];
     totalCount: number;
     truncated: boolean;
+}
+
+export interface SearchRuleCapabilitiesArgs {
+    intent?: string;
+    category?: QueryRulesArgs['category'] | 'all';
+    currentScope?: string;
+    desiredPushScope?: string;
+    limit?: number;
+}
+
+export interface SearchRuleCapabilitiesResult {
+    status: 'ready';
+    candidates: Array<{
+        rule: RuleInfo;
+        score: number;
+        reasons: string[];
+    }>;
+    totalConsidered: number;
+    source: string;
+    warnings?: string[];
+}
+
+export interface ExplainScopeArgs {
+    scope: string;
+}
+
+export interface ExplainScopeResult {
+    status: 'ready' | 'not_found';
+    scope: string;
+    canonicalName?: string;
+    aliases?: string[];
+    isSubscopeOf?: string[];
+    description?: string;
+    source?: {
+        file: string;
+        line: number;
+    };
+    semanticHints?: NonNullable<RuleInfo['semanticHints']>;
+    suggestions?: string[];
+}
+
+export interface ParsePdxFragmentArgs {
+    code: string;
+}
+
+export interface ParsePdxFragmentResult {
+    ok: boolean;
+    valid: boolean;
+    fragments: number;
+    errors: Array<{
+        line: number;
+        col: number;
+        message: string;
+    }>;
 }
 
 export interface QueryReferencesArgs {
@@ -755,6 +830,9 @@ export type ToolArgs =
     | QueryWorkspaceIndexArgs
     | QueryProjectProfileArgs
     | QueryRulesArgs
+    | SearchRuleCapabilitiesArgs
+    | ExplainScopeArgs
+    | ParsePdxFragmentArgs
     | QueryReferencesArgs
     | GetFileContextArgs
     | SearchModFilesArgs
@@ -787,6 +865,9 @@ export type ToolResult =
     | QueryWorkspaceIndexResult
     | QueryProjectProfileResult
     | QueryRulesResult
+    | SearchRuleCapabilitiesResult
+    | ExplainScopeResult
+    | ParsePdxFragmentResult
     | QueryReferencesResult
     | GetFileContextResult
     | SearchModFilesResult
@@ -819,6 +900,9 @@ export type AgentToolName =
     | 'query_project_profile'
     | 'run_skill'
     | 'query_rules'
+    | 'search_rule_capabilities'
+    | 'explain_scope'
+    | 'parse_pdx_fragment'
     | 'query_references'
     // validate_code — REMOVED: replaced by get_diagnostics + multi_replace_file_content inline diagnostics
     | 'get_lsp_status'

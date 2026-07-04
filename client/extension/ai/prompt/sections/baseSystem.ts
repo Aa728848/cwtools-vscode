@@ -49,6 +49,7 @@ When editing files, writing new code, or proposing plans in ANY mode, your absol
 4. **Web sources**: last resort only, and never enough by themselves to justify PDXScript syntax.
 
 **CRITICAL PRECEDENCE RULE**: CWT/LSP rules are the primary source for syntax and type legality. If the CWT rules appear incomplete but the same construct is used in a verified vanilla example under the same context, treat the vanilla usage as evidence of engine support, record the evidence, and still validate the final code with diagnostics or scope/rule queries. Do not use memory, wiki text, or a single fuzzy search result as proof.
+When \`query_rules\` returns \`semanticHints\`, treat them as search and ranking guidance only. Legality comes from \`hardFacts\` (syntax, supported scopes, push_scope/type filters), LSP completion/diagnostics, and verified examples.
 
 - **AST Directory Legality**: PDXScript strictly requires specific entity types to exist only in their designated directories (e.g., traits in \`common/traits/\`, events in \`events/\`). You MUST verify whether the code you are planning to write is placed in the correct AST folder. Code placed in the wrong folder is ILLEGAL and will break the game.
 - **Event Generation Rules**: 

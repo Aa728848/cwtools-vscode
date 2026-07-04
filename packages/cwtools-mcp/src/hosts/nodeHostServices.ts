@@ -26,7 +26,7 @@ import { createLspProcessHost, pathToFileUri, resolveRulesCacheRoot, type LspPro
 import { detectProjectSupport } from './projectDetect';
 import { readIgnoredDiagnostics, applyDiagnosticIgnoreList } from './projectSettings';
 import { RevalidationCoordinator } from './revalidation';
-import { detectExtensionCacheDir } from './vscodeCache';
+import { detectExtensionCacheDir, detectExtensionRulesDir } from './vscodeCache';
 
 export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
   const workspaceRoot = path.resolve(config.workspaceRoot);
@@ -39,6 +39,8 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
   // Fall back to the VS Code cwtools extension's globalStorage cache when --cache
   // is omitted, so the MCP reuses the vanilla cache the extension already built.
   const autoCache = config.cachePath ?? detectExtensionCacheDir(config.game);
+  const detectedRulesPath = detectExtensionRulesDir(autoCache, config.game);
+  const rulesConfigDirs = uniqueStrings([config.rulesPath, detectedRulesPath].filter((item): item is string => !!item));
   const lspProcess: LspProcessHost | undefined = enabled
     ? createLspProcessHost({
         workspaceRoot,
@@ -50,7 +52,7 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
       })
     : undefined;
   const lsp: LspHost = lspProcess
-    ?? createUnavailableLspHost('Workspace is not a recognised Paradox/Stellaris mod; CWTools is disabled here.');
+    ?? createUnavailableLspHost('Workspace is not a recognised Paradox mod; CWTools is disabled here.');
   if (!enabled) {
     console.error(`[cwtools-mcp] info: tool calls will be rejected (no language server) — ${support.reason} (pass --force-start to override)`);
   } else if (!support.supported) {
@@ -79,6 +81,15 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
     ),
     filesystem,
     indexing: new ThinNodeIndexHost(workspaceRoot),
+    rules: {
+      gameId: config.game,
+      configDirs: rulesConfigDirs,
+      async readTextFile(filePath) {
+        if (!fssync.existsSync(filePath)) return { content: '', hasBom: false, exists: false };
+        const content = await fs.readFile(filePath, 'utf8');
+        return { content, hasBom: content.charCodeAt(0) === 0xfeff, exists: true };
+      },
+    },
     vanillaCache: probeVanillaCache(workspaceRoot, { ...config, cachePath: autoCache }),
     now: () => Date.now(),
     log: (level, message, data) => {
@@ -88,6 +99,18 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
     },
     dispose: () => lspProcess?.dispose(),
   };
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const results: string[] = [];
+  for (const value of values) {
+    const key = process.platform === 'win32' ? value.toLowerCase() : value;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    results.push(value);
+  }
+  return results;
 }
 
 // Resolve vanilla-cache availability up front: a pre-built <game>.cwb under the

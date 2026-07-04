@@ -28,8 +28,8 @@ export function queryWorkflowHints(): { status: 'ready'; hints: WorkflowHint[] }
         id: 'entity-lookup',
         title: 'Verify game identifiers',
         triggers: ['id', 'technology', 'building', 'scripted_effect', 'scripted_trigger'],
-        recommendedTools: ['query_types', 'query_workspace_index', 'query_definition_by_name'],
-        guardrails: ['Treat empty text search results as inconclusive without indexed verification.'],
+        recommendedTools: ['search_rule_capabilities', 'query_rules', 'query_types', 'query_workspace_index', 'query_definition_by_name'],
+        guardrails: ['Treat empty text search results as inconclusive without indexed verification.', 'Treat semanticHints as retrieval hints, not legality proof.'],
       },
     ],
   };

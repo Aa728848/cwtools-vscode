@@ -12,6 +12,7 @@ import type { LanguageClient } from 'vscode-languageclient/node';
 import type {
     QueryScopeResult,
     QueryTypesResult,
+    QueryRulesArgs,
     QueryRulesResult,
     QueryReferencesResult,
     GetFileContextResult,
@@ -25,6 +26,7 @@ import { isPathInsideOrEqual } from '../workspaceSandbox';
 import { diagnosticMetadata } from './diagnosticMetadata';
 import { stripLineNumberPrefixes } from './replacerSuite';
 import { diagnosticCodeString, diagnosticMatchesIgnoredKey } from '../../diagnosticI18n';
+import { readProjectProfile } from '../projectProfile';
 
 function isAgentTempPath(filePath: string): boolean {
     return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
@@ -95,6 +97,37 @@ function normalizeWorkspaceIncludeGlob(include?: string): string {
     return normalized;
 }
 
+interface RuleDocInfo {
+    description: string;
+    syntax: string;
+    scopes: string[];
+    file: string;
+    line: number;
+}
+
+interface ScopeInfo {
+    name: string;
+    aliases: string[];
+    isSubscopeOf: string[];
+    description?: string;
+    file: string;
+    line: number;
+}
+
+interface RuleCapabilityCandidate {
+    rule: RuleInfo;
+    score: number;
+    reasons: string[];
+}
+
+interface CwtRuleCache {
+    triggers: RuleInfo[];
+    effects: RuleInfo[];
+    scopeChanges: RuleInfo[];
+    modifiers: RuleInfo[];
+    scopes: Map<string, ScopeInfo>;
+}
+
 // - Context type -
 
 /** Structural type for the properties LspToolHandler reads from the executor. */
@@ -112,7 +145,7 @@ export interface LspToolContext {
 // - Handler class -
 
 export class LspToolHandler {
-    private cwtRulesCache: { triggers: RuleInfo[]; effects: RuleInfo[]; modifiers: RuleInfo[] } | null = null;
+    private cwtRulesCache: CwtRuleCache | null = null;
     /** 5-second TTL cache for heavy read-only LSP commands */
     private lspReadCache = new Map<string, { data: unknown; expiresAt: number }>();
 
@@ -599,10 +632,12 @@ export class LspToolHandler {
             rules = cache.triggers;
         } else if (args.category === 'effect') {
             rules = cache.effects;
+        } else if (args.category === 'scope_change') {
+            rules = cache.scopeChanges;
         } else if (args.category === 'modifier') {
             rules = cache.modifiers;
         } else {
-            rules = [...cache.triggers, ...cache.effects, ...cache.modifiers];
+            rules = [...cache.triggers, ...cache.effects, ...cache.scopeChanges, ...cache.modifiers];
         }
 
         if (args.name) {
@@ -628,6 +663,127 @@ export class LspToolHandler {
         }
 
         return { rules: rules.slice(0, 80), totalCount: rules.length, truncated: rules.length > 80 };
+    }
+
+    async searchRuleCapabilities(args: {
+        intent?: string;
+        category?: QueryRulesArgs['category'] | 'all';
+        currentScope?: string;
+        desiredPushScope?: string;
+        limit?: number;
+    }): Promise<{
+        status: 'ready';
+        candidates: RuleCapabilityCandidate[];
+        totalConsidered: number;
+        source: string;
+        warnings: string[];
+    }> {
+        if (!this.cwtRulesCache) {
+            this.cwtRulesCache = await this.loadCWTRules();
+        }
+        const cache = this.cwtRulesCache;
+        const categories = args.category && args.category !== 'all'
+            ? [args.category]
+            : ['trigger', 'effect', 'scope_change', 'modifier'] as const;
+        const rules = categories.flatMap(category =>
+            category === 'trigger' ? cache.triggers
+                : category === 'effect' ? cache.effects
+                    : category === 'scope_change' ? cache.scopeChanges
+                        : cache.modifiers
+        );
+        const currentScope = args.currentScope?.trim().toLowerCase();
+        const desiredPushScope = args.desiredPushScope?.trim().toLowerCase();
+        const intentTokens = this.expandIntentTokens(args.intent ?? '');
+        const candidates = rules
+            .map(rule => this.scoreRuleCapability(rule, intentTokens, currentScope, desiredPushScope))
+            .filter(candidate => candidate.score > 0)
+            .sort((a, b) => b.score - a.score || a.rule.name.localeCompare(b.rule.name));
+        const limit = Math.max(1, Math.min(Number(args.limit ?? 10) || 10, 50));
+        return {
+            status: 'ready',
+            candidates: candidates.slice(0, limit),
+            totalConsidered: rules.length,
+            source: 'cwtools-node-rules',
+            warnings: [
+                'semanticHints are retrieval hints only; validate legality with hardFacts, completion, parse/diagnostics, or verified examples.',
+            ],
+        };
+    }
+
+    async explainScope(args: { scope: string }): Promise<{
+        status: 'ready' | 'not_found';
+        scope: string;
+        canonicalName?: string;
+        aliases?: string[];
+        isSubscopeOf?: string[];
+        description?: string;
+        source?: { file: string; line: number };
+        semanticHints?: NonNullable<RuleInfo['semanticHints']>;
+        suggestions?: string[];
+        error?: string;
+    }> {
+        if (!this.cwtRulesCache) {
+            this.cwtRulesCache = await this.loadCWTRules();
+        }
+        const query = args.scope.trim();
+        const scope = this.cwtRulesCache.scopes.get(query.toLowerCase());
+        if (!scope) {
+            const suggestions = Array.from(new Set(Array.from(this.cwtRulesCache.scopes.values()).map(item => item.name)))
+                .filter(name => name.toLowerCase().includes(query.toLowerCase()) || this.levenshtein(query.toLowerCase(), name.toLowerCase()) <= 3)
+                .slice(0, 10);
+            return {
+                status: 'not_found',
+                scope: query,
+                suggestions,
+                error: `Scope '${query}' was not found in scopes.cwt.`,
+            };
+        }
+        const detail = [
+            scope.description,
+            scope.aliases.length ? `aliases: ${scope.aliases.join(', ')}` : '',
+            scope.isSubscopeOf.length ? `is_subscope_of: ${scope.isSubscopeOf.join(', ')}` : '',
+        ].filter(Boolean).join('; ');
+        const semanticHints: NonNullable<RuleInfo['semanticHints']> = detail
+            ? [{
+                text: `Scope ${scope.name}: ${detail}`,
+                source: 'scopes.cwt',
+                file: scope.file,
+                line: scope.line,
+                confidence: 'hint',
+            }]
+            : [];
+        return {
+            status: 'ready',
+            scope: query,
+            canonicalName: scope.name,
+            aliases: scope.aliases,
+            isSubscopeOf: scope.isSubscopeOf,
+            description: scope.description,
+            source: { file: scope.file, line: scope.line },
+            semanticHints,
+        };
+    }
+
+    async parsePdxFragment(args: { code: string }): Promise<unknown> {
+        const code = String(args.code ?? '');
+        if (!code.trim()) {
+            return {
+                ok: false,
+                valid: false,
+                fragments: 0,
+                errors: [{ line: 0, col: 0, message: 'Provide a non-empty PDXScript fragment.' }],
+            };
+        }
+        try {
+            return await this.lspRequest('cwtools.ai.parseFragment', [code], 10_000);
+        } catch (e) {
+            return {
+                ok: false,
+                valid: false,
+                fragments: 0,
+                errors: [{ line: 0, col: 0, message: e instanceof Error ? e.message : String(e) }],
+            };
+        }
     }
 
     // - getPdxBlock -
@@ -700,14 +856,35 @@ export class LspToolHandler {
         }
     }
 
-    private async loadCWTRules(): Promise<{ triggers: RuleInfo[]; effects: RuleInfo[]; modifiers: RuleInfo[] }> {
+    private async loadCWTRules(): Promise<CwtRuleCache> {
         const triggers: RuleInfo[] = [];
         const effects: RuleInfo[] = [];
+        const scopeChanges: RuleInfo[] = [];
         const modifiers: RuleInfo[] = [];
 
-        const configPaths: string[] = [
-            path.join(this.ctx.workspaceRoot, 'submodules', 'cwtools-stellaris-config', 'config'),
-        ];
+        const configPaths: string[] = [];
+        const addConfigPath = (candidate: string | undefined) => {
+            if (!candidate?.trim()) return;
+            const resolved = path.resolve(candidate);
+            const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+            if (!configPaths.some(existing => (process.platform === 'win32' ? path.resolve(existing).toLowerCase() : path.resolve(existing)) === key)) {
+                configPaths.push(resolved);
+            }
+        };
+        const addRulesRoot = (candidate: string | undefined) => {
+            if (!candidate?.trim()) return;
+            addConfigPath(candidate);
+            addConfigPath(path.join(candidate, 'config'));
+        };
+        const game = this.resolveRulesGameId() ?? 'stellaris';
+        const cwtoolsConfig = vs.workspace.getConfiguration('stellarisLanguageServices');
+        const rulesVersion = cwtoolsConfig.get<string>('rules_version', 'latest');
+        const customRulesFolder = cwtoolsConfig.get<string>('rules_folder');
+        if (rulesVersion === 'manual' && customRulesFolder) {
+            addRulesRoot(customRulesFolder);
+        }
+
+        addRulesRoot(path.join(this.ctx.workspaceRoot, '.cwtools', game));
 
         const ext = vs.extensions.getExtension('ForeverSkywalker.foreverskywalker-stellaris-cwtools') ??
             vs.extensions.getExtension('ForeverSkywalker.eddy-stellaris-cwt') ??
@@ -715,58 +892,134 @@ export class LspToolHandler {
             vs.extensions.getExtension('tboby.cwtools-vscode') ??
             vs.extensions.getExtension('cwtools.cwtools-vscode');
         if (ext) {
-            configPaths.push(path.join(ext.extensionPath, 'config'));
-            // Cache directories downloaded by the language server
-            const games = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'ck3', 'vic3', 'eu5'];
-            for (const game of games) {
-                configPaths.push(path.join(ext.extensionPath, '.cwtools', game, 'config'));
-            }
-        }
-        
-        const cwtoolsConfig = vs.workspace.getConfiguration('stellarisLanguageServices');
-        const rulesVersion = cwtoolsConfig.get<string>('rules_version', 'latest');
-        const customRulesFolder = cwtoolsConfig.get<string>('rules_folder');
-        if (rulesVersion === 'manual' && customRulesFolder) {
-            configPaths.push(customRulesFolder);
+            addRulesRoot(path.join(ext.extensionPath, '.cwtools', game));
+            if (game === 'stellaris') addConfigPath(path.join(ext.extensionPath, 'config'));
         }
 
+        addRulesRoot(path.join(this.ctx.workspaceRoot, 'release', 'rules', game));
+        addRulesRoot(path.join(this.ctx.workspaceRoot, 'submodules', `cwtools-${game}-config`));
+        if (game === 'stellaris') addConfigPath(path.join(this.ctx.workspaceRoot, 'submodules', 'cwtools-stellaris-config', 'config'));
+
         for (const configPath of configPaths) {
-            const triggersFile = path.join(configPath, 'triggers.cwt');
-            const effectsFile = path.join(configPath, 'effects.cwt');
+            const scopesFile = path.join(configPath, 'scopes.cwt');
             const modifiersLog = path.join(configPath, 'logs', 'modifiers.log');
             const triggerDocsLog = path.join(configPath, 'logs', 'trigger_docs.log');
             
-            const scopeMap = new Map<string, string[]>();
-            if (fs.existsSync(triggerDocsLog)) { this.parseDocsLog(triggerDocsLog, scopeMap); }
+            const docs = fs.existsSync(triggerDocsLog) ? this.parseDocsLog(triggerDocsLog) : new Map<string, RuleDocInfo>();
+            const scopes = fs.existsSync(scopesFile) ? this.parseScopesFile(scopesFile) : new Map<string, ScopeInfo>();
 
-            if (fs.existsSync(triggersFile)) { this.parseCWTFile(triggersFile, triggers, scopeMap); }
-            if (fs.existsSync(effectsFile)) { this.parseCWTFile(effectsFile, effects, scopeMap); }
+            for (const file of ['triggers.cwt', 'trigger.cwt', path.join('generated', 'triggers.generated.cwt')]) {
+                const fullPath = path.join(configPath, file);
+                if (fs.existsSync(fullPath)) this.parseCWTFile(fullPath, 'trigger', triggers, docs, scopes);
+            }
+            for (const file of ['effects.cwt', 'effect.cwt', path.join('generated', 'effects.generated.cwt')]) {
+                const fullPath = path.join(configPath, file);
+                if (fs.existsSync(fullPath)) this.parseCWTFile(fullPath, 'effect', effects, docs, scopes);
+            }
+            for (const file of ['scope_changes.cwt', path.join('generated', 'scope_changes.generated.cwt')]) {
+                const fullPath = path.join(configPath, file);
+                if (fs.existsSync(fullPath)) this.parseCWTFile(fullPath, 'scope_change', scopeChanges, docs, scopes);
+            }
             if (fs.existsSync(modifiersLog)) { this.parseModifiersLog(modifiersLog, modifiers); }
-            if (triggers.length > 0 || effects.length > 0 || modifiers.length > 0) break;
+            if (triggers.length > 0 || effects.length > 0 || scopeChanges.length > 0 || modifiers.length > 0) {
+                return { triggers, effects, scopeChanges, modifiers, scopes };
+            }
         }
 
-        return { triggers, effects, modifiers };
+        return { triggers, effects, scopeChanges, modifiers, scopes: new Map<string, ScopeInfo>() };
     }
 
-    private parseDocsLog(filePath: string, scopeMap: Map<string, string[]>): void {
+    private resolveRulesGameId(): string | undefined {
+        const profileGame = readProjectProfile(this.ctx.workspaceRoot)?.game?.id;
+        if (profileGame && profileGame !== 'unknown') return profileGame.toLowerCase();
+        const languageId = vs.window.activeTextEditor?.document.languageId;
+        if (languageId && languageId !== 'paradox' && languageId !== 'plaintext') return languageId.toLowerCase();
+        return undefined;
+    }
+
+    private parseDocsLog(filePath: string): Map<string, RuleDocInfo> {
+        const docs = new Map<string, RuleDocInfo>();
         try {
             const content = fs.readFileSync(filePath, 'utf-8');
-            const lines = content.split('\n');
-            let currentName = '';
-            for (const line of lines) {
+            const lines = content.split(/\r?\n/);
+            let current: { name: string; description: string; syntaxLines: string[]; line: number } | undefined;
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i] ?? '';
                 const nameMatch = line.match(/^([\w.-]+)\s*-/);
                 if (nameMatch) {
-                    currentName = nameMatch[1]!;
+                    current = {
+                        name: nameMatch[1]!,
+                        description: line.slice(nameMatch[0].length).trim(),
+                        syntaxLines: [],
+                        line: i + 1,
+                    };
                     continue;
                 }
                 const scopeMatch = line.match(/^Supported Scopes:\s*(.*)/);
-                if (scopeMatch && currentName) {
-                    const scopes = scopeMatch[1]!.split(/\s+/).filter(s => s.length > 0 && s !== 'none');
-                    scopeMap.set(currentName, scopes);
-                    currentName = '';
+                if (scopeMatch && current) {
+                    docs.set(current.name, {
+                        description: current.description,
+                        syntax: current.syntaxLines.join('\n').trim(),
+                        scopes: this.splitWords(scopeMatch[1]!).filter(s => s !== 'none'),
+                        file: filePath,
+                        line: current.line,
+                    });
+                    current = undefined;
+                    continue;
+                }
+                if (current && line.trim().length > 0) {
+                    current.syntaxLines.push(line);
                 }
             }
         } catch { /* skip */ }
+        return docs;
+    }
+
+    private parseScopesFile(filePath: string): Map<string, ScopeInfo> {
+        const scopes = new Map<string, ScopeInfo>();
+        try {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const lines = content.split(/\r?\n/);
+            let pendingDescription = '';
+            let current: ScopeInfo | undefined;
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i]!.trim();
+                const commentMatch = line.match(/^#+\s*(.+)$/);
+                if (commentMatch?.[1] && !line.startsWith('## ')) {
+                    pendingDescription = commentMatch[1].trim();
+                    continue;
+                }
+
+                const scopeMatch = line.match(/^([A-Za-z][\w.-]*)\s*=\s*\{\s*$/);
+                if (scopeMatch?.[1]) {
+                    current = {
+                        name: scopeMatch[1],
+                        aliases: [],
+                        isSubscopeOf: [],
+                        description: pendingDescription || undefined,
+                        file: filePath,
+                        line: i + 1,
+                    };
+                    pendingDescription = '';
+                    continue;
+                }
+
+                if (current) {
+                    const aliasesMatch = line.match(/^aliases\s*=\s*\{([^}]*)\}/);
+                    if (aliasesMatch?.[1]) current.aliases = this.splitWords(aliasesMatch[1]);
+                    const subscopeMatch = line.match(/^is_subscope_of\s*=\s*\{([^}]*)\}/);
+                    if (subscopeMatch?.[1]) current.isSubscopeOf = this.splitWords(subscopeMatch[1]);
+                    if (line === '}') {
+                        if (current.name !== 'types') {
+                            scopes.set(current.name.toLowerCase(), current);
+                            for (const alias of current.aliases) scopes.set(alias.toLowerCase(), current);
+                        }
+                        current = undefined;
+                    }
+                }
+            }
+        } catch { /* skip */ }
+        return scopes;
     }
 
     private parseModifiersLog(filePath: string, results: RuleInfo[]): void {
@@ -783,36 +1036,81 @@ export class LspToolHandler {
                         description: `Categories: ${match[2]!}`,
                         scopes: [],
                         syntax: match[1]!,
+                        category: 'modifier',
+                        sourceFile: filePath,
+                        hardFacts: {
+                            category: 'modifier',
+                            syntax: match[1]!,
+                            cwtSource: { file: filePath, line: results.length + 1 },
+                        },
+                        semanticHints: [{
+                            text: `Categories: ${match[2]!}`,
+                            source: 'modifiers.log',
+                            file: filePath,
+                            confidence: 'hint',
+                        }],
                     });
                 }
             }
         } catch { /* skip */ }
     }
 
-    private parseCWTFile(filePath: string, results: RuleInfo[], scopeMap?: Map<string, string[]>): void {
+    private parseCWTFile(
+        filePath: string,
+        category: QueryRulesArgs['category'],
+        results: RuleInfo[],
+        docs: Map<string, RuleDocInfo>,
+        scopes: Map<string, ScopeInfo>,
+    ): void {
         try {
             const content = fs.readFileSync(filePath, 'utf-8');
-            const lines = content.split('\n');
+            const lines = content.split(/\r?\n/);
 
-            const aliasPattern = /^##\s*scope\s*=\s*\{?\s*([^}]*)\}?\s*$/i;
-            const namePattern = /^alias\[(?:trigger|effect):(\w+)\]\s*=\s*(.*)/;
+            const namePattern = /^alias\[(?:trigger|effect):([\w.-]+)\]\s*=\s*(.*)/;
 
             let currentScopes: string[] = [];
+            let currentSupportedScopes: string[] = [];
+            let currentPushScope: string | undefined;
+            let currentTypeKeyFilter: string | undefined;
             let currentDesc = '';
 
             for (let i = 0; i < lines.length; i++) {
                  
                 const line = lines[i]!.trim();
 
-                const scopeMatch = line.match(aliasPattern);
-                if (scopeMatch) {
-                     
-                    currentScopes = scopeMatch[1]!.split(/\s+/).filter(s => s.length > 0);
+                const directiveMatch = line.match(/^##\s*([A-Za-z_]+)\s*=\s*(.*)$/);
+                const directive = directiveMatch?.[1]?.toLowerCase();
+                const directiveValue = directiveMatch?.[2]?.trim() ?? '';
+                if (directive === 'scope') {
+                    currentScopes = this.splitRuleValueList(directiveValue);
+                    continue;
+                }
+                if (directive === 'supported_scopes') {
+                    currentSupportedScopes = this.splitRuleValueList(directiveValue);
+                    continue;
+                }
+                if (directive === 'push_scope') {
+                    currentPushScope = this.stripRuleValueBraces(directiveValue).split(/\s+/)[0];
+                    continue;
+                }
+                if (directive === 'type_key_filter') {
+                    currentTypeKeyFilter = this.stripRuleValueBraces(directiveValue).split(/\s+/)[0];
                     continue;
                 }
 
+                const scopeMatch = line.match(/^##\s*scope\s*=\s*\{?\s*([^}]*)\}?\s*$/i);
+                if (scopeMatch) {
+                    currentScopes = this.splitWords(scopeMatch[1]!);
+                    continue;
+                }
+
+                if (line.startsWith('###')) {
+                    currentDesc = line.replace(/^#+\s*/, '').trim();
+                    continue;
+                }
                 if (line.startsWith('## ') && !line.startsWith('## scope')) {
-                    currentDesc = line.substring(3).trim();
+                    const comment = line.substring(3).trim();
+                    if (comment && !/^(cardinality|replace_scope)/i.test(comment)) currentDesc = comment;
                     continue;
                 }
 
@@ -821,26 +1119,275 @@ export class LspToolHandler {
                      
                     const name = nameMatch[1]!;
                      
-                    const syntax = nameMatch[2]!;
-                    
-                    let scopes = [...currentScopes];
-                    // IMPORTANT: Reset currentScopes after applying it, so it doesn't leak to next rule
+                    const doc = docs.get(name);
+                    const cwtBlockText = this.collectCwtBlockText(lines, i);
+                    const scopesForRule = doc?.scopes.length
+                        ? doc.scopes
+                        : currentSupportedScopes.length
+                            ? currentSupportedScopes
+                            : currentScopes;
+                    const syntax = doc?.syntax || this.normalizeInlineSyntax(name, nameMatch[2]!);
+                    const description = doc?.description || currentDesc;
+                    const semanticHints = this.buildSemanticHints({
+                        description,
+                        doc,
+                        cwtDescription: currentDesc,
+                        scopes,
+                        relatedScopeNames: [
+                            ...scopesForRule,
+                            ...(currentPushScope ? [currentPushScope] : []),
+                            ...this.extractScopeNamesFromSyntax(syntax),
+                            ...this.extractScopeNamesFromSyntax(cwtBlockText),
+                        ],
+                        cwtFile: filePath,
+                        cwtLine: i + 1,
+                    });
+
                     currentScopes = [];
-                    
-                    if (scopeMap && scopeMap.has(name)) {
-                        scopes = scopeMap.get(name)!;
-                    }
 
                     results.push({
                         name,
-                        description: currentDesc,
-                        scopes,
-                        syntax: syntax.trim(),
+                        description,
+                        scopes: scopesForRule,
+                        syntax,
+                        category,
+                        sourceFile: filePath,
+                        sourceLine: i + 1,
+                        hardFacts: {
+                            category,
+                            supportedScopes: scopesForRule,
+                            pushScope: currentPushScope,
+                            typeKeyFilter: currentTypeKeyFilter,
+                            syntax,
+                            cwtSource: { file: filePath, line: i + 1 },
+                        },
+                        semanticHints,
                     });
+                    currentSupportedScopes = [];
+                    currentPushScope = undefined;
+                    currentTypeKeyFilter = undefined;
                     currentDesc = '';
                 }
             }
         } catch { /* skip */ }
+    }
+
+    private buildSemanticHints(args: {
+        description: string;
+        doc?: RuleDocInfo;
+        cwtDescription: string;
+        scopes: Map<string, ScopeInfo>;
+        relatedScopeNames: string[];
+        cwtFile: string;
+        cwtLine: number;
+    }): NonNullable<RuleInfo['semanticHints']> {
+        const hints: NonNullable<RuleInfo['semanticHints']> = [];
+        const seen = new Set<string>();
+        const add = (hint: NonNullable<RuleInfo['semanticHints']>[number]) => {
+            const key = `${hint.source}:${hint.text}`;
+            if (seen.has(key) || !hint.text.trim()) return;
+            seen.add(key);
+            hints.push(hint);
+        };
+
+        if (args.doc?.description) {
+            add({
+                text: args.doc.description,
+                source: 'trigger_docs.log',
+                file: args.doc.file,
+                line: args.doc.line,
+                confidence: 'hint',
+            });
+        }
+        if (args.cwtDescription && args.cwtDescription !== args.doc?.description) {
+            add({
+                text: args.cwtDescription,
+                source: 'cwt-comment',
+                file: args.cwtFile,
+                line: args.cwtLine,
+                confidence: 'hint',
+            });
+        }
+
+        for (const scopeName of args.relatedScopeNames) {
+            const scope = args.scopes.get(scopeName.toLowerCase());
+            if (!scope) continue;
+            const details = [
+                scope.description,
+                scope.aliases.length ? `aliases: ${scope.aliases.join(', ')}` : '',
+                scope.isSubscopeOf.length ? `is_subscope_of: ${scope.isSubscopeOf.join(', ')}` : '',
+            ].filter(Boolean).join('; ');
+            if (!details) continue;
+            add({
+                text: `Scope ${scope.name}: ${details}`,
+                source: 'scopes.cwt',
+                file: scope.file,
+                line: scope.line,
+                confidence: 'hint',
+            });
+        }
+
+        return hints.slice(0, 8);
+    }
+
+    private scoreRuleCapability(
+        rule: RuleInfo,
+        intentTokens: string[],
+        currentScope?: string,
+        desiredPushScope?: string,
+    ): RuleCapabilityCandidate {
+        let score = 0;
+        const reasons: string[] = [];
+        const supportedScopes = rule.hardFacts?.supportedScopes ?? rule.scopes;
+        const pushScope = rule.hardFacts?.pushScope?.toLowerCase();
+        const searchable = [
+            rule.name,
+            rule.description,
+            rule.syntax,
+            ...(rule.semanticHints ?? []).map(hint => hint.text),
+        ].join(' ').toLowerCase();
+        const ruleName = rule.name.toLowerCase();
+
+        if (currentScope) {
+            const matchesScope = supportedScopes.some(scope => {
+                const lower = scope.toLowerCase();
+                return lower === currentScope || lower === 'all' || lower === 'any';
+            });
+            if (matchesScope) {
+                score += 60;
+                reasons.push(`supported in current scope '${currentScope}'`);
+            } else if (supportedScopes.length > 0) {
+                score -= 20;
+            }
+        }
+
+        if (desiredPushScope) {
+            if (pushScope === desiredPushScope) {
+                score += 120;
+                reasons.push(`pushes scope to '${desiredPushScope}'`);
+            } else if (searchable.includes(desiredPushScope)) {
+                score += 15;
+                reasons.push(`mentions '${desiredPushScope}'`);
+            } else if (rule.category === 'scope_change') {
+                score -= 10;
+            }
+        }
+
+        for (const token of intentTokens) {
+            if (token.length <= 1) continue;
+            if (ruleName.includes(token)) {
+                score += 25;
+                reasons.push(`name matches '${token}'`);
+            } else if (searchable.includes(token)) {
+                score += 8;
+            }
+        }
+
+        const wantsEvery = intentTokens.some(token => token === 'iterate' || token === 'every' || token === 'all');
+        if (wantsEvery) {
+            if (ruleName.startsWith('every_')) {
+                score += 45;
+                reasons.push('matches every/all iteration intent');
+            } else if (/^(any|count|random|ordered)_/.test(ruleName)) {
+                score -= 15;
+            }
+        }
+        if (
+            wantsEvery
+            && currentScope === 'fleet'
+            && desiredPushScope === 'ship'
+            && ruleName.includes('_owned_ship')
+            && !intentTokens.includes('controlled')
+        ) {
+            score += 8;
+            reasons.push('preferred default fleet-to-ship iterator variant');
+        }
+        if (intentTokens.includes('random') && ruleName.startsWith('random_')) {
+            score += 20;
+            reasons.push('matches random selection intent');
+        }
+        if (intentTokens.includes('event') && ruleName.endsWith('_event')) {
+            score += 20;
+            reasons.push('matches event firing intent');
+        }
+        if (rule.semanticHints?.some(hint => hint.source === 'trigger_docs.log')) {
+            score += 3;
+        }
+
+        return {
+            rule,
+            score,
+            reasons: Array.from(new Set(reasons)).slice(0, 8),
+        };
+    }
+
+    private expandIntentTokens(intent: string): string[] {
+        const lower = intent.toLowerCase();
+        const direct = lower
+            .split(/[^a-z0-9_.:-]+/i)
+            .map(token => token.trim())
+            .filter(Boolean);
+        const synonyms: Array<[RegExp, string[]]> = [
+            [/舰队|艦隊/g, ['fleet']],
+            [/舰船|艦船|飞船|飛船|船只|船\b/g, ['ship']],
+            [/国家|國家|帝国|帝國/g, ['country']],
+            [/行星|星球/g, ['planet']],
+            [/殖民地/g, ['colony']],
+            [/航母|载体|載體|承载|承載/g, ['carrier']],
+            [/事件/g, ['event']],
+            [/遍历|遍歷|每个|每個|所有/g, ['iterate', 'every']],
+            [/随机|隨機/g, ['random']],
+            [/作用域|范围|範圍/g, ['scope']],
+            [/触发器|觸發器/g, ['trigger']],
+            [/效果|效应|效應/g, ['effect']],
+        ];
+        const expanded = [...direct];
+        for (const [pattern, tokens] of synonyms) {
+            pattern.lastIndex = 0;
+            if (pattern.test(intent)) expanded.push(...tokens);
+        }
+        return Array.from(new Set(expanded));
+    }
+
+    private extractScopeNamesFromSyntax(syntax: string): string[] {
+        const results: string[] = [];
+        for (const match of syntax.matchAll(/<event\.([A-Za-z][\w.-]*)>/g)) {
+            if (match[1]) results.push(match[1]);
+        }
+        return results;
+    }
+
+    private collectCwtBlockText(lines: string[], startIndex: number): string {
+        const collected: string[] = [];
+        let depth = 0;
+        for (let i = startIndex; i < lines.length; i++) {
+            const line = lines[i] ?? '';
+            collected.push(line);
+            for (const ch of line) {
+                if (ch === '{') depth++;
+                else if (ch === '}') depth--;
+            }
+            if (i > startIndex && depth <= 0) break;
+        }
+        return collected.join('\n');
+    }
+
+    private normalizeInlineSyntax(name: string, raw: string): string {
+        const trimmed = raw.trim();
+        if (!trimmed || trimmed === '{') return `${name} = { ... }`;
+        return `${name} = ${trimmed}`;
+    }
+
+    private splitRuleValueList(value: string): string[] {
+        return this.splitWords(this.stripRuleValueBraces(value));
+    }
+
+    private stripRuleValueBraces(value: string): string {
+        return value.replace(/^\{\s*/, '').replace(/\s*\}$/, '').trim();
+    }
+
+    private splitWords(value: string): string[] {
+        return value.split(/\s+/).map(part => part.trim()).filter(Boolean);
     }
 
     // - queryReferences -

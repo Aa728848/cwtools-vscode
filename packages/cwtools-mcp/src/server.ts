@@ -11,9 +11,9 @@ import { createToolCallHandler, toMcpCallToolResult } from './mcp/toolHandlers';
 import { listResources, readResource } from './mcp/resources';
 
 // Server-level guidance surfaced to the model at connect time (MCP `instructions`).
-// Tells a Paradox/Stellaris coding agent to ground every claim in these tools.
+// Tells a Paradox coding agent to ground every claim in these tools.
 const SERVER_INSTRUCTIONS = [
-  'CWTools is a read-only semantic service for Paradox / Stellaris mods. Ground every',
+  'CWTools is a read-only semantic service for Paradox mods. Ground every',
   'claim about the mod in these tools instead of memory — PDX identifiers and syntax',
   'are routinely hallucinated.',
   '',
@@ -84,7 +84,7 @@ export function createCwtoolsMcpServer(
         error: {
           code: 'project_not_supported',
           message:
-            `CWTools is disabled for this workspace (${host.workspaceRoot}): ${host.projectSupportReason ?? 'not a Paradox/Stellaris mod.'} ` +
+            `CWTools is disabled for this workspace (${host.workspaceRoot}): ${host.projectSupportReason ?? 'not a Paradox mod.'} ` +
             'If this IS a mod, point the server at the mod root — set the working directory (or pass --workspace <mod>) — or pass --force-start to override.',
         },
       });

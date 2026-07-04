@@ -9,7 +9,7 @@ import {
   getCompletionAtWithHost,
   workspaceSymbolsWithHost,
   type HostServices,
-} from '../index';
+} from 'cwtools-shared';
 
 describe('phase 1.5 symbols and phase 2 write contracts', () => {
   const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');

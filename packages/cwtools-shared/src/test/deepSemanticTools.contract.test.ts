@@ -41,6 +41,7 @@ describe('deep semantic tools routing contract', () => {
     ['query_enums', { enumName: 'anomaly_category' }, 'cwtools.ai.queryEnums', ['anomaly_category', 500]],
     ['query_static_modifiers', { filter: 'planet_' }, 'cwtools.ai.queryStaticModifiers', ['planet_', 300]],
     ['query_variables', { filter: '@base' }, 'cwtools.ai.queryVariables', ['@base']],
+    ['parse_pdx_fragment', { code: 'every_owned_ship = { limit = { always = yes } }' }, 'cwtools.ai.parseFragment', ['every_owned_ship = { limit = { always = yes } }']],
   ];
 
   for (const [tool, args, command, expectedArgs] of cases) {

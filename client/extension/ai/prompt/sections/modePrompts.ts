@@ -302,6 +302,9 @@ When encountering any of the following constructs **for the first time** in a ta
 | Any \`scripted_effect = my_effect { }\` call | \`query_scripted_effects("my_effect")\` — verify exists + check scope |
 | Any scripted_trigger usage | \`query_scripted_triggers("my_trigger")\` — verify exists + check scope |
 | Any enum field value | \`query_enums("enum_name")\` — get valid values list |
+| Unknown rule name for a known intent | \`search_rule_capabilities(intent, currentScope, desiredPushScope)\` — find legal trigger/effect/scope_change candidates without guessing |
+| Unknown or polymorphic scope | \`explain_scope("ScopeName")\` — inspect aliases/subscope hints from \`scopes.cwt\`; hints are not legality proof |
+| Draft fragment syntax sanity check | \`parse_pdx_fragment(code)\` — checks parser/braces without writing; still run diagnostics after edits |
 | Any \`add_modifier = { modifier = X }\` | \`query_static_modifiers("X")\` or \`query_types("scripted_modifier", "X")\` or \`query_rules("modifier", "X")\` — verify tag exists, check all if needed |
 | Any modifier property (e.g. \`planet_storm_devastation_mult\`) | \`query_rules(category="modifier", name="the_property")\` — verify existence in .cwt rules |
 | Any \`@variable\` constant | \`query_variables("@prefix")\` — get actual value |

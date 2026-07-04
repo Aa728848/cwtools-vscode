@@ -20,6 +20,12 @@ export interface CompletionHost {
   getCompletionContext(args: unknown): Promise<unknown>;
 }
 
+export interface RulesConfigHost {
+  gameId?: string;
+  configDirs?: string[];
+  readTextFile?(filePath: string): Promise<{ content: string; hasBom?: boolean; exists: boolean }>;
+}
+
 export interface HostServices {
   workspaceRoot: string;
   readonlyMode: boolean;
@@ -32,6 +38,7 @@ export interface HostServices {
   projectProfile?: ProjectProfileHost;
   knowledge?: GameKnowledgeHost;
   completion?: CompletionHost;
+  rules?: RulesConfigHost;
   vanillaCache?: VanillaCacheStatus;
   projectSupported?: boolean;
   projectSupportReason?: string;

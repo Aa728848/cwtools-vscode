@@ -134,6 +134,8 @@ interface CwtRuleCache {
 export interface LspToolContext {
     readonly workspaceRoot: string;
     readonly indexService?: import('../../indexing/indexService').IndexService;
+    readonly globalStoragePath?: string;
+    readonly extensionPath?: string;
     /** Agent file write mode from config ('confirm' or 'auto') */
     fileWriteMode?: 'confirm' | 'auto';
     /** Callback when a file write needs user confirmation (confirm mode). */
@@ -723,6 +725,9 @@ export class LspToolHandler {
             totalConsidered: rules.length,
             source: 'cwtools-node-rules',
             warnings: [
+                ...(rules.length === 0
+                    ? ['No CWT rule files were loaded for the active game/rules source; check rules configuration or reload CWTools before trusting empty results.']
+                    : []),
                 'semanticHints are retrieval hints only; validate legality with hardFacts, completion, parse/diagnostics, or verified examples.',
             ],
         };
@@ -744,6 +749,14 @@ export class LspToolHandler {
             this.cwtRulesCache = await this.loadCWTRules();
         }
         const query = args.scope.trim();
+        if (this.cwtRulesCache.scopes.size === 0) {
+            return {
+                status: 'not_found',
+                scope: query,
+                suggestions: [],
+                error: 'No scopes were loaded from scopes.cwt. Check the active CWT rules source or reload rules; this is not evidence that the scope is invalid.',
+            };
+        }
         const scope = this.cwtRulesCache.scopes.get(query.toLowerCase());
         if (!scope) {
             const suggestions = Array.from(new Set(Array.from(this.cwtRulesCache.scopes.values()).map(item => item.name)))
@@ -902,13 +915,12 @@ export class LspToolHandler {
             addRulesRoot(customRulesFolder);
         }
 
+        addRulesRoot(this.ctx.globalStoragePath ? path.join(this.ctx.globalStoragePath, '.cwtools', game) : undefined);
+        addRulesRoot(this.ctx.extensionPath ? path.join(this.ctx.extensionPath, '.cwtools', game) : undefined);
+        if (game === 'stellaris') addConfigPath(this.ctx.extensionPath ? path.join(this.ctx.extensionPath, 'config') : undefined);
         addRulesRoot(path.join(this.ctx.workspaceRoot, '.cwtools', game));
 
-        const ext = vs.extensions.getExtension('ForeverSkywalker.foreverskywalker-stellaris-cwtools') ??
-            vs.extensions.getExtension('ForeverSkywalker.eddy-stellaris-cwt') ??
-            vs.extensions.getExtension('Eddy.eddy-stellaris-cwt') ??
-            vs.extensions.getExtension('tboby.cwtools-vscode') ??
-            vs.extensions.getExtension('cwtools.cwtools-vscode');
+        const ext = vs.extensions.getExtension('ForeverSkywalker.foreverskywalker-stellaris-cwtools');
         if (ext) {
             addRulesRoot(path.join(ext.extensionPath, '.cwtools', game));
             if (game === 'stellaris') addConfigPath(path.join(ext.extensionPath, 'config'));

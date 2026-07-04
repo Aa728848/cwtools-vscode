@@ -6,12 +6,8 @@ import { vanillaCacheFileName } from 'cwtools-shared';
 // VS Code-compatible hosts store the extension's built vanilla cache + extracted
 // rules under globalStorage. In standalone mode, when the user doesn't pass
 // --cache, reuse that dir so the MCP rides on a cache the extension already built.
-const PRIMARY_EXTENSION_DIR = 'foreverskywalker.foreverskywalker-stellaris-cwtools';
-const LEGACY_EXTENSION_DIRS = [
-  'foreverskywalker.eddy-stellaris-cwt',
-  'eddy.eddy-stellaris-cwt',
-];
-const EXTENSION_DIRS = [PRIMARY_EXTENSION_DIR, ...LEGACY_EXTENSION_DIRS];
+const PRIMARY_EXTENSION_ID = 'ForeverSkywalker.foreverskywalker-stellaris-cwtools';
+const PRIMARY_EXTENSION_DIR = PRIMARY_EXTENSION_ID.toLowerCase();
 const VSCODE_APP_DIRS = ['Code', 'Code - Insiders', 'VSCodium', 'Cursor', 'Antigravity'];
 
 function globalStorageBases(): string[] {
@@ -35,10 +31,8 @@ export function detectExtensionCacheDir(game: string | undefined): string | unde
   const cacheFile = vanillaCacheFileName(game);
   if (!cacheFile) return undefined;
   for (const base of globalStorageBases()) {
-    for (const extensionDir of EXTENSION_DIRS) {
-      const dir = path.join(base, extensionDir, '.cwtools');
-      if (fs.existsSync(path.join(dir, cacheFile))) return dir;
-    }
+    const dir = path.join(base, PRIMARY_EXTENSION_DIR, '.cwtools');
+    if (fs.existsSync(path.join(dir, cacheFile))) return dir;
   }
   return undefined;
 }
@@ -53,19 +47,17 @@ function extensionInstallRoots(): string[] {
   );
 }
 
-// Newest installed extension dir, falling back to legacy extension IDs, else undefined.
+// Newest installed main extension dir, else undefined.
 export function detectInstalledExtensionDir(): string | undefined {
-  let best: { dir: string; version: string; priority: number } | undefined;
+  let best: { dir: string; version: string } | undefined;
   for (const root of extensionInstallRoots()) {
     if (!fs.existsSync(root)) continue;
     for (const name of fs.readdirSync(root)) {
-      for (const [priority, extensionDir] of EXTENSION_DIRS.entries()) {
-        if (!name.startsWith(`${extensionDir}-`)) continue;
-        const version = name.slice(extensionDir.length + 1);
-        // String compare is enough to pick the highest semver-ish folder name.
-        if (!best || version > best.version || (version === best.version && priority < best.priority)) {
-          best = { dir: path.join(root, name), version, priority };
-        }
+      if (!name.toLowerCase().startsWith(`${PRIMARY_EXTENSION_DIR}-`)) continue;
+      const version = name.slice(PRIMARY_EXTENSION_DIR.length + 1);
+      // String compare is enough to pick the highest semver-ish folder name.
+      if (!best || version > best.version) {
+        best = { dir: path.join(root, name), version };
       }
     }
   }
@@ -99,7 +91,7 @@ export function detectExtensionRulesDir(cacheDir: string | undefined, game: stri
   const g = (game ?? 'stellaris').toLowerCase();
   const roots = [
     ...(cacheDir ? [cacheDir] : []),
-    ...globalStorageBases().flatMap(base => EXTENSION_DIRS.map(extensionDir => path.join(base, extensionDir, '.cwtools'))),
+    ...globalStorageBases().map(base => path.join(base, PRIMARY_EXTENSION_DIR, '.cwtools')),
   ];
   for (const root of roots) {
     const config = path.join(root, g, 'config');

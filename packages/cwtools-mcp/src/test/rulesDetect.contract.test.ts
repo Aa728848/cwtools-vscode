@@ -54,4 +54,25 @@ describe('MCP extension rules detection contract', () => {
     fs.writeFileSync(path.join(config, 'effects.cwt'), 'x');
     expect(detectExtensionRulesDir(tmp, undefined)).to.equal(config);
   });
+
+  it('ignores legacy extension globalStorage rules', () => {
+    const legacyConfig = path.join(globalStorageRoot(), 'foreverskywalker.eddy-stellaris-cwt', '.cwtools', 'stellaris', 'config');
+    fs.mkdirSync(legacyConfig, { recursive: true });
+    fs.writeFileSync(path.join(legacyConfig, 'effects.cwt'), 'x');
+    expect(detectExtensionRulesDir(undefined, 'stellaris')).to.equal(undefined);
+  });
 });
+
+function globalStorageRoot(): string {
+  const home = os.homedir();
+  const platform = os.platform();
+  if (platform === 'win32') {
+    const appData = process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming');
+    return path.join(appData, 'Code', 'User', 'globalStorage');
+  }
+  if (platform === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage');
+  }
+  const xdg = process.env.XDG_CONFIG_HOME ?? path.join(home, '.config');
+  return path.join(xdg, 'Code', 'User', 'globalStorage');
+}

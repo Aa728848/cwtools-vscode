@@ -163,6 +163,9 @@ export async function queryRulesWithHost(host: HostServices, args: QueryRulesArg
       truncated,
       source: 'cwtools-node-rules',
       warnings: [
+        ...(rules.length === 0
+          ? ['No CWT rule files were loaded for the active game/rules source; check rules configuration or reload CWTools before trusting empty results.']
+          : []),
         'Phase 1 fallback: rules are parsed from CWT/log files. Add cwtools.ai.queryRules to make LSP the long-term semantic source.',
       ],
     },
@@ -201,6 +204,9 @@ export async function searchRuleCapabilitiesWithHost(
       totalConsidered: rules.length,
       source: 'cwtools-node-rules',
       warnings: [
+        ...(rules.length === 0
+          ? ['No CWT rule files were loaded for the active game/rules source; check rules configuration or reload CWTools before trusting empty results.']
+          : []),
         'semanticHints are retrieval hints only; validate legality with hardFacts, completion, parse/diagnostics, or verified examples.',
       ],
     },
@@ -213,6 +219,22 @@ export async function explainScopeWithHost(
 ): Promise<SharedToolResult<ExplainScopeResult>> {
   const cache = await loadCwtRules(host);
   const query = args.scope.trim();
+  if (cache.scopes.size === 0) {
+    return {
+      ok: false,
+      status: 'ready',
+      source: 'cwtools-node-rules',
+      data: {
+        status: 'not_found',
+        scope: query,
+        suggestions: [],
+      },
+      error: {
+        code: 'rules_source_empty',
+        message: 'No scopes were loaded from scopes.cwt. Check the active CWT rules source or reload rules; this is not evidence that the scope is invalid.',
+      },
+    };
+  }
   const scope = cache.scopes.get(query.toLowerCase());
   if (!scope) {
     const suggestions = Array.from(new Set(Array.from(cache.scopes.values()).map(item => item.name)))

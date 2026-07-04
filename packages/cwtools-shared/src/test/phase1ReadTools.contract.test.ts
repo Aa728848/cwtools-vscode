@@ -128,6 +128,21 @@ describe('phase 1 read tool contracts', () => {
     }
   });
 
+  it('reports an empty current-game rules source instead of claiming a known scope is invalid', async () => {
+    const result = await explainScopeWithHost(createFsHost(repoRoot, {
+      rules: {
+        gameId: 'hoi4',
+        configDirs: [],
+      },
+    }), {
+      scope: 'Fleet',
+    });
+
+    expect(result.ok).to.equal(false);
+    expect(result.error?.code).to.equal('rules_source_empty');
+    expect(result.error?.message).to.include('No scopes were loaded');
+  });
+
   it('extracts a complete PDX block by top-level symbol without leaving the workspace', async () => {
     const workspaceRoot = fs.mkdtempSync(path.join(repoRoot, '.tmp-pdx-block-'));
     try {

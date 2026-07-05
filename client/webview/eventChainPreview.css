@@ -41,6 +41,7 @@ body {
     background: var(--surface);
     background: color-mix(in srgb, var(--surface) 92%, transparent);
     flex-shrink: 0;
+    flex-wrap: wrap;
 }
 
 #toolbar .title {
@@ -57,6 +58,7 @@ body {
     align-items: center;
     gap: 6px;
     margin-left: auto;
+    flex-wrap: wrap;
     min-width: 0;
 }
 
@@ -106,9 +108,8 @@ body {
     position: relative;
     overflow: hidden;
     background:
-        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px),
-        var(--bg);
+        radial-gradient(circle at 16px 16px, rgba(255,255,255,0.045) 1px, transparent 1.5px),
+        #464646;
     background-size: 40px 40px;
 }
 
@@ -145,7 +146,7 @@ body {
     flex-direction: column;
     gap: 4px;
     z-index: 10;
-    max-height: min(42vh, 360px);
+    max-height: min(34vh, 300px);
     overflow: auto;
     box-shadow: 0 8px 28px rgba(0,0,0,0.25);
 }
@@ -347,7 +348,7 @@ body {
     font-size: 11px;
     z-index: 20;
     pointer-events: none;
-    max-width: 280px;
+    max-width: 300px;
     line-height: 1.5;
     box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }

@@ -75,36 +75,48 @@ const cy = cytoscape({
             selector: 'node',
             style: {
                 'label': 'data(label)',
+                'font-family': 'Segoe UI, system-ui, sans-serif',
                 'text-valign': 'center',
                 'text-halign': 'center',
-                'font-size': '11px',
+                'text-justification': 'left' as any,
+                'font-size': '13px',
                 'font-weight': 600,
                 'color': '#fff',
-                'background-color': '#4d4d4d',
-                'border-width': 1,
-                'border-color': '#707070',
-                'width': 'label',
-                'height': 38,
+                'line-height': 1.12,
+                'background-color': '#071521',
+                'background-opacity': 0.96,
+                'border-width': 2,
+                'border-color': '#2d8fd7',
+                'width': 306,
+                'height': 74,
                 'shape': 'round-rectangle',
-                'padding': '14px' as any,
+                'padding': '0px' as any,
                 'text-wrap': 'wrap' as any,
-                'text-max-width': '220px' as any,
+                'text-max-width': '266px' as any,
                 'text-outline-width': 1,
-                'text-outline-color': '#1b1b1b',
+                'text-outline-color': '#02070b',
+                'overlay-opacity': 0,
+            },
+        },
+        {
+            selector: 'node[?isSeed]',
+            style: {
+                'border-color': '#fff176',
+                'border-width': 3,
             },
         },
         {
             selector: 'node[?isEntry]',
             style: {
-                'background-color': '#2e7d32',
-                'border-color': '#4caf50',
+                'background-color': '#071f18',
+                'border-color': '#59c99c',
                 'border-width': 2,
             },
         },
         {
             selector: 'node[?isTriggered]',
             style: {
-                'background-color': '#1565c0',
+                'background-color': '#07192a',
                 'border-color': '#42a5f5',
             },
         },
@@ -133,8 +145,8 @@ const cy = cytoscape({
         {
             selector: 'node[?hasMTTH]',
             style: {
-                'background-color': '#5d4037',
-                'border-color': '#8d6e63',
+                'background-color': '#211707',
+                'border-color': '#e3a044',
                 'border-style': 'dashed' as any,
             },
         },
@@ -146,11 +158,11 @@ const cy = cytoscape({
                 'target-arrow-color': '#666',
                 'target-arrow-shape': 'triangle',
                 'curve-style': 'taxi',
-                'taxi-direction': 'auto' as any,
+                'taxi-direction': 'horizontal' as any,
                 'taxi-turn': '15px' as any,
                 'taxi-turn-min-distance': 5 as any,
                 'arrow-scale': 0.8,
-                'font-size': '10px',
+                'font-size': '12px',
                 'font-weight': 500,
                 'color': '#c7c7c7',
                 'text-background-color': '#1f1f1f',
@@ -217,8 +229,19 @@ const cy = cytoscape({
                 'background-color': '#78909c',
                 'border-color': '#b0bec5',
                 'border-width': 2,
-                'font-size': '10px',
+                'font-size': '12px',
+                'width': 170,
+                'height': 64,
+                'text-max-width': '132px' as any,
             },
+        },
+        {
+            selector: 'node.filtered-out',
+            style: { display: 'none' },
+        },
+        {
+            selector: 'edge.filtered-out',
+            style: { display: 'none' },
         },
         {
             selector: '.highlighted',
@@ -274,6 +297,7 @@ let fullGraph: EventGraph = { nodes: [], edges: [] };
 let currentNamespace = '__all__';
 let tooltip: HTMLDivElement | null = null;
 let selectedNodeId: string | null = null;
+let seedIds = new Set<string>();
 
 // ─── UI helpers ──────────────────────────────────────────────────────────────
 
@@ -296,16 +320,24 @@ function truncateText(value: string | undefined, maxLength: number): string {
 }
 
 function formatNodeLabel(node: EventNode): string {
-    const id = truncateText(node.id, 42);
+    const id = truncateText(node.id, 34);
+    const kind = node.hasMTTH
+        ? 'MTTH'
+        : node.isFireOnAction
+            ? 'On action'
+            : node.isTriggeredOnly
+                ? t('Triggered', '触发型')
+                : t('Event', '事件');
+    const type = truncateText(node.type.replace(/_event$/, ''), 18);
     if (!node.isHidden && node.title) {
-        return `${id}\n${truncateText(node.title, 48)}`;
+        return `${id}\n${kind} - ${type}\n${truncateText(node.title, 34)}`;
     }
-    return id;
+    return `${id}\n${kind} - ${type}`;
 }
 
 function formatExternalLabel(id: string): string {
     const normalized = id.startsWith('[') ? id.replace(/^\[\w+\]\s*/, '') : id;
-    return truncateText(normalized, 36);
+    return truncateText(normalized, 26);
 }
 
 function edgeTypeLabel(edgeType: EventEdge['edgeType'] | string): string {
@@ -325,6 +357,57 @@ function edgeTypeLabel(edgeType: EventEdge['edgeType'] | string): string {
 
 function clearFocusClasses() {
     cy.elements().removeClass('faded highlighted focus-node focus-neighbor focus-edge search-match');
+}
+
+function chooseInitialNamespace(nodes: EventNode[]): string {
+    const seedNamespaces = new Set(
+        nodes
+            .filter(node => seedIds.has(node.id) && node.namespace && !node.namespace.startsWith('__'))
+            .map(node => node.namespace),
+    );
+    if (seedNamespaces.size === 1) {
+        return [...seedNamespaces][0]!;
+    }
+    return '__all__';
+}
+
+function getVisibleNodes(): cytoscape.NodeCollection {
+    return cy.nodes().filter(node => !node.hasClass('filtered-out'));
+}
+
+function fitVisible(padding = 80) {
+    const visibleNodes = getVisibleNodes();
+    if (visibleNodes.length > 0) {
+        cy.fit(visibleNodes, padding);
+    }
+}
+
+function focusReadableStart() {
+    const visibleNodes = getVisibleNodes();
+    if (visibleNodes.length === 0) return;
+
+    let focusNodes = visibleNodes.filter(node => Boolean(node.data('isSeed')));
+    if (focusNodes.length === 0) {
+        focusNodes = visibleNodes.filter(node => Boolean(node.data('isEntry')));
+    }
+    const targetNodes = focusNodes.length > 0
+        ? focusNodes.closedNeighborhood().nodes().filter(node => !node.hasClass('filtered-out'))
+        : visibleNodes;
+
+    const bbox = targetNodes.length > 0
+        ? targetNodes.boundingBox({ includeLabels: true, includeOverlays: false })
+        : visibleNodes.boundingBox({ includeLabels: true, includeOverlays: false });
+    const availableWidth = Math.max(360, container.clientWidth - 120);
+    const columnsInView = container.clientWidth < 900 ? 2.2 : 3.1;
+    const targetZoom = Math.max(0.58, Math.min(1, availableWidth / (346 * columnsInView)));
+    cy.zoom({
+        level: targetZoom,
+        renderedPosition: { x: 0, y: 0 },
+    });
+    cy.pan({
+        x: 82 - bbox.x1 * targetZoom,
+        y: 82 - bbox.y1 * targetZoom,
+    });
 }
 
 function focusNode(node: cytoscape.NodeSingular, scope: 'direct' | 'flow' = 'flow') {
@@ -356,8 +439,12 @@ function selectNode(node: cytoscape.NodeSingular) {
 function clearSelection() {
     selectedNodeId = null;
     cy.nodes().unselect();
-    clearFocusClasses();
-    updateDetails(null);
+    if (searchInput.value.trim()) {
+        applySearch();
+    } else {
+        clearFocusClasses();
+        updateDetails(null);
+    }
 }
 
 function getNodeKind(data: Record<string, unknown>): string {
@@ -388,6 +475,7 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
     const outgoing = node.outgoers('edge').length;
     const canOpen = Boolean(data.file && data.line);
     const badges = [
+        data.isSeed ? t('Seed', '种子') : '',
         data.isEntry ? t('Entry', '入口') : '',
         data.isTriggered ? t('Triggered', '触发型') : '',
         data.isHidden ? t('Hidden', '隐藏') : '',
@@ -435,10 +523,11 @@ function applySearch() {
     clearFocusClasses();
     cy.elements().addClass('faded');
 
-    const matching = cy.nodes().filter(n => {
+    const matching = getVisibleNodes().filter(n => {
         const id = (n.data('id') || '').toLowerCase();
+        const label = (n.data('label') || '').toLowerCase();
         const title = (n.data('title') || '').toLowerCase();
-        return id.includes(query) || title.includes(query);
+        return id.includes(query) || label.includes(query) || title.includes(query);
     });
 
     if (matching.length === 0) {
@@ -455,7 +544,7 @@ function applySearch() {
         if (!firstMatch) firstMatch = n;
     });
     updateDetails(firstMatch);
-    cy.fit(neighborhood, 100);
+    cy.fit(neighborhood, 110);
 }
 
 // ─── Event handlers ──────────────────────────────────────────────────────────
@@ -484,13 +573,13 @@ cy.on('tap', (evt) => {
 cy.on('mouseover', 'node', (evt) => {
     const node = evt.target;
     showTooltip(node);
-    if (!selectedNodeId) {
+    if (!selectedNodeId && !searchInput.value.trim()) {
         focusNode(node, 'direct');
     }
 });
 cy.on('mouseout', 'node', () => {
     hideTooltip();
-    if (!selectedNodeId) {
+    if (!selectedNodeId && !searchInput.value.trim()) {
         clearFocusClasses();
     }
 });
@@ -582,7 +671,7 @@ function hideTooltip() {
 // ─── Controls ────────────────────────────────────────────────────────────────
 
 document.getElementById('btn-fit')?.addEventListener('click', () => {
-    cy.fit(undefined, 80);
+    fitVisible(80);
 });
 
 document.getElementById('btn-zoom-in')?.addEventListener('click', () => {
@@ -656,6 +745,7 @@ function renderGraph() {
                 line: node.line,
                 endLine: node.endLine,
                 namespace: node.namespace,
+                isSeed: seedIds.has(node.id) || undefined,
                 isEntry: isEntry || undefined,
                 isTriggered: node.isTriggeredOnly || undefined,
                 isHidden: node.isHidden || undefined,
@@ -683,11 +773,11 @@ function renderGraph() {
         }
     }
 
-    for (const edge of edges) {
+    edges.forEach((edge, index) => {
         const label = edge.label || edgeTypeLabel(edge.edgeType);
         elements.push({
             data: {
-                id: `${edge.source}→${edge.target}`,
+                id: `${edge.source}→${edge.target}:${edge.edgeType}:${index}`,
                 source: edge.source,
                 target: edge.target,
                 edgeType: edge.edgeType,
@@ -697,40 +787,44 @@ function renderGraph() {
                 isImplicit: implicitEdgeTypes.has(edge.edgeType) || undefined,
             },
         });
-    }
+    });
 
     cy.add(elements);
 
     // Layout — ELK (layered/hierarchical) for clean DAG visualization
-    const direction = container.clientWidth > container.clientHeight * 1.12 ? 'RIGHT' : 'DOWN';
     const layout = cy.layout({
         name: 'elk',
         animate: false,
-        fit: true,
+        fit: false,
         padding: 80,
-        nodeDimensionsIncludeLabels: true,
         elk: {
             algorithm: 'layered',
-            'elk.direction': direction,
-            'elk.aspectRatio': direction === 'RIGHT' ? 1.6 : 0.65,
-            'elk.edgeRouting': 'ORTHOGONAL',
-            'elk.spacing.componentComponent': 72,
-            'elk.spacing.nodeNode': 44,
-            'elk.spacing.edgeNode': 32,
-            'elk.layered.spacing.nodeNodeBetweenLayers': 92,
+            'elk.direction': 'RIGHT',
+            'elk.edgeRouting': 'POLYLINE',
+            'elk.spacing.componentComponent': 100,
+            'elk.spacing.nodeNode': 48,
+            'elk.spacing.edgeNode': 36,
+            'elk.layered.spacing.nodeNodeBetweenLayers': 120,
             'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
         },
     } as any);
     cy.one('layoutstop', () => {
-        cy.fit(undefined, 80);
         applySearch();
+        if (!searchInput.value.trim()) {
+            focusReadableStart();
+        }
     });
-    layout.run();
+    
+    // Run layout in the next frame to prevent race condition where ELK reads 0x0 node dimensions
+    requestAnimationFrame(() => {
+        layout.run();
+    });
 
     // Update stats
     statsBar.innerHTML = `
         <span>${t('Nodes', '节点')}: ${nodes.length}</span>
         <span>${t('Edges', '边')}: ${edges.length}</span>
+        <span>${t('Seed events', '种子事件')}: ${seedIds.size}</span>
         <span>${t('Namespace', '命名空间')}: ${currentNamespace === '__all__' ? t('All', '全部') : currentNamespace}</span>
     `;
 }
@@ -744,6 +838,7 @@ window.addEventListener('message', (event) => {
     switch (msg.command) {
         case 'render': {
             fullGraph = msg.data as EventGraph;
+            seedIds = new Set(Array.isArray(msg.seedIds) ? msg.seedIds : []);
             loadingEl.classList.add('hidden');
 
             // Populate namespace filter
@@ -755,6 +850,8 @@ window.addEventListener('message', (event) => {
                 opt.textContent = ns;
                 nsSelect.appendChild(opt);
             }
+            currentNamespace = chooseInitialNamespace(fullGraph.nodes);
+            nsSelect.value = currentNamespace;
 
             renderGraph();
             break;

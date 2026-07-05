@@ -39,6 +39,11 @@ function panelText(en: string, zh: string): string {
     return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
 }
 
+interface EventGraphBuildResult {
+    graph: EventGraph;
+    seedIds: string[];
+}
+
 // ─── Panel ───────────────────────────────────────────────────────────────────
 
 export class EventChainPanel {
@@ -131,24 +136,26 @@ export class EventChainPanel {
         });
 
         try {
-            const graph = await this._buildEventGraph();
+            const result = await this._buildEventGraph();
             this._panel.webview.postMessage({
                 command: 'render',
-                data: graph,
+                data: result.graph,
+                seedIds: result.seedIds,
             });
         } catch (e) {
             ErrorReporter.debug('EventChainPanel', 'Failed to scan events', e);
             this._panel.webview.postMessage({
                 command: 'render',
                 data: { nodes: [], edges: [] },
+                seedIds: [],
             });
         }
     }
 
-    private async _buildEventGraph(): Promise<EventGraph> {
+    private async _buildEventGraph(): Promise<EventGraphBuildResult> {
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (!workspaceFolders || workspaceFolders.length === 0) {
-            return { nodes: [], edges: [] };
+            return { graph: { nodes: [], edges: [] }, seedIds: [] };
         }
 
         const wsRoot = workspaceFolders[0]!;
@@ -168,7 +175,7 @@ export class EventChainPanel {
                 command: 'loading',
                 text: panelText('The current file does not contain event definitions.', '当前文件不包含事件定义'),
             });
-            return { nodes: [], edges: [] };
+            return { graph: { nodes: [], edges: [] }, seedIds: [] };
         }
 
         // ── Phase 1: Parse ALL event files to build the full event graph ──────
@@ -301,7 +308,7 @@ const subgraph = extractConnectedSubgraph(eventsOnlyGraph, seedIds, 2);
 this._panel.webview.postMessage({ command: 'loading', text: panelText('Resolving localisation text...', '解析本地化文本...') });
 await this._resolveLocTitles(subgraph);
 
-return subgraph;
+return { graph: subgraph, seedIds: Array.from(seedIds) };
 }
 
 // ── Resolve localization titles for non-hidden events ────────────────────
@@ -438,6 +445,7 @@ workspaceFolders[0]!,
         </div>
         <div id="legend">
             <div class="legend-title">${panelText('Legend', '图例')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#fff176;"></span> ${panelText('Seed event', '种子事件')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#4caf50;"></span> ${panelText('Entry event', '入口事件')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#42a5f5;"></span> ${panelText('Triggered event', '触发型事件')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#5d4037;border:1px dashed #8d6e63;"></span> ${panelText('MTTH event', 'MTTH 事件')}</div>

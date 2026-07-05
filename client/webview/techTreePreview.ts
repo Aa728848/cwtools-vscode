@@ -38,6 +38,9 @@ interface TechNode {
     tier: number;
     category: string;
     cost: number;
+    weight: number;
+    icon: string;
+    iconUri?: string;
     title: string;
     isRare: boolean;
     isDangerous: boolean;
@@ -79,6 +82,7 @@ let fullGraph: TechGraph = { nodes: [], edges: [] };
 let currentArea = '__all__';
 let currentTier = '__all__';
 let selectedTechId: string | null = null;
+let hasInitializedArea = false;
 
 // ─── Cytoscape instance ───────────────────────────────────────────────────────
 
@@ -94,38 +98,57 @@ const cy = cytoscape({
             selector: 'node',
             style: {
                 label: 'data(label)',
-                'font-size': '10.5px',
-                'font-weight': 600,
+                'font-family': 'Segoe UI, system-ui, sans-serif',
+                'font-size': '9.5px',
+                'font-weight': 700,
                 color: '#fff',
                 'text-valign': 'center',
                 'text-halign': 'center',
-                'background-color': '#4d4d4d',
-                'border-width': 1.5,
-                'border-color': '#909090',
-                width: 'label',
-                height: 30,
+                'text-justification': 'left' as any,
+                'text-margin-x': 28,
+                'line-height': 1.12,
+                'background-color': '#071521',
+                'background-opacity': 0.96,
+                'background-image': 'data(iconUri)',
+                'background-fit': 'none' as any,
+                'background-width': '48px' as any,
+                'background-height': '48px' as any,
+                'background-position-x': '8px' as any,
+                'background-position-y': '50%' as any,
+                'background-clip': 'node' as any,
+                'border-width': 2,
+                'border-color': '#2d8fd7',
+                width: 286,
+                height: 68,
                 shape: 'round-rectangle',
-                padding: '11px',
+                padding: '0px',
                 'text-wrap': 'wrap' as any,
-                'text-max-width': '190px' as any,
+                'text-max-width': '206px' as any,
                 'text-outline-width': 1,
-                'text-outline-color': '#1b1b1b',
+                'text-outline-color': '#02070b',
+                'overlay-opacity': 0,
+            },
+        },
+        {
+            selector: 'node[!iconUri]',
+            style: {
+                'background-image': 'none',
             },
         },
         // ── Physics
         {
             selector: 'node[area="physics"]',
-            style: { 'background-color': '#0d47a1', 'border-color': '#29b6f6' },
+            style: { 'background-color': '#07192a', 'border-color': '#2f9fe8' },
         },
         // ── Society
         {
             selector: 'node[area="society"]',
-            style: { 'background-color': '#1b5e20', 'border-color': '#66bb6a' },
+            style: { 'background-color': '#071f18', 'border-color': '#59c99c' },
         },
         // ── Engineering
         {
             selector: 'node[area="engineering"]',
-            style: { 'background-color': '#4a1800', 'border-color': '#ffa726' },
+            style: { 'background-color': '#211707', 'border-color': '#e3a044' },
         },
         // ── Start tech (bright gold border)
         {
@@ -140,8 +163,7 @@ const cy = cytoscape({
             selector: 'node[?isRare]',
             style: {
                 'border-style': 'dashed' as any,
-                'border-color': '#ce93d8',
-                'opacity': 0.8,
+                'border-color': '#a855f7',
             },
         },
         // ── Dangerous tech (red glow)
@@ -149,7 +171,7 @@ const cy = cytoscape({
             selector: 'node[?isDangerous]',
             style: {
                 'border-color': '#ef5350',
-                'border-width': 2,
+                'border-width': 2.5,
             },
         },
         // ── Selected
@@ -164,6 +186,10 @@ const cy = cytoscape({
         {
             selector: 'node.dimmed',
             style: { opacity: 0.15 },
+        },
+        {
+            selector: 'node.filtered-out',
+            style: { display: 'none' },
         },
         // ── Highlighted (search match)
         {
@@ -230,6 +256,10 @@ const cy = cytoscape({
             style: { opacity: 0.08 },
         },
         {
+            selector: 'edge.filtered-out',
+            style: { display: 'none' },
+        },
+        {
             selector: 'edge.focus-edge',
             style: {
                 width: 3,
@@ -269,12 +299,21 @@ function truncateText(value: string | undefined, maxLength: number): string {
     return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
 }
 
+function formatNumber(value: number | undefined): string {
+    if (!value || !Number.isFinite(value)) return '-';
+    return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
+}
+
+function formatTier(node: TechNode): string {
+    return node.tier < 1 ? t('Initial', '初始') : `${t('Level', '等级')} ${node.tier}`;
+}
+
 function formatTechLabel(node: TechNode): string {
-    const id = truncateText(node.id, 42);
-    if (node.title && node.title !== node.id) {
-        return `${id}\n${truncateText(node.title, 42)}`;
-    }
-    return id;
+    const title = truncateText(node.title && node.title !== node.id ? node.title : node.id, 24);
+    const category = truncateText(node.category || areaLabel[node.area] || node.area, 16);
+    const cost = node.cost > 0 ? formatNumber(node.cost) : '-';
+    const weight = node.weight > 0 ? formatNumber(node.weight) : '-';
+    return `${title}\n${category} - ${formatTier(node)}\n${t('Cost', '花费')}: ${cost}, ${t('Weight', '权重')}: ${weight}`;
 }
 
 function compareTech(a: TechNode, b: TechNode, ranks: Map<string, number>): number {
@@ -396,9 +435,9 @@ function assignComponentLanes(component: TechNode[], edges: TechEdge[], ranks: M
 function computeTechPositions(nodes: TechNode[], edges: TechEdge[]): Map<string, { x: number; y: number }> {
     const ranks = computeTechRanks(nodes, edges);
     const posMap = new Map<string, { x: number; y: number }>();
-    const NODE_W = 360;
-    const ROW_H = 76;
-    const COMPONENT_GAP = 44;
+    const NODE_W = 356;
+    const ROW_H = 92;
+    const COMPONENT_GAP = 52;
     const AREA_GAP = 120;
 
     let yCursor = 0;
@@ -423,6 +462,43 @@ function computeTechPositions(nodes: TechNode[], edges: TechEdge[]): Map<string,
     }
 
     return posMap;
+}
+
+function chooseInitialArea(nodes: TechNode[]): string {
+    for (const area of areaOrder) {
+        if (area === 'unknown') continue;
+        if (nodes.some(node => node.area === area)) return area;
+    }
+    return '__all__';
+}
+
+function getVisibleNodes(): cytoscape.NodeCollection {
+    return cy.nodes().filter(node => !node.hasClass('filtered-out'));
+}
+
+function fitVisible(padding = 80) {
+    const visibleNodes = getVisibleNodes();
+    if (visibleNodes.length > 0) {
+        cy.fit(visibleNodes, padding);
+    }
+}
+
+function focusReadableStart() {
+    const visibleNodes = getVisibleNodes();
+    if (visibleNodes.length === 0) return;
+
+    const bbox = visibleNodes.boundingBox({ includeLabels: true, includeOverlays: false });
+    const availableWidth = Math.max(360, cyContainer.clientWidth - 120);
+    const columnsInView = cyContainer.clientWidth < 900 ? 2.4 : 3.2;
+    const targetZoom = Math.max(0.72, Math.min(1, availableWidth / (356 * columnsInView)));
+    cy.zoom({
+        level: targetZoom,
+        renderedPosition: { x: 0, y: 0 },
+    });
+    cy.pan({
+        x: 76 - bbox.x1 * targetZoom,
+        y: 76 - bbox.y1 * targetZoom,
+    });
 }
 
 function clearFocusClasses() {
@@ -491,6 +567,9 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
     const data = node.data();
     const incoming = node.incomers('edge').length;
     const outgoing = node.outgoers('edge').length;
+    const iconHtml = data.iconUri
+        ? `<img class="details-tech-icon" src="${escapeHtml(data.iconUri)}" alt="">`
+        : `<div class="details-tech-icon placeholder">${escapeHtml((data.area || '?').slice(0, 1).toUpperCase())}</div>`;
     const badges = [
         data.isStartTech ? t('Starting tech', '起始科技') : '',
         data.isRare ? t('Rare', '稀有') : '',
@@ -503,13 +582,19 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
             <div class="details-kicker">${escapeHtml(areaLabel[data.area] ?? data.area)}</div>
             <button type="button" class="details-icon-button" data-clear-selection title="${t('Clear selection', '清除选择')}" aria-label="${t('Clear selection', '清除选择')}">×</button>
         </div>
-        <div class="details-title">${escapeHtml(data.id)}</div>
-        ${data.title && data.title !== data.id ? `<div class="details-subtitle">${escapeHtml(data.title)}</div>` : ''}
+        <div class="details-tech-heading">
+            ${iconHtml}
+            <div>
+                <div class="details-title">${escapeHtml(data.title || data.id)}</div>
+                ${data.title && data.title !== data.id ? `<div class="details-subtitle">${escapeHtml(data.id)}</div>` : ''}
+            </div>
+        </div>
         ${badges.length > 0 ? `<div class="details-badges">${badges.map(badge => `<span>${escapeHtml(badge)}</span>`).join('')}</div>` : ''}
         <dl class="details-list">
-            <div><dt>${t('Tier', '层级')}</dt><dd>Tier ${escapeHtml(data.tier)}</dd></div>
+            <div><dt>${t('Tier', '层级')}</dt><dd>${escapeHtml(formatTier(data as TechNode))}</dd></div>
             <div><dt>${t('Category', '分类')}</dt><dd>${escapeHtml(data.category || '-')}</dd></div>
             <div><dt>${t('Cost', '费用')}</dt><dd>${Number(data.cost) > 0 ? escapeHtml(data.cost) : '-'}</dd></div>
+            <div><dt>${t('Weight', '权重')}</dt><dd>${Number(data.weight) > 0 ? escapeHtml(formatNumber(data.weight)) : '-'}</dd></div>
             <div><dt>${t('Dependencies', '依赖')}</dt><dd>${t(`${incoming} prerequisites / ${outgoing} dependents`, `${incoming} 个前置 / ${outgoing} 个后续`)}</dd></div>
             <div><dt>${t('Source', '来源')}</dt><dd>${escapeHtml(data.file)}:${escapeHtml(data.line)}</dd></div>
         </dl>
@@ -523,11 +608,11 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
 
 btnZoomIn.addEventListener('click', () => cy.zoom({ level: cy.zoom() * 1.3, renderedPosition: { x: cyContainer.clientWidth / 2, y: cyContainer.clientHeight / 2 } }));
 btnZoomOut.addEventListener('click', () => cy.zoom({ level: cy.zoom() / 1.3, renderedPosition: { x: cyContainer.clientWidth / 2, y: cyContainer.clientHeight / 2 } }));
-btnFit.addEventListener('click', () => cy.fit(undefined, 80));
+btnFit.addEventListener('click', () => fitVisible(80));
 
-areaFilter.addEventListener('change', () => { currentArea = areaFilter.value; applyFilters(); });
-tierFilter.addEventListener('change', () => { currentTier = tierFilter.value; applyFilters(); });
-showRareCheck.addEventListener('change', () => applyFilters());
+areaFilter.addEventListener('change', () => { currentArea = areaFilter.value; applyFilters('start'); });
+tierFilter.addEventListener('change', () => { currentTier = tierFilter.value; applyFilters('start'); });
+showRareCheck.addEventListener('change', () => applyFilters('start'));
 
 let searchDebounce: ReturnType<typeof setTimeout> | null = null;
 searchInput.addEventListener('input', () => {
@@ -554,7 +639,7 @@ detailPanel?.addEventListener('click', (event) => {
     }
 });
 
-function applyFilters() {
+function applyFilters(viewAction: 'start' | 'none' = 'none') {
     const showRare = showRareCheck.checked;
     const visibleNodeIds = new Set<string>();
     cy.batch(() => {
@@ -564,21 +649,31 @@ function applyFilters() {
             const tierOk = currentTier === '__all__' || String(data.tier) === currentTier;
             const rareOk = showRare || !data.isRare;
             if (areaOk && tierOk && rareOk) {
-                n.removeClass('dimmed');
+                n.removeClass('dimmed filtered-out');
                 visibleNodeIds.add(n.id());
             } else {
-                n.addClass('dimmed');
+                n.addClass('filtered-out');
             }
         });
         cy.edges().forEach(edge => {
             if (visibleNodeIds.has(edge.source().id()) && visibleNodeIds.has(edge.target().id())) {
-                edge.removeClass('dimmed');
+                edge.removeClass('dimmed filtered-out');
             } else {
-                edge.addClass('dimmed');
+                edge.addClass('filtered-out');
             }
         });
     });
+
+    if (selectedTechId && !visibleNodeIds.has(selectedTechId)) {
+        selectedTechId = null;
+        cy.nodes().unselect();
+        updateDetails(null);
+    }
+
     applySearch(searchInput.value.trim().toLowerCase());
+    if (viewAction === 'start' && !searchInput.value.trim()) {
+        focusReadableStart();
+    }
 }
 
 function applySearch(query: string) {
@@ -602,9 +697,11 @@ function applySearch(query: string) {
         cy.elements().addClass('faded');
 
         const matches = cy.nodes().filter(n => {
+            if (n.hasClass('filtered-out')) return false;
             const id = (n.data('id') as string).toLowerCase();
             const lbl = (n.data('label') as string).toLowerCase();
-            return id.includes(query) || lbl.includes(query);
+            const title = String(n.data('title') ?? '').toLowerCase();
+            return id.includes(query) || lbl.includes(query) || title.includes(query);
         });
 
         if (matches.length === 0) {
@@ -643,12 +740,20 @@ cy.on('mouseover', 'node', evt => {
         d.isRare ? `${svgIconNoMargin('shield')} ${t('Rare', '稀有')}` : '',
         d.isDangerous ? `${svgIconNoMargin('warning')} ${t('Dangerous', '危险')}` : '',
     ].filter(Boolean).join(' ');
+    const iconHtml = d.iconUri
+        ? `<img class="tt-icon" src="${escapeHtml(d.iconUri)}" alt="">`
+        : `<div class="tt-icon placeholder">${escapeHtml((d.area || '?').slice(0, 1).toUpperCase())}</div>`;
 
     tooltip.innerHTML = `
-        <div class="tt-id">${escapeHtml(d.id)}</div>
-        ${d.title !== d.id ? `<div class="tt-title">${escapeHtml(d.title)}</div>` : ''}
-        <div class="tt-meta">${escapeHtml(areaLabel[d.area] ?? d.area)} · Tier ${escapeHtml(d.tier)} · ${escapeHtml(d.category || '-')}</div>
-        ${d.cost > 0 ? `<div class="tt-meta">${t('Research cost', '研究费用')}: ${escapeHtml(d.cost)}</div>` : ''}
+        <div class="tt-head">
+            ${iconHtml}
+            <div>
+                <div class="tt-title">${escapeHtml(d.title || d.id)}</div>
+                <div class="tt-id">${escapeHtml(d.id)}</div>
+            </div>
+        </div>
+        <div class="tt-meta">${escapeHtml(areaLabel[d.area] ?? d.area)} · ${escapeHtml(formatTier(d as TechNode))} · ${escapeHtml(d.category || '-')}</div>
+        <div class="tt-meta">${t('Research cost', '研究费用')}: ${escapeHtml(formatNumber(d.cost))} · ${t('Weight', '权重')}: ${escapeHtml(formatNumber(d.weight))}</div>
         ${flags ? `<div class="tt-meta">${flags}</div>` : ''}
         <div class="tt-file">${escapeHtml(d.file)}:${escapeHtml(d.line)}</div>
     `;
@@ -735,6 +840,13 @@ function render(nodes: TechNode[], edges: TechEdge[]) {
     }
     detailPanel?.classList.remove('hidden');
 
+    const availableAreas = new Set(nodes.map(node => node.area));
+    if (!hasInitializedArea || (currentArea !== '__all__' && !availableAreas.has(currentArea as TechNode['area']))) {
+        currentArea = chooseInitialArea(nodes);
+        hasInitializedArea = true;
+    }
+    areaFilter.value = currentArea;
+
     // Populate tier filter
     const tiers = [...new Set(nodes.map(n => n.tier))].sort((a, b) => a - b);
     // Remove old options except the first (all)
@@ -758,6 +870,9 @@ function render(nodes: TechNode[], edges: TechEdge[]) {
                 tier: node.tier,
                 category: node.category,
                 cost: node.cost,
+                weight: node.weight,
+                icon: node.icon,
+                iconUri: node.iconUri,
                 title: node.title,
                 isRare: node.isRare,
                 isDangerous: node.isDangerous,
@@ -812,11 +927,9 @@ function render(nodes: TechNode[], edges: TechEdge[]) {
     cy.layout({
         name: 'preset',
         animate: false,
-        fit: true,
+        fit: false,
         padding: 80,
     }).run();
-
-    cy.fit(undefined, 80);
 
     // Update stats
     const areaCount: Record<string, number> = {};
@@ -830,7 +943,7 @@ function render(nodes: TechNode[], edges: TechEdge[]) {
         <span>${areaLabel.engineering}: ${areaCount.engineering ?? 0}</span>
     `;
 
-    applyFilters();
+    applyFilters('start');
 }
 
 // ─── Message handler ──────────────────────────────────────────────────────────

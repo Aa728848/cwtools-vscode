@@ -117,9 +117,8 @@ body {
     position: relative;
     overflow: hidden;
     background:
-        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px),
-        var(--bg);
+        radial-gradient(circle at 16px 16px, rgba(255,255,255,0.045) 1px, transparent 1.5px),
+        #464646;
     background-size: 40px 40px;
 }
 
@@ -260,6 +259,30 @@ body {
     word-break: break-word;
 }
 
+.details-tech-heading {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+}
+
+.details-tech-icon {
+    width: 52px;
+    height: 52px;
+    border: 2px solid color-mix(in srgb, var(--accent) 55%, #000);
+    border-radius: 4px;
+    background: #05080d;
+    object-fit: cover;
+}
+
+.details-tech-icon.placeholder,
+.cy-tooltip .tt-icon.placeholder {
+    display: grid;
+    place-items: center;
+    color: var(--accent);
+    font-weight: 700;
+}
+
 .details-subtitle {
     margin-top: 6px;
     color: var(--muted);
@@ -360,8 +383,26 @@ body {
     line-height: 1.5;
     box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
-.cy-tooltip .tt-id { font-weight: 600; color: var(--accent); }
-.cy-tooltip .tt-title { color: var(--fg); font-size: 12px; }
+
+.cy-tooltip .tt-head {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.cy-tooltip .tt-icon {
+    width: 38px;
+    height: 38px;
+    border: 1px solid color-mix(in srgb, var(--accent) 55%, #000);
+    border-radius: 3px;
+    background: #05080d;
+    object-fit: cover;
+}
+
+.cy-tooltip .tt-id { opacity: 0.65; font-size: 10px; word-break: break-all; }
+.cy-tooltip .tt-title { color: var(--fg); font-size: 12px; font-weight: 700; word-break: break-word; }
 .cy-tooltip .tt-meta { opacity: 0.6; font-size: 10px; }
 .cy-tooltip .tt-file { opacity: 0.5; font-size: 10px; margin-top: 4px; }
 

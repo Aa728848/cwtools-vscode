@@ -11,7 +11,10 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { ErrorReporter } from './ai/errorReporter';
+import { decodeDds, decodeTga } from './ddsDecoder';
+import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import {
     parseTechFile,
     mergeTechGraphs,
@@ -33,6 +36,17 @@ function panelText(en: string, zh: string): string {
     return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
 }
 
+const TECH_ICON_DIR = 'gfx/interface/icons/technologies';
+const TECH_ICON_CACHE_MAX_BYTES = 20 * 1024 * 1024;
+const TECH_ICON_EXTENSIONS = ['.dds', '.png', '.tga', '.jpg', '.jpeg'];
+
+interface TechIconCacheEntry {
+    mtimeMs: number;
+    size: number;
+    uri: string;
+    bytes: number;
+}
+
 // ─── Panel ───────────────────────────────────────────────────────────────────
 
 export class TechTreePanel {
@@ -43,6 +57,9 @@ export class TechTreePanel {
     private readonly _extensionPath: string;
     private _disposables: vscode.Disposable[] = [];
     private _seedDocument: vscode.TextDocument | undefined;
+    private _searchRoots: string[] = [];
+    private readonly _iconCache = new Map<string, TechIconCacheEntry>();
+    private _iconCacheBytes = 0;
 
     public static async create(extensionPath: string, document?: vscode.TextDocument) {
         const column = vscode.ViewColumn.Beside;
@@ -63,6 +80,14 @@ export class TechTreePanel {
         this._extensionPath = extensionPath;
         this._seedDocument = seedDoc;
         const webviewRootPath = path.join(extensionPath, 'bin/client/webview');
+        const workspaceRoots = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+        const gamePath = this._getGamePath();
+        this._searchRoots = gamePath ? [...workspaceRoots, gamePath] : workspaceRoots;
+        const localResourceRoots: vscode.Uri[] = [vscode.Uri.file(webviewRootPath)];
+        for (const folder of vscode.workspace.workspaceFolders ?? []) {
+            localResourceRoots.push(folder.uri);
+        }
+        if (gamePath) localResourceRoots.push(vscode.Uri.file(gamePath));
 
         const title = seedDoc
             ? panelText(`Tech Tree: ${path.basename(seedDoc.fileName)}`, `科技树: ${path.basename(seedDoc.fileName)}`)
@@ -75,7 +100,7 @@ export class TechTreePanel {
             {
                 enableScripts: true,
                 retainContextWhenHidden: true,
-                localResourceRoots: [vscode.Uri.file(webviewRootPath)],
+                localResourceRoots,
             },
         );
 
@@ -106,6 +131,11 @@ export class TechTreePanel {
             const d = this._disposables.pop();
             if (d) d.dispose();
         }
+    }
+
+    private _getGamePath(): string | null {
+        const configPath = vscode.workspace.getConfiguration('stellarisLanguageServices').get<string>('cache.stellaris');
+        return configPath && fs.existsSync(configPath) ? configPath : null;
     }
 
     // ── Scan & render ─────────────────────────────────────────────────────────
@@ -166,6 +196,8 @@ export class TechTreePanel {
         // ── Phase 3: Resolve localization titles ──────────────────────────────
         this._panel.webview.postMessage({ command: 'loading', text: panelText('Resolving localisation text...', '解析本地化文本...') });
         await this._resolveLocTitles(graph.nodes);
+        this._panel.webview.postMessage({ command: 'loading', text: panelText('Resolving technology icons...', '解析科技图标...') });
+        this._resolveTechIcons(graph.nodes);
 
         return graph;
     }
@@ -216,6 +248,136 @@ export class TechTreePanel {
         }
     }
 
+    private _resolveTechIcons(nodes: TechNode[]) {
+        for (const node of nodes) {
+            node.iconUri = this._resolveTechIcon(node);
+        }
+    }
+
+    private _resolveTechIcon(node: TechNode): string | undefined {
+        for (const candidate of this._getTechIconCandidates(node)) {
+            const resolved = this._resolveAssetPath(candidate);
+            if (!resolved) continue;
+            const uri = this._getIconUri(resolved);
+            if (uri) return uri;
+        }
+        return undefined;
+    }
+
+    private _getTechIconCandidates(node: TechNode): string[] {
+        const refs = new Set<string>();
+        if (node.icon) refs.add(node.icon);
+        refs.add(node.id);
+
+        const candidates: string[] = [];
+        for (const ref of refs) {
+            candidates.push(...this._expandIconReference(ref));
+        }
+        return [...new Set(candidates)];
+    }
+
+    private _expandIconReference(rawRef: string): string[] {
+        const ref = rawRef.trim().replace(/^["']|["']$/g, '').replace(/\\/g, '/');
+        if (!ref) return [];
+
+        const names = new Set<string>([ref]);
+        if (ref.startsWith('GFX_')) names.add(ref.substring(4));
+
+        const candidates: string[] = [];
+        for (const name of names) {
+            const hasDirectory = name.includes('/');
+            const hasExtension = /\.(dds|png|tga|jpe?g)$/i.test(name);
+            if (hasDirectory || hasExtension) {
+                candidates.push(...this._withFallbackExtensions(name));
+            }
+            if (!hasDirectory) {
+                const baseName = hasExtension ? name.replace(/\.(dds|png|tga|jpe?g)$/i, '') : name;
+                candidates.push(`assets/img/${baseName}.png`);
+                candidates.push(...this._withFallbackExtensions(`${TECH_ICON_DIR}/${baseName}`));
+            }
+        }
+        return candidates;
+    }
+
+    private _withFallbackExtensions(assetPath: string): string[] {
+        if (/\.(dds|png|tga|jpe?g)$/i.test(assetPath)) return [assetPath];
+        return TECH_ICON_EXTENSIONS.map(ext => `${assetPath}${ext}`);
+    }
+
+    private _resolveAssetPath(assetPath: string): string | undefined {
+        const normalized = assetPath.replace(/[\\/]+/g, path.sep).replace(/^[\\/]+/, '');
+        const candidates = path.isAbsolute(assetPath)
+            ? [assetPath]
+            : this._searchRoots.map(root => path.join(root, normalized));
+
+        for (const candidate of candidates) {
+            const resolved = fs.existsSync(candidate) ? candidate : resolveCaseInsensitivePath(candidate);
+            if (resolved) return resolved;
+        }
+        return undefined;
+    }
+
+    private _getIconUri(filePath: string): string | undefined {
+        let stat: fs.Stats;
+        try {
+            stat = fs.statSync(filePath);
+        } catch (e) {
+            ErrorReporter.debug('TechTreePanel', `Failed to stat technology icon ${filePath}`, e);
+            this._removeIconCacheEntry(filePath);
+            return undefined;
+        }
+
+        const cached = this._iconCache.get(filePath);
+        if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+            this._iconCache.delete(filePath);
+            this._iconCache.set(filePath, cached);
+            return cached.uri;
+        }
+
+        const ext = path.extname(filePath).toLowerCase();
+        let uri: string | undefined;
+        try {
+            if (ext === '.dds') {
+                uri = decodeDds(filePath)?.dataUri;
+            } else if (ext === '.tga') {
+                uri = decodeTga(filePath)?.dataUri;
+            } else if (['.png', '.jpg', '.jpeg'].includes(ext)) {
+                uri = this._panel.webview.asWebviewUri(vscode.Uri.file(filePath)).toString();
+            }
+        } catch (e) {
+            ErrorReporter.debug('TechTreePanel', `Failed to decode technology icon ${filePath}`, e);
+            this._removeIconCacheEntry(filePath);
+            return undefined;
+        }
+
+        if (!uri) {
+            this._removeIconCacheEntry(filePath);
+            return undefined;
+        }
+
+        this._setIconCacheEntry(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, uri, bytes: uri.length });
+        return uri;
+    }
+
+    private _setIconCacheEntry(filePath: string, entry: TechIconCacheEntry) {
+        this._removeIconCacheEntry(filePath);
+        this._iconCache.set(filePath, entry);
+        this._iconCacheBytes += entry.bytes;
+
+        while (this._iconCacheBytes > TECH_ICON_CACHE_MAX_BYTES && this._iconCache.size > 0) {
+            const oldestKey = this._iconCache.keys().next().value;
+            if (!oldestKey) break;
+            this._removeIconCacheEntry(oldestKey);
+        }
+    }
+
+    private _removeIconCacheEntry(filePath: string) {
+        const old = this._iconCache.get(filePath);
+        if (!old) return;
+        this._iconCacheBytes -= old.bytes;
+        this._iconCache.delete(filePath);
+    }
+
     private async _goToTech(filePath: string, line: number) {
         if (!filePath) return;
         const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -252,7 +414,7 @@ export class TechTreePanel {
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${csp} 'unsafe-inline';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${csp} data:; script-src 'nonce-${nonce}'; style-src ${csp} 'unsafe-inline';" />
     <link href="${styleUri}" rel="stylesheet" />
     <title>${title}</title>
 </head>

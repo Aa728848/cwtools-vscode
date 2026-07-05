@@ -23,6 +23,9 @@ export interface TechNode {
     tier: number;
     category: string;
     cost: number;
+    weight: number;
+    icon: string;
+    iconUri?: string;
     /** localization key (usually same as id) */
     title: string;
     /** Weight = 0 → only appears via event unlock / scripted */
@@ -53,6 +56,7 @@ export interface TechGraph {
 export function parseTechFile(content: string, filePath: string): TechGraph {
     const nodes: TechNode[] = [];
     const edges: TechEdge[] = [];
+    const scriptValues = parseScriptValues(content);
 
     const lines = content.split(/\r?\n/);
     let i = 0;
@@ -104,9 +108,13 @@ export function parseTechFile(content: string, filePath: string): TechGraph {
 
             const area = normalizeArea(areaMatch[1]!);
             const tierMatch = cleanBody.match(/\btier\s*=\s*(\d+)/);
-            const costMatch = cleanBody.match(/\bcost\s*=\s*([\d.]+)/);
+            const costMatch = cleanBody.match(/\bcost\s*=\s*([@a-zA-Z0-9_.-]+)/);
+            const weightMatch = cleanBody.match(/\bweight\s*=\s*([@a-zA-Z0-9_.-]+)/);
             const catMatch = cleanBody.match(/\bcategory\s*=\s*\{\s*([a-zA-Z0-9_]+)/);
-            const isRare = /\bweight\s*=\s*0\b/.test(cleanBody) || /\bis_rare\s*=\s*yes\b/.test(cleanBody);
+            const iconMatch = cleanBody.match(/\bicon\s*=\s*"?([a-zA-Z0-9_./\\-]+(?:\.(?:dds|png|tga|jpg|jpeg))?)"?/i);
+            const resolvedWeight = resolveScriptNumber(weightMatch?.[1], scriptValues);
+            const weight = resolvedWeight ?? 0;
+            const isRare = resolvedWeight === 0 || /\bweight\s*=\s*0\b/.test(cleanBody) || /\bis_rare\s*=\s*yes\b/.test(cleanBody);
             const isDangerous = /\bis_dangerous\s*=\s*yes\b/.test(cleanBody);
             const isStartTech = /\bstart_tech\s*=\s*yes\b/.test(cleanBody);
 
@@ -115,7 +123,9 @@ export function parseTechFile(content: string, filePath: string): TechGraph {
                 area,
                 tier: tierMatch ? parseInt(tierMatch[1]!) : 0,
                 category: catMatch ? catMatch[1]! : '',
-                cost: costMatch ? parseFloat(costMatch[1]!) : 0,
+                cost: resolveScriptNumber(costMatch?.[1], scriptValues) ?? 0,
+                weight,
+                icon: iconMatch ? iconMatch[1]! : '',
                 title: techId, // will be resolved to loc name later
                 isRare,
                 isDangerous,
@@ -146,6 +156,24 @@ export function parseTechFile(content: string, filePath: string): TechGraph {
     }
 
     return { nodes, edges };
+}
+
+function parseScriptValues(content: string): Map<string, number> {
+    const values = new Map<string, number>();
+    const cleanContent = content.replace(/#[^\r\n]*/g, '');
+    const valuePattern = /^\s*(@[a-zA-Z0-9_.-]+)\s*=\s*([+-]?\d+(?:\.\d+)?)\s*$/gm;
+    let match: RegExpExecArray | null;
+    while ((match = valuePattern.exec(cleanContent)) !== null) {
+        values.set(match[1]!, parseFloat(match[2]!));
+    }
+    return values;
+}
+
+function resolveScriptNumber(token: string | undefined, scriptValues: Map<string, number>): number | undefined {
+    if (!token) return undefined;
+    if (token.startsWith('@')) return scriptValues.get(token);
+    const value = parseFloat(token);
+    return Number.isFinite(value) ? value : undefined;
 }
 
 function normalizeArea(area: string): TechArea {

@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.10] - 2026-07-06
+
+### 功能与优化 / Features & Optimizations
+- **[优化] 动态合成辅助槽枚举扩展**：在群星游戏模式下，自动扫描 Mod 舰船区块定义的 `large_utility_slots` 等的最大数值，并动态扩展 `utility_component_slots` 的静态枚举范围，从而彻底根治由于 Mod 超大槽位数目导致的高插槽校验误报。
+  English: Dynamically synthesise utility component slots: In Stellaris mode, automatically scans Mod ship section definitions for values like `large_utility_slots`, and extends the static `utility_component_slots` enum accordingly, preventing false positives from extremely large slot counts.
+
 ## [2.8.8] - 2026-07-05
 
 ### AI 规则语义与 LSP 证据 / AI Rule Semantics & LSP Evidence

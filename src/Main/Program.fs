@@ -2013,7 +2013,7 @@ type Server(client: ILanguageClient) =
         let range = convRangeToLSPRange tdi.range
         let line = range.start.line
         let character = range.start.character
-        let uri = Uri(filePath).ToString()
+        let uri = filePathToUri(filePath).ToString()
 
         { range = range
           command =
@@ -3500,7 +3500,7 @@ type Server(client: ILanguageClient) =
 
                         if didGlobalWork then
                             for doc in docs.OpenFiles() do
-                                let uri = Uri(doc.FullName)
+                                let uri = filePathToUri(doc.FullName)
                                 do! lint uri true false false false false  // idle re-lint is never an edit
 
                         return! loop false state
@@ -4248,9 +4248,8 @@ type Server(client: ILanguageClient) =
 
     let parseUri path =
         let inner p =
-            match Uri.TryCreate(p, UriKind.Absolute) with
-            | TrySuccess uri -> Some(uri.AbsoluteUri |> JsonValue.String)
-            | _ -> None
+            let uri = filePathToUri p
+            Some(uri.AbsoluteUri |> JsonValue.String)
 
         memoize id inner path
 
@@ -5058,7 +5057,7 @@ type Server(client: ILanguageClient) =
 
                         match gototype with
                         | Some goto ->
-                            [ { uri = Uri(goto.FileName)
+                            [ { uri = filePathToUri(goto.FileName)
                                 range = (convRangeToLSPRange goto) } ]
                         | None -> []
                     | None -> []
@@ -5088,7 +5087,7 @@ type Server(client: ILanguageClient) =
                         | Some gotos ->
                             gotos
                             |> List.map (fun goto ->
-                                { uri = Uri(goto.FileName)
+                                { uri = filePathToUri(goto.FileName)
                                   range = (convRangeToLSPRange goto) })
                         | None -> []
                     | None -> []
@@ -5270,7 +5269,7 @@ type Server(client: ILanguageClient) =
                                     { name = tdi.id
                                       kind = kind
                                       location =
-                                        { uri = Uri(tdi.range.FileName)
+                                        { uri = filePathToUri(tdi.range.FileName)
                                           range = convRangeToLSPRange tdi.range }
                                       containerName = Some typeName }))
                         |> List.sortBy (fun symbol ->
@@ -5409,7 +5408,7 @@ type Server(client: ILanguageClient) =
                                         { title = title
                                           command = "cwtools.showTypeReferences"
                                           arguments =
-                                            [ JsonValue.String(Uri(filePath).ToString())
+                                            [ JsonValue.String(filePathToUri(filePath).ToString())
                                               codeLensPositionJson line character
                                               JsonValue.String typeName
                                               JsonValue.String id ] } }
@@ -5765,7 +5764,7 @@ type Server(client: ILanguageClient) =
                             PdxShaderFeatures.documentLinks (game.AllFiles()) filePath text
                             |> List.map (fun link ->
                                 { range = convRangeToLSPRange link.range
-                                  target = Some(Uri(link.targetFilepath)) })
+                                  target = Some(filePathToUri(link.targetFilepath)) })
                         else
                             let workspaceRoot =
                                 workspaceFolders
@@ -5801,7 +5800,7 @@ type Server(client: ILanguageClient) =
                                     let (el, ec) = getLineCol endOffset
                                     Some {
                                         range = { ``start`` = { line = sl; character = sc }; ``end`` = { line = el; character = ec } }
-                                        target = Some (Uri(fullPath))
+                                        target = Some (filePathToUri(fullPath))
                                     }
                                 else None)
                             |> List.ofSeq
@@ -6435,7 +6434,7 @@ type Server(client: ILanguageClient) =
                                 gotos
                                 |> List.groupBy (fun (r, _) -> r.FileName)
                                 |> List.map (fun (fileName, editsForFile) ->
-                                    let uri = Uri(fileName).ToString()
+                                    let uri = filePathToUri(fileName).ToString()
                                     let edits =
                                         editsForFile
                                         |> List.map (fun (r, newText) ->
@@ -6458,7 +6457,7 @@ type Server(client: ILanguageClient) =
                         let locationToJson (r: CWTools.Utilities.Position.range) =
                             let lspRange = convRangeToLSPRange r
                             JsonValue.Record
-                                [| "uri", JsonValue.String(Uri(r.FileName).ToString())
+                                [| "uri", JsonValue.String(filePathToUri(r.FileName).ToString())
                                    "range",
                                    JsonValue.Record
                                        [| "start", codeLensPositionJson lspRange.start.line lspRange.start.character

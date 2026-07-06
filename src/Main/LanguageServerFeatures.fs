@@ -44,6 +44,10 @@ module LanguageServerFeatures =
             p.Substring(1)
         else p
 
+    let filePathToUri (path: string) =
+        let filePrefix = if path.StartsWith('/') then "file://" else "file:///"
+        Uri(filePrefix + path.Replace('\\', '/'))
+
     let lochoverFromInfo (localisation: (string * Entry) list) (infoOption: SymbolInformation option) (word: string) =
         let locToText (loc: SymbolLocalisationInfo) =
             let locdesc =
@@ -280,7 +284,7 @@ module LanguageServerFeatures =
                 let version = docs.GetVersion(fileInfo) |> Option.defaultValue 0
 
                 let docIdentifier =
-                    { uri = Uri(filename)
+                    { uri = filePathToUri filename
                       version = version }
 
                 let changes =

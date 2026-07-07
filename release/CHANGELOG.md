@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.11] - 2026-07-07
+
+### 改善用户体验 / Improve User Experience
+- **[优化] 改善用户体验**
+  English: Improve user experience.
+
 ## [2.8.10] - 2026-07-06
 
 ### 功能与优化 / Features & Optimizations

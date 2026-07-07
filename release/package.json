@@ -1338,12 +1338,6 @@
                     "type": "boolean",
                     "default": false,
                     "description": "%configuration.stellarisLanguageServices.ai.performance.includeFullSmallFiles.description%"
-                },
-                "stellarisLanguageServices.vanillaCompare.showGutterDecorations": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.vanillaCompare.showGutterDecorations.description%"
                 }
             }
         },

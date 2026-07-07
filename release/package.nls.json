@@ -176,6 +176,5 @@
   "commands.stellarisLanguageServices.vanillaCompare.migrateBlockFromVanilla.title": "Migrate Block from Vanilla",
   "commands.stellarisLanguageServices.vanillaCompare.migrateChangedFromVanilla.title": "Migrate Changed Blocks from Vanilla",
   "commands.stellarisLanguageServices.previewEntity.title": "Preview Entity Model",
-  "commands.stellarisLanguageServices.previewParticle.title": "Preview Particle Effect",
-  "configuration.stellarisLanguageServices.vanillaCompare.showGutterDecorations.description": "Show line-level diff decorations in the editor gutter for blocks that differ from vanilla. Uses distinct colors from Git SCM decorations."
+  "commands.stellarisLanguageServices.previewParticle.title": "Preview Particle Effect"
 }

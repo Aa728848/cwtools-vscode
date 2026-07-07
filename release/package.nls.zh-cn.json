@@ -176,6 +176,5 @@
   "commands.stellarisLanguageServices.vanillaCompare.migrateBlockFromVanilla.title": "从原版迁移当前代码块",
   "commands.stellarisLanguageServices.vanillaCompare.migrateChangedFromVanilla.title": "从原版迁移所有变更块",
   "commands.stellarisLanguageServices.previewEntity.title": "预览模型资产",
-  "commands.stellarisLanguageServices.previewParticle.title": "预览粒子特效",
-  "configuration.stellarisLanguageServices.vanillaCompare.showGutterDecorations.description": "在编辑器行号区域显示与原版不同的行级差异装饰。使用与 Git SCM 不同的颜色样式以作区分。"
+  "commands.stellarisLanguageServices.previewParticle.title": "预览粒子特效"
 }

@@ -108,6 +108,51 @@ describe('AIService OpenAI Responses payload', () => {
         expect(response.choices[0].message.tool_calls[0].id).to.equal('call_1');
         expect(response.choices[0].message.tool_calls[0].responseItemId).to.equal('fc_abc123');
     });
+
+    it('normalizes Responses cached token usage from known provider fields', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        const cases = [
+            {
+                usage: { input_tokens: 2000, output_tokens: 50, input_tokens_details: { cached_tokens: 512, cache_creation_tokens: 128 } },
+                cached: 512,
+                created: 128,
+            },
+            {
+                usage: { prompt_tokens: 2000, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 768, cache_creation_tokens: 64 } },
+                cached: 768,
+                created: 64,
+            },
+            {
+                usage: { input_tokens: 2000, output_tokens: 50, prompt_cache_hit_tokens: 1024, prompt_cache_miss_tokens: 976 },
+                cached: 1024,
+                created: 976,
+            },
+        ];
+
+        for (const testCase of cases) {
+            service.fetchWithRetry = async () => ({
+                ok: true,
+                json: async () => ({
+                    id: 'resp_usage',
+                    model: 'gpt-5.5',
+                    output_text: 'ok',
+                    usage: testCase.usage,
+                }),
+            });
+
+            const response = await service.callOpenAIResponses(
+                'https://api.openai.com/v1',
+                'test-key',
+                { model: 'gpt-5.5', messages: [{ role: 'user', content: 'read' }] },
+                'custom',
+                new AbortController(),
+            );
+
+            expect(response.usage!.cached_tokens).to.equal(testCase.cached);
+            expect(response.usage!.cache_creation_tokens).to.equal(testCase.created);
+        }
+    });
 });
 
 describe('AIService Anthropic Messages compatibility', () => {

@@ -46,6 +46,37 @@ function isResponsesFunctionCallItemId(value: unknown): value is string {
     return typeof value === 'string' && value.startsWith('fc_');
 }
 
+function finiteNumber(value: unknown): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function maxUsageNumber(...values: unknown[]): number | undefined {
+    const nums = values.map(finiteNumber).filter((n): n is number => n !== undefined);
+    return nums.length > 0 ? Math.max(...nums) : undefined;
+}
+
+function extractUsageCachedTokens(usage: Record<string, any>): number {
+    return maxUsageNumber(
+        usage.input_tokens_details?.cached_tokens,
+        usage.prompt_tokens_details?.cached_tokens,
+        usage.prompt_cache_hit_tokens,
+        usage.cached_tokens,
+        usage.cache_read_input_tokens,
+        usage.cached_content_token_count,
+    ) ?? 0;
+}
+
+function extractUsageCacheCreationTokens(usage: Record<string, any>, promptTokens: number, cachedTokens: number): number {
+    const explicit = maxUsageNumber(
+        usage.input_tokens_details?.cache_creation_tokens,
+        usage.prompt_tokens_details?.cache_creation_tokens,
+        usage.cache_creation_input_tokens,
+        usage.prompt_cache_miss_tokens,
+    );
+    if (explicit !== undefined) return explicit;
+    return cachedTokens > 0 && promptTokens > cachedTokens ? promptTokens - cachedTokens : 0;
+}
+
 export function normalizeChatCompletionTimeoutMs(value: unknown): number {
     const raw = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_CHAT_COMPLETION_TIMEOUT_MS;
@@ -988,7 +1019,7 @@ export class AIService {
                 const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
                 // Capture model name and usage from any chunk
                 if (typeof chunk.model === 'string' && chunk.model) modelBuf = chunk.model;
-                if (chunk.usage) { const u = chunk.usage as Record<string, any>; const cached = u.prompt_cache_hit_tokens ?? u.cached_tokens ?? u.cache_read_input_tokens ?? u.prompt_tokens_details?.cached_tokens ?? u.cached_content_token_count ?? 0; const promptTk = u.prompt_tokens ?? u.input_tokens ?? 0; const cacheCreation = u.cache_creation_input_tokens ?? u.prompt_cache_miss_tokens ?? (cached > 0 && promptTk > cached ? promptTk - cached : 0); usageBuf = { prompt_tokens: promptTk, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? (promptTk + (u.completion_tokens ?? 0)), cached_tokens: cached, cache_creation_tokens: cacheCreation }; }
+                if (chunk.usage) { const u = chunk.usage as Record<string, any>; const promptTk = u.prompt_tokens ?? u.input_tokens ?? 0; const cached = extractUsageCachedTokens(u); const cacheCreation = extractUsageCacheCreationTokens(u, promptTk, cached); usageBuf = { prompt_tokens: promptTk, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? (promptTk + (u.completion_tokens ?? 0)), cached_tokens: cached, cache_creation_tokens: cacheCreation }; }
                 if (!choices || choices.length === 0) continue;
                 const delta = choices[0]!.delta as Record<string, unknown> | undefined;  
                 if (!delta) { finishReason = (choices[0]!.finish_reason as string) ?? finishReason; continue; }  
@@ -1198,6 +1229,9 @@ export class AIService {
         const text = contentParts.join('');
         if (text) onTextDelta?.(text);
         const usage = data.usage ?? {};
+        const promptTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
+        const completionTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
+        const cachedTokens = extractUsageCachedTokens(usage);
         return {
             id: data.id,
             object: data.object ?? 'response',
@@ -1213,10 +1247,11 @@ export class AIService {
                 finish_reason: toolCalls.length > 0 ? 'tool_calls' : (data.status === 'incomplete' ? 'length' : 'stop'),
             }],
             usage: {
-                prompt_tokens: usage.input_tokens ?? usage.prompt_tokens ?? 0,
-                completion_tokens: usage.output_tokens ?? usage.completion_tokens ?? 0,
-                total_tokens: usage.total_tokens ?? ((usage.input_tokens ?? 0) + (usage.output_tokens ?? 0)),
-                cached_tokens: usage.input_tokens_details?.cached_tokens,
+                prompt_tokens: promptTokens,
+                completion_tokens: completionTokens,
+                total_tokens: usage.total_tokens ?? (promptTokens + completionTokens),
+                cached_tokens: cachedTokens,
+                cache_creation_tokens: extractUsageCacheCreationTokens(usage, promptTokens, cachedTokens),
             },
         } as ChatCompletionResponse;
     }

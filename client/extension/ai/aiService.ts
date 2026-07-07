@@ -42,6 +42,10 @@ const MIN_CHAT_COMPLETION_TIMEOUT_MS = 60 * 1000;
 const MAX_CHAT_COMPLETION_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_CUSTOM_API_FORMAT: CustomApiFormat = 'openai-chat-completions';
 
+function isResponsesFunctionCallItemId(value: unknown): value is string {
+    return typeof value === 'string' && value.startsWith('fc_');
+}
+
 export function normalizeChatCompletionTimeoutMs(value: unknown): number {
     const raw = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_CHAT_COMPLETION_TIMEOUT_MS;
@@ -1104,13 +1108,16 @@ export class AIService {
 
             if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
                 for (const tc of msg.tool_calls) {
-                    input.push({
+                    const item: Record<string, unknown> = {
                         type: 'function_call',
-                        id: tc.id,
                         call_id: tc.id,
                         name: tc.function.name,
                         arguments: tc.function.arguments,
-                    });
+                    };
+                    if (isResponsesFunctionCallItemId(tc.responseItemId)) {
+                        item.id = tc.responseItemId;
+                    }
+                    input.push(item);
                 }
             }
         }
@@ -1178,6 +1185,7 @@ export class AIService {
             } else if (item?.type === 'function_call') {
                 toolCalls.push({
                     id: item.call_id ?? item.id ?? `call_${toolCalls.length}`,
+                    ...(isResponsesFunctionCallItemId(item.id) ? { responseItemId: item.id } : {}),
                     type: 'function',
                     function: {
                         name: item.name ?? '',
@@ -1443,26 +1451,43 @@ export class AIService {
         providerId: string = 'claude'
     ): Promise<ChatCompletionResponse> {
         const url = `${normalizeAnthropicMessagesEndpoint(endpoint)}/messages`;
-        // Force stream=true so we get SSE — enables thinking tokens and unblocks UI
-        const claudeRequest = toClaudeRequest({ ...request, stream: true });
+        // Force stream=true so we get SSE — enables thinking tokens and unblocks UI.
+        // Custom Anthropic-compatible relays often implement the core Messages API
+        // but reject Anthropic cache_control blocks, so keep that shape plain there.
+        const claudeRequest = toClaudeRequest(
+            { ...request, stream: true },
+            { cacheControl: providerId !== 'custom' }
+        );
         // Claude Code-style relays often expose models that reject temperature entirely.
         if (providerId === 'custom') {
             delete claudeRequest.temperature;
         }
 
-        const sendClaudeRequest = (): Promise<Response> => this.fetchWithRetry(url, {
+        const buildClaudeHeaders = (authMode: 'x-api-key' | 'bearer'): Record<string, string> => ({
+            'Content-Type': 'application/json',
+            'anthropic-version': '2023-06-01',
+            ...(providerId === 'opencode'
+                ? this.buildAuthHeaders(providerId, apiKey)
+                : authMode === 'bearer'
+                    ? this.buildAuthHeaders(providerId, apiKey)
+                    : (apiKey ? { 'x-api-key': apiKey } : {})),
+        });
+
+        const sendClaudeRequest = (authMode: 'x-api-key' | 'bearer' = 'x-api-key'): Promise<Response> => this.fetchWithRetry(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01',
-                ...(providerId === 'opencode' ? this.buildAuthHeaders(providerId, apiKey) : {}),
-            },
+            headers: buildClaudeHeaders(authMode),
             body: JSON.stringify(claudeRequest),
             signal: controller.signal,
         }, providerId);
 
         let response = await sendClaudeRequest();
+        if (providerId === 'custom' && apiKey && (response.status === 401 || response.status === 403)) {
+            const authStatus = response.status;
+            response = await sendClaudeRequest('bearer');
+            if (response.ok) {
+                ErrorReporter.debug(SOURCE.AI_SERVICE, `${getProvider(providerId).name}: retried Claude request with Bearer authorization after HTTP ${authStatus}.`);
+            }
+        }
         if (!response.ok) {
             const errorText = await response.text();
             if (

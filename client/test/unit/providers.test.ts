@@ -502,6 +502,30 @@ describe('toClaudeRequest', () => {
         const systemArray = result.system as any[];
         expect(systemArray[0].text).to.equal('Part 1\n\nPart 2');
     });
+
+    it('can omit Anthropic cache_control blocks for compatible relays', () => {
+        const req: ChatCompletionRequest = {
+            model: 'claude-opus-4-7',
+            messages: [
+                { role: 'system', content: 'System prompt' },
+                { role: 'user', content: '[Context Recovery]\nHi' },
+                { role: 'assistant', content: 'Hello' },
+                { role: 'user', content: 'Continue' },
+            ],
+            tools: [{
+                type: 'function',
+                function: {
+                    name: 'read_file',
+                    description: 'Read a file',
+                    parameters: { type: 'object', properties: { path: { type: 'string' } } },
+                },
+            }],
+        };
+
+        const result = toClaudeRequest(req, { cacheControl: false });
+        expect(result.system).to.equal('System prompt');
+        expect(JSON.stringify(result)).to.not.include('cache_control');
+    });
 });
 
 // ─── suggestOllamaConfig ─────────────────────────────────────────────────────

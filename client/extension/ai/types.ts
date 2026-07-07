@@ -152,6 +152,8 @@ export interface ChatMessage {
 
 export interface ToolCall {
     id: string;
+    /** Responses API item id (usually fc_...), distinct from the call_id used for tool outputs. */
+    responseItemId?: string;
     type: 'function';
     function: {
         name: string;

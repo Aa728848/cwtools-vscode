@@ -6569,7 +6569,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const hints: Record<string, string> = {
             'openai-chat-completions': 'POST {endpoint}/chat/completions, Authorization: Bearer <key>',
             'openai-responses': 'POST {endpoint}/responses, Authorization: Bearer <key>',
-            'anthropic-messages': 'POST {endpoint}/messages, x-api-key: <key>',
+            'anthropic-messages': 'POST {endpoint}/messages, x-api-key or Authorization: Bearer <key>',
             'gemini-generate-content': 'POST {endpoint}/models/{model}:generateContent?key=<key>',
         };
         hint.textContent = hints[format] ?? hints['openai-chat-completions'] ?? '';

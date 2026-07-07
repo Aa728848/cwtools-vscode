@@ -313,7 +313,11 @@ export function getEnableThinkingParams(model: string, providerId?: string): Ena
  * Converts an OpenAI-format request to Claude Messages API format.
  * Claude uses a different structure for system prompts, tools, and responses.
  */
-export function toClaudeRequest(request: ChatCompletionRequest): Record<string, unknown> {
+export function toClaudeRequest(
+    request: ChatCompletionRequest,
+    options: { cacheControl?: boolean } = {}
+): Record<string, unknown> {
+    const enableCacheControl = options.cacheControl !== false;
     // Extract system message
     const systemMessages = request.messages.filter(m => m.role === 'system');
     const systemPrompt = systemMessages.map(m => contentToString(m.content)).join('\n\n');
@@ -395,13 +399,15 @@ export function toClaudeRequest(request: ChatCompletionRequest): Record<string, 
     // breakpoint 1: System prompt 末尾
     let claudeSystem: any = undefined;
     if (systemPrompt) {
-        claudeSystem = [
-            {
-                type: 'text',
-                text: systemPrompt,
-                cache_control: { type: 'ephemeral' }
-            }
-        ];
+        claudeSystem = enableCacheControl
+            ? [
+                {
+                    type: 'text',
+                    text: systemPrompt,
+                    cache_control: { type: 'ephemeral' }
+                }
+            ]
+            : systemPrompt;
     }
 
     // Convert tools
@@ -413,7 +419,7 @@ export function toClaudeRequest(request: ChatCompletionRequest): Record<string, 
     }));
 
     // breakpoint 2: 最后一个 tool 定义上打 breakpoint
-    if (claudeTools && claudeTools.length > 0) {
+    if (enableCacheControl && claudeTools && claudeTools.length > 0) {
         const lastTool = claudeTools[claudeTools.length - 1];
         if (lastTool) {
             lastTool.cache_control = { type: 'ephemeral' };
@@ -422,54 +428,58 @@ export function toClaudeRequest(request: ChatCompletionRequest): Record<string, 
 
     // breakpoint 3: 寻找第一个包含 Context Recovery 或 system-reminder 的 user 消息
     let recoveryIdx = -1;
-    for (let i = 0; i < claudeMessages.length; i++) {
-        const m = claudeMessages[i];
-        if (m && m.role === 'user') {
-            const txt = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-            if (txt.includes('[Context Recovery]') || txt.includes('<system-reminder>')) {
-                recoveryIdx = i;
-                if (typeof m.content === 'string') {
-                    m.content = [
-                        {
-                            type: 'text',
-                            text: m.content,
-                            cache_control: { type: 'ephemeral' }
+    if (enableCacheControl) {
+        for (let i = 0; i < claudeMessages.length; i++) {
+            const m = claudeMessages[i];
+            if (m && m.role === 'user') {
+                const txt = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+                if (txt.includes('[Context Recovery]') || txt.includes('<system-reminder>')) {
+                    recoveryIdx = i;
+                    if (typeof m.content === 'string') {
+                        m.content = [
+                            {
+                                type: 'text',
+                                text: m.content,
+                                cache_control: { type: 'ephemeral' }
+                            }
+                        ];
+                    } else if (Array.isArray(m.content) && m.content.length > 0) {
+                        const lastContentPart = m.content[m.content.length - 1];
+                        if (lastContentPart) {
+                            lastContentPart.cache_control = { type: 'ephemeral' };
                         }
-                    ];
-                } else if (Array.isArray(m.content) && m.content.length > 0) {
-                    const lastContentPart = m.content[m.content.length - 1];
-                    if (lastContentPart) {
-                        lastContentPart.cache_control = { type: 'ephemeral' };
                     }
+                    break; // 只打第一个
                 }
-                break; // 只打第一个
             }
         }
     }
 
     // breakpoint 4: 滚动历史前缀。在 claudeMessages 倒数第二条 user 消息（非最新 user 消息）上打 breakpoint
-    let userCount = 0;
-    for (let i = claudeMessages.length - 1; i >= 0; i--) {
-        const m = claudeMessages[i];
-        if (m && m.role === 'user') {
-            userCount++;
-            // 倒数第二条 user 消息，且其索引必须大于 recoveryIdx（避免与 breakpoint 3 碰撞）
-            if (userCount === 2 && i > recoveryIdx) {
-                if (typeof m.content === 'string') {
-                    m.content = [
-                        {
-                            type: 'text',
-                            text: m.content,
-                            cache_control: { type: 'ephemeral' }
+    if (enableCacheControl) {
+        let userCount = 0;
+        for (let i = claudeMessages.length - 1; i >= 0; i--) {
+            const m = claudeMessages[i];
+            if (m && m.role === 'user') {
+                userCount++;
+                // 倒数第二条 user 消息，且其索引必须大于 recoveryIdx（避免与 breakpoint 3 碰撞）
+                if (userCount === 2 && i > recoveryIdx) {
+                    if (typeof m.content === 'string') {
+                        m.content = [
+                            {
+                                type: 'text',
+                                text: m.content,
+                                cache_control: { type: 'ephemeral' }
+                            }
+                        ];
+                    } else if (Array.isArray(m.content) && m.content.length > 0) {
+                        const lastContentPart = m.content[m.content.length - 1];
+                        if (lastContentPart) {
+                            lastContentPart.cache_control = { type: 'ephemeral' };
                         }
-                    ];
-                } else if (Array.isArray(m.content) && m.content.length > 0) {
-                    const lastContentPart = m.content[m.content.length - 1];
-                    if (lastContentPart) {
-                        lastContentPart.cache_control = { type: 'ephemeral' };
                     }
+                    break;
                 }
-                break;
             }
         }
     }

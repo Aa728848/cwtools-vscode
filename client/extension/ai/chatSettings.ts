@@ -233,6 +233,10 @@ export class ChatSettingsManager {
                 lspFastPath: config.inlineCompletion.lspFastPath,
                 overlapStripping: config.inlineCompletion.overlapStripping,
             },
+            translationPreview: {
+                provider: config.translationPreview.provider,
+                model: config.translationPreview.model,
+            },
             mcp: {
                 servers: config.mcp.servers
             },
@@ -343,6 +347,9 @@ export class ChatSettingsManager {
         if (settings.inlineCompletion && settings.inlineCompletion.model) {
             await handleDynamicModel(settings.inlineCompletion.provider, settings.inlineCompletion.model, 0);
         }
+        if (settings.translationPreview?.model) {
+            await handleDynamicModel(settings.translationPreview.provider || settings.provider, settings.translationPreview.model, 0);
+        }
 
         lastAISettingsWriteTime = Date.now();
         await cfg.update('provider', settings.provider, vs.ConfigurationTarget.Global);
@@ -393,6 +400,10 @@ export class ChatSettingsManager {
             await cfg.update('inlineCompletion.requestTimeoutMs', settings.inlineCompletion.requestTimeoutMs, vs.ConfigurationTarget.Global);
             await cfg.update('inlineCompletion.lspFastPath', settings.inlineCompletion.lspFastPath, vs.ConfigurationTarget.Global);
             await cfg.update('inlineCompletion.overlapStripping', settings.inlineCompletion.overlapStripping, vs.ConfigurationTarget.Global);
+        }
+        if (settings.translationPreview) {
+            await cfg.update('translationPreview.provider', settings.translationPreview.provider || '', vs.ConfigurationTarget.Global);
+            await cfg.update('translationPreview.model', settings.translationPreview.model || '', vs.ConfigurationTarget.Global);
         }
 
         if (settings.mcp?.servers) {

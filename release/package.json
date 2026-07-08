@@ -229,6 +229,11 @@
                     "group": "stellaris@0"
                 },
                 {
+                    "command": "cwtools.ai.previewSelectionTranslation",
+                    "when": "editorHasSelection",
+                    "group": "stellaris@0.1"
+                },
+                {
                     "command": "cwtools.localisation.translateSelection",
                     "when": "resourceExtname == .yml",
                     "group": "stellaris@1"
@@ -535,6 +540,12 @@
                 "command": "cwtools.ai.selectModel",
                 "title": "%commands.stellarisLanguageServices.ai.selectModel.title%",
                 "category": "Stellaris AI"
+            },
+            {
+                "command": "cwtools.ai.previewSelectionTranslation",
+                "title": "%commands.stellarisLanguageServices.ai.previewSelectionTranslation.title%",
+                "category": "Stellaris AI",
+                "icon": "$(globe)"
             },
             {
                 "command": "cwtools.localisation.translateSelection",
@@ -1208,6 +1219,62 @@
                     "type": "string",
                     "default": "",
                     "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.endpoint.description%"
+                },
+                "stellarisLanguageServices.ai.translationPreview.provider": {
+                    "scope": "window",
+                    "type": "string",
+                    "enum": [
+                        "",
+                        "openai",
+                        "claude",
+                        "deepseek",
+                        "minimax",
+                        "glm",
+                        "qwen",
+                        "ollama",
+                        "custom",
+                        "siliconflow",
+                        "openrouter",
+                        "github",
+                        "together",
+                        "deepinfra",
+                        "google",
+                        "mimo",
+                        "minimax-token-plan",
+                        "mimo-token-plan",
+                        "opencode",
+                        "kimi"
+                    ],
+                    "enumDescriptions": [
+                        "%configuration.stellarisLanguageServices.ai.translationPreview.provider.enum.inherit%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.claude%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.deepseek%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.minimax%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.glm%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.qwen%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.ollama%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.custom%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.siliconflow%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.openrouter%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.github%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.together%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.deepinfra%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.google%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.mimo%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.minimax-token-plan%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.kimi%"
+                    ],
+                    "default": "",
+                    "description": "%configuration.stellarisLanguageServices.ai.translationPreview.provider.description%"
+                },
+                "stellarisLanguageServices.ai.translationPreview.model": {
+                    "scope": "window",
+                    "type": "string",
+                    "default": "",
+                    "description": "%configuration.stellarisLanguageServices.ai.translationPreview.model.description%"
                 },
                 "stellarisLanguageServices.ai.dynamicModels": {
                     "type": "object",

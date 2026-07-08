@@ -240,6 +240,10 @@ export class AIService {
                 endpoint: cfg.get<string>('inlineCompletion.endpoint', ''),
                 overlapStripping: cfg.get<boolean>('inlineCompletion.overlapStripping', true),
             },
+            translationPreview: {
+                provider: cfg.get<string>('translationPreview.provider', ''),
+                model: cfg.get<string>('translationPreview.model', ''),
+            },
             mcp: {
                 servers: cfg.get<import('./types').MCPServerConfig[]>('mcp.servers', []),
             },

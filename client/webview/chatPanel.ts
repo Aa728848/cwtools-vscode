@@ -2483,6 +2483,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
     });
     bindBtn('accChat', () => toggleAccordion('chatModelSection'));
+    bindBtn('accTranslationPreview', () => toggleAccordion('translationPreviewSection'));
     bindBtn('accInline', () => toggleAccordion('inlineSection'));
     bindBtn('accMcp', () => toggleAccordion('mcpSection'));
     bindBtn('accAgent', () => toggleAccordion('agentSection'));
@@ -6319,6 +6320,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         sel.innerHTML = providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         const inlineSel = document.getElementById('inlineProvider') as HTMLSelectElement;
         inlineSel.innerHTML = `<option value="">${tr('- Same as chat -', '- 与对话相同 -')}</option>` + providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.inlineCompletion?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+        const translationProviderSel = document.getElementById('translationPreviewProvider') as HTMLSelectElement;
+        if (translationProviderSel) {
+            translationProviderSel.innerHTML = `<option value="">${tr('- Same as chat -', '- 与对话相同 -')}</option>` + providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.translationPreview?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+        }
         (document.getElementById('settingsApiKey') as HTMLInputElement).value = '';
         (document.getElementById('settingsEndpoint') as HTMLInputElement).value = current.endpoint || '';
         const customFormatSel = document.getElementById('customApiFormat') as HTMLSelectElement | null;
@@ -6403,6 +6408,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             });
         });
 
+        function updateTranslationModelSelect(pid: string, selectedModel: string, ollamaModels: any[]) {
+            const effectiveProvider = pid || current.provider;
+            const providerDef = providers.find((p: any) => p.id === effectiveProvider);
+            const models: string[] = effectiveProvider === 'ollama'
+                ? (ollamaModels || []).map((m: any) => m.name)
+                : (providerDef ? providerDef.models : []);
+            const input = document.getElementById('translationPreviewModelInput') as HTMLInputElement | null;
+            if (!input) return;
+            input.value = selectedModel || '';
+            setupApDropdown('translationPreviewModelInput', 'translationPreviewModelDatalist', () => models);
+        }
+
         function updateInlineProviderSelect() {
             const currentPid = inlineSel.value;
             // Only FIM-capable providers can be used for inline completion
@@ -6462,7 +6479,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             setupApDropdown('inlineModelInput', 'inlineModelDatalist', () => ms);
         }
         const inlineProviderSel = document.getElementById('inlineProvider') as HTMLSelectElement;
+        const translationPreviewProviderSel = document.getElementById('translationPreviewProvider') as HTMLSelectElement | null;
 
+        updateTranslationModelSelect(current.translationPreview?.provider, current.translationPreview?.model, ollamaModels);
+        if (translationPreviewProviderSel) {
+            translationPreviewProviderSel.onchange = () => updateTranslationModelSelect(translationPreviewProviderSel.value, '', ollamaModels);
+        }
         updateInlineProviderSelect();
         updateInlineModelSelect(current.inlineCompletion?.provider, current.inlineCompletion?.model, ollamaModels);
         inlineProviderSel.onchange = () => updateInlineModelSelect(inlineProviderSel.value, '', ollamaModels);
@@ -6871,6 +6893,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     requestTimeoutMs: parseInlineNumber('inlineRequestTimeout', 1500),
                     lspFastPath: (document.getElementById('inlineLspFastPath') as HTMLInputElement | null)?.checked ?? true,
                     overlapStripping: (document.getElementById('inlineOverlapStripping') as HTMLInputElement | null)?.checked ?? true,
+                },
+                translationPreview: {
+                    provider: ((document.getElementById('translationPreviewProvider') as HTMLSelectElement | null)?.value || '').trim(),
+                    model: ((document.getElementById('translationPreviewModelInput') as HTMLInputElement | null)?.value || '').trim(),
                 },
                 mcp: { servers: mcpServers },
                 orchestrator: {

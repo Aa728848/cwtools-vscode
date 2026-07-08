@@ -120,6 +120,10 @@ export interface AIUserConfig {
         endpoint: string;
         overlapStripping: boolean;
     };
+    translationPreview: {
+        provider: string;
+        model: string;
+    };
     mcp: {
         servers: MCPServerConfig[];
     };
@@ -1895,6 +1899,10 @@ export interface PanelSettings {
         requestTimeoutMs: number;
         lspFastPath: boolean;
         overlapStripping: boolean;
+    };
+    translationPreview: {
+        provider: string;
+        model: string;
     };
     mcp?: {
         servers: MCPServerConfig[];

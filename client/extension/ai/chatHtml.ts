@@ -279,6 +279,22 @@ ${stylesheetLinks}
                 </div>
             </div>
         </div>
+        <div class="accordion-section" id="translationPreviewSection">
+            <div class="accordion-header" id="accTranslationPreview"><span>${svgIcon('book')} ${t('Translation preview', '翻译预览')}</span><span class="accordion-arrow">▶</span></div>
+            <div class="accordion-body">
+                <div class="settings-group">
+                    <label class="settings-label">${t('Provider', '提供商')}</label>
+                    <select class="settings-select" id="translationPreviewProvider"><option value="">${t('- Same as chat -', '- 与对话相同 -')}</option></select>
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">${t('Model', '模型')}</label>
+                    <div class="model-row" style="position:relative">
+                        <input class="settings-input" id="translationPreviewModelInput" type="text" placeholder="${t('Leave empty to match chat', '留空与对话相同')}" autocomplete="off" />
+                        <div id="translationPreviewModelDatalist" class="ap-dropdown"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
         <div class="accordion-section" id="inlineSection">
             <div class="accordion-header" id="accInline"><span>${svgIcon('edit')} ${t('Completion model', '补全模型')}</span><span class="accordion-arrow">▶</span></div>
             <div class="accordion-body">

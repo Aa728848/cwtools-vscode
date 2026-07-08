@@ -1063,7 +1063,9 @@ body.chat-empty .slash-popup { top: var(--composer-popup-top); bottom: auto; max
 .test-result { font-size: 11px; line-height: 1.45; text-align: left; padding: 7px 10px; border-radius: 6px; display: none; border: 1px solid transparent; }
 .test-result.ok { background: rgba(80,200,80,0.14); color: #74d674; display: block; border-color: rgba(80,200,80,0.2); }
 .test-result.fail { background: rgba(200,80,80,0.12); color: #f19a9a; display: block; border-color: rgba(200,80,80,0.22); }
-.accordion-section { border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; overflow: hidden; flex-shrink: 0; background: rgba(255,255,255,0.02); }
+.accordion-section { border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; overflow: hidden; flex-shrink: 0; background: rgba(255,255,255,0.02); position: relative; }
+.accordion-section.open { overflow: visible; }
+.accordion-section.open:focus-within { z-index: 20; }
 .accordion-header { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; cursor: pointer; font-size: 12px; font-weight: 600; user-select: none; background: rgba(255,255,255,0.015); }
 .accordion-header:hover { background: rgba(255,255,255,0.045); }
 .accordion-arrow { font-size: 9px; opacity: 0.4; transition: transform 0.15s; }

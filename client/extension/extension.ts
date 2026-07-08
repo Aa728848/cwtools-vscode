@@ -37,6 +37,7 @@ import { registerRelatedResourceFeatures } from './relatedResources';
 import { registerRulesConfigGroupCommands } from './rulesConfigGroups';
 import { registerImageTools } from './imageTools';
 import { registerLocalisationAiCommands } from './localisationAiCommands';
+import { registerTranslationPreviewCommands } from './translationPreview';
 import { registerSpecialPathCommands } from './specialPaths';
 import { registerInspectionOverviewCommand } from './inspectionOverview';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
@@ -1533,6 +1534,7 @@ export async function activate(context: ExtensionContext) {
 		await aiService.selectModelCommand();
 	});
 	registerLocalisationAiCommands(context, (message: string) => chatPanelProvider.sendProgrammaticMessage(message));
+	registerTranslationPreviewCommands(context, aiService);
 
 	// ── Quick AI commands (keyboard shortcuts / command palette) ──────────
 	safeRegisterCommand(context, "cwtools.ai.reviewFile", async () => {

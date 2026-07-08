@@ -347,8 +347,8 @@ export class ChatSettingsManager {
         if (settings.inlineCompletion && settings.inlineCompletion.model) {
             await handleDynamicModel(settings.inlineCompletion.provider, settings.inlineCompletion.model, 0);
         }
-        if (settings.translationPreview?.model) {
-            await handleDynamicModel(settings.translationPreview.provider || settings.provider, settings.translationPreview.model, 0);
+        if (settings.translationPreview?.provider && settings.translationPreview.model) {
+            await handleDynamicModel(settings.translationPreview.provider, settings.translationPreview.model, 0);
         }
 
         lastAISettingsWriteTime = Date.now();
@@ -402,8 +402,9 @@ export class ChatSettingsManager {
             await cfg.update('inlineCompletion.overlapStripping', settings.inlineCompletion.overlapStripping, vs.ConfigurationTarget.Global);
         }
         if (settings.translationPreview) {
-            await cfg.update('translationPreview.provider', settings.translationPreview.provider || '', vs.ConfigurationTarget.Global);
-            await cfg.update('translationPreview.model', settings.translationPreview.model || '', vs.ConfigurationTarget.Global);
+            const translationProvider = settings.translationPreview.provider || '';
+            await cfg.update('translationPreview.provider', translationProvider, vs.ConfigurationTarget.Global);
+            await cfg.update('translationPreview.model', translationProvider ? (settings.translationPreview.model || '') : '', vs.ConfigurationTarget.Global);
         }
 
         if (settings.mcp?.servers) {

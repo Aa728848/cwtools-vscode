@@ -65,9 +65,14 @@ describe('translation preview helpers', () => {
 
 		const system = String(messages[0]?.content ?? '');
 		const user = String(messages[1]?.content ?? '');
+		expect(system).to.contain('Target language: Simplified Chinese');
+		expect(system).to.contain('must be written in Simplified Chinese');
 		expect(system).to.contain('Return only the translated text');
 		expect(system).to.contain('Preserve placeholders like __CWTP_0__ exactly');
 		expect(system).to.contain('Do not reconstruct, copy, or add the code');
+		expect(system).to.contain('Do not leave English prose unchanged just because it touches #');
+		expect(system).to.contain("# #First is set to default");
+		expect(system).to.contain("# #第一个设置为默认值");
 		expect(system).to.not.contain('Apply the change');
 		expect(system).to.not.contain('write back');
 		expect(user).to.contain('events/test.txt:3-5');

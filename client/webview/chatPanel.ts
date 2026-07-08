@@ -6409,14 +6409,19 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         });
 
         function updateTranslationModelSelect(pid: string, selectedModel: string, ollamaModels: any[]) {
+            const inheritChat = !pid;
             const effectiveProvider = pid || current.provider;
             const providerDef = providers.find((p: any) => p.id === effectiveProvider);
-            const models: string[] = effectiveProvider === 'ollama'
+            const models: string[] = inheritChat ? [] : effectiveProvider === 'ollama'
                 ? (ollamaModels || []).map((m: any) => m.name)
                 : (providerDef ? providerDef.models : []);
             const input = document.getElementById('translationPreviewModelInput') as HTMLInputElement | null;
             if (!input) return;
-            input.value = selectedModel || '';
+            input.disabled = inheritChat;
+            input.value = inheritChat ? '' : (selectedModel || '');
+            input.placeholder = inheritChat
+                ? tr('Inherits the chat model', '继承对话模型')
+                : tr('Leave empty to use provider default', '留空使用提供商默认模型');
             setupApDropdown('translationPreviewModelInput', 'translationPreviewModelDatalist', () => models);
         }
 
@@ -6896,7 +6901,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 },
                 translationPreview: {
                     provider: ((document.getElementById('translationPreviewProvider') as HTMLSelectElement | null)?.value || '').trim(),
-                    model: ((document.getElementById('translationPreviewModelInput') as HTMLInputElement | null)?.value || '').trim(),
+                    model: (((document.getElementById('translationPreviewProvider') as HTMLSelectElement | null)?.value || '').trim()
+                        ? ((document.getElementById('translationPreviewModelInput') as HTMLInputElement | null)?.value || '').trim()
+                        : ''),
                 },
                 mcp: { servers: mcpServers },
                 orchestrator: {

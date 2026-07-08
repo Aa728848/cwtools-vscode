@@ -25,7 +25,7 @@ import {
     fetchOllamaModels,
     BUILTIN_PROVIDERS,
     getModelOutputTokens,
-    getDisableThinkingParams,
+    getReducedThinkingParams,
     getEnableThinkingParams,
     getEffectiveTemperature,
     getOpenCodeApiFormat,
@@ -354,7 +354,7 @@ export class AIService {
             /** Absolute wall-clock timeout for a single chat completion call. */
             requestTimeoutMs?: number;
             /**
-             * Disable thinking/reasoning for this call (used by inline completion).
+             * Disable thinking/reasoning for this call (used by inline completion and translation preview).
              * Per-provider implementation:
              *   - Qwen3+: enable_thinking=false + /no_think prompt injection
              *   - GLM thinking models: thinking={type:'disabled'}
@@ -362,7 +362,7 @@ export class AIService {
              *   - Gemini 3.x: thinking_level='minimal' (cannot fully disable)
              *   - Claude: no action needed (thinking not sent by default)
              *   - MiniMax: no API toggle (rely on <think> stripping)
-             *   - OpenAI GPT/DeepSeek-chat: non-reasoning, no-op
+             *   - OpenAI/DeepSeek: reasoning_effort='low' when full disable is unavailable
              * Models that ALWAYS think (o1/o3/deepseek-reasoner/glm-z1/gemini-pro)
              * should be blocked before calling this method.
              */
@@ -411,18 +411,19 @@ export class AIService {
         // Each provider has a different mechanism to disable thinking/reasoning.
         // This is critical for inline completion where latency must be minimal.
         let finalMessages = messages;
-         
+
         let extraBody: Record<string, any> | undefined;
+        const reducedThinkingParams = options?.disableThinking
+            ? getReducedThinkingParams(model, providerId, effectiveApiFormat)
+            : undefined;
 
         if (options?.disableThinking) {
-            // Data-driven lookup: each provider's disable-thinking params are defined
-            // in providers.ts DISABLE_THINKING_PARAMS table instead of inline if-else.
-            const thinkingParams = getDisableThinkingParams(model);
-            if (thinkingParams) {
-                if (thinkingParams.extraBody) {
-                    extraBody = thinkingParams.extraBody as Record<string, any>;
+            // Data-driven lookup keeps provider-specific thinking controls out of this flow.
+            if (reducedThinkingParams) {
+                if (reducedThinkingParams.extraBody) {
+                    extraBody = reducedThinkingParams.extraBody as Record<string, any>;
                 }
-                if (thinkingParams.injectPrompt) {
+                if (reducedThinkingParams.injectPrompt) {
                     // Qwen-style: append /no_think to system prompt as fallback
                     finalMessages = messages.map(m => {
                         if (m.role === 'system' && typeof m.content === 'string') {
@@ -454,17 +455,21 @@ export class AIService {
         };
 
         // Inject reasoning effort / thinking preferences based on provider
-        if (!options?.disableThinking) {
+        if (options?.disableThinking) {
+            if (reducedThinkingParams?.reasoningEffort) {
+                request.reasoning_effort = reducedThinkingParams.reasoningEffort;
+            }
+        } else {
             const rEffort = config.reasoningEffort || 'high';
-            if (config.provider === 'deepseek' || config.provider === 'openai' || effectiveApiFormat === 'openai-responses') {
+            if (providerId === 'deepseek' || providerId === 'openai' || effectiveApiFormat === 'openai-responses') {
                 request.reasoning_effort = rEffort;
-            } else if (config.provider === 'claude' || effectiveApiFormat === 'anthropic-messages') {
+            } else if (providerId === 'claude' || effectiveApiFormat === 'anthropic-messages') {
                 // Consumed by toClaudeRequest: mapped to output_config.effort and
                 // adaptive thinking on models that support them (Fable 5, Opus/Sonnet 4.6+).
                 request.reasoning_effort = rEffort;
-            } else if (config.provider === 'qwen' && (lowerModel.includes('qwen3') || lowerModel.includes('qwen-max'))) {
+            } else if (providerId === 'qwen' && (lowerModel.includes('qwen3') || lowerModel.includes('qwen-max'))) {
                 request.enable_thinking = true;
-            } else if (config.provider === 'gemini' && lowerModel.startsWith('gemini-3')) {
+            } else if (providerId === 'gemini' && lowerModel.startsWith('gemini-3')) {
                 // Map max to high for Gemini
                 const mappedLevel = rEffort === 'max' ? 'high' : rEffort;
                 request.thinking_config = { thinking_level: mappedLevel };

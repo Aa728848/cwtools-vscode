@@ -1,6 +1,6 @@
 import * as vs from 'vscode';
 import type { AIService } from './ai/aiService';
-import { getEffectiveEndpoint } from './ai/providers';
+import { getEffectiveEndpoint, getEffectiveModel } from './ai/providers';
 import type { AIUserConfig, ChatMessage } from './ai/types';
 
 const MAX_SELECTION_CHARS = 12_000;
@@ -124,10 +124,10 @@ export function protectPdxTokens(input: string): ProtectedText {
 	const tokens: ProtectedToken[] = [];
 	let text = input;
 	text = protectPattern(text, /\\(?:n|r|t|"|'|\\)/g, tokens);
-	text = protectPattern(text, /\$[A-Za-z0-9_.:-]+(?:\|[A-Za-z0-9!%+\-]+)?\$/g, tokens);
+	text = protectPattern(text, /\$[A-Za-z0-9_.:-]+(?:\|[A-Za-z0-9!%+-]+)?\$/g, tokens);
 	text = protectPattern(text, /\[[A-Za-z0-9_.:\-|]+(?:\.[A-Za-z0-9_.:\-|]+)*\]/g, tokens);
 	text = protectPattern(text, /£[A-Za-z0-9_.:-]+£/g, tokens);
-	text = protectPattern(text, /§[A-Za-z0-9!%+\-]/g, tokens);
+	text = protectPattern(text, /§[A-Za-z0-9!%+-]/g, tokens);
 	return { text, tokens };
 }
 
@@ -198,14 +198,17 @@ export function buildTranslationMessages(snippet: SelectionTranslationSnippet, p
 			role: 'system',
 			content: [
 				'You are a precise translation engine for Paradox/CWTools modding text.',
-				`Translate selected source-code comments into ${targetLanguage}.`,
+				`Target language: ${targetLanguage}. The translated prose must be written in ${targetLanguage}.`,
 				'Return only the translated text. Do not add explanations, headings, notes, or Markdown fences.',
 				'The input contains only # comments extracted from a source selection.',
 				'Translate only human-readable prose inside comments.',
-				'Preserve line breaks, # comment markers, quoting style, and protected placeholders.',
+				'For Simplified Chinese, use Simplified Chinese characters and Chinese wording for English prose.',
+				'Preserve line breaks, leading # comment markers, whitespace, quoting style, and protected placeholders.',
 				'Preserve placeholders like __CWTP_0__ exactly. Never translate or rewrite them.',
 				'Do not reconstruct, copy, or add the code that originally surrounded these comments.',
-				'Keep IDs, keys, file paths, scope chains, commands, and code-like tokens unchanged unless they are clearly prose.',
+				'Preserve code identifiers only when they are standalone technical references, not ordinary prose.',
+				'Do not leave English prose unchanged just because it touches #, ##, punctuation, or comment markers.',
+				"Example for Simplified Chinese: '# #First is set to default' -> '# #第一个设置为默认值'.",
 			].join('\n'),
 		},
 		{
@@ -259,8 +262,11 @@ async function pickTargetLanguage(): Promise<string | undefined> {
 
 function resolveTranslationPreviewSettings(aiService: AIService, config: AIUserConfig): TranslationPreviewSettings {
 	const translationConfig = config.translationPreview;
-	const provider = translationConfig.provider || config.provider;
-	const model = translationConfig.model || config.model;
+	const dedicatedProvider = translationConfig.provider.trim();
+	const provider = dedicatedProvider || config.provider;
+	const model = dedicatedProvider
+		? getEffectiveModel(provider, translationConfig.model)
+		: config.model;
 	return {
 		provider,
 		model,

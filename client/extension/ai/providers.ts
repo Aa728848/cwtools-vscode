@@ -235,10 +235,12 @@ export function getOpenCodeApiFormat(model: string): CustomApiFormat {
  * Result of looking up how to disable thinking for a specific model.
  * `extraBody`    → merged into the request body (e.g. enable_thinking, thinking_config)
  * `injectPrompt` → if true, append "/no_think" to system prompt (Qwen fallback)
+ * `reasoningEffort` → use the lowest supported reasoning effort when full disable is unavailable
  */
 export interface DisableThinkingResult {
     extraBody?: Record<string, unknown>;
     injectPrompt?: boolean;
+    reasoningEffort?: ChatCompletionRequest['reasoning_effort'];
 }
 
 export interface EnableThinkingResult {
@@ -287,6 +289,27 @@ export function getDisableThinkingParams(model: string): DisableThinkingResult |
     for (const entry of DISABLE_THINKING_PARAMS) {
         if (entry.match(lower)) return entry.result;
     }
+    return undefined;
+}
+
+/**
+ * Resolve the lowest-thinking request shape for a concrete provider call.
+ * Model-specific hard disables win; provider fallbacks only lower effort for
+ * APIs where that does not turn thinking back on.
+ */
+export function getReducedThinkingParams(
+    model: string,
+    providerId?: string,
+    apiFormat?: CustomApiFormat
+): DisableThinkingResult | undefined {
+    const modelParams = getDisableThinkingParams(model);
+    if (modelParams) return modelParams;
+
+    const lowerProvider = providerId?.toLowerCase() ?? '';
+    if (lowerProvider === 'openai' || lowerProvider === 'deepseek' || apiFormat === 'openai-responses') {
+        return { reasoningEffort: 'low' };
+    }
+
     return undefined;
 }
 

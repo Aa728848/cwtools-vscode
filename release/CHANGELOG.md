@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.12] - 2026-07-08
+
+### 功能与优化 / Features & Optimizations
+- **[功能] 新增注释翻译预览命令**：新增 `cwtools.ai.previewSelectionTranslation` 命令，支持在右键菜单或编辑器标题栏中对选中的注释文本快速进行翻译预览，而无需直接修改/覆盖原文件。
+  English: Added `cwtools.ai.previewSelectionTranslation` command to preview translation of the selected text in a hover/preview pane from the context menu or editor title bar, without directly overwriting files.
+
 ## [2.8.11] - 2026-07-07
 
 ### 改善用户体验 / Improve User Experience

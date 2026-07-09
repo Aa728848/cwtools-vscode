@@ -55,7 +55,7 @@ describe('isModelVisionCapable', () => {
         expect(isModelVisionCapable('mimo-v2.5-pro')).to.equal(true);
     });
 
-    it('returns false for mimo-v2-flash (text-only)', () => {
+    it('returns false for deprecated mimo-v2-flash', () => {
         expect(isModelVisionCapable('mimo-v2-flash')).to.equal(false);
     });
 
@@ -144,8 +144,21 @@ describe('getModelContextTokens', () => {
 
     it('uses OpenCode-specific limits', () => {
         expect(getModelContextTokens('gpt-5.3-codex-spark', 'opencode')).to.equal(128000);
+        expect(getModelContextTokens('claude-sonnet-5', 'opencode')).to.equal(1000000);
+        expect(getModelContextTokens('glm-5.2', 'opencode')).to.equal(1000000);
+        expect(getModelContextTokens('hy3-free', 'opencode')).to.equal(256000);
         expect(getModelContextTokens('qwen3.6-plus', 'opencode')).to.equal(262144);
         expect(getModelContextTokens('nemotron-3-ultra-free', 'opencode')).to.equal(1000000);
+        expect(getModelContextTokens('mimo-v2.5-pro', 'opencode-go')).to.equal(1048576);
+    });
+
+    it('uses current direct-provider context metadata', () => {
+        expect(getModelContextTokens('deepseek-v4-pro', 'deepseek')).to.equal(1000000);
+        expect(getModelContextTokens('claude-sonnet-5', 'claude')).to.equal(1000000);
+        expect(getModelContextTokens('MiniMax-M2.7', 'minimax')).to.equal(204800);
+        expect(getModelContextTokens('glm-4.7-flashx', 'glm')).to.equal(200000);
+        expect(getModelContextTokens('glm-4.6v', 'glm')).to.equal(128000);
+        expect(getModelContextTokens('mimo-v2.5', 'mimo')).to.equal(1048576);
     });
 
     it('returns 0 for completely unknown model and provider', () => {
@@ -176,7 +189,18 @@ describe('getModelOutputTokens', () => {
     it('uses OpenCode-specific output limits', () => {
         expect(getModelOutputTokens('claude-opus-4-8', 'opencode')).to.equal(128000);
         expect(getModelOutputTokens('minimax-m3-free', 'opencode')).to.equal(32000);
+        expect(getModelOutputTokens('big-pickle (免费)', 'opencode')).to.equal(32000);
+        expect(getModelOutputTokens('kimi-k2.7-code', 'opencode')).to.equal(262144);
         expect(getModelOutputTokens('grok-build-0.1', 'opencode')).to.equal(256000);
+        expect(getModelOutputTokens('grok-4.5', 'opencode')).to.equal(500000);
+        expect(getModelOutputTokens('kimi-k2.7-code', 'opencode-go')).to.equal(262144);
+        expect(getModelOutputTokens('mimo-v2.5-pro', 'opencode-go')).to.equal(128000);
+    });
+
+    it('uses current direct-provider output limits', () => {
+        expect(getModelOutputTokens('claude-sonnet-5', 'claude')).to.equal(128000);
+        expect(getModelOutputTokens('MiniMax-M2.7', 'minimax')).to.equal(131072);
+        expect(getModelOutputTokens('mimo-v2.5-pro', 'mimo')).to.equal(131072);
     });
 
     it('returns reasonable default for unknown provider', () => {
@@ -213,6 +237,33 @@ describe('getProvider', () => {
     it('falls back to openai for empty string', () => {
         const p = getProvider('');
         expect(p.id).to.equal('openai');
+    });
+
+    it('tracks current OpenCode model ids without display suffixes', () => {
+        const zen = BUILTIN_PROVIDERS['opencode']!;
+        expect(zen.defaultModel).to.equal('big-pickle');
+        expect(zen.models).to.include.members([
+            'claude-sonnet-5',
+            'glm-5.2',
+            'kimi-k2.7-code',
+            'grok-4.5',
+            'hy3-free',
+        ]);
+        expect(zen.models.some(model => model.includes('('))).to.equal(false);
+
+        const go = BUILTIN_PROVIDERS['opencode-go']!;
+        expect(go.models).to.include.members([
+            'mimo-v2.5-pro',
+        ]);
+        expect(go.models).to.not.include.members([
+            'mimo-v2-pro',
+            'mimo-v2-omni',
+            'mimo-v2-flash',
+            'kimi-k2.5',
+            'glm-5',
+            'qwen3.5-plus',
+            'hy3-preview',
+        ]);
     });
 });
 
@@ -361,13 +412,13 @@ describe('getEnableThinkingParams', () => {
     });
 
     it('returns MiMo thinking params for token-plan provider', () => {
-        const result = getEnableThinkingParams('mimo-v2-flash', 'mimo-token-plan');
+        const result = getEnableThinkingParams('mimo-v2.5', 'mimo-token-plan');
         expect(result).to.not.equal(undefined);
         expect(result!.extraBody).to.deep.equal({ thinking: { type: 'enabled' } });
     });
 
     it('infers MiMo thinking params from model name', () => {
-        const result = getEnableThinkingParams('mimo-v2-pro', 'custom');
+        const result = getEnableThinkingParams('mimo-v2.5-pro', 'custom');
         expect(result).to.not.equal(undefined);
         expect(result!.extraBody).to.deep.equal({ thinking: { type: 'enabled' } });
     });
@@ -621,39 +672,75 @@ describe('BUILTIN_PROVIDERS', () => {
     });
 
     it('uses current direct-provider defaults and supported model IDs', () => {
+        expect(BUILTIN_PROVIDERS['openai']!.models).to.include('gpt-5.4-pro');
+        expect(getModelContextTokens('gpt-5.4-pro')).to.equal(1050000);
+        expect(BUILTIN_PROVIDERS['claude']!.models).to.include('claude-sonnet-5');
         expect(BUILTIN_PROVIDERS['glm']!.defaultModel).to.equal('glm-5.2');
+        expect(BUILTIN_PROVIDERS['glm']!.models).to.include.members([
+            'glm-4.7-flashx',
+            'glm-4.6',
+            'glm-4.6v',
+        ]);
+        expect(BUILTIN_PROVIDERS['glm']!.models).to.not.include.members([
+            'glm-5-air',
+            'glm-5-flash',
+            'glm-5v',
+            'glm-5v-flash',
+        ]);
         expect(BUILTIN_PROVIDERS['qwen']!.defaultModel).to.equal('qwen3.7-max-2026-06-08');
         expect(BUILTIN_PROVIDERS['qwen']!.models).to.not.include('qwen3.7-flash');
         expect(BUILTIN_PROVIDERS['google']!.models).to.deep.equal([
             'gemini-3.5-flash',
             'gemini-3.1-pro-preview',
             'gemini-3.1-flash-lite',
+            'gemini-3-flash-preview',
+            'gemini-2.5-pro',
+            'gemini-2.5-flash',
+            'gemini-2.5-flash-lite',
         ]);
         expect(BUILTIN_PROVIDERS['kimi']!.defaultModel).to.equal('kimi-k2.7-code');
         expect(BUILTIN_PROVIDERS['kimi']!.endpoint).to.equal('https://api.moonshot.cn/v1');
         expect(ALWAYS_THINKING_PREFIXES).to.include('kimi-k2.7-code');
     });
 
+    it('uses the current GitHub Models inference endpoint and catalog IDs', () => {
+        const github = BUILTIN_PROVIDERS['github']!;
+        expect(github.endpoint).to.equal('https://models.github.ai/inference');
+        expect(github.defaultModel).to.equal('openai/gpt-5');
+        expect(github.models).to.include.members([
+            'openai/gpt-5',
+            'openai/gpt-5-mini',
+            'openai/gpt-4.1',
+            'deepseek/deepseek-r1-0528',
+            'microsoft/phi-4-reasoning',
+        ]);
+    });
+
     it('matches the enabled OpenCode paid and free model list', () => {
         const opencode = BUILTIN_PROVIDERS['opencode']!;
-        expect(opencode.defaultModel).to.equal('big-pickle (免费)');
-        expect(opencode.models).to.have.length(48);
-        expect(opencode.models.filter(model => model.includes('(免费)'))).to.have.length(7);
+        expect(opencode.defaultModel).to.equal('big-pickle');
+        expect(opencode.models).to.have.length(52);
+        expect(opencode.models.filter(model => model.includes('('))).to.have.length(0);
         expect(opencode.models).to.include.members([
             'claude-fable-5',
             'claude-opus-4-8',
+            'claude-sonnet-5',
             'gpt-5.5-pro',
             'gemini-3.5-flash',
-            'deepseek-v4-flash-free (免费)',
-            'big-pickle (免费)',
-            'minimax-m3-free (免费)',
-            'north-mini-code-free (免费)',
+            'deepseek-v4-flash-free',
+            'big-pickle',
+            'glm-5.2',
+            'kimi-k2.7-code',
+            'minimax-m3',
+            'hy3-free',
+            'north-mini-code-free',
         ]);
         expect(opencode.models).to.not.include.members([
-            'minimax-m2.5-free (免费)',
-            'nemotron-3-super-free (免费)',
+            'minimax-m2.5-free',
+            'minimax-m3-free',
+            'nemotron-3-super-free',
         ]);
-        expect(Object.keys(OPENCODE_MODEL_LIMITS)).to.have.length(48);
+        expect(Object.keys(OPENCODE_MODEL_LIMITS)).to.have.length(56);
     });
 
     it('matches the OpenCode Go model list and limits', () => {
@@ -661,24 +748,23 @@ describe('BUILTIN_PROVIDERS', () => {
         expect(go).to.not.equal(undefined);
         expect(go.endpoint).to.equal('https://opencode.ai/zen/go/v1');
         expect(go.defaultModel).to.equal('glm-5.2');
-        expect(go.models).to.have.length(14);
+        expect(go.models).to.have.length(13);
         expect(go.models).to.include.members([
             'glm-5.2',
             'kimi-k2.7-code',
             'mimo-v2.5-pro',
             'minimax-m3',
-            'minimax-m2.5',
             'qwen3.7-max',
             'deepseek-v4-pro',
         ]);
         expect(go.requiresApiKey).to.equal(true);
         expect(go.supportsVision).to.equal(true);
-        expect(Object.keys(OPENCODE_GO_MODEL_LIMITS)).to.have.length(14);
-        expect(getModelContextTokens('glm-5.2', 'opencode-go')).to.equal(1048576);
-        expect(getModelContextTokens('deepseek-v4-pro', 'opencode-go')).to.equal(1048576);
-        expect(getModelContextTokens('minimax-m2.7', 'opencode-go')).to.equal(196608);
-        expect(getModelOutputTokens('kimi-k2.7-code', 'opencode-go')).to.equal(32768);
-        expect(getModelOutputTokens('deepseek-v4-flash', 'opencode-go')).to.equal(393216);
+        expect(Object.keys(OPENCODE_GO_MODEL_LIMITS)).to.have.length(13);
+        expect(getModelContextTokens('glm-5.2', 'opencode-go')).to.equal(1000000);
+        expect(getModelContextTokens('deepseek-v4-pro', 'opencode-go')).to.equal(1000000);
+        expect(getModelContextTokens('minimax-m2.7', 'opencode-go')).to.equal(204800);
+        expect(getModelOutputTokens('kimi-k2.7-code', 'opencode-go')).to.equal(262144);
+        expect(getModelOutputTokens('deepseek-v4-flash', 'opencode-go')).to.equal(384000);
     });
 });
 

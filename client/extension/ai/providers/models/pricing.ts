@@ -99,9 +99,8 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
     if (lower.includes('minimax-m3') || lower.includes('minimax-m2.7')) return 0.2;
     if (lower.includes('minimax')) return 0.1;
     // Xiaomi MiMo — extremely aggressive cache pricing
-    if (lower.includes('mimo-v2.5-pro') || lower.includes('mimo-v2-pro')) return 0.0083;
-    if (lower.includes('mimo-v2.5') || lower.includes('mimo-v2-omni')) return 0.02;
-    if (lower.includes('mimo-v2-flash')) return 0.1;
+    if (lower.includes('mimo-v2.5-pro')) return 0.0083;
+    if (lower.includes('mimo-v2.5')) return 0.02;
     if (lower.includes('mimo')) return 0.01;
     // Unknown model — assume no discount (conservative)
     return 1.0;

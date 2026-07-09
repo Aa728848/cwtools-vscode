@@ -13,6 +13,7 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'gpt-5.5-instant': true,
     'gpt-5.3-instant': true,
     'gpt-5.3-codex-spark': false,
+    'gpt-5.4-pro': true,
     'gpt-5.4': true,
     'gpt-5.4-mini': true,
     'gpt-5.4-nano': true,
@@ -25,6 +26,7 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'claude-opus-4-8': true,
     'claude-opus-4-7': true,
     'claude-opus-4-6': true,
+    'claude-sonnet-5': true,
     'claude-sonnet-4-6': true,
     'claude-haiku-4-5': true,
     'claude-3': true,
@@ -58,6 +60,9 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'glm-5': false,
     'glm-4.7': false,
     'glm-4.7-flash': false,
+    'glm-4.7-flashx': false,
+    'glm-4.6': false,
+    'glm-4.6v': true,
     'glm-z1-flash': false,
     'glm-4-flash': false,
     'qwen3.7-max-2026-06-08': true,
@@ -81,10 +86,7 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'deepseek-v4-flash': false,
     'mimo-v2.5-pro': true,
     'mimo-v2.5-free': true,
-    'mimo-v2-omni': true,
-    'mimo-v2-pro': false,
     'mimo-v2.5': true,
-    'mimo-v2-flash': false,
     'kimi-k2.7-code': true,
     'kimi-k2.6': true,
     'kimi-k2.5': true,
@@ -161,6 +163,7 @@ export const OPENCODE_MODEL_LIMITS: Record<string, { context: number; output: nu
     'claude-opus-4-6': { context: 1000000, output: 128000 },
     'claude-opus-4-7': { context: 1000000, output: 128000 },
     'claude-opus-4-8': { context: 1000000, output: 128000 },
+    'claude-sonnet-5': { context: 1000000, output: 128000 },
     'claude-sonnet-4': { context: 1000000, output: 64000 },
     'claude-sonnet-4-5': { context: 1000000, output: 64000 },
     'claude-sonnet-4-6': { context: 1000000, output: 64000 },
@@ -190,36 +193,42 @@ export const OPENCODE_MODEL_LIMITS: Record<string, { context: number; output: nu
     'deepseek-v4-pro': { context: 1000000, output: 384000 },
     'glm-5': { context: 204800, output: 131072 },
     'glm-5.1': { context: 204800, output: 131072 },
+    'glm-5.2': { context: 1000000, output: 131072 },
+    'kimi-k2.7-code': { context: 262144, output: 262144 },
     'kimi-k2.5': { context: 262144, output: 65536 },
     'kimi-k2.6': { context: 262144, output: 65536 },
     'qwen3.5-plus': { context: 262144, output: 65536 },
     'qwen3.6-plus': { context: 262144, output: 65536 },
     'qwen3.6-plus-free': { context: 262144, output: 65536 },
+    'qwen3.7-max': { context: 1000000, output: 65536 },
+    'qwen3.7-plus': { context: 1000000, output: 65536 },
     'grok-build-0.1': { context: 256000, output: 256000 },
+    'grok-4.5': { context: 500000, output: 500000 },
     'minimax-m2.5': { context: 204800, output: 131072 },
     'minimax-m2.7': { context: 204800, output: 131072 },
+    'minimax-m3': { context: 1000000, output: 128000 },
     'minimax-m3-free': { context: 200000, output: 32000 },
     'mimo-v2.5-free': { context: 200000, output: 32000 },
+    'hy3-free': { context: 256000, output: 64000 },
     'nemotron-3-ultra-free': { context: 1000000, output: 128000 },
     'north-mini-code-free': { context: 256000, output: 64000 },
 };
 
 /** OpenCode Go limits from each vendor's official model documentation. */
 export const OPENCODE_GO_MODEL_LIMITS: Record<string, { context: number; output: number }> = {
-    'glm-5.2': { context: 1048576, output: 131072 },
-    'glm-5.1': { context: 204800, output: 131072 },
-    'kimi-k2.7-code': { context: 262144, output: 32768 },
-    'kimi-k2.6': { context: 262144, output: 32768 },
-    'mimo-v2.5': { context: 1048576, output: 32000 },
-    'mimo-v2.5-pro': { context: 1048576, output: 65536 },
-    'minimax-m3': { context: 1048576, output: 131072 },
-    'minimax-m2.7': { context: 196608, output: 131072 },
-    'minimax-m2.5': { context: 196608, output: 131072 },
-    'qwen3.7-max': { context: 1048576, output: 65536 },
-    'qwen3.7-plus': { context: 1048576, output: 65536 },
-    'qwen3.6-plus': { context: 1048576, output: 65536 },
-    'deepseek-v4-pro': { context: 1048576, output: 393216 },
-    'deepseek-v4-flash': { context: 1048576, output: 393216 },
+    'glm-5.2': { context: 1000000, output: 131072 },
+    'glm-5.1': { context: 202752, output: 32768 },
+    'kimi-k2.7-code': { context: 262144, output: 262144 },
+    'kimi-k2.6': { context: 262144, output: 65536 },
+    'mimo-v2.5': { context: 1000000, output: 128000 },
+    'mimo-v2.5-pro': { context: 1048576, output: 128000 },
+    'minimax-m3': { context: 1000000, output: 131072 },
+    'minimax-m2.7': { context: 204800, output: 131072 },
+    'qwen3.7-max': { context: 1000000, output: 65536 },
+    'qwen3.7-plus': { context: 1000000, output: 65536 },
+    'qwen3.6-plus': { context: 1000000, output: 65536 },
+    'deepseek-v4-pro': { context: 1000000, output: 384000 },
+    'deepseek-v4-flash': { context: 1000000, output: 384000 },
 };
 
 /**
@@ -230,6 +239,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'gpt-5.5-pro': 1050000,
     'gpt-5.5-instant': 200000,
     'gpt-5.3-instant': 128000,
+    'gpt-5.4-pro': 1050000,
     'gpt-5.4': 1050000,
     'gpt-5.4-mini': 400000,
     'gpt-5.4-nano': 400000,
@@ -237,17 +247,18 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'gpt-5-nano': 400000,
     'gpt-4-vision': 128000,
     'claude-fable-5': 1000000,
+    'claude-sonnet-5': 1000000,
     'claude-opus-4-7': 1000000,
     'claude-opus-4-6': 1000000,
     'claude-sonnet-4-6': 1000000,
     'claude-haiku-4-5': 200000,
     'MiniMax-M3': 1000000,
-    'MiniMax-M2.7': 200000,
-    'MiniMax-M2.7-highspeed': 200000,
-    'MiniMax-M2.5': 200000,
-    'MiniMax-M2.5-highspeed': 200000,
-    'MiniMax-M2.1': 200000,
-    'MiniMax-M2': 200000,
+    'MiniMax-M2.7': 204800,
+    'MiniMax-M2.7-highspeed': 204800,
+    'MiniMax-M2.5': 204800,
+    'MiniMax-M2.5-highspeed': 204800,
+    'MiniMax-M2.1': 204800,
+    'MiniMax-M2': 196608,
     'glm-5.2': 1000000,
     'glm-5.1': 200000,
     'glm-5.1-highspeed': 200000,
@@ -262,6 +273,9 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'glm-4.1v-thinking-flash': 128000,
     'glm-4.7': 200000,
     'glm-4.7-flash': 200000,
+    'glm-4.7-flashx': 200000,
+    'glm-4.6': 204800,
+    'glm-4.6v': 128000,
     'glm-z1-flash': 128000,
     'glm-4-flash': 128000,
     'qwen3.7-max-2026-06-08': 1000000,
@@ -287,11 +301,8 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'gemini-2.5-pro': 1048576,
     'gemini-2.5-flash': 1048576,
     'gemini-2.5-flash-lite': 1048576,
-    'mimo-v2.5-pro': 1000000,
-    'mimo-v2.5': 1000000,
-    'mimo-v2-pro': 1000000,
-    'mimo-v2-omni': 1000000,
-    'mimo-v2-flash': 1000000,
+    'mimo-v2.5-pro': 1048576,
+    'mimo-v2.5': 1048576,
     'gpt-4o': 128000,
     'gpt-4': 128000,
     'gpt-3': 16000,
@@ -303,13 +314,13 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'claude-3.5': 200000,
     'claude-3': 200000,
     'DeepSeek-V3': 128000,
-    'DeepSeek-V4': 1048576,
+    'DeepSeek-V4': 1000000,
     'DeepSeek-V2': 128000,
     'DeepSeek-R1': 128000,
     'DeepSeek-Coder': 128000,
     'DeepSeek-OCR': 32000,
-    'deepseek-v4-pro': 1048576,
-    'deepseek-v4-flash': 1048576,
+    'deepseek-v4-pro': 1000000,
+    'deepseek-v4-flash': 1000000,
     'deepseek': 128000,
     'Qwen3.6': 1000000,
     'Qwen3.5': 128000,
@@ -348,7 +359,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'kimi': 128000,
     'MiniMax': 1000000,
     'minimax': 1000000,
-    'mimo': 1000000,
+    'mimo': 1048576,
     'Llama-3.3': 128000,
     'Llama-3.2': 128000,
     'Llama-3.1': 128000,
@@ -445,13 +456,14 @@ export function getModelContextTokens(model: string, providerId?: string): numbe
 export function getModelOutputTokens(model: string, providerId?: string): number {
     if (!model) return 16384;
     const lower = model.toLowerCase();
+    const modelId = lower.replace(/\s*\([^)]*\)$/i, '');
 
     if (providerId === 'opencode') {
-        return OPENCODE_MODEL_LIMITS[lower]?.output ?? 32768;
+        return OPENCODE_MODEL_LIMITS[modelId]?.output ?? 32768;
     }
 
     if (providerId === 'opencode-go') {
-        return OPENCODE_GO_MODEL_LIMITS[lower]?.output ?? 32768;
+        return OPENCODE_GO_MODEL_LIMITS[modelId]?.output ?? 32768;
     }
 
     if (providerId === 'openai') {
@@ -461,9 +473,15 @@ export function getModelOutputTokens(model: string, providerId?: string): number
         return 384000;
     }
     if (providerId === 'claude' || lower.includes('claude')) {
+        if (lower.includes('haiku-4-5')) return 64000;
+        if (lower.includes('opus-4-5') || lower.includes('sonnet-4-5')) return 64000;
+        if (lower.includes('fable-5') || lower.includes('opus-4-') || lower.includes('sonnet-5') || lower.includes('sonnet-4-6')) return 128000;
         return 16384;
     }
     if (providerId === 'minimax' || providerId === 'minimax-token-plan' || providerId?.includes('minimax') || lower.includes('minimax')) {
+        if (lower.includes('minimax-m3')) return 128000;
+        if (lower.includes('minimax-m2.7') || lower.includes('minimax-m2.5') || lower.includes('minimax-m2.1')) return 131072;
+        if (lower.includes('minimax-m2')) return 128000;
         return 65536;
     }
     if (providerId === 'glm' || lower.includes('glm')) {
@@ -473,7 +491,7 @@ export function getModelOutputTokens(model: string, providerId?: string): number
         return 65536;
     }
     if (providerId === 'mimo' || providerId === 'mimo-token-plan' || providerId?.includes('mimo') || lower.includes('mimo')) {
-        return 65536;
+        return 131072;
     }
     if (providerId === 'kimi' || lower.includes('kimi') || lower.includes('moonshot')) {
         return 32768;

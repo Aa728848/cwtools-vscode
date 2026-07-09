@@ -19,7 +19,10 @@ describe('getModelPricing', () => {
     });
 
     it('uses current direct-provider pricing', () => {
+        expect(getModelPricing('claude-sonnet-5')).to.deep.equal([13.64, 68.20]);
         expect(getModelPricing('glm-5.2')).to.deep.equal([9.56, 30.05]);
+        expect(getModelPricing('glm-4.7-flashx')).to.deep.equal([0.48, 2.73]);
+        expect(getModelPricing('glm-4.6')).to.deep.equal([4.10, 15.02]);
         expect(getModelPricing('MiniMax-M3')).to.deep.equal([2.10, 8.40]);
         expect(getModelPricing('qwen3.7-max-2026-06-08')).to.deep.equal([12.00, 36.00]);
         expect(getModelPricing('gemini-3.5-flash')).to.deep.equal([10.23, 61.38]);

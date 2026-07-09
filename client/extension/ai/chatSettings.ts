@@ -36,6 +36,9 @@ interface ModelsRequestCandidate {
     url: string;
     headers: Record<string, string>;
     label: string;
+    providerFilter?: string;
+    filterDeprecated?: boolean;
+    merge?: boolean;
 }
 
 function normalizeModelEndpointBase(endpoint: string): string {
@@ -75,6 +78,31 @@ function buildModelsRequests(
     customApiFormat: CustomApiFormat
 ): ModelsRequestCandidate[] {
     const cleanEndpoint = normalizeModelEndpointBase(endpoint);
+    if (providerId === 'opencode' || providerId === 'opencode-go') {
+        return uniqueModelRequests([
+            {
+                url: 'https://models.dev/api.json',
+                headers: { Accept: 'application/json' },
+                label: 'models.dev metadata',
+                providerFilter: providerId,
+                filterDeprecated: true,
+                merge: true,
+            },
+            {
+                url: `${cleanEndpoint}/models`,
+                headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+                label: 'OpenCode /models',
+                merge: true,
+            },
+        ]);
+    }
+    if (providerId === 'github') {
+        return [{
+            url: 'https://models.github.ai/catalog/models',
+            headers: { Accept: 'application/json' },
+            label: 'GitHub Models catalog',
+        }];
+    }
     if (providerId === 'custom' && customApiFormat === 'gemini-generate-content') {
         const url = `${cleanEndpoint.endsWith('/models') ? cleanEndpoint : `${cleanEndpoint}/models`}${apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''}`;
         return [{ url, headers: apiKey ? { 'x-goog-api-key': apiKey } : {}, label: 'Gemini /models' }];
@@ -109,7 +137,10 @@ function buildModelsRequests(
     }];
 }
 
-function normalizeModelList(data: any, customApiFormat: CustomApiFormat): any[] {
+function normalizeModelList(data: any, customApiFormat: CustomApiFormat, providerFilter?: string): any[] {
+    if (providerFilter && data && typeof data === 'object' && data[providerFilter]) {
+        return normalizeModelList(data[providerFilter], customApiFormat);
+    }
     const normalizeModel = (m: any): any => {
         if (typeof m === 'string') return { id: m };
         if (m && typeof m === 'object') {
@@ -124,13 +155,16 @@ function normalizeModelList(data: any, customApiFormat: CustomApiFormat): any[] 
         const entries = Array.isArray(providers)
             ? providers.map((p: any) => [p?.name ?? p?.id, p] as const)
             : (providers && typeof providers === 'object' ? Object.entries(providers) : []);
+        const modelsFromProvider = (providerValue: any): any[] => {
+            if (Array.isArray(providerValue)) return providerValue;
+            if (Array.isArray(providerValue?.models)) return providerValue.models;
+            if (providerValue?.models && typeof providerValue.models === 'object') return Object.values(providerValue.models);
+            if (Array.isArray(providerValue?.data)) return providerValue.data;
+            return [];
+        };
         return entries
             .flatMap(([providerName, providerValue]: any) => {
-                const models = Array.isArray(providerValue)
-                    ? providerValue
-                    : (Array.isArray(providerValue?.models)
-                        ? providerValue.models
-                        : (Array.isArray(providerValue?.data) ? providerValue.data : []));
+                const models = modelsFromProvider(providerValue);
                 return models.map((m: any) => typeof m === 'string'
                     ? { id: m, provider: providerName }
                     : { ...m, provider: m.provider ?? providerName });
@@ -155,9 +189,43 @@ function normalizeModelList(data: any, customApiFormat: CustomApiFormat): any[] 
         }
         return data.models.map(normalizeModel).filter((m: any) => m.id);
     }
+    if (data?.models && typeof data.models === 'object') {
+        return Object.values(data.models).map(normalizeModel).filter((m: any) => m.id);
+    }
     const providerModels = normalizeProviderModels(data?.providers ?? data?.provider);
     if (providerModels.length > 0) return providerModels;
     return [];
+}
+
+function readModelContextTokens(model: any): number {
+    const raw = model?.context_length
+        ?? model?.context_window
+        ?? model?.max_context_length
+        ?? model?.limit?.context
+        ?? model?.limits?.context
+        ?? model?.limits?.max_input_tokens
+        ?? model?.top_provider?.context_length
+        ?? 0;
+    const value = typeof raw === 'string' ? Number(raw) : raw;
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+const OPENCODE_GO_DEPRECATED_MODELS = new Set([
+    'glm-5',
+    'hy3-preview',
+    'kimi-k2.5',
+    'mimo-v2-pro',
+    'mimo-v2-omni',
+    'mimo-v2-flash',
+    'minimax-m2.5',
+    'qwen3.5-plus',
+]);
+
+function isDeprecatedProviderModel(providerId: string, modelId: string): boolean {
+    if (providerId === 'opencode-go') {
+        return OPENCODE_GO_DEPRECATED_MODELS.has(modelId.toLowerCase());
+    }
+    return false;
 }
 
 export let lastAISettingsWriteTime = 0;
@@ -501,23 +569,64 @@ export class ChatSettingsManager {
             return;
         }
 
-        if (provider.requiresApiKey && !apiKey && providerId !== 'custom') {
+        if (provider.requiresApiKey && !apiKey && providerId !== 'custom' && providerId !== 'opencode' && providerId !== 'opencode-go') {
             this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: 'API Key is required to fetch models' });
-            return;
-        }
-
-        if (providerId === 'opencode' || providerId === 'opencode-go') {
-            const { BUILTIN_PROVIDERS } = await import('./providers');
-            const models = (BUILTIN_PROVIDERS[providerId]?.models || []).map(m => ({ id: m }));
-            this.postMessage({ type: 'apiModelsFetched', providerId, models, error: '' });
             return;
         }
 
         try {
             const candidates = buildModelsRequests(providerId, endpoint, apiKey, customApiFormat);
             const errors: string[] = [];
+            const aggregateModels = new Map<string, any>();
+            const aggregateContexts: Record<string, number> = {};
+            const aggregateLabels: string[] = [];
+            const deprecatedModelIds = new Set<string>();
+            let aggregateHasApiContext = false;
+            const { getModelContextTokens } = await import('./providers');
+
+            const collectModels = (modelList: any[], candidate: ModelsRequestCandidate) => {
+                const uniqueById = new Map<string, any>();
+                for (const model of modelList) {
+                    if (model.id && !uniqueById.has(model.id)) uniqueById.set(model.id, model);
+                }
+                const normalizedModelList = Array.from(uniqueById.values());
+                const dynContexts: Record<string, number> = {};
+                let apiHasContext = false;
+
+                normalizedModelList.forEach((m: any) => {
+                    let c = readModelContextTokens(m);
+                    const builtinContext = m.id ? getModelContextTokens(m.id, providerId) : 0;
+                    if (c) apiHasContext = true;
+
+                    if (builtinContext > c) {
+                        c = builtinContext;
+                    }
+
+                    if (c) dynContexts[m.id] = c;
+                });
+
+                if (candidate.merge) {
+                    for (const model of normalizedModelList) {
+                        if (!aggregateModels.has(model.id)) aggregateModels.set(model.id, model);
+                    }
+                    for (const [modelId, contextTokens] of Object.entries(dynContexts)) {
+                        if (!(modelId in aggregateContexts)) aggregateContexts[modelId] = contextTokens;
+                    }
+                    if (apiHasContext) aggregateHasApiContext = true;
+                    aggregateLabels.push(candidate.label);
+                }
+
+                return { normalizedModelList, dynContexts, apiHasContext };
+            };
+
             for (const candidate of candidates) {
-                const res = await fetch(candidate.url, { headers: candidate.headers });
+                let res: Response;
+                try {
+                    res = await fetch(candidate.url, { headers: candidate.headers });
+                } catch (e: unknown) {
+                    errors.push(`${candidate.label}: ${e instanceof Error ? e.message : String(e)}`);
+                    continue;
+                }
                 if (!res.ok) {
                     errors.push(`${candidate.label}: ${res.status}`);
                     continue;
@@ -529,41 +638,39 @@ export class ChatSettingsManager {
                     errors.push(`${candidate.label}: non-JSON response`);
                     continue;
                 }
-                const modelList: any[] = normalizeModelList(data, customApiFormat);
+                let modelList: any[] = normalizeModelList(data, customApiFormat, candidate.providerFilter);
+                if (candidate.filterDeprecated) {
+                    for (const model of modelList) {
+                        if (model?.status === 'deprecated' && model.id) deprecatedModelIds.add(model.id);
+                    }
+                    modelList = modelList.filter((m: any) => m.status !== 'deprecated');
+                }
+                modelList = modelList.filter((m: any) => !deprecatedModelIds.has(m.id) && !isDeprecatedProviderModel(providerId, m.id));
                 if (modelList.length === 0) {
                     errors.push(`${candidate.label}: empty or unknown response`);
                     continue;
                 }
-                const uniqueById = new Map<string, any>();
-                for (const model of modelList) {
-                    if (model.id && !uniqueById.has(model.id)) uniqueById.set(model.id, model);
-                }
-                const normalizedModelList = Array.from(uniqueById.values());
+                const { normalizedModelList, dynContexts, apiHasContext } = collectModels(modelList, candidate);
+                if (candidate.merge) continue;
+
                 const dynModels = normalizedModelList.map((m: any) => m.id).filter(Boolean);
-                const dynContexts: Record<string, number> = {};
-                const { getModelContextTokens } = await import('./providers');
-
-                normalizedModelList.forEach((m: any) => {
-                    let c = m.context_length
-                        || m.context_window
-                        || m.max_context_length
-                        || m.top_provider?.context_length
-                        || 0;
-
-                    if (!c && m.id) {
-                        c = getModelContextTokens(m.id, providerId);
-                    }
-
-                    if (c) dynContexts[m.id] = c;
-                });
-
-                const apiHasContext = normalizedModelList.some((m: any) => m.context_length || m.context_window || m.top_provider?.context_length);
                 const inferredCount = Object.keys(dynContexts).length;
                 const ctxNote = apiHasContext
                     ? `(context tokens from API for ${inferredCount} models; ${candidate.label})`
                     : `(context tokens inferred for ${inferredCount}/${dynModels.length} models; ${candidate.label})`;
 
                 this.postMessage({ type: 'apiModelsFetched', providerId, models: normalizedModelList, dynContexts, ctxNote });
+                return;
+            }
+            if (aggregateModels.size > 0) {
+                const normalizedModelList = Array.from(aggregateModels.values());
+                const dynModels = normalizedModelList.map((m: any) => m.id).filter(Boolean);
+                const inferredCount = Object.keys(aggregateContexts).length;
+                const labels = aggregateLabels.join(' + ');
+                const ctxNote = aggregateHasApiContext
+                    ? `(context tokens from API for ${inferredCount} models; ${labels})`
+                    : `(context tokens inferred for ${inferredCount}/${dynModels.length} models; ${labels})`;
+                this.postMessage({ type: 'apiModelsFetched', providerId, models: normalizedModelList, dynContexts: aggregateContexts, ctxNote });
                 return;
             }
             this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: `Could not fetch model list from discovery endpoints: ${errors.join('; ')}` });

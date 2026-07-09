@@ -84,7 +84,7 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'qwen3-vl': true,
     'deepseek-v4-pro': false,
     'deepseek-v4-flash': false,
-    'mimo-v2.5-pro': true,
+    'mimo-v2.5-pro': false,
     'mimo-v2.5-free': true,
     'mimo-v2.5': true,
     'kimi-k2.7-code': true,

@@ -15,6 +15,8 @@ import * as fs from 'fs';
 import { ErrorReporter } from './ai/errorReporter';
 import { decodeDds, decodeTga } from './ddsDecoder';
 import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
+import { getLocalisationDirectoryGlob } from './gameProfiles';
+import { parseLocFile, stripLocalisationColorMarkers } from './indexing/locParser';
 import {
     parseTechFile,
     mergeTechGraphs,
@@ -39,6 +41,7 @@ function panelText(en: string, zh: string): string {
 const TECH_ICON_DIR = 'gfx/interface/icons/technologies';
 const TECH_ICON_CACHE_MAX_BYTES = 20 * 1024 * 1024;
 const TECH_ICON_EXTENSIONS = ['.dds', '.png', '.tga', '.jpg', '.jpeg'];
+const TECH_LOC_FILE_LIMIT_PER_ROOT = 3000;
 
 interface TechIconCacheEntry {
     mtimeMs: number;
@@ -171,7 +174,8 @@ export class TechTreePanel {
         this._panel.webview.postMessage({ command: 'loading', text: panelText('Scanning common/technology/ files...', '扫描 common/technology/ 文件...') });
 
         const techPattern = new vscode.RelativePattern(wsRoot, '**/common/technology/**/*.txt');
-        const techFiles = await vscode.workspace.findFiles(techPattern, '**/node_modules/**', 500);
+        const techFiles = (await vscode.workspace.findFiles(techPattern, '**/node_modules/**', 500))
+            .sort((a, b) => a.fsPath.localeCompare(b.fsPath));
         const graphs: TechGraph[] = [];
 
         for (const fileUri of techFiles) {
@@ -203,49 +207,135 @@ export class TechTreePanel {
     }
 
     private async _resolveLocTitles(nodes: TechNode[]) {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders) return;
+        if (nodes.length === 0) return;
 
-        const keysToResolve = new Set(nodes.map(n => n.id));
-        if (keysToResolve.size === 0) return;
+        const locMap = await this._loadLocalisationMap();
+        if (locMap.size === 0) return;
 
-        const locMap = new Map<string, string>();
+        for (const node of nodes) {
+            const title = this._resolveLocKey(node.id, locMap);
+            if (title) node.title = title;
 
-        // Determine target languages (prefer Chinese)
-        const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
-        const locLangs = config.get<string[]>('localisation.languages') || ['English'];
-        let targetLangs = locLangs.map(l => l.toLowerCase());
-        if (targetLangs.length >= 2 && targetLangs.includes('chinese')) {
-            targetLangs = ['simp_chinese', 'chinese'];
-        } else {
-            targetLangs = targetLangs.map(l => l === 'chinese' ? 'simp_chinese' : l);
+            const description = this._resolveLocKey(`${node.id}_desc`, locMap);
+            if (description) node.description = description;
         }
+    }
 
-        const linePattern = /^\s*([a-zA-Z0-9_.:-]+)\s*:\d*\s*"(.*)"\s*$/;
+    private async _loadLocalisationMap(): Promise<Map<string, string>> {
+        const locMap = new Map<string, string>();
+        const locDirectoryGlob = getLocalisationDirectoryGlob();
+        const roots = this._getLocalisationRoots();
+        const targetTags = this._getTargetLocalisationTags();
 
-        for (const lang of targetLangs) {
-            const locPattern = new vscode.RelativePattern(
-                workspaceFolders[0]!,
-                `**/{localisation,localisation_synced,localization}/**/*l_${lang}.yml`,
-            );
-            const locFiles = await vscode.workspace.findFiles(locPattern, '**/node_modules/**', 200);
-            for (const fileUri of locFiles) {
-                try {
-                    const data = await vscode.workspace.fs.readFile(fileUri);
-                    const text = new TextDecoder('utf-8').decode(data);
-                    for (const line of text.split('\n')) {
-                        const m = linePattern.exec(line);
-                        if (m && keysToResolve.has(m[1]!)) {
-                            locMap.set(m[1]!, m[2]!.replace(/§[RGBYWHETLMSPr!]/g, ''));
+        for (const root of roots) {
+            for (const tag of targetTags) {
+                const locPattern = new vscode.RelativePattern(
+                    vscode.Uri.file(root),
+                    `**/${locDirectoryGlob}/**/*${tag}.yml`,
+                );
+                const locFiles = (await vscode.workspace.findFiles(
+                    locPattern,
+                    '**/{node_modules,.git,.cwtools}/**',
+                    TECH_LOC_FILE_LIMIT_PER_ROOT,
+                )).sort((a, b) => this._compareLocalisationFilePriority(a.fsPath, b.fsPath));
+
+                for (const fileUri of locFiles) {
+                    try {
+                        const data = await vscode.workspace.fs.readFile(fileUri);
+                        const text = new TextDecoder('utf-8').decode(data);
+                        for (const entry of parseLocFile(text, fileUri.fsPath)) {
+                            locMap.set(entry.key, entry.value);
                         }
-                    }
-                } catch { /* skip */ }
+                    } catch { /* skip */ }
+                }
             }
         }
 
-        for (const node of nodes) {
-            if (locMap.has(node.id)) node.title = locMap.get(node.id)!;
+        return locMap;
+    }
+
+    private _getLocalisationRoots(): string[] {
+        const workspaceRoots = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+        const roots: string[] = [];
+        const gamePath = this._getGamePath();
+        if (gamePath) roots.push(gamePath);
+        roots.push(...workspaceRoots);
+        return this._dedupeFsPaths(roots);
+    }
+
+    private _dedupeFsPaths(paths: string[]): string[] {
+        const seen = new Set<string>();
+        const result: string[] = [];
+        for (const rawPath of paths) {
+            const resolved = path.resolve(rawPath);
+            const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            result.push(resolved);
         }
+        return result;
+    }
+
+    private _getTargetLocalisationTags(): string[] {
+        const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
+        const locLangs = config.get<string[]>('localisation.languages') || ['English'];
+        const normalized = locLangs
+            .map(language => this._normalizeLocalisationTag(language))
+            .filter((tag): tag is string => !!tag);
+
+        const hasChinese = normalized.includes('l_chinese') || normalized.includes('l_simp_chinese');
+        const tags = hasChinese && normalized.length >= 2
+            ? ['l_simp_chinese', 'l_chinese']
+            : normalized.map(tag => tag === 'l_chinese' ? 'l_simp_chinese' : tag);
+
+        return [...new Set(tags.length > 0 ? tags : ['l_english'])];
+    }
+
+    private _normalizeLocalisationTag(language: string): string | undefined {
+        const value = language.trim().toLowerCase().replace(/[-\s]+/g, '_');
+        if (!value) return undefined;
+        if (value === 'chinese') return 'l_simp_chinese';
+        return value.startsWith('l_') ? value : `l_${value}`;
+    }
+
+    private _compareLocalisationFilePriority(a: string, b: string): number {
+        const priorityDiff = this._localisationFilePriority(a) - this._localisationFilePriority(b);
+        return priorityDiff !== 0 ? priorityDiff : a.localeCompare(b);
+    }
+
+    private _localisationFilePriority(filePath: string): number {
+        const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+        return normalized.includes('/replace/') ? 1 : 0;
+    }
+
+    private _resolveLocKey(key: string, locMap: Map<string, string>): string | undefined {
+        const value = locMap.get(key);
+        if (value === undefined) return undefined;
+
+        const resolved = this._resolveLocReferences(value, locMap, new Set([key]));
+        const cleaned = this._cleanLocText(resolved);
+        return cleaned || undefined;
+    }
+
+    private _resolveLocReferences(value: string, locMap: Map<string, string>, seen: Set<string>): string {
+        return value.replace(/\$([a-zA-Z0-9_.:-]+)\$/g, (match, key: string) => {
+            if (seen.has(key)) return match;
+            const replacement = locMap.get(key);
+            if (replacement === undefined) return match;
+
+            seen.add(key);
+            const resolved = this._resolveLocReferences(replacement, locMap, seen);
+            seen.delete(key);
+            return resolved;
+        });
+    }
+
+    private _cleanLocText(value: string): string {
+        return stripLocalisationColorMarkers(value)
+            .replace(/£[^£\s]+(?:\|[^£\s]+)?£/g, '')
+            .replace(/\\n/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
     }
 
     private _resolveTechIcons(nodes: TechNode[]) {

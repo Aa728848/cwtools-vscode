@@ -28,6 +28,8 @@ export interface TechNode {
     iconUri?: string;
     /** localization key (usually same as id) */
     title: string;
+    /** Resolved localisation description, when available. */
+    description?: string;
     /** Weight = 0 → only appears via event unlock / scripted */
     isRare: boolean;
     isDangerous: boolean;
@@ -127,6 +129,7 @@ export function parseTechFile(content: string, filePath: string): TechGraph {
                 weight,
                 icon: iconMatch ? iconMatch[1]! : '',
                 title: techId, // will be resolved to loc name later
+                description: undefined,
                 isRare,
                 isDangerous,
                 isStartTech,
@@ -192,7 +195,7 @@ export function mergeTechGraphs(graphs: TechGraph[]): TechGraph {
 
     for (const g of graphs) {
         for (const node of g.nodes) {
-            if (!nodeMap.has(node.id)) nodeMap.set(node.id, node);
+            nodeMap.set(node.id, node);
         }
         allEdges.push(...g.edges);
     }

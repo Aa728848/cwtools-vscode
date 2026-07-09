@@ -10,12 +10,11 @@
  * - Rare/dangerous styling
  * - Area & tier filter dropdowns
  * - Search by tech ID
- * - Hover tooltip with tech details
- * - Select-to-inspect tech details
+ * - Click-to-inspect tech details
+ * - Middle-button canvas pan and wheel zoom
  */
 
 import cytoscape from 'cytoscape';
-import { svgIconNoMargin } from './svgIcons';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore -- cytoscape-elk has no TS declarations
 import elk from 'cytoscape-elk';
@@ -42,6 +41,7 @@ interface TechNode {
     icon: string;
     iconUri?: string;
     title: string;
+    description?: string;
     isRare: boolean;
     isDangerous: boolean;
     isStartTech: boolean;
@@ -83,6 +83,17 @@ let currentArea = '__all__';
 let currentTier = '__all__';
 let selectedTechId: string | null = null;
 let hasInitializedArea = false;
+let nodeDragMoved = false;
+let lastNodeDragAt = 0;
+let lastMiddlePanAt = 0;
+
+const NODE_WIDTH = 286;
+const NODE_HEIGHT = 68;
+const NODE_X_SPACING = 420;
+const NODE_Y_SPACING = 118;
+const COMPONENT_GAP = 72;
+const AREA_GAP = 160;
+const DRAG_TAP_SUPPRESSION_MS = 180;
 
 // ─── Cytoscape instance ───────────────────────────────────────────────────────
 
@@ -92,6 +103,9 @@ const cy = cytoscape({
     wheelSensitivity: 0.5,
     minZoom: 0.05,
     maxZoom: 6,
+    userPanningEnabled: false,
+    userZoomingEnabled: true,
+    boxSelectionEnabled: false,
     style: [
         // ── Base node
         {
@@ -118,8 +132,8 @@ const cy = cytoscape({
                 'background-clip': 'node' as any,
                 'border-width': 2,
                 'border-color': '#2d8fd7',
-                width: 286,
-                height: 68,
+                width: NODE_WIDTH,
+                height: NODE_HEIGHT,
                 shape: 'round-rectangle',
                 padding: '0px',
                 'text-wrap': 'wrap' as any,
@@ -435,10 +449,6 @@ function assignComponentLanes(component: TechNode[], edges: TechEdge[], ranks: M
 function computeTechPositions(nodes: TechNode[], edges: TechEdge[]): Map<string, { x: number; y: number }> {
     const ranks = computeTechRanks(nodes, edges);
     const posMap = new Map<string, { x: number; y: number }>();
-    const NODE_W = 356;
-    const ROW_H = 92;
-    const COMPONENT_GAP = 52;
-    const AREA_GAP = 120;
 
     let yCursor = 0;
     for (const area of areaOrder) {
@@ -452,16 +462,45 @@ function computeTechPositions(nodes: TechNode[], edges: TechEdge[]): Map<string,
                 const rank = ranks.get(node.id) ?? 0;
                 const lane = laneById.get(node.id) ?? 0;
                 posMap.set(node.id, {
-                    x: rank * NODE_W,
-                    y: yCursor + lane * ROW_H,
+                    x: rank * NODE_X_SPACING,
+                    y: yCursor + lane * NODE_Y_SPACING,
                 });
             }
-            yCursor += laneCount * ROW_H + COMPONENT_GAP;
+            yCursor += laneCount * NODE_Y_SPACING + COMPONENT_GAP;
         }
         yCursor += AREA_GAP;
     }
 
+    enforceColumnSpacing(nodes, posMap);
     return posMap;
+}
+
+function enforceColumnSpacing(nodes: TechNode[], posMap: Map<string, { x: number; y: number }>) {
+    const columns = new Map<number, TechNode[]>();
+    for (const node of nodes) {
+        const pos = posMap.get(node.id);
+        if (!pos) continue;
+        const column = Math.round(pos.x);
+        const columnNodes = columns.get(column) ?? [];
+        columnNodes.push(node);
+        columns.set(column, columnNodes);
+    }
+
+    for (const columnNodes of columns.values()) {
+        columnNodes.sort((a, b) => {
+            const aPos = posMap.get(a.id)!;
+            const bPos = posMap.get(b.id)!;
+            return aPos.y - bPos.y || a.id.localeCompare(b.id);
+        });
+
+        let nextY = Number.NEGATIVE_INFINITY;
+        for (const node of columnNodes) {
+            const pos = posMap.get(node.id);
+            if (!pos) continue;
+            if (pos.y < nextY) pos.y = nextY;
+            nextY = pos.y + NODE_Y_SPACING;
+        }
+    }
 }
 
 function chooseInitialArea(nodes: TechNode[]): string {
@@ -490,7 +529,7 @@ function focusReadableStart() {
     const bbox = visibleNodes.boundingBox({ includeLabels: true, includeOverlays: false });
     const availableWidth = Math.max(360, cyContainer.clientWidth - 120);
     const columnsInView = cyContainer.clientWidth < 900 ? 2.4 : 3.2;
-    const targetZoom = Math.max(0.72, Math.min(1, availableWidth / (356 * columnsInView)));
+    const targetZoom = Math.max(0.72, Math.min(1, availableWidth / (NODE_X_SPACING * columnsInView)));
     cy.zoom({
         level: targetZoom,
         renderedPosition: { x: 0, y: 0 },
@@ -590,6 +629,7 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
             </div>
         </div>
         ${badges.length > 0 ? `<div class="details-badges">${badges.map(badge => `<span>${escapeHtml(badge)}</span>`).join('')}</div>` : ''}
+        ${data.description ? `<p class="details-description">${escapeHtml(data.description)}</p>` : ''}
         <dl class="details-list">
             <div><dt>${t('Tier', '层级')}</dt><dd>${escapeHtml(formatTier(data as TechNode))}</dd></div>
             <div><dt>${t('Category', '分类')}</dt><dd>${escapeHtml(data.category || '-')}</dd></div>
@@ -693,6 +733,7 @@ function applySearch(query: string) {
 
         selectedTechId = null;
         cy.nodes().unselect();
+        updateDetails(null);
         clearFocusClasses();
         cy.elements().addClass('faded');
 
@@ -714,11 +755,6 @@ function applySearch(query: string) {
         matches.addClass('search-match');
         neighborhoodToFit = neighborhood;
 
-        let firstMatch: cytoscape.NodeSingular | null = null;
-        matches.forEach((n) => {
-            if (!firstMatch) firstMatch = n;
-        });
-        updateDetails(firstMatch);
     });
     const fitTarget = neighborhoodToFit as cytoscape.CollectionReturnValue | null;
     if (fitTarget) {
@@ -726,59 +762,77 @@ function applySearch(query: string) {
     }
 }
 
-// ─── Tooltip ──────────────────────────────────────────────────────────────────
-
-const tooltip = document.createElement('div');
-tooltip.className = 'cy-tooltip';
-tooltip.style.display = 'none';
-document.body.appendChild(tooltip);
+// ─── Hover focus ──────────────────────────────────────────────────────────────
 
 cy.on('mouseover', 'node', evt => {
-    const d = evt.target.data();
-    const flags = [
-        d.isStartTech ? `${svgIconNoMargin('star')} ${t('Starting tech', '起始科技')}` : '',
-        d.isRare ? `${svgIconNoMargin('shield')} ${t('Rare', '稀有')}` : '',
-        d.isDangerous ? `${svgIconNoMargin('warning')} ${t('Dangerous', '危险')}` : '',
-    ].filter(Boolean).join(' ');
-    const iconHtml = d.iconUri
-        ? `<img class="tt-icon" src="${escapeHtml(d.iconUri)}" alt="">`
-        : `<div class="tt-icon placeholder">${escapeHtml((d.area || '?').slice(0, 1).toUpperCase())}</div>`;
-
-    tooltip.innerHTML = `
-        <div class="tt-head">
-            ${iconHtml}
-            <div>
-                <div class="tt-title">${escapeHtml(d.title || d.id)}</div>
-                <div class="tt-id">${escapeHtml(d.id)}</div>
-            </div>
-        </div>
-        <div class="tt-meta">${escapeHtml(areaLabel[d.area] ?? d.area)} · ${escapeHtml(formatTier(d as TechNode))} · ${escapeHtml(d.category || '-')}</div>
-        <div class="tt-meta">${t('Research cost', '研究费用')}: ${escapeHtml(formatNumber(d.cost))} · ${t('Weight', '权重')}: ${escapeHtml(formatNumber(d.weight))}</div>
-        ${flags ? `<div class="tt-meta">${flags}</div>` : ''}
-        <div class="tt-file">${escapeHtml(d.file)}:${escapeHtml(d.line)}</div>
-    `;
-    tooltip.style.display = 'block';
-
     if (!selectedTechId && !searchInput.value.trim()) {
         focusTech(evt.target, 'direct');
     }
 });
 
 cy.on('mouseout', 'node', () => {
-    tooltip.style.display = 'none';
     if (!selectedTechId && !searchInput.value.trim()) {
         clearFocusClasses();
     }
 });
 
-cy.on('mousemove', evt => {
-    const pos = evt.renderedPosition;
-    const cx = cyContainer.getBoundingClientRect();
-    tooltip.style.left = (cx.left + pos.x + 14) + 'px';
-    tooltip.style.top = (cx.top + pos.y - 10) + 'px';
-});
+function isPrimaryCytoscapeEvent(evt: cytoscape.EventObject): boolean {
+    const original = evt.originalEvent as MouseEvent | PointerEvent | undefined;
+    if (!original || !('button' in original)) return true;
+    return original.button === 0;
+}
+
+function shouldSuppressTapAfterDrag(): boolean {
+    const now = Date.now();
+    return now - lastNodeDragAt < DRAG_TAP_SUPPRESSION_MS
+        || now - lastMiddlePanAt < DRAG_TAP_SUPPRESSION_MS;
+}
+
+let middlePanState: { startX: number; startY: number; panX: number; panY: number } | null = null;
+
+function beginMiddlePan(event: MouseEvent) {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const pan = cy.pan();
+    middlePanState = {
+        startX: event.clientX,
+        startY: event.clientY,
+        panX: pan.x,
+        panY: pan.y,
+    };
+    cyContainer.classList.add('middle-panning');
+}
+
+function updateMiddlePan(event: MouseEvent) {
+    if (!middlePanState) return;
+    event.preventDefault();
+    cy.pan({
+        x: middlePanState.panX + event.clientX - middlePanState.startX,
+        y: middlePanState.panY + event.clientY - middlePanState.startY,
+    });
+}
+
+function endMiddlePan(event?: MouseEvent) {
+    if (!middlePanState) return;
+    if (event && event.button !== 1) return;
+    middlePanState = null;
+    lastMiddlePanAt = Date.now();
+    cyContainer.classList.remove('middle-panning');
+}
+
+cyContainer.addEventListener('mousedown', beginMiddlePan, true);
+cyContainer.addEventListener('auxclick', (event) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+}, true);
+window.addEventListener('mousemove', updateMiddlePan);
+window.addEventListener('mouseup', endMiddlePan);
+window.addEventListener('blur', () => endMiddlePan());
 
 cy.on('tap', 'node', evt => {
+    if (!isPrimaryCytoscapeEvent(evt) || shouldSuppressTapAfterDrag()) return;
     selectTech(evt.target);
 });
 
@@ -787,6 +841,7 @@ cy.on('dbltap', 'node', evt => {
 });
 
 cy.on('tap', evt => {
+    if (!isPrimaryCytoscapeEvent(evt) || shouldSuppressTapAfterDrag()) return;
     if (evt.target === cy) {
         clearSelection();
     }
@@ -801,17 +856,23 @@ cy.on('grab', 'node', (evt) => {
     const node = evt.target;
     dragPrevPos = { ...node.position() };
     draggedSubtree = node.successors().nodes();
+    nodeDragMoved = false;
 });
 
 cy.on('drag', 'node', (evt) => {
-    if (!dragPrevPos || !draggedSubtree || draggedSubtree.length === 0) return;
+    if (!dragPrevPos) return;
     const node = evt.target;
     const currPos = node.position();
     const dx = currPos.x - dragPrevPos.x;
     const dy = currPos.y - dragPrevPos.y;
-    
+
     if (dx === 0 && dy === 0) return;
-    
+    nodeDragMoved = true;
+    if (!draggedSubtree || draggedSubtree.length === 0) {
+        dragPrevPos = { ...currPos };
+        return;
+    }
+
     draggedSubtree.forEach((child) => {
         const p = child.position();
         child.position({ x: p.x + dx, y: p.y + dy });
@@ -821,8 +882,10 @@ cy.on('drag', 'node', (evt) => {
 });
 
 cy.on('free', 'node', () => {
+    if (nodeDragMoved) lastNodeDragAt = Date.now();
     dragPrevPos = null;
     draggedSubtree = null;
+    nodeDragMoved = false;
 });
 
 // ─── Render ───────────────────────────────────────────────────────────────────
@@ -874,6 +937,7 @@ function render(nodes: TechNode[], edges: TechEdge[]) {
                 icon: node.icon,
                 iconUri: node.iconUri,
                 title: node.title,
+                description: node.description,
                 isRare: node.isRare,
                 isDangerous: node.isDangerous,
                 isStartTech: node.isStartTech,

@@ -122,6 +122,11 @@ body {
     background-size: 40px 40px;
 }
 
+#cy-container.middle-panning,
+#cy-container.middle-panning * {
+    cursor: grabbing !important;
+}
+
 /* ── Stats bar ── */
 #stats-bar {
     min-height: 28px;
@@ -275,8 +280,7 @@ body {
     object-fit: cover;
 }
 
-.details-tech-icon.placeholder,
-.cy-tooltip .tt-icon.placeholder {
+.details-tech-icon.placeholder {
     display: grid;
     place-items: center;
     color: var(--accent);
@@ -304,6 +308,13 @@ body {
     padding: 2px 7px;
     font-size: 10px;
     line-height: 1.4;
+}
+
+.details-description {
+    margin-top: 12px;
+    color: var(--fg);
+    line-height: 1.5;
+    word-break: break-word;
 }
 
 .details-list {
@@ -368,43 +379,6 @@ body {
     opacity: 0.5;
 }
 #empty-state.visible { display: flex; }
-
-/* ── Node tooltip ── */
-.cy-tooltip {
-    position: absolute;
-    background: rgba(30,30,30,0.95);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 10px;
-    font-size: 11px;
-    z-index: 20;
-    pointer-events: none;
-    max-width: 300px;
-    line-height: 1.5;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-}
-
-.cy-tooltip .tt-head {
-    display: grid;
-    grid-template-columns: 42px minmax(0, 1fr);
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 6px;
-}
-
-.cy-tooltip .tt-icon {
-    width: 38px;
-    height: 38px;
-    border: 1px solid color-mix(in srgb, var(--accent) 55%, #000);
-    border-radius: 3px;
-    background: #05080d;
-    object-fit: cover;
-}
-
-.cy-tooltip .tt-id { opacity: 0.65; font-size: 10px; word-break: break-all; }
-.cy-tooltip .tt-title { color: var(--fg); font-size: 12px; font-weight: 700; word-break: break-word; }
-.cy-tooltip .tt-meta { opacity: 0.6; font-size: 10px; }
-.cy-tooltip .tt-file { opacity: 0.5; font-size: 10px; margin-top: 4px; }
 
 @media (max-width: 900px) {
     #toolbar {

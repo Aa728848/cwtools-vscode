@@ -22,7 +22,7 @@ export function analyzeDiagnosticKnowledge(query: DiagnosticKnowledgeQuery): Dia
       code,
       category: 'syntax',
       explanation: 'The diagnostic appears to be a parse or syntax error.',
-      suggestedTools: ['get_pdx_block', 'document_symbols', 'query_rules'],
+      suggestedTools: ['get_pdx_block', 'document_symbols', 'query_cwt_schema', 'query_rules'],
       nextSteps: [
         'Inspect the nearest complete block before editing.',
         'Verify brace balance and rule syntax before writing.',
@@ -50,7 +50,7 @@ export function analyzeDiagnosticKnowledge(query: DiagnosticKnowledgeQuery): Dia
       code,
       category: 'scope',
       explanation: 'The diagnostic appears related to an invalid or unexpected scope.',
-      suggestedTools: ['query_scope', 'query_rules', 'get_completion_at'],
+      suggestedTools: ['query_scope', 'query_cwt_schema', 'query_rules', 'get_completion_at'],
       nextSteps: [
         'Query the scope at the failing position.',
         'Verify valid scope changes or trigger/effect syntax before editing.',
@@ -63,7 +63,7 @@ export function analyzeDiagnosticKnowledge(query: DiagnosticKnowledgeQuery): Dia
     code,
     category: 'general',
     explanation: 'No specialized diagnostic route matched; use LSP and indexed evidence before editing.',
-    suggestedTools: ['get_diagnostics', 'query_definition_by_name', 'query_workspace_index'],
+    suggestedTools: ['get_diagnostics', 'query_cwt_schema', 'query_definition_by_name', 'query_workspace_index'],
     nextSteps: [
       'Group similar diagnostics and inspect a representative block.',
       'Verify identifiers through indexed tools before making changes.',

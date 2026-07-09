@@ -732,6 +732,16 @@ describe('agent sprite candidate tool contract', () => {
         expect(definition.function.parameters.properties).to.have.property('mode');
     });
 
+    it('registers query_cwt_schema as a first-class CWT-first read-only tool', () => {
+        const definition = TOOL_DEFINITIONS.find((tool: any) => tool.function.name === 'query_cwt_schema');
+        if (!definition) {
+            throw new Error('query_cwt_schema tool definition is missing');
+        }
+        expect(definition.function.description).to.include('CWT-FIRST schema lookup');
+        expect(definition.function.parameters.properties).to.have.property('target');
+        expect(definition.function.parameters.properties).to.have.property('name');
+    });
+
     it('tells dispatch_agents to declare known Builder plannedFiles', () => {
         const definition = TOOL_DEFINITIONS.find((tool: any) => tool.function.name === 'dispatch_agents');
         if (!definition) {

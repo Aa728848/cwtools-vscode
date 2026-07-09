@@ -397,6 +397,21 @@ export interface QueryRulesArgs {
     scope?: string;
 }
 
+export interface QueryCwtSchemaArgs {
+    /** Target project file, directory, or CWT-relative path such as common/buildings. */
+    target?: string;
+    /** Optional alias for target when the caller has a concrete project file. */
+    file?: string;
+    /** Optional alias for target when the caller has a directory or entity family. */
+    directory?: string;
+    /** Optional field, type, alias, or rule name to find inside matched CWT files. */
+    name?: string;
+    /** Include a larger CWT excerpt when the schema file is broad. Default false. */
+    includeContent?: boolean;
+    /** Maximum matching CWT files to return. Default 5, max 20. */
+    limit?: number;
+}
+
 export interface RuleInfo {
     name: string;
     description: string;
@@ -429,6 +444,29 @@ export interface QueryRulesResult {
     rules: RuleInfo[];
     totalCount: number;
     truncated: boolean;
+}
+
+export interface CwtSchemaMatch {
+    ruleFile: string;
+    relativeRuleFile: string;
+    sourceRoot: string;
+    score: number;
+    matchedBy: string[];
+    snippet?: string;
+    startLine?: number;
+    endLine?: number;
+    truncated?: boolean;
+}
+
+export interface QueryCwtSchemaResult {
+    status: 'ready' | 'not_found';
+    target?: string;
+    normalizedTarget?: string;
+    name?: string;
+    rulesRoots: string[];
+    matches: CwtSchemaMatch[];
+    warnings?: string[];
+    _hint?: string;
 }
 
 export interface SearchRuleCapabilitiesArgs {
@@ -836,6 +874,7 @@ export type ToolArgs =
     | QueryWorkspaceIndexArgs
     | QueryProjectProfileArgs
     | QueryRulesArgs
+    | QueryCwtSchemaArgs
     | SearchRuleCapabilitiesArgs
     | ExplainScopeArgs
     | ParsePdxFragmentArgs
@@ -871,6 +910,7 @@ export type ToolResult =
     | QueryWorkspaceIndexResult
     | QueryProjectProfileResult
     | QueryRulesResult
+    | QueryCwtSchemaResult
     | SearchRuleCapabilitiesResult
     | ExplainScopeResult
     | ParsePdxFragmentResult
@@ -906,6 +946,7 @@ export type AgentToolName =
     | 'query_project_profile'
     | 'run_skill'
     | 'query_rules'
+    | 'query_cwt_schema'
     | 'query_override_modes'
     | 'search_rule_capabilities'
     | 'explain_scope'

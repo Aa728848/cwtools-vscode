@@ -14,7 +14,7 @@ export function queryWorkflowHints(): { status: 'ready'; hints: WorkflowHint[] }
         id: 'diagnostic-fix',
         title: 'Fix CWTools diagnostics',
         triggers: ['diagnostic', 'error', 'warning'],
-        recommendedTools: ['get_diagnostics', 'analyze_diagnostic_error', 'get_pdx_block', 'query_rules'],
+        recommendedTools: ['get_diagnostics', 'analyze_diagnostic_error', 'get_pdx_block', 'query_cwt_schema', 'query_rules'],
         guardrails: ['Verify after writes.', 'Do not suppress diagnostics instead of fixing them.'],
       },
       {
@@ -28,7 +28,7 @@ export function queryWorkflowHints(): { status: 'ready'; hints: WorkflowHint[] }
         id: 'entity-lookup',
         title: 'Verify game identifiers',
         triggers: ['id', 'technology', 'building', 'scripted_effect', 'scripted_trigger'],
-        recommendedTools: ['search_rule_capabilities', 'query_rules', 'query_types', 'query_workspace_index', 'query_definition_by_name'],
+        recommendedTools: ['query_cwt_schema', 'search_rule_capabilities', 'query_rules', 'query_types', 'query_workspace_index', 'query_definition_by_name'],
         guardrails: ['Treat empty text search results as inconclusive without indexed verification.', 'Treat semanticHints as retrieval hints, not legality proof.'],
       },
     ],

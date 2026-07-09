@@ -635,6 +635,8 @@ export class AgentToolExecutor {
                 result = this.runSkill(args); break;
             case 'query_rules':
                 result = await this.lspHandler.queryRules(args as any); break;
+            case 'query_cwt_schema':
+                result = await this.lspHandler.queryCwtSchema(args as any); break;
             case 'query_override_modes':
                 result = await this.lspHandler.queryOverrideModes(args as any); break;
             case 'search_rule_capabilities':

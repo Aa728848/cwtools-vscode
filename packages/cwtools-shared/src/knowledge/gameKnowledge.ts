@@ -25,7 +25,7 @@ const COMMON_PDX_CARDS: GameKnowledgeCard[] = [
     title: 'Verification first',
     facts: [
       'Verify game identifiers through LSP or indexed tools before writing them.',
-      'Use query_rules for trigger/effect syntax instead of inventing parameters.',
+      'Use query_cwt_schema for common/entity schema and query_rules for trigger/effect syntax instead of inventing parameters.',
       'Use search_rule_capabilities when intent is known but the exact rule name is not.',
       'Treat semanticHints as retrieval guidance; legality comes from hardFacts and validation.',
       'Use parse_pdx_fragment for syntax-only fragment checks before final diagnostics.',
@@ -48,8 +48,8 @@ const STELLARIS_CARDS: GameKnowledgeCard[] = [
     id: 'stellaris-scope-caution',
     title: 'Stellaris scope caution',
     facts: [
-      'Scope chains should be verified with query_scope, completions, or query_rules before final edits.',
-      'Archaeological site stage events commonly run in fleet scope with the site available through from.',
+      'Scope chains, event contexts, and on_action payloads must be retrieved from active CWT/LSP tools before final edits.',
+      'Do not rely on static prompt knowledge for archaeological site, special project, or on_action scope facts.',
       'Override behavior differs by common/ folder and should not be guessed from load order alone.',
     ],
   },

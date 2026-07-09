@@ -84,6 +84,7 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
     const game = detectGame(root, descriptor, keyDirectories.map(d => d.path));
     const preferredReadTools = [
         'query_project_profile',
+        'query_cwt_schema',
         'query_workspace_index',
         'query_localisation_index',
         'query_definition_by_name',
@@ -165,6 +166,7 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
     const promptCards = buildPromptCards(profileBase);
     const efficiencyHints = [
         'Call query_project_profile(section="summary") before broad workspace scans.',
+        'Use query_cwt_schema or get_completion_at before inventing common/ entity fields or block shapes.',
         'Use query_workspace_index or query_definition_by_name before search_mod_files for known IDs.',
         'Use mode-specific prompt cards from the profile instead of injecting full project files.',
         'Keep CWTOOLS.md for human-edited rules; use profile.json for machine routing facts.',
@@ -205,7 +207,7 @@ export function renderProjectRulesMarkdown(profile: ProjectProfile, customRules 
         '',
         '## Agent Routing',
         '- Start with `query_project_profile` for project facts and workflow routing.',
-        '- Prefer indexed tools before raw scans: `query_workspace_index`, `query_localisation_index`, `query_definition_by_name`, `get_pdx_block`.',
+        '- Prefer CWT/indexed tools before raw scans: `query_cwt_schema`, `get_completion_at`, `query_workspace_index`, `query_localisation_index`, `query_definition_by_name`, `get_pdx_block`.',
         '- Use the recommended workflow when the task matches diagnostics, localisation, event-chain design, rules review, or asset wiring.',
         '',
         '## Project Structure',
@@ -225,6 +227,7 @@ export function renderProjectRulesMarkdown(profile: ProjectProfile, customRules 
             ? `- Localisation encoding: ${profile.localisation.encoding}. Preserve this convention.`
             : '- Localisation encoding unknown; inspect an existing file before writing localisation.',
         namespaces.length ? '- Reuse detected namespaces unless the user explicitly asks for a new namespace.' : '',
+        '- Treat CWT/LSP schema as the first legality source. If a CWT rule has semantic comments or docs, prefer those semantics; if it is structural only, confirm usage from vanilla or mature project examples before editing.',
         '- Treat profile facts as routing hints; verify concrete IDs with indexed tools before editing.',
         '',
         '## Mode Cards',

@@ -370,16 +370,16 @@ Run this step once the clarification rules allow planning, or immediately when t
    - Check \`<project-premise>\` if provided for existing namespaces, identifiers, and conventions
 
 **1b. Request Decomposition**: Parse the user's request into a **preliminary pipeline topology**:
-   - Identify ALL game subsystems implied (events, on_actions, archaeological_sites, special_projects, relics, situations, anomalies, technologies, modifiers, etc.)
+   - Identify candidate game subsystems implied by the request, but treat them as hypotheses until active CWT/LSP tools confirm the directory, entity type, scope, and trigger semantics.
    - Map the implied trigger flow: what triggers what, in what order
    - Identify branching points and terminal outcomes
    - Note which parts the user specified explicitly vs. which are implicit/ambiguous
 
-**1c. Common Directory Capability Review**: Build a broad design-space map from \`common/\`, then narrow it:
-   - Group candidate directories by design role: entry hooks, map presence, progression anchor, player agency, economy/reward, AI/weights, cleanup/support.
-   - For each plausible directory, use \`query_workspace_index\`, \`query_types\`, \`query_rules\`, or representative project/vanilla symbols to learn what it can actually implement.
-   - Select a primary anchor subsystem (for example \`situations\`, \`archaeological_site_types\`, \`special_projects\`, or pure \`events\`) and record why other plausible directories are not used.
-   - Reward planning must consider concrete common entity families such as \`common/relics\`, \`common/technology\`, \`common/static_modifiers\`, \`common/buildings\`, \`common/decisions\`, \`common/edicts\`, \`common/traits\`, resources/economy definitions, or project-specific equivalents when appropriate.
+**1c. Common Directory Capability Review**: Build a broad design-space map from active project/CWT evidence, then narrow it:
+   - Group candidate directories by design role only after discovering them through \`query_cwt_schema\`, \`query_workspace_index\`, \`query_types\`, or current examples.
+   - For each plausible directory, use \`query_cwt_schema\` first for schema/entity shape, then \`query_rules\`/\`query_scope\` for trigger/effect/scope semantics.
+   - Select a primary anchor subsystem from verified active evidence and record why other plausible directories are not used.
+   - Reward planning must map to concrete common entity families discovered through CWT/LSP and current project/vanilla evidence; do not use static prompt lists as the source of truth.
 
 **1d. Archetype Research**: For each selected or seriously considered entity type, study a project or vanilla example:
    - Use \`query_definition_by_name\`, \`workspace_symbols\`, \`query_types\`, or exact \`search_mod_files(..., exactMatch=true)\` to find a representative project archetype first, then a concrete vanilla archetype only if needed
@@ -416,19 +416,16 @@ After collecting user answers from Step 2, you MUST complete this step BEFORE wr
 **3a. Finalize Pipeline**: Integrate user answers into the pipeline topology from Step 1.
    Resolve all ambiguities. Confirm branching paths and convergence points.
 
-**3b. Deep Coupling Assessment (MANDATORY for complex pipelines)**:
-   Before finalizing the blueprint, evaluate whether the design leverages the engine's native subsystems
-   (refer to the "Deep Coupling Subsystem Reference" in game knowledge) or relies solely on text event chains.
+**3b. Dynamic Coupling Assessment (MANDATORY for complex pipelines)**:
+   Before finalizing the blueprint, evaluate whether the design leverages engine subsystems discovered from active CWT/LSP and indexed project/vanilla evidence, or relies solely on text event chains.
    - **Common Directory Grounding**: The blueprint MUST include a \`commonDirectoryReview\` that records the relevant \`common/\` directories considered, what each could contribute, which are selected, and why rejected directories are not appropriate.
-   - **Reward Implementation Grounding**: Rewards must be mapped to concrete common entity families (for example relic, technology, static modifier, building, decision, edict, trait, deposit, resource/economy, or project-specific reward wrapper). Do not describe rewards only as narrative prose.
+   - **Reward Implementation Grounding**: Rewards must be mapped to concrete common entity families verified through active CWT/LSP or current examples. Do not describe rewards only as narrative prose.
    - **Requirements-Driven Subsystem Checklist**: Based on the user's stated requirements and your own
      understanding of the feature, determine how many subsystem layers (Spatial, Progression, Agency, Hooks)
      the design should incorporate. Include this as a checklist in the blueprint. DO NOT blindly force
      subsystem count — the user's intent is supreme. If the user explicitly requests a simple event-only
      flow, respect that decision.
-   - **Indirect Trigger Planning**: For any event chain with >3 sequential nodes, plan where to use
-     \`on_actions\` (physical condition triggers), \`MTTH\` (probabilistic time triggers), and \`days=X\`
-     (hard delays). Document this in the blueprint to ensure pacing is organic, not mechanical.
+   - **Indirect Trigger Planning**: For any event chain with >3 sequential nodes, investigate indirect trigger mechanisms through \`query_cwt_schema\`, \`query_rules\`, and current examples before selecting them. Document only mechanisms verified as available in the active rules/project.
    - **Dynamic Archetype Indexing**: Before designing, search the **current user mod project** for mature
      composite examples of the target entity type. If none exist, use bounded vanilla archetype evidence
      found through indexed or exact lookups. Use these as functional templates, not block-count templates.
@@ -442,8 +439,7 @@ After collecting user answers from Step 2, you MUST complete this step BEFORE wr
      (systems, flags, modifiers, decisions) have a documented cleanup/closure path when the main thread ends.
 
 **3c. Scope Chain Trace**: Document the expected scope for EVERY entity in the finalized pipeline.
-   Mark all scope transition points (e.g., fleet scope → country scope via \`owner = {}\`).
-   Verify against CWT .cwt rules and vanilla archetype examples from Step 1 — NEVER guess scope.
+   Mark all scope transition points using active \`query_scope\`, \`query_rules(category="scope_change")\`, completions, diagnostics, and current archetype evidence. NEVER guess scope from static prompt memory.
 
 **3d. ID & Key Allocation**: Pre-allocate ALL event IDs, entity keys, modifier names, and
    localisation key prefixes in a single allocation table.
@@ -454,7 +450,7 @@ After collecting user answers from Step 2, you MUST complete this step BEFORE wr
    - Engine subsystem plan: which subsystem layers are used and how they serve the user's requirement
    - Entity topology (trigger flow graph with user-confirmed content at each node)
    - Subsystem checklist with introduction rationale for each (from 3b)
-   - Indirect trigger plan (on_action / MTTH / days=X allocation per node)
+   - Indirect trigger plan with only CWT/LSP-verified mechanisms per node
    - Reward and outcome implementation plan tied to concrete common entity families
    - Scope context for every entity (CWT-verified)
    - Event ID allocation ranges
@@ -903,8 +899,8 @@ Only AFTER the user reviews your plan and explicitly replies "同意执行" (App
 3. **Use the Blackboard Safely** — store concise shared data (entity IDs, namespace allocations) in the Blackboard. For massive data (e.g. file manifests, ASTs), instruct agents to write to a local file inside the exact Agent Workspace Dir shown in Current Editor Context, such as \`.cwtools-ai/<current-topic-id>/scratch/\`, and only share the file path.
 4. **Respect dependencies** — never dispatch a Builder before its Explorer dependency completes
 5. **Quality gate** — for complex tasks, always dispatch a Reviewer after all Builders complete
-6. **Deep Coupling Architecture** — when planning complex features (event chains, archaeological sites,
-   crises, exploration sequences), evaluate the design against the "Deep Coupling Subsystem Reference".
+6. **Dynamic Coupling Architecture** — when planning complex features (event chains, archaeological sites,
+   crises, exploration sequences), evaluate the design against active CWT/LSP and indexed project/vanilla evidence.
    Consult the user on desired coupling breadth BEFORE drafting the blueprint. For event-chain planning,
    dispatch or perform a common-directory capability review before Builder work: enumerate relevant
    \`common/\` subsystems, select the primary anchor, map rewards to concrete common entity families, and

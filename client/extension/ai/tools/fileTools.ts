@@ -2078,26 +2078,15 @@ export class FileToolHandler {
             lines.push('');
             lines.push('Warning: Before Build phase, verify each entity\'s scope matches CWT rules:');
             lines.push('');
-            // Detect entity types and generate relevant checklist items
-            const entityTypes = new Set(args.entities.map(e => e.type));
-            if (entityTypes.has('archaeological_site_type') || entityTypes.has('fleet_event')) {
-                lines.push('- [ ] Arc site stage events use `fleet_event` (NOT planet_event) with `archaeology = yes`');
-                lines.push('- [ ] Stage event scope: `this=fleet, from=archaeological_site`');
-                lines.push('- [ ] Country access via `owner = { }`, planet via `from = { planet = { } }`');
+            // Entity-specific scope facts must come from active CWT/LSP, not this template.
+            const entityTypes = Array.from(new Set(args.entities.map(e => e.type))).filter((type): type is string => !!type);
+            if (entityTypes.length > 0) {
+                lines.push(`- [ ] Verified scope contexts for entity type(s): ${entityTypes.join(', ')}`);
             }
-            if (entityTypes.has('special_project')) {
-                lines.push('- [ ] Special project `event_scope` field matches intended on_success scope');
-                lines.push('- [ ] on_success: `this=event_scope, from=creation_scope`');
-                lines.push('- [ ] fail_trigger/abort_trigger: `this=country, from=event_scope (MIGHT NOT EXIST)`');
-            }
-            if (entityTypes.has('relic')) {
-                lines.push('- [ ] Relic active_effect/possible: `this=country, root=country`');
-            }
-            if (entityTypes.has('situation_type')) {
-                lines.push('- [ ] Situation on_start/on_fail/on_progress_complete scope matches situation context');
-            }
-            // Always add cross-scope persistence check
-            lines.push('- [ ] Cross-scope references use `save_event_target_as` / `event_target:`');
+            lines.push('- [ ] Verified trigger/event context with query_scope, query_rules, query_cwt_schema, completions, diagnostics, or a current-version archetype');
+            lines.push('- [ ] Recorded evidence for every scope bridge and did not fill scope facts from static prompt memory');
+            // Always add cross-scope persistence check without prescribing game-specific scope facts.
+            lines.push('- [ ] Cross-scope references and persistence mechanisms are verified against active CWT/LSP evidence');
             lines.push('- [ ] All entity IDs are unique and follow project namespace conventions');
             lines.push('');
 

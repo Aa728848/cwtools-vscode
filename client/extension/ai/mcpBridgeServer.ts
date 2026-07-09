@@ -16,6 +16,7 @@ const MAX_REQUEST_BYTES = 1024 * 1024;
 
 const MCP_BRIDGE_TOOL_NAMES = [
     'query_types',
+    'query_cwt_schema',
     'query_rules',
     'query_override_modes',
     'query_scope',
@@ -307,9 +308,9 @@ export class McpBridgeServer implements Disposable {
                 return {
                     status: 'ready',
                     routes: [
-                        { category: 'syntax', recommendedTools: ['get_diagnostics', 'get_pdx_block', 'query_rules'] },
+                        { category: 'syntax', recommendedTools: ['get_diagnostics', 'get_pdx_block', 'query_cwt_schema', 'query_rules'] },
                         { category: 'localisation', recommendedTools: ['get_diagnostics', 'query_localisation_index'] },
-                        { category: 'scope', recommendedTools: ['query_scope', 'query_rules', 'get_completion_at'] },
+                        { category: 'scope', recommendedTools: ['query_scope', 'query_cwt_schema', 'query_rules', 'get_completion_at'] },
                         { category: 'reference', recommendedTools: ['query_definition_by_name', 'query_references', 'workspace_symbols'] },
                     ],
                 };
@@ -318,7 +319,7 @@ export class McpBridgeServer implements Disposable {
                     status: 'ready',
                     hints: [
                         'Use query_types before relying on a game ID.',
-                        'Use query_rules and query_scope before changing trigger/effect syntax.',
+                        'Use query_cwt_schema for schema/entity shape and query_rules/query_scope before changing trigger/effect syntax.',
                         'Use get_diagnostics after edits; bridge diagnostics are sourced from the active host Problems panel.',
                         'This bridge is read-only. Perform file edits through the host agent environment, then re-check diagnostics.',
                     ],

@@ -8,7 +8,7 @@
 
 import { getProfileByLanguageId } from '../gameProfiles';
 
-// ─── Stellaris Knowledge (full, authoritative) ───────────────────────────────
+// ─── Stellaris Static Guardrails (non-authoritative) ─────────────────────────
 
 export const STELLARIS_KNOWLEDGE = `
 ## PDXScript Syntax Rules
@@ -38,7 +38,7 @@ export const STELLARIS_KNOWLEDGE = `
 
 ### Execution Order (CRITICAL)
 - Executable PDXScript commands/effects in the same file and block are processed **top-to-bottom in textual order**.
-- Do not assume a later command has already run for an earlier command. For example, \`save_event_target_as\`, flag/variable setup, or scope preparation must appear before the command that uses it.
+- Do not assume a later command has already run for an earlier command. Setup commands, flags, variables, or scope preparation must appear before the command that uses them, and the specific effect names must be verified through active CWT/LSP evidence.
 - When repairing diagnostics, preserve meaningful statement order; do not sort, hoist, or move commands across setup/use boundaries unless you have verified the gameplay semantics.
 
 ## Override & Load-Order Semantics (CRITICAL - USE ACTIVE CWT RULES)
@@ -52,54 +52,24 @@ Read the mode semantics from \`modeInfo\` / \`matchedModeInfo\` instead of relyi
 
 ### Operating rules for the Agent
 1. **NEVER tell the user to "just redefine the key in a new file, it overrides vanilla" without first calling \`query_override_modes\` for the target path and reading \`matchedModeInfo\`.** For FIOS/DUPL/NO/MERGE paths that advice is often wrong and the override will silently fail or error.
-2. Follow the \`description\` returned for the matched mode verbatim for the correct override strategy (e.g. sort the file earlier for FIOS, replace the whole file for DUPL/NO, add entries to merge for MERGE/on_actions).
-3. For **on_actions**, entries **merge**; to extend vanilla behaviour, add a new \`on_actions\` block with the same on_action name (its contents are appended); to *remove* vanilla behaviour you must overwrite the whole file.
+2. Follow the \`description\` returned for the matched mode verbatim for the correct override strategy; do not use examples or memory as the source of override semantics.
+3. For **on_actions** or any other path-specific system, read the active \`matchedModeInfo\` / \`modeInfo\` before advising whether entries merge, replace, duplicate, or require whole-file overrides.
 4. If \`query_override_modes\` returns no \`matched\`, say the active CWT rules do not define an override mode for that path and verify with local examples/diagnostics instead of guessing. If \`matched\` exists but \`matchedModeInfo\` is absent, use the returned \`strategy\` as the active mode but say that this mode lacks CWT documentation and verify the override strategy before giving final advice.
 5. Static knowledge in this prompt is background guidance. If it conflicts with \`query_override_modes\` (\`matched\`/\`matchedModeInfo\`/\`modeInfo\`), \`query_rules\` \`hardFacts\`, LSP completion/diagnostics, or verified current-version examples, prefer the verified local evidence and state the conflict.
 
-## Strict Adherence to query_rules Schema (CRITICAL)
-PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.
-- **Do NOT Guess**: If unsure about parameters, you MUST use \`query_rules\` before writing code.
-- **Use capability search before inventing names**: If you know the intent but not the exact rule name (for example "iterate ships from fleet scope"), use \`search_rule_capabilities\` with currentScope/desiredPushScope instead of guessing an effect name.
-- **Hard facts vs semantic hints**: \`query_rules\` returns \`hardFacts\` from CWT structure and optional \`semanticHints\` from docs/comments. Use \`semanticHints\` only to find candidates; legality comes from \`hardFacts\`, completions, diagnostics, parse checks, and verified examples.
-- **Never Invent Parameters**: Do NOT add arbitrary properties (like \`multiply\`, \`add\`, \`limit\`, \`count\`) into a block unless explicitly listed.
-- **Interpreting Syntax**:
-  - If syntax is \`yes/no\` or \`bool\`, use \`trigger = yes\`.
-  - If syntax is \`scope[...]\`, \`scope_group[...]\`, or \`<target>\`, use a scope target (e.g., \`FROM\`, \`event_target:X\`). **NEVER** use \`{ }\` code blocks for scopes! Example: \`is_background_planet = FROM\`.
-  - ONLY use a \`{ ... }\` block if the syntax explicitly shows \`{ ... }\` or \`clause\`.
-- **Unsupported Math**: If an effect (e.g. \`subtract_variable\`, \`add_modifier\`) doesn't support a math parameter like \`multiply = X\`, you MUST use workarounds:
-  1. **Inline Script Value**: \`value = { value = my_var multiply = 4 }\`
-  2. **Temp Variables**: Use \`multiply_variable\` on a \`temp_var\` beforehand.
+## CWT/LSP Evidence Routing (CRITICAL)
+PDXScript is strictly typed. Static prompt text is only background guidance; active CWT/LSP evidence is authoritative.
+- For common/entity/schema files, call \`query_cwt_schema\` or \`get_completion_at\` before writing fields or block shapes.
+- For triggers, effects, scope changes, and modifiers, call \`query_rules\`, \`query_scope\`, \`search_rule_capabilities\`, or completion tools before writing.
+- **Do NOT Guess**: If unsure about parameters, fields, values, scope links, or block shape, query active CWT/LSP before writing code.
+- **Hard facts vs semantic hints**: CWT comments/docs and \`semanticHints\` guide retrieval and intent. Legality comes from CWT structure, \`hardFacts\`, completions, diagnostics, parse checks, and verified current-version examples.
+- **Never Invent Parameters**: Do NOT add arbitrary properties (like \`multiply\`, \`add\`, \`limit\`, \`count\`) into a block unless active CWT/LSP evidence explicitly supports them.
 
-## Scope System & Scope Links (CRITICAL)
-Every block operates within a scope (Country, Planet, Ship, Fleet, Pop, Leader, …).
-You can chain scopes using dot notation (e.g. \`owner.capital.owner\`) or nested blocks (\`owner = { capital_scope = { ... } }\`).
-**CRITICAL**: Do NOT reject logical scope links (like \`leader.planet\`, \`leader.owner\`, \`planet.owner\`, \`pop.planet\`) just because you cannot find an explicit "scope_change" rule for them. Many scope links (like \`owner\`, \`planet\`, \`fleet\`, \`army\`, \`leader\`, \`system\`) are hardcoded native properties that work seamlessly across logical entity transitions.
-- A leader can absolutely transition to \`owner\`, \`planet\`, \`fleet\`, or \`army\`.
-- A pop can transition to \`planet\`, \`owner\`, \`faction\`.
-- \`from\` / \`root\` / \`prev\` are used for context-relative references.
-Treat common logical scope links as plausible hardcoded native links, then verify before final blueprint/build with \`query_scope\`, \`query_rules(category="scope_change")\`, completions, diagnostics, or a verified project/vanilla archetype. Do NOT reject them solely because an explicit scope_change rule is missing; do NOT finalize them solely from memory.
-
-### Optional Scope Operator \`scope?\` (NEW syntax — DO NOT flag as an error)
-Recent Stellaris versions support the **optional / null-safe scope operator**: a trailing \`?\` on a scope link. \`scope? = { ... }\` is shorthand for "enter \`scope\` only if it exists" — it folds an existence guard into the scope change itself.
-- It is valid in trigger/effect code only when the left-hand key is a real, single scope-link target. This includes saved targets such as \`event_target:my_target? = { ... }\`; the \`?\` is an existence operator, **not part of the target key**. Do not save or search for \`my_target?\`.
-- These two forms are **equivalent**:
-  \`\`\`
-  # Old form — explicit existence guard:
-  exists = owner
-  owner = { ... }
-
-  # New form — optional scope (SAME meaning, do NOT reject):
-  owner? = { ... }
-  \`\`\`
-- Works on chained links too: \`owner.capital_scope? = { ... }\` enters the block only if \`owner.capital_scope\` resolves to a valid scope.
-- **NEVER flag \`scope?\` as a syntax error or suggest removing the \`?\`.** It is valid modern PDXScript.
-- When the target scope may be null/absent, prefer \`scope? = { ... }\` over a separate \`exists = scope\` line — it is more concise and avoids the scope being entered on a non-existent target.
-- Still verify the underlying scope link is real (via \`query_scope\` / completions); the \`?\` only changes existence handling, not whether the link itself is valid.
-- Do **not** use optional scope syntax in \`prescripted_countries/\`; that directory does not support this form.
-- Do **not** append \`?\` to selector/iterator families: \`every_*\`, \`random_*\`, \`any_*\`, \`ordered_*\`, or \`last_*\` (for example, use \`random_owned_planet = { ... }\`, not \`random_owned_planet? = { ... }\`). If the selection needs guarding, use the normal trigger/effect-specific \`limit\`, \`exists\`, or availability checks.
-- Do **not** append \`?\` to value assignment keys such as \`type = country\`, \`scope = <value>\`, or other \`key = value\` fields. These are not scope changes.
-- Do **not** append \`?\` to structural code-block keywords such as \`trigger = { }\`, \`option = { }\`, \`immediate = { }\`, \`after = { }\`, \`limit = { }\`, \`effect = { }\`, or \`hidden_effect = { }\`. These blocks define code structure; they are not scope links.
+## Scope, on_action, and Event Contexts
+Do not rely on static prompt knowledge for scopes, scope links, optional scope syntax, event contexts, or on_action payloads. These are dynamic game-version facts.
+- Query the active CWT/LSP context with \`query_scope\`, \`query_rules(category="scope_change")\`, \`query_cwt_schema\`, \`get_completion_at\`, and diagnostics.
+- Use project or vanilla examples only after an indexed lookup identifies a concrete current-version archetype.
+- If static background text and active CWT/LSP evidence disagree, follow active CWT/LSP and state the conflict.
 
 ## Vanilla Game Cache — Query Strategy
 The CWTools language server has already indexed the entire vanilla game.
@@ -151,151 +121,17 @@ Stellaris localisation files use YAML-like format in the \`localisation/\` direc
    my_event.1.desc:0 "We have found §Gsomething§! interesting on [Root.GetName]."
   \`\`\`
 
-## Complex Entity Archetypes (Cascading Trigger Pipelines)
+## Dynamic Game-Context Discovery
+Static prompt text must not encode current-version CWT facts such as on_action payloads, scope tables, special-project scopes, archaeological-site event scopes, entity availability, or subsystem directory capability.
 
-When designing entities that span multiple game subsystems, think in terms of a
-**cascading trigger pipeline** — each node triggers the next, potentially crossing
-scope boundaries. ALL scope data below is verified against CWTools .cwt rules.
+When designing complex features:
+1. Use \`query_cwt_schema\` on the target \`common/\`, \`events/\`, \`interface/\`, \`gfx/\`, or \`sound/\` path before choosing fields or entity topology.
+2. Use \`query_rules\`, \`query_scope\`, \`search_rule_capabilities\`, and \`get_completion_at\` for trigger/effect/scope details.
+3. Use \`query_types\`, \`query_workspace_index\`, \`query_definition_by_name\`, and \`workspace_symbols\` to locate concrete current project or vanilla archetypes.
+4. Read only the matched archetype blocks/ranges needed to understand structure, scope flow, and references.
+5. Record the CWT/LSP and archetype evidence used. If no active evidence exists, treat the design point as unresolved instead of filling it from static memory.
 
-### Archaeological Site Pipeline Pattern
-\`\`\`
-[on_action / MTTH] → [archaeological_site] → stage fleet_events → [special_project] → [relic/reward]
-\`\`\`
-- Site STAGE events are **fleet_event** (this=fleet, from=archaeological_site) — NOT planet_event!
-- \`archaeology = yes\` flag is MANDATORY on all stage events
-- Access country via \`owner = { }\`, access planet via \`from = { planet = { } }\`
-- special_project on_success scope depends on its \`event_scope\` field:
-  - \`event_scope = ship_event\` → this = ship, from = creation scope
-  - \`event_scope = planet_event\` → this = planet, from = creation scope
-  - \`event_scope = country_event\` → this = country, from = creation scope
-- Chain sites use scripted_effects to spawn next site within fleet scope
-- Final stage grants relic via \`owner = { add_relic = r_xxx }\`
-- Use \`save_event_target_as\` in site events + \`event_target:\` in project for scope persistence
-
-### General Event Chain Pattern
-\`\`\`
-1. Entry trigger (on_action / MTTH / situation / anomaly / planet_event)
-2. Branch events (player choices create diverging paths via options)
-3. Follow-ups via on_actions (physical triggers), MTTH (probabilistic), or days = X (hard delay)
-4. Resolution event (grants rewards, clears flags/variables)
-\`\`\`
-- Use \`set_country_flag\` / \`set_global_flag\` to track chain state
-- Use \`event_target:\` to pass scope references across chain links
-- Use \`saved_event_target:\` for cross-event scope persistence
-
-### Scope Chain Rules (Verified from CWTools .cwt Rules)
-
-#### Archaeological Site Scopes (source: anomalies_and_archaeology.cwt)
-| Context | this | from | ROOT |
-|---------|------|------|------|
-| weight | planet | — | planet |
-| allow / potential | fleet | archaeological_site | fleet |
-| visible / on_visible | country | archaeological_site | country |
-| on_create | archaeological_site | — | archaeological_site |
-| on_roll_failed | fleet | archaeological_site | fleet |
-| stage event | fleet | archaeological_site | fleet |
-| on_arch_stage_finished | fleet | archaeological_site | fleet |
-| on_arch_site_finished | fleet | archaeological_site | fleet |
-
-#### Special Project Scopes (source: special_projects.cwt)
-| Context | this | from | Notes |
-|---------|------|------|-------|
-| fail_trigger / abort_trigger | country | event_scope (MIGHT NOT EXIST) | push_scope = country |
-| on_success | event_scope* | creation scope | *depends on event_scope field |
-| on_fail / on_cancel | country | creation scope | push_scope = country |
-
-#### Common Scope Transitions
-| From | To | Mechanism | Notes |
-|------|----|-----------|-------|
-| Fleet | Country | \`owner = { ... }\` | In fleet_event |
-| Fleet | Planet | \`from = { planet = { } }\` or \`orbit = { }\` | Via arc site's planet |
-| Country | Planet | \`capital_scope\` / \`random_owned_planet\` | |
-| Planet | Country | \`owner = { ... }\` | |
-| System | Planet | \`random_system_planet = { ... }\` | |
-| Any | Saved | \`event_target:name = { ... }\` | Cross-event persistence |
-
-### on_action Trigger Points (Verified from on_actions.csv)
-
-#### Planet-Scope (this=planet, root=planet)
-- \`on_colonized\` — planet colonized
-- \`on_building_complete\` — building finished
-- \`on_district_complete\` — district finished
-- \`on_blocker_cleared\` — blocker cleared
-- \`on_colony_1_year_old\` ... \`on_colony_10_years_old\` — colony age milestones
-
-#### Planet-Scope with FROM=country (this=planet, from=country)
-- \`on_terraforming_complete\` — terraforming done
-- \`on_planet_transfer\` — planet transferred
-- \`on_planet_conquer\` — planet conquered
-
-#### Country-Scope (this=country, root=country)
-- \`on_tech_increased\` — technology completed
-- \`on_monthly_pulse_country\` — monthly pulse
-- \`on_yearly_pulse_country\` — yearly pulse
-
-#### Ship/Fleet-Scope
-- \`on_survey\` — survey completed (this=ship, from=planet)
-- \`on_planet_surveyed\` — planet surveyed (this=planet, from=country, fromfrom=fleet)
-- \`on_entering_system_fleet\` — fleet enters system (this=fleet, from=system)
-
-#### Archaeological on_actions
-- \`on_arch_stage_finished\` — excavation stage done (this=fleet, from=archaeological_site)
-- \`on_arch_site_finished\` — excavation complete (this=fleet, from=archaeological_site)
-- \`on_relic_activated\` — relic activated (this=country, root=country)
-
-## Deep Coupling Subsystem Reference (Engine-First Design)
-When designing complex features spanning multiple game subsystems, think in terms of
-**engine entities, not text-only event chains**. The following layers are available for
-cross-system coupling and should be considered during blueprint planning:
-
-### Stellaris common/ Design Space Review
-Before planning a complex event chain, inventory \`common/\` and build a capability map. Do not treat
-"richness" as adding random subsystems; treat it as choosing the right engine entities for entry,
-progression, player agency, rewards, AI behavior, and cleanup.
-
-Recommended directory families to consider (verify availability with \`list_directory("common")\`, \`query_types\`, and CWT rules for the user's install/config):
-- **Entry hooks and flow control**: \`common/on_actions\`, \`common/event_chains\`, \`common/scripted_effects\`, \`common/scripted_triggers\`, \`common/script_values\`, \`common/game_rules\`.
-- **Exploration and progression anchors**: \`common/anomalies\` (\`anomaly_category\`), \`common/archaeological_site_types\` (\`archaeological_site_type\`), \`common/special_projects\`, \`common/situations\`, \`common/astral_rifts\`, \`common/astral_actions\`, \`common/first_contact\`, \`common/intel_categories\`, \`common/intel_levels\`, \`common/storm_types\`.
-- **Map and spatial presence**: \`common/solar_system_initializers\`, \`common/star_classes\`, \`common/planet_classes\`, \`common/deposits\`, \`common/deposit_categories\`, \`common/megastructures\`, \`common/bypass\`, \`common/ambient_objects\`, \`common/dust_clouds\`, \`common/terraform_links\`.
-- **Rewards and economy**: \`common/relics\`, \`common/artifact_actions\`, \`common/technology\`, \`common/buildings\`, \`common/districts\`, \`common/pop_jobs\`, \`common/pop_categories\`, \`common/resources\`, \`common/static_modifiers\`, modifier category enums, \`common/decisions\`, \`common/edicts\`, \`common/policies\`, \`common/traits\`, \`common/ascension_perks\`, \`common/traditions\`.
-- **Political, diplomatic, and AI context**: \`common/personalities\`, \`common/country_types\`, \`common/federation_laws\` / \`common/federation_perks\` / \`common/federation_types\`, \`common/galactic_focuses\`, \`common/resolution_categories\`, \`common/resolutions\`, \`common/espionage_operation_categories\`, \`common/espionage_assets\`, \`common/espionage_operation_types\`, \`common/agreement_terms\`, \`common/agreement_term_values\`, \`common/agreement_presets\`, \`common/agreement_resources\`, \`common/pop_faction_types\`, \`common/ethics\`, \`common/governments\`, \`common/governments/civics\`, \`common/governments/authorities\`, \`common/governments/councilors\`.
-
-For each serious candidate, record whether it is selected, what concrete entity type it contributes,
-which scope it operates in, and why it is better than a pure event-only implementation. Also record
-why rejected common directories are not used, so the design stays broad without becoming fragmented.
-
-### Layer 1 — Spatial & Map (physical presence on the star map)
-- \`solar_system_initializers\`: Generate dedicated physical star systems
-- \`ambient_objects\` / \`dust_clouds\`: Environmental entities within systems
-- \`megastructures\`: Repairable or constructible mega-scale structures
-
-### Layer 2 — Dynamic Progression (time-spanning mechanics with player participation)
-- \`situations\`: Long-term crises/celebrations with staged progression, monthly ticks, and dedicated UI
-- \`archaeological_site_types\`: Multi-stage excavation with randomized branching
-- \`special_projects\` / \`astral_rifts\`: Tasks requiring physical ship/leader dispatch
-
-### Layer 3 — Player Agency & Economy (interactive tools for the player)
-- \`decisions\`: Planet-scoped player actions
-- \`edicts\` / \`policies\`: Empire-wide resource allocation and modifiers
-- \`relics\`: Permanent passive bonuses with activatable effects (\`active_effect\`)
-- \`buildings\` / \`pop_jobs\` / \`districts\`: Micro-economic entity rewards
-
-### Layer 4 — Listeners, Hooks & Delays (seamless event flow triggers)
-- \`on_actions\`: Native hooks (\`on_entering_system_fleet\`, \`on_planet_surveyed\`, \`on_arch_site_finished\`, etc.)
-- \`MTTH (mean_time_to_happen)\`: Probabilistic time-based triggers for organic pacing
-- \`days = X\` delays can be **combined** with the above as fallback triggers
-
-### Golden Architecture A: Immersive Exploration Loop
-\\\`\\\`\\\`
-Entry (anomaly/tech) → spawn_system (initializer) → on_entering_system_fleet (on_action)
-  → archaeological_site / special_project (progression) → relic + technology + decisions (resolution)
-\\\`\\\`\\\`
-
-### Golden Architecture B: Empire Crisis Mechanism
-\\\`\\\`\\\`
-Entry (MTTH/on_yearly_pulse/tech) → situation (staged progression with static_modifiers)
-  → edicts + decisions (player agency) → on_fail/on_success (multi-ending resolution)
-\\\`\\\`\\\`
+Do not copy scope, on_action, or subsystem facts from this prompt; they are intentionally absent and must come from active tools.
 `;
 
 // ─── HOI4 Knowledge ──────────────────────────────────────────────────────────
@@ -316,20 +152,15 @@ export const HOI4_KNOWLEDGE = `
 - **NEVER suggest adding \`;\` between statements** — this will break the code.
 - Multiple key-value pairs on the same line are common and intentional.
 
-## Strict Adherence to query_rules Schema (CRITICAL)
-PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.
-- **Do NOT Guess**: If unsure about parameters, you MUST use \`query_rules\` before writing code.
-- **Never Invent Parameters**: Do NOT add arbitrary properties into a block unless explicitly listed.
+## CWT/LSP Evidence Routing (CRITICAL)
+PDXScript is strictly typed. Static game notes are not legality proof.
+- Use \`query_cwt_schema\` for common/entity/schema structure before writing fields or block shapes.
+- Use \`query_rules\`, \`query_scope\`, \`search_rule_capabilities\`, and completions for triggers, effects, scope changes, and modifiers.
+- **Do NOT Guess**: If unsure about parameters, scope links, values, or block shape, query active CWT/LSP before writing code.
+- **Never Invent Parameters**: Do NOT add arbitrary properties into a block unless active CWT/LSP evidence explicitly supports them.
 
-## HOI4 Scope System
-HOI4 scopes: Country, State, Character, Division, MilitaryIndustrialOrganization, Operative
-You can chain scopes using dot notation or nested blocks. Treat logical native links as hypotheses to verify with CWT/LSP evidence before final code.
-- \`ROOT\`, \`FROM\`, \`PREV\` — context-relative references
-- \`owner\` → State to Country
-- \`capital\` → Country to State
-- \`controller\` → State to Country
-- \`tag\` → Country identifier
-Treat logical scope transitions as plausible until verified; do not reject or approve them solely from model memory.
+## Scope Discovery
+Do not use static scope lists from this prompt. Scope names, links, context references, and native transitions must be retrieved from active CWT/LSP tools and verified with diagnostics or current-version archetypes.
 
 ## Deep API Tools — Anti-Hallucination Arsenal
 These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_files\` for symbol lookups.
@@ -345,10 +176,10 @@ These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_
 | Look up @variable values | \`query_variables(filter)\` | Before using any @-prefixed constant |
 
 ## Vanilla Query Strategy
-**ALWAYS query LSP tools** — do NOT rely on memory. Use \`query_types\`, \`query_rules\`, \`workspace_symbols\` for any game construct lookups. LLM knowledge of HOI4 constructs is frequently hallucinated.
+**ALWAYS query LSP tools** — do NOT rely on memory. Use \`query_cwt_schema\`, \`query_types\`, \`query_rules\`, and \`workspace_symbols\` for any game construct lookups.
 
-## HOI4 Modding Entities
-Common directories: \`common/national_focus\`, \`common/ideas\`, \`common/technologies\`, \`common/decisions\`, \`events/\`, \`history/\`
+## Entity And Directory Discovery
+Do not rely on static directory lists from this prompt. Discover valid directories, entity types, and file shapes from active CWT/LSP schema, workspace indexes, and current-version examples.
 
 ## Localisation (HOI4)
 - File encoding: **UTF-8 with BOM** (\\uFEFF)
@@ -372,19 +203,15 @@ export const EU4_KNOWLEDGE = `
 - Statements are separated by **whitespace** (newlines or spaces).
 - **NEVER suggest adding \`;\` between statements** — this will break the code.
 
-## Strict Adherence to query_rules Schema (CRITICAL)
-PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.
-- **Do NOT Guess**: If unsure about parameters, you MUST use \`query_rules\` before writing code.
-- **Never Invent Parameters**: Do NOT add arbitrary properties into a block unless explicitly listed.
+## CWT/LSP Evidence Routing (CRITICAL)
+PDXScript is strictly typed. Static game notes are not legality proof.
+- Use \`query_cwt_schema\` for common/entity/schema structure before writing fields or block shapes.
+- Use \`query_rules\`, \`query_scope\`, \`search_rule_capabilities\`, and completions for triggers, effects, scope changes, and modifiers.
+- **Do NOT Guess**: If unsure about parameters, scope links, values, or block shape, query active CWT/LSP before writing code.
+- **Never Invent Parameters**: Do NOT add arbitrary properties into a block unless active CWT/LSP evidence explicitly supports them.
 
-## EU4 Scope System
-EU4 scopes: Country, Province, TradeNode, Advisor, Monarch, Heir, Consort, RebelFaction
-You can chain scopes using dot notation or nested blocks. Treat logical transitions as native-link hypotheses to verify with CWT/LSP evidence before final code.
-- \`ROOT\`, \`FROM\`, \`PREV\` — context-relative references
-- \`owner\` → Province to Country
-- \`capital_scope\` → Country to Province
-- \`controller\` → Province to Country
-Treat logical scope transitions as plausible until verified; do not reject or approve them solely from model memory.
+## Scope Discovery
+Do not use static scope lists from this prompt. Scope names, links, context references, and native transitions must be retrieved from active CWT/LSP tools and verified with diagnostics or current-version archetypes.
 
 ## Deep API Tools — Anti-Hallucination Arsenal
 These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_files\` for symbol lookups.
@@ -400,10 +227,10 @@ These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_
 | Look up @variable values | \`query_variables(filter)\` | Before using any @-prefixed constant |
 
 ## Vanilla Query Strategy
-Use \`query_types\`, \`query_rules\`, \`workspace_symbols\` for game construct lookups. Never rely on memory for EU4 constructs — LLM knowledge is frequently hallucinated.
+Use \`query_cwt_schema\`, \`query_types\`, \`query_rules\`, and \`workspace_symbols\` for game construct lookups. Never rely on memory for EU4 constructs.
 
-## EU4 Modding Entities
-Key directories: \`common/ideas\`, \`common/policies\`, \`common/national_ideas\`, \`decisions/\`, \`events/\`, \`missions/\`, \`history/\`
+## Entity And Directory Discovery
+Do not rely on static directory lists from this prompt. Discover valid directories, entity types, and file shapes from active CWT/LSP schema, workspace indexes, and current-version examples.
 
 ## Localisation (EU4)
 - File encoding: UTF-8 with BOM
@@ -421,16 +248,14 @@ export const CK2_KNOWLEDGE = `
 - Comments: \`#\` for line comments
 - **NO semicolons** — whitespace as separator
 
-## CK2 Scope System
-CK2 scopes: Character, Title, Province, Offmap, Wonder
-- \`ROOT\`, \`FROM\`, \`FROMFROM\` — context-relative references
-- Event triggers often work with character scopes
+## Scope Discovery
+Do not use static scope lists from this prompt. Scope names, context references, event contexts, and native transitions must be retrieved from active CWT/LSP tools and verified with diagnostics or current-version archetypes.
 
 ## Vanilla Query Strategy
-Use CWTools LSP tools (\`query_types\`, \`query_rules\`) for all game entity lookups.
+Use CWTools LSP tools (\`query_cwt_schema\`, \`query_types\`, \`query_rules\`) for all game entity lookups.
 
-## CK2 Modding Entities
-Key directories: \`common/\`, \`events/\`, \`decisions/\`, \`history/\`
+## Entity And Directory Discovery
+Do not rely on static directory lists from this prompt. Discover valid directories, entity types, and file shapes from active CWT/LSP schema, workspace indexes, and current-version examples.
 
 ## Localisation (CK2)
 - File encoding: UTF-8 with BOM or Windows-1252
@@ -454,20 +279,15 @@ export const CK3_KNOWLEDGE = `
 - Statements are separated by **whitespace** (newlines or spaces).
 - **NEVER suggest adding \`;\` between statements** — this will break the code.
 
-## Strict Adherence to query_rules Schema (CRITICAL)
-PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.
-- **Do NOT Guess**: If unsure about parameters, you MUST use \`query_rules\` before writing code.
-- **Never Invent Parameters**: Do NOT add arbitrary properties into a block unless explicitly listed.
+## CWT/LSP Evidence Routing (CRITICAL)
+PDXScript is strictly typed. Static game notes are not legality proof.
+- Use \`query_cwt_schema\` for common/entity/schema structure before writing fields or block shapes.
+- Use \`query_rules\`, \`query_scope\`, \`search_rule_capabilities\`, and completions for triggers, effects, scope changes, and modifiers.
+- **Do NOT Guess**: If unsure about parameters, scope links, values, or block shape, query active CWT/LSP before writing code.
+- **Never Invent Parameters**: Do NOT add arbitrary properties into a block unless active CWT/LSP evidence explicitly supports them.
 
-## CK3 Scope System
-CK3 scopes: Character, Title, Province, County, Duchy, Kingdom, Empire, Culture, Faith, Dynasty, House
-- \`root\`, \`scope:character\`, \`prev\` — context references
-- CK3 uses data types extensively — scopes are strongly typed
-- \`liege\`, \`vassal\` → Character to Character
-- \`capital_province\` → Title to Province
-- \`holder\` → Title to Character
-- \`faith\`, \`culture\` → Character to Faith/Culture
-Treat logical scope transitions as plausible until verified; do not reject or approve them solely from model memory.
+## Scope Discovery
+Do not use static scope lists from this prompt. Scope names, links, context references, and native transitions must be retrieved from active CWT/LSP tools and verified with diagnostics or current-version archetypes.
 
 ## Deep API Tools — Anti-Hallucination Arsenal
 These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_files\` for symbol lookups.
@@ -483,10 +303,10 @@ These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_
 | Look up @variable values | \`query_variables(filter)\` | Before using any @-prefixed constant |
 
 ## Vanilla Query Strategy
-Use CWTools LSP tools for all construct lookups. \`query_types\`, \`query_rules\`, \`workspace_symbols\` are your primary tools. LLM knowledge of CK3 constructs is frequently hallucinated — always verify with the LSP.
+Use CWTools LSP tools for all construct lookups. \`query_cwt_schema\`, \`query_types\`, \`query_rules\`, and \`workspace_symbols\` are your primary tools.
 
-## CK3 Modding Entities
-Key directories: \`common/\`, \`events/\`, \`gfx/\`, \`gui/\`, \`localization/\`
+## Entity And Directory Discovery
+Do not rely on static directory lists from this prompt. Discover valid directories, entity types, and file shapes from active CWT/LSP schema, workspace indexes, and current-version examples.
 
 ## Localisation (CK3)
 - File encoding: UTF-8 with BOM
@@ -506,15 +326,14 @@ export const VIC2_KNOWLEDGE = `
 - Comments: \`#\` for line comments
 - **NO semicolons**
 
-## VIC2 Scope System
-Scopes: Country, Province, Pop
-- \`THIS\`, \`FROM\` — context references
+## Scope Discovery
+Do not use static scope lists from this prompt. Scope names, context references, and native transitions must be retrieved from active CWT/LSP tools and verified with diagnostics or current-version archetypes.
 
 ## Vanilla Query Strategy
-Use CWTools LSP tools for entity lookups.
+Use CWTools LSP tools for entity lookups, including \`query_cwt_schema\` for schema/entity shape.
 
-## VIC2 Modding Entities
-Key directories: \`common/\`, \`events/\`, \`decisions/\`, \`history/\`
+## Entity And Directory Discovery
+Do not rely on static directory lists from this prompt. Discover valid directories, entity types, and file shapes from active CWT/LSP schema, workspace indexes, and current-version examples.
 `;
 
 // ─── VIC3 Knowledge ──────────────────────────────────────────────────────────
@@ -529,16 +348,14 @@ export const VIC3_KNOWLEDGE = `
 - Script values: \`value:script_value_name\`
 - **NO semicolons** — statements separated by whitespace only
 
-## VIC3 Scope System
-VIC3 scopes: Country, State, StateRegion, Market, Pop, Building, InterestGroup, PoliticalMovement
-- \`root\`, \`scope:country\`, \`prev\` — context references
-- VIC3 uses strongly-typed scopes similar to CK3
+## Scope Discovery
+Do not use static scope lists from this prompt. Scope names, context references, and native transitions must be retrieved from active CWT/LSP tools and verified with diagnostics or current-version archetypes.
 
 ## Vanilla Query Strategy
-Use CWTools LSP tools for all game construct lookups. Do NOT rely on memory.
+Use CWTools LSP tools for all game construct lookups, including \`query_cwt_schema\` for schema/entity shape. Do NOT rely on memory.
 
-## VIC3 Modding Entities
-Key directories: \`common/\`, \`events/\`, \`gfx/\`, \`gui/\`, \`localization/\`
+## Entity And Directory Discovery
+Do not rely on static directory lists from this prompt. Discover valid directories, entity types, and file shapes from active CWT/LSP schema, workspace indexes, and current-version examples.
 
 ## Localisation (VIC3)
 - File encoding: UTF-8 with BOM
@@ -558,15 +375,14 @@ export const IMPERATOR_KNOWLEDGE = `
 - Variables: \`@variable_name\`
 - **NO semicolons**
 
-## Imperator Scope System
-Scopes: Country, Province, Character, Family, Pop
-- \`ROOT\`, \`FROM\`, \`PREV\` — context references
+## Scope Discovery
+Do not use static scope lists from this prompt. Scope names, context references, and native transitions must be retrieved from active CWT/LSP tools and verified with diagnostics or current-version archetypes.
 
 ## Vanilla Query Strategy
-Use CWTools LSP tools for all lookups.
+Use CWTools LSP tools for all lookups, including \`query_cwt_schema\` for schema/entity shape.
 
-## Imperator Modding Entities
-Key directories: \`common/\`, \`events/\`, \`decisions/\`, \`localization/\`
+## Entity And Directory Discovery
+Do not rely on static directory lists from this prompt. Discover valid directories, entity types, and file shapes from active CWT/LSP schema, workspace indexes, and current-version examples.
 
 ## Localisation (Imperator)
 - File encoding: UTF-8 with BOM
@@ -586,15 +402,14 @@ export const EU5_KNOWLEDGE = `
 - Script values: \`value:script_value_name\`
 - **NO semicolons** — statements separated by whitespace only
 
-## EU5 Scope System
-EU5 uses strongly-typed scopes similar to CK3/VIC3.
-- \`root\`, \`scope:country\`, \`prev\` — context references
+## Scope Discovery
+Do not use static scope lists from this prompt. Scope names, context references, and native transitions must be retrieved from active CWT/LSP tools and verified with diagnostics or current-version archetypes.
 
 ## Vanilla Query Strategy
-Use CWTools LSP tools for all game construct lookups. EU5 is a newer title — LLM knowledge is particularly unreliable.
+Use CWTools LSP tools for all game construct lookups, including \`query_cwt_schema\` for schema/entity shape. EU5 is a newer title — LLM knowledge is particularly unreliable.
 
-## EU5 Modding Entities
-Key directories: \`common/\`, \`events/\`, \`gfx/\`, \`gui/\`, \`localization/\`
+## Entity And Directory Discovery
+Do not rely on static directory lists from this prompt. Discover valid directories, entity types, and file shapes from active CWT/LSP schema, workspace indexes, and current-version examples.
 
 ## Localisation (EU5)
 - File encoding: UTF-8 with BOM
@@ -614,24 +429,17 @@ export const PARADOX_KNOWLEDGE = `
 - **NO semicolons** — statements separated by whitespace only
 - **NEVER suggest adding \`;\` between statements**
 
-## Strict Adherence to query_rules Schema (CRITICAL)
-PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.
-- **Do NOT Guess**: If unsure about parameters, you MUST use \`query_rules\` before writing code.
-- If you know the intent but not the exact rule name, use \`search_rule_capabilities\` with currentScope/desiredPushScope before inventing trigger/effect names.
-- Treat \`semanticHints\` from docs/comments as retrieval hints only. Legality comes from \`hardFacts\`, completions, diagnostics, parse checks, and verified examples.
-- **Never Invent Parameters**: Do NOT add arbitrary properties (like \`multiply\`, \`add\`, \`limit\`, \`count\`) into a block unless explicitly listed.
-- **Interpreting Syntax**:
-  - If syntax is \`yes/no\` or \`bool\`, use \`trigger = yes\`.
-  - If syntax is \`scope[...]\`, \`scope_group[...]\`, or \`<target>\`, use a scope target (e.g., \`FROM\`, \`event_target:X\`). **NEVER** use \`{ }\` code blocks for scopes!
-  - ONLY use a \`{ ... }\` block if the syntax explicitly shows \`{ ... }\` or \`clause\`.
-- **Unsupported Math**: If an effect doesn't support a math parameter like \`multiply = X\`, use workarounds:
-  1. **Inline Script Value**: \`value = { value = my_var multiply = 4 }\`
-  2. **Temp Variables**: Use \`multiply_variable\` on a \`temp_var\` beforehand.
+## CWT/LSP Evidence Routing (CRITICAL)
+PDXScript is strictly typed. Static game notes are not legality proof.
+- Use \`query_cwt_schema\` for common/entity/schema structure before writing fields or block shapes.
+- Use \`query_rules\`, \`query_scope\`, \`search_rule_capabilities\`, and completions for triggers, effects, scope changes, and modifiers.
+- **Do NOT Guess**: If unsure about parameters, scope links, values, or block shape, query active CWT/LSP before writing code.
+- **Never Invent Parameters**: Do NOT add arbitrary properties into a block unless active CWT/LSP evidence explicitly supports them.
 
 ## Vanilla Query Strategy
-Use CWTools LSP tools (\`query_types\`, \`query_rules\`, \`workspace_symbols\`) for all game construct lookups.
+Use CWTools LSP tools (\`query_cwt_schema\`, \`query_types\`, \`query_rules\`, \`workspace_symbols\`) for all game construct lookups.
 Do NOT rely on memory — always verify with the LSP server.
-Static knowledge is background guidance only; prefer \`query_rules\` \`hardFacts\`, \`search_rule_capabilities\`, LSP completion/diagnostics, and verified current-version examples when they disagree.
+Static knowledge is background guidance only; prefer active CWT schema, \`query_rules\` \`hardFacts\`, \`search_rule_capabilities\`, LSP completion/diagnostics, and verified current-version examples when they disagree.
 `;
 
 // ─── Game ID → Knowledge Mapping ─────────────────────────────────────────────

@@ -142,6 +142,25 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'query_cwt_schema',
+            description: 'CWT-FIRST schema lookup for common/entity definitions and other non-trigger/effect rules. Use BEFORE writing or planning new PDXScript under common/, events/, interface/, gfx/, sound/, map/, etc. Input a target file/directory such as "common/buildings/00_x.txt" or "common/buildings", plus optional field/rule name. Returns active CWT source snippets and line numbers. If returned snippets include comments/semantic text, use that semantics first; if they are structural only, confirm intended usage from verified vanilla/project examples before writing.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    target: { type: 'string', description: 'Project file, directory, or CWT-relative path to inspect, e.g. "common/buildings/00_my_building.txt", "common/technology", "events", "interface".' },
+                    file: { type: 'string', description: 'Alias for target when you have a concrete project file path.' },
+                    directory: { type: 'string', description: 'Alias for target when you know the entity directory, e.g. "common/jobs".' },
+                    name: { type: 'string', description: 'Optional field, type, alias, or rule name to locate inside the matched CWT files, e.g. "resources", "potential", "planet_modifier".' },
+                    includeContent: { type: 'boolean', description: 'If true, return a larger excerpt from matched schema files. Default false.' },
+                    limit: { type: 'number', description: 'Maximum CWT files to return. Default 5, max 20.' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'query_override_modes',
             description: 'Query path override/load-order modes from the active CWT rules currently loaded by the language server. Use this before advising how to override vanilla files; do not rely on hard-coded prompt tables. The response includes: `modes` (path to strategy mapping, truncated to `limit`), `matched` and `matchedModeInfo` (longest-prefix match for `path` plus the documentation for that mode), and `modeInfo` (the full legend of every mode `name` and `description` - meaning / who wins by default / how to override vanilla - sourced from the CWT `override_modes_info` block). Read mode semantics from `modeInfo` / `matchedModeInfo` rather than from prompt text.',
             parameters: {
@@ -158,7 +177,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'search_rule_capabilities',
-            description: 'Search CWT/LSP rule evidence by intent and scope capability instead of guessing a rule name. Use this when you know what you want to do (for example iterate ships from fleet scope, fire a carrier event, pick a random planet) but do not know the exact trigger/effect/scope_change name. Returns ranked candidates with hardFacts and semanticHints; validate the selected rule before writing.',
+            description: 'Search CWT/LSP rule evidence by intent and scope capability instead of guessing a rule name. Use this when you know what you want to do but do not know the exact trigger/effect/scope_change name. Returns ranked candidates with hardFacts and semanticHints; validate the selected rule before writing.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1005,11 +1024,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                             type: 'object',
                             properties: {
                                 id: { type: 'string', description: 'Entity ID (e.g. "d_ancient_databank", "ns.100", "MY_PROJECT")' },
-                                type: { type: 'string', description: 'Entity type (must match CWT type system). Common types: on_action, anomaly_category, archaeological_site_type, special_project, event_chain, situation_type, relic, artifact_action, technology, building, decision, edict, fleet_event, planet_event, country_event, ship_event, scripted_effect, scripted_trigger, static_modifier, deposit, solar_system_initializer' },
+                                type: { type: 'string', description: 'Entity type. Must match the active CWT type system; query_cwt_schema/query_types before using a value from memory.' },
                                 file: { type: 'string', description: 'Target file path relative to workspace root' },
                                 triggeredBy: { type: 'string', description: 'What triggers this entity (e.g. "MTTH", "on_colonized", "stage 2 completion of d_ancient_databank")' },
                                 fires: { type: 'array', items: { type: 'string' }, description: 'IDs of downstream entities this one triggers, with scope transition notation. Format each entry as "targetId via scope_path" (e.g. "ns.100 via owner = { country_event }", "MY_PROJECT via fleet event_target"). Plain IDs are accepted but scope paths are STRONGLY recommended to catch scope chain errors early.' },
-                                scopeContext: { type: 'string', description: 'Scope context in CWT format: "this=X root=X from=Y fromfrom=Z". MUST be verified against CWT .cwt rules. Example for arc site stage: "this=fleet root=fleet from=archaeological_site". For special_project on_success: depends on event_scope field.' },
+                                scopeContext: { type: 'string', description: 'Scope context in CWT format, e.g. "this=X root=X from=Y fromfrom=Z". MUST be dynamically verified against active CWT/LSP rules and current archetype evidence; do not fill this from static prompt memory.' },
                             },
                             required: ['id', 'type', 'file'],
                         },
@@ -1047,14 +1066,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                     triggerPlan: {
                         type: 'array',
-                        description: 'Per-node trigger and pacing plan, including indirect triggers such as on_actions, MTTH, days delays, situation ticks, or direct event calls.',
+                        description: 'Per-node trigger and pacing plan. Mechanisms must be verified through active CWT/LSP evidence and current archetypes before inclusion.',
                         items: {
                             type: 'object',
                             properties: {
                                 nodeId: { type: 'string', description: 'Entity or node ID this trigger plan applies to' },
-                                mechanism: { type: 'string', description: 'Trigger mechanism, e.g. on_action, MTTH, days, direct_event, situation_tick, special_project_on_success' },
-                                scopeBridge: { type: 'string', description: 'Scope transition used by the trigger, e.g. owner={ country_event }, event_target:site_planet' },
-                                timing: { type: 'string', description: 'Timing or pacing detail, e.g. 30 days, yearly pulse, project completion' },
+                                mechanism: { type: 'string', description: 'Trigger mechanism verified through active CWT/LSP evidence, not static prompt memory.' },
+                                scopeBridge: { type: 'string', description: 'Scope transition used by the trigger; must be verified with query_scope/query_rules/completions or current archetype evidence.' },
+                                timing: { type: 'string', description: 'Timing or pacing detail, verified against the selected mechanism.' },
                                 rationale: { type: 'string', description: 'Why this trigger mechanism is appropriate' },
                             },
                             required: ['nodeId', 'mechanism', 'rationale'],

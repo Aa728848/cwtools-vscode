@@ -22,12 +22,9 @@ export function buildCodexAssistantTurnModel(content: string, steps: Record<stri
 }
 
 export function renderTurnStatus(summary: CodexTurnSummary, options: RenderCodexAssistantTurnOptions): string {
-    const issue = summary.issueCount > 0
-        ? `<span class="codex-turn-issues">${summary.issueCount} ${escapeHtml(summary.issueCount === 1 ? options.i18n.codex.status.issue : options.i18n.codex.status.issues)}</span>`
-        : '';
+    void options;
     return `<button type="button" class="codex-turn-status codex-turn-status-${summary.status}" data-codex-turn-toggle aria-expanded="true">
         <span class="codex-turn-status-label">${escapeHtml(summary.label)}</span>
-        ${issue}
         <span class="codex-turn-status-chevron" aria-hidden="true">›</span>
         <span class="codex-turn-status-line" aria-hidden="true"></span>
     </button>`;

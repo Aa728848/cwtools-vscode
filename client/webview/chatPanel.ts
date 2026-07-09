@@ -3864,8 +3864,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 fullscreen.innerHTML = buildSubagentFullscreenHtml(agentId, uniqueId, chatI18n);
                 bindSubagentScroll(fullscreen);
                 currentAssistantDiv.appendChild(fullscreen);
-                
-                state.container = fullscreen.querySelector('.subagent-body') as HTMLElement;
+
+                const subagentBody = fullscreen.querySelector('.subagent-body') as HTMLElement;
+                subagentBody.innerHTML = `<div class="codex-live-host">${renderAssistantTurnCodex('', [], {
+                    i18n: chatI18n,
+                    live: true,
+                    renderMarkdown,
+                    isSubagentView: true,
+                })}</div>`;
+                state.container = subagentBody;
                 ensureSubagentTicker();
             }
             streamStates.set(key, state);
@@ -4068,6 +4075,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             i18n: chatI18n,
             live: !state.isComplete,
             renderMarkdown,
+            isSubagentView: !!state.fullscreenId,
         });
         restoreCodexTurnUiState(host, uiSnapshot);
         enhanceCodeBlocks(host);
@@ -4195,7 +4203,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             return;
         }
 
-        if (!s.agentId && state.container?.classList.contains('codex-message')) {
+        if (state.container?.querySelector(':scope > .codex-live-host')) {
             const coalesced = coalesceLiveStep(state, s);
             if (!coalesced) state.liveSteps.push(s);
             state.lastStepAt = Date.now();
@@ -4204,6 +4212,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 state.completedAt = Date.now();
             }
             renderCodexLiveTurn(state, s.type === 'subtask_complete' ? (s.content || '') : '');
+            if (s.agentId) {
+                updateSubagentCard(state, s.type === 'subtask_complete' ? (s.content || '') : undefined);
+            }
             if (s.transactionCard && s.transactionCard.status === 'pending') {
                 showTransactionCard(s.transactionCard);
             }

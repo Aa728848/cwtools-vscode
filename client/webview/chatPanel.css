@@ -1577,7 +1577,7 @@ body.script-mode .token-usage-fill { background: #2aa198 !important; }
     z-index: 100;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 14px;
+    padding: 0;
 }
 .subagent-fullscreen-view.active {
     display: block;
@@ -1588,33 +1588,40 @@ body.script-mode .token-usage-fill { background: #2aa198 !important; }
     to { transform: translateX(0); opacity: 1; }
 }
 .subagent-header {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    gap: 12px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--vscode-panel-border);
-    margin-bottom: 16px;
+    gap: 9px;
+    min-height: 38px;
+    padding: 6px 12px;
+    border-bottom: 1px solid color-mix(in srgb, var(--codex-line) 70%, transparent);
+    margin-bottom: 0;
     position: sticky;
     top: 0;
     background: var(--vscode-editor-background);
     z-index: 101;
 }
 .subagent-back-btn {
+    min-height: 26px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     background: transparent;
-    border: 1px solid var(--vscode-button-secondaryBorder, transparent);
-    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
-    background-color: var(--vscode-button-secondaryBackground, rgba(130, 130, 130, 0.1));
+    border: 1px solid transparent;
+    color: var(--codex-muted);
     cursor: pointer;
     font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 4px;
-    transition: background 0.15s;
+    padding: 2px 8px;
+    border-radius: 6px;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 .subagent-back-btn:hover {
-    background: var(--vscode-button-secondaryHoverBackground, rgba(130, 130, 130, 0.2));
+    color: var(--fg);
+    background: var(--codex-row-hover);
+    border-color: var(--codex-line);
 }
 .subagent-title {
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1628,32 +1635,32 @@ body.script-mode .token-usage-fill { background: #2aa198 !important; }
     flex: 1;
 }
 .subagent-subtitle {
-    font-size: 11px;
-    opacity: 0.6;
+    font-size: 10.5px;
+    color: var(--codex-muted);
+    opacity: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 .subagent-header-metrics {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    max-width: 42%;
-    font-size: 10px;
-    opacity: 0.65;
-    font-family: var(--vscode-editor-font-family, monospace);
+    display: none;
 }
-.subagent-header-metrics span {
-    padding: 2px 5px;
-    border-radius: 4px;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.06);
+.subagent-fullscreen-view .subagent-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px 28px;
+}
+.subagent-fullscreen-view .codex-message,
+.subagent-fullscreen-view .codex-live-host {
+    width: 100%;
+    max-width: 100%;
+}
+.subagent-fullscreen-view .codex-turn {
+    gap: 10px;
 }
 @media (max-width: 520px) {
     .subagent-header { align-items: flex-start; }
-    .subagent-header-metrics { max-width: 100%; justify-content: flex-start; }
 }
 
 .subagent-card {

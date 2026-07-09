@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.14] - 2026-07-09
+
+### 功能与优化 / Features & Optimizations
+- **[优化] 支持Opencode Go套餐**
+  English: [Optimization] Support Opencode Go package.
+
 ## [2.8.13] - 2026-07-09
 
 ### 修复 / Fixes

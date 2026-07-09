@@ -796,6 +796,10 @@ type LintRequestMsg =
     | RevalidateRequest of VersionedTextDocumentIdentifier
     | WorkComplete of DateTime
 
+type private IncrementalTypeStage =
+    | ScriptedServices of StagedScriptedTypes
+    | TypeIndexOnly of IIncrementalTypeIndex * StagedTypeIndex
+
 /// Shared token computation - walks AST, classifies tokens, encodes to delta int[].
 let computeShaderTokens (game: IGame<_>) (filePath: string) (fileText: string) =
     let tokens = ResizeArray<struct (int * int * int * int * int)>()
@@ -1156,6 +1160,7 @@ type Server(client: ILanguageClient) =
     let mutable deferDynamicParameterDiagnostics = true
     let mutable dynamicDeferDelayMs = 300
     let dynamicDeferMaxFiles = 500
+    let dynamicDeferBatchSize = 16
 
     let runtimeStateLock = obj()
     let mutable validationRuntimeState =
@@ -2440,6 +2445,10 @@ type Server(client: ILanguageClient) =
         let normalised = path.Replace('\\', '/').ToLowerInvariant()
         scriptedDefinitionPathMarkers |> Array.exists normalised.Contains
 
+    let isEventDefinitionPath (path: string) =
+        let normalised = path.Replace('\\', '/').ToLowerInvariant()
+        normalised.Contains("/events/")
+
     let isCompletionHeavyEditPath (path: string) =
         isDynamicDefinitionPath path || isTypeDefiningPath path
 
@@ -2455,6 +2464,11 @@ type Server(client: ILanguageClient) =
 
     let isInlineScriptDefinitionPath (path: string) =
         tryInlineScriptNameFromPath path |> Option.isSome
+
+    let isTypeIndexOnlyRefreshPath (path: string) =
+        isTypeDefiningPath path
+        && not (isDynamicDefinitionPath path)
+        && not (isInlineScriptDefinitionPath path)
 
     let scriptedTypeKeys =
         [ "scripted_trigger"; "scripted_effect"; "script_value" ]
@@ -2583,10 +2597,43 @@ type Server(client: ILanguageClient) =
                 [])
         |> List.distinctBy normaliseCachePath
 
+    let referenceFilesForDefinitionsFromIndex (game: IGame) (definitions: (string * string) list) =
+        try
+            let index = game.TypeReferenceIndex()
+            definitions
+            |> List.collect (fun (typeName, id) ->
+                let baseTypeName = typeName.Split('.').[0]
+                let trimmedId = if isNull id then "" else id.Trim().Trim('"')
+                index |> Map.tryFind (baseTypeName, trimmedId) |> Option.defaultValue []
+                |> List.map _.FileName)
+            |> List.distinctBy normaliseCachePath
+        with e ->
+            logDiag $"TypeReferenceIndex lookup failed: {e.Message}"
+            []
+
+    let referenceFilesForChangedDefinitions (game: IGame) (path: string) (definitions: (string * string) list) =
+        if isEventDefinitionPath path then
+            referenceFilesForDefinitionsFromIndex game definitions
+        elif isDynamicDefinitionPath path then
+            referenceFilesForDefinitions game definitions
+        else
+            []
+
     let mutable scheduleDeferredDynamicRevalidationImpl: string list -> unit = fun _ -> ()
 
     let scheduleDeferredDynamicRevalidation files =
         scheduleDeferredDynamicRevalidationImpl files
+
+    let markDeferredRevalidationStale files =
+        let queued =
+            files
+            |> List.distinctBy normaliseCachePath
+            |> List.truncate dynamicDeferMaxFiles
+        if files.Length > dynamicDeferMaxFiles then
+            logDiag $"Deferred stale mark capped files={files.Length} cap={dynamicDeferMaxFiles}"
+        for path in queued do
+            clearFileCaches path
+            markFileStale path "types"
 
     let mutable postDeferredRevalidationImpl: string -> unit = fun _ -> ()
 
@@ -2708,6 +2755,8 @@ type Server(client: ILanguageClient) =
                 && incrementalTypeRefreshEnabled ()
                 && isTypeDefiningPath name
                 && not (isInlineScriptDefinitionPath name)
+            let shouldRevalidateReferencedCallSites =
+                isDynamicDefinitionPath name || isEventDefinitionPath name
 
             // Mark type refresh needed ONLY if the file was EDITED (not just opened).
             // Opening a file does not change its content, so the type/enum index is still valid.
@@ -2799,7 +2848,7 @@ type Server(client: ILanguageClient) =
                             None
 
                     gameStateLock.EnterWriteLock()
-                    let updateErrors, priorCallFiles, skipIncrementalRefresh, gameRefAtUpdate =
+                    let updateErrors, priorDefsForRevalidation, skipIncrementalRefresh, gameRefAtUpdate =
                         try
                             let priorDefs =
                                 if canTryIncrementalTypeRefresh then
@@ -2821,8 +2870,8 @@ type Server(client: ILanguageClient) =
                                 | None -> false
 
                             let prior =
-                                if canTryIncrementalTypeRefresh && not skip then
-                                    referenceFilesForDefinitions game priorDefs
+                                if canTryIncrementalTypeRefresh && shouldRevalidateReferencedCallSites && not skip then
+                                    priorDefs
                                 else
                                     []
 
@@ -2834,11 +2883,31 @@ type Server(client: ILanguageClient) =
                     if skipIncrementalRefresh then
                         monitorLog Refresh $"RefreshIncrementalTypes skipped (definitions unchanged) file={name}"
 
+                    let priorCallFiles =
+                        if priorDefsForRevalidation.IsEmpty then
+                            []
+                        else
+                            gameStateLock.EnterReadLock()
+                            try
+                                referenceFilesForChangedDefinitions game name priorDefsForRevalidation
+                            finally
+                                gameStateLock.ExitReadLock()
+
                     let staged =
                         if canTryIncrementalTypeRefresh && not skipIncrementalRefresh then
                             gameStateLock.EnterReadLock()
                             try
-                                try game.PrepareScriptedTypes [ name ]
+                                try
+                                    if isDynamicDefinitionPath name then
+                                        game.PrepareScriptedTypes [ name ]
+                                        |> Option.map ScriptedServices
+                                    else
+                                        match game with
+                                        | :? IIncrementalTypeIndex as index ->
+                                            index.PrepareTypeIndex [ name ]
+                                            |> Option.map (fun stagedIndex -> TypeIndexOnly(index, stagedIndex))
+                                        | _ ->
+                                            None
                                 with e ->
                                     logDiag $"Incremental type prepare failed for {name}: {e.Message}"
                                     None
@@ -2859,8 +2928,13 @@ type Server(client: ILanguageClient) =
                                 if not gameStillCurrent then false
                                 else
                                     match staged with
-                                    | Some s ->
+                                    | Some (ScriptedServices s) ->
                                         (try game.CommitScriptedTypes s
+                                         with e ->
+                                             logDiag $"Incremental type commit failed for {name}: {e.Message}"
+                                             false)
+                                    | Some (TypeIndexOnly(index, s)) ->
+                                        (try index.CommitTypeIndex s
                                          with e ->
                                              logDiag $"Incremental type commit failed for {name}: {e.Message}"
                                              false)
@@ -2872,7 +2946,11 @@ type Server(client: ILanguageClient) =
                                 clearTypeCaches ()
                                 markFileStale name "types"
 
-                                if incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount then
+                                if isTypeIndexOnlyRefreshPath name then
+                                    needsTypeRefresh <- true
+                                    lastTypeRefreshRequestAt <- DateTime.UtcNow
+                                    addPendingRefreshDomains [ "types"; "rules" ]
+                                elif incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount then
                                     needsTypeRefresh <- true
                                     lastTypeRefreshRequestAt <- DateTime.UtcNow
                                     addPendingRefreshDomains [ "types"; "rules" ]
@@ -2901,7 +2979,10 @@ type Server(client: ILanguageClient) =
                                 evictIfNeeded locCache
                              with e -> logDiag $"Incremental loc-error refresh failed for {name}: {e.Message}")
                             let currentCallFiles =
-                                referenceFilesForDefinitions game (typeDefinitionsForFiles game [ name ])
+                                if shouldRevalidateReferencedCallSites then
+                                    referenceFilesForChangedDefinitions game name (typeDefinitionsForFiles game [ name ])
+                                else
+                                    []
                             let revalidateFiles =
                                 (if fastDefinitionIndex then [ name ] else []) @ priorCallFiles @ currentCallFiles
                                 |> List.filter (fun file -> normaliseCachePath file <> normaliseCachePath name)
@@ -2913,7 +2994,10 @@ type Server(client: ILanguageClient) =
                                 else
                                     revalidateFiles
                             if not revalidateFiles.IsEmpty then
-                                scheduleDeferredDynamicRevalidation revalidateFiles
+                                if isEventDefinitionPath name then
+                                    markDeferredRevalidationStale revalidateFiles
+                                else
+                                    scheduleDeferredDynamicRevalidation revalidateFiles
                             monitorLog Refresh $"RefreshIncrementalTypes file={name} patches={incrementalScriptedPatchCount} refs={revalidateFiles.Length}"
                         finally
                             gameStateLock.ExitReadLock()
@@ -2964,11 +3048,12 @@ type Server(client: ILanguageClient) =
                 else
                     refreshedCurrentDiagnostics
 
-            visibleDiagnosticsList
-            |> List.filter (fun (filePath, _) -> normaliseCachePath filePath <> normaliseCachePath name)
-            |> function
-                | [] -> ()
-                | otherDiagnostics -> sendDiagnostics otherDiagnostics
+            if not (isTypeIndexOnlyRefreshPath name) then
+                visibleDiagnosticsList
+                |> List.filter (fun (filePath, _) -> normaliseCachePath filePath <> normaliseCachePath name)
+                |> function
+                    | [] -> ()
+                    | otherDiagnostics -> sendDiagnostics otherDiagnostics
 
             // Always publish the current file, including an empty complete result
             // for ordinary files, so fixed diagnostics are cleared.
@@ -2981,11 +3066,12 @@ type Server(client: ILanguageClient) =
                 if pendingKinds.IsEmpty then Fresh else Pending
             setFileDiagnosticStateWithEpoch name newEpoch freshness pendingKinds publishedCurrentDiagnostics
 
-            visibleDiagnosticsList
-            |> List.groupBy fst
-            |> List.iter (fun (filePath, entries) ->
-                if normaliseCachePath filePath <> normaliseCachePath name then
-                    setFileDiagnosticStateWithEpoch filePath newEpoch freshness pendingKinds (entries |> List.map snd))
+            if not (isTypeIndexOnlyRefreshPath name) then
+                visibleDiagnosticsList
+                |> List.groupBy fst
+                |> List.iter (fun (filePath, entries) ->
+                    if normaliseCachePath filePath <> normaliseCachePath name then
+                        setFileDiagnosticStateWithEpoch filePath newEpoch freshness pendingKinds (entries |> List.map snd))
             perfLintCount <- perfLintCount + 1
             maybePerfReport "lint"
         }
@@ -2995,19 +3081,33 @@ type Server(client: ILanguageClient) =
         | None -> ()
         | Some game when not files.IsEmpty ->
             try
-                (try
-                    let warmSw = Stopwatch.StartNew()
-                    let warmed = game.ForceDynamicParameterData(dynamicPreflightTimeoutMs, dynamicPreflightMaxEntities)
-                    warmSw.Stop()
-                    logDiag
-                        $"Deferred revalidation warmed {warmed} dynamic-parameter entities (cap timeout={dynamicPreflightTimeoutMs}ms entities={dynamicPreflightMaxEntities}) in {warmSw.ElapsedMilliseconds}ms"
-                 with e -> logDiag $"Deferred revalidation warm-up error: {e.Message}")
-                files
-                |> List.distinctBy normaliseCachePath
-                |> List.iter (fun path ->
-                    clearFileCaches path
-                    markFileStale path "types"
-                    postDeferredRevalidationImpl path)
+                if isCompletionHeavyInteractiveWindow () then
+                    scheduleDeferredDynamicRevalidation files
+                    logDiag $"Deferred revalidation yielded to completion activity files={files.Length}"
+                else
+                    (try
+                        let warmSw = Stopwatch.StartNew()
+                        let warmed = game.ForceDynamicParameterData(dynamicPreflightTimeoutMs, dynamicPreflightMaxEntities)
+                        warmSw.Stop()
+                        logDiag
+                            $"Deferred revalidation warmed {warmed} dynamic-parameter entities (cap timeout={dynamicPreflightTimeoutMs}ms entities={dynamicPreflightMaxEntities}) in {warmSw.ElapsedMilliseconds}ms"
+                     with e -> logDiag $"Deferred revalidation warm-up error: {e.Message}")
+                    let queued =
+                        files
+                        |> List.distinctBy normaliseCachePath
+                    let batch =
+                        queued
+                        |> List.truncate dynamicDeferBatchSize
+                    let deferred =
+                        queued
+                        |> List.skip batch.Length
+                    batch
+                    |> List.distinctBy normaliseCachePath
+                    |> List.iter (fun path ->
+                        clearFileCaches path
+                        postDeferredRevalidationImpl path)
+                    if not deferred.IsEmpty then
+                        scheduleDeferredDynamicRevalidation deferred
             with e -> logDiag $"Deferred dynamic revalidation failed: {e.Message}"
         | _ -> ()
 
@@ -3018,10 +3118,19 @@ type Server(client: ILanguageClient) =
     do
         scheduleDeferredDynamicRevalidationImpl <- fun (files: string list) ->
             let delay = max 0 dynamicDeferDelayMs
+            let queued =
+                files
+                |> List.distinctBy normaliseCachePath
+                |> List.truncate dynamicDeferMaxFiles
+            if files.Length > dynamicDeferMaxFiles then
+                logDiag $"Deferred dynamic revalidation capped files={files.Length} cap={dynamicDeferMaxFiles}"
+            for path in queued do
+                clearFileCaches path
+                markFileStale path "types"
             let shouldStart =
                 lock deferredRevalidationLock (fun () ->
                     pendingDeferredRevalidationFiles <-
-                        files |> List.fold (fun acc f -> Set.add f acc) pendingDeferredRevalidationFiles
+                        queued |> List.fold (fun acc f -> Set.add f acc) pendingDeferredRevalidationFiles
                     if deferredRevalidationInFlight then
                         false
                     else
@@ -4782,13 +4891,25 @@ type Server(client: ILanguageClient) =
                             match gameObj with
                             | Some game ->
                                 let mutable handled = false
-                                let mutable callFiles: string list = []
+                                let mutable definitionsForRevalidation: (string * string) list = []
+                                let shouldRevalidateReferencedCallSites =
+                                    isDynamicDefinitionPath path || isEventDefinitionPath path
                                 gameStateLock.EnterWriteLock()
                                 try
                                     try
-                                        let definitions = scriptedDefinitionsForFiles game [ path ]
-                                        callFiles <- referenceFilesForDefinitions game definitions
-                                        handled <- game.RemoveScriptedTypes [ path ]
+                                        if shouldRevalidateReferencedCallSites then
+                                            definitionsForRevalidation <-
+                                                if isEventDefinitionPath path then
+                                                    typeDefinitionsForFiles game [ path ]
+                                                else
+                                                    scriptedDefinitionsForFiles game [ path ]
+                                        handled <-
+                                            if isDynamicDefinitionPath path then
+                                                game.RemoveScriptedTypes [ path ]
+                                            else
+                                                match game with
+                                                | :? IIncrementalTypeIndex as index -> index.RemoveTypeIndex [ path ]
+                                                | _ -> false
                                     with e ->
                                         logDiag $"Incremental scripted delete failed for {path}: {e.Message}"
                                         handled <- false
@@ -4796,16 +4917,32 @@ type Server(client: ILanguageClient) =
                                     gameStateLock.ExitWriteLock()
 
                                 if handled then
+                                    let callFiles =
+                                        if definitionsForRevalidation.IsEmpty then
+                                            []
+                                        else
+                                            gameStateLock.EnterReadLock()
+                                            try
+                                                referenceFilesForChangedDefinitions game path definitionsForRevalidation
+                                            finally
+                                                gameStateLock.ExitReadLock()
                                     incrementalScriptedPatchCount <- incrementalScriptedPatchCount + 1
                                     clearTypeCaches ()
                                     let revalidateFiles =
                                         callFiles
                                         |> List.filter (fun file -> normaliseCachePath file <> normaliseCachePath path)
                                     if not revalidateFiles.IsEmpty then
-                                        scheduleDeferredDynamicRevalidation revalidateFiles
+                                        if isEventDefinitionPath path then
+                                            markDeferredRevalidationStale revalidateFiles
+                                        else
+                                            scheduleDeferredDynamicRevalidation revalidateFiles
                                     monitorLog Refresh $"RemoveScriptedTypes file={path} patches={incrementalScriptedPatchCount} refs={revalidateFiles.Length}"
 
-                                    if incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount then
+                                    if isTypeIndexOnlyRefreshPath path then
+                                        needsTypeRefresh <- true
+                                        lastTypeRefreshRequestAt <- DateTime.UtcNow
+                                        addPendingRefreshDomains [ "types"; "rules" ]
+                                    elif incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount then
                                         needsTypeRefresh <- true
                                         lastTypeRefreshRequestAt <- DateTime.UtcNow
                                         addPendingRefreshDomains [ "types"; "rules" ]

@@ -1,0 +1,610 @@
+import {
+    fileBaseName,
+    formatDuration,
+    READ_TOOL_NAMES,
+    VALIDATION_TOOL_NAMES,
+    WRITE_TOOL_NAMES,
+} from './formatters';
+import type {
+    CodexActivityEvent,
+    CodexActivityGroup,
+    CodexActivityStatus,
+    CodexBuildOptions,
+    CodexCommandDetail,
+    CodexGroupKind,
+    CodexI18nText,
+    CodexTextSegment,
+    CodexTurnItem,
+    CodexTurnModel,
+    CodexTurnSummary,
+} from './codexTypes';
+
+const COMMAND_TOOL_NAMES = new Set(['run_command', 'shell_command']);
+const WRITE_LIKE_TOOL_NAMES = new Set([
+    ...WRITE_TOOL_NAMES,
+    'edit_file',
+    'write_file',
+    'write_localisation',
+    'replace_lines',
+    'multi_replace_file_content',
+    'ast_mutate',
+]);
+const READ_LIKE_TOOL_NAMES = new Set([
+    ...READ_TOOL_NAMES,
+    'read_file',
+    'open_file',
+    'list_directory',
+    'rg',
+    'grep',
+    'codegraph_explore',
+]);
+
+type StepLike = Record<string, unknown>;
+
+function asString(value: unknown): string {
+    return typeof value === 'string' ? value : value == null ? '' : String(value);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function formatCount(template: string, count: number): string {
+    return template.replace('{count}', String(count));
+}
+
+function timestampOf(step: StepLike, fallback: number): number {
+    const value = Number(step.timestamp || 0);
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function invocationIdOf(step: StepLike): string | undefined {
+    return asString(step.invocationId || step.toolCallId || step.callId || step.id) || undefined;
+}
+
+function commandFromArgs(args: Record<string, unknown>, step?: StepLike): string {
+    return asString(args.command || args.cmd || args.script || step?.content).trim();
+}
+
+function queryFromArgs(args: Record<string, unknown>): string {
+    return asString(args.query || args.q || args.pattern || args.symbol || args.search || args.path).trim();
+}
+
+function targetPathFromArgs(args: Record<string, unknown>): string {
+    return asString(args.filePath || args.file || args.path || args.directory || args.targetPath || args.uri).trim();
+}
+
+function getResultObject(step: StepLike): Record<string, unknown> {
+    return asRecord(step.toolResult || step.result);
+}
+
+function resultFailed(result: Record<string, unknown>): boolean {
+    return result.success === false || !!result.error || !!result.stderr && result.exitCode !== 0;
+}
+
+function resultSkipped(result: Record<string, unknown>): boolean {
+    return result.skipped === true || result.status === 'skipped';
+}
+
+function statusFromResult(result: Record<string, unknown>): CodexActivityStatus {
+    if (resultSkipped(result)) return 'skipped';
+    if (resultFailed(result)) return 'failed';
+    return 'success';
+}
+
+function compactPreview(value: unknown, max = 220): string {
+    if (value == null) return '';
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    if (!text) return '';
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    return normalized.length > max ? normalized.slice(0, max - 3) + '...' : normalized;
+}
+
+function isInternalThinkingNote(content: string): boolean {
+    const text = content.trim();
+    return /^\[(?:Tool Arg Repair|Tool Name Repair|VLM Image|SYSTEM)\]/i.test(text)
+        || /^Repaired tool name:/i.test(text);
+}
+
+function commandDetailFrom(args: Record<string, unknown>, result: Record<string, unknown>, step?: StepLike): CodexCommandDetail {
+    return {
+        command: commandFromArgs(args, step),
+        cwd: asString(args.cwd || args.workdir || result.cwd || result.workingDirectory) || undefined,
+        exitCode: (result.exitCode ?? result.exit_code ?? result.code) as number | string | undefined,
+        stdout: asString(result.stdout) || undefined,
+        stderr: asString(result.stderr) || undefined,
+        output: asString(result.output || result.preview || result.message) || undefined,
+        preflight: result.preflight || result.policy || result.classification,
+        riskLevel: asString(result.riskLevel || result.risk) || undefined,
+        resultRef: asString(result.resultRef || result.fullResultRef || result.outputRef || result.file) || undefined,
+    };
+}
+
+function toolSubject(toolName: string, args: Record<string, unknown>, step: StepLike): string {
+    if (COMMAND_TOOL_NAMES.has(toolName)) return commandFromArgs(args, step);
+    const target = targetPathFromArgs(args);
+    if (target) return fileBaseName(target);
+    const query = queryFromArgs(args);
+    if (query) return query;
+    if (toolName === 'codegraph_explore') return 'CodeGraph explore';
+    return toolName;
+}
+
+function createToolEvent(step: StepLike, labels: CodexI18nText, index: number): CodexActivityEvent {
+    const toolName = asString(step.toolName || step.name || 'tool');
+    const args = asRecord(step.toolArgs || step.args);
+    const targetPath = targetPathFromArgs(args);
+    const timestamp = timestampOf(step, Date.now() + index);
+    let kind: CodexActivityEvent['kind'] = 'tool';
+    let label = labels.activity.tool;
+    const groupKind: CodexGroupKind = 'tool';
+
+    if (COMMAND_TOOL_NAMES.has(toolName)) {
+        kind = 'command';
+        label = labels.activity.ranCommand;
+    } else if (WRITE_LIKE_TOOL_NAMES.has(toolName)) {
+        kind = 'file';
+        label = toolName.includes('write') ? labels.activity.wroteFile : labels.activity.editedFile;
+    } else if (READ_LIKE_TOOL_NAMES.has(toolName)) {
+        kind = 'file';
+        label = toolName === 'codegraph_explore' ? 'CodeGraph explore' : labels.activity.readFile;
+    } else if (VALIDATION_TOOL_NAMES.has(toolName)) {
+        kind = 'validation';
+        label = labels.activity.validation;
+    }
+
+    return {
+        id: invocationIdOf(step) || `tool-${index}-${timestamp}`,
+        kind,
+        status: step.type === 'permission_request' ? 'waiting' : 'running',
+        label: step.type === 'permission_request' ? labels.activity.waitingPermission : label,
+        subject: toolSubject(toolName, args, step),
+        timestamp,
+        toolName,
+        invocationId: invocationIdOf(step),
+        agentId: asString(step.agentId) || undefined,
+        groupKind,
+        sourceStep: step,
+        detailModel: {
+            args,
+            targetPath: targetPath || undefined,
+            command: COMMAND_TOOL_NAMES.has(toolName) ? commandDetailFrom(args, {}, step) : undefined,
+        },
+    };
+}
+
+function applyToolResult(event: CodexActivityEvent, resultStep: StepLike): void {
+    const result = getResultObject(resultStep);
+    const args = asRecord((event.detailModel?.args as Record<string, unknown>) || {});
+    event.status = statusFromResult(result);
+    event.durationMs = Number(resultStep.durationMs || 0) || Math.max(0, timestampOf(resultStep, event.timestamp) - event.timestamp);
+    event.detail = compactPreview(result.message || result.error || result.preview || result.output);
+    event.sourceStep = event.sourceStep || resultStep;
+    event.detailModel = {
+        ...event.detailModel,
+        result,
+        preview: compactPreview(result.preview || result.message || result.error || result.output),
+        command: COMMAND_TOOL_NAMES.has(event.toolName || '') ? commandDetailFrom(args, result, event.sourceStep as StepLike) : event.detailModel?.command,
+        statusText: asString(result.status || result.message || result.error) || undefined,
+    };
+}
+
+function createStandaloneResult(step: StepLike, labels: CodexI18nText, index: number): CodexActivityEvent {
+    const event = createToolEvent({ ...step, type: 'tool_call' }, labels, index);
+    applyToolResult(event, step);
+    return event;
+}
+
+function createThinkingEvent(content: string, labels: CodexI18nText, index: number, timestamp: number, sourceStep: StepLike | undefined, live: boolean): CodexActivityEvent {
+    return {
+        id: `thinking-${index}-${timestamp}`,
+        kind: 'thinking',
+        status: live ? 'running' : 'success',
+        label: labels.activity.thinking,
+        timestamp,
+        sourceStep,
+        detailModel: { preview: content },
+    };
+}
+
+function createSpecialEvent(step: StepLike, labels: CodexI18nText, index: number): CodexActivityEvent | undefined {
+    const type = asString(step.type);
+    const timestamp = timestampOf(step, Date.now() + index);
+    const content = asString(step.content);
+    if (type === 'validation') {
+        return {
+            id: `validation-${index}-${timestamp}`,
+            kind: 'validation',
+            status: /fail|error|失败|错误/i.test(content) ? 'failed' : 'success',
+            label: labels.activity.validation,
+            subject: content,
+            timestamp,
+            sourceStep: step,
+            groupKind: 'tool',
+            detailModel: { preview: content },
+        };
+    }
+    if (type === 'error') {
+        return {
+            id: `error-${index}-${timestamp}`,
+            kind: 'tool',
+            status: 'failed',
+            label: labels.status.issues,
+            subject: content,
+            timestamp,
+            sourceStep: step,
+            detailModel: { preview: content },
+        };
+    }
+    if (type === 'compaction') {
+        const info = asRecord(step.compactionInfo);
+        const state = asString(info.state);
+        return {
+            id: `compaction-${index}-${timestamp}`,
+            kind: 'context',
+            status: state === 'failed' ? 'failed' : state === 'start' ? 'running' : 'success',
+            label: labels.activity.contextCompaction,
+            subject: content,
+            timestamp,
+            sourceStep: step,
+            detailModel: { result: info, preview: content },
+        };
+    }
+    if (type === 'orchestrator_progress' || type === 'subtask_start' || type === 'subtask_complete') {
+        return {
+            id: `subagent-${index}-${timestamp}`,
+            kind: 'subagent',
+            status: type === 'subtask_complete' ? 'success' : 'running',
+            label: labels.activity.subtask,
+            subject: content,
+            timestamp,
+            agentId: asString(step.agentId) || undefined,
+            groupKind: 'subagent',
+            sourceStep: step,
+            detailModel: { preview: content },
+        };
+    }
+    if (type === 'permission_request') {
+        return createToolEvent(step, labels, index);
+    }
+    if (type === 'write_confirmation_request' || type === 'pending_write') {
+        const args = asRecord(step.toolArgs || step.args);
+        const targetPath = targetPathFromArgs(args) || content;
+        return {
+            id: invocationIdOf(step) || `write-confirm-${index}-${timestamp}`,
+            kind: 'file',
+            status: 'waiting',
+            label: labels.activity.waitingWrite,
+            subject: targetPath ? fileBaseName(targetPath) : undefined,
+            detail: targetPath || undefined,
+            timestamp,
+            toolName: asString(step.toolName || 'write_file'),
+            invocationId: invocationIdOf(step),
+            groupKind: 'tool',
+            sourceStep: step,
+            detailModel: {
+                args,
+                targetPath: targetPath || undefined,
+                result: step.toolResult || step.result,
+                statusText: labels.activity.waitingWrite,
+            },
+        };
+    }
+    if (type.endsWith('_card') || type === 'artifact_created') {
+        return {
+            id: `artifact-${index}-${timestamp}`,
+            kind: 'artifact',
+            status: 'success',
+            label: labels.activity.artifact,
+            subject: content,
+            timestamp,
+            sourceStep: step,
+            detailModel: { result: step.toolResult || step.result, preview: content },
+        };
+    }
+    return undefined;
+}
+
+function groupStatus(events: CodexActivityEvent[]): CodexActivityStatus {
+    if (events.some(e => e.status === 'failed')) return 'failed';
+    if (events.some(e => e.status === 'waiting')) return 'waiting';
+    if (events.some(e => e.status === 'running' || e.status === 'pending')) return 'running';
+    if (events.every(e => e.status === 'skipped')) return 'skipped';
+    return 'success';
+}
+
+function labelForGroup(kind: CodexGroupKind, count: number, labels: CodexI18nText): string {
+    if (kind === 'command') return formatCount(labels.activity.ranCommands, count);
+    if (kind === 'read') return formatCount(labels.activity.readFiles, count);
+    if (kind === 'subagent') return `${count} ${labels.activity.subtask}`;
+    return formatCount(labels.activity.toolCallsCount, count);
+}
+
+function shouldGroup(kind: CodexGroupKind, count: number): boolean {
+    if (kind === 'tool') return count >= 1;
+    if (kind === 'command') return count >= 2;
+    if (kind === 'read') return count >= 3;
+    if (kind === 'subagent') return count >= 2;
+    return count >= 4;
+}
+
+function groupTurnItems(items: CodexTurnItem[], labels: CodexI18nText): CodexTurnItem[] {
+    const output: CodexTurnItem[] = [];
+    let pending: CodexActivityEvent[] = [];
+    let pendingKind: CodexGroupKind | undefined;
+
+    const flush = () => {
+        if (!pending.length) return;
+        if (pendingKind && shouldGroup(pendingKind, pending.length)) {
+            const startedAt = pending[0]!.timestamp;
+            const endedAt = Math.max(...pending.map(event => event.timestamp + (event.durationMs || 0)));
+            const group: CodexActivityGroup = {
+                id: `group-${pendingKind}-${startedAt}-${pending.length}`,
+                kind: pendingKind,
+                status: groupStatus(pending),
+                label: labelForGroup(pendingKind, pending.length, labels),
+                timestamp: startedAt,
+                durationMs: Math.max(0, endedAt - startedAt),
+                events: pending,
+            };
+            output.push({ type: 'group', group });
+        } else {
+            for (const event of pending) output.push({ type: 'activity', event });
+        }
+        pending = [];
+        pendingKind = undefined;
+    };
+
+    for (const item of items) {
+        if (item.type !== 'activity' || !item.event.groupKind) {
+            flush();
+            output.push(item);
+            continue;
+        }
+        if (pendingKind && pendingKind !== item.event.groupKind) flush();
+        pendingKind = item.event.groupKind;
+        pending.push(item.event);
+    }
+    flush();
+    return output;
+}
+
+function summarize(items: CodexTurnItem[], finalText: string, options: CodexBuildOptions): CodexTurnSummary {
+    const events = items.flatMap(item => item.type === 'activity' ? [item.event] : item.type === 'group' ? item.group.events : []);
+    const timestamps = [
+        ...events.map(event => event.timestamp),
+        ...items.filter((item): item is { type: 'text'; text: CodexTextSegment } => item.type === 'text').map(item => item.text.timestamp),
+    ].filter(value => Number.isFinite(value) && value > 0);
+    const startedAt = timestamps.length ? Math.min(...timestamps) : undefined;
+    const completedAt = timestamps.length ? Math.max(...timestamps) : undefined;
+    const issueCount = events.filter(event => event.status === 'failed').length;
+    const running = options.live || events.some(event => event.status === 'running' || event.status === 'waiting' || event.status === 'pending');
+    const status: CodexTurnSummary['status'] = issueCount > 0 ? 'failed' : running ? 'running' : 'complete';
+    const durationMs = startedAt && completedAt ? Math.max(0, completedAt - startedAt) : 0;
+    const durationLabel = durationMs > 0 ? formatDuration(durationMs) : (running ? '' : options.labels.status.shortTask);
+    const base = status === 'running'
+        ? options.labels.status.processing
+        : status === 'failed'
+            ? options.labels.status.processed
+            : options.labels.status.processed;
+    const label = durationLabel
+        ? `${base} ${durationLabel}`
+        : status === 'running'
+            ? base
+            : `${base}${finalText ? '' : ` ${options.labels.status.preparing}`}`;
+    return {
+        status,
+        startedAt,
+        completedAt,
+        durationMs,
+        label,
+        toolCount: events.filter(event => event.kind === 'tool' || event.kind === 'command' || event.kind === 'file').length,
+        commandCount: events.filter(event => event.kind === 'command').length,
+        readCount: events.filter(event => event.groupKind === 'read').length,
+        writeCount: events.filter(event => event.kind === 'file' && event.groupKind !== 'read').length,
+        validationCount: events.filter(event => event.kind === 'validation').length,
+        issueCount,
+    };
+}
+
+export function buildCodexTurnModel(content: string, steps: StepLike[] | undefined, options: CodexBuildOptions): CodexTurnModel {
+    const labels = options.labels;
+    const sorted = [...(steps || [])].sort((a, b) => timestampOf(a, 0) - timestampOf(b, 0));
+    const rawItems: CodexTurnItem[] = [];
+    const pendingByInvocation = new Map<string, CodexActivityEvent>();
+    const pendingByTool = new Map<string, CodexActivityEvent[]>();
+    let textBuffer = '';
+    let textStartedAt = 0;
+    let streamedText = '';
+    let thinkingBuffer = '';
+    let thinkingStartedAt = 0;
+    let thinkingSourceStep: StepLike | undefined;
+    let processTextBuffer = '';
+    let processTextStartedAt = 0;
+
+    const flushText = () => {
+        if (!textBuffer.trim()) {
+            textBuffer = '';
+            textStartedAt = 0;
+            return;
+        }
+        rawItems.push({
+            type: 'text',
+            text: {
+                id: `text-${textStartedAt}-${rawItems.length}`,
+                content: textBuffer,
+                timestamp: textStartedAt || Date.now(),
+                source: 'text_delta',
+            },
+        });
+        streamedText += textBuffer;
+        textBuffer = '';
+        textStartedAt = 0;
+    };
+
+    const flushProcessText = () => {
+        if (!processTextBuffer.trim()) {
+            processTextBuffer = '';
+            processTextStartedAt = 0;
+            return;
+        }
+        rawItems.push({
+            type: 'text',
+            text: {
+                id: `message-${processTextStartedAt}-${rawItems.length}`,
+                content: processTextBuffer,
+                timestamp: processTextStartedAt || Date.now(),
+                source: 'message',
+            },
+        });
+        processTextBuffer = '';
+        processTextStartedAt = 0;
+    };
+
+    const flushThinking = () => {
+        if (!thinkingBuffer.trim()) {
+            thinkingBuffer = '';
+            thinkingStartedAt = 0;
+            thinkingSourceStep = undefined;
+            return;
+        }
+        rawItems.push({
+            type: 'activity',
+            event: createThinkingEvent(
+                thinkingBuffer,
+                labels,
+                rawItems.length,
+                thinkingStartedAt || Date.now(),
+                thinkingSourceStep,
+                !!options.live,
+            ),
+        });
+        thinkingBuffer = '';
+        thinkingStartedAt = 0;
+        thinkingSourceStep = undefined;
+    };
+
+    const rememberPending = (event: CodexActivityEvent) => {
+        if (event.invocationId) pendingByInvocation.set(event.invocationId, event);
+        const key = event.toolName || '';
+        if (!key) return;
+        const list = pendingByTool.get(key) || [];
+        list.push(event);
+        pendingByTool.set(key, list);
+    };
+
+    const takePending = (step: StepLike): CodexActivityEvent | undefined => {
+        const invocationId = invocationIdOf(step);
+        if (invocationId) {
+            const match = pendingByInvocation.get(invocationId);
+            if (match) {
+                pendingByInvocation.delete(invocationId);
+                const list = pendingByTool.get(match.toolName || '') || [];
+                pendingByTool.set(match.toolName || '', list.filter(item => item !== match));
+                return match;
+            }
+        }
+        const toolName = asString(step.toolName || step.name || 'tool');
+        const list = pendingByTool.get(toolName) || [];
+        const match = list.shift();
+        pendingByTool.set(toolName, list);
+        return match;
+    };
+
+    sorted.forEach((step, index) => {
+        const type = asString(step.type);
+        if (type === 'text_delta') {
+            flushThinking();
+            flushProcessText();
+            const ts = timestampOf(step, Date.now() + index);
+            if (!textBuffer) textStartedAt = ts;
+            textBuffer += asString(step.content);
+            return;
+        }
+        if (type === 'thinking_content') {
+            flushText();
+            flushProcessText();
+            const ts = timestampOf(step, Date.now() + index);
+            if (!thinkingBuffer) {
+                thinkingStartedAt = ts;
+                thinkingSourceStep = step;
+            }
+            thinkingBuffer += asString(step.content);
+            return;
+        }
+        if (type === 'thinking') {
+            flushText();
+            flushThinking();
+            const ts = timestampOf(step, Date.now() + index);
+            const content = asString(step.content);
+            if (content && !isInternalThinkingNote(content)) {
+                if (!processTextBuffer) processTextStartedAt = ts;
+                processTextBuffer += content;
+            } else if (content) {
+                thinkingStartedAt = thinkingStartedAt || ts;
+                thinkingSourceStep = thinkingSourceStep || step;
+                thinkingBuffer += content;
+            }
+            return;
+        }
+        if (type === 'cache_stats') {
+            flushText();
+            flushThinking();
+            flushProcessText();
+            return;
+        }
+        flushText();
+        flushThinking();
+        flushProcessText();
+
+        if (type === 'tool_call' || type === 'permission_request') {
+            const event = createToolEvent(step, labels, index);
+            rawItems.push({ type: 'activity', event });
+            if (type === 'tool_call') rememberPending(event);
+            return;
+        }
+        if (type === 'tool_result') {
+            const event = takePending(step);
+            if (event) {
+                applyToolResult(event, step);
+            } else {
+                rawItems.push({ type: 'activity', event: createStandaloneResult(step, labels, index) });
+            }
+            return;
+        }
+        const special = createSpecialEvent(step, labels, index);
+        if (special) rawItems.push({ type: 'activity', event: special });
+        else {
+            const content = asString(step.content);
+            if (content) {
+                rawItems.push({
+                    type: 'text',
+                    text: {
+                        id: `message-${timestampOf(step, Date.now() + index)}-${rawItems.length}`,
+                        content,
+                        timestamp: timestampOf(step, Date.now() + index),
+                        source: 'message',
+                    },
+                });
+            }
+        }
+    });
+    flushText();
+    flushThinking();
+    flushProcessText();
+
+    let finalText = (content || '').trim();
+    const normalizedStream = streamedText.trim();
+    if (normalizedStream && finalText) {
+        if (finalText === normalizedStream) finalText = '';
+        else if (finalText.startsWith(normalizedStream)) finalText = finalText.slice(normalizedStream.length).trim();
+    }
+
+    const items = groupTurnItems(rawItems, labels);
+    return {
+        summary: summarize(items, finalText, options),
+        items,
+        finalText,
+        streamedText: normalizedStream,
+    };
+}

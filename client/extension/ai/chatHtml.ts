@@ -13,6 +13,9 @@ export interface ChatPanelHtmlOptions {
     bodyClass?: string;
     extraStylesheets?: string[];
     scriptName?: string;
+    surface?: 'chat' | 'manager';
+    layout?: 'sidebar' | 'detached';
+    enableCodexUi?: boolean;
 }
 
 /**
@@ -32,7 +35,14 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri, opti
     const stylesheetLinks = stylesheetUris.map(uri => `<link rel="stylesheet" href="${uri}">`).join('\n');
     const csp = webview.cspSource;
     const title = options?.title ?? 'Eddy CWTool Code';
-    const bodyClass = options?.bodyClass ?? 'chat-empty';
+    const surface = options?.surface ?? 'chat';
+    const layout = options?.layout ?? 'sidebar';
+    const enableCodexUi = options?.enableCodexUi ?? true;
+    const bodyClass = [
+        options?.bodyClass ?? 'chat-empty',
+        enableCodexUi ? 'codex-chat-shell' : '',
+        layout === 'detached' ? 'codex-detached-shell' : 'codex-sidebar-shell',
+    ].filter(Boolean).join(' ');
     const locale = vs.env.language.toLowerCase().startsWith('zh') ? 'zh-cn' : 'en';
     const htmlLang = locale === 'zh-cn' ? 'zh-CN' : 'en';
     const t = (en: string, zh: string) => locale === 'zh-cn' ? zh : en;
@@ -45,7 +55,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri, opti
 <title>${title}</title>
 ${stylesheetLinks}
 </head>
-<body class="${bodyClass}" data-locale="${locale}">
+<body class="${bodyClass}" data-locale="${locale}" data-surface="${surface}" data-layout="${layout}" data-codex-ui="${enableCodexUi ? 'true' : 'false'}">
 <div class="header" role="banner">
     <div class="header-title">
         <svg class="header-brand-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
@@ -129,11 +139,11 @@ ${stylesheetLinks}
     <div class="side-workspace-body" id="sideWorkspaceBody"></div>
 </aside>
 
-<div class="chat-area" id="chatArea" role="log" aria-live="polite" aria-label="${t('AI conversation messages', 'AI 对话消息区')}">
+<div class="chat-area codex-conversation" id="chatArea" role="log" aria-live="polite" aria-label="${t('AI conversation messages', 'AI 对话消息区')}">
     <div class="empty-state" id="emptyState" aria-hidden="true"></div>
 </div>
 
-<div id="floatingCardArea" class="floating-card-area"></div>
+<div id="floatingCardArea" class="floating-card-area codex-floating-layer"></div>
 <div id="slashPopup" class="slash-popup"></div>
 
 <div class="input-wrapper">

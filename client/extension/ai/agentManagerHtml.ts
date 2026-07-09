@@ -11,5 +11,8 @@ export function getAgentManagerHtml(webview: vs.Webview, extensionUri: vs.Uri): 
         bodyClass: 'chat-empty agent-manager-shell',
         extraStylesheets: [managerCssUri],
         scriptName: 'agentManager.js',
+        surface: 'manager',
+        layout: 'detached',
+        enableCodexUi: true,
     });
 }

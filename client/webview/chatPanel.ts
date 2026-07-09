@@ -45,6 +45,7 @@ import { buildSlashCommands, filterSlashCommands, renderSlashCommandItems } from
 import { type WorkflowView } from './chat/workflows';
 import { createMarkdownRenderer } from './chat/markdown';
 import { createAnnotationCard, type AnnotationCardOptions } from './chat/annotations';
+import { renderAssistantTurnCodex } from './chat/codexConversation';
 import {
     CONTEXT_TYPE_META,
     generateContextId,
@@ -3360,7 +3361,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     // Delegated to chat/formatters.ts
     const formatDuration = _fmtFormatDuration;
 
-    function buildProcessPanel(sortedSteps: any[]) {
+    function _buildProcessPanel(sortedSteps: any[]) {
         const thinkingSteps = sortedSteps.filter((s: any) => s.type === 'thinking' || s.type === 'thinking_content');
         const textDeltas = sortedSteps.filter((s: any) => s.type === 'text_delta');
         const cacheStatsSteps = sortedSteps.filter((s: any) => s.type === 'cache_stats');
@@ -3623,77 +3624,35 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function buildAssistantMessage(content: string, steps: any[], msgTime: number | null, isSubagentView = false) {
         const div = document.createElement('div');
-        div.className = 'message assistant';
+        div.className = 'message assistant codex-message';
 
-        // ── Header row ──
-        const hdr = document.createElement('div');
-        hdr.className = 'msg-header';
-        hdr.innerHTML = '<svg width="13" height="13" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" class="ai-star"><path fill="#e8c840" d="M8 1L9.2 6.8 15 8l-5.8 1.2L8 15l-1.2-5.8L1 8l5.8-1.2z"/><circle fill="#e8c840" cx="13" cy="3" r="1"/></svg>' +
-            '<span class="msg-role">CWTools AI</span>' +
-            '<span class="msg-time">' + (msgTime || '') + '</span>';
-        div.appendChild(hdr);
-        if (steps && steps.length > 0 && !isSubagentView) {
-            const summaryWrap = document.createElement('div');
-            summaryWrap.innerHTML = renderRunSummaryHtml(makeRunSummary(steps, content), false);
-            div.appendChild(summaryWrap.firstElementChild || summaryWrap);
-        }
-
-        let hadTextDelta = false;
-        let streamedText = '';
         const subAgentGroups = new Map<string, any[]>();
         const mainSteps: any[] = [];
-
-        if (steps && steps.length > 0) {
-            // Detach the steps belonging to the subagent
-            for (const step of steps) {
-                if (step.agentId) {
-                    let group = subAgentGroups.get(step.agentId);
-                    if (!group) {
-                        group = [];
-                        subAgentGroups.set(step.agentId, group);
-                    }
-                    const stepCopy = { ...step };
-                    delete stepCopy.agentId;
-                    if (stepCopy.content && stepCopy.content.startsWith(`[${step.agentId}] `)) {
-                        stepCopy.content = stepCopy.content.substring(step.agentId.length + 3);
-                    }
-                    group.push(stepCopy);
-                } else {
-                    mainSteps.push(step);
+        for (const step of steps || []) {
+            if (step.agentId && !isSubagentView) {
+                let group = subAgentGroups.get(step.agentId);
+                if (!group) {
+                    group = [];
+                    subAgentGroups.set(step.agentId, group);
                 }
-            }
-
-            const sorted = [...mainSteps].sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0));
-            for (const step of sorted.filter((s: any) =>
-                s.type === 'compaction' && s.compactionInfo && s.compactionInfo.state !== 'start'
-            )) {
-                div.appendChild(createContextCompactionCard(step as RendererStep));
-            }
-            const processPanel = buildProcessPanel(sorted);
-            if (processPanel) div.appendChild(processPanel);
-            hadTextDelta = sorted.some((s: any) => s.type === 'text_delta');
-            streamedText = sorted.filter((s: any) => s.type === 'text_delta').map((s: any) => s.content || '').join('').trim();
-        }
-
-        // Final text response — only render if no text_delta steps were rendered inline
-        // (otherwise content is a duplicate of what text_delta already streamed)
-        let finalText = (content || '').trim();
-        if (hadTextDelta && streamedText) {
-            if (finalText === streamedText) {
-                finalText = '';
-            } else if (finalText.startsWith(streamedText)) {
-                finalText = finalText.slice(streamedText.length).trim();
+                const stepCopy = { ...step };
+                delete stepCopy.agentId;
+                if (stepCopy.content && stepCopy.content.startsWith(`[${step.agentId}] `)) {
+                    stepCopy.content = stepCopy.content.substring(step.agentId.length + 3);
+                }
+                group.push(stepCopy);
+            } else {
+                mainSteps.push(step);
             }
         }
 
-        // Final text response: hide exact streamed duplicates, but keep host-added
-        // plan/clarification text that is appended after streaming completes.
-        if (finalText) {
-            const b = document.createElement('div');
-            b.className = 'msg-bubble';
-            b.innerHTML = renderMarkdown(finalText);
-            div.appendChild(b);
-        }
+        const sorted = [...mainSteps].sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0));
+        div.innerHTML = renderAssistantTurnCodex(content, sorted, {
+            i18n: chatI18n,
+            msgTime,
+            renderMarkdown,
+            isSubagentView,
+        });
 
         // Recursively render all sub-Agent independent boxes to prevent merging with the main dialogue flow
         for (const [agentId, groupSteps] of subAgentGroups.entries()) {
@@ -4045,18 +4004,89 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function initLiveAssistantDiv() {
         const div = document.createElement('div');
-        div.className = 'message assistant live-msg';
-        const hdr = document.createElement('div');
-        hdr.className = 'msg-header';
-        hdr.innerHTML = '<svg width="13" height="13" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" class="ai-star"><path fill="#e8c840" d="M8 1L9.2 6.8 15 8l-5.8 1.2L8 15l-1.2-5.8L1 8l5.8-1.2z"/><circle fill="#e8c840" cx="13" cy="3" r="1"/></svg>' +
-            '<span class="msg-role">CWTools AI</span>';
-        div.appendChild(hdr);
-        const summary = document.createElement('div');
-        summary.className = 'live-run-summary-anchor';
-        summary.innerHTML = renderRunSummaryHtml(makeRunSummary([], chatI18n.locale === 'zh-cn' ? '准备中' : 'Preparing'), true);
-        div.appendChild(summary);
-
+        div.className = 'message assistant live-msg codex-message';
+        const host = document.createElement('div');
+        host.className = 'codex-live-host';
+        host.innerHTML = renderAssistantTurnCodex('', [], {
+            i18n: chatI18n,
+            live: true,
+            renderMarkdown,
+        });
+        div.appendChild(host);
         return div;
+    }
+
+    interface CodexTurnUiSnapshot {
+        turnCollapsed: boolean;
+        expandedGroupIds: Set<string>;
+        hadExpandedGroup: boolean;
+    }
+
+    function snapshotCodexTurnUiState(host: HTMLElement): CodexTurnUiSnapshot {
+        const turn = host.querySelector(':scope > .codex-turn') as HTMLElement | null;
+        const groups = Array.from(host.querySelectorAll<HTMLElement>('.codex-activity-group'));
+        const expandedGroups = groups.filter(group => !group.classList.contains('codex-activity-group-collapsed'));
+        return {
+            turnCollapsed: !!turn?.classList.contains('codex-turn-collapsed'),
+            expandedGroupIds: new Set(expandedGroups.map(group => group.dataset.activityGroupId || '').filter(Boolean)),
+            hadExpandedGroup: expandedGroups.length > 0,
+        };
+    }
+
+    function restoreCodexTurnUiState(host: HTMLElement, snapshot: CodexTurnUiSnapshot): void {
+        const turn = host.querySelector(':scope > .codex-turn') as HTMLElement | null;
+        const turnToggle = host.querySelector('[data-codex-turn-toggle]') as HTMLElement | null;
+        if (turn) turn.classList.toggle('codex-turn-collapsed', snapshot.turnCollapsed);
+        if (turnToggle) turnToggle.setAttribute('aria-expanded', snapshot.turnCollapsed ? 'false' : 'true');
+
+        const groups = Array.from(host.querySelectorAll<HTMLElement>('.codex-activity-group'));
+        let restoredExpandedGroup = false;
+        for (const group of groups) {
+            const shouldExpand = snapshot.expandedGroupIds.has(group.dataset.activityGroupId || '');
+            if (shouldExpand) {
+                group.classList.remove('codex-activity-group-collapsed');
+                restoredExpandedGroup = true;
+            }
+            const toggle = group.querySelector('[data-codex-activity-group-toggle]') as HTMLElement | null;
+            if (toggle) toggle.setAttribute('aria-expanded', group.classList.contains('codex-activity-group-collapsed') ? 'false' : 'true');
+        }
+
+        if (snapshot.hadExpandedGroup && !restoredExpandedGroup && groups.length > 0) {
+            const group = groups[0]!;
+            group.classList.remove('codex-activity-group-collapsed');
+            const toggle = group.querySelector('[data-codex-activity-group-toggle]') as HTMLElement | null;
+            if (toggle) toggle.setAttribute('aria-expanded', 'true');
+        }
+    }
+
+    function renderCodexLiveTurn(state: AgentStreamState, finalContent = ''): void {
+        if (!state.container) return;
+        const host = state.container.querySelector(':scope > .codex-live-host') as HTMLElement | null;
+        if (!host) return;
+        const uiSnapshot = snapshotCodexTurnUiState(host);
+        host.innerHTML = renderAssistantTurnCodex(finalContent, state.liveSteps, {
+            i18n: chatI18n,
+            live: !state.isComplete,
+            renderMarkdown,
+        });
+        restoreCodexTurnUiState(host, uiSnapshot);
+        enhanceCodeBlocks(host);
+        enhanceTaskLists(host);
+    }
+
+    function appendCodexLiveSyntheticStep(step: any): void {
+        if (!currentAssistantDiv?.classList.contains('codex-message')) return;
+        const state = getStreamState(undefined);
+        const key = step.invocationId || step.permissionId || step.messageId || `${step.type}:${step.content || step.toolName || ''}`;
+        if (key && state.liveSteps.some(existing =>
+            (existing.invocationId || existing.permissionId || existing.messageId || `${existing.type}:${existing.content || existing.toolName || ''}`) === key
+        )) {
+            return;
+        }
+        state.liveSteps.push(step);
+        state.lastStepAt = Date.now();
+        renderCodexLiveTurn(state);
+        scrollBottom();
     }
 
     function flushLiveText(state: AgentStreamState) {
@@ -4162,6 +4192,22 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             if (s.transactionCard && s.transactionCard.status === 'pending') {
                 showTransactionCard(s.transactionCard);
             }
+            return;
+        }
+
+        if (!s.agentId && state.container?.classList.contains('codex-message')) {
+            const coalesced = coalesceLiveStep(state, s);
+            if (!coalesced) state.liveSteps.push(s);
+            state.lastStepAt = Date.now();
+            if (s.type === 'subtask_complete') {
+                state.isComplete = true;
+                state.completedAt = Date.now();
+            }
+            renderCodexLiveTurn(state, s.type === 'subtask_complete' ? (s.content || '') : '');
+            if (s.transactionCard && s.transactionCard.status === 'pending') {
+                showTransactionCard(s.transactionCard);
+            }
+            scrollBottom();
             return;
         }
         const coalesced = coalesceLiveStep(state, s);
@@ -4415,6 +4461,24 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         scrollBottom();
     }
 
+    chatArea.addEventListener('click', (e) => {
+        const groupToggle = (e.target as HTMLElement).closest('[data-codex-activity-group-toggle]') as HTMLElement | null;
+        if (groupToggle) {
+            const group = groupToggle.closest('.codex-activity-group') as HTMLElement | null;
+            if (!group) return;
+            const collapsed = group.classList.toggle('codex-activity-group-collapsed');
+            groupToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            return;
+        }
+
+        const toggle = (e.target as HTMLElement).closest('[data-codex-turn-toggle]') as HTMLElement | null;
+        if (!toggle) return;
+        const turn = toggle.closest('.codex-turn') as HTMLElement | null;
+        if (!turn) return;
+        const collapsed = turn.classList.toggle('codex-turn-collapsed');
+        toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    });
+
     // ── Phase 5: Event delegation for inline permission buttons in tool timeline ──
     chatArea.addEventListener('click', (e) => {
         const btn = (e.target as HTMLElement).closest('.tp-perm-btn') as HTMLElement | null;
@@ -4526,7 +4590,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function addUserMessage(text: string, msgIdx: number, images?: string[], contexts?: ActiveContext[]) {
         emptyState.style.display = 'none';
         const div = document.createElement('div');
-        div.className = 'message user';
+        div.className = 'message user codex-user-message';
         if (msgIdx !== undefined && msgIdx >= 0) div.dataset.msgIndex = String(msgIdx);
 
         const hdr = document.createElement('div');
@@ -4534,7 +4598,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         hdr.innerHTML = '<span class="msg-role user-role">You</span><span class="msg-time">' + formatTime(Date.now()) + '</span>';
 
         const bubble = document.createElement('div');
-        bubble.className = 'msg-bubble user-bubble';
+        bubble.className = 'msg-bubble user-bubble codex-user-bubble';
 
         const localisationCardHtml = buildLocalisationPromptCardHtml(text, chatI18n.locale);
         if (localisationCardHtml) {
@@ -5397,13 +5461,38 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 break;
             }
 
-            case 'pendingWriteFile': showPendingWriteCard(msg.file, msg.messageId, msg.isNewFile, msg); break;
+            case 'pendingWriteFile':
+                appendCodexLiveSyntheticStep({
+                    type: 'write_confirmation_request',
+                    toolName: 'write_file',
+                    invocationId: msg.messageId ? `write:${msg.messageId}` : undefined,
+                    messageId: msg.messageId,
+                    content: msg.file || '',
+                    toolArgs: { filePath: msg.file, isNewFile: !!msg.isNewFile },
+                    toolResult: msg.diffLines ? { diffLines: msg.diffLines } : undefined,
+                    timestamp: Date.now(),
+                });
+                showPendingWriteCard(msg.file, msg.messageId, msg.isNewFile, msg);
+                break;
 
             case 'floatingCardResolved':
                 resolveFloatingCard(msg.card, msg.id);
                 break;
 
             case 'permissionRequest': {
+                appendCodexLiveSyntheticStep({
+                    type: 'permission_request',
+                    toolName: msg.tool || 'tool',
+                    permissionId: msg.permissionId,
+                    invocationId: msg.permissionId ? `permission:${msg.permissionId}` : undefined,
+                    content: msg.description || msg.command || msg.tool || '',
+                    toolArgs: {
+                        command: msg.command || undefined,
+                        description: msg.description || undefined,
+                    },
+                    toolResult: msg.preflight ? { preflight: msg.preflight } : undefined,
+                    timestamp: Date.now(),
+                });
                 showPermissionCard(msg.permissionId, msg.tool || '', msg.description || '', msg.command || '', !!msg.allowAlways, msg.preflight);
                 break;
             }

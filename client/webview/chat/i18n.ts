@@ -63,6 +63,58 @@ export interface ChatI18nText {
         contextCompacted: string;
         contextCompactionFailed: string;
     };
+    codex: {
+        assistantName: string;
+        status: {
+            preparing: string;
+            processing: string;
+            processed: string;
+            blocked: string;
+            shortTask: string;
+            issue: string;
+            issues: string;
+        };
+        activity: {
+            thinking: string;
+            message: string;
+            tool: string;
+            tools: string;
+            toolCalls: string;
+            toolCallsCount: string;
+            command: string;
+            commands: string;
+            ranCommand: string;
+            ranCommands: string;
+            readFile: string;
+            readFiles: string;
+            editedFile: string;
+            wroteFile: string;
+            validation: string;
+            permission: string;
+            waitingPermission: string;
+            waitingWrite: string;
+            context: string;
+            contextCompaction: string;
+            cacheStats: string;
+            artifact: string;
+            subtask: string;
+        };
+        details: {
+            arguments: string;
+            result: string;
+            command: string;
+            cwd: string;
+            exitCode: string;
+            duration: string;
+            stdout: string;
+            stderr: string;
+            output: string;
+            preview: string;
+            target: string;
+            status: string;
+            noDetails: string;
+        };
+    };
     annotations: {
         plan: AnnotationI18nText;
         orchestratorPlan: AnnotationI18nText;
@@ -249,6 +301,58 @@ const EN: ChatI18nText = {
         compactingContextDetail: 'Summarizing older turns while preserving goals, decisions, and recent progress',
         contextCompacted: 'Context compacted',
         contextCompactionFailed: 'Context compaction failed',
+    },
+    codex: {
+        assistantName: 'CWTools AI',
+        status: {
+            preparing: 'Preparing',
+            processing: 'Processing',
+            processed: 'Processed',
+            blocked: 'Blocked',
+            shortTask: 'short task',
+            issue: 'issue',
+            issues: 'issues',
+        },
+        activity: {
+            thinking: 'Thinking',
+            message: 'Progress update',
+            tool: 'Tool',
+            tools: 'Tools',
+            toolCalls: 'Tool calls',
+            toolCallsCount: 'Tool calls ({count})',
+            command: 'Command',
+            commands: 'Commands',
+            ranCommand: 'Ran command',
+            ranCommands: 'Ran {count} commands',
+            readFile: 'Read',
+            readFiles: 'Read {count} files',
+            editedFile: 'Edited',
+            wroteFile: 'Wrote',
+            validation: 'Validated',
+            permission: 'Permission',
+            waitingPermission: 'Waiting for permission',
+            waitingWrite: 'Waiting for write confirmation',
+            context: 'Context',
+            contextCompaction: 'Compacted context',
+            cacheStats: 'Prefix cache',
+            artifact: 'Artifact',
+            subtask: 'Subtask',
+        },
+        details: {
+            arguments: 'Arguments',
+            result: 'Result',
+            command: 'Command',
+            cwd: 'Working directory',
+            exitCode: 'Exit code',
+            duration: 'Duration',
+            stdout: 'stdout',
+            stderr: 'stderr',
+            output: 'Output',
+            preview: 'Preview',
+            target: 'Target',
+            status: 'Status',
+            noDetails: 'No additional details.',
+        },
     },
     annotations: {
         plan: {
@@ -472,6 +576,58 @@ const ZH_CN: ChatI18nText = {
         compactingContextDetail: '整理较早的对话，同时保留目标、关键决策和最新进展',
         contextCompacted: '上下文压缩完成',
         contextCompactionFailed: '上下文压缩失败',
+    },
+    codex: {
+        assistantName: 'CWTools AI',
+        status: {
+            preparing: '准备中',
+            processing: '正在处理',
+            processed: '已处理',
+            blocked: '已阻塞',
+            shortTask: '短任务',
+            issue: '个问题',
+            issues: '个问题',
+        },
+        activity: {
+            thinking: '思考中',
+            message: '过程说明',
+            tool: '工具',
+            tools: '工具',
+            toolCalls: '工具调用',
+            toolCallsCount: '工具调用（{count}）',
+            command: '命令',
+            commands: '命令',
+            ranCommand: '已运行命令',
+            ranCommands: '已运行 {count} 条命令',
+            readFile: '读取',
+            readFiles: '已读取 {count} 个文件',
+            editedFile: '编辑',
+            wroteFile: '写入',
+            validation: '验证',
+            permission: '权限',
+            waitingPermission: '等待权限',
+            waitingWrite: '等待写入确认',
+            context: '上下文',
+            contextCompaction: '压缩上下文',
+            cacheStats: 'Prefix Cache',
+            artifact: '产物',
+            subtask: '子任务',
+        },
+        details: {
+            arguments: '参数',
+            result: '结果',
+            command: '命令',
+            cwd: '工作目录',
+            exitCode: '退出码',
+            duration: '持续时间',
+            stdout: '标准输出',
+            stderr: '标准错误',
+            output: '输出',
+            preview: '预览',
+            target: '目标',
+            status: '状态',
+            noDetails: '没有更多详情。',
+        },
     },
     annotations: {
         plan: {

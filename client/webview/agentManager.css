@@ -4,6 +4,7 @@ body.agent-manager-shell {
     --manager-active-left-width: var(--manager-left-width);
     --manager-right-width: clamp(520px, 38vw, 760px);
     --manager-active-right-width: 0px;
+    --codex-chat-column: min(100%, 840px);
     --manager-bg: var(--vscode-editor-background, #1e1e1e);
     --manager-panel: var(--vscode-sideBar-background, #252526);
     --manager-panel-soft: color-mix(in srgb, var(--manager-panel) 88%, var(--manager-bg));
@@ -990,8 +991,8 @@ body.agent-manager-shell .chat-area {
 }
 
 body.agent-manager-shell .chat-area > *:not(.empty-state) {
-    width: min(100%, 980px);
-    max-width: 980px;
+    width: var(--codex-chat-column);
+    max-width: var(--codex-chat-column);
 }
 
 body.agent-manager-shell .chat-area > *:not(.empty-state):last-child {

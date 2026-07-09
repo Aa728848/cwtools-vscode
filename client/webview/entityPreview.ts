@@ -1399,7 +1399,10 @@ interface SkeletonBuildResult {
 }
 
 /** Build a THREE.Bone hierarchy from PDX parsed bone data. */
-function buildSkeletonFromParsedBones(parsedBones: import('./pdxMeshParser').ParsedBone[]): SkeletonBuildResult | null {
+function buildSkeletonFromParsedBones(
+    parsedBones: import('./pdxMeshParser').ParsedBone[],
+    positionScale = 1.0,
+): SkeletonBuildResult | null {
     if (parsedBones.length === 0) return null;
 
     const bones: THREE.Bone[] = [];
@@ -1446,6 +1449,7 @@ function buildSkeletonFromParsedBones(parsedBones: import('./pdxMeshParser').Par
         }
         const pos = new THREE.Vector3(); const rot = new THREE.Quaternion(); const scl = new THREE.Vector3();
         localMat.decompose(pos, rot, scl);
+        if (positionScale !== 1.0) pos.multiplyScalar(positionScale);
         bones[i]!.position.copy(pos);
         bones[i]!.quaternion.copy(rot);
         if (scl.x > 0.001 && scl.y > 0.001 && scl.z > 0.001) bones[i]!.scale.copy(scl);
@@ -1465,7 +1469,12 @@ function buildSkeletonFromParsedBones(parsedBones: import('./pdxMeshParser').Par
  * Creates keyframe tracks that reference bone names in the scene graph.
  * boneNameMap: maps animation bone index → actual scene bone name
  */
-function pdxAnimToClip(anim: ParsedAnimation, clipName: string, boneNameMap?: Map<number, string>): THREE.AnimationClip {
+function pdxAnimToClip(
+    anim: ParsedAnimation,
+    clipName: string,
+    boneNameMap?: Map<number, string>,
+    translationScale = 1.0,
+): THREE.AnimationClip {
     const tracks: THREE.KeyframeTrack[] = [];
     const duration = (anim.sampleCount - 1) / anim.fps;
 
@@ -1488,10 +1497,11 @@ function pdxAnimToClip(anim: ParsedAnimation, clipName: string, boneNameMap?: Ma
 
         // Translation track
         if (bone.translations && tCount > 0) {
+            const translationData = scaleFloat32Array(bone.translations, translationScale);
             tracks.push(new THREE.VectorKeyframeTrack(
                 `${targetName}.position`,
                 makeTimes(tCount),
-                bone.translations as unknown as number[],
+                translationData as unknown as number[],
             ));
         }
 
@@ -1530,7 +1540,7 @@ function pdxAnimToClip(anim: ParsedAnimation, clipName: string, boneNameMap?: Ma
  * Creates AnimationMixer on the modelGroup and parses all clips.
  * animData: Map of animName → { buffer, stateName }
  */
-function initAnimations(animBuffers: Map<string, ArrayBuffer>) {
+function initAnimations(animBuffers: Map<string, ArrayBuffer>, translationScale = 1.0) {
     if (!currentModel) return;
 
     // Clean up previous mixer
@@ -1566,7 +1576,7 @@ function initAnimations(animBuffers: Map<string, ArrayBuffer>) {
     for (const [animName, buffer] of animBuffers) {
         try {
             const parsed = parsePdxAnim(buffer);
-            const clip = pdxAnimToClip(parsed, animName, boneNameMap);
+            const clip = pdxAnimToClip(parsed, animName, boneNameMap, translationScale);
             animationClips.set(animName, clip);
         } catch {
         }
@@ -2215,11 +2225,21 @@ async function upgradeSubmeshMaterial(mesh: THREE.Mesh | THREE.SkinnedMesh, text
 
 // ── Mesh → Three.js Geometry ─────────────────────────────────────────────────
 
-function buildGeometry(subMesh: ParsedSubMesh): THREE.BufferGeometry {
+function scaleFloat32Array(values: Float32Array, scale: number): Float32Array {
+    if (scale === 1.0) return values;
+    const scaled = new Float32Array(values.length);
+    for (let i = 0; i < values.length; i++) {
+        scaled[i] = values[i]! * scale;
+    }
+    return scaled;
+}
+
+function buildGeometry(subMesh: ParsedSubMesh, positionScale = 1.0): THREE.BufferGeometry {
     const geo = new THREE.BufferGeometry();
 
     // Positions (vec3)
-    geo.setAttribute('position', new THREE.BufferAttribute(subMesh.positions, 3));
+    const positions = scaleFloat32Array(subMesh.positions, positionScale);
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
     // Normals (vec3)
     if (subMesh.normals.length > 0) {
@@ -2239,7 +2259,7 @@ function buildGeometry(subMesh: ParsedSubMesh): THREE.BufferGeometry {
 
     // Skinning attributes
     if (subMesh.skin) {
-        const vertexCount = subMesh.positions.length / 3;
+        const vertexCount = positions.length / 3;
 
         const declared = subMesh.skin.boneCount || 4;
         const derived = vertexCount > 0
@@ -2406,12 +2426,15 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
         // Maya Z+ forward → Three.js Z- forward: rotate 180° around Y
         modelGroup.rotation.y = Math.PI;
 
+        // Scale mesh-space data from the .gfx pdxmesh definition into entity space.
+        const meshScale = entity.meshScale ?? 1.0;
+
         // Build skeleton + GPU skinning
         let sharedBoneRoot: THREE.Bone | null = null;
         let sharedSkeleton: THREE.Skeleton | null = null;
         const firstSkelShape = parsed.shapes.find(s => s.skeleton.length > 0);
         if (firstSkelShape) {
-            const skelResult = buildSkeletonFromParsedBones(firstSkelShape.skeleton);
+            const skelResult = buildSkeletonFromParsedBones(firstSkelShape.skeleton, meshScale);
             if (skelResult) {
                 sharedBoneRoot = skelResult.root;
                 sharedBoneRoot.userData.isSkeleton = true;
@@ -2420,9 +2443,6 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                 sharedSkeleton = new THREE.Skeleton(skelResult.orderedBones);
             }
         }
-
-        // Apply pdxmesh scale
-        const meshScale = entity.meshScale ?? 1.0;
 
         // Find leaf bone index (deepest in first chain) for non-skinned meshes
         let leafBoneIndex = 0;
@@ -2447,7 +2467,7 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                 const submeshIndex = rootSubmeshIndexCounter++;
                 const currentMeshIndexInShape = meshIndexInShape++;
                 
-                const geo = buildGeometry(subMesh);
+                const geo = buildGeometry(subMesh, meshScale);
                 const meshMat = subMesh.material;
                 const textures = resolveSubmeshTextures(submeshIndex, subMesh.name, {
                     shader: meshMat.shader,
@@ -2653,6 +2673,8 @@ async function loadAttachChildren(
             const scale = child.scale ?? 1.0;
             childGroup.scale.setScalar(scale);
 
+            // Scale mesh-space data from the child .gfx pdxmesh definition into entity space.
+            const childMeshScale = child.meshScale ?? 1.0;
 
             if (child.meshBase64) {
                 // Decode mesh buffer
@@ -2670,8 +2692,6 @@ async function loadAttachChildren(
                     textureMap: child.textureMap,
                 };
 
-                // Apply pdxmesh scale (from .gfx definition)
-                const childMeshScale = child.meshScale ?? 1.0;
                 // Build skeleton for child entity.
                 // Prefix child bone names with entity name to avoid collisions
                 // with parent bones (e.g., both having a bone named "root").
@@ -2680,7 +2700,7 @@ async function loadAttachChildren(
                 const childBonePrefix = `${child.entityName}__`;
                 const firstChildSkelShape = parsed.shapes.find(s => s.skeleton.length > 0);
                 if (firstChildSkelShape) {
-                    const childSkelResult = buildSkeletonFromParsedBones(firstChildSkelShape.skeleton);
+                    const childSkelResult = buildSkeletonFromParsedBones(firstChildSkelShape.skeleton, childMeshScale);
                     if (childSkelResult) {
                         // Prefix all child bone names to avoid name collisions
                         for (const bone of childSkelResult.orderedBones) {
@@ -2699,7 +2719,7 @@ async function loadAttachChildren(
                         const submeshIndex = submeshIndexCounter++;
                         const currentMeshIndexInShape = meshIndexInShape++;
                         
-                        const geo = buildGeometry(subMesh);
+                        const geo = buildGeometry(subMesh, childMeshScale);
                         const meshMat = subMesh.material;
                         const textures = resolveSubmeshTextures(submeshIndex, subMesh.name, {
                             shader: meshMat.shader,
@@ -2831,7 +2851,7 @@ async function loadAttachChildren(
                         const bin = atob(animEntry.animBase64);
                         const buf = new Uint8Array(bin.length);
                         for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-                        const clip = pdxAnimToClip(parsePdxAnim(buf.buffer), animEntry.animName, childBoneNameMap);
+                        const clip = pdxAnimToClip(parsePdxAnim(buf.buffer), animEntry.animName, childBoneNameMap, childMeshScale);
                         clipMap.set(animEntry.stateName, clip);
                     } catch {
                     }
@@ -4308,7 +4328,7 @@ async function handleWindowMessage(event: MessageEvent) {
             rebuildVertexSnapMeshCache();
             // Initialize animations after model is loaded
             if (animBuffers.size > 0) {
-                initAnimations(animBuffers);
+                initAnimations(animBuffers, data.entity.meshScale ?? 1.0);
             }
             break;
         }

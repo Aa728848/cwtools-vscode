@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.13] - 2026-07-09
+
+### 修复 / Fixes
+- **[修复] 修复Meshscale的应用问题**
+  English: [Fix] Fix application issues of Meshscale.
+
 ## [2.8.12] - 2026-07-08
 
 ### 功能与优化 / Features & Optimizations

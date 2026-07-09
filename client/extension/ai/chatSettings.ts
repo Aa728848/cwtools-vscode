@@ -506,7 +506,7 @@ export class ChatSettingsManager {
             return;
         }
 
-        if (providerId === 'opencode') {
+        if (providerId === 'opencode' || providerId === 'opencode-go') {
             const { BUILTIN_PROVIDERS } = await import('./providers');
             const models = (BUILTIN_PROVIDERS[providerId]?.models || []).map(m => ({ id: m }));
             this.postMessage({ type: 'apiModelsFetched', providerId, models, error: '' });

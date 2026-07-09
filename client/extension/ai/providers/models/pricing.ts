@@ -64,6 +64,21 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
         if (lower.startsWith('deepseek-v4-pro')) return 0.08;
         return 0.1;
     }
+    // OpenCode Go — per-model cached-read ratios from Go pricing (cached/input).
+    if (providerId?.toLowerCase() === 'opencode-go') {
+        if (lower.includes('free') || lower.includes('pickle')) return 0;
+        if (lower.startsWith('mimo-v2.5-pro')) return 0.0083;
+        if (lower.startsWith('mimo-v2.5')) return 0.02;
+        if (lower.startsWith('deepseek-v4-pro')) return 0.01;
+        if (lower.startsWith('deepseek-v4-flash')) return 0.02;
+        if (lower.startsWith('kimi-k2.7')) return 0.2;
+        if (lower.startsWith('kimi')) return 0.17;
+        if (lower.startsWith('minimax')) return 0.2;
+        if (lower.startsWith('qwen3.7-max')) return 0.2;
+        if (lower.startsWith('qwen')) return 0.1;
+        if (lower.startsWith('glm')) return 0.19;
+        return 0.1;
+    }
     // DeepSeek — extremely aggressive cache pricing
     if (lower.includes('deepseek')) return 0.01;
     // Anthropic Claude

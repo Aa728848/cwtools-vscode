@@ -29,6 +29,7 @@ import {
     getEnableThinkingParams,
     getEffectiveTemperature,
     getOpenCodeApiFormat,
+    getOpenCodeGoApiFormat,
 } from './providers';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
@@ -405,7 +406,7 @@ export class AIService {
         const lowerModel = model.toLowerCase();
         const effectiveApiFormat = providerId === 'opencode'
             ? getOpenCodeApiFormat(model)
-            : customApiFormat;
+            : (providerId === 'opencode-go' ? getOpenCodeGoApiFormat(model) : customApiFormat);
 
         // ── Disable thinking: per-provider API parameters ──
         // Each provider has a different mechanism to disable thinking/reasoning.
@@ -1510,7 +1511,7 @@ export class AIService {
         const buildClaudeHeaders = (authMode: 'x-api-key' | 'bearer'): Record<string, string> => ({
             'Content-Type': 'application/json',
             'anthropic-version': '2023-06-01',
-            ...(providerId === 'opencode'
+            ...(providerId === 'opencode' || providerId === 'opencode-go'
                 ? this.buildAuthHeaders(providerId, apiKey)
                 : authMode === 'bearer'
                     ? this.buildAuthHeaders(providerId, apiKey)

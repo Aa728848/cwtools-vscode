@@ -91,6 +91,7 @@
   "configuration.stellarisLanguageServices.ai.provider.enum.minimax-token-plan": "MiniMax Token Plan",
   "configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan": "MiMo Token Plan (Xiaomi)",
   "configuration.stellarisLanguageServices.ai.provider.enum.opencode": "OpenCode Zen",
+  "configuration.stellarisLanguageServices.ai.provider.enum.opencode-go": "OpenCode Go",
   "configuration.stellarisLanguageServices.ai.provider.enum.kimi": "Kimi (Moonshot)",
   "configuration.stellarisLanguageServices.ai.provider.description": "AI Provider. API Keys: [OpenAI](https://platform.openai.com/api-keys) | [Claude](https://console.anthropic.com/) | [DeepSeek](https://platform.deepseek.com/) | [MiniMax](https://minimaxi.com/) | [Zhipu](https://bigmodel.cn/) | [Qwen](https://dashscope.console.aliyun.com/) | [SiliconFlow](https://cloud.siliconflow.cn/) | [OpenRouter](https://openrouter.ai/keys) | [GitHub](https://github.com/marketplace/models) | [Together AI](https://api.together.xyz/) | [DeepInfra](https://deepinfra.com/dash/api_keys) | [Kimi](https://platform.moonshot.cn/) | Custom OpenAI-compatible endpoint",
   "configuration.stellarisLanguageServices.ai.model.description": "AI model name (leave empty for provider default)",

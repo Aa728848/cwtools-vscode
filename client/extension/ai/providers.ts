@@ -16,6 +16,7 @@ import {
     isModelFIMCapable,
     ALWAYS_THINKING_PREFIXES,
     OPENCODE_MODEL_LIMITS,
+    OPENCODE_GO_MODEL_LIMITS,
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
     getModelOutputTokens,
@@ -31,6 +32,7 @@ export {
     isModelFIMCapable,
     ALWAYS_THINKING_PREFIXES,
     OPENCODE_MODEL_LIMITS,
+    OPENCODE_GO_MODEL_LIMITS,
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
     getModelOutputTokens,
@@ -226,6 +228,13 @@ export function getOpenCodeApiFormat(model: string): CustomApiFormat {
     if (normalized.startsWith('gpt-')) return 'openai-responses';
     if (normalized.startsWith('claude-') || normalized.startsWith('qwen')) return 'anthropic-messages';
     if (normalized.startsWith('gemini-')) return 'gemini-generate-content';
+    return 'openai-chat-completions';
+}
+
+/** OpenCode Go wire protocols: MiniMax and Qwen use Anthropic Messages, the rest use OpenAI chat completions. */
+export function getOpenCodeGoApiFormat(model: string): CustomApiFormat {
+    const normalized = model.toLowerCase().replace(/\s*\(免费\)$/i, '');
+    if (normalized.startsWith('minimax-') || normalized.startsWith('qwen')) return 'anthropic-messages';
     return 'openai-chat-completions';
 }
 

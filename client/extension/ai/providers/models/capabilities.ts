@@ -83,7 +83,7 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'mimo-v2.5-free': true,
     'mimo-v2-omni': true,
     'mimo-v2-pro': false,
-    'mimo-v2.5': false,
+    'mimo-v2.5': true,
     'mimo-v2-flash': false,
     'kimi-k2.7-code': true,
     'kimi-k2.6': true,
@@ -202,6 +202,24 @@ export const OPENCODE_MODEL_LIMITS: Record<string, { context: number; output: nu
     'mimo-v2.5-free': { context: 200000, output: 32000 },
     'nemotron-3-ultra-free': { context: 1000000, output: 128000 },
     'north-mini-code-free': { context: 256000, output: 64000 },
+};
+
+/** OpenCode Go limits from each vendor's official model documentation. */
+export const OPENCODE_GO_MODEL_LIMITS: Record<string, { context: number; output: number }> = {
+    'glm-5.2': { context: 1048576, output: 131072 },
+    'glm-5.1': { context: 204800, output: 131072 },
+    'kimi-k2.7-code': { context: 262144, output: 32768 },
+    'kimi-k2.6': { context: 262144, output: 32768 },
+    'mimo-v2.5': { context: 1048576, output: 32000 },
+    'mimo-v2.5-pro': { context: 1048576, output: 65536 },
+    'minimax-m3': { context: 1048576, output: 131072 },
+    'minimax-m2.7': { context: 196608, output: 131072 },
+    'minimax-m2.5': { context: 196608, output: 131072 },
+    'qwen3.7-max': { context: 1048576, output: 65536 },
+    'qwen3.7-plus': { context: 1048576, output: 65536 },
+    'qwen3.6-plus': { context: 1048576, output: 65536 },
+    'deepseek-v4-pro': { context: 1048576, output: 393216 },
+    'deepseek-v4-flash': { context: 1048576, output: 393216 },
 };
 
 /**
@@ -382,6 +400,9 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     ...Object.fromEntries(
         Object.entries(OPENCODE_MODEL_LIMITS).map(([model, limits]) => [`opencode:${model}`, limits.context])
     ),
+    ...Object.fromEntries(
+        Object.entries(OPENCODE_GO_MODEL_LIMITS).map(([model, limits]) => [`opencode-go:${model}`, limits.context])
+    ),
 };
 
 /**
@@ -427,6 +448,10 @@ export function getModelOutputTokens(model: string, providerId?: string): number
 
     if (providerId === 'opencode') {
         return OPENCODE_MODEL_LIMITS[lower]?.output ?? 32768;
+    }
+
+    if (providerId === 'opencode-go') {
+        return OPENCODE_GO_MODEL_LIMITS[lower]?.output ?? 32768;
     }
 
     if (providerId === 'openai') {

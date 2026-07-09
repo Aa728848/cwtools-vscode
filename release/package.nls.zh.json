@@ -91,6 +91,7 @@
   "configuration.stellarisLanguageServices.ai.provider.enum.minimax-token-plan": "MiniMax额度套餐",
   "configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan": "小米MiMo额度套餐",
   "configuration.stellarisLanguageServices.ai.provider.enum.opencode": "OpenCode Zen",
+  "configuration.stellarisLanguageServices.ai.provider.enum.opencode-go": "OpenCode Go",
   "configuration.stellarisLanguageServices.ai.provider.enum.kimi": "月之暗面 (Kimi)",
   "configuration.stellarisLanguageServices.ai.provider.description": "AI 服务提供商。API 申请地址：[OpenAI](https://platform.openai.com/api-keys) | [Claude](https://console.anthropic.com/) | [DeepSeek](https://platform.deepseek.com/) | [MiniMax](https://minimaxi.com/) | [智谱清言](https://bigmodel.cn/) | [通义千问](https://dashscope.console.aliyun.com/) | [硅基流动](https://cloud.siliconflow.cn/) | [OpenRouter](https://openrouter.ai/keys) | [GitHub Models](https://github.com/marketplace/models) | [Together AI](https://api.together.xyz/) | [DeepInfra](https://deepinfra.com/dash/api_keys) | [月之暗面](https://platform.moonshot.cn/) | 自定义 OpenAI 兼容端点",
   "configuration.stellarisLanguageServices.ai.model.description": "AI模型名称（留空则使用提供商默认值）",

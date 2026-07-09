@@ -9,6 +9,7 @@ import {
     getEffectiveModel,
     getEffectiveTemperature,
     getOpenCodeApiFormat,
+    getOpenCodeGoApiFormat,
     getDisableThinkingParams,
     getEnableThinkingParams,
     toClaudeRequest,
@@ -19,6 +20,7 @@ import {
     FIM_CAPABLE_MODELS,
     ALWAYS_THINKING_PREFIXES,
     OPENCODE_MODEL_LIMITS,
+    OPENCODE_GO_MODEL_LIMITS,
 } from '../../extension/ai/providers';
 import type { ChatCompletionRequest, ChatMessage } from '../../extension/ai/types';
 
@@ -292,6 +294,19 @@ describe('getOpenCodeApiFormat', () => {
         expect(getOpenCodeApiFormat('qwen3.6-plus-free (免费)')).to.equal('anthropic-messages');
         expect(getOpenCodeApiFormat('gemini-3.5-flash')).to.equal('gemini-generate-content');
         expect(getOpenCodeApiFormat('deepseek-v4-pro')).to.equal('openai-chat-completions');
+    });
+});
+
+describe('getOpenCodeGoApiFormat', () => {
+    it('routes MiniMax and Qwen to Anthropic Messages, the rest to OpenAI chat completions', () => {
+        expect(getOpenCodeGoApiFormat('glm-5.2')).to.equal('openai-chat-completions');
+        expect(getOpenCodeGoApiFormat('kimi-k2.7-code')).to.equal('openai-chat-completions');
+        expect(getOpenCodeGoApiFormat('deepseek-v4-flash')).to.equal('openai-chat-completions');
+        expect(getOpenCodeGoApiFormat('mimo-v2.5-pro')).to.equal('openai-chat-completions');
+        expect(getOpenCodeGoApiFormat('minimax-m3')).to.equal('anthropic-messages');
+        expect(getOpenCodeGoApiFormat('minimax-m2.7')).to.equal('anthropic-messages');
+        expect(getOpenCodeGoApiFormat('qwen3.7-max')).to.equal('anthropic-messages');
+        expect(getOpenCodeGoApiFormat('qwen3.6-plus')).to.equal('anthropic-messages');
     });
 });
 
@@ -639,6 +654,31 @@ describe('BUILTIN_PROVIDERS', () => {
             'nemotron-3-super-free (免费)',
         ]);
         expect(Object.keys(OPENCODE_MODEL_LIMITS)).to.have.length(48);
+    });
+
+    it('matches the OpenCode Go model list and limits', () => {
+        const go = BUILTIN_PROVIDERS['opencode-go']!;
+        expect(go).to.not.equal(undefined);
+        expect(go.endpoint).to.equal('https://opencode.ai/zen/go/v1');
+        expect(go.defaultModel).to.equal('glm-5.2');
+        expect(go.models).to.have.length(14);
+        expect(go.models).to.include.members([
+            'glm-5.2',
+            'kimi-k2.7-code',
+            'mimo-v2.5-pro',
+            'minimax-m3',
+            'minimax-m2.5',
+            'qwen3.7-max',
+            'deepseek-v4-pro',
+        ]);
+        expect(go.requiresApiKey).to.equal(true);
+        expect(go.supportsVision).to.equal(true);
+        expect(Object.keys(OPENCODE_GO_MODEL_LIMITS)).to.have.length(14);
+        expect(getModelContextTokens('glm-5.2', 'opencode-go')).to.equal(1048576);
+        expect(getModelContextTokens('deepseek-v4-pro', 'opencode-go')).to.equal(1048576);
+        expect(getModelContextTokens('minimax-m2.7', 'opencode-go')).to.equal(196608);
+        expect(getModelOutputTokens('kimi-k2.7-code', 'opencode-go')).to.equal(32768);
+        expect(getModelOutputTokens('deepseek-v4-flash', 'opencode-go')).to.equal(393216);
     });
 });
 

@@ -72,11 +72,18 @@ body {
     padding: 0 8px;
     cursor: pointer;
     font-size: 12px;
+    white-space: nowrap;
     transition: background 0.15s;
 }
 #toolbar button:hover { background: rgba(255,255,255,0.12); }
 #toolbar button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 #toolbar button.active { background: rgba(79,195,247,0.2); border-color: var(--accent); }
+
+#btn-show-all { min-width: 92px; }
+#btn-export {
+    min-width: 42px;
+    font-weight: 700;
+}
 
 #toolbar select {
     background: var(--bg);
@@ -136,6 +143,8 @@ body {
     color: var(--muted);
     display: flex;
     gap: 16px;
+    flex-wrap: wrap;
+    row-gap: 4px;
     flex-shrink: 0;
     background: var(--surface);
     background: color-mix(in srgb, var(--surface) 88%, transparent);

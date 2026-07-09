@@ -41,6 +41,7 @@ function panelText(en: string, zh: string): string {
 const TECH_ICON_DIR = 'gfx/interface/icons/technologies';
 const TECH_ICON_CACHE_MAX_BYTES = 20 * 1024 * 1024;
 const TECH_ICON_EXTENSIONS = ['.dds', '.png', '.tga', '.jpg', '.jpeg'];
+const TECH_FILE_LIMIT_PER_ROOT = 2000;
 const TECH_LOC_FILE_LIMIT_PER_ROOT = 3000;
 
 interface TechIconCacheEntry {
@@ -48,6 +49,19 @@ interface TechIconCacheEntry {
     size: number;
     uri: string;
     bytes: number;
+}
+
+type TechTreeViewMode = 'context' | 'all';
+
+interface TechTreeScanOptions {
+    includeVanilla: boolean;
+    useSeed: boolean;
+    viewMode: TechTreeViewMode;
+}
+
+interface TechScanRoot {
+    uri: vscode.Uri;
+    kind: 'workspace' | 'vanilla';
 }
 
 // ─── Panel ───────────────────────────────────────────────────────────────────
@@ -83,9 +97,8 @@ export class TechTreePanel {
         this._extensionPath = extensionPath;
         this._seedDocument = seedDoc;
         const webviewRootPath = path.join(extensionPath, 'bin/client/webview');
-        const workspaceRoots = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
         const gamePath = this._getGamePath();
-        this._searchRoots = gamePath ? [...workspaceRoots, gamePath] : workspaceRoots;
+        this._refreshSearchRoots(gamePath);
         const localResourceRoots: vscode.Uri[] = [vscode.Uri.file(webviewRootPath)];
         for (const folder of vscode.workspace.workspaceFolders ?? []) {
             localResourceRoots.push(folder.uri);
@@ -121,6 +134,12 @@ export class TechTreePanel {
                     case 'goToTech':
                         await this._goToTech(msg.file, msg.line);
                         break;
+                    case 'showAllTechnologies':
+                        await this._scanAndRender({ includeVanilla: true, useSeed: false, viewMode: 'all' });
+                        break;
+                    case 'exportTechTreeImage':
+                        await this._saveExportedImage(msg.dataUri, msg.fileName);
+                        break;
                 }
             }, null, this._disposables),
         );
@@ -141,27 +160,43 @@ export class TechTreePanel {
         return configPath && fs.existsSync(configPath) ? configPath : null;
     }
 
+    private _refreshSearchRoots(gamePath = this._getGamePath()) {
+        const workspaceRoots = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+        this._searchRoots = this._dedupeFsPaths(gamePath ? [gamePath, ...workspaceRoots] : workspaceRoots);
+    }
+
     // ── Scan & render ─────────────────────────────────────────────────────────
 
-    private async _scanAndRender() {
-        this._panel.webview.postMessage({ command: 'loading', text: panelText('Scanning technology files...', '扫描科技文件...') });
+    private async _scanAndRender(options?: Partial<TechTreeScanOptions>) {
+        const scanOptions: TechTreeScanOptions = {
+            includeVanilla: options?.includeVanilla ?? false,
+            useSeed: options?.useSeed ?? true,
+            viewMode: options?.viewMode ?? 'context',
+        };
+        this._panel.webview.postMessage({
+            command: 'loading',
+            text: scanOptions.includeVanilla
+                ? panelText('Scanning workspace and vanilla technology files...', '扫描工作区和原版科技文件...')
+                : panelText('Scanning technology files...', '扫描科技文件...'),
+        });
         try {
-            const graph = await this._buildTechGraph();
-            this._panel.webview.postMessage({ command: 'render', data: graph });
+            const graph = await this._buildTechGraph(scanOptions);
+            this._panel.webview.postMessage({ command: 'render', data: graph, viewMode: scanOptions.viewMode });
         } catch (e) {
             ErrorReporter.debug('TechTreePanel', 'Failed to scan tech files', e);
-            this._panel.webview.postMessage({ command: 'render', data: { nodes: [], edges: [] } });
+            this._panel.webview.postMessage({ command: 'render', data: { nodes: [], edges: [] }, viewMode: scanOptions.viewMode });
         }
     }
 
-    private async _buildTechGraph(): Promise<TechGraph> {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders || workspaceFolders.length === 0) return { nodes: [], edges: [] };
-        const wsRoot = workspaceFolders[0]!;
+    private async _buildTechGraph(options: TechTreeScanOptions): Promise<TechGraph> {
+        const gamePath = this._getGamePath();
+        this._refreshSearchRoots(gamePath);
+        const scanRoots = this._getTechnologyScanRoots(options.includeVanilla, gamePath);
+        if (scanRoots.length === 0) return { nodes: [], edges: [] };
 
         // Determine seed tech IDs from the active file (if it's a tech file)
         let seedIds = new Set<string>();
-        if (this._seedDocument) {
+        if (options.useSeed && this._seedDocument) {
             const seedPath = vscode.workspace.asRelativePath(this._seedDocument.uri).toLowerCase();
             if (seedPath.includes('technology')) {
                 const seedGraph = parseTechFile(this._seedDocument.getText(),
@@ -171,19 +206,27 @@ export class TechTreePanel {
         }
 
         // ── Phase 1: Scan all tech files ──────────────────────────────────────
-        this._panel.webview.postMessage({ command: 'loading', text: panelText('Scanning common/technology/ files...', '扫描 common/technology/ 文件...') });
+        this._panel.webview.postMessage({
+            command: 'loading',
+            text: options.includeVanilla && gamePath
+                ? panelText('Scanning workspace and vanilla common/technology/ files...', '扫描工作区和原版 common/technology/ 文件...')
+                : panelText('Scanning common/technology/ files...', '扫描 common/technology/ 文件...'),
+        });
 
-        const techPattern = new vscode.RelativePattern(wsRoot, '**/common/technology/**/*.txt');
-        const techFiles = (await vscode.workspace.findFiles(techPattern, '**/node_modules/**', 500))
-            .sort((a, b) => a.fsPath.localeCompare(b.fsPath));
         const graphs: TechGraph[] = [];
 
-        for (const fileUri of techFiles) {
-            try {
-                const doc = await vscode.workspace.openTextDocument(fileUri);
-                const g = parseTechFile(doc.getText(), vscode.workspace.asRelativePath(fileUri));
-                if (g.nodes.length > 0) graphs.push(g);
-            } catch { /* skip */ }
+        for (const root of scanRoots) {
+            const techFiles = await this._findTechnologyFiles(root.uri);
+            for (const fileUri of techFiles) {
+                try {
+                    const doc = await vscode.workspace.openTextDocument(fileUri);
+                    const filePath = root.kind === 'workspace'
+                        ? vscode.workspace.asRelativePath(fileUri)
+                        : fileUri.fsPath;
+                    const g = parseTechFile(doc.getText(), filePath);
+                    if (g.nodes.length > 0) graphs.push(g);
+                } catch { /* skip */ }
+            }
         }
 
         // ── Phase 2: Merge & BFS-expand ───────────────────────────────────────
@@ -204,6 +247,33 @@ export class TechTreePanel {
         this._resolveTechIcons(graph.nodes);
 
         return graph;
+    }
+
+    private _getTechnologyScanRoots(includeVanilla: boolean, gamePath: string | null): TechScanRoot[] {
+        const roots: TechScanRoot[] = [];
+        if (includeVanilla && gamePath) {
+            roots.push({ uri: vscode.Uri.file(gamePath), kind: 'vanilla' });
+        }
+        for (const folder of vscode.workspace.workspaceFolders ?? []) {
+            roots.push({ uri: folder.uri, kind: 'workspace' });
+        }
+
+        const seen = new Set<string>();
+        return roots.filter(root => {
+            const key = process.platform === 'win32' ? root.uri.fsPath.toLowerCase() : root.uri.fsPath;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }
+
+    private async _findTechnologyFiles(root: vscode.Uri): Promise<vscode.Uri[]> {
+        const techPattern = new vscode.RelativePattern(root, '**/common/technology/**/*.txt');
+        return (await vscode.workspace.findFiles(
+            techPattern,
+            '**/{node_modules,.git,.cwtools}/**',
+            TECH_FILE_LIMIT_PER_ROOT,
+        )).sort((a, b) => a.fsPath.localeCompare(b.fsPath));
     }
 
     private async _resolveLocTitles(nodes: TechNode[]) {
@@ -470,19 +540,72 @@ export class TechTreePanel {
 
     private async _goToTech(filePath: string, line: number) {
         if (!filePath) return;
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders) return;
-
-        let uri: vscode.Uri | undefined;
-        try {
-            uri = vscode.Uri.joinPath(workspaceFolders[0]!.uri, filePath);
-        } catch { return; }
+        const uri = this._resolveSourceUri(filePath);
+        if (!uri) return;
 
         const doc = await vscode.workspace.openTextDocument(uri);
         const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
         const pos = new vscode.Position(Math.max(0, line - 1), 0);
         editor.selection = new vscode.Selection(pos, pos);
         editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+    }
+
+    private _resolveSourceUri(filePath: string): vscode.Uri | undefined {
+        if (path.isAbsolute(filePath)) {
+            return vscode.Uri.file(filePath);
+        }
+
+        for (const folder of vscode.workspace.workspaceFolders ?? []) {
+            const candidate = vscode.Uri.joinPath(folder.uri, filePath);
+            if (fs.existsSync(candidate.fsPath)) return candidate;
+        }
+
+        for (const root of this._searchRoots) {
+            const candidate = path.join(root, filePath);
+            if (fs.existsSync(candidate)) return vscode.Uri.file(candidate);
+        }
+
+        return undefined;
+    }
+
+    private async _saveExportedImage(dataUri: unknown, fileName: unknown) {
+        if (typeof dataUri !== 'string') return;
+        const match = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(dataUri);
+        if (!match) {
+            vscode.window.showErrorMessage(panelText('Failed to export technology tree image.', '导出科技树图片失败。'));
+            return;
+        }
+        const pngBase64 = match[1];
+        if (!pngBase64) {
+            vscode.window.showErrorMessage(panelText('Failed to export technology tree image.', '导出科技树图片失败。'));
+            return;
+        }
+
+        const safeName = this._sanitizeExportFileName(fileName);
+        const defaultUri = vscode.workspace.workspaceFolders?.[0]
+            ? vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, safeName)
+            : undefined;
+
+        const target = await vscode.window.showSaveDialog({
+            defaultUri,
+            filters: { [panelText('PNG Image', 'PNG 图片')]: ['png'] },
+        });
+        if (!target) return;
+
+        try {
+            await vscode.workspace.fs.writeFile(target, Buffer.from(pngBase64, 'base64'));
+            vscode.window.showInformationMessage(panelText('Technology tree image exported.', '科技树图片已导出。'));
+        } catch (e) {
+            ErrorReporter.debug('TechTreePanel', 'Failed to save exported technology tree image', e);
+            vscode.window.showErrorMessage(panelText('Failed to export technology tree image.', '导出科技树图片失败。'));
+        }
+    }
+
+    private _sanitizeExportFileName(fileName: unknown): string {
+        if (typeof fileName !== 'string') return 'tech-tree.png';
+        const normalized = fileName.trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+        if (!normalized) return 'tech-tree.png';
+        return normalized.toLowerCase().endsWith('.png') ? normalized : `${normalized}.png`;
     }
 
     // ── HTML ──────────────────────────────────────────────────────────────────
@@ -537,6 +660,9 @@ export class TechTreePanel {
             <label class="toggle-label" title="${panelText('Show rare technologies', '显示稀有科技')}">
                 <input type="checkbox" id="show-rare" checked /> ${panelText('Rare', '稀有')}
             </label>
+            <span class="separator">|</span>
+            <button id="btn-show-all" title="${panelText('Show all technologies, including vanilla when configured', '显示全部科技；已配置原版路径时包含原版科技')}" aria-label="${panelText('Show all technologies', '显示全部科技')}">${panelText('All + Vanilla', '全部+原版')}</button>
+            <button id="btn-export" title="${panelText('Export technology tree as PNG', '导出科技树为 PNG 图片')}" aria-label="${panelText('Export technology tree as PNG', '导出科技树为 PNG 图片')}">PNG</button>
             <span class="separator">|</span>
             <button id="btn-zoom-in" title="${panelText('Zoom in', '放大')}" aria-label="${panelText('Zoom in', '放大')}">+</button>
             <button id="btn-zoom-out" title="${panelText('Zoom out', '缩小')}" aria-label="${panelText('Zoom out', '缩小')}">−</button>

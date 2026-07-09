@@ -68,6 +68,8 @@ const areaFilter = document.getElementById('area-filter') as HTMLSelectElement;
 const tierFilter = document.getElementById('tier-filter') as HTMLSelectElement;
 const searchInput = document.getElementById('search-input') as HTMLInputElement;
 const showRareCheck = document.getElementById('show-rare') as HTMLInputElement;
+const btnShowAll = document.getElementById('btn-show-all') as HTMLButtonElement;
+const btnExport = document.getElementById('btn-export') as HTMLButtonElement;
 const btnZoomIn = document.getElementById('btn-zoom-in')!;
 const btnZoomOut = document.getElementById('btn-zoom-out')!;
 const btnFit = document.getElementById('btn-fit')!;
@@ -93,7 +95,13 @@ const NODE_X_SPACING = 420;
 const NODE_Y_SPACING = 118;
 const COMPONENT_GAP = 72;
 const AREA_GAP = 160;
+const ISOLATED_SECTION_GAP = 96;
+const ISOLATED_GRID_MAX_COLUMNS = 8;
 const DRAG_TAP_SUPPRESSION_MS = 180;
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 6;
+const WHEEL_ZOOM_RATE = 0.0015;
+const EXPORT_IMAGE_MAX_DIMENSION = 12000;
 
 // ─── Cytoscape instance ───────────────────────────────────────────────────────
 
@@ -101,8 +109,8 @@ const cy = cytoscape({
     container: cyContainer,
     elements: [],
     wheelSensitivity: 0.5,
-    minZoom: 0.05,
-    maxZoom: 6,
+    minZoom: MIN_ZOOM,
+    maxZoom: MAX_ZOOM,
     userPanningEnabled: false,
     userZoomingEnabled: true,
     boxSelectionEnabled: false,
@@ -338,6 +346,27 @@ function compareTech(a: TechNode, b: TechNode, ranks: Map<string, number>): numb
     return a.id.localeCompare(b.id);
 }
 
+function getAreaSortIndex(area: TechNode['area']): number {
+    const index = areaOrder.indexOf(area);
+    return index === -1 ? areaOrder.length : index;
+}
+
+function getConnectedNodeIds(nodes: TechNode[], edges: TechEdge[]): Set<string> {
+    const nodeIds = new Set(nodes.map(node => node.id));
+    const connectedIds = new Set<string>();
+    for (const edge of edges) {
+        if (nodeIds.has(edge.source)) connectedIds.add(edge.source);
+        if (nodeIds.has(edge.target)) connectedIds.add(edge.target);
+    }
+    return connectedIds;
+}
+
+function compareIsolatedTech(a: TechNode, b: TechNode, ranks: Map<string, number>): number {
+    const areaDiff = getAreaSortIndex(a.area) - getAreaSortIndex(b.area);
+    if (areaDiff !== 0) return areaDiff;
+    return compareTech(a, b, ranks);
+}
+
 function computeTechRanks(nodes: TechNode[], edges: TechEdge[]): Map<string, number> {
     const tierList = [...new Set(nodes.map(n => n.tier))].sort((a, b) => a - b);
     const tierRank = new Map(tierList.map((tier, index) => [tier, index]));
@@ -446,14 +475,41 @@ function assignComponentLanes(component: TechNode[], edges: TechEdge[], ranks: M
     return { laneById, laneCount };
 }
 
+function layoutIsolatedTechs(
+    isolatedNodes: TechNode[],
+    ranks: Map<string, number>,
+    posMap: Map<string, { x: number; y: number }>,
+    startY: number,
+) {
+    if (isolatedNodes.length === 0) return;
+
+    const sortedNodes = [...isolatedNodes].sort((a, b) => compareIsolatedTech(a, b, ranks));
+    const columns = Math.max(1, Math.min(ISOLATED_GRID_MAX_COLUMNS, Math.ceil(Math.sqrt(sortedNodes.length * 1.25))));
+
+    for (let index = 0; index < sortedNodes.length; index++) {
+        const node = sortedNodes[index]!;
+        const column = index % columns;
+        const row = Math.floor(index / columns);
+        posMap.set(node.id, {
+            x: column * NODE_X_SPACING,
+            y: startY + row * NODE_Y_SPACING,
+        });
+    }
+}
+
 function computeTechPositions(nodes: TechNode[], edges: TechEdge[]): Map<string, { x: number; y: number }> {
     const ranks = computeTechRanks(nodes, edges);
+    const connectedIds = getConnectedNodeIds(nodes, edges);
+    const connectedNodes = nodes.filter(node => connectedIds.has(node.id));
+    const isolatedNodes = nodes.filter(node => !connectedIds.has(node.id));
     const posMap = new Map<string, { x: number; y: number }>();
 
     let yCursor = 0;
+    let hasConnectedNodes = false;
     for (const area of areaOrder) {
-        const areaNodes = nodes.filter(node => node.area === area);
+        const areaNodes = connectedNodes.filter(node => node.area === area);
         if (areaNodes.length === 0) continue;
+        hasConnectedNodes = true;
 
         const components = findAreaComponents(areaNodes, edges, ranks);
         for (const component of components) {
@@ -469,6 +525,11 @@ function computeTechPositions(nodes: TechNode[], edges: TechEdge[]): Map<string,
             yCursor += laneCount * NODE_Y_SPACING + COMPONENT_GAP;
         }
         yCursor += AREA_GAP;
+    }
+
+    if (isolatedNodes.length > 0) {
+        const isolatedStartY = hasConnectedNodes ? yCursor + ISOLATED_SECTION_GAP : 0;
+        layoutIsolatedTechs(isolatedNodes, ranks, posMap, isolatedStartY);
     }
 
     enforceColumnSpacing(nodes, posMap);
@@ -613,6 +674,7 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
         data.isStartTech ? t('Starting tech', '起始科技') : '',
         data.isRare ? t('Rare', '稀有') : '',
         data.isDangerous ? t('Dangerous', '危险') : '',
+        data.isIsolated ? t('Isolated', '孤立') : '',
     ].filter(Boolean);
 
     detailPanel.classList.remove('empty');
@@ -646,8 +708,57 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
 
 // ─── Controls ─────────────────────────────────────────────────────────────────
 
-btnZoomIn.addEventListener('click', () => cy.zoom({ level: cy.zoom() * 1.3, renderedPosition: { x: cyContainer.clientWidth / 2, y: cyContainer.clientHeight / 2 } }));
-btnZoomOut.addEventListener('click', () => cy.zoom({ level: cy.zoom() / 1.3, renderedPosition: { x: cyContainer.clientWidth / 2, y: cyContainer.clientHeight / 2 } }));
+function makeExportFileName(): string {
+    const scope = currentArea === '__all__' ? 'all' : currentArea;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return `tech-tree-${scope}-${stamp}.png`;
+}
+
+function getExportScale(): number {
+    const visibleNodes = getVisibleNodes();
+    if (visibleNodes.length === 0) return 1;
+
+    const bbox = visibleNodes.boundingBox({ includeLabels: true, includeOverlays: false });
+    const maxDimension = Math.max(bbox.w, bbox.h, 1);
+    return Math.max(0.5, Math.min(2, EXPORT_IMAGE_MAX_DIMENSION / maxDimension));
+}
+
+function exportTechTreeImage() {
+    if (getVisibleNodes().length === 0) return;
+    try {
+        const dataUri = cy.png({
+            full: true,
+            scale: getExportScale(),
+            bg: '#464646',
+        });
+        vscode.postMessage({
+            command: 'exportTechTreeImage',
+            dataUri,
+            fileName: makeExportFileName(),
+        });
+    } catch {
+        // The extension host cannot inspect webview exceptions directly.
+        vscode.postMessage({ command: 'exportTechTreeImage', dataUri: '', fileName: makeExportFileName() });
+    }
+}
+
+function resetAllTechnologiesView() {
+    currentArea = '__all__';
+    currentTier = '__all__';
+    selectedTechId = null;
+    hasInitializedArea = true;
+    searchInput.value = '';
+    showRareCheck.checked = true;
+}
+
+btnShowAll.addEventListener('click', () => {
+    loadingEl.classList.remove('hidden');
+    loadingEl.textContent = t('Scanning all technologies...', '扫描全部科技...');
+    vscode.postMessage({ command: 'showAllTechnologies' });
+});
+btnExport.addEventListener('click', exportTechTreeImage);
+btnZoomIn.addEventListener('click', () => cy.zoom({ level: Math.min(MAX_ZOOM, cy.zoom() * 1.3), renderedPosition: { x: cyContainer.clientWidth / 2, y: cyContainer.clientHeight / 2 } }));
+btnZoomOut.addEventListener('click', () => cy.zoom({ level: Math.max(MIN_ZOOM, cy.zoom() / 1.3), renderedPosition: { x: cyContainer.clientWidth / 2, y: cyContainer.clientHeight / 2 } }));
 btnFit.addEventListener('click', () => fitVisible(80));
 
 areaFilter.addEventListener('change', () => { currentArea = areaFilter.value; applyFilters('start'); });
@@ -821,7 +932,31 @@ function endMiddlePan(event?: MouseEvent) {
     cyContainer.classList.remove('middle-panning');
 }
 
+function normalizeWheelDelta(event: WheelEvent): number {
+    if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16;
+    if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * Math.max(1, cyContainer.clientHeight);
+    return event.deltaY;
+}
+
+function handleWheelZoom(event: WheelEvent) {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (target?.closest('#details-panel, #legend')) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const rect = cyContainer.getBoundingClientRect();
+    const renderedPosition = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+    };
+    const factor = Math.exp(-normalizeWheelDelta(event) * WHEEL_ZOOM_RATE);
+    const level = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, cy.zoom() * factor));
+    cy.zoom({ level, renderedPosition });
+}
+
 cyContainer.addEventListener('mousedown', beginMiddlePan, true);
+cyContainer.addEventListener('wheel', handleWheelZoom, { passive: false, capture: true });
 cyContainer.addEventListener('auxclick', (event) => {
     if (event.button !== 1) return;
     event.preventDefault();
@@ -920,9 +1055,14 @@ function render(nodes: TechNode[], edges: TechEdge[]) {
         opt.textContent = `Tier ${t}`;
         tierFilter.appendChild(opt);
     }
+    if (currentTier !== '__all__' && !tiers.includes(Number(currentTier))) {
+        currentTier = '__all__';
+    }
+    tierFilter.value = currentTier;
 
     const elements: cytoscape.ElementDefinition[] = [];
     const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const connectedNodeIds = getConnectedNodeIds(nodes, edges);
 
     for (const node of nodes) {
         elements.push({
@@ -941,6 +1081,7 @@ function render(nodes: TechNode[], edges: TechEdge[]) {
                 isRare: node.isRare,
                 isDangerous: node.isDangerous,
                 isStartTech: node.isStartTech,
+                isIsolated: !connectedNodeIds.has(node.id),
                 file: node.file,
                 line: node.line,
             },
@@ -968,7 +1109,7 @@ function render(nodes: TechNode[], edges: TechEdge[]) {
         });
     }
 
-    const posMap = computeTechPositions(nodes, layoutEdges);
+    const posMap = computeTechPositions(nodes, edges);
 
     // Apply positions to nodes BEFORE adding to cy
     for (const el of elements) {
@@ -998,10 +1139,12 @@ function render(nodes: TechNode[], edges: TechEdge[]) {
     // Update stats
     const areaCount: Record<string, number> = {};
     for (const n of nodes) areaCount[n.area] = (areaCount[n.area] ?? 0) + 1;
+    const isolatedCount = nodes.filter(node => !connectedNodeIds.has(node.id)).length;
 
     statsBar.innerHTML = `
         <span>${t('Technologies', '科技')}: ${nodes.length}</span>
         <span>${t('Dependencies', '依赖关系')}: ${edgeSet.size}</span>
+        <span>${t('Isolated', '孤立')}: ${isolatedCount}</span>
         <span>${areaLabel.physics}: ${areaCount.physics ?? 0}</span>
         <span>${areaLabel.society}: ${areaCount.society ?? 0}</span>
         <span>${areaLabel.engineering}: ${areaCount.engineering ?? 0}</span>
@@ -1019,6 +1162,7 @@ window.addEventListener('message', (event) => {
     switch (msg.command) {
         case 'render': {
             fullGraph = msg.data as TechGraph;
+            if (msg.viewMode === 'all') resetAllTechnologiesView();
             loadingEl.classList.add('hidden');
             render(fullGraph.nodes, fullGraph.edges);
             break;

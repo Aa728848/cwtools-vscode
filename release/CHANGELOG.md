@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.15] - 2026-07-11
+
+### 功能与优化 / Features & Optimizations
+- **[优化] 优化Agent运行**
+  English: [Optimization] Optimize agent execution.
+
 ## [2.8.14] - 2026-07-09
 
 ### 功能与优化 / Features & Optimizations

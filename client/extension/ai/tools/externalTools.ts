@@ -42,6 +42,46 @@ const COMMAND_TEMP_SCRIPT_DIR_NAMES = new Set([
     '.tmp', 'scratch', 'temp', 'tmp',
 ]);
 const COMMAND_TEMP_SCRIPT_NAME_PATTERN = /^(?:agent_helper|helper|tmp|temp|scratch|batch|bulk|replace|rewrite|fix|verify|check|search|scan)(?:[_\-.].*)?\.(?:bat|cmd|cjs|js|mjs|ps1|py|sh)$/i;
+const COMMAND_STDOUT_MAX_CHARS = 4000;
+const COMMAND_STDERR_MAX_CHARS = 2000;
+const COMMAND_PROCESS_KILL_GRACE_MS = 1500;
+
+export class HeadTailTextBuffer {
+    private head = '';
+    private tail = '';
+    private omittedChars = 0;
+    private readonly headLimit: number;
+
+    constructor(
+        private readonly maxChars: number,
+        private readonly tailLimit = Math.floor(maxChars / 2)
+    ) {
+        this.headLimit = Math.max(0, maxChars - tailLimit);
+    }
+
+    append(text: string): void {
+        if (!text) return;
+        let remaining = text;
+        if (this.head.length < this.headLimit) {
+            const headRoom = this.headLimit - this.head.length;
+            this.head += remaining.slice(0, headRoom);
+            remaining = remaining.slice(headRoom);
+        }
+        if (!remaining) return;
+
+        this.tail += remaining;
+        if (this.tail.length > this.tailLimit) {
+            const drop = this.tail.length - this.tailLimit;
+            this.tail = this.tail.slice(drop);
+            this.omittedChars += drop;
+        }
+    }
+
+    toString(): string {
+        if (this.omittedChars <= 0) return this.head + this.tail;
+        return `${this.head}\n... [${this.omittedChars} chars omitted] ...\n${this.tail}`;
+    }
+}
 
 interface CommandFileState {
     filePath: string;
@@ -75,6 +115,43 @@ export class ExternalToolHandler {
     private ignoredCommandTempArtifacts = new Set<string>();
 
     constructor(private ctx: ExternalToolContext) {}
+
+    private terminateProcessTree(proc: import('child_process').ChildProcess, spawnFn: typeof import('child_process').spawn): void {
+        const pid = proc.pid;
+        if (pid && process.platform === 'win32') {
+            try {
+                const killer = spawnFn('taskkill.exe', ['/pid', String(pid), '/t', '/f'], {
+                    stdio: 'ignore',
+                    windowsHide: true,
+                });
+                killer.on('error', () => {});
+            } catch {
+                // Fall through to direct process termination below.
+            }
+        } else if (pid) {
+            try {
+                process.kill(-pid, 'SIGTERM');
+            } catch {
+                try { proc.kill('SIGTERM'); } catch { /* best effort */ }
+            }
+        }
+
+        try { proc.kill('SIGTERM'); } catch { /* best effort */ }
+
+        const hardKill = setTimeout(() => {
+            if (pid && process.platform !== 'win32') {
+                try {
+                    process.kill(-pid, 'SIGKILL');
+                    return;
+                } catch {
+                    // Fall through to direct process termination below.
+                }
+            }
+            if (proc.killed) return;
+            try { proc.kill('SIGKILL'); } catch { /* best effort */ }
+        }, COMMAND_PROCESS_KILL_GRACE_MS);
+        hardKill.unref?.();
+    }
 
     private isWithinAnyWorkspace(candidate: string): boolean {
         return resolveWorkspacePathInput(candidate, this.ctx.workspaceRoot, { preferExistingAiPath: true }).isWithinAnyWorkspace;
@@ -1120,9 +1197,8 @@ export class ExternalToolHandler {
             }
         } catch { /* allowlist must not break command execution */ }
 
-        let stdoutBuf = '';
-        let stderrBuf = '';
-        const MAX_OUTPUT = 4000;
+        const stdoutBuf = new HeadTailTextBuffer(COMMAND_STDOUT_MAX_CHARS);
+        const stderrBuf = new HeadTailTextBuffer(COMMAND_STDERR_MAX_CHARS);
         let commandChangeBaseline: Map<string, CommandFileState> | undefined;
         const shouldTrackCommandChanges = !(isAutoApproveSafeCommand && !hasShellControlOperator);
         if (shouldTrackCommandChanges) {
@@ -1141,7 +1217,13 @@ export class ExternalToolHandler {
         }>(resolve => {
             let proc: ReturnType<typeof spawn>;
             try {
-                proc = spawn(shell, shellArgs, { cwd, env: spawnEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+                proc = spawn(shell, shellArgs, {
+                    cwd,
+                    env: spawnEnv,
+                    stdio: ['ignore', 'pipe', 'pipe'],
+                    detached: !isWindows,
+                    windowsHide: true,
+                });
             } catch (e) {
                 resolve({
                     stdout: '',
@@ -1169,10 +1251,13 @@ export class ExternalToolHandler {
             const onParentAbort = () => {
                 const reason = abortSignal?.reason;
                 const abortedByTimeout = reason instanceof Error && reason.name === 'TimeoutError';
-                proc.kill();
+                this.terminateProcessTree(proc, spawn);
+                stdoutBuf.append(abortedByTimeout
+                    ? aiText('\n[... stopped after timeout]', '\n[... 超时已终止]')
+                    : aiText('\n[... stopped by user]', '\n[... 被用户中止]'));
                 finish({
-                    stdout: stdoutBuf.substring(0, MAX_OUTPUT) + (abortedByTimeout ? aiText('\n[... stopped after timeout]', '\n[... 超时已终止]') : aiText('\n[... stopped by user]', '\n[... 被用户中止]')),
-                    stderr: stderrBuf.substring(0, 2000),
+                    stdout: stdoutBuf.toString(),
+                    stderr: stderrBuf.toString(),
                     exitCode: -1,
                     timedOut: abortedByTimeout,
                 });
@@ -1187,7 +1272,7 @@ export class ExternalToolHandler {
 
             proc.on('error', (e: Error) => {
                 finish({
-                    stdout: stdoutBuf.substring(0, MAX_OUTPUT),
+                    stdout: stdoutBuf.toString(),
                     stderr: `Command failed to start in cwd "${cwd}": ${e.message}`,
                     exitCode: 1,
                 });
@@ -1206,10 +1291,11 @@ export class ExternalToolHandler {
             }, 15_000);
 
             timer = setTimeout(() => {
-                proc.kill();
+                this.terminateProcessTree(proc, spawn);
+                stdoutBuf.append(aiText('\n[... stopped after timeout]', '\n[... 超时已终止]'));
                 finish({
-                    stdout: stdoutBuf.substring(0, MAX_OUTPUT) + aiText('\n[... stopped after timeout]', '\n[... 超时已终止]'),
-                    stderr: stderrBuf.substring(0, 2000),
+                    stdout: stdoutBuf.toString(),
+                    stderr: stderrBuf.toString(),
                     exitCode: -1,
                     timedOut: true,
                 });
@@ -1217,24 +1303,24 @@ export class ExternalToolHandler {
 
             proc.stdout?.on('data', (chunk: Buffer) => {
                 const text = chunk.toString();
-                stdoutBuf += text;
+                stdoutBuf.append(text);
             });
 
             proc.stderr?.on('data', (chunk: Buffer) => {
-                stderrBuf += chunk.toString();
+                stderrBuf.append(chunk.toString());
             });
 
             proc.on('close', code => {
                 finish({
-                    stdout: stdoutBuf.substring(0, MAX_OUTPUT),
-                    stderr: stderrBuf.substring(0, 2000),
+                    stdout: stdoutBuf.toString(),
+                    stderr: stderrBuf.toString(),
                     exitCode: code ?? 0,
                 });
             });
 
             proc.on('error', err => {
                 finish({
-                    stdout: stdoutBuf.substring(0, MAX_OUTPUT),
+                    stdout: stdoutBuf.toString(),
                     stderr: `spawn error: ${err.message}`,
                     exitCode: 1,
                 });

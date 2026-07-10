@@ -72,11 +72,30 @@ function loadToolModules() {
 
 const { fileTools, externalTools, agentTools, agentRunner, permissionPolicy } = loadToolModules();
 const { FileToolHandler } = fileTools;
-const { ExternalToolHandler } = externalTools;
+const { ExternalToolHandler, HeadTailTextBuffer } = externalTools;
 const { AgentToolExecutor, TOOL_DEFINITIONS } = agentTools;
 const { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } = agentRunner;
 const { PermissionPolicyStore } = permissionPolicy;
 const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
+
+describe('HeadTailTextBuffer', () => {
+    it('keeps bounded head and tail output while recording omitted chars', () => {
+        const buffer = new HeadTailTextBuffer(12, 4);
+        buffer.append('abcdef');
+        buffer.append('ghijklmnop');
+
+        const output = buffer.toString();
+        expect(output).to.equal('abcdefgh\n... [4 chars omitted] ...\nmnop');
+    });
+
+    it('does not add an omission marker when output fits', () => {
+        const buffer = new HeadTailTextBuffer(12, 4);
+        buffer.append('hello ');
+        buffer.append('world');
+
+        expect(buffer.toString()).to.equal('hello world');
+    });
+});
 
 function makeWorkspace(): string {
     fs.mkdirSync(TEMP_BASE, { recursive: true });

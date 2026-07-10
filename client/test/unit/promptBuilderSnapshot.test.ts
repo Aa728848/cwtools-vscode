@@ -62,23 +62,29 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('Plan Mode');
         expect(prompt).to.include('Clarification BEFORE Planning Phase');
         expect(prompt).to.include('write_design_blueprint');
-        expect(prompt).to.include('Deep Coupling Assessment');
+        expect(prompt).to.include('Dynamic Coupling Assessment');
         expect(prompt).to.include('Common Directory Capability Review');
         expect(prompt).to.include('Reward Implementation Grounding');
         expect(prompt).to.include('current-game common subsystems');
         expect(prompt).to.include('bounded vanilla archetype evidence');
     });
 
-    it('injects Stellaris common design-space knowledge only when Stellaris is explicit', () => {
+    it('injects Stellaris dynamic evidence guidance only when Stellaris is explicit', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
         const prompt = builder.buildSystemPromptForMode('plan', undefined, 'stellaris');
 
-        expect(prompt).to.include('Stellaris common/ Design Space Review');
-        expect(prompt).to.include('common/technology');
-        expect(prompt).to.include('common/pop_jobs');
-        expect(prompt).to.include('common/pop_faction_types');
-        expect(prompt).to.include('common/storm_types');
+        expect(prompt).to.include('Stellaris PDXScript modding');
+        expect(prompt).to.include('Do not rely on static prompt knowledge for scopes');
+        expect(prompt).to.include('Static prompt text must not encode current-version CWT facts');
+        expect(prompt).to.include('subsystem directory capability');
+        expect(prompt).to.include('Do not copy scope, on_action, or subsystem facts from this prompt');
+        expect(prompt).to.include('query_cwt_schema');
+        expect(prompt).to.include('query_workspace_index');
+        expect(prompt).to.include('Common Directory Capability Review');
+        expect(prompt).to.not.include('Stellaris common/ Design Space Review');
+        expect(prompt).to.not.include('common/pop_faction_types');
+        expect(prompt).to.not.include('common/storm_types');
     });
 
     it('requires visible process updates for main, orchestrator, and slim prompts', () => {

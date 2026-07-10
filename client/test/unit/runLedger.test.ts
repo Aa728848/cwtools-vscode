@@ -116,6 +116,32 @@ describe('RunLedger Unit Tests', () => {
         expect((await freshLedger.getOrLoadSnapshot(run.runId))?.events.map(event => event.sequence)).to.deep.equal([1, 2]);
     });
 
+    it('writes checked JSON artifacts under the run directory', async () => {
+        const { runLedger } = loadRunLedgerModule();
+        const run = await runLedger.createRun('topic_artifact', 'build', 'artifact prompt');
+
+        const artifact = await runLedger.writeJsonArtifact(run.runId, 'model_requests/request_1.json', {
+            messages: [{ role: 'user', content: 'hello' }],
+            tools: [],
+        });
+
+        expect(artifact?.ref).to.equal('model_requests/request_1.json');
+        expect(artifact?.sha256).to.match(/^[a-f0-9]{64}$/);
+
+        const artifactPath = path.join(
+            workspaceRoot,
+            '.cwtools-ai',
+            'topic_artifact',
+            'runs',
+            run.runId,
+            'model_requests',
+            'request_1.json',
+        );
+        expect(fs.existsSync(artifactPath)).to.equal(true);
+        expect(JSON.parse(fs.readFileSync(artifactPath, 'utf-8')).messages[0].content).to.equal('hello');
+        expect(await runLedger.writeJsonArtifact(run.runId, '../outside.json', {})).to.equal(undefined);
+    });
+
     it('replays a disk-only run with its original prompt and recorded tool result', async () => {
         const { runLedger } = loadRunLedgerModule();
         const fullPrompt = 'compare the persisted implementation after restart';

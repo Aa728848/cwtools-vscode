@@ -1634,6 +1634,10 @@ export class AgentRunner {
                 parentAbortSignal?.addEventListener('abort', abortModelFromParent, { once: true });
             }
             const activeProviderConfig = this.aiService.getConfig();
+            const requestProviderId = options?.providerId ?? activeProviderConfig.provider;
+            const requestModel = options?.model ?? activeProviderConfig.model;
+            const requestMaxTokens = resolveRunMaxOutputTokens({ useSlimPrompt: options?.useSlimPrompt });
+            const requestDisableThinking = options?.useSlimPrompt === true && (mode === 'loc_writer' || mode === 'loc_translator');
             const appendModelDeltaEvent = (kind: string, text: string) => {
                 const now = Date.now();
                 if (now - lastModelDeltaEventAt < 1000) return;
@@ -1645,15 +1649,43 @@ export class AgentRunner {
                     { invocationId: modelCallId, status: 'running' }
                 ).catch(() => {});
             };
+            const requestArtifact = await runLedger.writeJsonArtifact(
+                runRecord.runId,
+                `model_requests/${modelCallId}.json`,
+                {
+                    version: 1,
+                    kind: 'model_request',
+                    runId: runRecord.runId,
+                    invocationId: modelCallId,
+                    iteration,
+                    mode,
+                    providerId: requestProviderId,
+                    model: requestModel,
+                    options: {
+                        maxTokens: requestMaxTokens,
+                        disableThinking: requestDisableThinking,
+                        useSlimPrompt: options?.useSlimPrompt === true,
+                        workflowId: options?.workflowId,
+                        replayOf: options?.replayOf,
+                    },
+                    messages,
+                    tools: availableTools,
+                }
+            ).catch(error => {
+                ErrorReporter.warn('AgentRunner', `Failed to archive model request ${modelCallId}`, error);
+                return undefined;
+            });
             await runLedger.appendEvent(
                 runRecord.runId,
                 'model_call_start',
                 {
                     iteration,
-                    providerId: options?.providerId ?? activeProviderConfig.provider,
-                    model: options?.model ?? activeProviderConfig.model,
+                    providerId: requestProviderId,
+                    model: requestModel,
                     messageCount: messages.length,
-                    toolCount: availableTools.length
+                    toolCount: availableTools.length,
+                    requestRef: requestArtifact?.ref,
+                    requestSha256: requestArtifact?.sha256,
                 },
                 { invocationId: modelCallId, status: 'running' }
             );
@@ -1663,8 +1695,8 @@ export class AgentRunner {
                     tools: availableTools,
                     providerId: options?.providerId,
                     model: options?.model,
-                    maxTokens: resolveRunMaxOutputTokens({ useSlimPrompt: options?.useSlimPrompt }),
-                    disableThinking: options?.useSlimPrompt === true && (mode === 'loc_writer' || mode === 'loc_translator'),
+                    maxTokens: requestMaxTokens,
+                    disableThinking: requestDisableThinking,
                     // 🔴 Key fix: propagate abort signal to HTTP request layer
                     // The absence of this parameter will cause the child agent to wait for the LLM streaming response
                     // Cannot be interrupted at all by the parent's cancelGeneration/abort
@@ -2366,7 +2398,7 @@ export class AgentRunner {
                     await Promise.all(batchIndices.map(async idx => {
                         const callInfo = parsedCalls[idx]!;
                         const runReadTool = async () => {
-                            const releaseLock = await toolScheduler.acquireLock(callInfo.concurrencyClass);
+                            const releaseLock = await toolScheduler.acquireLock(callInfo.concurrencyClass, options?.abortSignal);
                             try {
                                 options?.abortSignal?.throwIfAborted();
                                 await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: callInfo.toolName }, { invocationId: callInfo.invocationId });
@@ -2396,7 +2428,7 @@ export class AgentRunner {
                     }));
                 } else {
                     if (!WRITE_TOOLS.has(toolName)) {
-                        const releaseLock = await toolScheduler.acquireLock(ci.concurrencyClass);
+                        const releaseLock = await toolScheduler.acquireLock(ci.concurrencyClass, options?.abortSignal);
                         try {
                             options?.abortSignal?.throwIfAborted();
                             await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: ci.toolName }, { invocationId: ci.invocationId });
@@ -2432,7 +2464,7 @@ export class AgentRunner {
 
                     try {
                         await this.writeQueue.enqueue(lockPaths, async () => {
-                            const releaseLock = await toolScheduler.acquireLock(ci.concurrencyClass);
+                                const releaseLock = await toolScheduler.acquireLock(ci.concurrencyClass, options?.abortSignal);
                             try {
                                 options?.abortSignal?.throwIfAborted();
                                 await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: ci.toolName }, { invocationId: ci.invocationId });
@@ -2748,16 +2780,45 @@ export class AgentRunner {
         });
 
         const finalModelCallId = `model_${runRecord.runId}_final`;
+        const finalProviderConfig = this.aiService.getConfig();
+        const finalProviderId = options?.providerId ?? finalProviderConfig.provider;
+        const finalModel = options?.model ?? finalProviderConfig.model;
+        const finalRequestArtifact = await runLedger.writeJsonArtifact(
+            runRecord.runId,
+            `model_requests/${finalModelCallId}.json`,
+            {
+                version: 1,
+                kind: 'model_request',
+                runId: runRecord.runId,
+                invocationId: finalModelCallId,
+                iteration,
+                purpose: 'max_iteration_summary',
+                mode,
+                providerId: finalProviderId,
+                model: finalModel,
+                options: {
+                    workflowId: options?.workflowId,
+                    replayOf: options?.replayOf,
+                },
+                messages,
+                tools: [],
+            }
+        ).catch(error => {
+            ErrorReporter.warn('AgentRunner', `Failed to archive model request ${finalModelCallId}`, error);
+            return undefined;
+        });
         await runLedger.appendEvent(
             runRecord.runId,
             'model_call_start',
             {
                 iteration,
                 purpose: 'max_iteration_summary',
-                providerId: options?.providerId ?? this.aiService.getConfig().provider,
-                model: options?.model ?? this.aiService.getConfig().model,
+                providerId: finalProviderId,
+                model: finalModel,
                 messageCount: messages.length,
-                toolCount: 0
+                toolCount: 0,
+                requestRef: finalRequestArtifact?.ref,
+                requestSha256: finalRequestArtifact?.sha256,
             },
             { invocationId: finalModelCallId, status: 'running' }
         );

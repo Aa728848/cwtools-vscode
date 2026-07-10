@@ -21,7 +21,7 @@ import type { AgentRunEvent, AgentRunEventType } from './runLedger';
 
 export interface RunStateSnapshot {
     runId: string | undefined;
-    status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled' | 'unknown';
+    status: 'pending' | 'planning' | 'running' | 'completed' | 'done' | 'failed' | 'cancelled' | 'unknown';
     startedAt: number | undefined;
     endedAt: number | undefined;
     totalInputTokens: number;
@@ -50,20 +50,22 @@ export function reduceRunState(events: AgentRunEvent[]): RunStateSnapshot {
         lastStepContent: undefined,
     };
     for (const ev of events) {
+        const p = ev.payload as Record<string, any> | undefined;
         switch (ev.type) {
             case 'run_created':
                 snap.startedAt = ev.timestamp;
                 snap.status = 'running';
                 break;
-            case 'status_changed':
-                if (ev.status) snap.status = ev.status as RunStateSnapshot['status'];
-                if (ev.status === 'done' || ev.status === 'failed' || ev.status === 'cancelled') {
+            case 'status_changed': {
+                const status = normalizeRunStatus(p?.status ?? ev.status);
+                if (status) snap.status = status;
+                if (isTerminalRunStatus(status)) {
                     snap.endedAt = ev.timestamp;
                 }
                 break;
+            }
             case 'model_call_end': {
                 snap.iterations++;
-                const p = ev.payload as Record<string, any> | undefined;
                 if (p?.usage) {
                     snap.totalInputTokens += p.usage.prompt_tokens ?? 0;
                     snap.totalOutputTokens += p.usage.completion_tokens ?? 0;
@@ -73,7 +75,6 @@ export function reduceRunState(events: AgentRunEvent[]): RunStateSnapshot {
                 break;
             }
             case 'cache_stats': {
-                const p = ev.payload as Record<string, any> | undefined;
                 snap.totalCachedTokens += p?.cachedTokens ?? 0;
                 snap.totalCacheCreationTokens += p?.cacheCreationTokens ?? 0;
                 break;
@@ -85,13 +86,30 @@ export function reduceRunState(events: AgentRunEvent[]): RunStateSnapshot {
                 snap.errorCount++;
                 break;
             case 'step_appended': {
-                const p = ev.payload as Record<string, any> | undefined;
                 if (typeof p?.content === 'string') snap.lastStepContent = p.content;
                 break;
             }
         }
     }
     return snap;
+}
+
+function normalizeRunStatus(value: unknown): RunStateSnapshot['status'] | undefined {
+    if (value === 'pending'
+        || value === 'planning'
+        || value === 'running'
+        || value === 'completed'
+        || value === 'done'
+        || value === 'failed'
+        || value === 'cancelled'
+        || value === 'unknown') {
+        return value;
+    }
+    return undefined;
+}
+
+function isTerminalRunStatus(status: RunStateSnapshot['status'] | undefined): boolean {
+    return status === 'completed' || status === 'done' || status === 'failed' || status === 'cancelled';
 }
 
 // ─── Tool timeline ───────────────────────────────────────────────────────────

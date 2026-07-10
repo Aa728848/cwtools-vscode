@@ -406,6 +406,33 @@ export class RunLedger {
         return loaded.value.prompt;
     }
 
+    public async writeJsonArtifact(
+        runId: string,
+        relativePath: string,
+        value: unknown,
+    ): Promise<{ ref: string; sha256: string } | undefined> {
+        const run = this.activeRuns.get(runId);
+        if (!run || path.isAbsolute(relativePath)) return undefined;
+
+        const normalizedRef = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+        if (!normalizedRef || normalizedRef.split('/').some(part => part === '..')) {
+            ErrorReporter.warn('RunLedger', `Rejected unsafe artifact path for ${runId}: ${relativePath}`);
+            return undefined;
+        }
+
+        const runDir = this.resolveRunDir(run.topicId, runId);
+        const artifactPath = path.join(runDir, ...normalizedRef.split('/'));
+        if (!isPathInsideOrEqual(artifactPath, runDir)) {
+            ErrorReporter.warn('RunLedger', `Rejected artifact outside run directory for ${runId}: ${relativePath}`);
+            return undefined;
+        }
+
+        const serialized = JSON.stringify(value, null, 2);
+        const sha256 = sha256Text(serialized);
+        await atomicWriteJson(artifactPath, value);
+        return { ref: normalizedRef, sha256 };
+    }
+
     private getRunDir(topicId: string, runId: string): string {
         const topicDir = getTopicStorageDir(topicId);
         return path.join(topicDir, 'runs', runId);

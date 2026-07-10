@@ -12,6 +12,15 @@ import { ToolConcurrencyClass } from '../types';
 
 export const SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS = new Set<string>(['write_file']);
 
+type SchedulerQueueKind = 'lsp' | 'network' | 'global';
+
+interface SchedulerWaiter {
+    resolve: () => void;
+    reject: (reason?: unknown) => void;
+    signal?: AbortSignal;
+    onAbort?: () => void;
+}
+
 export function getAgentToolTargetFiles(
     toolName: string,
     args: Record<string, unknown>,
@@ -105,16 +114,16 @@ export class ToolSchedulerV2 {
 
     // Concurrency Limit Semaphores
     private activeLspCount = 0;
-    private lspQueue: (() => void)[] = [];
+    private lspQueue: SchedulerWaiter[] = [];
     private readonly MAX_LSP_CONCURRENCY = 4;
 
     private activeNetworkCount = 0;
-    private networkQueue: (() => void)[] = [];
+    private networkQueue: SchedulerWaiter[] = [];
     private readonly MAX_NETWORK_CONCURRENCY = 2;
 
     // Global exclusive lock
     private globalLocked = false;
-    private globalQueue: (() => void)[] = [];
+    private globalQueue: SchedulerWaiter[] = [];
 
     private constructor() {}
 
@@ -125,116 +134,159 @@ export class ToolSchedulerV2 {
         return ToolSchedulerV2.instance;
     }
 
+    public static createForTesting(): ToolSchedulerV2 {
+        return new ToolSchedulerV2();
+    }
+
     /**
      * Acquires the necessary concurrency permits based on the ToolConcurrencyClass.
      * Resolves when the lock is acquired. Returns a release function.
      */
-    public async acquireLock(concurrencyClass: ToolConcurrencyClass): Promise<() => void> {
+    public async acquireLock(concurrencyClass: ToolConcurrencyClass, abortSignal?: AbortSignal): Promise<() => void> {
+        if (abortSignal?.aborted) {
+            return Promise.reject(this.getAbortReason(abortSignal));
+        }
+
         if (concurrencyClass === 'parallel' || concurrencyClass === 'per-file-write') {
             // No global rate limit, safe to invoke instantly
             return () => {};
         }
 
         if (concurrencyClass === 'lsp-limited') {
-            await this.waitLspPermit();
+            await this.waitLspPermit(abortSignal);
             return () => this.releaseLspPermit();
         }
 
         if (concurrencyClass === 'network-limited') {
-            await this.waitNetworkPermit();
+            await this.waitNetworkPermit(abortSignal);
             return () => this.releaseNetworkPermit();
         }
 
         // global-exclusive and interactive get global exclusive lock
-        await this.acquireGlobalLock();
+        await this.acquireGlobalLock(abortSignal);
         return () => this.releaseGlobalLock();
     }
 
-    private waitLspPermit(): Promise<void> {
-        if (this.activeLspCount < this.MAX_LSP_CONCURRENCY && !this.globalLocked) {
+    private waitLspPermit(abortSignal?: AbortSignal): Promise<void> {
+        if (this.canStartLimitedWork(this.activeLspCount, this.MAX_LSP_CONCURRENCY)) {
             this.activeLspCount++;
             return Promise.resolve();
         }
-        return new Promise<void>(resolve => {
-            this.lspQueue.push(resolve);
-        });
+        return this.enqueueWaiter(this.lspQueue, 'lsp', abortSignal);
     }
 
     private releaseLspPermit(): void {
-        this.activeLspCount--;
-        this.processNextLsp();
+        this.activeLspCount = Math.max(0, this.activeLspCount - 1);
+        this.scheduleNext();
     }
 
-    private processNextLsp(): void {
-        if (this.globalLocked) return;
-        if (this.activeLspCount < this.MAX_LSP_CONCURRENCY && this.lspQueue.length > 0) {
-            const resolve = this.lspQueue.shift();
-            if (resolve) {
-                this.activeLspCount++;
-                resolve();
-            }
-        }
-    }
-
-    private waitNetworkPermit(): Promise<void> {
-        if (this.activeNetworkCount < this.MAX_NETWORK_CONCURRENCY && !this.globalLocked) {
+    private waitNetworkPermit(abortSignal?: AbortSignal): Promise<void> {
+        if (this.canStartLimitedWork(this.activeNetworkCount, this.MAX_NETWORK_CONCURRENCY)) {
             this.activeNetworkCount++;
             return Promise.resolve();
         }
-        return new Promise<void>(resolve => {
-            this.networkQueue.push(resolve);
-        });
+        return this.enqueueWaiter(this.networkQueue, 'network', abortSignal);
     }
 
     private releaseNetworkPermit(): void {
-        this.activeNetworkCount--;
-        this.processNextNetwork();
+        this.activeNetworkCount = Math.max(0, this.activeNetworkCount - 1);
+        this.scheduleNext();
     }
 
-    private processNextNetwork(): void {
-        if (this.globalLocked) return;
-        if (this.activeNetworkCount < this.MAX_NETWORK_CONCURRENCY && this.networkQueue.length > 0) {
-            const resolve = this.networkQueue.shift();
-            if (resolve) {
-                this.activeNetworkCount++;
-                resolve();
-            }
-        }
-    }
-
-    private acquireGlobalLock(): Promise<void> {
-        if (
-            !this.globalLocked &&
-            this.activeLspCount === 0 &&
-            this.activeNetworkCount === 0
-        ) {
+    private acquireGlobalLock(abortSignal?: AbortSignal): Promise<void> {
+        if (this.canStartGlobalWork()) {
             this.globalLocked = true;
             return Promise.resolve();
         }
-        return new Promise<void>(resolve => {
-            this.globalQueue.push(resolve);
-        });
+        return this.enqueueWaiter(this.globalQueue, 'global', abortSignal);
     }
 
     private releaseGlobalLock(): void {
         this.globalLocked = false;
-        this.processNextGlobal();
+        this.scheduleNext();
     }
 
-    private processNextGlobal(): void {
+    private canStartGlobalWork(): boolean {
+        return !this.globalLocked && this.activeLspCount === 0 && this.activeNetworkCount === 0;
+    }
+
+    private canStartLimitedWork(activeCount: number, maxCount: number): boolean {
+        return activeCount < maxCount && !this.globalLocked && this.globalQueue.length === 0;
+    }
+
+    private enqueueWaiter(queue: SchedulerWaiter[], kind: SchedulerQueueKind, abortSignal?: AbortSignal): Promise<void> {
+        if (abortSignal?.aborted) {
+            return Promise.reject(this.getAbortReason(abortSignal));
+        }
+
+        return new Promise<void>((resolve, reject) => {
+            const waiter: SchedulerWaiter = { resolve, reject, signal: abortSignal };
+            waiter.onAbort = () => {
+                this.removeWaiter(kind, waiter);
+                reject(this.getAbortReason(abortSignal));
+                this.scheduleNext();
+            };
+            if (abortSignal) {
+                abortSignal.addEventListener('abort', waiter.onAbort, { once: true });
+            }
+            queue.push(waiter);
+        });
+    }
+
+    private getAbortReason(abortSignal?: AbortSignal): Error {
+        const reason = abortSignal?.reason;
+        const error = new Error(reason instanceof Error
+            ? reason.message
+            : typeof reason === 'string'
+                ? reason
+                : 'Scheduler wait aborted');
+        error.name = 'AbortError';
+        return error;
+    }
+
+    private removeWaiter(kind: SchedulerQueueKind, waiter: SchedulerWaiter): void {
+        const queue = kind === 'lsp'
+            ? this.lspQueue
+            : kind === 'network'
+                ? this.networkQueue
+                : this.globalQueue;
+        const index = queue.indexOf(waiter);
+        if (index >= 0) queue.splice(index, 1);
+    }
+
+    private resolveWaiter(waiter: SchedulerWaiter): void {
+        if (waiter.signal && waiter.onAbort) {
+            waiter.signal.removeEventListener('abort', waiter.onAbort);
+        }
+        waiter.resolve();
+    }
+
+    private scheduleNext(): void {
+        if (this.globalLocked) return;
+
         if (this.globalQueue.length > 0) {
-            const resolve = this.globalQueue.shift();
-            if (resolve) {
+            if (!this.canStartGlobalWork()) return;
+            const waiter = this.globalQueue.shift();
+            if (waiter) {
                 this.globalLocked = true;
-                resolve();
+                this.resolveWaiter(waiter);
             }
-        } else {
-            // Wake up queued tasks
-            while (this.activeLspCount < this.MAX_LSP_CONCURRENCY && this.lspQueue.length > 0) {
-                this.processNextLsp();
+            return;
+        }
+
+        while (this.canStartLimitedWork(this.activeLspCount, this.MAX_LSP_CONCURRENCY) && this.lspQueue.length > 0) {
+            const waiter = this.lspQueue.shift();
+            if (waiter) {
+                this.activeLspCount++;
+                this.resolveWaiter(waiter);
             }
-            while (this.activeNetworkCount < this.MAX_NETWORK_CONCURRENCY && this.networkQueue.length > 0) {
-                this.processNextNetwork();
+        }
+
+        while (this.canStartLimitedWork(this.activeNetworkCount, this.MAX_NETWORK_CONCURRENCY) && this.networkQueue.length > 0) {
+            const waiter = this.networkQueue.shift();
+            if (waiter) {
+                this.activeNetworkCount++;
+                this.resolveWaiter(waiter);
             }
         }
     }

@@ -24,14 +24,24 @@ function ev(type: AgentRunEvent['type'], extra: Partial<AgentRunEvent> = {}, pay
 
 describe('RunReducers — pure event projections (T3.2)', () => {
     describe('reduceRunState', () => {
-        it('marks status running on run_created and done on status_changed', () => {
+        it('marks status running on run_created and completed from status_changed payload', () => {
+            const events: AgentRunEvent[] = [
+                ev('run_created', { timestamp: 1 }),
+                ev('status_changed', { timestamp: 2 }, { status: 'completed' }),
+            ];
+            const snap = reduceRunState(events);
+            expect(snap.status).to.equal('completed');
+            expect(snap.startedAt).to.equal(1);
+            expect(snap.endedAt).to.equal(2);
+        });
+
+        it('keeps compatibility with legacy top-level run status events', () => {
             const events: AgentRunEvent[] = [
                 ev('run_created', { timestamp: 1 }),
                 ev('status_changed', { status: 'done', timestamp: 2 }),
             ];
             const snap = reduceRunState(events);
             expect(snap.status).to.equal('done');
-            expect(snap.startedAt).to.equal(1);
             expect(snap.endedAt).to.equal(2);
         });
 

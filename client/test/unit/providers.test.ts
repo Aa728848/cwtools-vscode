@@ -51,8 +51,10 @@ describe('isModelVisionCapable', () => {
         expect(isModelVisionCapable('GPT-4O')).to.equal(true);
     });
 
-    it('returns true for mimo-v2.5-pro (multimodal)', () => {
-        expect(isModelVisionCapable('mimo-v2.5-pro')).to.equal(true);
+    it('tracks MiMo v2.5 vision variants', () => {
+        expect(isModelVisionCapable('mimo-v2.5-pro')).to.equal(false);
+        expect(isModelVisionCapable('mimo-v2.5-free')).to.equal(true);
+        expect(isModelVisionCapable('mimo-v2.5')).to.equal(true);
     });
 
     it('returns false for deprecated mimo-v2-flash', () => {

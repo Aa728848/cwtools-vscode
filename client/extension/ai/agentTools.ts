@@ -1534,8 +1534,14 @@ export class AgentToolExecutor {
 
     //- Orchestrator scheduling implementation -
 
-    /** Executing Orchestrator abort controller (anti-reentrancy protection) */
-    private _activeDispatchAbortController?: AbortController;
+    /**
+     * Controllers for in-flight orchestrator dispatches.
+     *
+     * AgentToolExecutor is shared by top-level runs, so a single global
+     * controller would let an unrelated retry/resume cancel another run's
+     * sub-agents. Each dispatch instead follows only its own parent signal.
+     */
+    private readonly _activeDispatchAbortControllers = new Set<AbortController>();
 
     /** The latest coordinator execution result (read by merge_results) */
     private _lastOrchestratorResult?: import('./orchestrator/types').OrchestratorResult;
@@ -1545,15 +1551,6 @@ export class AgentToolExecutor {
 * Then trigger true multi-Agent parallel execution through Orchestrator.execute(). 
 */
     private async executeDispatchAgents(args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
-        // Anti-reentrancy: If there is already a running schedule (due to timeout retry or user forced interruption), kill the old one first to clean up the zombie process
-        if (this._activeDispatchAbortController) {
-            this._activeDispatchAbortController.abort('New dispatch_agents call replaced the previous one.');
-            this._activeDispatchAbortController = undefined;
-        }
-
-        const localAbort = new AbortController();
-        this._activeDispatchAbortController = localAbort;
-
         const tasks = args.tasks as Array<{
             id: string;
             agentType: string;
@@ -1603,6 +1600,16 @@ export class AgentToolExecutor {
             return { success: false, error: 'Orchestrator is not ready: missing AgentRunner instance. Run in a coordinator-capable mode.' };
         }
 
+        const localAbort = new AbortController();
+        this._activeDispatchAbortControllers.add(localAbort);
+        const globalSignal = runnerOptsForLimits?.abortSignal;
+        const onGlobalAbort = () => localAbort.abort(globalSignal?.reason);
+        if (globalSignal?.aborted) {
+            onGlobalAbort();
+        } else {
+            globalSignal?.addEventListener('abort', onGlobalAbort, { once: true });
+        }
+
         try {
             //Dynamic import avoids circular dependencies
             const { Orchestrator } = await import('./orchestrator/orchestrator');
@@ -1647,11 +1654,6 @@ export class AgentToolExecutor {
 
             // Build execution options (read first from AgentToolContext, fallback to old instance fields)
             const runnerOpts = runnerOptsForLimits;
-            const globalSignal = runnerOpts?.abortSignal;
-            const onGlobalAbort = () => localAbort.abort(globalSignal?.reason);
-            if (globalSignal) {
-                globalSignal.addEventListener('abort', onGlobalAbort);
-            }
 
             const onBeforeFileWrite =
                 context?.onBeforeFileWrite
@@ -1694,18 +1696,9 @@ export class AgentToolExecutor {
                 }
             }
 
-            let result;
-            try {
-                // implement
-                result = await orchestrator.execute(graph, options);
-            } finally {
-                if (globalSignal) {
-                    globalSignal.removeEventListener('abort', onGlobalAbort);
-                }
-                if (this._activeDispatchAbortController === localAbort) {
-                    this._activeDispatchAbortController = undefined;
-                }
-            }
+            // A later dispatch may belong to another top-level run and must
+            // not replace or cancel this graph.
+            const result = await orchestrator.execute(graph, options);
 
             // Cache results for use by merge_results
             this._lastOrchestratorResult = result;
@@ -1807,6 +1800,9 @@ export class AgentToolExecutor {
         } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
             return { success: false, error: `Coordinator execution failed: ${errMsg}` };
+        } finally {
+            globalSignal?.removeEventListener('abort', onGlobalAbort);
+            this._activeDispatchAbortControllers.delete(localAbort);
         }
     }
 

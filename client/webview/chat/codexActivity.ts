@@ -418,8 +418,9 @@ function hasUsefulProcessTextImmediatelyBefore(items: CodexTurnItem[]): boolean 
 
 function injectAutoProcessText(items: CodexTurnItem[], labels: CodexI18nText): CodexTurnItem[] {
     const output: CodexTurnItem[] = [];
+    let hasProcessNarrative = false;
     for (const item of items) {
-        if (isActivityLikeItem(item) && !hasUsefulProcessTextImmediatelyBefore(output)) {
+        if (isActivityLikeItem(item) && !hasProcessNarrative && !hasUsefulProcessTextImmediatelyBefore(output)) {
             const timestamp = itemTimestamp(item);
             output.push({
                 type: 'text',
@@ -430,8 +431,12 @@ function injectAutoProcessText(items: CodexTurnItem[], labels: CodexI18nText): C
                     source: 'auto',
                 },
             });
+            hasProcessNarrative = true;
         }
         output.push(item);
+        if (item.type === 'text' && item.text.content.trim()) {
+            hasProcessNarrative = true;
+        }
     }
     return output;
 }
@@ -535,6 +540,7 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
     let thinkingSourceStep: StepLike | undefined;
     let processTextBuffer = '';
     let processTextStartedAt = 0;
+    let lastStreamingType: 'text' | 'thinking' | undefined;
 
     const flushText = () => {
         if (!textBuffer.trim()) {
@@ -612,6 +618,19 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
         thinkingSourceStep = undefined;
     };
 
+    const flushStreaming = (stillThinking = false) => {
+        const thinkingFirst = thinkingStartedAt > 0
+            && (textStartedAt === 0 || thinkingStartedAt <= textStartedAt);
+        if (thinkingFirst) {
+            flushThinking(stillThinking);
+            flushText();
+        } else {
+            flushText();
+            flushThinking(stillThinking);
+        }
+        lastStreamingType = undefined;
+    };
+
     const rememberPending = (event: CodexActivityEvent) => {
         if (event.invocationId) pendingByInvocation.set(event.invocationId, event);
         const key = event.toolName || '';
@@ -642,15 +661,14 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
     sorted.forEach((step, index) => {
         const type = asString(step.type);
         if (type === 'text_delta') {
-            flushThinking();
             flushProcessText();
             const ts = timestampOf(step, Date.now() + index);
             if (!textBuffer) textStartedAt = ts;
             textBuffer += asString(step.content);
+            lastStreamingType = 'text';
             return;
         }
         if (type === 'thinking_content') {
-            flushText();
             flushProcessText();
             const ts = timestampOf(step, Date.now() + index);
             if (!thinkingBuffer) {
@@ -659,11 +677,11 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
             }
             thinkingLastAt = ts;
             thinkingBuffer += asString(step.content);
+            lastStreamingType = 'thinking';
             return;
         }
         if (type === 'thinking') {
-            flushText();
-            flushThinking();
+            flushStreaming();
             const ts = timestampOf(step, Date.now() + index);
             const content = asString(step.content);
             if (content && !isInternalThinkingNote(content)) {
@@ -673,13 +691,11 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
             return;
         }
         if (type === 'cache_stats') {
-            flushText();
-            flushThinking();
+            flushStreaming();
             flushProcessText();
             return;
         }
-        flushText();
-        flushThinking();
+        flushStreaming();
         flushProcessText();
 
         if (type === 'permission_request') {
@@ -717,8 +733,7 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
             }
         }
     });
-    flushText();
-    flushThinking(options.live);
+    flushStreaming(options.live && lastStreamingType === 'thinking');
     flushProcessText();
 
     let finalText = (content || '').trim();

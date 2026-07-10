@@ -590,6 +590,68 @@ describe('dispatch_agents tool wiring', () => {
             (Orchestrator.prototype as any).execute = originalExecute;
         }
     });
+
+    it('does not cancel an in-flight dispatch when another top-level run starts', async () => {
+        const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
+        const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
+        const executor = new AgentToolExecutor({
+            onNotification: () => undefined,
+            sendNotification: () => undefined,
+        } as any, process.cwd());
+        executor.parentAgentRunner = { run: async () => undefined } as any;
+
+        const originalExecute = Orchestrator.prototype.execute;
+        let firstSignal: AbortSignal | undefined;
+        let releaseFirst!: () => void;
+        let markFirstStarted!: () => void;
+        const firstStarted = new Promise<void>(resolve => { markFirstStarted = resolve; });
+        const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
+        let callCount = 0;
+        const successfulResult = () => ({
+            success: true,
+            summary: 'ok',
+            agentResults: new Map(),
+            totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+            failedNodes: [],
+            cancelledNodes: [],
+        });
+
+        (Orchestrator.prototype as any).execute = async (_graph: unknown, options: { abortSignal?: AbortSignal }) => {
+            callCount++;
+            if (callCount === 1) {
+                firstSignal = options.abortSignal;
+                markFirstStarted();
+                await firstGate;
+            }
+            return successfulResult();
+        };
+
+        const context = () => ({
+            runnerOptions: { mode: 'script', abortSignal: new AbortController().signal },
+            onStep: () => undefined,
+        } as any);
+
+        try {
+            const first = executor.execute('dispatch_agents', {
+                userPrompt: 'first long wave',
+                tasks: makeTasks(1),
+            }, context()) as Promise<any>;
+            await firstStarted;
+
+            const second = await executor.execute('dispatch_agents', {
+                userPrompt: 'independent second wave',
+                tasks: makeTasks(1),
+            }, context()) as any;
+
+            expect(second.success).to.equal(true);
+            expect(firstSignal?.aborted).to.equal(false);
+            releaseFirst();
+            expect((await first).success).to.equal(true);
+        } finally {
+            releaseFirst();
+            (Orchestrator.prototype as any).execute = originalExecute;
+        }
+    });
 });
 
 describe('Orchestrator runtime safety', () => {

@@ -52,7 +52,7 @@ describe('Codex activity view model', () => {
         expect(group.events).to.have.lengthOf(2);
     });
 
-    it('adds process text before each activity group when the model did not provide it', () => {
+    it('adds at most one synthetic process line when the model did not provide narration', () => {
         const model = build([
             { type: 'tool_call', toolName: 'run_command', invocationId: '1', toolArgs: { command: 'npm run compile' }, timestamp: 1000 },
             { type: 'tool_result', toolName: 'run_command', invocationId: '1', toolResult: { success: true }, timestamp: 1100 },
@@ -60,11 +60,10 @@ describe('Codex activity view model', () => {
             { type: 'tool_result', toolName: 'read_file', invocationId: '2', toolResult: { success: true }, timestamp: 1300 },
         ]);
 
-        expect(model.items.map(item => item.type)).to.deep.equal(['text', 'group', 'text', 'group']);
+        expect(model.items.map(item => item.type)).to.deep.equal(['text', 'group', 'group']);
         expect(model.items[0]?.type === 'text' && model.items[0].text.source).to.equal('auto');
-        expect(model.items[2]?.type === 'text' && model.items[2].text.source).to.equal('auto');
         expect(model.items[0]?.type === 'text' && model.items[0].text.content).to.include('running a command');
-        expect(model.items[2]?.type === 'text' && model.items[2].text.content).to.include('reading the relevant');
+        expect(model.items.filter(item => item.type === 'text' && item.text.source === 'auto')).to.have.lengthOf(1);
     });
 
     it('suppresses raw command output that would otherwise stream as transcript text', () => {
@@ -129,6 +128,23 @@ describe('Codex activity view model', () => {
         expect(thinkingGroup.events[0]?.status).to.equal('success');
         expect(thinkingGroup.events[0]?.detailModel?.preview).to.equal('The user said hello.');
         expect(model.items.some(item => item.type === 'text' && item.text.content.includes('user said'))).to.equal(false);
+    });
+
+    it('coalesces interleaved text and thinking deltas until the next activity boundary', () => {
+        const model = build([
+            { type: 'thinking_content', content: 'Checking ', timestamp: 1000 },
+            { type: 'text_delta', content: 'Localisation ', timestamp: 1001 },
+            { type: 'thinking_content', content: 'schema.', timestamp: 1002 },
+            { type: 'text_delta', content: 'keys are valid.', timestamp: 1003 },
+            { type: 'tool_call', toolName: 'read_file', invocationId: '1', toolArgs: { filePath: 'a.txt' }, timestamp: 1100 },
+        ]);
+
+        const thinkingGroup = firstGroup(model, 'thinking');
+        expect(thinkingGroup.events).to.have.lengthOf(1);
+        expect(thinkingGroup.events[0]?.detailModel?.preview).to.equal('Checking schema.');
+        expect(model.streamedText).to.equal('Localisation keys are valid.');
+        const streamedSegments = model.items.filter(item => item.type === 'text' && item.text.source === 'text_delta');
+        expect(streamedSegments).to.have.lengthOf(1);
     });
 
     it('keeps only the active trailing thinking row running in live mode', () => {

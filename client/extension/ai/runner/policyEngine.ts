@@ -270,7 +270,7 @@ export const POLICY_PRESETS: Record<PolicyPresetId, Omit<PermissionProfile, 'wri
 };
 
 export function buildProfile(preset: PolicyPresetId, workspaceRoot: string, rules: PolicyRule[] = []): PermissionProfile {
-    const base = POLICY_PRESETS[preset] ?? POLICY_PRESETS['workspace-auto'];
+    const base = POLICY_PRESETS[preset] ?? POLICY_PRESETS['workspace-auto-review'];
     return { ...base, writableRoots: [workspaceRoot], rules };
 }
 

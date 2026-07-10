@@ -205,11 +205,11 @@ ${stylesheetLinks}
             <select class="hidden-composer-select" id="quickWriteModeSelect" title="${t('Write mode', '写入模式')}" aria-hidden="true" tabindex="-1">
                 <option value="confirm">${t('Confirm writes', '确认写入')}</option>
                 <option value="auto">${t('Auto writes', '自动写入')}</option>
-                <option value="auto_review">${t('Auto approve', '自动审批')}</option>
+                <option value="auto_review" selected>${t('Auto approve', '自动审批')}</option>
                 <option value="full">${t('Full access', '完全放行')}</option>
             </select>
             <button class="composer-model-trigger composer-write-mode-trigger" id="quickWriteModeTrigger" title="${t('Write mode', '写入模式')}" aria-haspopup="listbox" aria-expanded="false">
-                <span id="quickWriteModeLabel">${t('Confirm writes', '确认写入')}</span>
+                <span id="quickWriteModeLabel">${t('Auto approve', '自动审批')}</span>
                 <span class="composer-chevron" aria-hidden="true">v</span>
             </button>
             <button class="send-btn" id="sendBtn" title="${t('Send (Enter)', '发送 (Enter)')}" aria-label="${t('Send message', '发送消息')}">↑</button>

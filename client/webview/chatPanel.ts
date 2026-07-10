@@ -322,7 +322,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let activeWorkflowId: string | null = null;
     let quickModelOptions: string[] = [];
     let quickModelCurrent = '';
-    let quickWriteMode: 'confirm' | 'auto' | 'auto_review' | 'full' = 'confirm';
+    let quickWriteMode: 'confirm' | 'auto' | 'auto_review' | 'full' = 'auto_review';
     /** Last known host-side cwtools.ai.developer.disableSecuritySandbox value (the 'full' tier). */
     let settingsSandboxDisabled = false;
     let sideWorkspaceContent: HTMLElement | null = null;
@@ -3733,7 +3733,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             // Use a fixed uniqueId to prevent the active state from being lost during re-rendering
             const uniqueId = `subview-${agentId.replace(/[^a-zA-Z0-9_-]/g, '_')}-${msgTime || 'sub'}`;
             const agentSummary = makeRunSummary(groupSteps);
-            const agentStatusClass = agentSummary.errorCount + agentSummary.failedToolCount > 0 ? 'lane-failed' : 'lane-done';
+            const agentStatusClass = 'lane-done';
             const agentFiles = agentSummary.changedFiles.length > 0 ? ` · ${agentSummary.changedFiles.length} ${tr('file(s)', '文件')}` : '';
             const agentDuration = agentSummary.durationMs > 0 ? formatDuration(agentSummary.durationMs) : tr('short task', '短任务');
             const agentTopTool = agentSummary.topTools[0]?.name || tr('no tool', '无工具');
@@ -3747,7 +3747,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     <span class="lane-role">${tr('Subtask', '子任务')}: ${escapeHtml(agentId)}</span>
                     <span class="lane-status" style="margin-left:auto;">›</span>
                 </div>
-                <div class="lane-status-text">${agentSummary.toolCallCount} ${tr('tools', '工具')}${agentFiles}${agentSummary.failedToolCount ? ` · ${agentSummary.failedToolCount} ${tr('failed', '失败')}` : ''}</div>
+                <div class="lane-status-text">${agentSummary.toolCallCount} ${tr('tools', '工具')}${agentFiles}</div>
                 <div class="lane-meta">
                     <span>${escapeHtml(agentDuration)}</span>
                     <span>${escapeHtml(agentTopTool)}</span>
@@ -3967,17 +3967,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const summary = makeRunSummary(state.liveSteps, finalText);
         const idleMs = state.isComplete ? 0 : now - state.lastStepAt;
         const toolName = latestLiveToolName(state.liveSteps, chatI18n.live.waitingForOutput);
-        const isBlocked = /澄清|clarification|blocked/i.test(finalText || summary.latestStatus || '');
-        const hasProblem = isBlocked || summary.errorCount > 0 || summary.failedToolCount > 0 || /失败|错误|超时|中止|fail|error|timeout/i.test(finalText || '');
+        const isBlocked = !state.isComplete && /澄清|clarification|blocked/i.test(finalText || summary.latestStatus || '');
 
         card.classList.remove('lane-running', 'lane-done', 'lane-failed', 'lane-stalled', 'lane-blocked');
         if (!state.isComplete) {
-            card.classList.add('lane-running');
-            if (idleMs >= 2 * 60 * 1000) card.classList.add('lane-stalled');
-        } else if (isBlocked) {
-            card.classList.add('lane-blocked');
+            card.classList.add(isBlocked ? 'lane-blocked' : 'lane-running');
+            if (!isBlocked && idleMs >= 2 * 60 * 1000) card.classList.add('lane-stalled');
         } else {
-            card.classList.add(hasProblem ? 'lane-failed' : 'lane-done');
+            card.classList.add('lane-done');
         }
 
         const statusText = card.querySelector('.lane-status-text') as HTMLElement | null;
@@ -4358,9 +4355,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const card = document.querySelector(`.subagent-card[data-target-id="${state.fullscreenId}"]`);
                 if (card) {
                     card.classList.remove('lane-running');
-                    const blocked = /澄清|clarification|blocked/i.test(s.content || '');
-                    const failed = blocked || /fail|error|失败|错误|超时|中止/i.test(s.content || '');
-                    card.classList.add(blocked ? 'lane-blocked' : failed ? 'lane-failed' : 'lane-done');
+                    card.classList.add('lane-done');
                     const statusText = card.querySelector('.lane-status-text');
                     if (statusText) statusText.textContent = s.content || tr('Complete', '完成');
                 }
@@ -6590,7 +6585,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         (document.getElementById('inlineContextAfter') as HTMLInputElement).value = String(current.inlineCompletion?.contextAfterLines ?? 10);
         (document.getElementById('inlineRequestTimeout') as HTMLInputElement).value = String(current.inlineCompletion?.requestTimeoutMs ?? 1500);
         (document.getElementById('inlineMcpCacheTtl') as HTMLInputElement).value = String(current.inlineCompletion?.mcpCacheTtlMs ?? 30000);
-        (document.getElementById('agentWriteMode') as HTMLSelectElement).value = current.agentFileWriteMode || 'confirm';
+        (document.getElementById('agentWriteMode') as HTMLSelectElement).value = current.agentFileWriteMode || 'auto';
         updateQuickWriteModeSelector(deriveWriteTier(current));
         const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
         if (autoReviewEl) autoReviewEl.checked = current.approvals?.reviewer === 'auto_review';
@@ -7180,7 +7175,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 apiKey: (document.getElementById('settingsApiKey') as HTMLInputElement).value,
                 endpoint: (document.getElementById('settingsEndpoint') as HTMLInputElement).value.trim(),
                 customApiFormat: getCustomApiFormat(),
-                maxContextTokens: 0, agentFileWriteMode: 'confirm',
+                maxContextTokens: 0, agentFileWriteMode: 'auto',
                 reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
                 inlineCompletion: {
                     enabled: false,

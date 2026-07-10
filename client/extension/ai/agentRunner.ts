@@ -1267,7 +1267,7 @@ export class AgentRunner {
             if (!subject) return;
             const { getToolMetadata } = require('./runner/toolInvocation') as typeof import('./runner/toolInvocation');
             const riskLevel = ci.riskLevel ?? getToolMetadata(ci.toolName).riskLevel;
-            const profile = buildProfile(cfg.get<string>('policy.preset', 'workspace-auto') as any, this.toolExecutor.workspaceRoot);
+            const profile = buildProfile(cfg.get<string>('policy.preset', 'workspace-auto-review') as any, this.toolExecutor.workspaceRoot);
             const args = ci.toolArgs || {};
             const decision = resolvePolicy({
                 toolName: ci.toolName,

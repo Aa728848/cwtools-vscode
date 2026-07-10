@@ -181,20 +181,13 @@ export async function routeWebviewMessage(
                 contextStr = `\n\n${aiText('User annotations:', '用户批注:')}\n` + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
             }
 
-            if (provider.session.currentMode === 'orchestrator' || provider.session.currentMode === 'script') {
-                const prompt = aiText(
-                    'Approved. Based on the latest generated plan, use the `dispatch_agents` tool to decompose it and assign the subtasks to suitable sub-agents.',
-                    '同意执行。请根据最新生成的计划，使用 `dispatch_agents` 工具将该计划分解并分配给适当的子 Agent 执行。',
-                ) + contextStr;
-                await provider.handleUserMessage(prompt, undefined, undefined, true, true);
-            } else {
-                provider.switchMode('build');
-                const prompt = aiText(
-                    'Approved. Build according to the latest generated plan.\n\nImportant: first use the `todo_write` tool to convert every plan step into a detailed subtask list before starting any `write_file` or other build operation.',
-                    '同意执行。请根据最新生成的计划进行构建。\n\n⚠️ 重要要求：你必须首先使用 `todo_write` 工具将该计划的所有步骤转化为详细的子任务列表（即 task 线路），在开始任何 `write_file` 或其他构建操作之前完成这一步！',
-                ) + contextStr;
-                await provider.handleUserMessage(prompt, undefined, undefined, true, true);
-            }
+            provider.switchWorkflow(null);
+            provider.switchMode('script');
+            const prompt = aiText(
+                'Approved. Based on the latest generated plan, use the `dispatch_agents` tool to decompose it and assign the subtasks to suitable sub-agents.',
+                '同意执行。请根据最新生成的计划，使用 `dispatch_agents` 工具将该计划分解并分配给适当的子 Agent 执行。',
+            ) + contextStr;
+            await provider.handleUserMessage(prompt, undefined, undefined, true, true);
             break;
         }
         case 'revisePlanWithAnnotations': {

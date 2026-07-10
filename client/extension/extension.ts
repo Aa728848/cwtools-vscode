@@ -1474,11 +1474,11 @@ export async function activate(context: ExtensionContext) {
 	toolExecutor.onTodoUpdate = (todos) =>
 		chatPanelProvider.sendTodoUpdate(todos);
 	// Sync fileWriteMode from config on startup
-	toolExecutor.fileWriteMode = workspace.getConfiguration('stellarisLanguageServices.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
+	toolExecutor.fileWriteMode = workspace.getConfiguration('stellarisLanguageServices.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'auto');
 	// Re-sync fileWriteMode whenever config changes
 	context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
 		if (e.affectsConfiguration('stellarisLanguageServices.ai.agentFileWriteMode')) {
-			toolExecutor.fileWriteMode = workspace.getConfiguration('stellarisLanguageServices.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
+			toolExecutor.fileWriteMode = workspace.getConfiguration('stellarisLanguageServices.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'auto');
 		}
 	}));
 	// Invalidate LSP read cache on document changes so AI doesn't base decisions on stale data

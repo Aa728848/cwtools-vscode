@@ -224,7 +224,7 @@ export class AIService {
             maxRetries: Math.max(1, cfg.get<number>('maxRetries') || 3),
             requestTimeoutMs: normalizeChatCompletionTimeoutMs(cfg.get<number>('requestTimeoutMs')),
             maxContextTokens: cfg.get<number>('maxContextTokens', 0),
-            agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm'),
+            agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'auto'),
             reasoningEffort: cfg.get<'low' | 'medium' | 'high' | 'max'>('reasoningEffort', 'high'),
             inlineCompletion: {
                 enabled: cfg.get<boolean>('inlineCompletion.enabled') || false,

@@ -49,6 +49,7 @@ import { ArtifactStore } from './artifactStore';
 import { getAllWorkflows, getWorkflow } from './workflowRegistry';
 import { toWorkflowViewModel } from './workflowViewModel';
 import { getWorkflowUiLabels } from './workflowI18n';
+import { buildModeRoutingPrompt, inferBuildModeRoute, parseModelRouteResponse } from './modeRouting';
 import { computeLineDiff } from './diffEngine';
 import { budgetToolResult } from './contextBudget';
 import {
@@ -688,6 +689,32 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return text.slice(0, Math.max(0, maxLength - 3)).trimEnd() + '...';
     }
 
+    private async inferBuildModeRouteWithModel(text: string): Promise<AgentMode | undefined> {
+        try {
+            const response = await this.aiService.chatCompletion([
+                {
+                    role: 'system',
+                    content: 'You are a fast request router for a VS Code coding agent. Return only the requested JSON.',
+                },
+                {
+                    role: 'user',
+                    content: buildModeRoutingPrompt(text),
+                },
+            ], {
+                temperature: 0,
+                maxTokens: 80,
+                disableThinking: true,
+                requestTimeoutMs: 10_000,
+            });
+            const content = response.choices?.[0]?.message?.content;
+            const raw = typeof content === 'string' ? content : JSON.stringify(content ?? '');
+            return parseModelRouteResponse(raw) ?? inferBuildModeRoute(text);
+        } catch (error) {
+            ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Mode auto-routing failed; using fallback router.', error);
+            return inferBuildModeRoute(text);
+        }
+    }
+
     public async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], _skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[]): Promise<void> {
         if (!text.trim() && (!images || images.length === 0)) return;
 
@@ -695,7 +722,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             await this.handleSlashCommand(text.trim());
             return;
         }
-
 
         // Check if AI is enabled
         const config = this.aiService.getConfig();
@@ -705,6 +731,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 error: aiText('AI is not enabled. Click the gear icon to configure an AI provider first.', 'AI 功能未启用。请先点击⚙配置 AI Provider。'),
             });
             return;
+        }
+
+        if (!_skipAutoModeSwitch && text.trim() && this.currentMode === 'build' && !this.currentWorkflowId) {
+            const routedMode = await this.inferBuildModeRouteWithModel(text);
+            if (routedMode && routedMode !== this.currentMode) {
+                this.switchMode(routedMode);
+            }
         }
 
         // Ensure we have a topic
@@ -2169,7 +2202,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // Auto-review: reviewer swap at the approval boundary; ask_user falls through to the card.
         // Mode-agnostic: utility/build/script all share this exact funnel.
-        const reviewerMode = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('approvals.reviewer', 'user');
+        const reviewerMode = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('approvals.reviewer', 'auto_review');
         if (reviewerMode === 'auto_review' && !isEscalationRequest) {
             return this.runAutoReview(id, tool, description, command, context).then(decision => {
                 if (decision !== undefined) return decision;

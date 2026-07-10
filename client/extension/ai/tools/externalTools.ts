@@ -798,7 +798,7 @@ export class ExternalToolHandler {
 
     async removeIgnoredDiagnostic(args: { diagnosticKey: string; reason: string }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string }> {
         const vs = await import('vscode');
-        const fileWriteMode = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('agentFileWriteMode', 'confirm');
+        const fileWriteMode = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('agentFileWriteMode', 'auto');
 
         // Auto mode -> strictly follow whitelist without asking
         if (fileWriteMode === 'auto') {

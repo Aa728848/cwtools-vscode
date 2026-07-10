@@ -1903,10 +1903,34 @@ body.script-mode .token-usage-fill { background: #2aa198 !important; }
 
 .subagent-card {
     cursor: pointer;
+    padding: 7px 10px;
+    border-radius: 7px;
 }
 .subagent-card:hover {
     border-color: var(--vscode-focusBorder);
     background: rgba(255, 255, 255, 0.05);
+}
+.subagent-card .lane-header {
+    gap: 5px;
+    margin-bottom: 2px;
+}
+.subagent-card .lane-icon {
+    font-size: 14px;
+}
+.subagent-card .lane-role {
+    font-size: 11.5px;
+}
+.subagent-card .lane-status {
+    font-size: 12px;
+}
+.subagent-card .lane-status-text {
+    margin-top: 2px;
+    font-size: 9.5px;
+}
+.subagent-card .lane-meta {
+    gap: 6px;
+    font-size: 9.5px;
+    line-height: 1.25;
 }
 
 /* ── 双 Agent 视图并排分栏模式 (Side-by-Side Dual-Agent Mode) ── */

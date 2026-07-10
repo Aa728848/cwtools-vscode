@@ -1007,7 +1007,7 @@
                         "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.enum.confirm%",
                         "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.enum.auto%"
                     ],
-                    "default": "confirm",
+                    "default": "auto",
                     "description": "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.description%"
                 },
                 "stellarisLanguageServices.ai.approvals.reviewer": {
@@ -1021,7 +1021,7 @@
                         "%configuration.stellarisLanguageServices.ai.approvals.reviewer.enum.user%",
                         "%configuration.stellarisLanguageServices.ai.approvals.reviewer.enum.auto_review%"
                     ],
-                    "default": "user",
+                    "default": "auto_review",
                     "description": "%configuration.stellarisLanguageServices.ai.approvals.reviewer.description%"
                 },
                 "stellarisLanguageServices.ai.developer.disableSecuritySandbox": {
@@ -1047,7 +1047,7 @@
                         "%configuration.stellarisLanguageServices.ai.policy.preset.enum.trusted-automation%",
                         "%configuration.stellarisLanguageServices.ai.policy.preset.enum.full-access%"
                     ],
-                    "default": "workspace-auto",
+                    "default": "workspace-auto-review",
                     "description": "%configuration.stellarisLanguageServices.ai.policy.preset.description%"
                 },
                 "stellarisLanguageServices.ai.maxRetries": {

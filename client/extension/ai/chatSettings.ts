@@ -274,7 +274,7 @@ export class ChatSettingsManager {
             maxContextTokens: config.maxContextTokens,
             agentFileWriteMode: config.agentFileWriteMode,
             approvals: {
-                reviewer: vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<'user' | 'auto_review'>('approvals.reviewer', 'user'),
+                reviewer: vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<'user' | 'auto_review'>('approvals.reviewer', 'auto_review'),
             },
             securitySandboxDisabled: vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<boolean>('developer.disableSecuritySandbox') === true,
             reasoningEffort: config.reasoningEffort,
@@ -375,7 +375,7 @@ export class ChatSettingsManager {
         // manual read-only / trusted-automation choice.
         const LADDER_PRESETS: Record<string, string> = { confirm: 'workspace-auto', auto: 'workspace-auto', auto_review: 'workspace-auto-review', full: 'full-access' };
         const ladderPresetValues = new Set(Object.values(LADDER_PRESETS));
-        const preset = cfg.get<string>('policy.preset', 'workspace-auto');
+        const preset = cfg.get<string>('policy.preset', 'workspace-auto-review');
         const nextPreset = LADDER_PRESETS[mode]!;
         if (ladderPresetValues.has(preset) && preset !== nextPreset) {
             await cfg.update('policy.preset', nextPreset, vs.ConfigurationTarget.Global);

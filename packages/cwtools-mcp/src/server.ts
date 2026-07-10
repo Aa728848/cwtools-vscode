@@ -23,6 +23,8 @@ const SERVER_INSTRUCTIONS = [
   '  query_enums / query_variables for those kinds.',
   '- Check trigger/effect/scope-change/modifier syntax with query_rules; check the scope',
   '  valid at a position with query_scope.',
+  '- Check common/event/interface/gfx schema shape with query_cwt_schema before writing',
+  '  fields, block topology, or entity-path assumptions.',
   '- Before declaring code correct, review get_diagnostics (whole project). Honor the',
   '  readiness/freshness fields: if readiness.ready is false the project is still loading —',
   '  retry; an empty result then is not authoritative.',

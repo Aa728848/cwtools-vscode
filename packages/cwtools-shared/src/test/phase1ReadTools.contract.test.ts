@@ -6,6 +6,7 @@ import {
   createUnavailableLspHost,
   explainScopeWithHost,
   getPdxBlockWithHost,
+  queryCwtSchemaWithHost,
   queryRulesWithHost,
   searchRuleCapabilitiesWithHost,
   type HostServices,
@@ -24,6 +25,58 @@ describe('phase 1 read tool contracts', () => {
     expect(result.source).to.equal('cwtools-node-rules');
     expect(result.data!.rules.length).to.be.greaterThan(0);
     expect(result.data!.warnings?.[0]).to.include('Phase 1 fallback');
+  });
+
+  it('queries CWT schema snippets and type summaries from the configured rules source', async () => {
+    const rulesRoot = fs.mkdtempSync(path.join(repoRoot, '.tmp-cwt-schema-'));
+    try {
+      const configDir = path.join(rulesRoot, 'config');
+      const schemaFile = path.join(configDir, 'common', 'special_projects.cwt');
+      fs.mkdirSync(path.dirname(schemaFile), { recursive: true });
+      fs.writeFileSync(schemaFile, [
+        'types = {',
+        '  type[special_project] = {',
+        '    path = "common/special_projects"',
+        '    graph_related_types = { ship country }',
+        '    subtype[ship] = {',
+        '      type_per_file = yes',
+        '    }',
+        '  }',
+        '}',
+        '',
+      ].join('\n'), 'utf8');
+      const host = createFsHost(repoRoot, {
+        rules: {
+          gameId: 'stellaris',
+          configDirs: [rulesRoot],
+          async readTextFile(filePath) {
+            if (!fs.existsSync(filePath)) return { content: '', hasBom: false, exists: false };
+            const content = fs.readFileSync(filePath, 'utf8');
+            return { content, hasBom: content.charCodeAt(0) === 0xfeff, exists: true };
+          },
+          async listCwtFiles(root) {
+            const relative = path.relative(root, schemaFile);
+            return relative.startsWith('..') || path.isAbsolute(relative) ? [] : [schemaFile];
+          },
+        },
+      });
+
+      const result = await queryCwtSchemaWithHost(host, {
+        target: 'common/special_projects/00_test.txt',
+        name: 'ship',
+      });
+
+      expect(result.ok).to.equal(true);
+      expect(result.data!.status).to.equal('ready');
+      expect(result.data!.matches[0]!.relativeRuleFile).to.equal('common/special_projects.cwt');
+      expect(result.data!.matches[0]!.snippet).to.include('type[special_project]');
+      expect(result.data!.entities[0]!.name).to.equal('special_project');
+      expect(result.data!.entities[0]!.path).to.equal('common/special_projects');
+      expect(result.data!.entities[0]!.subtypes).to.include('ship');
+      expect(result.data!.entities[0]!.schemaKeys).to.include('path');
+    } finally {
+      fs.rmSync(rulesRoot, { recursive: true, force: true });
+    }
   });
 
   it('exposes scope-change hard facts and docs hints from CWT rules', async () => {

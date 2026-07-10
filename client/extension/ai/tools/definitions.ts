@@ -143,7 +143,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_cwt_schema',
-            description: 'CWT-FIRST schema lookup for common/entity definitions and other non-trigger/effect rules. Use BEFORE writing or planning new PDXScript under common/, events/, interface/, gfx/, sound/, map/, etc. Input a target file/directory such as "common/buildings/00_x.txt" or "common/buildings", plus optional field/rule name. Returns active CWT source snippets and line numbers. If returned snippets include comments/semantic text, use that semantics first; if they are structural only, confirm intended usage from verified vanilla/project examples before writing.',
+            description: 'CWT-FIRST schema lookup for common/entity definitions and other non-trigger/effect rules. Use BEFORE writing or planning new PDXScript under common/, events/, interface/, gfx/, sound/, map/, etc. Input a target file/directory such as "common/buildings/00_x.txt" or "common/buildings", plus optional field/rule name. Returns active CWT source snippets, line numbers, and parsed type/path/subtype entity summaries. If returned snippets include comments/semantic text, use that semantics first; if they are structural only, confirm intended usage from verified vanilla/project examples before writing.',
             parameters: {
                 type: 'object',
                 properties: {

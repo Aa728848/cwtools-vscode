@@ -24,6 +24,7 @@ export interface RulesConfigHost {
   gameId?: string;
   configDirs?: string[];
   readTextFile?(filePath: string): Promise<{ content: string; hasBom?: boolean; exists: boolean }>;
+  listCwtFiles?(root: string, options?: { limit?: number }): Promise<string[]>;
 }
 
 export interface HostServices {

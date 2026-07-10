@@ -89,6 +89,15 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
         const content = await fs.readFile(filePath, 'utf8');
         return { content, hasBom: content.charCodeAt(0) === 0xfeff, exists: true };
       },
+      async listCwtFiles(root, options) {
+        const limit = Math.max(1, Math.min(options?.limit ?? 1000, 5000));
+        const results: string[] = [];
+        await walk(root, async filePath => {
+          if (results.length >= limit) return;
+          if (filePath.toLowerCase().endsWith('.cwt')) results.push(filePath);
+        });
+        return results;
+      },
     },
     vanillaCache: probeVanillaCache(workspaceRoot, { ...config, cachePath: autoCache }),
     now: () => Date.now(),

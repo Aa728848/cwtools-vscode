@@ -28,6 +28,55 @@ export interface QueryRulesResult {
   warnings?: string[];
 }
 
+export interface QueryCwtSchemaArgs {
+  target?: string;
+  file?: string;
+  directory?: string;
+  name?: string;
+  includeContent?: boolean;
+  limit?: number;
+}
+
+export interface CwtSchemaMatch {
+  ruleFile: string;
+  relativeRuleFile: string;
+  sourceRoot: string;
+  score: number;
+  matchedBy: string[];
+  snippet?: string;
+  startLine?: number;
+  endLine?: number;
+  truncated?: boolean;
+}
+
+export interface CwtSchemaEntitySummary {
+  name: string;
+  path?: string;
+  ruleFile: string;
+  relativeRuleFile: string;
+  sourceRoot: string;
+  line: number;
+  subtypes: string[];
+  schemaKeys: string[];
+  graphRelatedTypes?: string[];
+  matchedBy: string[];
+  snippet?: string;
+  truncated?: boolean;
+}
+
+export interface QueryCwtSchemaResult {
+  status: 'ready' | 'not_found';
+  target?: string;
+  normalizedTarget?: string;
+  name?: string;
+  rulesRoots: string[];
+  matches: CwtSchemaMatch[];
+  entities: CwtSchemaEntitySummary[];
+  entityCount: number;
+  warnings?: string[];
+  _hint?: string;
+}
+
 export interface SearchRuleCapabilitiesArgs {
   intent?: string;
   category?: QueryRulesArgs['category'] | 'all';
@@ -172,6 +221,102 @@ export async function queryRulesWithHost(host: HostServices, args: QueryRulesArg
 };
 }
 
+export async function queryCwtSchemaWithHost(
+  host: HostServices,
+  args: QueryCwtSchemaArgs = {},
+): Promise<SharedToolResult<QueryCwtSchemaResult>> {
+  const target = String(args.target ?? args.file ?? args.directory ?? '').trim();
+  const normalizedTarget = normalizeCwtSchemaTarget(host, target);
+  const name = args.name?.trim();
+  const limit = Math.max(1, Math.min(Number(args.limit ?? 5) || 5, 20));
+  const roots = await resolveRulesConfigPaths(host);
+  const candidates: Array<{
+    file: string;
+    root: string;
+    relativeRuleFile: string;
+    score: number;
+    matchedBy: string[];
+  }> = [];
+
+  for (const root of roots) {
+    const files = await findCwtSchemaFiles(host, root, 1000);
+    for (const file of files) {
+      let contentLower: string | undefined;
+      if (name) {
+        const read = await readRulesTextFile(host, file).catch(() => ({ exists: false, content: '', hasBom: false }));
+        contentLower = read.exists ? read.content.toLowerCase() : undefined;
+      }
+      const relativeRuleFile = path.relative(root, file).replace(/\\/g, '/');
+      const relNoExt = relativeRuleFile.replace(/\.cwt$/i, '');
+      const scored = scoreCwtSchemaFile(relNoExt, normalizedTarget, name, contentLower);
+      if (scored.score > 0) {
+        candidates.push({
+          file,
+          root,
+          relativeRuleFile,
+          score: scored.score,
+          matchedBy: scored.matchedBy,
+        });
+      }
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score || a.relativeRuleFile.localeCompare(b.relativeRuleFile));
+  const seen = new Set<string>();
+  const entityCandidates: CwtSchemaEntitySummary[] = [];
+  const matches: CwtSchemaMatch[] = [];
+  for (const candidate of candidates) {
+    const key = `${candidate.root}|${candidate.relativeRuleFile}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (matches.length >= limit) break;
+    const excerpt = await buildCwtSchemaSnippet(host, candidate.file, name, !!args.includeContent);
+    entityCandidates.push(...await extractCwtSchemaEntities(host, candidate.file, candidate.root, candidate.relativeRuleFile, normalizedTarget, name));
+    matches.push({
+      ruleFile: candidate.file,
+      relativeRuleFile: candidate.relativeRuleFile,
+      sourceRoot: candidate.root,
+      score: candidate.score,
+      matchedBy: candidate.matchedBy,
+      ...excerpt,
+    });
+  }
+
+  const entities = entityCandidates
+    .sort((a, b) => scoreCwtSchemaEntity(b, normalizedTarget, name) - scoreCwtSchemaEntity(a, normalizedTarget, name)
+      || a.relativeRuleFile.localeCompare(b.relativeRuleFile)
+      || a.line - b.line)
+    .slice(0, Math.min(50, Math.max(10, limit * 10)));
+  const warnings: string[] = [];
+  if (roots.length === 0) {
+    warnings.push('No active CWT config roots were found. Check the rules configuration or reload CWTools.');
+  }
+  if (matches.length === 0) {
+    warnings.push('No matching CWT schema file was found. This is not proof the construct is legal or illegal; retry with a broader target directory or inspect completion/diagnostics.');
+  }
+  if (matches.length > 0 && entities.length === 0) {
+    warnings.push('Matched CWT files did not expose type[...] summaries. Use the returned snippets directly, then confirm with completions/diagnostics or a verified current-version example.');
+  }
+
+  return {
+    ok: true,
+    status: 'ready',
+    source: 'cwtools-node-rules',
+    data: {
+      status: matches.length > 0 ? 'ready' : 'not_found',
+      target: target || undefined,
+      normalizedTarget: normalizedTarget || undefined,
+      name,
+      rulesRoots: roots,
+      matches,
+      entities,
+      entityCount: entities.length,
+      warnings,
+      _hint: 'CWT schema is the primary legality source. Use entities for active type/path/subtype evidence, and use snippets for exact schema keys and comments. schemaKeys are CWT metadata keys, not necessarily direct game-script fields. If the schema is structural only, confirm intended usage with a verified vanilla archetype or mature project example before writing, then validate with completions/diagnostics.',
+    },
+  };
+}
+
 export async function searchRuleCapabilitiesWithHost(
   host: HostServices,
   args: SearchRuleCapabilitiesArgs = {},
@@ -287,6 +432,327 @@ export async function explainScopeWithHost(
       semanticHints: hints,
     },
   };
+}
+
+function normalizeCwtSchemaTarget(host: HostServices, value: string): string {
+  let normalized = value.trim().replace(/\\/g, '/');
+  if (!normalized) return '';
+  if (path.isAbsolute(value)) {
+    const relative = path.relative(host.workspaceRoot, value).replace(/\\/g, '/');
+    if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+      normalized = relative;
+    }
+  }
+  normalized = normalized.replace(/^file:\/\/\/?/i, '').replace(/^\/+/, '');
+  const knownRoots = ['common', 'events', 'interface', 'gfx', 'sound', 'map', 'music', 'localisation', 'localization', 'history', 'decisions'];
+  const lower = normalized.toLowerCase();
+  for (const root of knownRoots) {
+    const marker = `${root}/`;
+    const idx = lower.indexOf(marker);
+    if (idx >= 0) {
+      normalized = normalized.slice(idx);
+      break;
+    }
+  }
+  const hadKnownExt = /\.(txt|gui|gfx|asset|entity|cwt|shader)$/i.test(normalized);
+  normalized = normalized.replace(/\.(txt|gui|gfx|asset|entity|cwt|shader)$/i, '');
+  if (hadKnownExt) {
+    normalized = normalized.split('/').slice(0, -1).join('/');
+  }
+  return normalized.replace(/\/+/g, '/').replace(/^\/+|\/+$/g, '').toLowerCase();
+}
+
+async function findCwtSchemaFiles(host: HostServices, root: string, maxFiles: number): Promise<string[]> {
+  if (host.rules?.listCwtFiles) {
+    return (await host.rules.listCwtFiles(root, { limit: maxFiles })).slice(0, maxFiles);
+  }
+  const rootRelative = workspaceRelativePath(host.workspaceRoot, root);
+  if (!rootRelative) return [];
+  const results: string[] = [];
+  const ignoredDirs = new Set(['.git', 'node_modules', 'logs']);
+  const walk = async (relativeDir: string, depth: number): Promise<void> => {
+    if (results.length >= maxFiles || depth > 8) return;
+    let entries: Awaited<ReturnType<HostServices['filesystem']['list']>>;
+    try {
+      entries = await host.filesystem.list(relativeDir === '.' ? '' : relativeDir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (results.length >= maxFiles) break;
+      const childRelative = relativeDir === '.' ? entry.name : `${relativeDir}/${entry.name}`;
+      const fullPath = path.join(host.workspaceRoot, childRelative);
+      if (entry.type === 'directory') {
+        if (!ignoredDirs.has(entry.name)) await walk(childRelative, depth + 1);
+      } else if (entry.type === 'file' && entry.name.toLowerCase().endsWith('.cwt')) {
+        results.push(fullPath);
+      }
+    }
+  };
+  await walk(rootRelative, 0);
+  return results;
+}
+
+function workspaceRelativePath(workspaceRoot: string, fullPath: string): string | undefined {
+  const relative = path.relative(workspaceRoot, fullPath);
+  if (relative === '') return '.';
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return undefined;
+  return relative.replace(/\\/g, '/');
+}
+
+function scoreCwtSchemaFile(
+  relativeNoExt: string,
+  normalizedTarget: string,
+  name: string | undefined,
+  contentLower: string | undefined,
+): { score: number; matchedBy: string[] } {
+  const rel = relativeNoExt.toLowerCase().replace(/\\/g, '/');
+  const base = rel.split('/').pop() ?? rel;
+  const targetParts = normalizedTarget.split('/').filter(Boolean);
+  const targetLast = targetParts[targetParts.length - 1] ?? '';
+  const matchedBy: string[] = [];
+  let score = 0;
+
+  if (normalizedTarget) {
+    if (rel === normalizedTarget) {
+      score += 100;
+      matchedBy.push('exact-cwt-path');
+    }
+    if (rel.endsWith(`/${normalizedTarget}`)) {
+      score += 90;
+      matchedBy.push('suffix-cwt-path');
+    }
+    if (normalizedTarget.startsWith(`${rel}/`)) {
+      score += 80;
+      matchedBy.push('target-under-cwt-path');
+    }
+    if (rel.includes(normalizedTarget)) {
+      score += 50;
+      matchedBy.push('contains-cwt-path');
+    }
+    if (targetLast) {
+      const normalizedBase = normalizeCwtNameSegment(base);
+      const normalizedTargetLast = normalizeCwtNameSegment(targetLast);
+      if (normalizedBase === normalizedTargetLast) {
+        score += 45;
+        matchedBy.push('entity-family-name');
+      } else if (normalizedBase.includes(normalizedTargetLast) || normalizedTargetLast.includes(normalizedBase)) {
+        score += 25;
+        matchedBy.push('near-entity-family-name');
+      } else if (levenshtein(normalizedBase, normalizedTargetLast) <= 3) {
+        score += 15;
+        matchedBy.push('fuzzy-entity-family-name');
+      }
+    }
+  }
+
+  if (name?.trim()) {
+    const needle = name.trim().toLowerCase();
+    if (contentLower?.includes(needle)) {
+      score += 35;
+      matchedBy.push('name-in-cwt-content');
+    }
+    if (base.includes(needle)) {
+      score += 20;
+      matchedBy.push('name-in-cwt-file');
+    }
+  }
+
+  return { score, matchedBy };
+}
+
+function normalizeCwtNameSegment(segment: string): string {
+  return segment
+    .toLowerCase()
+    .replace(/_consolidated$/i, '')
+    .replace(/ies$/i, 'y')
+    .replace(/s$/i, '');
+}
+
+async function buildCwtSchemaSnippet(
+  host: HostServices,
+  filePath: string,
+  name: string | undefined,
+  includeContent: boolean,
+): Promise<{
+  snippet?: string;
+  startLine?: number;
+  endLine?: number;
+  truncated?: boolean;
+}> {
+  const read = await readRulesTextFile(host, filePath).catch(error => ({
+    content: `Error reading CWT schema: ${error instanceof Error ? error.message : String(error)}`,
+    hasBom: false,
+    exists: false,
+  }));
+  if (!read.exists) return { snippet: 'CWT schema file was not readable.', truncated: false };
+  if (read.content.length > 1_000_000) {
+    return { snippet: '[CWT file is larger than 1MB; narrow the query with name/target.]', truncated: true };
+  }
+  const lines = read.content.split(/\r?\n/);
+  const maxLines = includeContent ? 220 : 90;
+  let start = 0;
+  if (name?.trim()) {
+    const needle = name.trim().toLowerCase();
+    const hit = lines.findIndex(line => line.toLowerCase().includes(needle));
+    if (hit >= 0) start = Math.max(0, hit - 25);
+  }
+  const endExclusive = Math.min(lines.length, start + maxLines);
+  return {
+    snippet: lines
+      .slice(start, endExclusive)
+      .map((line, index) => `${start + index + 1} | ${line}`)
+      .join('\n'),
+    startLine: start + 1,
+    endLine: endExclusive,
+    truncated: endExclusive < lines.length,
+  };
+}
+
+async function extractCwtSchemaEntities(
+  host: HostServices,
+  filePath: string,
+  sourceRoot: string,
+  relativeRuleFile: string,
+  normalizedTarget: string,
+  name: string | undefined,
+): Promise<CwtSchemaEntitySummary[]> {
+  const read = await readRulesTextFile(host, filePath).catch(() => ({ exists: false, content: '', hasBom: false }));
+  if (!read.exists || read.content.length > 1_000_000) return [];
+  const lines = read.content.split(/\r?\n/);
+  const summaries: CwtSchemaEntitySummary[] = [];
+  const needle = name?.trim().toLowerCase();
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (line === undefined) continue;
+    const typeMatch = line.match(/^\s*type\[([^\]]+)\]\s*=\s*\{/i);
+    if (!typeMatch) continue;
+    const typeName = typeMatch[1];
+    if (!typeName) continue;
+    const end = findCwtBlockEnd(lines, index);
+    const blockLines = lines.slice(index, end + 1);
+    const summary = summarizeCwtTypeBlock({
+      name: typeName.trim(),
+      filePath,
+      sourceRoot,
+      relativeRuleFile,
+      startLine: index + 1,
+      block: blockLines.join('\n'),
+      blockLines,
+    });
+    if (cwtEntityMatches(summary, normalizedTarget, needle)) summaries.push(summary);
+    index = end;
+  }
+  return summaries;
+}
+
+function findCwtBlockEnd(lines: string[], startIndex: number): number {
+  let depth = 0;
+  let opened = false;
+  for (let index = startIndex; index < lines.length; index++) {
+    const line = (lines[index] ?? '').replace(/#.*$/, '');
+    for (const char of line) {
+      if (char === '{') {
+        depth++;
+        opened = true;
+      } else if (char === '}') {
+        depth--;
+      }
+    }
+    if (opened && depth <= 0) return index;
+  }
+  return Math.min(lines.length - 1, startIndex + 120);
+}
+
+function summarizeCwtTypeBlock(args: {
+  name: string;
+  filePath: string;
+  sourceRoot: string;
+  relativeRuleFile: string;
+  startLine: number;
+  block: string;
+  blockLines: string[];
+}): CwtSchemaEntitySummary {
+  const pathMatch = args.block.match(/^\s*path\s*=\s*"([^"]+)"/mi)
+    ?? args.block.match(/^\s*path\s*=\s*([^\s#]+)/mi);
+  const graphRelatedMatch = args.block.match(/^\s*graph_related_types\s*=\s*\{([^}]+)\}/mi);
+  const schemaKeys: string[] = [];
+  for (const line of args.blockLines) {
+    const keyMatch = line.match(/^\s*([A-Za-z_][\w.-]*)\s*=/);
+    if (!keyMatch) continue;
+    const key = keyMatch[1];
+    if (!key) continue;
+    if (!schemaKeys.includes(key)) schemaKeys.push(key);
+    if (schemaKeys.length >= 30) break;
+  }
+  const subtypes = Array.from(args.block.matchAll(/\bsubtype\[([^\]]+)\]/gi))
+    .map(match => match[1]?.trim() ?? '')
+    .filter((value, index, all) => value.length > 0 && all.indexOf(value) === index)
+    .slice(0, 40);
+  const graphRelatedText = graphRelatedMatch?.[1];
+  const graphRelatedTypes = graphRelatedText
+    ? graphRelatedText
+      .split(/\s+/)
+      .map(value => value.replace(/^"|"$/g, '').trim())
+      .filter(Boolean)
+      .slice(0, 40)
+    : undefined;
+  const snippetLines = args.blockLines.slice(0, 36);
+  return {
+    name: args.name,
+    path: pathMatch?.[1]?.trim(),
+    ruleFile: args.filePath,
+    relativeRuleFile: args.relativeRuleFile,
+    sourceRoot: args.sourceRoot,
+    line: args.startLine,
+    subtypes,
+    schemaKeys,
+    graphRelatedTypes,
+    matchedBy: [],
+    snippet: snippetLines.map((line, index) => `${args.startLine + index} | ${line}`).join('\n'),
+    truncated: snippetLines.length < args.blockLines.length,
+  };
+}
+
+function cwtEntityMatches(summary: CwtSchemaEntitySummary, normalizedTarget: string, needle: string | undefined): boolean {
+  const matchedBy: string[] = [];
+  const haystack = [
+    summary.name,
+    summary.path ?? '',
+    summary.relativeRuleFile,
+    ...summary.subtypes,
+    ...summary.schemaKeys,
+    ...(summary.graphRelatedTypes ?? []),
+  ].join('\n').toLowerCase().replace(/\\/g, '/');
+
+  if (!normalizedTarget && !needle) matchedBy.push('listed-from-matched-cwt-file');
+  if (normalizedTarget) {
+    const targetLast = normalizedTarget.split('/').filter(Boolean).pop() ?? normalizedTarget;
+    const summaryPath = summary.path?.toLowerCase().replace(/\\/g, '/');
+    const relativeNoExt = summary.relativeRuleFile.toLowerCase().replace(/\\/g, '/').replace(/\.cwt$/i, '');
+    if (summaryPath === normalizedTarget) matchedBy.push('exact-entity-path');
+    else if (summaryPath?.includes(normalizedTarget)) matchedBy.push('target-in-entity-path');
+    else if (relativeNoExt === normalizedTarget) matchedBy.push('exact-cwt-path');
+    else if (targetLast && haystack.includes(targetLast.toLowerCase())) matchedBy.push('target-token-in-entity');
+  }
+  if (needle && haystack.includes(needle)) matchedBy.push('name-in-entity-summary');
+
+  summary.matchedBy = matchedBy;
+  return matchedBy.length > 0;
+}
+
+function scoreCwtSchemaEntity(summary: CwtSchemaEntitySummary, normalizedTarget: string, name: string | undefined): number {
+  let score = 0;
+  if (summary.matchedBy.includes('exact-entity-path')) score += 100;
+  if (summary.matchedBy.includes('target-in-entity-path')) score += 80;
+  if (summary.matchedBy.includes('exact-cwt-path')) score += 70;
+  if (summary.matchedBy.includes('target-token-in-entity')) score += 45;
+  if (summary.matchedBy.includes('name-in-entity-summary')) score += 35;
+  if (summary.matchedBy.includes('listed-from-matched-cwt-file')) score += 10;
+  const normalizedPath = summary.path?.toLowerCase().replace(/\\/g, '/') ?? '';
+  if (normalizedTarget && normalizedPath === normalizedTarget) score += 20;
+  if (name && summary.name.toLowerCase() === name.toLowerCase()) score += 20;
+  return score;
 }
 
 async function loadCwtRules(host: HostServices): Promise<CwtRuleCache> {

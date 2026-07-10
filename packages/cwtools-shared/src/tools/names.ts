@@ -1,6 +1,7 @@
 export const MCP_TOOL_NAMES = [
   'query_types',
   'query_rules',
+  'query_cwt_schema',
   'search_rule_capabilities',
   'explain_scope',
   'parse_pdx_fragment',

@@ -3,6 +3,7 @@ import type { HostServices } from '../host/hostServices';
 import { analyzeDiagnosticKnowledge } from '../knowledge/diagnosticRouting';
 import {
   explainScopeWithHost,
+  queryCwtSchemaWithHost,
   queryRulesWithHost,
   searchRuleCapabilitiesWithHost,
 } from '../knowledge/rules';
@@ -188,6 +189,16 @@ export const defaultSharedToolDispatcher: SharedToolDispatcher = async (host, na
         category: String(args.category ?? 'trigger') as never,
         name: typeof args.name === 'string' ? args.name : undefined,
         scope: typeof args.scope === 'string' ? args.scope : undefined,
+      });
+
+    case 'query_cwt_schema':
+      return queryCwtSchemaWithHost(host, {
+        target: typeof args.target === 'string' ? args.target : undefined,
+        file: typeof args.file === 'string' ? args.file : undefined,
+        directory: typeof args.directory === 'string' ? args.directory : undefined,
+        name: typeof args.name === 'string' ? args.name : undefined,
+        includeContent: args.includeContent === true,
+        limit: typeof args.limit === 'number' ? args.limit : undefined,
       });
 
     case 'search_rule_capabilities':

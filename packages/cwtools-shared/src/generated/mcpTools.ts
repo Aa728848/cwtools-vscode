@@ -84,8 +84,52 @@ export const GENERATED_MCP_TOOLS = [
   },
   {
     "tool": {
+      "name": "query_cwt_schema",
+      "description": "CWT-FIRST schema lookup for common/entity definitions and other non-trigger/effect rules. Use BEFORE writing or planning new PDXScript under common/, events/, interface/, gfx/, sound/, map/, etc. Input a target file/directory such as \"common/buildings/00_x.txt\" or \"common/buildings\", plus optional field/rule name. Returns active CWT source snippets, line numbers, and parsed type/path/subtype entity summaries. If returned snippets include comments/semantic text, use that semantics first; if they are structural only, confirm intended usage from verified vanilla/project examples before writing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Project file, directory, or CWT-relative path to inspect, e.g. \"common/buildings/00_my_building.txt\", \"common/technology\", \"events\", \"interface\"."
+          },
+          "file": {
+            "type": "string",
+            "description": "Alias for target when you have a concrete project file path."
+          },
+          "directory": {
+            "type": "string",
+            "description": "Alias for target when you know the entity directory, e.g. \"common/jobs\"."
+          },
+          "name": {
+            "type": "string",
+            "description": "Optional field, type, alias, or rule name to locate inside the matched CWT files, e.g. \"resources\", \"potential\", \"planet_modifier\"."
+          },
+          "includeContent": {
+            "type": "boolean",
+            "description": "If true, return a larger excerpt from matched schema files. Default false."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum CWT files to return. Default 5, max 20."
+          }
+        },
+        "required": []
+      }
+    },
+    "registry": {
+      "name": "query_cwt_schema",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "parallel"
+    }
+  },
+  {
+    "tool": {
       "name": "search_rule_capabilities",
-      "description": "Search CWT/LSP rule evidence by intent and scope capability instead of guessing a rule name. Use this when you know what you want to do (for example iterate ships from fleet scope, fire a carrier event, pick a random planet) but do not know the exact trigger/effect/scope_change name. Returns ranked candidates with hardFacts and semanticHints; validate the selected rule before writing.",
+      "description": "Search CWT/LSP rule evidence by intent and scope capability instead of guessing a rule name. Use this when you know what you want to do but do not know the exact trigger/effect/scope_change name. Returns ranked candidates with hardFacts and semanticHints; validate the selected rule before writing.",
       "inputSchema": {
         "type": "object",
         "properties": {

@@ -458,6 +458,21 @@ export interface CwtSchemaMatch {
     truncated?: boolean;
 }
 
+export interface CwtSchemaEntitySummary {
+    name: string;
+    path?: string;
+    ruleFile: string;
+    relativeRuleFile: string;
+    sourceRoot: string;
+    line: number;
+    subtypes: string[];
+    schemaKeys: string[];
+    graphRelatedTypes?: string[];
+    matchedBy: string[];
+    snippet?: string;
+    truncated?: boolean;
+}
+
 export interface QueryCwtSchemaResult {
     status: 'ready' | 'not_found';
     target?: string;
@@ -465,6 +480,8 @@ export interface QueryCwtSchemaResult {
     name?: string;
     rulesRoots: string[];
     matches: CwtSchemaMatch[];
+    entities?: CwtSchemaEntitySummary[];
+    entityCount?: number;
     warnings?: string[];
     _hint?: string;
 }

@@ -29,6 +29,8 @@ import { stripLineNumberPrefixes } from './replacerSuite';
 import { diagnosticCodeString, diagnosticMatchesIgnoredKey } from '../../diagnosticI18n';
 import { readProjectProfile } from '../projectProfile';
 
+type CwtSchemaEntitySummary = NonNullable<QueryCwtSchemaResult['entities']>[number];
+
 function isAgentTempPath(filePath: string): boolean {
     return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
 }
@@ -735,6 +737,7 @@ export class LspToolHandler {
 
         candidates.sort((a, b) => b.score - a.score || a.relativeRuleFile.localeCompare(b.relativeRuleFile));
         const seen = new Set<string>();
+        const entityCandidates: CwtSchemaEntitySummary[] = [];
         const matches = candidates
             .filter(candidate => {
                 const key = `${candidate.root}|${candidate.relativeRuleFile}`;
@@ -745,6 +748,7 @@ export class LspToolHandler {
             .slice(0, limit)
             .map(candidate => {
                 const excerpt = this.buildCwtSchemaSnippet(candidate.file, name, !!args.includeContent);
+                entityCandidates.push(...this.extractCwtSchemaEntities(candidate.file, candidate.root, candidate.relativeRuleFile, normalizedTarget, name));
                 return {
                     ruleFile: candidate.file,
                     relativeRuleFile: candidate.relativeRuleFile,
@@ -754,6 +758,11 @@ export class LspToolHandler {
                     ...excerpt,
                 };
             });
+        const entities = entityCandidates
+            .sort((a, b) => this.scoreCwtSchemaEntity(b, normalizedTarget, name) - this.scoreCwtSchemaEntity(a, normalizedTarget, name)
+                || a.relativeRuleFile.localeCompare(b.relativeRuleFile)
+                || a.line - b.line)
+            .slice(0, Math.min(50, Math.max(10, limit * 10)));
 
         const warnings: string[] = [];
         if (roots.length === 0) {
@@ -762,6 +771,9 @@ export class LspToolHandler {
         if (matches.length === 0) {
             warnings.push('No matching CWT schema file was found. This is not proof the construct is legal or illegal; retry with a broader target directory or inspect completion/diagnostics.');
         }
+        if (matches.length > 0 && entities.length === 0) {
+            warnings.push('Matched CWT files did not expose type[...] summaries. Use the returned snippets directly, then confirm with completions/diagnostics or a verified current-version example.');
+        }
         return {
             status: matches.length > 0 ? 'ready' : 'not_found',
             target: target || undefined,
@@ -769,8 +781,10 @@ export class LspToolHandler {
             name,
             rulesRoots: roots,
             matches,
+            entities,
+            entityCount: entities.length,
             warnings,
-            _hint: 'CWT schema is the primary legality source. Prefer comments/docs/semantic text in the returned schema when present. If the schema is structural only, confirm intended usage with a verified vanilla archetype or mature project example before writing, then validate with completions/diagnostics.',
+            _hint: 'CWT schema is the primary legality source. Use entities for active type/path/subtype evidence, and use snippets for exact schema keys and comments. schemaKeys are CWT metadata keys, not necessarily direct game-script fields. If the schema is structural only, confirm intended usage with a verified vanilla archetype or mature project example before writing, then validate with completions/diagnostics.',
         };
     }
 
@@ -1174,6 +1188,168 @@ export class LspToolHandler {
                 truncated: false,
             };
         }
+    }
+
+    private extractCwtSchemaEntities(
+        filePath: string,
+        sourceRoot: string,
+        relativeRuleFile: string,
+        normalizedTarget: string,
+        name: string | undefined,
+    ): CwtSchemaEntitySummary[] {
+        try {
+            const stat = fs.statSync(filePath);
+            if (stat.size > 1_000_000) return [];
+            const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+            const summaries: CwtSchemaEntitySummary[] = [];
+            const needle = name?.trim().toLowerCase();
+
+            for (let index = 0; index < lines.length; index++) {
+                const line = lines[index];
+                if (line === undefined) continue;
+                const typeMatch = line.match(/^\s*type\[([^\]]+)\]\s*=\s*\{/i);
+                if (!typeMatch) continue;
+                const typeName = typeMatch[1];
+                if (!typeName) continue;
+                const end = this.findCwtBlockEnd(lines, index);
+                const blockLines = lines.slice(index, end + 1);
+                const block = blockLines.join('\n');
+                const summary = this.summarizeCwtTypeBlock({
+                    name: typeName.trim(),
+                    filePath,
+                    sourceRoot,
+                    relativeRuleFile,
+                    startLine: index + 1,
+                    block,
+                    blockLines,
+                });
+                if (!this.cwtEntityMatches(summary, normalizedTarget, needle)) continue;
+                summaries.push(summary);
+                index = end;
+            }
+
+            return summaries;
+        } catch {
+            return [];
+        }
+    }
+
+    private findCwtBlockEnd(lines: string[], startIndex: number): number {
+        let depth = 0;
+        let opened = false;
+        for (let index = startIndex; index < lines.length; index++) {
+            const line = (lines[index] ?? '').replace(/#.*$/, '');
+            for (const char of line) {
+                if (char === '{') {
+                    depth++;
+                    opened = true;
+                } else if (char === '}') {
+                    depth--;
+                }
+            }
+            if (opened && depth <= 0) return index;
+        }
+        return Math.min(lines.length - 1, startIndex + 120);
+    }
+
+    private summarizeCwtTypeBlock(args: {
+        name: string;
+        filePath: string;
+        sourceRoot: string;
+        relativeRuleFile: string;
+        startLine: number;
+        block: string;
+        blockLines: string[];
+    }): CwtSchemaEntitySummary {
+        const pathMatch = args.block.match(/^\s*path\s*=\s*"([^"]+)"/mi)
+            ?? args.block.match(/^\s*path\s*=\s*([^\s#]+)/mi);
+        const graphRelatedMatch = args.block.match(/^\s*graph_related_types\s*=\s*\{([^}]+)\}/mi);
+        const schemaKeys: string[] = [];
+        for (const line of args.blockLines) {
+            const keyMatch = line.match(/^\s*([A-Za-z_][\w.-]*)\s*=/);
+            if (!keyMatch) continue;
+            const key = keyMatch[1];
+            if (!key) continue;
+            if (!schemaKeys.includes(key)) schemaKeys.push(key);
+            if (schemaKeys.length >= 30) break;
+        }
+
+        const subtypes = Array.from(args.block.matchAll(/\bsubtype\[([^\]]+)\]/gi))
+            .map(match => match[1]?.trim() ?? '')
+            .filter((value, index, all) => value.length > 0 && all.indexOf(value) === index)
+            .slice(0, 40);
+        const graphRelatedText = graphRelatedMatch?.[1];
+        const graphRelatedTypes = graphRelatedText
+            ? graphRelatedText
+                .split(/\s+/)
+                .map(value => value.replace(/^"|"$/g, '').trim())
+                .filter(Boolean)
+                .slice(0, 40)
+            : undefined;
+        const snippetLines = args.blockLines.slice(0, 36);
+
+        return {
+            name: args.name,
+            path: pathMatch?.[1]?.trim(),
+            ruleFile: args.filePath,
+            relativeRuleFile: args.relativeRuleFile,
+            sourceRoot: args.sourceRoot,
+            line: args.startLine,
+            subtypes,
+            schemaKeys,
+            graphRelatedTypes,
+            matchedBy: [],
+            snippet: snippetLines.map((line, index) => `${args.startLine + index} | ${line}`).join('\n'),
+            truncated: snippetLines.length < args.blockLines.length,
+        };
+    }
+
+    private cwtEntityMatches(summary: CwtSchemaEntitySummary, normalizedTarget: string, needle: string | undefined): boolean {
+        const matchedBy: string[] = [];
+        const haystack = [
+            summary.name,
+            summary.path ?? '',
+            summary.relativeRuleFile,
+            ...summary.subtypes,
+            ...summary.schemaKeys,
+            ...(summary.graphRelatedTypes ?? []),
+        ].join('\n').toLowerCase().replace(/\\/g, '/');
+
+        if (!normalizedTarget && !needle) {
+            matchedBy.push('listed-from-matched-cwt-file');
+        }
+        if (normalizedTarget) {
+            const targetLast = normalizedTarget.split('/').filter(Boolean).pop() ?? normalizedTarget;
+            if (summary.path?.toLowerCase().replace(/\\/g, '/') === normalizedTarget) {
+                matchedBy.push('exact-entity-path');
+            } else if (summary.path?.toLowerCase().replace(/\\/g, '/').includes(normalizedTarget)) {
+                matchedBy.push('target-in-entity-path');
+            } else if (summary.relativeRuleFile.toLowerCase().replace(/\\/g, '/').replace(/\.cwt$/i, '') === normalizedTarget) {
+                matchedBy.push('exact-cwt-path');
+            } else if (targetLast && haystack.includes(targetLast.toLowerCase())) {
+                matchedBy.push('target-token-in-entity');
+            }
+        }
+        if (needle && haystack.includes(needle)) {
+            matchedBy.push('name-in-entity-summary');
+        }
+
+        summary.matchedBy = matchedBy;
+        return matchedBy.length > 0;
+    }
+
+    private scoreCwtSchemaEntity(summary: CwtSchemaEntitySummary, normalizedTarget: string, name: string | undefined): number {
+        let score = 0;
+        if (summary.matchedBy.includes('exact-entity-path')) score += 100;
+        if (summary.matchedBy.includes('target-in-entity-path')) score += 80;
+        if (summary.matchedBy.includes('exact-cwt-path')) score += 70;
+        if (summary.matchedBy.includes('target-token-in-entity')) score += 45;
+        if (summary.matchedBy.includes('name-in-entity-summary')) score += 35;
+        if (summary.matchedBy.includes('listed-from-matched-cwt-file')) score += 10;
+        const normalizedPath = summary.path?.toLowerCase().replace(/\\/g, '/') ?? '';
+        if (normalizedTarget && normalizedPath === normalizedTarget) score += 20;
+        if (name && summary.name.toLowerCase() === name.toLowerCase()) score += 20;
+        return score;
     }
 
     private async loadCWTRules(): Promise<CwtRuleCache> {

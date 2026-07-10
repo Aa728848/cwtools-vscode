@@ -60,6 +60,7 @@ describe('webview smoke checks', () => {
         const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
         const html = fs.readFileSync(path.join(root, 'client/extension/ai/chatHtml.ts'), 'utf8');
         const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        const mermaidRenderer = fs.readFileSync(path.join(root, 'client/webview/chat/mermaidRenderer.ts'), 'utf8');
 
         for (const selector of [
             '.message.assistant',
@@ -98,6 +99,13 @@ describe('webview smoke checks', () => {
         expect(script).to.include("case 'contextCompactionStatus'");
         expect(css).to.include('context-compact-flow');
         expect(css).to.include('prefers-reduced-motion');
+        expect(css).to.include('--mermaid-node-bg');
+        expect(css).to.include('.md-mermaid-output svg text');
+        expect(css).to.include('.md-mermaid-output svg .node rect');
+        expect(css).to.include('.md-mermaid-output svg .flowchart-link');
+        expect(mermaidRenderer).to.include('htmlLabels: false');
+        expect(mermaidRenderer).to.include('nodeTextColor');
+        expect(mermaidRenderer).to.include('edgeLabelBackground');
     });
 
     it('chat sidebar reserves composer height for bottom confirmation cards', () => {

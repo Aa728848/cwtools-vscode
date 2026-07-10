@@ -30,6 +30,12 @@
     --codex-row-hover: color-mix(in srgb, var(--vscode-list-hoverBackground, rgba(255,255,255,0.08)) 58%, transparent);
     --codex-radius: 8px;
     --codex-mono: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Consolas, monospace);
+    --mermaid-bg: var(--vscode-editor-background, #1e1e1e);
+    --mermaid-node-bg: color-mix(in srgb, var(--vscode-editorWidget-background, #252526) 88%, var(--vscode-editor-background, #1e1e1e));
+    --mermaid-node-border: var(--vscode-panel-border, #454545);
+    --mermaid-label-bg: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 92%, transparent);
+    --mermaid-text: var(--fg);
+    --mermaid-muted: var(--vscode-descriptionForeground, #9d9d9d);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { min-width: var(--chat-min-width); }
@@ -582,7 +588,7 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
     border: 1px solid var(--border);
     border-radius: 10px;
     overflow: hidden;
-    background: var(--vscode-editor-background);
+    background: var(--mermaid-bg);
     color: var(--fg);
 }
 .md-mermaid-toolbar {
@@ -640,6 +646,68 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
     max-width: 100%;
     height: auto;
     vertical-align: top;
+    color: var(--mermaid-text);
+}
+.md-mermaid-output svg text,
+.md-mermaid-output svg tspan,
+.md-mermaid-fullscreen-viewport svg text,
+.md-mermaid-fullscreen-viewport svg tspan {
+    fill: var(--mermaid-text) !important;
+    color: var(--mermaid-text) !important;
+}
+.md-mermaid-output svg .label,
+.md-mermaid-output svg .nodeLabel,
+.md-mermaid-output svg .edgeLabel,
+.md-mermaid-fullscreen-viewport svg .label,
+.md-mermaid-fullscreen-viewport svg .nodeLabel,
+.md-mermaid-fullscreen-viewport svg .edgeLabel {
+    color: var(--mermaid-text) !important;
+}
+.md-mermaid-output svg .node rect,
+.md-mermaid-output svg .node circle,
+.md-mermaid-output svg .node ellipse,
+.md-mermaid-output svg .node polygon,
+.md-mermaid-output svg .node path,
+.md-mermaid-output svg .actor,
+.md-mermaid-fullscreen-viewport svg .node rect,
+.md-mermaid-fullscreen-viewport svg .node circle,
+.md-mermaid-fullscreen-viewport svg .node ellipse,
+.md-mermaid-fullscreen-viewport svg .node polygon,
+.md-mermaid-fullscreen-viewport svg .node path,
+.md-mermaid-fullscreen-viewport svg .actor {
+    fill: var(--mermaid-node-bg) !important;
+    stroke: var(--mermaid-node-border) !important;
+}
+.md-mermaid-output svg .cluster rect,
+.md-mermaid-fullscreen-viewport svg .cluster rect {
+    fill: color-mix(in srgb, var(--mermaid-node-bg) 58%, transparent) !important;
+    stroke: var(--mermaid-node-border) !important;
+}
+.md-mermaid-output svg .edgeLabel rect,
+.md-mermaid-output svg .labelBkg,
+.md-mermaid-fullscreen-viewport svg .edgeLabel rect,
+.md-mermaid-fullscreen-viewport svg .labelBkg {
+    fill: var(--mermaid-label-bg) !important;
+    opacity: .96 !important;
+}
+.md-mermaid-output svg .edgePath .path,
+.md-mermaid-output svg .flowchart-link,
+.md-mermaid-output svg .messageLine0,
+.md-mermaid-output svg .messageLine1,
+.md-mermaid-output svg .relationshipLine,
+.md-mermaid-fullscreen-viewport svg .edgePath .path,
+.md-mermaid-fullscreen-viewport svg .flowchart-link,
+.md-mermaid-fullscreen-viewport svg .messageLine0,
+.md-mermaid-fullscreen-viewport svg .messageLine1,
+.md-mermaid-fullscreen-viewport svg .relationshipLine {
+    stroke: var(--mermaid-muted) !important;
+}
+.md-mermaid-output svg .arrowheadPath,
+.md-mermaid-output svg marker path,
+.md-mermaid-fullscreen-viewport svg .arrowheadPath,
+.md-mermaid-fullscreen-viewport svg marker path {
+    fill: var(--mermaid-muted) !important;
+    stroke: var(--mermaid-muted) !important;
 }
 .md-mermaid-source {
     margin: 0;
@@ -681,7 +749,7 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
     box-shadow: 0 18px 60px rgba(0, 0, 0, .42);
     text-align: center;
 }
-.md-mermaid-fullscreen-viewport svg { min-width: min(980px, 100%); max-width: none; height: auto; }
+.md-mermaid-fullscreen-viewport svg { min-width: min(980px, 100%); max-width: none; height: auto; color: var(--mermaid-text); }
 .md-mermaid-fullscreen-close {
     position: fixed;
     top: 14px;

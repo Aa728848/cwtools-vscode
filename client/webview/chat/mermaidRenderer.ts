@@ -32,24 +32,59 @@ function themeValue(name: string, fallback: string): string {
 }
 
 function initializeMermaid(): void {
+    const background = themeValue('--vscode-editor-background', '#1e1e1e');
+    const foreground = themeValue('--vscode-editor-foreground', '#d4d4d4');
+    const mutedForeground = themeValue('--vscode-descriptionForeground', '#9d9d9d');
+    const widgetBackground = themeValue('--vscode-editorWidget-background', '#252526');
+    const inputBackground = themeValue('--vscode-input-background', '#313131');
+    const panelBorder = themeValue('--vscode-panel-border', '#454545');
+    const fontFamily = themeValue('--vscode-font-family', 'system-ui, sans-serif');
+
     getMermaidRuntime().initialize({
         startOnLoad: false,
         securityLevel: 'strict',
         theme: 'base',
+        htmlLabels: false,
         flowchart: {
             htmlLabels: false,
             useMaxWidth: true,
             curve: 'basis',
         },
         themeVariables: {
-            background: themeValue('--vscode-editor-background', '#1e1e1e'),
-            primaryColor: themeValue('--vscode-editorWidget-background', '#252526'),
-            primaryTextColor: themeValue('--vscode-editor-foreground', '#d4d4d4'),
-            primaryBorderColor: themeValue('--vscode-panel-border', '#454545'),
-            lineColor: themeValue('--vscode-descriptionForeground', '#9d9d9d'),
-            secondaryColor: themeValue('--vscode-sideBar-background', '#252526'),
-            tertiaryColor: themeValue('--vscode-input-background', '#313131'),
-            fontFamily: themeValue('--vscode-font-family', 'system-ui, sans-serif'),
+            background,
+            primaryColor: widgetBackground,
+            primaryTextColor: foreground,
+            primaryBorderColor: panelBorder,
+            secondaryColor: inputBackground,
+            secondaryTextColor: foreground,
+            secondaryBorderColor: panelBorder,
+            tertiaryColor: background,
+            tertiaryTextColor: foreground,
+            tertiaryBorderColor: panelBorder,
+            textColor: foreground,
+            lineColor: mutedForeground,
+            defaultLinkColor: mutedForeground,
+            arrowheadColor: mutedForeground,
+            mainBkg: widgetBackground,
+            nodeBkg: widgetBackground,
+            nodeBorder: panelBorder,
+            nodeTextColor: foreground,
+            clusterBkg: background,
+            clusterBorder: panelBorder,
+            edgeLabelBackground: background,
+            titleColor: foreground,
+            noteBkgColor: inputBackground,
+            noteTextColor: foreground,
+            noteBorderColor: panelBorder,
+            actorBkg: widgetBackground,
+            actorTextColor: foreground,
+            actorBorder: panelBorder,
+            labelBoxBkgColor: inputBackground,
+            labelBoxBorderColor: panelBorder,
+            labelTextColor: foreground,
+            signalColor: foreground,
+            signalTextColor: foreground,
+            fontFamily,
         },
     });
 }

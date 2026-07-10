@@ -116,18 +116,21 @@ export class PermissionPolicyStore {
         return newRule;
     }
 
-    /** Snapshot active rules for checkpoint persistence. */
-    public serialize(): PermissionRule[] {
-        return this.getRules();
+    /** Snapshot active rules. Durable snapshots must exclude session-only approvals. */
+    public serialize(options?: { includeSessionOnly?: boolean }): PermissionRule[] {
+        const includeSessionOnly = options?.includeSessionOnly !== false;
+        return this.getRules().filter(rule => includeSessionOnly || !rule.sessionOnly);
     }
 
-    /** Restore rules from a checkpoint; skips expired and duplicate entries. */
-    public restore(rules: PermissionRule[] | undefined): number {
+    /** Restore rules; durable resume paths must not re-arm session-only approvals. */
+    public restore(rules: PermissionRule[] | undefined, options?: { allowSessionOnly?: boolean }): number {
         if (!Array.isArray(rules)) return 0;
+        const allowSessionOnly = options?.allowSessionOnly !== false;
         const now = Date.now();
         let restored = 0;
         for (const rule of rules) {
             if (!rule || typeof rule.tool !== 'string' || typeof rule.cwdScope !== 'string') continue;
+            if (rule.sessionOnly && !allowSessionOnly) continue;
             if (rule.expiresAt && rule.expiresAt <= now) continue;
             if (this.findEquivalent(rule)) continue;
             this.rules.push({ ...rule });

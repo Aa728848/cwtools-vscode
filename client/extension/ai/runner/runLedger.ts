@@ -1,9 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
-import { getTopicStorageDir } from '../workspacePaths';
+import { getAiStorageRootCandidates, getTopicStorageDir } from '../workspacePaths';
 import { ErrorReporter } from '../errorReporter';
 import { AgentRunRecord } from '../types';
+import { isPathInsideOrEqual } from '../../pathScope';
+import { atomicWriteJson, readJsonWithBackup, sha256Text } from './durableStorage';
 
 const RUN_LEDGER_FIELD_MAX_CHARS = 6000;
 const RUN_STATE_MAX_LOAD_BYTES = 4_000_000;
@@ -81,6 +83,9 @@ export class RunLedger {
     private activeRuns = new Map<string, AgentRunRecord>();
     private runEvents = new Map<string, AgentRunEvent[]>();
     private runSequences = new Map<string, number>();
+    private persistenceQueues = new Map<string, Promise<void>>();
+    private runPrompts = new Map<string, string>();
+    private runDirectories = new Map<string, string>();
     private emitter = new EventEmitter();
 
     private static latestActiveRunId: string | undefined;
@@ -112,15 +117,23 @@ export class RunLedger {
         return this.activeRuns.get(runId);
     }
 
+    public getLatestEvent(runId: string): AgentRunEvent | undefined {
+        return this.runEvents.get(runId)?.at(-1);
+    }
+
     public async createRun(
         topicId: string,
         mode: string,
         userPromptPreview: string,
-        parentRunId?: string
+        parentRunId?: string,
+        userPrompt?: string,
     ): Promise<AgentRunRecord> {
         const runId = `run_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
         RunLedger.latestActiveRunId = runId;
         const now = Date.now();
+        const hasUserPrompt = typeof userPrompt === 'string';
+        const promptRef = hasUserPrompt ? 'prompt.json' : undefined;
+        const promptSha256 = hasUserPrompt ? sha256Text(userPrompt) : undefined;
         const record: AgentRunRecord = {
             runId,
             topicId,
@@ -150,16 +163,33 @@ export class RunLedger {
                 permissionDenied: 0,
                 artifactizedResultCount: 0
             },
+            context: promptRef ? { promptRef, promptSha256 } : undefined,
             writtenFiles: []
         };
         this.activeRuns.set(runId, record);
         this.runEvents.set(runId, []);
         this.runSequences.set(runId, 0);
+        this.runDirectories.set(runId, this.getRunDir(topicId, runId));
+
+        if (hasUserPrompt) {
+            this.runPrompts.set(runId, userPrompt);
+            try {
+                await atomicWriteJson(path.join(this.getRunDir(topicId, runId), promptRef!), {
+                    version: 1,
+                    prompt: userPrompt,
+                    sha256: promptSha256,
+                });
+            } catch (error) {
+                ErrorReporter.warn('RunLedger', `Failed to archive original prompt for run ${runId}`, error);
+            }
+        }
 
         await this.appendEvent(runId, 'run_created', {
             topicId,
             mode,
             userPromptPreview,
+            promptRef,
+            promptSha256,
             parentRunId
         });
 
@@ -247,9 +277,15 @@ export class RunLedger {
         const events = this.runEvents.get(runId);
         if (events) events.push(event);
 
-        // Persist event to jsonl
-        await this.writeEventToDisk(run, event);
-        await this.writeStateToDisk(run);
+        // Persist event/state in per-run sequence order. Capture the state at
+        // this event boundary so a concurrent later event cannot race ahead.
+        const stateSnapshot = JSON.parse(JSON.stringify(run)) as AgentRunRecord;
+        stateSnapshot.context = {
+            ...stateSnapshot.context,
+            lastStableEventId: event.eventId,
+            lastStableSequence: event.sequence,
+        };
+        await this.enqueuePersistence(run, event, stateSnapshot);
 
         // Notify subscribers of the change
         this.emitter.emit('change', runId);
@@ -297,8 +333,8 @@ export class RunLedger {
             return { ...payload, step: this.compactStep(payload.step) };
         }
         if (type === 'tool_call_created' || type === 'tool_call_start') {
-            const args = this.compactUnknown(payload.args ?? payload.arguments);
-            return { ...payload, args, arguments: args };
+            const args = this.compactUnknown(payload.toolArgs ?? payload.args ?? payload.arguments);
+            return { ...payload, toolArgs: args, args, arguments: args };
         }
         if (type === 'tool_call_end') {
             return { ...payload, result: this.compactUnknown(payload.result) };
@@ -321,19 +357,98 @@ export class RunLedger {
         return { run, events: this.runEvents.get(runId) ?? [] };
     }
 
+    public async getOrLoadSnapshot(
+        runId: string,
+        topicId?: string,
+    ): Promise<{ run: AgentRunRecord; events: AgentRunEvent[] } | undefined> {
+        const existing = this.getSnapshot(runId);
+        if (existing) return existing;
+
+        const match = await this.findRunDirectory(runId, topicId);
+        if (!match) return undefined;
+        await this.loadRunFromDirectory(match.topicId, runId, match.runDir);
+        return this.getSnapshot(runId);
+    }
+
+    public async readPrompt(runId: string, topicId?: string): Promise<string | undefined> {
+        const inMemory = this.runPrompts.get(runId);
+        if (inMemory !== undefined) return inMemory;
+
+        const snapshot = await this.getOrLoadSnapshot(runId, topicId);
+        if (!snapshot) return undefined;
+        const created = snapshot.events.find(event => event.type === 'run_created');
+        const ref = created?.payload?.promptRef ?? snapshot.run.context?.promptRef;
+        const expectedHash = created?.payload?.promptSha256 ?? snapshot.run.context?.promptSha256;
+        if (typeof ref !== 'string' || !ref) return undefined;
+
+        const runDir = this.resolveRunDir(snapshot.run.topicId, runId);
+        const promptPath = path.isAbsolute(ref) ? ref : path.join(runDir, ref);
+        if (!isPathInsideOrEqual(promptPath, runDir)) {
+            ErrorReporter.warn('RunLedger', `Rejected prompt artifact outside run directory for ${runId}`);
+            return undefined;
+        }
+        const loaded = readJsonWithBackup<{ prompt: string; sha256?: string }>(
+            promptPath,
+            (value): value is { prompt: string; sha256?: string } => {
+                if (!value || typeof value !== 'object') return false;
+                const candidate = value as { prompt?: unknown; sha256?: unknown };
+                if (typeof candidate.prompt !== 'string') return false;
+                const actualHash = sha256Text(candidate.prompt);
+                return (!expectedHash || actualHash === expectedHash)
+                    && (typeof candidate.sha256 !== 'string' || actualHash === candidate.sha256);
+            },
+        );
+        if (!loaded) {
+            ErrorReporter.warn('RunLedger', `Prompt checksum mismatch for run ${runId}`);
+            return undefined;
+        }
+        this.runPrompts.set(runId, loaded.value.prompt);
+        return loaded.value.prompt;
+    }
+
     private getRunDir(topicId: string, runId: string): string {
         const topicDir = getTopicStorageDir(topicId);
         return path.join(topicDir, 'runs', runId);
     }
 
+    private resolveRunDir(topicId: string, runId: string): string {
+        return this.runDirectories.get(runId) ?? this.getRunDir(topicId, runId);
+    }
+
+    private enqueuePersistence(
+        run: AgentRunRecord,
+        event: AgentRunEvent,
+        stateSnapshot: AgentRunRecord,
+    ): Promise<void> {
+        const previous = this.persistenceQueues.get(run.runId) ?? Promise.resolve();
+        const current = previous
+            .catch(() => {})
+            .then(async () => {
+                await this.writeEventToDisk(run, event);
+                await this.writeStateToDisk(stateSnapshot);
+            });
+        this.persistenceQueues.set(run.runId, current);
+        return current.finally(() => {
+            if (this.persistenceQueues.get(run.runId) === current) {
+                this.persistenceQueues.delete(run.runId);
+            }
+        });
+    }
+
     private async writeEventToDisk(run: AgentRunRecord, event: AgentRunEvent): Promise<void> {
         try {
-            const dir = this.getRunDir(run.topicId, run.runId);
+            const dir = this.resolveRunDir(run.topicId, run.runId);
             if (!fs.existsSync(dir)) {
                 await fs.promises.mkdir(dir, { recursive: true });
             }
             const file = path.join(dir, 'events.jsonl');
-            await fs.promises.appendFile(file, JSON.stringify(event) + '\n', 'utf8');
+            const handle = await fs.promises.open(file, 'a', 0o600);
+            try {
+                await handle.writeFile(JSON.stringify(event) + '\n', 'utf8');
+                await handle.sync();
+            } finally {
+                await handle.close();
+            }
         } catch (e) {
             ErrorReporter.warn('RunLedger', `Failed to write event to disk for run ${run.runId}`, e);
         }
@@ -341,12 +456,12 @@ export class RunLedger {
 
     private async writeStateToDisk(run: AgentRunRecord): Promise<void> {
         try {
-            const dir = this.getRunDir(run.topicId, run.runId);
+            const dir = this.resolveRunDir(run.topicId, run.runId);
             if (!fs.existsSync(dir)) {
                 await fs.promises.mkdir(dir, { recursive: true });
             }
             const file = path.join(dir, 'run_state.json');
-            await fs.promises.writeFile(file, JSON.stringify(run, null, 2), 'utf8');
+            await atomicWriteJson(file, run);
         } catch (e) {
             ErrorReporter.warn('RunLedger', `Failed to write state to disk for run ${run.runId}`, e);
         }
@@ -431,6 +546,133 @@ export class RunLedger {
         };
     }
 
+    private applyPersistedEvents(record: AgentRunRecord, events: AgentRunEvent[], includeMetrics = false): void {
+        record.steps = [];
+        record.writtenFiles = Array.isArray(record.writtenFiles) ? record.writtenFiles : [];
+        for (const event of events) {
+            if (event.type === 'status_changed' && event.payload?.status) {
+                record.status = event.payload.status;
+            } else if (event.type === 'complete') {
+                record.status = 'completed';
+            } else if (event.type === 'file_change' && event.payload?.filePath && !record.writtenFiles.includes(event.payload.filePath)) {
+                record.writtenFiles.push(event.payload.filePath);
+            } else if (event.type === 'tool_call_end' && Array.isArray(event.payload?.writtenFiles)) {
+                for (const filePath of event.payload.writtenFiles) {
+                    if (typeof filePath === 'string' && !record.writtenFiles.includes(filePath)) record.writtenFiles.push(filePath);
+                }
+            } else if (event.type === 'subagent_end' && Array.isArray(event.payload?.filesWritten)) {
+                for (const filePath of event.payload.filesWritten) {
+                    if (typeof filePath === 'string' && !record.writtenFiles.includes(filePath)) record.writtenFiles.push(filePath);
+                }
+            }
+
+            if (!includeMetrics) continue;
+            if (event.type === 'metrics_updated') {
+                record.metrics = { ...record.metrics, ...event.payload?.metrics };
+            } else if (event.type === 'model_call_start') {
+                record.metrics.modelCallCount = (record.metrics.modelCallCount ?? 0) + 1;
+            } else if (event.type === 'tool_call_end' && event.payload?.success === false && !event.payload?.skipped) {
+                record.metrics.failedToolCount = (record.metrics.failedToolCount ?? 0) + 1;
+            } else if (event.type === 'permission_requested') {
+                record.metrics.permissionRequested = (record.metrics.permissionRequested ?? 0) + 1;
+            } else if (event.type === 'permission_resolved') {
+                if (event.payload?.allowed) {
+                    record.metrics.permissionApproved = (record.metrics.permissionApproved ?? 0) + 1;
+                } else {
+                    record.metrics.permissionDenied = (record.metrics.permissionDenied ?? 0) + 1;
+                }
+            } else if (event.type === 'artifact_created') {
+                record.metrics.artifactizedResultCount = (record.metrics.artifactizedResultCount ?? 0) + 1;
+            } else if (event.type === 'compaction_end' && event.payload?.success !== false) {
+                record.metrics.compactionCount = (record.metrics.compactionCount ?? 0) + 1;
+            }
+        }
+        const latest = events.at(-1);
+        if (latest) {
+            record.updatedAt = Math.max(record.updatedAt ?? 0, latest.timestamp);
+            record.context = {
+                ...record.context,
+                lastStableEventId: latest.eventId,
+                lastStableSequence: latest.sequence,
+            };
+        }
+    }
+
+    private async loadRunFromDirectory(
+        topicId: string,
+        runId: string,
+        runDir: string,
+    ): Promise<AgentRunRecord | undefined> {
+        const stateFile = path.join(runDir, 'run_state.json');
+        const loadedState = readJsonWithBackup<AgentRunRecord>(stateFile, (value): value is AgentRunRecord => (
+            !!value && typeof value === 'object' && typeof (value as AgentRunRecord).runId === 'string'
+        ));
+        if (!loadedState) return undefined;
+
+        const stateStat = await fs.promises.stat(loadedState.sourcePath);
+        const record = stateStat.size > RUN_STATE_MAX_LOAD_BYTES
+            ? this.createLargeRunPlaceholder(topicId, runId, stateStat.mtimeMs, stateStat.size)
+            : loadedState.value;
+        const events = await this.readEventsFromDisk(runDir, runId);
+        const stableSequence = record.context?.lastStableSequence;
+        const unappliedEvents = typeof stableSequence === 'number'
+            ? events.filter(event => event.sequence > stableSequence)
+            : events;
+        this.applyPersistedEvents(record, unappliedEvents, typeof stableSequence === 'number');
+        const latestSequence = events.reduce((max, event) => Math.max(max, event.sequence), 0);
+        this.activeRuns.set(record.runId, record);
+        this.runEvents.set(record.runId, events);
+        this.runSequences.set(record.runId, latestSequence);
+        this.runDirectories.set(record.runId, runDir);
+        return record;
+    }
+
+    private async findRunDirectory(
+        runId: string,
+        topicId?: string,
+    ): Promise<{ topicId: string; runDir: string } | undefined> {
+        if (topicId) {
+            const runDir = this.getRunDir(topicId, runId);
+            if (fs.existsSync(runDir)) return { topicId, runDir };
+        }
+
+        for (const root of getAiStorageRootCandidates()) {
+            const topics = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => []);
+            for (const topic of topics) {
+                if (!topic.isDirectory()) continue;
+                const runDir = path.join(root, topic.name, 'runs', runId);
+                if (fs.existsSync(runDir)) return { topicId: topic.name, runDir };
+            }
+        }
+        return undefined;
+    }
+
+    public async listRecentRunsFromDisk(limit = 50): Promise<AgentRunRecord[]> {
+        const candidates: Array<{ topicId: string; runId: string; runDir: string; mtimeMs: number }> = [];
+        for (const root of getAiStorageRootCandidates()) {
+            const topics = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => []);
+            for (const topic of topics) {
+                if (!topic.isDirectory()) continue;
+                const runsDir = path.join(root, topic.name, 'runs');
+                const runs = await fs.promises.readdir(runsDir, { withFileTypes: true }).catch(() => []);
+                for (const run of runs) {
+                    if (!run.isDirectory()) continue;
+                    const runDir = path.join(runsDir, run.name);
+                    const stat = await fs.promises.stat(runDir).catch(() => undefined);
+                    if (stat) candidates.push({ topicId: topic.name, runId: run.name, runDir, mtimeMs: stat.mtimeMs });
+                }
+            }
+        }
+
+        candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+        for (const candidate of candidates.slice(0, Math.max(limit * 2, limit))) {
+            if (!this.activeRuns.has(candidate.runId)) {
+                await this.loadRunFromDirectory(candidate.topicId, candidate.runId, candidate.runDir);
+            }
+        }
+        return this.listRecentRuns().slice(0, limit);
+    }
+
     /**
      * Attempts to load the latest run for a given topic.
      * Useful for restoring pending write confirm / permission cards on startup.
@@ -456,37 +698,7 @@ export class RunLedger {
             if (!latestRunId) return undefined;
 
             const runDir = path.join(runsDir, latestRunId);
-            const stateFile = path.join(runDir, 'run_state.json');
-            if (!fs.existsSync(stateFile)) return undefined;
-
-            const stateStat = await fs.promises.stat(stateFile);
-            let record: AgentRunRecord;
-            if (stateStat.size > RUN_STATE_MAX_LOAD_BYTES) {
-                record = this.createLargeRunPlaceholder(topicId, latestRunId, stateStat.mtimeMs, stateStat.size);
-            } else {
-                const data = await fs.promises.readFile(stateFile, 'utf8');
-                record = JSON.parse(data) as AgentRunRecord;
-                record.steps = [];
-            }
-            const events = await this.readEventsFromDisk(runDir, record.runId);
-            for (const event of events) {
-                if (event.type === 'status_changed' && event.payload?.status) {
-                    record.status = event.payload.status;
-                } else if (event.type === 'complete') {
-                    record.status = 'completed';
-                } else if (event.type === 'file_change' && event.payload?.filePath && !record.writtenFiles.includes(event.payload.filePath)) {
-                    record.writtenFiles.push(event.payload.filePath);
-                } else if (event.type === 'subagent_end' && Array.isArray(event.payload?.filesWritten)) {
-                    for (const filePath of event.payload.filesWritten) {
-                        if (typeof filePath === 'string' && !record.writtenFiles.includes(filePath)) record.writtenFiles.push(filePath);
-                    }
-                }
-            }
-            const latestSequence = events.reduce((max, event) => Math.max(max, event.sequence), 0);
-            this.activeRuns.set(record.runId, record);
-            this.runEvents.set(record.runId, events);
-            this.runSequences.set(record.runId, latestSequence);
-            return record;
+            return await this.loadRunFromDirectory(topicId, latestRunId, runDir);
         } catch (e) {
             ErrorReporter.warn('RunLedger', `Failed to load latest run for topic ${topicId}`, e);
             return undefined;

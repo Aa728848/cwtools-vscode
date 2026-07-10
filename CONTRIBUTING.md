@@ -266,12 +266,14 @@ Key constraints for tools:
 - Concurrent reads of a file with an in-flight write are queued after it via `writeCoordinator.afterCurrentWrites`. Target paths for `read_file`/`get_pdx_block`/`get_file_context`/`edit_file` are resolved inside `getAgentToolTargetFiles`.
 - `get_file_context`/`get_pdx_block` marks reads and returns 1-indexed line spans. Query errors return an `error` field to distinguish from empty results. `read_file` lines are prefixed with `N | `. `replacerSuite.ts`'s `stripLineNumberPrefixes` automatically strips pasted prefixes when matching fails.
 - Diagnostic repair hints are cataloged in `tools/diagnosticMetadata.ts` for `analyze_diagnostic_error`. Update `diagnosticMetadata.test.ts` accordingly.
-- Record new steps via `runner/runLedger.ts`. New events must update `runTimeline.ts`, `runInspector.ts`, and `runReducers.ts`.
+- Record new steps via `runner/runLedger.ts`. Per-run writes must stay serialized, run snapshots must use atomic replacement, and large/full context belongs in referenced artifacts rather than bounded event payloads. New events must update `runTimeline.ts`, `runInspector.ts`, and `runReducers.ts`.
 - Fuzzy matching strategies reside in `tools/replacerSuite.ts` (`fuzzyReplace`). It has 10 strategies (Exact, Unicode norm, Line trim, Block anchor, Whitespace norm, Indentation elasticity, Escape norm, Boundary trim, Context awareness, Jaccard similarity). Update `editFileReplacer.test.ts` on modifications.
 - For weak tool calling providers, `tools/schemaFlatten.ts` flattens schemas and `nestArguments()` restores them before execution.
 - `runner/readTracker.ts` tracks files in Extension Host via mtime + SHA-256 to prevent out-of-date writes.
 - `runner/runReducers.ts` provides pure-function event projection reducers to reconstruct run statistics and topologies from events.
-- `runner/runReplay.ts` enables recorded-tool replays (Mode A) answering tool calls from the ledger.
+- `runner/contextTranscript.ts` is the shared transcript-integrity boundary for compaction and resume. Preserve leading system instructions and complete assistant-tool groups when changing it.
+- `runner/checkpoint.ts` writes atomic V3 resume state and transcript checksums while retaining V2 read compatibility. Never persist or restore `sessionOnly` approvals.
+- `runner/runReplay.ts` enables recorded-tool replays (Mode A) answering tool calls from the ledger; full original prompts must be resolved from checksummed `prompt.json` artifacts after restart.
 - `workspacePaths.ts` resolves `.cwtools-ai/` paths, topics, and scratch dirs.
 - `workspaceSandbox.ts` handles path input sanitization, workspace folder resolution, and sandbox scope categorization.
 - `runnerPolicy.ts` manages mode-based tool filters, iteration limits, and output budgets.
@@ -310,7 +312,7 @@ Choose tests based on your modifications:
 | Documentation | Check links, paths, and commands validity |
 | Extension TS | `npm run compile` and `npm run test:unit` |
 | AI Tools / Prompts / Workflows | Specific tests, then `npm run test:unit` |
-| AI Runner Pipeline | `reducers.test.ts`, `runLedger.test.ts`, `resumeStateV2.test.ts` |
+| AI Runner Pipeline | `durableStorage.test.ts`, `contextTranscript.test.ts`, `contextCompaction.test.ts`, `runLedger.test.ts`, `resumeStateV2.test.ts`, `reducers.test.ts` |
 | AI Tool Execution | `editFileReplacer.test.ts`, `argRepair.test.ts`, `toolInvocation.test.ts` |
 | Diagnostics i18n / ReadTracker / Command Safety | `diagnosticI18n.test.ts`, `readTracker.test.ts`, `runCommandReadonly.test.ts`, `commandPreflight.test.ts` |
 | Project Profile / `/init` | `projectProfile.test.ts` |
@@ -626,12 +628,14 @@ Webview 运行在浏览器沙盒中：
 - 同一文件的读操作会经 `writeCoordinator.afterCurrentWrites` 排在在途写入之后；`getAgentToolTargetFiles` 已为 `read_file`/`get_pdx_block`/`get_file_context`/`edit_file` 补齐路径提取。
 - `get_file_context`/`get_pdx_block` 现会 `markRead` 并返回 1 基 `startLine`/`endLine`，可直接衔接 `replace_lines`；读/搜索工具出错时返回 `error` 字段以区别于"空结果"。`read_file` 输出带 `N | ` 行号前缀，`replacerSuite.ts` 的 `stripLineNumberPrefixes` 会在 `edit_file` 匹配失败时剥离模型误粘贴的行号前缀。
 - 诊断修复元数据集中在 `tools/diagnosticMetadata.ts`：为 `analyze_diagnostic_error` 提供诊断分类（`DiagnosticAnalysisCategory`）与修复提示，修改时同步更新 `diagnosticMetadata.test.ts`。
-- 新增用户可见运行步骤时，通过 `runner/runLedger.ts` 写事件；新增事件类型时同步 `runTimeline.ts`、`runInspector.ts` 和 `runReducers.ts`。
+- 新增用户可见运行步骤时，通过 `runner/runLedger.ts` 写事件。per-run 写入必须保持串行，run snapshot 使用原子替换，大型/完整上下文应进入带引用的 artifact，不放进有界事件负载；新增事件类型时同步 `runTimeline.ts`、`runInspector.ts` 和 `runReducers.ts`。
 - 文件编辑的模糊匹配策略集中在 `tools/replacerSuite.ts`（`fuzzyReplace`），由 `tools/fileTools.ts` 的 `replace()` 辅助方法消费，用于 `edit_file` 工具与内部 hunk 应用（`replace_lines` 完全按行号替换）。它包含 10 种递进式匹配算法（直接匹配、Unicode 归一化、行级 trim、块锚定、空白归一化、缩进弹性、转义归一化、边界 trim、上下文感知、Jaccard 相似度）。修改替换策略时请同步更新 `editFileReplacer.test.ts`。
 - 面向弱工具调用能力的 Provider，`tools/schemaFlatten.ts` 可自动将深层嵌套 schema 展平；执行工具前由 `nestArguments()` 反向还原。
 - `runner/readTracker.ts` 在 Extension Host 中跟踪文件的读取状态（mtime + SHA-256 hash），防止 Agent 未读即写或写入已被外部修改的文件。
 - `runner/runReducers.ts` 提供纯函数式的事件投影 reducer，用于从 JSONL 事件流重建 run 状态、工具时间线、Agent 拓扑图和缓存统计快照。新增事件类型时必须更新对应 reducer。
-- `runner/runReplay.ts` 提供运行回放功能：模式 A (recorded-tool) 使用原始 ledger 的工具结果回答工具调用，模式 B (full-replay) 暂缓。`ReplaySession` 按规范化参数索引工具结果。
+- `runner/contextTranscript.ts` 是 compaction 与 resume 共用的 transcript 完整性边界；修改时必须保留前置 system 指令和完整 assistant-tool 调用组。
+- `runner/checkpoint.ts` 原子写入 V3 resume state 与 transcript 校验和，并兼容读取 V2；绝不能持久化或恢复 `sessionOnly` 审批。
+- `runner/runReplay.ts` 提供运行回放功能：模式 A (recorded-tool) 使用原始 ledger 的工具结果回答工具调用，模式 B (full-replay) 暂缓。完整原始 prompt 必须在重启后从带校验和的 `prompt.json` artifact 读取；`ReplaySession` 按规范化参数索引工具结果。
 - `workspacePaths.ts` 负责解析 AI 存储根目录（`.cwtools-ai/`）、topic 目录和 scratch 目录，支持多 workspace folder 场景。
 - `workspaceSandbox.ts` 负责路径输入清洗、作用域分类（`project`/`ai`/`workspace`/`outside`）和信任判定。
 - `runnerPolicy.ts` 集中管理模式级工具过滤、每种模式的迭代次数上限、slim sub-agent 输出预算。
@@ -671,7 +675,7 @@ Webview 运行在浏览器沙盒中：
 | 文档 | 检查链接、路径和命令是否存在 |
 | Extension TypeScript | `npm run compile`，必要时 `npm run test:unit` |
 | AI 工具 / Prompt / Workflow / Orchestrator | 相关单测，再视范围执行 `npm run test:unit` |
-| AI Runner Pipeline (reducers/replay/ledger) | `reducers.test.ts`、`runLedger.test.ts`、`resumeStateV2.test.ts` |
+| AI Runner Pipeline (context/resume/replay/ledger) | `durableStorage.test.ts`、`contextTranscript.test.ts`、`contextCompaction.test.ts`、`runLedger.test.ts`、`resumeStateV2.test.ts`、`reducers.test.ts` |
 | AI Tool Execution (replacer/arg repair) | `editFileReplacer.test.ts`、`argRepair.test.ts`、`toolInvocation.test.ts` |
 | 诊断 i18n / ReadTracker / 命令安全 | `diagnosticI18n.test.ts`、`readTracker.test.ts`、`runCommandReadonly.test.ts`、`commandPreflight.test.ts` |
 | Project Profile / `/init` | `projectProfile.test.ts` |

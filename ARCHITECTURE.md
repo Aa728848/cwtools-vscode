@@ -191,8 +191,10 @@ sequenceDiagram
 
 | File | Purpose |
 | --- | --- |
-| `compaction.ts` | Chat history compaction and context management helpers |
-| `checkpoint.ts` | V2 resume states and synthetic tool call repairs for interrupted generations |
+| `compaction.ts` | Canonical chat-history compaction that preserves stable system instructions and tool groups |
+| `contextTranscript.ts` | Provider-safe transcript normalization and resume/compaction boundary selection |
+| `durableStorage.ts` | Atomic UTF-8/JSON replacement with a recoverable previous generation |
+| `checkpoint.ts` | Atomic V3 resume state, V2 compatibility, transcript checksums, and interrupted tool-call repairs |
 | `writeCoordinator.ts` | Koordinations entry for `PartitionedWriteQueue` and read-after-write blockades |
 | `fallbackPolicy.ts` | Model fallbacks and retries on rate limits or failures |
 | `cancellation.ts` | LLM generation abort tracking and exceptions |
@@ -204,7 +206,7 @@ sequenceDiagram
 | `policyEngine.ts` | Hierarchical permission resolution and sandbox shadow audits |
 | `autoReviewer.ts` | Read-only automated LLM reviewer: caches decisions, falls back safely to user prompts |
 | `shellEnv.ts` | White-lists environment variables for child processes |
-| `runLedger.ts` | Appends agent steps to JSONL and serves as raw data for timelines |
+| `runLedger.ts` | Ordered JSONL events, atomic run snapshots, prompt artifacts, and disk-backed run discovery |
 | `runReducers.ts` | Pure event projection reducers: reconstructs run topologies, stats, and timelines |
 | `runReplay.ts` | Tool mock replayer (Mode A: uses historic inputs to answer LLM calls) |
 | `readTracker.ts` | Hash-based integrity tracking (mtime + SHA-256) to ensure reads precede writes |
@@ -277,8 +279,9 @@ The orchestrator structures DAG sub-tasks, schedules parallel processes, shares 
 ##### Reducers, Checkpoints, and Replays
 
 - `runReducers.ts` scans events list sequentially to build state snapshots without side-effects.
-- `checkpoint.ts` builds V2 resume states, injecting artificial tool outputs for interrupted runs.
-- `runReplay.ts` runs Mode A replays matching historic outputs based on canonical tool arguments.
+- `contextTranscript.ts` canonicalizes tool-call/result groups before checkpointing or compaction and keeps leading system instructions outside replaceable history.
+- `checkpoint.ts` writes V3 resume states and checksummed transcript snapshots atomically, loads V2 for compatibility, and never restores session-only approvals.
+- `runReplay.ts` discovers runs and their full prompt artifacts after restart, then runs Mode A replays matching historic outputs by canonical tool arguments.
 - `readTracker.ts` blocks write attempts if files were modified externally since their last read.
 
 #### Out-of-the-Box MCP Server
@@ -562,8 +565,10 @@ sequenceDiagram
 
 | 文件 | 作用 |
 | --- | --- |
-| `compaction.ts` | 历史压缩与上下文窗口辅助 |
-| `checkpoint.ts` | V2 断点恢复元数据和孤儿 `tool_call` 补齐 |
+| `compaction.ts` | 规范化历史压缩，保留稳定 system 指令与完整工具调用组 |
+| `contextTranscript.ts` | Provider 安全的 transcript 规范化与 resume/compaction 边界选择 |
+| `durableStorage.ts` | 带上一完整版本备份的 UTF-8/JSON 原子替换 |
+| `checkpoint.ts` | 原子 V3 断点状态、V2 兼容、transcript 校验和与中断工具调用补齐 |
 | `writeCoordinator.ts` | `PartitionedWriteQueue` 写入协调 + `afterCurrentWrites` 读后于写屏障 |
 | `fallbackPolicy.ts` | 模型备选及 API 报错重试管理 |
 | `cancellation.ts` | 大模型生成终止判定与异常抛出 |
@@ -575,7 +580,7 @@ sequenceDiagram
 | `policyEngine.ts` | 分层权限 profile 解析、类型化规则匹配与可执行拒绝（shadow 模式） |
 | `autoReviewer.ts` | 只读 LLM 审批 reviewer：决策缓存、fail-open 到 ask_user，绝不放宽沙盒 |
 | `shellEnv.ts` | Shell 环境变量白名单构建（按平台基线 + 用户追加） |
-| `runLedger.ts` | 运行账本、事件 JSONL 和前端 `runSnapshot` 数据源 |
+| `runLedger.ts` | 有序 JSONL、原子 run snapshot、prompt artifact、磁盘 run 发现和前端 `runSnapshot` 数据源 |
 | `runReducers.ts` | 纯事件投影 reducer：run 状态、工具时间线、Agent 拓扑图、缓存统计 |
 | `runReplay.ts` | 运行回放引擎 — 模式 A (recorded-tool) 从 ledger 回答工具调用 |
 | `readTracker.ts` | 文件读写完整性跟踪（mtime + SHA-256 hash） |
@@ -669,9 +674,9 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 
 ##### Run Ledger、Checkpoint 与 Compacted Memory
 
-`runner/runLedger.ts` 提供单例 `RunLedger`，把每次 Agent 运行抽象为 `AgentRunRecord` + 追加式 `AgentRunEvent` 序列流。事件用 per-run 单调递增的 `sequence` 排序，落盘到 `.cwtools-ai/<topic>/runs/<runId>/events.jsonl`，并通过 `runSnapshot` 消息广播到聊天与 Agent Manager 面板。
+`runner/runLedger.ts` 提供单例 `RunLedger`，把每次 Agent 运行抽象为 `AgentRunRecord` + 追加式 `AgentRunEvent` 序列流。per-run 写入队列保证 JSONL 顺序与单调递增 `sequence` 一致，`run_state.json` 使用原子替换并保留上一完整版本。完整原始 prompt 单独写入带 SHA-256 的 `prompt.json`，重启后可通过磁盘扫描恢复 run 与回放上下文。状态通过 `runSnapshot` 消息广播到聊天与 Agent Manager 面板。
 
-`runner/checkpoint.ts` 产出 V2 `AgentResumeState`。`prepareMessagesForResume` 为孤儿 `tool_call` 注入合成 interrupted 回复，避免 OpenAI 风格 API 拒绝恢复请求；`buildResumeMessages` 把压缩摘要前置，并限制上下文尾部。
+`runner/contextTranscript.ts` 在压缩与恢复前统一规范化消息：移除孤立/重复工具结果，为未完成调用补合成 interrupted 回复，并保证切分不拆散 assistant-tool 组。`runner/checkpoint.ts` 产出 V3 `AgentResumeState`，原子保存压缩尾部和带 SHA-256/消息数的完整 transcript，损坏时回退上一完整版本，同时兼容读取 V2；进程重启后不恢复 `sessionOnly` 审批规则。
 
 `runner/contextMemory.ts` 产出结构化 `CompactedSummary`，由 `promptBuilder.ts` 在恢复时注入。Agent Manager 的 `runTimeline.ts` 和 `runInspector.ts` 消费 run snapshot 展示事件时间轴和单事件详情。
 
@@ -954,7 +959,7 @@ Webview 与 Extension Host 是完全隔离的运行环境。Webview 运行在受
 
 ##### 运行账本与恢复
 
-每次 Agent 运行通过 `runner/runLedger.ts` 写入 `AgentRunRecord` 与 `AgentRunEvent` 序列。`runner/checkpoint.ts` 保存 V2 resume state，`runner/contextMemory.ts` 产出结构化压缩摘要，前端通过 `runSnapshot` 展示实时状态。
+每次 Agent 运行通过 `runner/runLedger.ts` 串行写入 `AgentRunRecord` 与 `AgentRunEvent` 序列，并原子替换 run snapshot。`runner/checkpoint.ts` 保存可校验、可回退的 V3 resume state（兼容 V2），`runner/contextTranscript.ts` 维护工具调用与 system 指令边界，`runner/contextMemory.ts` 产出结构化压缩摘要；前端通过 `runSnapshot` 展示实时状态，回放命令可在 Extension Host 重启后从磁盘发现 run 和原始 prompt。
 
 ##### 本地化写入
 

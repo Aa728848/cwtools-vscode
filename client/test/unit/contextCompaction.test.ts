@@ -77,4 +77,42 @@ describe('context compaction', () => {
         expect(result.some(message => String(message.content).includes('NEW_SUMMARY'))).to.equal(true);
         expect(steps.map(step => step.compactionInfo?.state)).to.deep.equal(['start', 'complete']);
     });
+
+    it('preserves leading system instructions for providers without OpenAI prefix caching', async () => {
+        const { maybeCompactHistory } = loadCompaction();
+        const history: ChatMessage[] = [
+            { role: 'system', content: 'base system prompt' },
+            { role: 'system', content: 'workspace safety policy' },
+            ...Array.from({ length: 12 }, (_, index): ChatMessage => ({
+                role: index % 2 === 0 ? 'user' : 'assistant',
+                content: `message-${index} ${'context '.repeat(80)}`,
+            })),
+        ];
+        const aiService = {
+            getConfig: () => ({
+                provider: 'anthropic',
+                model: 'claude-test',
+                maxContextTokens: 4_000,
+            }),
+            chatCompletion: async () => ({
+                choices: [{ message: { role: 'assistant', content: 'SAFE_SUMMARY' }, finish_reason: 'stop' }],
+            }),
+        };
+
+        const result = await maybeCompactHistory(
+            history,
+            () => undefined,
+            { aiService: aiService as any, promptBuilder: { buildCompactionPrompt: () => 'compact' } as any },
+            { providerId: 'anthropic', model: 'claude-test' },
+            undefined,
+            undefined,
+            { force: true },
+        );
+
+        expect(result.slice(0, 2).map(message => message.content)).to.deep.equal([
+            'base system prompt',
+            'workspace safety policy',
+        ]);
+        expect(result.some(message => String(message.content).includes('SAFE_SUMMARY'))).to.equal(true);
+    });
 });

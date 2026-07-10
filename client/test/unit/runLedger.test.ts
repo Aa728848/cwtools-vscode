@@ -92,6 +92,106 @@ describe('RunLedger Unit Tests', () => {
         expect(updatedSnapshot?.events.at(-1)?.sequence).to.equal(4);
     });
 
+    it('archives the complete prompt and discovers replay context after restart', async () => {
+        const { RunLedger, runLedger } = loadRunLedgerModule();
+        const fullPrompt = `inspect every relevant file\n${'detail '.repeat(200)}`;
+        const run = await runLedger.createRun(
+            'topic_replay',
+            'build',
+            fullPrompt.slice(0, 100),
+            undefined,
+            fullPrompt,
+        );
+        await runLedger.appendEvent(run.runId, 'status_changed', { status: 'completed' });
+
+        const runDir = path.join(workspaceRoot, '.cwtools-ai', 'topic_replay', 'runs', run.runId);
+        const promptArtifact = JSON.parse(fs.readFileSync(path.join(runDir, 'prompt.json'), 'utf-8'));
+        expect(promptArtifact.prompt).to.equal(fullPrompt);
+        expect(promptArtifact.sha256).to.match(/^[a-f0-9]{64}$/);
+
+        const freshLedger = new (RunLedger as any)() as typeof runLedger;
+        const recent = await freshLedger.listRecentRunsFromDisk(10);
+        expect(recent.some(candidate => candidate.runId === run.runId)).to.equal(true);
+        expect(await freshLedger.readPrompt(run.runId)).to.equal(fullPrompt);
+        expect((await freshLedger.getOrLoadSnapshot(run.runId))?.events.map(event => event.sequence)).to.deep.equal([1, 2]);
+    });
+
+    it('replays a disk-only run with its original prompt and recorded tool result', async () => {
+        const { runLedger } = loadRunLedgerModule();
+        const fullPrompt = 'compare the persisted implementation after restart';
+        const run = await runLedger.createRun('topic_disk_replay', 'build', fullPrompt, undefined, fullPrompt);
+        await runLedger.appendEvent(
+            run.runId,
+            'tool_call_created',
+            { toolName: 'read_file', toolArgs: { filePath: 'a.txt', line: 1 } },
+            { invocationId: 'inv_replay' },
+        );
+        await runLedger.appendEvent(
+            run.runId,
+            'tool_call_end',
+            { toolName: 'read_file', success: true, result: { content: 'persisted result' } },
+            { invocationId: 'inv_replay' },
+        );
+
+        const { replayRun } = loadRunReplayModule();
+        let receivedPrompt = '';
+        let recordedResult: unknown;
+        await replayRun(run.runId, {
+            run: async (prompt: string, _context: unknown, _history: unknown, options: any) => {
+                receivedPrompt = prompt;
+                recordedResult = options.replaySession.lookup('read_file', { line: 1, filePath: 'a.txt' });
+                return {};
+            },
+        } as any);
+
+        expect(receivedPrompt).to.equal(fullPrompt);
+        expect(recordedResult).to.deep.equal({ content: 'persisted result' });
+    });
+
+    it('serializes concurrent event writes in monotonic JSONL order', async () => {
+        const { RunLedger, runLedger } = loadRunLedgerModule();
+        const run = await runLedger.createRun('topic_order', 'build', 'ordered prompt');
+        await Promise.all(Array.from({ length: 24 }, (_, index) => (
+            runLedger.appendEvent(run.runId, 'todo_update', { index })
+        )));
+
+        const runDir = path.join(workspaceRoot, '.cwtools-ai', 'topic_order', 'runs', run.runId);
+        const persistedSequences = fs.readFileSync(path.join(runDir, 'events.jsonl'), 'utf-8')
+            .trim()
+            .split(/\r?\n/)
+            .map(line => JSON.parse(line).sequence);
+        expect(persistedSequences).to.deep.equal(Array.from({ length: 25 }, (_, index) => index + 1));
+
+        const freshLedger = new (RunLedger as any)() as typeof runLedger;
+        await freshLedger.loadLatestRunForTopic('topic_order');
+        expect(freshLedger.getSnapshot(run.runId)?.events.map(event => event.sequence)).to.deep.equal(persistedSequences);
+    });
+
+    it('recovers run state from its atomic backup and reapplies durable events', async () => {
+        const { RunLedger, runLedger } = loadRunLedgerModule();
+        const run = await runLedger.createRun('topic_state_backup', 'build', 'backup prompt');
+        await runLedger.appendEvent(run.runId, 'status_changed', { status: 'running' });
+        await runLedger.appendEvent(run.runId, 'model_call_start', { model: 'test-model' });
+
+        const statePath = path.join(
+            workspaceRoot,
+            '.cwtools-ai',
+            'topic_state_backup',
+            'runs',
+            run.runId,
+            'run_state.json',
+        );
+        expect(fs.existsSync(`${statePath}.bak`)).to.equal(true);
+        fs.writeFileSync(statePath, '{invalid state', 'utf-8');
+
+        const freshLedger = new (RunLedger as any)() as typeof runLedger;
+        const loaded = await freshLedger.loadLatestRunForTopic('topic_state_backup');
+        expect(loaded?.runId).to.equal(run.runId);
+        expect(loaded?.status).to.equal('running');
+        expect(loaded?.metrics.modelCallCount).to.equal(1);
+        expect(freshLedger.getSnapshot(run.runId)?.events.map(event => event.sequence)).to.deep.equal([1, 2, 3]);
+    });
+
     it('cleans old or excess large tool result artifacts', async () => {
         const { runLedger } = loadRunLedgerModule();
         const topicId = 'topic_cleanup';
@@ -131,6 +231,23 @@ function loadRunLedgerModule() {
         delete require.cache[require.resolve('../../extension/ai/workspacePaths')];
         delete require.cache[require.resolve('../../extension/ai/runner/runLedger')];
         return require('../../extension/ai/runner/runLedger') as typeof import('../../extension/ai/runner/runLedger');
+    } finally {
+        moduleLoader._load = originalLoad;
+    }
+}
+
+function loadRunReplayModule() {
+    const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+    const originalLoad = moduleLoader._load;
+    moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
+        if (request === 'vscode') return vscodeStub;
+        return originalLoad.apply(this, [request, ...args]);
+    };
+    try {
+        delete require.cache[require.resolve('../../extension/ai/workspacePaths')];
+        delete require.cache[require.resolve('../../extension/ai/runner/runLedger')];
+        delete require.cache[require.resolve('../../extension/ai/runner/runReplay')];
+        return require('../../extension/ai/runner/runReplay') as typeof import('../../extension/ai/runner/runReplay');
     } finally {
         moduleLoader._load = originalLoad;
     }

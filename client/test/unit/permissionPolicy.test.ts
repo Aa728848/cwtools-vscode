@@ -69,6 +69,25 @@ describe('PermissionPolicyStore Unit Tests', () => {
         // Command with higher riskLevel than rule's riskMax (e.g. 3) should still fail
         expect(store.isApproved('run_command', { CommandLine: 'python build.py', Cwd: 'C:/project' }, 3)).to.be.false;
     });
+
+    it('does not serialize or restore session-only approvals across durable resume', () => {
+        const { PermissionPolicyStore } = loadPermissionPolicyModule();
+        const store = PermissionPolicyStore.getInstance();
+        const sessionRule = store.addRule({
+            tool: 'run_command',
+            cwdScope: 'C:/project',
+            commandPrefix: ['npm', 'run', 'deploy'],
+            riskMax: 1,
+            sessionOnly: true,
+        });
+
+        expect(store.serialize()).to.have.lengthOf(1);
+        expect(store.serialize({ includeSessionOnly: false })).to.deep.equal([]);
+
+        store.clear();
+        expect(store.restore([sessionRule], { allowSessionOnly: false })).to.equal(0);
+        expect(store.getRules()).to.deep.equal([]);
+    });
 });
 
 function loadPermissionPolicyModule() {

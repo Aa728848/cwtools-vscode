@@ -150,12 +150,14 @@ export async function replayRun(
     runner: AgentRunner,
     overrides: ReplayOverrides = {},
 ): Promise<ReplayResult> {
-    const snapshot = runLedger.getSnapshot(originalRunId);
+    const snapshot = await runLedger.getOrLoadSnapshot(originalRunId);
     if (!snapshot) {
         throw new Error(`replayRun: original run ${originalRunId} not found in ledger`);
     }
     const events = snapshot.events;
-    const userPrompt = extractOriginalUserPrompt(events);
+    const userPrompt = await runLedger.readPrompt(originalRunId, snapshot.run.topicId)
+        ?? extractOriginalUserPrompt(events)
+        ?? snapshot.run.userPromptPreview;
     if (!userPrompt) {
         throw new Error(`replayRun: could not extract original user prompt from ${originalRunId}`);
     }

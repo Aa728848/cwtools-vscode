@@ -1508,8 +1508,8 @@ export interface AgentCheckpoint {
  * with the complete tool call context and reasoning history.
  */
 export interface AgentResumeState {
-    /** V2 resume state includes version discriminator for dual-version compat */
-    version?: 2;
+    /** V3 adds atomic snapshots and transcript integrity metadata; V2 remains readable. */
+    version?: 2 | 3;
     timestamp: number;
     mode: AgentMode;
     messages: ChatMessage[];
@@ -1521,9 +1521,13 @@ export interface AgentResumeState {
     fullTranscriptRef?: string;
     pendingToolCalls?: any[];
     lastStableEventId?: string;
+    lastStableSequence?: number;
     tailMessageCount?: number;
     compacted?: boolean;
-    /** Session/workflow permission rules learned from approvals; restored on resume. */
+    transcriptSha256?: string;
+    transcriptMessageCount?: number;
+    recoveredFromBackup?: boolean;
+    /** @deprecated V3 never persists session-only approval rules. */
     permissionRules?: import('./runner/permissionPolicy').PermissionRule[];
 }
 
@@ -2117,6 +2121,10 @@ export interface AgentRunRecord {
         contextLimit?: number;
         latestSummaryRef?: string;
         transcriptRef?: string;
+        promptRef?: string;
+        promptSha256?: string;
+        lastStableEventId?: string;
+        lastStableSequence?: number;
     };
     writtenFiles: string[];
     error?: string;

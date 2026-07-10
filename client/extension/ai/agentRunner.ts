@@ -53,6 +53,7 @@ import { getWorkflow } from './workflowRegistry';
 import { TOOL_REGISTRY, WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { PartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
+import { atomicWriteText, sha256Text } from './runner/durableStorage';
 import { loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
 import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT, type CompactionBudgetOptions } from './runner/compaction';
 import { executeFallbackRetry, isFallbackEligibleApiError } from './runner/fallbackPolicy';
@@ -560,7 +561,7 @@ export class AgentRunner {
         let mode = options?.mode ?? 'build';
         const topicId = context.topicId || 'default';
         const userPromptPreview = userMessage.substring(0, 100);
-        const runRecordPromise = runLedger.createRun(topicId, mode, userPromptPreview).then(async r => {
+        const runRecordPromise = runLedger.createRun(topicId, mode, userPromptPreview, undefined, userMessage).then(async r => {
             await runLedger.appendEvent(r.runId, 'status_changed', { status: 'planning' });
             return r;
         });
@@ -1138,16 +1139,14 @@ export class AgentRunner {
         }
 
         try {
-            const fs = await import('fs');
             const pathModule = await import('path');
             const wsRoot = getProjectWorkspaceRoot();
             const runDir = pathModule.join(getTopicStorageDir(topicId, wsRoot), 'runs', runId, 'large_results');
-            if (!fs.existsSync(runDir)) {
-                fs.mkdirSync(runDir, { recursive: true });
-            }
 
             const filePath = pathModule.join(runDir, `${invocationId}_result.json`);
-            fs.writeFileSync(filePath, typeof result === 'string' ? result : JSON.stringify(result, null, 2), 'utf-8');
+            const archivedResult = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+            const resultSha256 = sha256Text(archivedResult);
+            await atomicWriteText(filePath, archivedResult);
 
             const relativeDiskPath = pathModule.relative(wsRoot, filePath);
             const preview = strContent.substring(0, 1000);
@@ -1159,6 +1158,7 @@ export class AgentRunner {
                     title: `${toolName} result`,
                     filePath: relativeDiskPath,
                     resultRef: relativeDiskPath,
+                    resultSha256,
                     toolName,
                     resultSize: strContent.length
                 },
@@ -1182,7 +1182,8 @@ export class AgentRunner {
                 message: `Tool result for ${toolName} was archived because it is large (${strContent.length} chars). Use the preview and resultRef, or retry with narrower arguments if more detail is needed.`,
                 preview,
                 fullResultLocalPath: relativeDiskPath,
-                resultRef: relativeDiskPath
+                resultRef: relativeDiskPath,
+                resultSha256,
             };
         } catch {
             await runLedger.appendEvent(
@@ -1232,6 +1233,7 @@ export class AgentRunner {
         const error = resultRecord?.error;
         const skipped = !!resultRecord?.skipped;
         const resultRef = resultRecord?.resultRef || resultRecord?.fullResultLocalPath;
+        const resultSha256 = resultRecord?.resultSha256;
         const previewSource = typeof resultRecord?.preview === 'string' ? resultRecord.preview : strContent;
         const rawWrittenFiles = resultRecord?.writtenFiles ?? resultRecord?.changedFiles ?? resultRecord?.filesWritten ?? resultRecord?.filesChanged;
         const writtenFiles = Array.isArray(rawWrittenFiles)
@@ -1244,8 +1246,10 @@ export class AgentRunner {
             skipped,
             truncated: !!resultRecord?.truncated,
             resultRef,
+            resultSha256,
             resultSize: strContent.length,
             preview: previewSource.substring(0, 1000),
+            ...(!resultRef ? { result } : {}),
             ...(writtenFiles.length > 0 ? { writtenFiles } : {}),
         };
     }

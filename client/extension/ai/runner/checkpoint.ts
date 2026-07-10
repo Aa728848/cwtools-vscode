@@ -3,25 +3,19 @@ import * as pathModule from 'path';
 import { getProjectWorkspaceRoot, getTopicStorageDir, getTopicStorageDirCandidates } from '../workspacePaths';
 import type { AgentResumeState, ChatMessage, AgentMode } from '../types';
 import type { AgentToolExecutor } from '../agentTools';
+import { isPathInsideOrEqual } from '../../pathScope';
+import { ErrorReporter } from '../errorReporter';
 import { PermissionPolicyStore } from './permissionPolicy';
+import {
+    cloneChatMessage,
+    normalizeTranscriptForPersistence,
+    selectTranscriptForResume,
+} from './contextTranscript';
+import { atomicWriteJson, readJsonWithBackup, sha256Text } from './durableStorage';
+import { runLedger } from './runLedger';
 
 export const RESUME_TAIL_MESSAGE_LIMIT = 24;
 const RESUME_SUMMARY_CHAR_LIMIT = 12000;
-
-function cloneChatMessage(message: ChatMessage): ChatMessage {
-    return {
-        ...message,
-        content: Array.isArray(message.content)
-            ? message.content.map(part => part.type === 'image_url'
-                ? { ...part, image_url: { ...part.image_url } }
-                : { ...part })
-            : message.content,
-        tool_calls: message.tool_calls?.map(call => ({
-            ...call,
-            function: { ...call.function },
-        })),
-    };
-}
 
 /**
  * Return a provider-safe resume transcript.
@@ -34,41 +28,7 @@ function cloneChatMessage(message: ChatMessage): ChatMessage {
  * failing before the model sees the recovery context.
  */
 export function prepareMessagesForResume(messages: ChatMessage[]): ChatMessage[] {
-    const normalized = messages.map(cloneChatMessage);
-
-    for (let i = 0; i < normalized.length; i++) {
-        const message = normalized[i];
-        const toolCalls = message?.role === 'assistant' ? message.tool_calls : undefined;
-        if (!toolCalls || toolCalls.length === 0) continue;
-
-        let cursor = i + 1;
-        const answeredCallIds = new Set<string>();
-        while (cursor < normalized.length && normalized[cursor]?.role === 'tool') {
-            const toolCallId = normalized[cursor]?.tool_call_id;
-            if (toolCallId) answeredCallIds.add(toolCallId);
-            cursor++;
-        }
-
-        const missingResults = toolCalls
-            .filter(call => !answeredCallIds.has(call.id))
-            .map(call => ({
-                role: 'tool' as const,
-                content: JSON.stringify({
-                    success: false,
-                    interrupted: true,
-                    error: `Tool '${call.function.name}' did not return before the previous run stopped. Re-read current state before retrying.`,
-                }),
-                tool_call_id: call.id,
-                name: call.function.name,
-            }));
-
-        if (missingResults.length > 0) {
-            normalized.splice(cursor, 0, ...missingResults);
-            i = cursor + missingResults.length - 1;
-        }
-    }
-
-    return normalized;
+    return normalizeTranscriptForPersistence(messages);
 }
 
 function findLatestSummaryRef(resumeDir: string, runId?: string): string | undefined {
@@ -92,7 +52,8 @@ function findLatestSummaryRef(resumeDir: string, runId?: string): string | undef
             })
             .filter((entry): entry is { summaryPath: string; time: number } => !!entry)
             .sort((a, b) => b.time - a.time)[0]?.summaryPath;
-    } catch {
+    } catch (error) {
+        ErrorReporter.warn('Checkpoint', 'Failed to archive the full resume transcript', error);
         return undefined;
     }
 }
@@ -109,33 +70,21 @@ function readSummarySnippet(summaryRef?: string): string {
     }
 }
 
-function findTailStart(messages: ChatMessage[], tailLimit: number): number {
-    if (messages.length <= tailLimit) return 0;
-    let start = Math.max(0, messages.length - tailLimit);
-    while (start < messages.length && messages[start]?.role === 'tool') {
-        start++;
-    }
-    return Math.min(start, messages.length);
-}
-
 export function buildResumeMessages(
     messages: ChatMessage[],
     summaryText = '',
     tailLimit = RESUME_TAIL_MESSAGE_LIMIT
 ): ChatMessage[] {
     const normalized = prepareMessagesForResume(messages);
-    const firstSystem = normalized.find(message => message.role === 'system');
-    const tailStart = findTailStart(normalized, tailLimit);
-    const tail = normalized
-        .slice(tailStart)
-        .filter((message, index) => !(index === 0 && message.role === 'system'))
-        .map(cloneChatMessage);
+    const split = selectTranscriptForResume(normalized, tailLimit);
+    const tail = split.recentMessages.map(cloneChatMessage);
 
-    const resumeMessages: ChatMessage[] = [];
-    if (firstSystem) {
-        resumeMessages.push(cloneChatMessage(firstSystem));
-    }
-    if (summaryText.trim()) {
+    const resumeMessages: ChatMessage[] = split.persistentSystemMessages.map(cloneChatMessage);
+    const hasLegacySystemSummary = split.persistentSystemMessages.some(message => (
+        message.role === 'system'
+        && String(message.content).includes('## Conversation Summary (compacted)')
+    ));
+    if (summaryText.trim() && !hasLegacySystemSummary) {
         resumeMessages.push({
             role: 'user',
             content: [
@@ -149,14 +98,28 @@ export function buildResumeMessages(
     return prepareMessagesForResume(resumeMessages);
 }
 
-function archiveFullTranscript(resumeDir: string, runId: string | undefined, normalizedMessages: ChatMessage[]): string | undefined {
+interface ArchivedTranscript {
+    path: string;
+    sha256: string;
+    messageCount: number;
+}
+
+async function archiveFullTranscript(
+    resumeDir: string,
+    runId: string | undefined,
+    normalizedMessages: ChatMessage[],
+): Promise<ArchivedTranscript | undefined> {
     if (!runId) return undefined;
     try {
         const runDir = pathModule.join(resumeDir, 'runs', runId);
-        if (!fs.existsSync(runDir)) fs.mkdirSync(runDir, { recursive: true });
         const transcriptPath = pathModule.join(runDir, 'resume_transcript.json');
-        fs.writeFileSync(transcriptPath, JSON.stringify(normalizedMessages, null, 2), 'utf-8');
-        return transcriptPath;
+        const serialized = JSON.stringify(normalizedMessages, null, 2);
+        await atomicWriteJson(transcriptPath, normalizedMessages);
+        return {
+            path: transcriptPath,
+            sha256: sha256Text(serialized),
+            messageCount: normalizedMessages.length,
+        };
     } catch {
         return undefined;
     }
@@ -186,10 +149,12 @@ export async function saveResumeState(
         const summaryRef = findLatestSummaryRef(resumeDir, runId);
         const summaryText = readSummarySnippet(summaryRef);
         const compactedMessages = buildResumeMessages(normalizedMessages, summaryText);
-        const fullTranscriptRef = archiveFullTranscript(resumeDir, runId, normalizedMessages);
+        const transcript = await archiveFullTranscript(resumeDir, runId, normalizedMessages);
+        const latestEvent = runId ? runLedger.getLatestEvent(runId) : undefined;
+        const durablePermissionRules = PermissionPolicyStore.getInstance().serialize({ includeSessionOnly: false });
 
         const resumeState: AgentResumeState = {
-            version: 2,
+            version: 3,
             timestamp: Date.now(),
             mode,
             messages: compactedMessages,
@@ -197,40 +162,63 @@ export async function saveResumeState(
             topicId,
             runId,
             summaryRef,
-            fullTranscriptRef,
+            fullTranscriptRef: transcript?.path,
             pendingToolCalls,
-            lastStableEventId: 'evt_latest',
+            lastStableEventId: latestEvent?.eventId,
+            lastStableSequence: latestEvent?.sequence,
             tailMessageCount: compactedMessages.length,
             compacted: true,
-            permissionRules: PermissionPolicyStore.getInstance().serialize(),
+            transcriptSha256: transcript?.sha256,
+            transcriptMessageCount: transcript?.messageCount,
+            ...(durablePermissionRules.length > 0 ? { permissionRules: durablePermissionRules } : {}),
         };
 
-        fs.writeFileSync(
-            pathModule.join(resumeDir, 'resume_state.json'),
-            JSON.stringify(resumeState),
-            'utf-8'
-        );
-    } catch {
-        // Non-critical — silently ignore save failures
+        await atomicWriteJson(pathModule.join(resumeDir, 'resume_state.json'), resumeState);
+    } catch (error) {
+        ErrorReporter.warn('Checkpoint', `Failed to save resume state for topic ${topicId}`, error);
     }
 }
 
 /**
  * Read the resumable state under the specified topicId.
- * Supports both V2 (with version: 2) and legacy format.
+ * Supports V3, V2, and the legacy unversioned format.
  */
 export async function loadResumeState(topicId: string): Promise<AgentResumeState | null> {
     try {
         const wsRoot = getProjectWorkspaceRoot();
         const resumePath = getTopicStorageDirCandidates(topicId, wsRoot)
             .map(dir => pathModule.join(dir, 'resume_state.json'))
-            .find(candidate => fs.existsSync(candidate));
+            .find(candidate => fs.existsSync(candidate) || fs.existsSync(`${candidate}.bak`));
         if (!resumePath) return null;
-        const raw = JSON.parse(fs.readFileSync(resumePath, 'utf-8'));
-        if (!raw || !raw.messages || !Array.isArray(raw.messages)) return null;
+        const loaded = readJsonWithBackup<AgentResumeState>(resumePath, (value): value is AgentResumeState => (
+            !!value && typeof value === 'object' && typeof (value as AgentResumeState).timestamp === 'number'
+        ));
+        if (!loaded) return null;
+        const raw = loaded.value;
+
+        if (
+            !Array.isArray(raw.messages)
+            && raw.fullTranscriptRef
+            && isPathInsideOrEqual(raw.fullTranscriptRef, pathModule.dirname(resumePath))
+        ) {
+            const transcript = readJsonWithBackup<ChatMessage[]>(
+                raw.fullTranscriptRef,
+                (value): value is ChatMessage[] => {
+                    if (!Array.isArray(value)) return false;
+                    const serialized = JSON.stringify(value, null, 2);
+                    return !raw.transcriptSha256 || sha256Text(serialized) === raw.transcriptSha256;
+                },
+            );
+            if (transcript) {
+                raw.messages = buildResumeMessages(transcript.value, readSummarySnippet(raw.summaryRef));
+            }
+        }
+        if (!Array.isArray(raw.messages)) return null;
         raw.messages = prepareMessagesForResume(raw.messages);
-        // Re-arm learned approval rules so resumed runs do not re-prompt.
-        PermissionPolicyStore.getInstance().restore(raw.permissionRules);
+        raw.recoveredFromBackup = loaded.recoveredFromBackup;
+        // A process restart ends the approval session. Only explicitly durable
+        // rules may be restored; legacy V2 session-only approvals are ignored.
+        PermissionPolicyStore.getInstance().restore(raw.permissionRules, { allowSessionOnly: false });
         return raw as AgentResumeState;
     } catch {
         return null;
@@ -246,7 +234,7 @@ export async function hasResumeState(topicId: string): Promise<boolean> {
         const wsRoot = getProjectWorkspaceRoot();
         return getTopicStorageDirCandidates(topicId, wsRoot)
             .map(dir => pathModule.join(dir, 'resume_state.json'))
-            .some(candidate => fs.existsSync(candidate));
+            .some(candidate => fs.existsSync(candidate) || fs.existsSync(`${candidate}.bak`));
     } catch {
         return false;
     }
@@ -262,8 +250,8 @@ export async function clearResumeState(topicId: string): Promise<void> {
         const resumePaths = getTopicStorageDirCandidates(topicId, wsRoot)
             .map(dir => pathModule.join(dir, 'resume_state.json'));
         for (const candidate of resumePaths) {
-            if (fs.existsSync(candidate)) {
-                fs.unlinkSync(candidate);
+            for (const file of [candidate, `${candidate}.bak`]) {
+                if (fs.existsSync(file)) fs.unlinkSync(file);
             }
         }
     } catch {

@@ -7,7 +7,8 @@ import { AGENT } from '../messages';
 import type { AIService } from '../aiService';
 import type { PromptBuilder } from '../promptBuilder';
 import { OutputRepetitionDetector } from './outputRepetitionDetector';
-import { estimateTokenCount, CHARS_PER_TOKEN, supportsOpenAiStylePrefixCache } from '../agentRunner';
+import { estimateTokenCount, CHARS_PER_TOKEN } from '../agentRunner';
+import { normalizeTranscriptForPersistence, splitTranscriptForCompaction } from './contextTranscript';
 
 // Leave room for the system prompt, tool schemas, the current turn, and output.
 // Both Codex and Claude Code compact before the model's hard context boundary.
@@ -142,13 +143,13 @@ function buildBoundedMessageContext(messages: ChatMessage[], maxTokens: number):
 }
 
 function buildSafeFallbackTail(history: ChatMessage[], count: number): ChatMessage[] {
-    if (history.length <= count) return history;
-    let start = Math.max(0, history.length - count);
-    while (start > 0 && history[start]?.role === 'tool') start--;
-    if (start > 0 && history[start - 1]?.role === 'assistant' && history[start - 1]?.tool_calls?.length) start--;
-    const tail = history.slice(start);
-    const system = history[0]?.role === 'system' && start > 0 ? [history[0]] : [];
-    return [...system, ...tail];
+    const canonical = normalizeTranscriptForPersistence(history);
+    if (canonical.length <= count) return canonical;
+    const split = splitTranscriptForCompaction(canonical, count);
+    return normalizeTranscriptForPersistence([
+        ...split.persistentSystemMessages,
+        ...split.recentMessages,
+    ]);
 }
 
 export async function maybeCompactHistory(
@@ -160,8 +161,9 @@ export async function maybeCompactHistory(
     thresholdRatio: number = COMPACTION_THRESHOLD_RATIO,
     budgetOptions: CompactionBudgetOptions = {},
 ): Promise<ChatMessage[]> {
+    const canonicalHistory = normalizeTranscriptForPersistence(history);
     // Estimate total token usage using CJK-aware estimation.
-    const estimatedTokens = history.reduce((sum, m) => {
+    const estimatedTokens = canonicalHistory.reduce((sum, m) => {
         if (typeof m.content === 'string') return sum + estimateTokenCount(m.content);
         if (Array.isArray(m.content)) {
             return sum + (m.content as import('../types').ContentPart[]).reduce((s, part) => {
@@ -176,7 +178,7 @@ export async function maybeCompactHistory(
         return sum;
     }, 0);
     if (estimatedTokens === 0 || (!budgetOptions.force && estimatedTokens < MIN_HISTORY_TOKENS_FOR_AUTO_COMPACTION)) {
-        return history;
+        return canonicalHistory;
     }
 
     const config = deps.aiService.getConfig();
@@ -188,7 +190,7 @@ export async function maybeCompactHistory(
     const estimatedRequestTokens = estimatedTokens + Math.max(0, budgetOptions.reservedTokens ?? 0);
 
     if (!budgetOptions.force && estimatedRequestTokens <= compactionThreshold) {
-        return history;
+        return canonicalHistory;
     }
 
     emitStep({
@@ -204,25 +206,11 @@ export async function maybeCompactHistory(
     });
 
     try {
-        const keepN = Math.min(COMPACTION_KEEP_LAST_N, Math.max(1, history.length - 1));
-        let splitIndex = history.length - keepN;
-        // Never leave a tool result in the retained tail without its assistant
-        // tool-call message. Providers reject such orphaned tool results.
-        while (splitIndex > 1 && history[splitIndex]?.role === 'tool') splitIndex--;
-        if (splitIndex > 1 && history[splitIndex - 1]?.role === 'assistant' && history[splitIndex - 1]?.tool_calls?.length) {
-            splitIndex--;
-        }
-        if (
-            splitIndex < history.length
-            && history[splitIndex - 1]?.role === 'user'
-            && String(history[splitIndex - 1]?.content).includes('[Context Recovery]')
-            && history[splitIndex]?.role === 'assistant'
-            && String(history[splitIndex]?.content).includes('## Conversation Summary (compacted)')
-        ) {
-            splitIndex++;
-        }
-        let olderMessages = history.slice(0, splitIndex);
-        const recentMessages = history.slice(splitIndex);
+        const keepN = Math.min(COMPACTION_KEEP_LAST_N, Math.max(1, canonicalHistory.length - 1));
+        const split = splitTranscriptForCompaction(canonicalHistory, keepN);
+        const persistentSystemMessages = split.persistentSystemMessages;
+        let olderMessages = split.olderMessages;
+        const recentMessages = split.recentMessages;
 
         let existingSummaryText = '';
         if (olderMessages[0]?.role === 'system' && String(olderMessages[0].content).includes('Conversation Summary (compacted)')) {
@@ -323,35 +311,18 @@ export async function maybeCompactHistory(
                 },
             });
 
-            const supportsPrefixCache = supportsOpenAiStylePrefixCache(providerId, config.customApiFormat);
-
-            if (supportsPrefixCache) {
-                const systemMsg = history[0]?.role === 'system' ? history[0] : undefined;
-                const newSummaryUser = {
-                    role: 'user' as const,
-                    content: '[Context Recovery] Use the compacted conversation summary below as the active history and continue.'
-                };
-                const newSummaryAssistant = {
-                    role: 'assistant' as const,
-                    content: `## Conversation Summary (compacted)\n${summary}${pinnedSection}`
-                };
-
-                return [
-                    ...(systemMsg ? [systemMsg] : []),
-                    newSummaryUser,
-                    newSummaryAssistant,
-                    ...recentMessages,
-                ];
-            }
-
-            // ── Default path (other providers) ──
-            return [
+            return normalizeTranscriptForPersistence([
+                ...persistentSystemMessages,
                 {
-                    role: 'system',
+                    role: 'user',
+                    content: '[Context Recovery] Use the compacted conversation summary below as the active history and continue.',
+                },
+                {
+                    role: 'assistant',
                     content: `## Conversation Summary (compacted)\n${summary}${pinnedSection}`,
                 },
                 ...recentMessages,
-            ];
+            ]);
         }
     } catch (e) {
         emitStep({
@@ -367,5 +338,5 @@ export async function maybeCompactHistory(
         });
     }
 
-    return buildSafeFallbackTail(history, 6);
+    return buildSafeFallbackTail(canonicalHistory, 6);
 }

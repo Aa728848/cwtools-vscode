@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { ChatMessage } from '../../extension/ai/types';
 
-describe('ResumeState V2 Message Transcript Normalization Tests', () => {
+describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
     it('appends auto-interrupted tool replies for unanswered tool calls', () => {
         const { prepareMessagesForResume } = loadCheckpointModule();
         const messages: ChatMessage[] = [
@@ -91,7 +91,41 @@ describe('ResumeState V2 Message Transcript Normalization Tests', () => {
         expect(compacted.some(message => message.content === 'message 39')).to.equal(true);
     });
 
-    it('saves Resume V2 as compacted summary plus tail and archives full transcript', async () => {
+    it('preserves all leading system instructions in compact resume context', () => {
+        const { buildResumeMessages } = loadCheckpointModule();
+        const messages: ChatMessage[] = [
+            { role: 'system', content: 'system prompt' },
+            { role: 'system', content: 'workspace policy' },
+            ...Array.from({ length: 20 }, (_, i): ChatMessage => ({
+                role: i % 2 === 0 ? 'user' : 'assistant',
+                content: `message ${i}`,
+            })),
+        ];
+
+        const compacted = buildResumeMessages(messages, 'durable summary', 6);
+        expect(compacted.slice(0, 2).map(message => message.content)).to.deep.equal([
+            'system prompt',
+            'workspace policy',
+        ]);
+        expect(String(compacted[2]?.content)).to.include('[SYSTEM RESUME MEMORY]');
+    });
+
+    it('retains a legacy system-form compacted summary when loading a long V2 transcript', () => {
+        const { buildResumeMessages } = loadCheckpointModule();
+        const messages: ChatMessage[] = [
+            { role: 'system', content: '## Conversation Summary (compacted)\nLEGACY_DECISION' },
+            ...Array.from({ length: 20 }, (_, i): ChatMessage => ({
+                role: i % 2 === 0 ? 'user' : 'assistant',
+                content: `message ${i}`,
+            })),
+        ];
+
+        const compacted = buildResumeMessages(messages, 'duplicate external summary', 4);
+        expect(String(compacted[0]?.content)).to.include('LEGACY_DECISION');
+        expect(compacted.some(message => String(message.content).includes('[SYSTEM RESUME MEMORY]'))).to.equal(false);
+    });
+
+    it('saves Resume V3 as compacted summary plus tail and archives a checksummed full transcript', async () => {
         const { saveResumeState } = loadCheckpointModule();
         const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-resume-v2-'));
         vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: tmpRoot } }];
@@ -121,15 +155,111 @@ describe('ResumeState V2 Message Transcript Normalization Tests', () => {
 
             const resumePath = path.join(tmpRoot, '.cwtools-ai', topicId, 'resume_state.json');
             const saved = JSON.parse(fs.readFileSync(resumePath, 'utf-8'));
-            expect(saved.version).to.equal(2);
+            expect(saved.version).to.equal(3);
             expect(saved.compacted).to.equal(true);
             expect(saved.summaryRef).to.match(/summary\.md$/);
             expect(saved.fullTranscriptRef).to.match(/resume_transcript\.json$/);
             expect(fs.existsSync(saved.fullTranscriptRef)).to.equal(true);
+            expect(saved.transcriptSha256).to.match(/^[a-f0-9]{64}$/);
+            expect(saved.transcriptMessageCount).to.equal(messages.length);
             expect(saved.messages.length).to.be.lessThan(messages.length);
             expect(JSON.stringify(saved.messages)).to.include('[SYSTEM RESUME MEMORY]');
             expect(saved.pendingToolCalls).to.deep.equal([{ id: 'call_pending' }]);
         } finally {
+            fs.rmSync(tmpRoot, { recursive: true, force: true });
+            vscodeStub.workspace.workspaceFolders = [];
+        }
+    });
+
+    it('recovers a V3 resume state from the previous complete generation', async () => {
+        const { saveResumeState, loadResumeState } = loadCheckpointModule();
+        const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-resume-backup-'));
+        vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: tmpRoot } }];
+        try {
+            const topicId = 'topic_backup';
+            const toolExecutor = { getTodos: () => [] } as any;
+            await saveResumeState(topicId, 'build', [{ role: 'user', content: 'generation one' }], toolExecutor);
+            await saveResumeState(topicId, 'build', [{ role: 'user', content: 'generation two' }], toolExecutor);
+
+            const resumePath = path.join(tmpRoot, '.cwtools-ai', topicId, 'resume_state.json');
+            expect(fs.existsSync(`${resumePath}.bak`)).to.equal(true);
+            fs.writeFileSync(resumePath, '{broken json', 'utf-8');
+
+            const loaded = await loadResumeState(topicId);
+            expect(loaded?.recoveredFromBackup).to.equal(true);
+            expect(loaded?.version).to.equal(3);
+            expect(loaded?.messages.some(message => message.content === 'generation one')).to.equal(true);
+        } finally {
+            fs.rmSync(tmpRoot, { recursive: true, force: true });
+            vscodeStub.workspace.workspaceFolders = [];
+        }
+    });
+
+    it('uses the checksummed transcript backup when the primary transcript is valid JSON but damaged', async () => {
+        const { saveResumeState, loadResumeState } = loadCheckpointModule();
+        const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-transcript-backup-'));
+        vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: tmpRoot } }];
+        try {
+            const topicId = 'topic_transcript_backup';
+            const runId = 'run_transcript_backup';
+            const runDir = path.join(tmpRoot, '.cwtools-ai', topicId, 'runs', runId);
+            fs.mkdirSync(runDir, { recursive: true });
+            const toolExecutor = { getTodos: () => [] } as any;
+            await saveResumeState(topicId, 'build', [{ role: 'user', content: 'transcript generation one' }], toolExecutor, runId);
+            await saveResumeState(topicId, 'build', [{ role: 'user', content: 'transcript generation two' }], toolExecutor, runId);
+
+            const resumePath = path.join(tmpRoot, '.cwtools-ai', topicId, 'resume_state.json');
+            const generationOneState = JSON.parse(fs.readFileSync(`${resumePath}.bak`, 'utf-8'));
+            delete generationOneState.messages;
+            fs.writeFileSync(resumePath, JSON.stringify(generationOneState), 'utf-8');
+            fs.writeFileSync(path.join(runDir, 'resume_transcript.json'), JSON.stringify([
+                { role: 'user', content: 'tampered but valid JSON' },
+            ]), 'utf-8');
+
+            const loaded = await loadResumeState(topicId);
+            expect(loaded?.messages.some(message => message.content === 'transcript generation one')).to.equal(true);
+            expect(loaded?.messages.some(message => message.content === 'tampered but valid JSON')).to.equal(false);
+        } finally {
+            fs.rmSync(tmpRoot, { recursive: true, force: true });
+            vscodeStub.workspace.workspaceFolders = [];
+        }
+    });
+
+    it('loads V2 state without restoring its legacy session-only approvals', async () => {
+        const { loadResumeState } = loadCheckpointModule();
+        const { PermissionPolicyStore } = require('../../extension/ai/runner/permissionPolicy') as typeof import('../../extension/ai/runner/permissionPolicy');
+        const store = PermissionPolicyStore.getInstance();
+        const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-resume-v2-compat-'));
+        vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: tmpRoot } }];
+        try {
+            store.clear();
+            const topicId = 'topic_v2_compat';
+            const resumeDir = path.join(tmpRoot, '.cwtools-ai', topicId);
+            fs.mkdirSync(resumeDir, { recursive: true });
+            fs.writeFileSync(path.join(resumeDir, 'resume_state.json'), JSON.stringify({
+                version: 2,
+                timestamp: Date.now(),
+                mode: 'build',
+                topicId,
+                messages: [{ role: 'user', content: 'legacy context' }],
+                todos: [],
+                permissionRules: [{
+                    id: 'legacy_session_rule',
+                    tool: 'run_command',
+                    cwdScope: tmpRoot,
+                    commandPrefix: ['npm'],
+                    riskMax: 1,
+                    sessionOnly: true,
+                    createdAt: Date.now(),
+                }],
+            }), 'utf-8');
+
+            const loaded = await loadResumeState(topicId);
+            expect(loaded?.version).to.equal(2);
+            expect(loaded?.messages[0]?.content).to.equal('legacy context');
+            expect(store.getRules()).to.deep.equal([]);
+        } finally {
+            store.clear();
             fs.rmSync(tmpRoot, { recursive: true, force: true });
             vscodeStub.workspace.workspaceFolders = [];
         }

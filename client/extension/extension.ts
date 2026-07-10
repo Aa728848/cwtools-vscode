@@ -1401,7 +1401,7 @@ export async function activate(context: ExtensionContext) {
 		try {
 			const { runLedger } = require('./ai/runner/runLedger') as typeof import('./ai/runner/runLedger');
 			const { replayRun } = require('./ai/runner/runReplay') as typeof import('./ai/runner/runReplay');
-			const recentRuns = runLedger.listRecentRuns();
+			const recentRuns = await runLedger.listRecentRunsFromDisk(30);
 			if (recentRuns.length === 0) {
 				vs.window.showInformationMessage('CWTools: no recorded runs available to replay.');
 				return;
@@ -1409,7 +1409,7 @@ export async function activate(context: ExtensionContext) {
 			const pick = await vs.window.showQuickPick(
 				recentRuns.slice(0, 30).map((r: any) => ({
 					label: `${(r.runId ?? '').substring(0, 12)}  ·  ${r.mode ?? 'build'}  ·  ${r.status ?? 'unknown'}`,
-					description: r.userPrompt ? String(r.userPrompt).substring(0, 80) : '',
+					description: r.userPromptPreview ? String(r.userPromptPreview).substring(0, 80) : '',
 					runId: r.runId,
 				})),
 				{ placeHolder: 'Select a run to replay (recorded tool results will be reused)' }

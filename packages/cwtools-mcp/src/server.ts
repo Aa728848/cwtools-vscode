@@ -18,6 +18,8 @@ const SERVER_INSTRUCTIONS = [
   'are routinely hallucinated.',
   '',
   'Use it whenever working in a Paradox mod (common/, events/, localisation/, gfx/, …):',
+  '- Start structural and dependency questions with explore_pdx_project. It returns a',
+  '  bounded live CWTools semantic subgraph, file facts, provenance, and freshness.',
   '- Before using ANY game ID, verify it exists: query_types for typed entities;',
   '  query_scripted_effects / query_scripted_triggers / query_static_modifiers /',
   '  query_enums / query_variables for those kinds.',

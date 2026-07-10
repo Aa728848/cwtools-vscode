@@ -44,7 +44,7 @@ export const CODE_COMPLIANCE_RULE = `## 🛑 CRITICAL: Strict Rule Compliance in
 When editing files, writing new code, or proposing plans in ANY mode, your absolute highest priority is generating code that strictly conforms to the established structure and logic.
 **Legality and validity must follow this evidence hierarchy:**
 1. **CWT/LSP schema and typed indexes**: \`get_lsp_status\`, \`query_cwt_schema\`, \`query_rules\`, \`query_override_modes\`, \`query_scope\`, \`query_types\`, \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_enums\`, \`query_static_modifiers\`, \`query_variables\`, \`get_completion_at\`.
-2. **Current project definitions and mature local examples**: \`query_definition_by_name\`, \`workspace_symbols\`, \`query_workspace_index\`, \`get_entity_info\`, \`document_symbols\`, \`get_pdx_block\`, or bounded \`read_file\` on known project files.
+2. **Current project definitions and mature local examples**: start with \`explore_pdx_project\` for structure and dependencies, then use \`query_definition_by_name\`, \`workspace_symbols\`, \`query_workspace_index\`, \`get_entity_info\`, \`document_symbols\`, \`get_pdx_block\`, or bounded \`read_file\` on known project files.
 3. **Bounded vanilla archetype evidence**: use \`query_definition_by_name\`, \`workspace_symbols\`, \`query_types\`, or exact \`search_mod_files(searchContext="vanilla", exactMatch=true)\` to locate a concrete vanilla example; then read only the needed block/range to study structure or scope flow.
 4. **Web sources**: last resort only, and never enough by themselves to justify PDXScript syntax.
 
@@ -63,7 +63,7 @@ export const ANALYSIS_COMPLIANCE_RULE = `## 🛑 CRITICAL: Analytical & Suggesti
 When analyzing problems, diagnosing errors, reviewing code, proposing optimization plans, or writing implementation plans, your reasoning and any proposed code snippets MUST be grounded in PDXScript legality.
 - **Diagnostic Workflow**: When diagnosing an error or analyzing unknown code, you MUST follow this strict order:
   1. **Check CWT/LSP FIRST**: Use \`query_cwt_schema\`, \`query_rules\`, \`query_scope\`, \`query_types\`, \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_enums\`, or other indexed tools to check syntax, type, and scope legality.
-  2. **Check Project Examples SECOND**: Use \`query_definition_by_name\`, \`workspace_symbols\`, \`query_workspace_index\`, \`document_symbols\`, \`get_pdx_block\`, or bounded \`read_file\` to inspect mature local usage.
+  2. **Check Project Examples SECOND**: Use \`explore_pdx_project\` first for a bounded semantic subgraph, then \`query_definition_by_name\`, \`workspace_symbols\`, \`query_workspace_index\`, \`document_symbols\`, \`get_pdx_block\`, or bounded \`read_file\` to inspect mature local usage.
   3. **Check Vanilla Archetypes THIRD**: Use typed/indexed lookup first, then bounded vanilla reads only for concrete archetype evidence or when CWT rules are incomplete.
   4. **Web Search as LAST RESORT**: Only use \`web_fetch\`, \`search_web\`, or \`codesearch\` if local rules, project examples, and vanilla cache yield no answer. Web information for Paradox modding is often outdated or hallucinated by AI tools.
 - Your entire understanding of the issue and any recommendations must be evaluated against this evidence hierarchy (CWT/LSP, project codebase, bounded vanilla archetypes, then web).

@@ -246,6 +246,7 @@ export interface AgentRunnerOptions {
 
 /** Tools allowed in Plan mode (read-only + architecture design tools) */
 const _PLAN_MODE_TOOLS: AgentToolName[] = [
+    'explore_pdx_project',
     'query_scope', 'query_types', 'query_rules', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'todo_write',
@@ -265,6 +266,7 @@ const _PLAN_MODE_TOOLS: AgentToolName[] = [
 
 /** Explore mode: same as plan, plus CWTools Deep API tools — no writes (OpenCode explore agent) */
 const _EXPLORE_MODE_TOOLS: AgentToolName[] = [
+    'explore_pdx_project',
     'query_scope', 'query_types', 'query_rules', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
@@ -285,6 +287,7 @@ const _UTILITY_EXCLUDED_TOOLS: AgentToolName[] = ['dispatch_agents', 'query_blac
 
 /** Review mode: same as explore, plus query_definition — read-only tools only */
 const _REVIEW_MODE_TOOLS: AgentToolName[] = [
+    'explore_pdx_project',
     'query_scope', 'query_types', 'query_rules', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
@@ -298,6 +301,7 @@ const _REVIEW_MODE_TOOLS: AgentToolName[] = [
 
 /** Loc Translator mode: read localisation files, write translated output */
 const _LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
+    'explore_pdx_project',
     'read_file', 'write_file', 'edit_file', 'replace_lines',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
     'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_lsp_status', 'get_diagnostics',
@@ -308,6 +312,7 @@ const _LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
 
 /** Loc Writer mode: create new localisation entries from scratch */
 const _LOC_WRITER_TOOLS: AgentToolName[] = [
+    'explore_pdx_project',
     'read_file', 'write_file', 'edit_file', 'replace_lines',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
     'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_lsp_status', 'get_diagnostics',
@@ -318,6 +323,7 @@ const _LOC_WRITER_TOOLS: AgentToolName[] = [
 
 /** Orchestrator mode: read-only tools + coordinator-specific tools (dispatch_agents, query_blackboard, merge_results) */
 const _ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
+    'explore_pdx_project',
     //Read-only information collection
     'query_scope', 'query_types', 'query_rules', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',

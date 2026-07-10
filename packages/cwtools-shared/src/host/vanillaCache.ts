@@ -41,6 +41,7 @@ export const VANILLA_DEPENDENT_TOOLS: ReadonlySet<string> = new Set([
   'query_scope',
   'query_definition',
   'query_definition_by_name',
+  'explore_pdx_project',
   'query_references',
   'get_diagnostics',
   'query_scripted_effects',

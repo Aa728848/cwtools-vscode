@@ -23,6 +23,7 @@ export const LOAD_DEPENDENT_TOOLS: ReadonlySet<string> = new Set([
   'get_completion_at',
   'query_definition',
   'query_definition_by_name',
+  'explore_pdx_project',
   'query_references',
   'get_diagnostics',
   'query_scripted_effects',

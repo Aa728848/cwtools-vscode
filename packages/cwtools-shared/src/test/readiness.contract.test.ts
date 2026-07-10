@@ -43,6 +43,7 @@ describe('lsp readiness contract', () => {
   });
 
   it('does not touch tools that do not depend on the game load', () => {
+    expect(LOAD_DEPENDENT_TOOLS.has('explore_pdx_project')).to.equal(true);
     expect(LOAD_DEPENDENT_TOOLS.has('get_pdx_block')).to.equal(false);
     const r = annotateReadiness('get_pdx_block', EMPTY_OK, { ready: false });
     expect(r).to.deep.equal(EMPTY_OK);

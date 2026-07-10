@@ -445,6 +445,40 @@ export class LspToolHandler {
         }
     }
 
+    async explorePdxProject(args: import('../types').ExplorePdxProjectArgs): Promise<import('../types').ExplorePdxProjectResult> {
+        const query = args.query?.trim() ?? '';
+        const file = args.file?.trim() ?? '';
+        const typeName = args.typeName?.trim() ?? '';
+        if (!query && !file && !typeName) {
+            return {
+                ok: false,
+                status: 'error',
+                error: 'explore_pdx_project requires query, file, or typeName.',
+            };
+        }
+        const cacheKey = `semanticGraph:${JSON.stringify([
+            query, file, typeName, !!args.exact, args.depth ?? 1,
+            args.maxNodes ?? 30, args.maxEdges ?? 80, args.includeMetadata !== false,
+        ])}`;
+        return this.cachedLspRead(cacheKey, async () => {
+            try {
+                const raw = await this.lspRequestWithRetry('cwtools.ai.exploreProject', [
+                    query,
+                    file ? vs.Uri.file(path.isAbsolute(file) ? file : path.resolve(this.ctx.workspaceRoot, file)).toString() : '',
+                    typeName,
+                    !!args.exact,
+                    args.depth ?? 1,
+                    args.maxNodes ?? 30,
+                    args.maxEdges ?? 80,
+                    args.includeMetadata !== false,
+                ], 30_000) as import('../types').ExplorePdxProjectResult | undefined;
+                return raw ?? { ok: false, status: 'unavailable', error: 'LSP returned no semantic graph response.' };
+            } catch (error) {
+                return { ok: false, status: 'unavailable', error: String(error) };
+            }
+        }, 3000);
+    }
+
     async queryScriptedEffects(args: { filter?: string; limit?: number }): Promise<unknown> {
         const limit = args.limit ?? (args.filter ? 200 : 50);
         const cacheKey = `sfx:${JSON.stringify([args.filter ?? '', limit])}`;

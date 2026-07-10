@@ -26,6 +26,7 @@ interface ToolPhraseEntry {
 }
 
 const TOOL_PHRASES: Record<string, ToolPhraseEntry> = {
+    explore_pdx_project:       { category: 'query',       icon: '🕸️', en: 'Explore semantic graph', zh: '探索语义图' },
     read_file:                 { category: 'read',        icon: '📖', en: 'Read file', zh: '读取文件' },
     get_file_context:          { category: 'read',        icon: '📖', en: 'Get file context', zh: '获取文件上下文' },
     get_pdx_block:             { category: 'read',        icon: '📖', en: 'Extract script block', zh: '提取脚本块' },
@@ -206,6 +207,14 @@ export function getToolDynamicPhrase(
             if (typeof fp === 'string') {
                 const name = basename(fp);
                 return zh ? dualPhrase(`诊断 ${name}`, locale) : dualPhrase(`Diagnose ${name}`, locale, `Diagnosing ${name}...`);
+            }
+            return dualPhrase(meta.phrase, locale);
+        }
+        case 'explore_pdx_project': {
+            const query = args.query ?? args.Query ?? args.keyword;
+            if (typeof query === 'string') {
+                const short = truncateStr(query, 50);
+                return zh ? dualPhrase(`探索语义图“${short}”`, locale) : dualPhrase(`Explore graph "${short}"`, locale, `Exploring graph "${short}"...`);
             }
             return dualPhrase(meta.phrase, locale);
         }

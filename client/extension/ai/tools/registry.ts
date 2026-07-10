@@ -4,7 +4,7 @@ import { analyzeSchema, flattenSchema } from './schemaFlatten';
 
 export type AgentToolName =
     | 'query_scope' | 'query_types' | 'query_rules' | 'query_cwt_schema' | 'query_override_modes' | 'search_rule_capabilities' | 'explain_scope' | 'parse_pdx_fragment' | 'remove_ignored_diagnostic'
-    | 'query_localisation_index' | 'query_workspace_index' | 'query_project_profile' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'edit_pdx_block' | 'query_references'
+    | 'query_localisation_index' | 'query_workspace_index' | 'explore_pdx_project' | 'query_project_profile' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'edit_pdx_block' | 'query_references'
     | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
     | 'verify_pdx_identifier' | 'todo_write' | 'read_file' | 'write_file' | 'edit_file'
@@ -58,7 +58,7 @@ export const TOOL_REGISTRY = new Map<AgentToolName, ToolRegistryEntry>();
 
 // Categories to help assign modes
 const BASE_READ: AgentToolName[] = [
-    'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'query_references',
+    'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_references',
     'query_project_profile', 'run_skill', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory', 'glob_files',
     'lsp_operation', 'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name',
@@ -151,7 +151,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
     if (BASE_READ.includes(name)) {
         effect = 'workspace_read';
         riskLevel = 0;
-        if (['document_symbols', 'workspace_symbols', 'get_lsp_status', 'get_diagnostics', 'lsp_operation', 'query_references', 'query_definition'].includes(name)) {
+        if (['document_symbols', 'workspace_symbols', 'get_lsp_status', 'get_diagnostics', 'lsp_operation', 'query_references', 'query_definition', 'explore_pdx_project'].includes(name)) {
             concurrencyClass = 'lsp-limited';
         } else {
             concurrencyClass = 'parallel';

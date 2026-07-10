@@ -43,6 +43,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_types: 45_000,
     query_localisation_index: 45_000,
     query_workspace_index: 45_000,
+    explore_pdx_project: 45_000,
     query_project_profile: 5_000,
     query_rules: 45_000,
     query_override_modes: 45_000,
@@ -629,6 +630,8 @@ export class AgentToolExecutor {
                 result = this.queryLocalisationIndex(args as any); break;
             case 'query_workspace_index':
                 result = await this.queryWorkspaceIndex(args as any); break;
+            case 'explore_pdx_project':
+                result = await this.lspHandler.explorePdxProject(args as any); break;
             case 'query_project_profile':
                 result = queryProjectProfile(this.workspaceRoot, args as any); break;
             case 'run_skill':

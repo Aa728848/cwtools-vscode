@@ -486,6 +486,32 @@ export interface QueryCwtSchemaResult {
     _hint?: string;
 }
 
+export interface ExplorePdxProjectArgs {
+    query?: string;
+    file?: string;
+    typeName?: string;
+    exact?: boolean;
+    depth?: number;
+    maxNodes?: number;
+    maxEdges?: number;
+    includeMetadata?: boolean;
+}
+
+export interface ExplorePdxProjectResult {
+    ok: boolean;
+    status: 'ready' | 'stale' | 'loading' | 'unavailable' | 'error';
+    source?: 'cwtools-semantic-graph';
+    graphVersion?: number;
+    nodes?: Array<Record<string, unknown>>;
+    edges?: Array<Record<string, unknown>>;
+    entryPoints?: Array<Record<string, unknown>>;
+    fileFacts?: Array<Record<string, unknown>>;
+    budget?: Record<string, unknown>;
+    freshness?: Record<string, unknown>;
+    warnings?: string[];
+    error?: string;
+}
+
 export interface SearchRuleCapabilitiesArgs {
     intent?: string;
     category?: QueryRulesArgs['category'] | 'all';
@@ -889,6 +915,7 @@ export type ToolArgs =
     | QueryTypesArgs
     | QueryLocalisationIndexArgs
     | QueryWorkspaceIndexArgs
+    | ExplorePdxProjectArgs
     | QueryProjectProfileArgs
     | QueryRulesArgs
     | QueryCwtSchemaArgs
@@ -925,6 +952,7 @@ export type ToolResult =
     | QueryTypesResult
     | QueryLocalisationIndexResult
     | QueryWorkspaceIndexResult
+    | ExplorePdxProjectResult
     | QueryProjectProfileResult
     | QueryRulesResult
     | QueryCwtSchemaResult
@@ -960,6 +988,7 @@ export type AgentToolName =
     | 'query_types'
     | 'query_localisation_index'
     | 'query_workspace_index'
+    | 'explore_pdx_project'
     | 'query_project_profile'
     | 'run_skill'
     | 'query_rules'

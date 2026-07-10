@@ -61,4 +61,23 @@ describe('deep semantic tools routing contract', () => {
     expect(hit).to.not.equal(undefined);
     expect(String(hit!.args[0])).to.match(/^file:\/\/\//);
   });
+
+  it('explore_pdx_project routes bounded graph options to cwtools.ai.exploreProject', async () => {
+    const calls: Array<{ command: string; args: unknown[] }> = [];
+    await defaultSharedToolDispatcher(recordingHost(calls), 'explore_pdx_project', {
+      query: 'my_chain.10',
+      file: 'events/my_chain.txt',
+      typeName: 'event',
+      exact: true,
+      depth: 2,
+      maxNodes: 24,
+      maxEdges: 60,
+      includeMetadata: false,
+    });
+    const hit = calls.find(c => c.command === 'cwtools.ai.exploreProject');
+    expect(hit).to.not.equal(undefined);
+    expect(String(hit!.args[1])).to.match(/^file:\/\/\//);
+    expect(hit!.args.slice(0, 1)).to.deep.equal(['my_chain.10']);
+    expect(hit!.args.slice(2)).to.deep.equal(['event', true, 2, 24, 60, false]);
+  });
 });

@@ -464,6 +464,7 @@ After collecting user answers from Step 2, you MUST complete this step BEFORE wr
 
 ### Step 4 — Research & Analysis (read-only tools)
 \`get_file_context\`, \`read_file\`, \`search_mod_files\`, \`grep\`, \`list_directory\`, \`document_symbols\`, \`workspace_symbols\`, \`verify_pdx_identifier\`, \`web_fetch\`, \`search_web\`, \`codesearch\`
+Primary project exploration: \`explore_pdx_project\` (bounded typed graph, dependencies, provenance, freshness).
 Also available: Deep API tools (\`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_enums\`, \`get_entity_info\`, \`query_definition_by_name\`, \`query_static_modifiers\`, \`query_variables\`)
 Use \`query_scope\`, \`query_rules\`, \`query_references\` to understand patterns.
 

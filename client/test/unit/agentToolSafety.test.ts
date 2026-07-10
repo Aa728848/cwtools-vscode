@@ -722,6 +722,18 @@ describe('agent sprite candidate tool contract', () => {
         expect(definition.function.parameters.properties).to.have.property('source');
     });
 
+    it('registers explore_pdx_project as the bounded semantic graph entry point', () => {
+        const definition = TOOL_DEFINITIONS.find((tool: any) => tool.function.name === 'explore_pdx_project');
+        if (!definition) {
+            throw new Error('explore_pdx_project tool definition is missing');
+        }
+        expect(definition.function.description).to.include('Primary semantic exploration entry point');
+        expect(definition.function.parameters.properties).to.have.property('depth');
+        expect(definition.function.parameters.properties.depth.maximum).to.equal(3);
+        expect(definition.function.parameters.properties.maxNodes.maximum).to.equal(100);
+        expect(definition.function.parameters.properties.maxEdges.maximum).to.equal(300);
+    });
+
     it('registers query_project_profile as a first-class read-only tool', () => {
         const definition = TOOL_DEFINITIONS.find((tool: any) => tool.function.name === 'query_project_profile');
         if (!definition) {

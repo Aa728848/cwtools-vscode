@@ -107,6 +107,27 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'explore_pdx_project',
+            description: 'Primary semantic exploration entry point for large Paradox projects. Queries the live CWTools type/reference graph and returns bounded entry points, typed nodes, dependency edges, file facts, provenance, truncation, and freshness without scanning or reading whole files. Use this FIRST for questions such as how an entity is connected, what calls or references an ID, what a file depends on, or what may be affected by a change. Follow with exact query_rules/query_scope/query_types/get_pdx_block checks before writing.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: 'Identifier or concise semantic search text. Exact PDX IDs give the strongest results. Optional when file or typeName is supplied.' },
+                    file: { type: 'string', description: 'Optional workspace-relative or absolute file path used to restrict entry points.' },
+                    typeName: { type: 'string', description: 'Optional exact CWTools type name, e.g. event, technology, scripted_effect, building.' },
+                    exact: { type: 'boolean', description: 'Require query to exactly match an entity ID. Default false.' },
+                    depth: { type: 'number', minimum: 0, maximum: 3, description: 'Incoming/outgoing graph traversal depth. Default 1; use 2-3 only for focused IDs.' },
+                    maxNodes: { type: 'number', minimum: 1, maximum: 100, description: 'Maximum graph nodes. Default 30.' },
+                    maxEdges: { type: 'number', minimum: 1, maximum: 300, description: 'Maximum graph edges and per-file semantic facts. Default 80.' },
+                    includeMetadata: { type: 'boolean', description: 'Include documentation, variables, event targets, and block metadata. Default true.' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'run_skill',
             description: 'Load the full instructions for an installed Agent Skill by exact name. Use this when the skill index says a skill is relevant; the system prompt only contains the compact index, not the skill body.',
             parameters: {

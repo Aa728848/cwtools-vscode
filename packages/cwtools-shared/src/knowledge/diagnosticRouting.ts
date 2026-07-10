@@ -63,7 +63,7 @@ export function analyzeDiagnosticKnowledge(query: DiagnosticKnowledgeQuery): Dia
     code,
     category: 'general',
     explanation: 'No specialized diagnostic route matched; use LSP and indexed evidence before editing.',
-    suggestedTools: ['get_diagnostics', 'query_cwt_schema', 'query_definition_by_name', 'query_workspace_index'],
+    suggestedTools: ['get_diagnostics', 'explore_pdx_project', 'query_cwt_schema', 'query_definition_by_name', 'query_workspace_index'],
     nextSteps: [
       'Group similar diagnostics and inspect a representative block.',
       'Verify identifiers through indexed tools before making changes.',

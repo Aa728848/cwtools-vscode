@@ -10,6 +10,7 @@ export const MCP_TOOL_NAMES = [
   'analyze_diagnostic_error',
   'query_project_profile',
   'query_workspace_index',
+  'explore_pdx_project',
   'query_localisation_index',
   'get_pdx_block',
   'get_completion_at',

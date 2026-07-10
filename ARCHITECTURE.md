@@ -103,6 +103,12 @@ The extension entry point, indexing layer, and AI game knowledge should prioriti
 
 The core constraint of this layer is: if the shared index can answer the query, do not force consumers to scan the workspace again.
 
+##### CWTools Semantic Graph
+
+`src/Main/SemanticGraph.fs` builds a bounded semantic subgraph directly from the loaded CWTools `Types()`, `GetEventGraphData`, and per-file `ComputedData` caches. It does not maintain a second parser or a lexical reference database. `cwtools.ai.exploreProject` ranks typed entry points, traverses at most three hops, caps nodes/edges, and returns provenance, file facts, truncation, and validation/load freshness. The extension and MCP expose it as `explore_pdx_project`, the preferred first tool for project-structure and dependency questions; exact rule, scope, type, and block tools remain the write-time verification layer.
+
+Because the graph reads the existing game model, scripted-type refreshes and ordinary file updates become visible through the same cache/locking lifecycle as diagnostics and completion. Empty results from a loading or stale snapshot are explicitly non-authoritative.
+
 #### Submodules
 
 The repository depends on two submodules with different responsibilities:
@@ -277,7 +283,7 @@ The orchestrator structures DAG sub-tasks, schedules parallel processes, shares 
 
 #### Out-of-the-Box MCP Server
 
-The packages `packages/cwtools-shared` and `packages/cwtools-mcp` implement a **read-only** Model Context Protocol (MCP) server. It exports 21 semantic tools of CWTools to external hosts.
+The packages `packages/cwtools-shared` and `packages/cwtools-mcp` implement a **read-only** Model Context Protocol (MCP) server. It exports 26 semantic tools of CWTools to external hosts.
 
 ##### Scope & Structure
 
@@ -466,6 +472,12 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 - AI 通过 `query_localisation_index` 和 `query_workspace_index` 消费共享索引。
 
 该层的核心约束是：当共享索引能回答问题时，不要让每个消费者各自重新扫描工作区。
+
+##### CWTools 语义图
+
+`src/Main/SemanticGraph.fs` 直接基于已加载的 CWTools `Types()`、`GetEventGraphData` 和逐文件 `ComputedData` 缓存构建有界语义子图，不维护第二套解析器或词法引用数据库。`cwtools.ai.exploreProject` 对 typed entry point 排序，最多遍历三跳，并限制节点/边数量，同时返回 provenance、文件语义事实、截断信息以及校验/加载 freshness。Extension 与 MCP 将其暴露为 `explore_pdx_project`，作为项目结构和依赖问题的首选入口；精确规则、作用域、类型和 block 工具仍负责写入前验证。
+
+语义图复用现有 game model，因此 scripted type 增量刷新和普通文件更新会沿诊断与补全相同的缓存/锁生命周期生效。加载中或 stale snapshot 的空结果会被明确标记为非权威。
 
 #### 子模块
 
@@ -770,7 +782,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ##### 工具集与单一事实源
 
-- 首期工具为 **21 个只读工具**（`cwtools-shared/src/tools/names.ts`）：`query_types`/`query_rules`/`query_scope`/`get_diagnostics`/`analyze_diagnostic_error`/`query_project_profile`/`query_workspace_index`/`query_localisation_index`/`get_pdx_block`/`get_completion_at`/`document_symbols`/`workspace_symbols`/`query_definition`/`query_definition_by_name`/`query_references`，以及深层语义 `query_scripted_effects`/`query_scripted_triggers`/`query_enums`/`query_static_modifiers`/`query_variables`/`get_entity_info`。
+- 当前工具为 **26 个只读工具**（`cwtools-shared/src/tools/names.ts`），其中 `explore_pdx_project` 是有界语义图入口；其余工具覆盖规则、作用域、诊断、类型/定义/引用、本地化与 workspace 索引、结构化 block、补全及深层语义查询。
 - schema 由 `tools/generate-mcp-schema.cjs` 从上游 `definitions.ts` + `registry.ts` 生成到 `cwtools-shared/src/generated/mcpTools.ts`，**不手写**；白名单同时存在于 `names.ts` 与生成脚本，须保持一致，contract 测试检测漂移。
 - 共享 dispatcher（`tools/toolHandlers.ts`）把每个工具路由到对应 `cwtools.ai.*` LSP 命令或 host 调用。新增语义能力必须先在 `src/LSP`/`src/Main` 增加 `cwtools.ai.*` 命令（只读命令同时登记到 `LanguageServer.fs` 的 `isReadCmd`），再在 dispatcher 接线，不在 MCP 内重写 CWTools 语义。
 

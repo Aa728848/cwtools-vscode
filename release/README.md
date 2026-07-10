@@ -42,7 +42,7 @@ This is the most innovative subsystem of the plugin. Unlike generic single-round
   - **Review Mode**: A secure read-only review environment that disables write permissions, designed to enforce code style rules, prevent logical flaws, and block out-of-scope write-overs.
 - **Sub-Agent Parallel DAG Orchestration**: The underlying reasoning flow is based on a topologically sorted task graph, scheduling specialized sub-agents (e.g., Explorer, Builder, LocWriter, Reviewer) in parallel via `Promise.allSettled` to write complex features on a **shared Blackboard**—speeding up execution several fold.
 - **Anti-Looping & Smart Context Windowing**: Built-in two-phase "Doom-Loop" prevention; when the dialogue tokens approach 70% of the maximum limit, it automatically triggers LLM-level structured memory compression and repairs orphan tool calls, ensuring high success rates for long-duration tasks.
-- **Bi-directional MCP Integration**: Serves as an **MCP Client** to consume external stdio/SSE tools; simultaneously, it **exports a read-only MCP Server** (`packages/cwtools-mcp`) bundled with the plugin, opening up its 21 semantic tools (types, rules, scopes, diagnostics, etc.) for external agents like **Codex / Claude Code**—see Section 7 for details.
+- **Bi-directional MCP Integration**: Serves as an **MCP Client** to consume external stdio/SSE tools; simultaneously, it **exports a read-only MCP Server** (`packages/cwtools-mcp`) bundled with the plugin, opening up its 26 semantic tools (bounded project graph, types, rules, scopes, diagnostics, etc.) for external agents like **Codex / Claude Code**—see Section 7 for details.
 - **Workspace-wide Localization Indexing**: An asynchronous incremental indexing system based on VS Code `FileSystemWatcher` feeds stable, accurate localization context to the large model.
 
 ##### 📂 4. Differences & Fast Migration Pipeline (Vanilla Compare)
@@ -116,7 +116,8 @@ Below is the overall module interaction and data flow topology:
   - Fine-tune materials (e.g., diffuse, specular) using slider panels.
 
 ##### 🔌 7. Out-of-the-Box MCP Server (for Codex / Claude Code)
-This extension bundles a **read-only** Model Context Protocol (MCP) server, offering 21 read-only semantic tools of CWTools (syntax check, scope queries, definitions, references, diagnostics, scripted triggers/effects/enums) to external agents.
+This extension bundles a **read-only** Model Context Protocol (MCP) server, offering 26 read-only semantic tools of CWTools (bounded project graph, syntax check, scope queries, definitions, references, diagnostics, scripted triggers/effects/enums) to external agents.
+* **Bounded Semantic Graph**: `explore_pdx_project` is the preferred first query for large mods. It returns ranked typed entry points, dependency edges, per-file semantic facts, provenance, truncation budgets, and freshness from the live CWTools model without reading whole files.
 * **Extension-Host Bridge by Default**: The MCP entry script connects to the active VS Code-compatible host (VS Code, Cursor, VSCodium, Antigravity, etc.) through `globalStorage/mcp/bridge-manifest.json`, reusing the IDE's existing CWTools language client and Problems diagnostics instead of starting a second server. The client workspace is discovered dynamically from MCP roots/session environment/cwd and must match the bridge workspace; mismatches return `bridge_unavailable` instead of answering from another project.
 * **Stable Version-Independent Path**: Activated plugins copy the proxy script to `globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs` to survive version upgrades. Legacy standalone mode is still available with `--standalone`.
 * **Codex**:
@@ -237,7 +238,7 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
   - **Review 模式**：独立安全的只读审查环境，禁用任何写入特权，专为强制校验代码规范、防御逻辑漏洞和越界覆盖而设计。
 - **Sub-Agent 并行编排 (DAG)**：底层推理流基于拓扑排序任务图，通过 `Promise.allSettled` 并行调度多个专职子 Agent（如 Explorer, Builder, LocWriter, Reviewer），在**共享黑板 (Blackboard)** 上协同编写复杂的功能，速度相比单链 Agent 提升数倍。
 - **防循环与智能压缩 (Context Smart Windowing)**：内置两阶段 "Doom-Loop" 循环调用防御机制；当长对话 Token 消耗接近上限的 70% 时，将自动触发 LLM 级别的结构化记忆压缩，并对孤儿 Tool Call 智能补齐，确保长任务的高成功率。
-- **MCP 双向集成（消费 + 输出）**：作为 **MCP 客户端**集成 Model Context Protocol（stdio 与 SSE），让内置 Agent 调用外部 MCP 工具；同时**对外输出一个随插件分发的只读 MCP 服务**（`packages/cwtools-mcp`），把本项目的 PDX 语义能力（类型/规则/作用域/诊断/定义引用/补全/深层语义共 21 个只读工具）开放给 **Codex / Claude Code** 等外部 Agent 复用——详见下方功能指引第 7 节。
+- **MCP 双向集成（消费 + 输出）**：作为 **MCP 客户端**集成 Model Context Protocol（stdio 与 SSE），让内置 Agent 调用外部 MCP 工具；同时**对外输出一个随插件分发的只读 MCP 服务**（`packages/cwtools-mcp`），把本项目的 PDX 语义能力（有界项目语义图、类型/规则/作用域/诊断/定义引用/补全/深层语义共 26 个只读工具）开放给 **Codex / Claude Code** 等外部 Agent 复用——详见下方功能指引第 7 节。
 - **全工作区本地化索引**：全工作区本地化 YML 文本基于后台 `FileSystemWatcher` 异步实时增量索引，为大模型源源不断地输送稳定、精准的项目上下文。
 
 ##### 📂 4. 原版对比与极速迁移通道 (Vanilla Compare & Sync)
@@ -314,7 +315,8 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
   - 支持材质属性（如漫反射、高光强度）在侧边栏面板上的动态滑块调节与实时重绘调试。
 
 ##### 🔌 7. 通用 MCP 服务（供 Codex / Claude Code 调用）
-本插件随包分发一个**只读**的 MCP 服务，把 CWTools 的 PDX 语义能力（验证 ID、查语法、查作用域、全项目诊断、定义/引用、补全、scripted effects/triggers/enums/modifiers/variables、实体信息，共 21 个只读工具）开放给任意 MCP 客户端。文件写入仍由你的 Agent 自带环境完成。
+本插件随包分发一个**只读**的 MCP 服务，把 CWTools 的 PDX 语义能力（有界项目语义图、验证 ID、查语法、查作用域、全项目诊断、定义/引用、补全、scripted effects/triggers/enums/modifiers/variables、实体信息，共 26 个只读工具）开放给任意 MCP 客户端。文件写入仍由你的 Agent 自带环境完成。
+* **有界语义图**：大型 Mod 优先调用 `explore_pdx_project`。它直接读取 live CWTools model，返回排序后的 typed entry point、依赖边、逐文件语义事实、provenance、截断预算与 freshness，不需要读取整份文件。
 
 * **默认复用插件内服务**：MCP 入口脚本会通过 `globalStorage/mcp/bridge-manifest.json` 连接当前已激活的 VS Code 兼容宿主（VS Code / Cursor / VSCodium / Antigravity 等），复用 IDE 中已有的 CWTools LSP 与 Problems 诊断，不再额外启动第二个重型服务。客户端工作区会从 MCP roots、会话环境变量或 cwd 动态发现，且必须与 bridge 暴露的工作区一致；不一致时返回 `bridge_unavailable`，不会从另一个项目静默回答。
 * **版本无关稳定路径**：插件激活时把 MCP 代理脚本同步到 `globalStorage/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs`（不含版本号），配置指向它即可**自动跟随插件更新**。旧的独立 LSP 模式仍可用 `--standalone` 显式启用。

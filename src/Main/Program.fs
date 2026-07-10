@@ -22,6 +22,7 @@ open System.Diagnostics
 open Main.Lang.GameLoader
 open Main.Lang.LanguageServerFeatures
 open Main.Completion
+open Main.SemanticGraph
 open CWTools.Utilities.Utils
 open CWTools.Localisation
 open LSP.LanguageServer   // brings gameStateLock into scope
@@ -4514,6 +4515,7 @@ type Server(client: ILanguageClient) =
                                           "cwtools.ai.queryTypes"
                                           "cwtools.ai.queryDefinition"
                                           "cwtools.ai.queryDefinitionByName"
+                                          "cwtools.ai.exploreProject"
                                           "cwtools.ai.queryScriptedEffects"
                                           "cwtools.ai.queryScriptedTriggers"
                                           "cwtools.ai.queryEnums"
@@ -7202,6 +7204,82 @@ type Server(client: ILanguageClient) =
                                                 [| "ok",    JsonValue.Boolean false
                                                    "error", JsonValue.String $"Symbol '{name}' not found. Try query_scripted_effects or query_scripted_triggers with a filter instead." |]
                             Some result
+
+                        // - cwtools.ai.exploreProject -
+                        // Bounded semantic graph over CWTools' existing typed indexes and
+                        // ComputedData. The server remains the only source of PDX/CWT truth;
+                        // MCP and the extension are thin consumers of this command.
+                        | { command = "cwtools.ai.exploreProject"
+                            arguments = args } ->
+                            let stringArg index =
+                                args
+                                |> List.tryItem index
+                                |> Option.bind (function
+                                    | JsonValue.String value when not (String.IsNullOrWhiteSpace value) -> Some value
+                                    | _ -> None)
+                            let boolArg index fallback =
+                                args
+                                |> List.tryItem index
+                                |> Option.bind (function JsonValue.Boolean value -> Some value | _ -> None)
+                                |> Option.defaultValue fallback
+                            let intArg index fallback =
+                                args
+                                |> List.tryItem index
+                                |> Option.bind (fun value ->
+                                    try Some(value.AsInteger())
+                                    with _ -> None)
+                                |> Option.defaultValue fallback
+                            let query = stringArg 0 |> Option.defaultValue ""
+                            let file =
+                                stringArg 1
+                                |> Option.map (fun value ->
+                                    if value.StartsWith("file:", StringComparison.OrdinalIgnoreCase) then
+                                        try getPathFromDoc (Uri(value))
+                                        with _ -> value
+                                    else value)
+                            let typeName = stringArg 2
+                            let options: ExploreOptions =
+                                { query = query
+                                  file = file
+                                  typeName = typeName
+                                  exact = boolArg 3 false
+                                  depth = intArg 4 1
+                                  maxNodes = intArg 5 30
+                                  maxEdges = intArg 6 80
+                                  includeMetadata = boolArg 7 true }
+
+                            if String.IsNullOrWhiteSpace query && file.IsNone && typeName.IsNone then
+                                Some(
+                                    JsonValue.Record
+                                        [| "ok", JsonValue.Boolean false
+                                           "status", JsonValue.String "error"
+                                           "error", JsonValue.String "exploreProject requires query, file, or typeName." |])
+                            else
+                                let validation = validationRuntimeSnapshot ()
+                                let loading = loadingRuntimeSnapshot ()
+                                let pendingKinds = pendingRefreshDomainList ()
+                                let status =
+                                    if loading.inProgress then "loading"
+                                    elif validation.inProgress || not pendingKinds.IsEmpty then "stale"
+                                    else "ready"
+                                let runtime: RuntimeMetadata =
+                                    { graphVersion = diagnosticEpoch.Value
+                                      status = status
+                                      validationInProgress = validation.inProgress
+                                      loadingInProgress = loading.inProgress
+                                      pendingGlobalKinds = pendingKinds
+                                      lastGlobalRefreshAtUnixMs = dateTimeToUnixMs lastGlobalRefreshAt }
+                                let visitor =
+                                    { new IGameVisitor<JsonValue> with
+                                        member _.Visit game = exploreProject game options runtime }
+                                match gameDispatcher.Dispatch visitor with
+                                | Some result -> Some result
+                                | None ->
+                                    Some(
+                                        JsonValue.Record
+                                            [| "ok", JsonValue.Boolean false
+                                               "status", JsonValue.String "unavailable"
+                                               "error", JsonValue.String "LSP server has not loaded a game model yet." |])
 
                         // - cwtools.ai.queryScriptedEffects -
                         // Returns all scripted effects with name, scope constraints and type

@@ -136,6 +136,7 @@ registerWorkflow({
 	toolPolicy: {
 		strategy: 'allowlist',
 		tools: [
+			'explore_pdx_project',
 			// Read & analyze
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
@@ -206,6 +207,7 @@ registerWorkflow({
 	toolPolicy: {
 		strategy: 'allowlist',
 		tools: [
+			'explore_pdx_project',
 			// Read & analyze
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'list_directory', 'glob_files',
@@ -263,6 +265,7 @@ registerWorkflow({
 	toolPolicy: {
 		strategy: 'allowlist',
 		tools: [
+			'explore_pdx_project',
 			// Read-only analysis
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'list_directory', 'glob_files',
@@ -346,6 +349,7 @@ registerWorkflow({
 	toolPolicy: {
 		strategy: 'allowlist',
 		tools: [
+			'explore_pdx_project',
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'list_directory', 'glob_files',
 			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
@@ -400,6 +404,7 @@ registerWorkflow({
 	toolPolicy: {
 		strategy: 'allowlist',
 		tools: [
+			'explore_pdx_project',
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'list_directory', 'glob_files',
 			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',

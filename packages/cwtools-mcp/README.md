@@ -133,6 +133,7 @@ tools such as:
 - `query_rules`
 - `query_scope`
 - `get_diagnostics`
+- `explore_pdx_project` for a bounded live semantic graph with dependency edges and freshness
 - `query_workspace_index`
 - `query_localisation_index`
 - `get_pdx_block`
@@ -267,6 +268,7 @@ MCP 入口仍保持只读。它暴露生成出来的 CWTools 语义工具，例�
 - `query_rules`
 - `query_scope`
 - `get_diagnostics`
+- `explore_pdx_project`：返回带依赖边与 freshness 的有界 live 语义图
 - `query_workspace_index`
 - `query_localisation_index`
 - `get_pdx_block`

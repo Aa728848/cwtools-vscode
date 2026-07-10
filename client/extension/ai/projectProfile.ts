@@ -84,6 +84,7 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
     const game = detectGame(root, descriptor, keyDirectories.map(d => d.path));
     const preferredReadTools = [
         'query_project_profile',
+        'explore_pdx_project',
         'query_cwt_schema',
         'query_workspace_index',
         'query_localisation_index',
@@ -151,7 +152,7 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
             ],
             preferredReadTools,
             avoidPatterns: [
-                'Do not broad grep before checking query_project_profile and query_workspace_index.',
+                'Do not broad grep before checking query_project_profile, explore_pdx_project, and query_workspace_index.',
                 'Do not invent PDX identifiers, localisation keys, GFX names, or sound names.',
                 'Do not write localisation through generic write tools; use write_localisation.',
             ],
@@ -167,7 +168,7 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
     const efficiencyHints = [
         'Call query_project_profile(section="summary") before broad workspace scans.',
         'Use query_cwt_schema or get_completion_at before inventing common/ entity fields or block shapes.',
-        'Use query_workspace_index or query_definition_by_name before search_mod_files for known IDs.',
+        'Use explore_pdx_project, query_workspace_index, or query_definition_by_name before search_mod_files for known IDs.',
         'Use mode-specific prompt cards from the profile instead of injecting full project files.',
         'Keep CWTOOLS.md for human-edited rules; use profile.json for machine routing facts.',
     ];
@@ -207,7 +208,7 @@ export function renderProjectRulesMarkdown(profile: ProjectProfile, customRules 
         '',
         '## Agent Routing',
         '- Start with `query_project_profile` for project facts and workflow routing.',
-        '- Prefer CWT/indexed tools before raw scans: `query_cwt_schema`, `get_completion_at`, `query_workspace_index`, `query_localisation_index`, `query_definition_by_name`, `get_pdx_block`.',
+        '- Prefer CWT/indexed tools before raw scans: `explore_pdx_project`, `query_cwt_schema`, `get_completion_at`, `query_workspace_index`, `query_localisation_index`, `query_definition_by_name`, `get_pdx_block`.',
         '- Use the recommended workflow when the task matches diagnostics, localisation, event-chain design, rules review, or asset wiring.',
         '',
         '## Project Structure',
@@ -328,7 +329,7 @@ function buildPromptCards(profile: Omit<ProjectProfile, 'promptCards' | 'efficie
             `- Workspace kind: ${profile.workspaceKind}; game: ${profile.game.displayName}.`,
             `- Key directories: ${keyDirs}.`,
             `- Namespaces: ${namespaces}.`,
-            '- Before editing known IDs, prefer query_workspace_index/query_definition_by_name/get_pdx_block.',
+            '- Before editing known IDs, prefer explore_pdx_project/query_workspace_index/query_definition_by_name/get_pdx_block.',
             '- After edits, run get_diagnostics on changed files.',
         ].join('\n'),
         plan: [
@@ -341,7 +342,7 @@ function buildPromptCards(profile: Omit<ProjectProfile, 'promptCards' | 'efficie
         ].join('\n'),
         explore: [
             'Explore mode project card:',
-            '- Start with query_project_profile, then query_workspace_index for symbols.',
+            '- Start with query_project_profile, then explore_pdx_project for a bounded semantic graph.',
             '- Use broad scans only after indexed lookups fail or when the user asks for a full audit.',
         ].join('\n'),
         review: [

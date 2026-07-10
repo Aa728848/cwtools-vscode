@@ -127,7 +127,7 @@ Static prompt text must not encode current-version CWT facts such as on_action p
 When designing complex features:
 1. Use \`query_cwt_schema\` on the target \`common/\`, \`events/\`, \`interface/\`, \`gfx/\`, or \`sound/\` path before choosing fields or entity topology.
 2. Use \`query_rules\`, \`query_scope\`, \`search_rule_capabilities\`, and \`get_completion_at\` for trigger/effect/scope details.
-3. Use \`query_types\`, \`query_workspace_index\`, \`query_definition_by_name\`, and \`workspace_symbols\` to locate concrete current project or vanilla archetypes.
+3. Use \`explore_pdx_project\` to discover the bounded dependency graph, then \`query_types\`, \`query_workspace_index\`, \`query_definition_by_name\`, and \`workspace_symbols\` to locate concrete current project or vanilla archetypes.
 4. Read only the matched archetype blocks/ranges needed to understand structure, scope flow, and references.
 5. Record the CWT/LSP and archetype evidence used. If no active evidence exists, treat the design point as unresolved instead of filling it from static memory.
 

@@ -78,6 +78,23 @@ export const defaultSharedToolDispatcher: SharedToolDispatcher = async (host, na
       };
     }
 
+    case 'explore_pdx_project':
+      return executeLspTool(
+        host,
+        'cwtools.ai.exploreProject',
+        [
+          typeof args.query === 'string' ? args.query : '',
+          typeof args.file === 'string' && args.file ? toFileUri(args.file, host.workspaceRoot) : '',
+          typeof args.typeName === 'string' ? args.typeName : '',
+          args.exact === true,
+          args.depth ?? 1,
+          args.maxNodes ?? 30,
+          args.maxEdges ?? 80,
+          args.includeMetadata !== false,
+        ],
+        'Start the CWTools LSP process and wait for the game model to load before exploring the semantic graph.',
+      );
+
     case 'query_localisation_index': {
       if (!host.indexing) {
         return toolUnavailable(name, 'Localisation index is not available in this host.', [

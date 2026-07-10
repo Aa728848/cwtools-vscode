@@ -226,6 +226,10 @@ export interface OrchestratorOptions {
     abortSignal?: AbortSignal;
     /** Topic ID (used for checkpoints and working directories) */
     topicId?: string;
+    /** Parent durable run id for child agent threads. */
+    parentRunId?: string;
+    /** Explicit parent event sink for orchestration events. */
+    runEventSink?: import('../runner/runContext').RunEventSink;
     /** Step callback */
     onStep?: (step: AgentStep) => void;
     /** Snapshot callback before file writing, used to pass upward to the recall system */

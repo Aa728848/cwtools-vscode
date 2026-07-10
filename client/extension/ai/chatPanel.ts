@@ -41,6 +41,7 @@ import { UI, SOURCE, aiText } from './messages';
 import { ContextReferenceManager } from './contextReferences';
 import { AgentSessionCoordinator } from './agentSessionCoordinator';
 import { runLedger, type AgentRunEvent } from './runner/runLedger';
+import { AgentRuntime } from './runner/agentRuntime';
 import { PermissionPolicyStore, deriveCommandPrefix, hasInlineEvalPayload } from './runner/permissionPolicy';
 import { isSecuritySandboxDisabled } from './workspaceSandbox';
 import { AutoReviewer } from './runner/autoReviewer';
@@ -105,6 +106,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private view?: vs.WebviewView;
     private managerPanel?: vs.WebviewPanel;
     private currentRunId?: string;
+    private readonly agentRuntime: AgentRuntime;
     public readonly session = new AgentSessionCoordinator();
     public readonly broadcaster = new AgentUiBroadcaster();
     public readonly artifactStore = new ArtifactStore(() => this.topicManager.currentTopic?.id ?? 'session');
@@ -182,6 +184,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.session.isGenerating = value;
     }
 
+    public get isGenerating(): boolean {
+        return this._isGenerating;
+    }
+
     constructor(
         public extensionUri: vs.Uri,
         public agentRunner: AgentRunner,
@@ -189,6 +195,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         public usageTracker: UsageTracker,
         public storageUri: vs.Uri | undefined
     ) {
+        this.agentRuntime = new AgentRuntime(agentRunner);
         this.topicManager = new ChatTopicManager(storageUri, (msg) => this.postMessage(msg));
         this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg), storageUri?.fsPath);
         this.contextReferences = new ContextReferenceManager(() => this.agentRunner.toolExecutor.blackboard);
@@ -715,8 +722,84 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
+    private async resolveActiveRunId(): Promise<string | undefined> {
+        if (this.currentRunId) return this.currentRunId;
+        const activeRun = await this.agentRunner.getActiveRunRecordPromise()?.catch(() => undefined);
+        if (activeRun?.runId) {
+            this.currentRunId = activeRun.runId;
+            return activeRun.runId;
+        }
+        return undefined;
+    }
+
+    public async submitSteerMessage(text: string, images?: string[], displayText?: string, contexts?: import('./types').ContextItem[]): Promise<boolean> {
+        const hasText = text.trim().length > 0;
+        const hasImages = !!images?.length;
+        if (!hasText && !hasImages) return false;
+        if (!this.topicManager.currentTopic) return false;
+
+        const runId = await this.resolveActiveRunId();
+        if (!runId) {
+            this.postMessage({
+                type: 'generationError',
+                error: aiText('No active AI run is available to receive queued input.', '当前没有可接收排队输入的 AI 任务。'),
+            });
+            return false;
+        }
+
+        const steeringText = hasText
+            ? text
+            : aiText('[User attached image(s) while the run was active.]', '[用户在任务运行中附加了图片。]');
+        const clientUserMessageId = `steer_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const accepted = this.agentRuntime.steerTurn(runId, steeringText, clientUserMessageId, images).accepted;
+        if (!accepted) {
+            this.postMessage({
+                type: 'generationError',
+                error: aiText('The current AI run could not accept queued input. It may have just finished.', '当前 AI 任务无法接收排队输入，可能刚刚结束。'),
+            });
+            return false;
+        }
+
+        const visibleText = displayText ?? steeringText;
+        const messageIndex = this.topicManager.currentTopic.messages.length;
+        this.postMessage({ type: 'queuedUserInput', text: visibleText, messageIndex, images: hasImages ? images : undefined, contexts });
+        this.topicManager.addHistoryMessage({
+            role: 'user',
+            content: steeringText,
+            displayContent: displayText,
+            contexts,
+            timestamp: Date.now(),
+            images: hasImages ? images : undefined,
+        });
+        const historyContent: ChatMessage['content'] = hasImages
+            ? [
+                { type: 'text' as const, text: steeringText },
+                ...images!.map(url => ({
+                    type: 'image_url' as const,
+                    image_url: { url, detail: 'auto' as const },
+                })),
+            ]
+            : steeringText;
+        this.conversationMessages.push({ role: 'user', content: historyContent });
+        this.topicManager.saveTopics();
+        this.postMessage({
+            type: 'agentStep',
+            step: {
+                type: 'thinking',
+                content: aiText('Queued your input for the next model step.', '已将你的输入排队到下一次模型步骤。'),
+                timestamp: Date.now(),
+            },
+        });
+        return true;
+    }
+
     public async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], _skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[]): Promise<void> {
         if (!text.trim() && (!images || images.length === 0)) return;
+
+        if (this._isGenerating) {
+            await this.submitSteerMessage(text, images, displayText, contexts);
+            return;
+        }
 
         if (text.trim().startsWith('/')) {
             await this.handleSlashCommand(text.trim());
@@ -813,11 +896,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         };
 
         try {
-            const runPromise = this.agentRunner.run(
-                text,
-                { ...context, topicId: this.topicManager.currentTopic?.id },
-                this.conversationMessages,
-                {
+            const runPromise = this.agentRuntime.startTurn({
+                userMessage: text,
+                context: { ...context, topicId: this.topicManager.currentTopic?.id },
+                conversationHistory: this.conversationMessages,
+                options: {
                     mode: this.currentMode,
                     model: this.aiService.getConfig().model || undefined,
                     streaming: true,  // Enable typewriter text effect
@@ -840,8 +923,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     resumeFromState,
                     workflowId: this.currentWorkflowId ?? undefined,
                 },
-                images  // pass images to build ContentPart[] user turn
-            );
+                images,  // pass images to build ContentPart[] user turn
+            }).then(turn => turn.result);
 
             this.agentRunner.getActiveRunRecordPromise()?.then((r: any) => {
                 this.currentRunId = r.runId;
@@ -989,6 +1072,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }
 
             this.abortController = null;
+            this.currentRunId = undefined;
             this._isGenerating = false;
             this._liveSteps = [];
         }
@@ -1940,6 +2024,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             topicId,
             topic ? this.compactMessagesForWebview(topic.messages) as any : undefined
         );
+        void this.agentRuntime.resumeThread(topicId, topicId).catch(() => undefined);
         const resumeState = await this.agentRunner.loadResumeState(topicId);
         if (resumeState) {
             const topic = this.topicManager.currentTopic;
@@ -1980,6 +2065,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public forkTopic(topicId: string, messageIndex: number): void {
         this.clearArtifacts();
         this.conversationMessages = this.topicManager.forkTopic(topicId, messageIndex);
+        const forkedTopicId = this.topicManager.currentTopic?.id;
+        if (forkedTopicId) {
+            void this.agentRuntime.forkThread(topicId, topicId, forkedTopicId, forkedTopicId).catch(() => undefined);
+        }
     }
 
     /** Archive/unarchive a topic (hidden from main list but not deleted) */
@@ -2029,6 +2118,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     public cancelGeneration(): void {
+        if (this.currentRunId) {
+            this.agentRuntime.interruptTurn(this.currentRunId, 'Interrupted by user');
+        }
         if (this.abortController) {
             this.abortController.abort();
             this.abortController = null;
@@ -2070,6 +2162,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }, step => {
                 if (step.compactionInfo) this.postMessage({ type: 'contextCompactionStatus', step });
             });
+            if (result.compacted && this.topicManager.currentTopic?.id) {
+                const topicId = this.topicManager.currentTopic.id;
+                const latestRun = this.currentRunId
+                    ? undefined
+                    : await runLedger.loadLatestRunForTopic(topicId).catch(() => undefined);
+                void this.agentRuntime.compactThread(topicId, topicId, this.currentRunId ?? latestRun?.runId).catch(() => undefined);
+            }
             vs.window.showInformationMessage(result.compacted ? UI.CONTEXT_COMPACTED : UI.CONTEXT_COMPACT_EMPTY);
         } else if (cmd.startsWith('mode:') || cmd.startsWith('/mode:')) {
             const mode = cmd.split(':')[1] as AgentMode;

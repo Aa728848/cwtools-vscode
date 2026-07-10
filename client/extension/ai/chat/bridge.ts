@@ -21,6 +21,9 @@ export async function routeWebviewMessage(
         case 'sendMessage':
             await provider.handleUserMessage(msg.text, msg.images, msg.attachedFiles);
             break;
+        case 'steerGeneration':
+            await provider.submitSteerMessage(msg.text, msg.images);
+            break;
         case 'sendMessageWithReference': {
             const referencePrompt = await provider.contextReferences.buildReferencePrompt(msg.contexts);
             const displayText = msg.text.trim();
@@ -29,7 +32,11 @@ export async function routeWebviewMessage(
                 msg.text || 'Please use the referenced context above.',
             ].filter(Boolean).join('\n\n');
 
-            await provider.handleUserMessage(agentText, msg.images, undefined, false, false, false, displayText, msg.contexts);
+            if (provider.isGenerating) {
+                await provider.submitSteerMessage(agentText, msg.images, displayText, msg.contexts);
+            } else {
+                await provider.handleUserMessage(agentText, msg.images, undefined, false, false, false, displayText, msg.contexts);
+            }
             break;
         }
         case 'editAndResendMessage':

@@ -14,6 +14,7 @@
 
 export interface ReadyMessage { type: 'ready' }
 export interface SendMessagePayload { type: 'sendMessage'; text: string; mode: string; images?: string[] }
+export interface SteerGenerationMessage { type: 'steerGeneration'; text: string; images?: string[] }
 export interface SendMessageWithReferencePayload { type: 'sendMessageWithReference'; text: string; mode: string; reference: unknown; images?: string[] }
 export interface EditAndResendMessagePayload { type: 'editAndResendMessage'; messageIndex: number; text: string; contexts?: unknown[]; images?: string[] }
 export interface CancelGenerationMessage { type: 'cancelGeneration' }
@@ -49,6 +50,7 @@ export interface QuestionResponseMessage { type: 'questionResponse'; questionId:
 export type WebviewToHostMessage =
     | ReadyMessage
     | SendMessagePayload
+    | SteerGenerationMessage
     | SendMessageWithReferencePayload
     | EditAndResendMessagePayload
     | CancelGenerationMessage
@@ -83,6 +85,7 @@ export type WebviewToHostMessage =
 // ─── Host → Webview messages (panel.webview.postMessage) ─────────────────────
 
 export interface StreamTextMessage { type: 'streamText'; text: string; isComplete: boolean }
+export interface QueuedUserInputMessage { type: 'queuedUserInput'; text: string; messageIndex: number; images?: string[]; contexts?: unknown[] }
 export interface AgentStepMessage { type: 'agentStep'; step: unknown }
 export interface ContextCompactionStatusMessage { type: 'contextCompactionStatus'; step: unknown }
 export interface UpdateHistoryMessage { type: 'updateHistory'; messages: unknown[] }
@@ -104,6 +107,7 @@ export interface SkillsUpdateMessage { type: 'skillsUpdate'; skills: unknown[] }
 /** Union of all host → webview messages. */
 export type HostToWebviewMessage =
     | StreamTextMessage
+    | QueuedUserInputMessage
     | AgentStepMessage
     | ContextCompactionStatusMessage
     | UpdateHistoryMessage

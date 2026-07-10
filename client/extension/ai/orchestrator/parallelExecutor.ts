@@ -19,6 +19,7 @@ import { Blackboard } from './blackboard';
 import { ConflictDetector } from './conflictDetector';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, aiText } from '../messages';
+import type { RunEventSink } from '../runner/runContext';
 
 /** Sub-agent executor injected by Orchestrator. */
 export type SubAgentExecutor = (
@@ -43,12 +44,17 @@ export class ParallelExecutor {
     constructor(options?: {
         maxConcurrency?: number;
         globalTokenBudget?: number;
+        eventSink?: RunEventSink;
     }) {
         this.maxConcurrency = options?.maxConcurrency ?? Math.min(4, os.cpus().length || 2);
         this.globalTokenBudget = options?.globalTokenBudget ?? 0;
         this.consumedTokens = { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
-        this.conflictDetector = new ConflictDetector();
+        this.conflictDetector = new ConflictDetector(options?.eventSink);
         this.graphEngine = new TaskGraphEngine();
+    }
+
+    setEventSink(eventSink?: RunEventSink): void {
+        this.conflictDetector.setEventSink(eventSink);
     }
 
     async executeGraph(

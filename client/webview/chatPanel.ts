@@ -1129,6 +1129,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return getInputText().trim() === '' && !input.querySelector('.reference-chip');
     }
 
+    function hasComposerPayload(): boolean {
+        return getInputText().trim() !== ''
+            || pendingImages.length > 0
+            || pendingFiles.length > 0
+            || activeContexts.length > 0
+            || !!input.querySelector('.reference-chip');
+    }
+
     function autoResizeInput() {
         updateComposerStackHeight();
     }
@@ -1751,6 +1759,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             activeContexts = activeContexts.filter(c => c.id !== id);
             chip.remove();
             autoResizeInput();
+            updateSendButtonState();
             input.focus();
         });
         return chip;
@@ -1998,7 +2007,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     // ── Button logic ───────────────────────────────────────────────────────────
     sendBtn.addEventListener('click', () => {
-        if (isGenerating) {
+        if (isGenerating && !hasComposerPayload()) {
             vscode.postMessage({ type: 'cancelGeneration' });
         } else {
             sendMessage();
@@ -2028,7 +2037,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            if (!isGenerating) sendMessage();
+            if (!isGenerating || hasComposerPayload()) sendMessage();
         } else if (e.key === 'Tab') {
             e.preventDefault();
             const modes = ['build', 'plan', 'explore', 'utility', 'review', 'orchestrator', 'script'];
@@ -2043,6 +2052,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         syncContextsFromComposer();
         saveInputSelection();
         autoResizeInput();
+        updateSendButtonState();
     });
     input.addEventListener('keyup', saveInputSelection);
     input.addEventListener('mouseup', saveInputSelection);
@@ -3043,10 +3053,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             pendingImages = pendingImages.filter(u => u !== dataUrl);
             wrap.remove();
             updateComposerStackHeight();
+            updateSendButtonState();
         });
         wrap.appendChild(img); wrap.appendChild(del);
         area.appendChild(wrap);
         updateComposerStackHeight();
+        updateSendButtonState();
     }
 
 
@@ -3076,7 +3088,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             activeContexts = [];
         } else {
             vscode.postMessage({
-                type: 'sendMessage',
+                type: isGenerating ? 'steerGeneration' : 'sendMessage',
                 text,
                 images: imagesToSend,
                 attachedFiles: pendingFiles.length > 0 ? [...pendingFiles] : undefined,
@@ -3087,6 +3099,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         stopPlaceholderRotation();
         clearComposerAttachmentPreviews();
         updateComposerStackHeight();
+        updateSendButtonState();
     }
 
     /**
@@ -3113,18 +3126,24 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     document.body.classList.add('build-mode');
     renderComposerChips();
 
-    function setGenerating(val: boolean) {
-        isGenerating = val;
-        if (val) {
+    function updateSendButtonState() {
+        if (isGenerating && !hasComposerPayload()) {
             sendBtn.innerHTML = '<span class="stop-icon"></span>';
             sendBtn.title = chatI18n.buttons.cancelGeneration;
             sendBtn.className = 'send-btn cancel-mode';
-        } else {
-            sendBtn.innerHTML = '<span class="send-icon">↑</span>';
-            sendBtn.title = `${chatI18n.buttons.send} (Enter)`;
-            sendBtn.className = 'send-btn';
-            if (isInputEmpty()) startPlaceholderRotation();
+            return;
         }
+        sendBtn.innerHTML = '<span class="send-icon">↑</span>';
+        sendBtn.title = isGenerating
+            ? tr('Queue input for current run', '排队到当前任务')
+            : `${chatI18n.buttons.send} (Enter)`;
+        sendBtn.className = isGenerating ? 'send-btn steer-mode' : 'send-btn';
+    }
+
+    function setGenerating(val: boolean) {
+        isGenerating = val;
+        updateSendButtonState();
+        if (!val && isInputEmpty()) startPlaceholderRotation();
     }
 
     // ── Token usage bar ────────────────────────────────────────────────────────
@@ -5319,6 +5338,21 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 chatArea.appendChild(currentAssistantDiv);
                 scrollBottom(true);
                 break;
+
+            case 'queuedUserInput': {
+                const queued = addUserMessage(msg.text, msg.messageIndex, msg.images, msg.contexts);
+                queued.classList.add('queued-user-input');
+                const bubble = queued.querySelector('.msg-bubble');
+                if (bubble) {
+                    const status = document.createElement('div');
+                    status.className = 'queued-input-status';
+                    status.style.cssText = 'margin-top:6px;font-size:11px;color:var(--vscode-descriptionForeground);';
+                    status.textContent = tr('Queued for current run', '已排队到当前任务');
+                    bubble.appendChild(status);
+                }
+                updateSendButtonState();
+                break;
+            }
 
             case 'startBackgroundGeneration':
                 removeReplayBanners();

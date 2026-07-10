@@ -244,6 +244,238 @@ describe('RunLedger Unit Tests', () => {
         expect(fs.existsSync(oldFile)).to.equal(false);
         expect([keepFile, extraFile].filter(file => fs.existsSync(file))).to.have.lengthOf(1);
     });
+
+    it('routes blackboard events through an explicit run event sink instead of the latest run', async () => {
+        const { runLedger } = loadRunLedgerModule();
+        const { createRunEventSink } = loadRunContextModule();
+        const { Blackboard } = loadBlackboardModule();
+
+        const intendedRun = await runLedger.createRun('topic_sink_a', 'orchestrator', 'intended prompt');
+        const latestRun = await runLedger.createRun('topic_sink_b', 'orchestrator', 'latest prompt');
+        const sink = createRunEventSink({ runId: intendedRun.runId, agentId: 'parent' });
+        const blackboard = new Blackboard(undefined, sink);
+
+        blackboard.write('k', 'value', 'free_text', 'agent_a');
+        expect(blackboard.read('k')?.value).to.equal('value');
+
+        await waitForEvent(runLedger, intendedRun.runId, 'blackboard_read');
+        expect(runLedger.getSnapshot(intendedRun.runId)?.events.map(event => event.type)).to.include.members([
+            'blackboard_write',
+            'blackboard_read',
+        ]);
+        expect(runLedger.getSnapshot(latestRun.runId)?.events.map(event => event.type)).to.not.include('blackboard_write');
+    });
+
+    it('routes conflict detector events through the provided run event sink', async () => {
+        const { runLedger } = loadRunLedgerModule();
+        const { createRunEventSink } = loadRunContextModule();
+        const { Blackboard } = loadBlackboardModule();
+        const { ConflictDetector } = loadConflictDetectorModule();
+
+        const intendedRun = await runLedger.createRun('topic_conflict_a', 'orchestrator', 'intended prompt');
+        const latestRun = await runLedger.createRun('topic_conflict_b', 'orchestrator', 'latest prompt');
+        const sink = createRunEventSink({ runId: intendedRun.runId, agentId: 'parent' });
+        const blackboard = new Blackboard(undefined, sink);
+        const detector = new ConflictDetector(sink);
+
+        detector.declareIntent('agent_b', ['common/events/test.txt'], blackboard);
+        const result = detector.checkWriteConflict('agent_a', 'common/events/test.txt', blackboard);
+
+        expect(result.hasConflict).to.equal(true);
+        await waitForEvent(runLedger, intendedRun.runId, 'conflict_detected');
+        expect(runLedger.getSnapshot(intendedRun.runId)?.events.map(event => event.type)).to.include('conflict_detected');
+        expect(runLedger.getSnapshot(latestRun.runId)?.events.map(event => event.type)).to.not.include('conflict_detected');
+    });
+
+    it('exposes rollout projection and explicit run metadata', async () => {
+        const { runLedger } = loadRunLedgerModule();
+        const { createRunEventSink } = loadRunContextModule();
+        const { readRunRollout } = loadRolloutStoreModule();
+        const run = await runLedger.createRun(
+            'topic_rollout',
+            'build',
+            'rollout prompt',
+            'parent_run',
+            'rollout prompt',
+            { agentId: 'agent_rollout', providerId: 'test-provider', model: 'test-model', threadId: 'thread_1', turnId: 'turn_1' },
+        );
+        const sink = createRunEventSink({ runId: run.runId, agentId: 'agent_rollout' });
+        await sink.append('input_queued', { inputId: 'input_1', size: 5 }, { status: 'pending' });
+
+        const rollout = await readRunRollout(run.runId);
+        expect(rollout?.run.parentRunId).to.equal('parent_run');
+        expect(rollout?.run.agentId).to.equal('agent_rollout');
+        expect(rollout?.events.map(event => event.type)).to.include('input_queued');
+        expect(rollout?.projection).to.be.an('object');
+    });
+
+    it('queues and drains steer input in FIFO order', () => {
+        const { AgentInputQueue } = loadInputQueueModule();
+        const queue = new AgentInputQueue('run_input');
+        queue.enqueue('first', 'client_1');
+        queue.enqueue('second', undefined, ['data:image/png;base64,abc']);
+
+        expect(queue.size).to.equal(2);
+        const drained = queue.drain();
+        expect(drained.map(item => item.message)).to.deep.equal(['first', 'second']);
+        expect(drained[1]?.images).to.deep.equal(['data:image/png;base64,abc']);
+        expect(queue.size).to.equal(0);
+    });
+
+    it('records background process lifecycle events through the run event sink', async () => {
+        const { runLedger } = loadRunLedgerModule();
+        const { createRunEventSink } = loadRunContextModule();
+        const { ProcessRegistry } = loadProcessRegistryModule();
+        const run = await runLedger.createRun('topic_process', 'build', 'process prompt');
+        const sink = createRunEventSink({ runId: run.runId });
+        const registry = new ProcessRegistry();
+
+        const process = registry.register('echo hello', workspaceRoot, 1234, sink, {
+            sandboxMode: 'direct-preflight',
+            networkAccess: true,
+        });
+        registry.appendOutput(process.processId, 'stdout', 'hello\n', sink);
+        registry.complete(process.processId, 0, sink);
+
+        await waitForEvent(runLedger, run.runId, 'process_completed');
+        const snapshot = runLedger.getSnapshot(run.runId);
+        expect(snapshot?.events.map(event => event.type)).to.include.members([
+            'process_started',
+            'process_output_delta',
+            'process_completed',
+        ]);
+        const started = snapshot?.events.find(event => event.type === 'process_started');
+        expect(started?.payload.sandboxMode).to.equal('direct-preflight');
+        expect(started?.payload.networkAccess).to.equal(true);
+    });
+
+    it('persists durable thread records and supports fork/compact metadata', async () => {
+        const { runLedger } = loadRunLedgerModule();
+        const { ThreadStore } = loadThreadStoreModule();
+        const store = new ThreadStore();
+        const run = await runLedger.createRun(
+            'topic_threads',
+            'build',
+            'thread prompt',
+            undefined,
+            'thread prompt',
+            { threadId: 'thread_main', turnId: 'turn_1', agentId: 'agent_main' },
+        );
+
+        const record = await store.recordRun(run);
+        expect(record.threadId).to.equal('thread_main');
+        expect(record.currentRunId).to.equal(run.runId);
+        expect(record.runIds).to.deep.equal([run.runId]);
+
+        const fork = await store.forkThread('topic_threads', 'thread_main', 'thread_fork', 'topic_threads_fork');
+        expect(fork?.parentThreadId).to.equal('thread_main');
+        expect(fork?.topicId).to.equal('topic_threads_fork');
+        expect(fork?.forkedFromRunId).to.equal(run.runId);
+
+        const compacted = await store.markCompacted('topic_threads', 'thread_main', run.runId, 'summaries/latest.json');
+        expect(compacted?.status).to.equal('compacted');
+        expect(compacted?.latestSummaryRef).to.equal('summaries/latest.json');
+
+        const fresh = new ThreadStore();
+        expect((await fresh.getThread('topic_threads', 'thread_main'))?.currentRunId).to.equal(run.runId);
+        expect((await fresh.listThreads('topic_threads')).map(thread => thread.threadId)).to.include('thread_main');
+        expect((await fresh.listThreads('topic_threads_fork')).map(thread => thread.threadId)).to.include('thread_fork');
+    });
+
+    it('TurnRunner records a durable thread for each started turn', async () => {
+        const { runLedger } = loadRunLedgerModule();
+        const { TurnRunner } = loadTurnRunnerModule();
+        const { ThreadStore } = loadThreadStoreModule();
+        const store = new ThreadStore();
+        const runner = new TurnRunner(runLedger, store);
+
+        const runtime = await runner.startTurn({
+            topicId: 'topic_turn_runner',
+            mode: 'build',
+            userPrompt: 'turn prompt',
+            threadId: 'thread_turn_runner',
+            turnId: 'turn_1',
+        });
+
+        const thread = await store.getThread('topic_turn_runner', 'thread_turn_runner');
+        expect(thread?.currentRunId).to.equal(runtime.run.runId);
+        expect(runtime.eventSink.runId).to.equal(runtime.run.runId);
+    });
+
+    it('ActiveTurnRegistry steers and interrupts active turns', () => {
+        const { ActiveTurnRegistry } = loadActiveTurnRegistryModule();
+        const registry = new ActiveTurnRegistry();
+        const controller = new AbortController();
+        const steered: Array<{ message: string; images?: string[] }> = [];
+        registry.register({
+            runId: 'run_active',
+            runner: {
+                submitInput: (_runId: string, message: string, _clientId?: string, images?: string[]) => {
+                    steered.push({ message, images });
+                    return true;
+                },
+            },
+            abortController: controller,
+        });
+
+        expect(registry.steer('run_active', 'please pivot', undefined, ['img'])).to.equal(true);
+        expect(steered).to.deep.equal([{ message: 'please pivot', images: ['img'] }]);
+        expect(registry.interrupt('run_active', 'stop now')).to.equal(true);
+        expect(controller.signal.aborted).to.equal(true);
+    });
+
+    it('AgentRuntime exposes protocol-style start/steer/interrupt/thread methods', async () => {
+        const { activeTurnRegistry } = loadActiveTurnRegistryModule();
+        const { AgentRuntime } = loadAgentRuntimeModule();
+        const { ThreadStore } = loadThreadStoreModule();
+        const capturedOptions: any[] = [];
+        const runtime = new AgentRuntime({
+            run: async (_message: string, _context: unknown, _history: unknown, options: unknown) => {
+                capturedOptions.push(options);
+                return {
+                    runId: 'run_protocol',
+                    code: '',
+                    explanation: 'done',
+                    validationErrors: [],
+                    isValid: true,
+                    retryCount: 0,
+                    steps: [],
+                };
+            },
+            submitInput: () => true,
+        } as any);
+
+        const started = await runtime.startTurn({
+            userMessage: 'hello',
+            context: { topicId: 'topic_protocol' },
+            options: { threadId: 'thread_protocol' },
+        });
+
+        expect(started.threadId).to.equal('thread_protocol');
+        expect(started.runId).to.equal('run_protocol');
+        expect(capturedOptions[0].threadId).to.equal('thread_protocol');
+
+        const controller = new AbortController();
+        const runtimeSteered: Array<{ message: string; images?: string[] }> = [];
+        const unregister = activeTurnRegistry.register({
+            runId: 'run_direct',
+            runner: {
+                submitInput: (_runId: string, message: string, _clientId?: string, images?: string[]) => {
+                    runtimeSteered.push({ message, images });
+                    return true;
+                },
+            },
+            abortController: controller,
+        });
+        expect(runtime.steerTurn('run_direct', 'queued', undefined, ['img_runtime']).accepted).to.equal(true);
+        expect(runtimeSteered).to.deep.equal([{ message: 'queued', images: ['img_runtime'] }]);
+        expect(runtime.interruptTurn('run_direct').interrupted).to.equal(true);
+        unregister();
+
+        const store = new ThreadStore();
+        const thread = await store.markStatus('topic_protocol', 'thread_missing', 'active');
+        expect(thread).to.equal(undefined);
+    });
 });
 
 function loadRunLedgerModule() {
@@ -276,6 +508,79 @@ function loadRunReplayModule() {
         return require('../../extension/ai/runner/runReplay') as typeof import('../../extension/ai/runner/runReplay');
     } finally {
         moduleLoader._load = originalLoad;
+    }
+}
+
+function loadRunContextModule() {
+    delete require.cache[require.resolve('../../extension/ai/runner/runContext')];
+    return require('../../extension/ai/runner/runContext') as typeof import('../../extension/ai/runner/runContext');
+}
+
+function loadRolloutStoreModule() {
+    delete require.cache[require.resolve('../../extension/ai/runner/rolloutStore')];
+    return require('../../extension/ai/runner/rolloutStore') as typeof import('../../extension/ai/runner/rolloutStore');
+}
+
+function loadInputQueueModule() {
+    delete require.cache[require.resolve('../../extension/ai/runner/inputQueue')];
+    return require('../../extension/ai/runner/inputQueue') as typeof import('../../extension/ai/runner/inputQueue');
+}
+
+function loadProcessRegistryModule() {
+    delete require.cache[require.resolve('../../extension/ai/runner/processRegistry')];
+    return require('../../extension/ai/runner/processRegistry') as typeof import('../../extension/ai/runner/processRegistry');
+}
+
+function loadThreadStoreModule() {
+    return loadModuleWithVscodeStub('../../extension/ai/runner/threadStore') as typeof import('../../extension/ai/runner/threadStore');
+}
+
+function loadTurnRunnerModule() {
+    return loadModuleWithVscodeStub('../../extension/ai/runner/turnRunner') as typeof import('../../extension/ai/runner/turnRunner');
+}
+
+function loadActiveTurnRegistryModule() {
+    delete require.cache[require.resolve('../../extension/ai/runner/activeTurnRegistry')];
+    return require('../../extension/ai/runner/activeTurnRegistry') as typeof import('../../extension/ai/runner/activeTurnRegistry');
+}
+
+function loadAgentRuntimeModule() {
+    return loadModuleWithVscodeStub('../../extension/ai/runner/agentRuntime') as typeof import('../../extension/ai/runner/agentRuntime');
+}
+
+function loadBlackboardModule() {
+    delete require.cache[require.resolve('../../extension/ai/orchestrator/blackboard')];
+    return require('../../extension/ai/orchestrator/blackboard') as typeof import('../../extension/ai/orchestrator/blackboard');
+}
+
+function loadConflictDetectorModule() {
+    delete require.cache[require.resolve('../../extension/ai/orchestrator/conflictDetector')];
+    return require('../../extension/ai/orchestrator/conflictDetector') as typeof import('../../extension/ai/orchestrator/conflictDetector');
+}
+
+function loadModuleWithVscodeStub(request: string): unknown {
+    const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+    const originalLoad = moduleLoader._load;
+    moduleLoader._load = function (this: unknown, moduleRequest: string, ...args: any[]) {
+        if (moduleRequest === 'vscode') return vscodeStub;
+        return originalLoad.apply(this, [moduleRequest, ...args]);
+    };
+    try {
+        delete require.cache[require.resolve(request)];
+        return require(request);
+    } finally {
+        moduleLoader._load = originalLoad;
+    }
+}
+
+async function waitForEvent(
+    ledger: typeof import('../../extension/ai/runner/runLedger').runLedger,
+    runId: string,
+    eventType: string,
+): Promise<void> {
+    for (let i = 0; i < 40; i++) {
+        if (ledger.getSnapshot(runId)?.events.some(event => event.type === eventType)) return;
+        await new Promise(resolve => setTimeout(resolve, 5));
     }
 }
 

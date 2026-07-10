@@ -31,7 +31,6 @@ import { QualityGate, PDX_DIAGNOSTIC_EXTENSIONS, isPdxDiagnosticFile } from './q
 import { getAgentProfile } from './agentRegistry';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, ORCHESTRATOR_MSG, aiText } from '../messages';
-import { runLedger, RunLedger } from '../runner/runLedger';
 import { getAgentToolTargetFiles } from '../runner/toolScheduler';
 import { WRITE_TOOLS } from '../tools/registry';
 
@@ -123,6 +122,9 @@ export class Orchestrator {
         options: OrchestratorOptions,
     ): Promise<OrchestratorResult> {
         const emitStep = options.onStep ?? (() => {});
+        this.blackboard.setEventSink(options.runEventSink);
+        this.executor.setEventSink(options.runEventSink);
+        this.qualityGate.setEventSink(options.runEventSink);
 
         emitStep({
             type: 'thinking',
@@ -276,6 +278,10 @@ export class Orchestrator {
                             {
                                 ...options,
                                 mode: 'build', // Force use of build mode for repair
+                                parentRunId: options.parentRunId,
+                                agentId: 'quality_gate_autofix',
+                                threadId: `${options.parentRunId ?? options.topicId ?? 'orchestrator'}/quality_gate_autofix`,
+                                turnId: 'quality_gate_autofix',
                                 skipValidation: true, // Orchestrator already has an independent QualityGate, no need to repeat verification
                                 excludeTools: [ // Maintain consistent security constraints with normal subagents
                                     'web_fetch', 'search_web', 'codesearch',
@@ -353,18 +359,13 @@ export class Orchestrator {
         const workspaceRoot = this.agentRunner.toolExecutor?.workspaceRoot || process.cwd();
         const { buildSubAgentSandbox } = require('./subAgentSandbox');
         const sandbox = buildSubAgentSandbox(taskNode, workspaceRoot);
-        {
-            const latestRunId = RunLedger.getLatestActiveRunId();
-            if (latestRunId) {
-                runLedger.appendEvent(latestRunId, 'subagent_policy_derived', {
-                    agentId: taskNode.id,
-                    role: taskNode.agentType,
-                    mode: profile.mode,
-                    writeScope: sandbox.writeScope,
-                    rejectedScopes: sandbox.rejectedScopes,
-                }, { agentId: taskNode.id }).catch(() => {});
-            }
-        }
+        orchestratorOptions.runEventSink?.appendSoon('subagent_policy_derived', {
+            agentId: taskNode.id,
+            role: taskNode.agentType,
+            mode: profile.mode,
+            writeScope: sandbox.writeScope,
+            rejectedScopes: sandbox.rejectedScopes,
+        }, { agentId: taskNode.id });
         const plannedFiles = Array.isArray(taskNode.plannedFiles) ? taskNode.plannedFiles : [];
         const onlyLocalisationYmlWrites = plannedFiles.length > 0 && plannedFiles.every(isLocalisationYmlPath);
         const excludedTools = [
@@ -384,6 +385,10 @@ export class Orchestrator {
             abortSignal, // Will be overwritten later by the child controller with timeout
             streaming: true, // Enable streaming output to visualize the progress of deep thinking
             topicId: orchestratorOptions.topicId,
+            parentRunId: orchestratorOptions.parentRunId,
+            agentId: taskNode.id,
+            threadId: `${orchestratorOptions.parentRunId ?? orchestratorOptions.topicId ?? 'orchestrator'}/${taskNode.id}`,
+            turnId: taskNode.id,
             onTodoUpdate: orchestratorOptions.onTodoUpdate,
             useSlimPrompt: true,
             maxIterations: taskNode.maxIterations ?? profile.maxIterations,
@@ -493,15 +498,12 @@ export class Orchestrator {
                     timestamp: Date.now(),
                 });
                 if (!allowed) {
-                    const latestRunId = RunLedger.getLatestActiveRunId();
-                    if (latestRunId) {
-                        runLedger.appendEvent(latestRunId, 'subagent_refused', {
-                            agentId: taskNode.id,
-                            tool,
-                            command,
-                            reason: 'USER_PERMISSION_DENIED'
-                        }).catch(() => {});
-                    }
+                    orchestratorOptions.runEventSink?.appendSoon('subagent_refused', {
+                        agentId: taskNode.id,
+                        tool,
+                        command,
+                        reason: 'USER_PERMISSION_DENIED'
+                    }, { agentId: taskNode.id });
                 }
                 return allowed;
             } catch (error) {

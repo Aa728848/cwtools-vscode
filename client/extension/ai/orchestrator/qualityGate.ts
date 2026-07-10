@@ -7,8 +7,8 @@
 
 import type { SubAgentResult } from './types';
 import type { QualityGateResult } from './types';
-import { runLedger, RunLedger } from '../runner/runLedger';
 import { aiText } from '../messages';
+import type { RunEventSink } from '../runner/runContext';
 
 /** Quality gate configuration */
 export interface QualityGateConfig {
@@ -69,9 +69,15 @@ export const SOUND_REPAIR_PROTOCOL = [
 */
 export class QualityGate {
     private config: QualityGateConfig;
+    private eventSink?: RunEventSink;
 
-    constructor(config?: Partial<QualityGateConfig>) {
+    constructor(config?: Partial<QualityGateConfig>, eventSink?: RunEventSink) {
         this.config = { ...DEFAULT_CONFIG, ...config };
+        this.eventSink = eventSink;
+    }
+
+    setEventSink(eventSink?: RunEventSink): void {
+        this.eventSink = eventSink;
     }
 
     /** 
@@ -186,16 +192,13 @@ export class QualityGate {
         
         const passed = diagnosticErrorCount === 0 && totalLogicIssues === 0;
 
-        const latestRunId = RunLedger.getLatestActiveRunId();
-        if (latestRunId) {
-            runLedger.appendEvent(latestRunId, 'quality_gate_decision', {
-                passed,
-                diagnosticErrors: diagnosticErrorCount,
-                logicIssues: totalLogicIssues,
-                filesChecked: writtenFiles,
-                fixSuggestions: parsed.fixSuggestions || []
-            }).catch(() => {});
-        }
+        this.eventSink?.appendSoon('quality_gate_decision', {
+            passed,
+            diagnosticErrors: diagnosticErrorCount,
+            logicIssues: totalLogicIssues,
+            filesChecked: writtenFiles,
+            fixSuggestions: parsed.fixSuggestions || []
+        });
 
         return {
             passed,

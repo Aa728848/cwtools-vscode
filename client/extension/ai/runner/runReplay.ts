@@ -15,6 +15,7 @@
 
 import type { AgentRunEvent } from './runLedger';
 import { runLedger } from './runLedger';
+import { readRunRollout } from './rolloutStore';
 import type { AgentRunRecord, AgentMode, AgentStep, GenerationResult, AgentToolName } from '../types';
 import type { AgentRunner, AgentRunnerOptions } from '../agentRunner';
 
@@ -150,18 +151,18 @@ export async function replayRun(
     runner: AgentRunner,
     overrides: ReplayOverrides = {},
 ): Promise<ReplayResult> {
-    const snapshot = await runLedger.getOrLoadSnapshot(originalRunId);
-    if (!snapshot) {
+    const rollout = await readRunRollout(originalRunId);
+    if (!rollout) {
         throw new Error(`replayRun: original run ${originalRunId} not found in ledger`);
     }
-    const events = snapshot.events;
-    const userPrompt = await runLedger.readPrompt(originalRunId, snapshot.run.topicId)
+    const events = rollout.events;
+    const userPrompt = await runLedger.readPrompt(originalRunId, rollout.run.topicId)
         ?? extractOriginalUserPrompt(events)
-        ?? snapshot.run.userPromptPreview;
+        ?? rollout.run.userPromptPreview;
     if (!userPrompt) {
         throw new Error(`replayRun: could not extract original user prompt from ${originalRunId}`);
     }
-    const mode: AgentMode = overrides.mode ?? (snapshot.run as any).mode ?? 'build';
+    const mode: AgentMode = overrides.mode ?? (rollout.run as any).mode ?? 'build';
     const replayMode: ReplayMode = overrides.replayMode ?? 'recorded-tool';
     if (replayMode === 'full-replay') {
         // Mode B not implemented — fall through to mode A but flag.

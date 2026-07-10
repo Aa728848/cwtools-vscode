@@ -15,7 +15,7 @@ import type {
     BlackboardWriteResult,
     SerializedBlackboard,
 } from './types';
-import { runLedger, RunLedger } from '../runner/runLedger';
+import type { RunEventSink } from '../runner/runContext';
 
 /** Cancellation handle of subscription callback */
 export interface BlackboardDisposable {
@@ -52,9 +52,15 @@ export class Blackboard {
     private watchers = new Map<string, Set<(entry: BlackboardEntry) => void>>();
     /** Configuration */
     private config: BlackboardConfig;
+    private eventSink?: RunEventSink;
 
-    constructor(config?: Partial<BlackboardConfig>) {
+    constructor(config?: Partial<BlackboardConfig>, eventSink?: RunEventSink) {
         this.config = { ...DEFAULT_CONFIG, ...config };
+        this.eventSink = eventSink;
+    }
+
+    setEventSink(eventSink?: RunEventSink): void {
+        this.eventSink = eventSink;
     }
 
     // ─── Read operation ────────────────────────────────────────────────────────
@@ -62,14 +68,13 @@ export class Blackboard {
     /** Read an entry */
     read(key: string): BlackboardEntry | undefined {
         const entry = this.entries.get(key);
-        const latestRunId = RunLedger.getLatestActiveRunId();
-        if (latestRunId && entry) {
-            runLedger.appendEvent(latestRunId, 'blackboard_read', {
+        if (entry) {
+            this.eventSink?.appendSoon('blackboard_read', {
                 key,
                 type: entry.type,
                 version: entry.version,
                 authorAgentId: entry.authorAgentId
-            }).catch(() => {});
+            });
         }
         return entry;
     }
@@ -178,16 +183,13 @@ export class Blackboard {
         this.notifyWatchers(key, entry);
 
         // 🌟 记录黑板写入事件至 Ledger
-        const latestRunId = RunLedger.getLatestActiveRunId();
-        if (latestRunId) {
-            runLedger.appendEvent(latestRunId, 'blackboard_write', {
-                key,
-                type,
-                version: newVersion,
-                authorAgentId: agentId,
-                valuePreview: value.length > 200 ? value.substring(0, 200) + '...' : value
-            }).catch(() => {});
-        }
+        this.eventSink?.appendSoon('blackboard_write', {
+            key,
+            type,
+            version: newVersion,
+            authorAgentId: agentId,
+            valuePreview: value.length > 200 ? value.substring(0, 200) + '...' : value
+        }, { agentId });
 
         return { success: true, newVersion };
     }

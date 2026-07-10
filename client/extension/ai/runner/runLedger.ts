@@ -22,6 +22,11 @@ export type AgentRunEventType =
     | 'tool_call_start'
     | 'tool_call_end'
     | 'tool_output_delta'
+    | 'input_queued'
+    | 'input_injected'
+    | 'process_started'
+    | 'process_output_delta'
+    | 'process_completed'
     | 'permission_requested'
     | 'permission_resolved'
     | 'write_confirmation_requested'
@@ -127,6 +132,14 @@ export class RunLedger {
         userPromptPreview: string,
         parentRunId?: string,
         userPrompt?: string,
+        metadata?: {
+            agentId?: string;
+            providerId?: string;
+            model?: string;
+            workflowId?: string | null;
+            threadId?: string;
+            turnId?: string;
+        },
     ): Promise<AgentRunRecord> {
         const runId = `run_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
         RunLedger.latestActiveRunId = runId;
@@ -138,8 +151,14 @@ export class RunLedger {
             runId,
             topicId,
             parentRunId,
+            agentId: metadata?.agentId,
+            threadId: metadata?.threadId,
+            turnId: metadata?.turnId,
             status: 'created',
             mode,
+            workflowId: metadata?.workflowId,
+            providerId: metadata?.providerId,
+            model: metadata?.model,
             userPromptPreview,
             startedAt: now,
             createdAt: now,
@@ -190,8 +209,14 @@ export class RunLedger {
             userPromptPreview,
             promptRef,
             promptSha256,
-            parentRunId
-        });
+            parentRunId,
+            agentId: metadata?.agentId,
+            providerId: metadata?.providerId,
+            model: metadata?.model,
+            workflowId: metadata?.workflowId,
+            threadId: metadata?.threadId,
+            turnId: metadata?.turnId,
+        }, { agentId: metadata?.agentId });
 
         return record;
     }

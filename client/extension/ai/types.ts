@@ -901,6 +901,7 @@ export interface GetMemoryResult {
 export interface AgentToolContext {
     runnerOptions?: import('./agentRunner').AgentRunnerOptions;
     agentRunner?: import('./agentRunner').AgentRunner;
+    runEventSink?: import('./runner/runContext').RunEventSink;
     tokenAccumulator?: TokenUsage;
     onStep?: (step: AgentStep) => void;
     onPermissionRequest?: (id: string, tool: string, description: string, command?: string, context?: any) => Promise<boolean>;
@@ -1656,6 +1657,8 @@ export interface AgentArtifact {
 }
 
 export interface GenerationResult {
+    /** Durable run id for this generation. */
+    runId?: string;
     code: string;
     explanation: string;
     validationErrors: ValidationError[];
@@ -1776,6 +1779,7 @@ export type ContextItem = CodeSelectionContext | FileContext | FolderContext | D
 
 export type WebViewMessage =
     | { type: 'sendMessage'; text: string; attachedFiles?: string[]; images?: string[] }
+    | { type: 'steerGeneration'; text: string; images?: string[] }
     | { type: 'sendMessageWithReference'; text: string; contexts: ContextItem[]; images?: string[] }
     | { type: 'editAndResendMessage'; messageIndex: number; text: string; contexts?: ContextItem[]; images?: string[] }
     | { type: 'openContextReference'; context: ContextItem }
@@ -1850,6 +1854,7 @@ export type WebViewMessage =
 
 export type HostMessage =
     | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[] }
+    | { type: 'queuedUserInput'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[] }
     | { type: 'startBackgroundGeneration' }
     | { type: 'agentStep'; step: AgentStep }
     | { type: 'contextCompactionStatus'; step: AgentStep }
@@ -2086,6 +2091,8 @@ export interface AgentRunRecord {
     topicId: string;
     parentRunId?: string;
     agentId?: string;
+    threadId?: string;
+    turnId?: string;
     status: AgentRunStatus;
     mode: AgentMode | string;
     workflowId?: string | null;

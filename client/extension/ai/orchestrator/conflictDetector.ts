@@ -6,8 +6,8 @@
 */
 
 import { Blackboard } from './blackboard';
-import { runLedger, RunLedger } from '../runner/runLedger';
 import { aiText } from '../messages';
+import type { RunEventSink } from '../runner/runContext';
 
 /** Conflict detection results */
 export interface ConflictResult {
@@ -37,6 +37,15 @@ export class ConflictDetector {
     private static readonly INTENT_PREFIX = '__intent:';
     /** The key prefix of the entity registered in Blackboard */
     private static readonly ENTITY_PREFIX = '__entity:';
+    private eventSink?: RunEventSink;
+
+    constructor(eventSink?: RunEventSink) {
+        this.eventSink = eventSink;
+    }
+
+    setEventSink(eventSink?: RunEventSink): void {
+        this.eventSink = eventSink;
+    }
 
     /** 
 * Check whether the Agent's write intent conflicts with other running Agents. 
@@ -58,16 +67,13 @@ export class ConflictDetector {
                 `File ${filePath} already has a write intent declared by Agent ${existing.authorAgentId}.`,
                 `文件 ${filePath} 已被 Agent ${existing.authorAgentId} 声明写入意图`,
             );
-            const latestRunId = RunLedger.getLatestActiveRunId();
-            if (latestRunId) {
-                runLedger.appendEvent(latestRunId, 'conflict_detected', {
-                    conflictType: 'file_write',
-                    agentId,
-                    conflictAgentId: existing.authorAgentId,
-                    target: filePath,
-                    details,
-                }).catch(() => {});
-            }
+            this.eventSink?.appendSoon('conflict_detected', {
+                conflictType: 'file_write',
+                agentId,
+                conflictAgentId: existing.authorAgentId,
+                target: filePath,
+                details,
+            }, { agentId });
             return {
                 hasConflict: true,
                 conflictType: 'file_write',
@@ -99,16 +105,13 @@ export class ConflictDetector {
                 `Entity ${entityId} has already been registered by Agent ${existing.authorAgentId}.`,
                 `实体 ${entityId} 已被 Agent ${existing.authorAgentId} 注册`,
             );
-            const latestRunId = RunLedger.getLatestActiveRunId();
-            if (latestRunId) {
-                runLedger.appendEvent(latestRunId, 'conflict_detected', {
-                    conflictType: 'entity_id',
-                    agentId,
-                    conflictAgentId: existing.authorAgentId,
-                    target: entityId,
-                    details,
-                }).catch(() => {});
-            }
+            this.eventSink?.appendSoon('conflict_detected', {
+                conflictType: 'entity_id',
+                agentId,
+                conflictAgentId: existing.authorAgentId,
+                target: entityId,
+                details,
+            }, { agentId });
             return {
                 hasConflict: true,
                 conflictType: 'entity_id',

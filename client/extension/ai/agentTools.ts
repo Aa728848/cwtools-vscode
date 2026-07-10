@@ -29,7 +29,6 @@ import { ExternalToolHandler } from './tools/externalTools';
 import { MemoryToolHandler } from './tools/memoryTools';
 import type { IndexService } from '../indexing/indexService';
 import { validateToolAccess, evaluateMcpPermission } from './tools/permissions';
-import { runLedger } from './runner/runLedger';
 import { queryProjectProfile } from './projectProfile';
 import { loadSkill } from './skills';
 import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
@@ -1654,6 +1653,8 @@ export class AgentToolExecutor {
 
             // Build execution options (read first from AgentToolContext, fallback to old instance fields)
             const runnerOpts = runnerOptsForLimits;
+            const parentRunSink = context?.runEventSink ?? runnerOpts?.runEventSink;
+            this.blackboard.setEventSink(parentRunSink);
 
             const onBeforeFileWrite =
                 context?.onBeforeFileWrite
@@ -1665,6 +1666,8 @@ export class AgentToolExecutor {
                 model: runnerOpts?.model,
                 abortSignal: localAbort.signal,
                 topicId: runnerOpts?.topicId,
+                parentRunId: parentRun?.runId ?? parentRunSink?.runId,
+                runEventSink: parentRunSink,
                 onStep: context?.onStep,
                 onBeforeFileWrite,
                 onTodoUpdate: context?.onTodoUpdate || runnerOpts?.onTodoUpdate,
@@ -1679,10 +1682,9 @@ export class AgentToolExecutor {
                 content: `Coordinator started: dispatching ${normalizedTasks.length} sub-agent task(s).`,
                 timestamp: Date.now(),
             });
-            if (parentRun) {
+            if (parentRunSink) {
                 for (const task of normalizedTasks) {
-                    await runLedger.appendEvent(
-                        parentRun.runId,
+                    await parentRunSink.append(
                         'subagent_start',
                         {
                             taskNodeId: task.id,
@@ -1739,9 +1741,8 @@ export class AgentToolExecutor {
                 if (agentResult.needsClarification && agentResult.clarification) {
                     clarifications.push({ id, clarification: agentResult.clarification.slice(0, 4000) });
                 }
-                if (parentRun) {
-                    await runLedger.appendEvent(
-                        parentRun.runId,
+                if (parentRunSink) {
+                    await parentRunSink.append(
                         'subagent_end',
                         {
                             taskNodeId: id,
@@ -1757,8 +1758,7 @@ export class AgentToolExecutor {
                     ).catch(() => {});
                     for (const filePath of agentResult.writtenFiles ?? []) {
                         if (typeof filePath !== 'string' || !filePath) continue;
-                        await runLedger.appendEvent(
-                            parentRun.runId,
+                        await parentRunSink.append(
                             'file_change',
                             { filePath, source: 'subagent', taskNodeId: id },
                             { agentId: id, status: agentResult.success ? 'done' : 'failed' }

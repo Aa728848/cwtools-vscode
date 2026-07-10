@@ -9,6 +9,8 @@ import * as fs from 'fs';
 import type { TodoItem, TodoWriteResult } from '../types';
 import { preflightCommand } from '../runner/commandPreflight';
 import { PermissionPolicyStore } from '../runner/permissionPolicy';
+import { processRegistry } from '../runner/processRegistry';
+import { DirectSandboxRunner } from '../runner/sandboxRunner';
 import { getAiStorageRoot, getAiStorageRootCandidates, getTopicScratchDir, getTopicStorageDir } from '../workspacePaths';
 import {
     escapeRegExp,
@@ -956,6 +958,7 @@ export class ExternalToolHandler {
         stdout: string;
         stderr: string;
         exitCode: number;
+        processId?: string;
         timedOut?: boolean;
         changedFiles?: string[];
         writtenFiles?: string[];
@@ -1199,6 +1202,11 @@ export class ExternalToolHandler {
 
         const stdoutBuf = new HeadTailTextBuffer(COMMAND_STDOUT_MAX_CHARS);
         const stderrBuf = new HeadTailTextBuffer(COMMAND_STDERR_MAX_CHARS);
+        const eventSink = context?.runEventSink ?? context?.runnerOptions?.runEventSink;
+        const sandboxProfile = {
+            sandboxMode: bypassSandbox ? 'disabled' : 'direct-preflight',
+            networkAccess: true,
+        };
         let commandChangeBaseline: Map<string, CommandFileState> | undefined;
         const shouldTrackCommandChanges = !(isAutoApproveSafeCommand && !hasShellControlOperator);
         if (shouldTrackCommandChanges) {
@@ -1213,17 +1221,26 @@ export class ExternalToolHandler {
             stdout: string;
             stderr: string;
             exitCode: number;
+            processId?: string;
             timedOut?: boolean;
         }>(resolve => {
             let proc: ReturnType<typeof spawn>;
+            let processId: string | undefined;
             try {
-                proc = spawn(shell, shellArgs, {
-                    cwd,
-                    env: spawnEnv,
-                    stdio: ['ignore', 'pipe', 'pipe'],
-                    detached: !isWindows,
-                    windowsHide: true,
+                const sandboxRunner = new DirectSandboxRunner(spawn);
+                proc = sandboxRunner.spawn({
+                    command: shell,
+                    args: shellArgs,
+                    options: {
+                        cwd,
+                        env: spawnEnv,
+                        stdio: ['ignore', 'pipe', 'pipe'],
+                        detached: !isWindows,
+                        windowsHide: true,
+                    },
+                    profile: sandboxProfile,
                 });
+                processId = processRegistry.register(args.command, cwd, proc.pid, eventSink, sandboxProfile).processId;
             } catch (e) {
                 resolve({
                     stdout: '',
@@ -1239,19 +1256,20 @@ export class ExternalToolHandler {
             let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
             const abortSignal = context?.runnerOptions?.abortSignal;
 
-            const finish = (result: { stdout: string; stderr: string; exitCode: number; timedOut?: boolean }) => {
+            const finish = (result: { stdout: string; stderr: string; exitCode: number; processId?: string; timedOut?: boolean }) => {
                 if (settled) return;
                 settled = true;
                 if (timer) clearTimeout(timer);
                 if (heartbeatTimer) clearInterval(heartbeatTimer);
                 if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
-                resolve(result);
+                resolve(processId ? { ...result, processId } : result);
             };
 
             const onParentAbort = () => {
                 const reason = abortSignal?.reason;
                 const abortedByTimeout = reason instanceof Error && reason.name === 'TimeoutError';
                 this.terminateProcessTree(proc, spawn);
+                if (processId) processRegistry.markTerminated(processId, eventSink);
                 stdoutBuf.append(abortedByTimeout
                     ? aiText('\n[... stopped after timeout]', '\n[... 超时已终止]')
                     : aiText('\n[... stopped by user]', '\n[... 被用户中止]'));
@@ -1271,6 +1289,7 @@ export class ExternalToolHandler {
             }
 
             proc.on('error', (e: Error) => {
+                if (!settled && processId) processRegistry.complete(processId, 1, eventSink);
                 finish({
                     stdout: stdoutBuf.toString(),
                     stderr: `Command failed to start in cwd "${cwd}": ${e.message}`,
@@ -1292,6 +1311,7 @@ export class ExternalToolHandler {
 
             timer = setTimeout(() => {
                 this.terminateProcessTree(proc, spawn);
+                if (processId) processRegistry.markTerminated(processId, eventSink);
                 stdoutBuf.append(aiText('\n[... stopped after timeout]', '\n[... 超时已终止]'));
                 finish({
                     stdout: stdoutBuf.toString(),
@@ -1304,13 +1324,17 @@ export class ExternalToolHandler {
             proc.stdout?.on('data', (chunk: Buffer) => {
                 const text = chunk.toString();
                 stdoutBuf.append(text);
+                if (processId) processRegistry.appendOutput(processId, 'stdout', text, eventSink);
             });
 
             proc.stderr?.on('data', (chunk: Buffer) => {
-                stderrBuf.append(chunk.toString());
+                const text = chunk.toString();
+                stderrBuf.append(text);
+                if (processId) processRegistry.appendOutput(processId, 'stderr', text, eventSink);
             });
 
             proc.on('close', code => {
+                if (!settled && processId) processRegistry.complete(processId, code ?? 0, eventSink);
                 finish({
                     stdout: stdoutBuf.toString(),
                     stderr: stderrBuf.toString(),
@@ -1319,6 +1343,7 @@ export class ExternalToolHandler {
             });
 
             proc.on('error', err => {
+                if (!settled && processId) processRegistry.complete(processId, 1, eventSink);
                 finish({
                     stdout: stdoutBuf.toString(),
                     stderr: `spawn error: ${err.message}`,

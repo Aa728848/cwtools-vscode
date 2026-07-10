@@ -62,6 +62,11 @@ import { buildToolInvocation } from './runner/toolInvocation';
 import { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeToolResultHash, DoomLoopState } from './runner/doomLoopDetector';
 import { OutputRepetitionDetector, type OutputRepetitionMatch } from './runner/outputRepetitionDetector';
 import { ReadTracker } from './runner/readTracker';
+import { TurnRunner } from './runner/turnRunner';
+import type { AgentInputQueue } from './runner/inputQueue';
+import type { RunEventSink } from './runner/runContext';
+import { activeTurnRegistry } from './runner/activeTurnRegistry';
+import { threadStore } from './runner/threadStore';
 import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 
 export { isFallbackEligibleApiError } from './runner/fallbackPolicy';
@@ -199,6 +204,20 @@ export interface AgentRunnerOptions {
     onPermissionRequest?: (id: string, tool: string, description: string, command?: string, context?: any) => Promise<boolean>;
     /** If provided, file mutations are written to this memory overlay instead of disk. */
     vfsOverlay?: Map<string, string>;
+    /** Parent durable run when this run is a child agent/replay/fix turn. */
+    parentRunId?: string;
+    /** Stable agent id inside a multi-agent graph. */
+    agentId?: string;
+    /** Durable thread id for protocol/app-server style runtimes. */
+    threadId?: string;
+    /** Durable turn id for protocol/app-server style runtimes. */
+    turnId?: string;
+    /** Explicit event sink for this run. Avoids global latest-run routing. */
+    runEventSink?: RunEventSink;
+    /** Running user-steer queue drained at safe model boundaries. */
+    inputQueue?: AgentInputQueue;
+    /** Explicit durable run record for this turn. Avoids class-level active-run races. */
+    runRecord?: import('./types').AgentRunRecord;
     /** Topic ID for checkpoint persistence — threaded from run() context */
     topicId?: string;
     /** T4.1 — replay session. When present, tool calls are served from the ledger instead of live execution. */
@@ -350,6 +369,9 @@ export class AgentRunner {
     public readonly readTracker = new ReadTracker();
     private writeQueue = globalPartitionedWriteQueue;
     private activeRunRecordPromise?: Promise<import('./types').AgentRunRecord>;
+    private readonly turnRunner = new TurnRunner();
+    private readonly activeInputQueues = new Map<string, AgentInputQueue>();
+    private readonly activeRunEventSinks = new Map<string, RunEventSink>();
     constructor(
         private aiService: AIService,
         public readonly toolExecutor: AgentToolExecutor,
@@ -364,6 +386,20 @@ export class AgentRunner {
 
     public getActiveRunRecordPromise(): Promise<import('./types').AgentRunRecord> | undefined {
         return this.activeRunRecordPromise;
+    }
+
+    public submitInput(runId: string, message: string, clientUserMessageId?: string, images?: string[]): boolean {
+        const queue = this.activeInputQueues.get(runId);
+        if (!queue) return false;
+        const item = queue.enqueue(message, clientUserMessageId, images);
+        this.activeRunEventSinks.get(runId)?.appendSoon('input_queued', {
+            inputId: item.id,
+            clientUserMessageId,
+            size: message.length,
+            imageCount: images?.length ?? 0,
+            preview: message.slice(0, 240),
+        }, { status: 'pending' });
+        return true;
     }
 
     // ─── Transaction Management ────────────────────────────────────────────────
@@ -558,13 +594,34 @@ export class AgentRunner {
         images?: string[]
     ): Promise<GenerationResult> {
         const steps: AgentStep[] = [];
+        const parentAbortSignal = options?.abortSignal;
+        const turnAbortController = new AbortController();
+        const forwardParentAbort = () => turnAbortController.abort(parentAbortSignal?.reason);
+        if (parentAbortSignal?.aborted) {
+            forwardParentAbort();
+        } else {
+            parentAbortSignal?.addEventListener('abort', forwardParentAbort, { once: true });
+        }
         let mode = options?.mode ?? 'build';
         const topicId = context.topicId || 'default';
+        const threadId = options?.threadId ?? topicId;
+        const turnId = options?.turnId ?? `turn_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        options = { ...options, abortSignal: turnAbortController.signal, threadId, turnId };
         const userPromptPreview = userMessage.substring(0, 100);
-        const runRecordPromise = runLedger.createRun(topicId, mode, userPromptPreview, undefined, userMessage).then(async r => {
-            await runLedger.appendEvent(r.runId, 'status_changed', { status: 'planning' });
-            return r;
+        const turnRuntimePromise = this.turnRunner.startTurn({
+            topicId,
+            mode,
+            userPrompt: userMessage,
+            userPromptPreview,
+            parentRunId: options?.parentRunId,
+            agentId: options?.agentId,
+            providerId: options?.providerId,
+            model: options?.model,
+            workflowId: options?.workflowId,
+            threadId,
+            turnId,
         });
+        const runRecordPromise = turnRuntimePromise.then(runtime => runtime.run);
         this.activeRunRecordPromise = runRecordPromise;
 
         const emitStep = (step: AgentStep) => {
@@ -578,6 +635,7 @@ export class AgentRunner {
             runRecordPromise.then(r => {
                 runLedger.appendEvent(r.runId, 'status_changed', { status }).catch(() => {});
                 if (status === 'completed' || status === 'failed') {
+                    threadStore.markStatus(topicId, threadId, status === 'completed' ? 'completed' : 'failed').catch(() => {});
                     runLedger.appendEvent(r.runId, 'metrics_updated', {
                         metrics: {
                             totalTokens: tokenAccumulator.total,
@@ -620,6 +678,7 @@ export class AgentRunner {
         const _agentToolContext: import('./types').AgentToolContext = {
             runnerOptions: options,
             agentRunner: this,
+            runEventSink: options?.runEventSink,
             tokenAccumulator: tokenAccumulator,
             onStep: emitStep,
             onPermissionRequest: options?.onPermissionRequest,
@@ -740,8 +799,27 @@ export class AgentRunner {
                   ]
                 : effectiveUserMessage;
 
-        const runRecord = await runRecordPromise;
+        const turnRuntime = await turnRuntimePromise;
+        const runRecord = turnRuntime.run;
         const runId = runRecord.runId;
+        options = {
+            ...options,
+            topicId,
+            mode,
+            runEventSink: turnRuntime.eventSink,
+            inputQueue: turnRuntime.inputQueue,
+            runRecord: turnRuntime.run,
+        };
+        this.activeRunEventSinks.set(runId, turnRuntime.eventSink);
+        this.activeInputQueues.set(runId, turnRuntime.inputQueue);
+        const unregisterActiveTurn = activeTurnRegistry.register({
+            runId,
+            threadId: options.threadId,
+            turnId: options.turnId,
+            runner: this,
+            abortController: turnAbortController,
+            eventSink: turnRuntime.eventSink,
+        });
         // topicId is already declared in function scope
 
         // 收集 Pinned Context 实时数据 (Todos & Diagnostics)
@@ -949,6 +1027,7 @@ export class AgentRunner {
                 updateRunStatus('completed');
                 await clearResumeStateIfComplete();
                 return {
+                    runId,
                     code: '',
                     explanation: finalMessage,
                     validationErrors: [],
@@ -968,6 +1047,7 @@ export class AgentRunner {
                 updateRunStatus('completed');
                 await clearResumeStateIfComplete();
                 return {
+                    runId,
                     code,
                     explanation: this.extractExplanation(finalMessage),
                     validationErrors: [],
@@ -987,6 +1067,7 @@ export class AgentRunner {
             updateRunStatus('completed');
             await clearResumeStateIfComplete();
             return {
+                runId,
                 ...validationResult,
                 explanation: this.extractExplanation(finalMessage),
                 steps,
@@ -998,6 +1079,7 @@ export class AgentRunner {
             const errorMsg = e instanceof Error ? e.message : String(e);
 
             if (errorMsg.includes('aborted') || errorMsg.includes('cancel')) {
+                threadStore.markStatus(topicId, threadId, 'interrupted').catch(() => {});
                 emitStep({ type: 'error', content: AGENT.CANCELLED, timestamp: Date.now() });
             } else {
                 emitStep({ type: 'error', content: `${AGENT.ERROR_PREFIX}: ${errorMsg}`, timestamp: Date.now() });
@@ -1009,6 +1091,7 @@ export class AgentRunner {
             runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
 
             return {
+                runId,
                 code: '',
                 explanation: aiText(`[Execution error] ${errorMsg}`, `[执行异常] ${errorMsg}`),
                 validationErrors: [],
@@ -1018,6 +1101,14 @@ export class AgentRunner {
                 tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
                 runMetrics,
             };
+        } finally {
+            unregisterActiveTurn();
+            parentAbortSignal?.removeEventListener('abort', forwardParentAbort);
+            this.activeRunEventSinks.delete(runId);
+            this.activeInputQueues.delete(runId);
+            if (this.activeRunRecordPromise === runRecordPromise) {
+                this.activeRunRecordPromise = undefined;
+            }
         }
     }
 
@@ -1315,7 +1406,7 @@ export class AgentRunner {
         onFileWrite?: (filePath: string, prevContent: string | null) => void,
         runMetrics?: AgentRunMetrics
     ): Promise<string> {
-        const runRecord = await this.activeRunRecordPromise!;
+        const runRecord = options?.runRecord ?? await this.activeRunRecordPromise!;
         this.readTracker.reset();
         // Per-run reset of edit failure counters (top-level runs only: sub-agents
         // share the executor and must not clear the parent run's counters).
@@ -1336,6 +1427,7 @@ export class AgentRunner {
         const agentToolContext: import('./types').AgentToolContext = {
             runnerOptions: options,
             agentRunner: this,
+            runEventSink: options?.runEventSink,
             tokenAccumulator: tokenAccumulator,
             onStep: emitStep,
             onPermissionRequest: options?.onPermissionRequest,
@@ -1489,6 +1581,40 @@ export class AgentRunner {
                     timestamp: Date.now(),
                 });
             } else {
+
+                const pendingInputs = options?.inputQueue?.drain() ?? [];
+                if (pendingInputs.length > 0) {
+                    for (const input of pendingInputs) {
+                        const content: ChatMessage['content'] = input.images && input.images.length > 0
+                            ? [
+                                { type: 'text' as const, text: `[User steering input queued during run]\n${input.message}` },
+                                ...input.images.map(url => ({
+                                    type: 'image_url' as const,
+                                    image_url: { url, detail: 'auto' as const },
+                                })),
+                            ]
+                            : `[User steering input queued during run]\n${input.message}`;
+                        messages.push({
+                            role: 'user',
+                            content,
+                        });
+                        options?.runEventSink?.appendSoon('input_injected', {
+                            inputId: input.id,
+                            clientUserMessageId: input.clientUserMessageId,
+                            size: input.message.length,
+                            imageCount: input.images?.length ?? 0,
+                            preview: input.message.slice(0, 240),
+                        }, { status: 'done' });
+                    }
+                    emitStep({
+                        type: 'thinking',
+                        content: aiText(
+                            `Injected ${pendingInputs.length} queued user input message(s) into the next model step.`,
+                            `已将 ${pendingInputs.length} 条排队用户输入注入下一次模型步骤。`,
+                        ),
+                        timestamp: Date.now(),
+                    });
+                }
 
             // Batch 2.3: Periodic checkpoint save for crash recovery
             if (iteration > 1 && iteration % CHECKPOINT_INTERVAL === 0) {
@@ -2890,7 +3016,7 @@ export class AgentRunner {
         let currentCode = initialCode;
         let retryCount = 0;
         let lastErrors: ValidationError[] = [];
-        const validationRunRecord = await this.activeRunRecordPromise?.catch(() => undefined);
+        const validationRunRecord = options?.runRecord ?? await this.activeRunRecordPromise?.catch(() => undefined);
         let validationEndEmitted = false;
         if (validationRunRecord) {
             await runLedger.appendEvent(
@@ -2915,6 +3041,7 @@ export class AgentRunner {
         const agentToolContext: import('./types').AgentToolContext = {
             runnerOptions: options,
             agentRunner: this,
+            runEventSink: options?.runEventSink,
             onStep: emitStep,
             onPermissionRequest: options?.onPermissionRequest,
             onTodoUpdate: options?.onTodoUpdate

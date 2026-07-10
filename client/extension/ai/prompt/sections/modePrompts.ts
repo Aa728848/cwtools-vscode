@@ -10,6 +10,7 @@ import {
     PLAN_CLARIFICATION_RULE,
     CODE_COMPLIANCE_RULE,
     ANALYSIS_COMPLIANCE_RULE,
+    ARCHITECTURE_VISUALIZATION_RULE,
     BLACKBOARD_USAGE_RULE,
     SUB_AGENT_ANTI_OVERREACH_RULE,
     SUB_AGENT_NON_INTERACTIVE_RULE,
@@ -31,8 +32,8 @@ const ENV_VAR_SYNTAX_NOTE = IS_WINDOWS
 
 export function buildBuildSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim 
-        ? `${PROCESS_VISIBILITY_RULE}\n${CODE_COMPLIANCE_RULE}\n${BLACKBOARD_USAGE_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${INTENT_VERIFICATION_RULE}\n${BUILD_CLARIFICATION_RULE}\n${CODE_COMPLIANCE_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}`;
+        ? `${PROCESS_VISIBILITY_RULE}\n${CODE_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${BLACKBOARD_USAGE_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
+        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${INTENT_VERIFICATION_RULE}\n${BUILD_CLARIFICATION_RULE}\n${CODE_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}`;
 
     return `You are Eddy CWTool Code, an expert AI coding agent for ${gameName} PDXScript mod development.
 ${rules}
@@ -344,8 +345,8 @@ ${gameKnowledge}`;
 
 export function buildPlanModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim 
-        ? `${PROCESS_VISIBILITY_RULE}\n${CODE_COMPLIANCE_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${BLACKBOARD_USAGE_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${INTENT_VERIFICATION_RULE}\n${PLAN_CLARIFICATION_RULE}\n${CODE_COMPLIANCE_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
+        ? `${PROCESS_VISIBILITY_RULE}\n${CODE_COMPLIANCE_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${BLACKBOARD_USAGE_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
+        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${INTENT_VERIFICATION_RULE}\n${PLAN_CLARIFICATION_RULE}\n${CODE_COMPLIANCE_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}`;
 
     return `You are Eddy CWTool Code in **Plan Mode** — a read-only analysis and planning agent for ${gameName} PDXScript modding.
 ${rules}
@@ -498,8 +499,8 @@ ${gameKnowledge}`;
 
 export function buildExploreModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim
-        ? `${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
+        ? `${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
+        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}`;
 
     return `You are Eddy CWTool Code in **Explore Mode** — a codebase exploration agent for ${gameName} mods.
 ${rules}
@@ -534,6 +535,7 @@ export function buildGeneralModeSystemPrompt(gameKnowledge: string, gameName: st
     return `You are Eddy CWTool Code — a versatile AI assistant for ${gameName} mod development.
 ${LANGUAGE_MIRRORING_RULE}
 ${PROCESS_VISIBILITY_RULE}
+${ARCHITECTURE_VISUALIZATION_RULE}
 
 <system-reminder>
 General mode is a simple Q&A and guidance mode. You MUST NOT modify any files, execute write actions, or run destructive commands. Your primary purpose is to answer user questions, explain code, and provide guidance.
@@ -593,8 +595,8 @@ ${gameKnowledge}`;
 
 export function buildReviewModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim
-        ? `${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
+        ? `${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
+        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}`;
 
     return `You are Eddy CWTool Code in **Review Mode** — an expert code reviewer for ${gameName} mods.
 ${rules}
@@ -798,6 +800,7 @@ ${LANGUAGE_MIRRORING_RULE}
 ${PROCESS_VISIBILITY_RULE}
 ${INTENT_VERIFICATION_RULE}
 ${ANALYSIS_COMPLIANCE_RULE}
+${ARCHITECTURE_VISUALIZATION_RULE}
 
 <system-reminder>
 Script Mode is for high-throughput Paradox script work: diagnostics, scope/rule repair, asset wiring, localisation gaps, rules-sync review, and multi-file PDXScript changes.
@@ -857,6 +860,7 @@ export function buildOrchestratorSystemPrompt(gameKnowledge: string, gameName: s
     return `You are Eddy CWTool Code in **Orchestrator Mode** — a multi-agent coordinator for ${gameName} PDXScript modding.
 ${LANGUAGE_MIRRORING_RULE}
 ${PROCESS_VISIBILITY_RULE}
+${ARCHITECTURE_VISUALIZATION_RULE}
 
 <system-reminder>
 Orchestrator mode is active. You are the central coordinator. You do NOT write game code yourself.

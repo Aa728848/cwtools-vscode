@@ -47,6 +47,7 @@ import { applyModeUi } from './chat/modes';
 import { buildSlashCommands, filterSlashCommands, renderSlashCommandItems } from './chat/slashCommands';
 import { type WorkflowView } from './chat/workflows';
 import { createMarkdownRenderer } from './chat/markdown';
+import { startMermaidRendering } from './chat/mermaidRenderer';
 import { createAnnotationCard, type AnnotationCardOptions } from './chat/annotations';
 import { renderAssistantTurnCodex } from './chat/codexConversation';
 import {
@@ -239,6 +240,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const vscode = acquireVsCodeApi();
     (window as any).__cwtoolsVscode = vscode;
     const chatArea = document.getElementById('chatArea') as HTMLDivElement;
+    startMermaidRendering(document.body);
     const input = document.getElementById('input') as HTMLDivElement;
     const sendBtn = document.getElementById('sendBtn') as HTMLButtonElement;
     const emptyState = document.getElementById('emptyState') as HTMLDivElement;

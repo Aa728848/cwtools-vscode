@@ -20,6 +20,7 @@
         "../client/webview/chat/contextMentions.ts",
         "../client/webview/chat/liveSteps.ts",
         "../client/webview/chat/markdown.ts",
+        "../client/webview/chat/mermaidRenderer.ts",
         "../client/webview/chat/modes.ts",
         "../client/webview/chat/settingsOverview.ts",
         "../client/webview/chat/slashCommands.ts",

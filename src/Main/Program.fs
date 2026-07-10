@@ -769,27 +769,40 @@ let setupLogger (client: ILanguageClient) =
 type LintRequestOptions =
     { forceDeepLint: bool
       forceGlobalRefresh: bool
-      fastDefinitionIndex: bool }
+      fastDefinitionIndex: bool
+      forceDisk: bool }
 
 let normalLintRequest =
     { forceDeepLint = false
       forceGlobalRefresh = false
-      fastDefinitionIndex = false }
+      fastDefinitionIndex = false
+      forceDisk = false }
 
 let deepLintRequest =
     { forceDeepLint = true
       forceGlobalRefresh = false
-      fastDefinitionIndex = false }
+      fastDefinitionIndex = false
+      forceDisk = false }
 
 let fastDefinitionIndexRequest =
     { forceDeepLint = false
       forceGlobalRefresh = false
-      fastDefinitionIndex = true }
+      fastDefinitionIndex = true
+      forceDisk = false }
+
+/// A file-system or agent write must replace the CWTools VFS entry from disk,
+/// even when the file is not in a type-defining directory.
+let diskRefreshRequest =
+    { forceDeepLint = true
+      forceGlobalRefresh = false
+      fastDefinitionIndex = false
+      forceDisk = true }
 
 let mergeLintRequestOptions a b =
     { forceDeepLint = a.forceDeepLint || b.forceDeepLint
       forceGlobalRefresh = a.forceGlobalRefresh || b.forceGlobalRefresh
-      fastDefinitionIndex = a.fastDefinitionIndex || b.fastDefinitionIndex }
+      fastDefinitionIndex = a.fastDefinitionIndex || b.fastDefinitionIndex
+      forceDisk = a.forceDisk || b.forceDisk }
 
 type LintRequestMsg =
     | UpdateRequest of VersionedTextDocumentIdentifier * LintRequestOptions
@@ -3474,13 +3487,13 @@ type Server(client: ILanguageClient) =
                                         lastCycleShallow = useShallowAnalyze
                                         lastCycleEditAction = isEditAction
                                         lastError = None })
-                                logDiag $"lint forceDeep={options.forceDeepLint}, forceGlobal={options.forceGlobalRefresh}, fastDefinitionIndex={options.fastDefinitionIndex}, shallow={useShallowAnalyze}"
+                                logDiag $"lint forceDeep={options.forceDeepLint}, forceGlobal={options.forceGlobalRefresh}, fastDefinitionIndex={options.fastDefinitionIndex}, forceDisk={options.forceDisk}, shallow={useShallowAnalyze}"
                                 let priorDiagnostics =
                                     match fileDiagnosticStates.TryGetValue(lintPath) with
                                     | true, state -> state.diagnostics
                                     | _ -> []
                                 let validateCachedOnly = options.forceDeepLint && not isEditAction
-                                do! lint uri useShallowAnalyze false isEditAction validateCachedOnly options.fastDefinitionIndex
+                                do! lint uri useShallowAnalyze options.forceDisk isEditAction validateCachedOnly options.fastDefinitionIndex
                                 // Only deep/save paths schedule cross-file revalidation; shallow edits skip it
                                 // to avoid a whole-project revalidation pass on every keystroke.
                                 if not useShallowAnalyze then
@@ -4873,7 +4886,8 @@ type Server(client: ILanguageClient) =
             async {
                 for change in p.changes do
                     match change.``type`` with
-                    | FileChangeType.Created ->
+                    | FileChangeType.Created
+                    | FileChangeType.Changed ->
                         let path = getPathFromDoc change.uri
                         forgetFileCaches path
                         match gameObj with
@@ -4886,7 +4900,7 @@ type Server(client: ILanguageClient) =
                             addPendingRefreshDomains (if domains.IsEmpty then [ "types" ] else domains)
                             clearTypeCaches ()
                             markFileStale path "path"
-                        lintDebounceAgent.Post(UpdateRequest({ uri = change.uri; version = 0 }, deepLintRequest))
+                        lintDebounceAgent.Post(UpdateRequest({ uri = change.uri; version = 0 }, diskRefreshRequest))
                     | FileChangeType.Deleted ->
                         let path = getPathFromDoc change.uri
                         if incrementalTypeRefreshEnabled () && isTypeDefiningPath path then
@@ -4965,7 +4979,6 @@ type Server(client: ILanguageClient) =
                         client.PublishDiagnostics { uri = change.uri; diagnostics = [] }
                         forgetFileCaches path
                         fileDiagnosticStates.TryRemove(path) |> ignore
-                    | _ -> ()
             }
 
         member this.Completion(p: CompletionParams) =
@@ -7255,31 +7268,37 @@ type Server(client: ILanguageClient) =
                                            "status", JsonValue.String "error"
                                            "error", JsonValue.String "exploreProject requires query, file, or typeName." |])
                             else
-                                let validation = validationRuntimeSnapshot ()
-                                let loading = loadingRuntimeSnapshot ()
-                                let pendingKinds = pendingRefreshDomainList ()
-                                let status =
-                                    if loading.inProgress then "loading"
-                                    elif validation.inProgress || not pendingKinds.IsEmpty then "stale"
-                                    else "ready"
-                                let runtime: RuntimeMetadata =
-                                    { graphVersion = diagnosticEpoch.Value
-                                      status = status
-                                      validationInProgress = validation.inProgress
-                                      loadingInProgress = loading.inProgress
-                                      pendingGlobalKinds = pendingKinds
-                                      lastGlobalRefreshAtUnixMs = dateTimeToUnixMs lastGlobalRefreshAt }
-                                let visitor =
-                                    { new IGameVisitor<JsonValue> with
-                                        member _.Visit game = exploreProject game options runtime }
-                                match gameDispatcher.Dispatch visitor with
-                                | Some result -> Some result
-                                | None ->
-                                    Some(
-                                        JsonValue.Record
-                                            [| "ok", JsonValue.Boolean false
-                                               "status", JsonValue.String "unavailable"
-                                               "error", JsonValue.String "LSP server has not loaded a game model yet." |])
+                                // Query a coherent model snapshot. UpdateFile, incremental type
+                                // commits, deletes, and RefreshCaches all hold the matching write lock.
+                                gameStateLock.EnterReadLock()
+                                try
+                                    let validation = validationRuntimeSnapshot ()
+                                    let loading = loadingRuntimeSnapshot ()
+                                    let pendingKinds = pendingRefreshDomainList ()
+                                    let status =
+                                        if loading.inProgress then "loading"
+                                        elif validation.inProgress || not pendingKinds.IsEmpty then "stale"
+                                        else "ready"
+                                    let runtime: RuntimeMetadata =
+                                        { graphVersion = diagnosticEpoch.Value
+                                          status = status
+                                          validationInProgress = validation.inProgress
+                                          loadingInProgress = loading.inProgress
+                                          pendingGlobalKinds = pendingKinds
+                                          lastGlobalRefreshAtUnixMs = dateTimeToUnixMs lastGlobalRefreshAt }
+                                    let visitor =
+                                        { new IGameVisitor<JsonValue> with
+                                            member _.Visit game = exploreProject game options runtime }
+                                    match gameDispatcher.Dispatch visitor with
+                                    | Some result -> Some result
+                                    | None ->
+                                        Some(
+                                            JsonValue.Record
+                                                [| "ok", JsonValue.Boolean false
+                                                   "status", JsonValue.String "unavailable"
+                                                   "error", JsonValue.String "LSP server has not loaded a game model yet." |])
+                                finally
+                                    gameStateLock.ExitReadLock()
 
                         // - cwtools.ai.queryScriptedEffects -
                         // Returns all scripted effects with name, scope constraints and type
@@ -7871,10 +7890,7 @@ type Server(client: ILanguageClient) =
                                         match fileDiagnosticStates.TryGetValue(filePath) with
                                         | true, st -> decimal st.epoch
                                         | _ -> 0m
-                                    if isTypeDefiningPath filePath then
-                                        lintAgent.Post(UpdateRequest({ uri = uri; version = 0 }, deepLintRequest))
-                                    else
-                                        lintAgent.Post(RevalidateRequest({ uri = uri; version = 0 }))
+                                    lintAgent.Post(UpdateRequest({ uri = uri; version = 0 }, diskRefreshRequest))
                                     JsonValue.Record
                                         [| "file",       JsonValue.String(filePath.Replace('\\', '/'))
                                            "priorEpoch", JsonValue.Number priorEpoch |])

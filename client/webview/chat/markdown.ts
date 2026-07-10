@@ -55,6 +55,14 @@ export function renderMarkdown(rawText: string, labels: MarkdownLabels = {}): st
 
     function renderBlock(block: MarkdownBlock): string {
         if (block.isCard) return block.code;
+        const language = block.lang.trim().toLowerCase();
+        if (language === 'mermaid' || language === 'mmd') {
+            return '<div class="md-mermaid" data-mermaid-state="pending">' +
+                '<div class="md-mermaid-loading" role="status">Mermaid</div>' +
+                '<div class="md-mermaid-output"></div>' +
+                '<pre class="md-mermaid-source"><code>' + escapeHtml(block.code) + '</code></pre>' +
+                '</div>';
+        }
         return '<div class="md-codeblock"><div class="md-codeblock-lang">' +
             escapeHtml(block.lang) +
             '</div><code>' +

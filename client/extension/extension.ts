@@ -1485,6 +1485,16 @@ export async function activate(context: ExtensionContext) {
 	context.subscriptions.push(workspace.onDidChangeTextDocument(e => {
 		toolExecutor.invalidateCacheForFile(e.document.uri.fsPath);
 	}));
+	// Closed files can be changed by Git, external editors, generators, or agent
+	// commands without producing onDidChangeTextDocument. Keep query-only semantic
+	// graph caches coherent with those file-system mutations as well.
+	const aiSemanticWatcher = workspace.createFileSystemWatcher('**/*.{txt,gui,yml,gfx,asset,cwt,entity,shader,fxh}');
+	context.subscriptions.push(
+		aiSemanticWatcher,
+		aiSemanticWatcher.onDidChange(uri => toolExecutor.invalidateCacheForFile(uri.fsPath)),
+		aiSemanticWatcher.onDidCreate(uri => toolExecutor.invalidateCacheForFile(uri.fsPath)),
+		aiSemanticWatcher.onDidDelete(uri => toolExecutor.invalidateCacheForFile(uri.fsPath)),
+	);
 	// Backspacing never auto-triggers completion in VS Code (only typed word characters do),
 	// so a mistyped character inside an @variable token would dead-end the suggestion list.
 	// Re-open it when a small deletion leaves the cursor inside an @token. Similarly, typing

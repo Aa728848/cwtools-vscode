@@ -24,6 +24,7 @@ describe('webview smoke checks', () => {
         expect(html).to.include('id="btnWorkspace"');
         expect(html).to.include('data-composer-action="workflows"');
         expect(html).to.include('id="artifactDrawer"');
+        expect(html).to.include("'mermaid.min.js'");
         expect(script).to.include("case 'workflowList'");
         expect(script).to.include('renderComposerChips');
         expect(script).to.include('renderArtifactPanel');
@@ -41,6 +42,7 @@ describe('webview smoke checks', () => {
             'settingsOverview.ts',
             'liveSteps.ts',
             'markdown.ts',
+            'mermaidRenderer.ts',
             'annotations.ts',
             'contextMentions.ts',
             'i18n.ts',
@@ -73,6 +75,7 @@ describe('webview smoke checks', () => {
             '.annotatable-plan',
             '.md-table-wrap',
             '.md-codeblock',
+            '.md-mermaid',
             '.context-compaction-card',
         ]) {
             expect(css).to.include(selector);

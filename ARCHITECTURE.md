@@ -107,7 +107,7 @@ The core constraint of this layer is: if the shared index can answer the query, 
 
 `src/Main/SemanticGraph.fs` builds a bounded semantic subgraph directly from the loaded CWTools `Types()`, `GetEventGraphData`, and per-file `ComputedData` caches. It does not maintain a second parser or a lexical reference database. `cwtools.ai.exploreProject` ranks typed entry points, traverses at most three hops, caps nodes/edges, and returns provenance, file facts, truncation, and validation/load freshness. The extension and MCP expose it as `explore_pdx_project`, the preferred first tool for project-structure and dependency questions; exact rule, scope, type, and block tools remain the write-time verification layer.
 
-Because the graph reads the existing game model, scripted-type refreshes and ordinary file updates become visible through the same cache/locking lifecycle as diagnostics and completion. Empty results from a loading or stale snapshot are explicitly non-authoritative.
+Because the graph reads the existing game model, scripted-type refreshes and ordinary file updates become visible through the same cache/locking lifecycle as diagnostics and completion. User buffer changes are debounced into `UpdateFile`; agent writes and watched file-system changes force a disk-backed update; creates, changes, and deletes update or remove typed indexes; and graph reads hold the game-state read lock while incremental commits/full refreshes hold the write lock. Query-only graph caches are invalidated on every relevant workspace mutation. Standalone MCP uses a bounded Chokidar watcher to forward the same LSP watched-file events. Empty results from a loading or stale snapshot are explicitly non-authoritative.
 
 #### Submodules
 
@@ -311,6 +311,8 @@ The packages `packages/cwtools-shared` and `packages/cwtools-mcp` implement a **
 | Entity | `entityPreview.ts` | Three.js renderer for mesh, textures, and skeleton animations |
 | Particles | `particlePreview.ts` | Three.js particle simulators and curve plots |
 
+`chat/markdown.ts` converts fenced `mermaid` blocks into inert placeholders. `chat/mermaidRenderer.ts` observes chat/card DOM mutations and renders them asynchronously with the locally bundled Mermaid runtime, `securityLevel: strict`, disabled per-diagram config directives, SVG sanitization, VS Code theme variables, copy/fullscreen controls, and source fallback. This single pipeline covers final messages, streaming process text, tool-result cards, plans, blueprints, walkthroughs, and Agent Manager views without CDN access.
+
 #### F# / .NET Language Server
 
 The backend runs on .NET 10.
@@ -477,7 +479,7 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 
 `src/Main/SemanticGraph.fs` 直接基于已加载的 CWTools `Types()`、`GetEventGraphData` 和逐文件 `ComputedData` 缓存构建有界语义子图，不维护第二套解析器或词法引用数据库。`cwtools.ai.exploreProject` 对 typed entry point 排序，最多遍历三跳，并限制节点/边数量，同时返回 provenance、文件语义事实、截断信息以及校验/加载 freshness。Extension 与 MCP 将其暴露为 `explore_pdx_project`，作为项目结构和依赖问题的首选入口；精确规则、作用域、类型和 block 工具仍负责写入前验证。
 
-语义图复用现有 game model，因此 scripted type 增量刷新和普通文件更新会沿诊断与补全相同的缓存/锁生命周期生效。加载中或 stale snapshot 的空结果会被明确标记为非权威。
+语义图复用现有 game model，因此 scripted type 增量刷新和普通文件更新会沿诊断与补全相同的缓存/锁生命周期生效。用户未保存缓冲区经过防抖后进入 `UpdateFile`；Agent 写入和文件系统 watcher 事件强制从磁盘更新；创建、修改和删除会更新或移除 typed index；语义图读取持有 game-state 读锁，而增量提交和完整刷新持有写锁。任何相关工作区变更都会使纯 query 语义图缓存失效。Standalone MCP 通过有界 Chokidar watcher 转发相同的 LSP 文件事件。加载中或 stale snapshot 的空结果会被明确标记为非权威。
 
 #### 子模块
 
@@ -819,6 +821,8 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 | `particlePreview.ts` | `particlePreview.css`, `particleSimulation.ts`, `particleRenderer.ts`, `curveEditor.ts`, `inspector.ts`, `particleTypes.ts` | Stellaris 粒子特效近似模拟、实例化渲染、曲线/属性编辑和 `.asset` 写回 |
 
 `client/webview/chat/` 承载 chat 和 Agent Manager 的共享浏览器模块，包括 artifacts、topics、workflow、formatters、i18n、modes、slash commands、settings overview、live steps、markdown、annotations、context mentions、message contracts、run timeline 和 run inspector。
+
+`chat/markdown.ts` 将 `mermaid` fenced code block 转换为惰性占位卡片；`chat/mermaidRenderer.ts` 观察聊天和卡片 DOM 变化，使用本地打包的 Mermaid runtime 异步渲染。渲染固定使用 `securityLevel: strict`，拒绝逐图配置指令，清理 SVG，并应用 VS Code 主题变量、源码复制、全屏查看和失败源码回退。最终消息、实时过程文本、工具结果卡、计划、蓝图、walkthrough 与 Agent Manager 复用同一条无 CDN 渲染链路。
 
 Webview 维护规则：
 

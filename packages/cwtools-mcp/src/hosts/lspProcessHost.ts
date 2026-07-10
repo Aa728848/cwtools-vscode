@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
+import { watch, type FSWatcher } from 'chokidar';
 import {
   createMessageConnection,
   StreamMessageReader,
@@ -49,6 +50,9 @@ export class LspProcessHost implements LspHost {
   // Epoch (ms) when the server finished loading/initial validation. Files modified
   // after this are candidates for on-demand revalidation.
   private startedAtMs?: number;
+  private fileWatcher?: FSWatcher;
+  private watcherFlushTimer?: NodeJS.Timeout;
+  private readonly pendingWatchedChanges = new Map<string, 1 | 2 | 3>();
 
   constructor(private readonly options: LspProcessHostOptions) {}
 
@@ -98,6 +102,7 @@ export class LspProcessHost implements LspHost {
     this.connection = undefined;
     this.process = undefined;
     this.startPromise = undefined;
+    this.stopFileWatcher();
     try {
       connection?.dispose();
     } catch {
@@ -142,6 +147,7 @@ export class LspProcessHost implements LspHost {
     this.process.on('exit', (code, signal) => {
       this.startError = `CWTools LSP exited with code ${code ?? 'null'} signal ${signal ?? 'null'}`;
       this.connection = undefined;
+      this.stopFileWatcher();
     });
 
     this.connection = createMessageConnection(
@@ -210,7 +216,58 @@ export class LspProcessHost implements LspHost {
       },
     });
     await this.waitForExecuteCommandsReady(20_000);
+    this.startFileWatcher();
     this.startedAtMs = Date.now();
+  }
+
+  private startFileWatcher(): void {
+    if (this.fileWatcher) return;
+    const watcher = watch(this.options.workspaceRoot, {
+      ignoreInitial: true,
+      ignored: [/(^|[\\/])(?:node_modules|\.git|\.cwtools|\.cwtools-ai)(?:[\\/]|$)/],
+      awaitWriteFinish: { stabilityThreshold: 120, pollInterval: 30 },
+    });
+    watcher.on('add', filePath => this.queueWatchedFileChange(filePath, 1));
+    watcher.on('change', filePath => this.queueWatchedFileChange(filePath, 2));
+    watcher.on('unlink', filePath => this.queueWatchedFileChange(filePath, 3));
+    watcher.on('error', error => {
+      if (process.env.CWTOOLS_MCP_DEBUG) {
+        process.stderr.write(`[cwtools-mcp] file watcher error: ${String(error)}\n`);
+      }
+    });
+    this.fileWatcher = watcher;
+  }
+
+  private stopFileWatcher(): void {
+    if (this.watcherFlushTimer) clearTimeout(this.watcherFlushTimer);
+    this.watcherFlushTimer = undefined;
+    this.pendingWatchedChanges.clear();
+    const watcher = this.fileWatcher;
+    this.fileWatcher = undefined;
+    void watcher?.close();
+  }
+
+  private queueWatchedFileChange(filePath: string, type: 1 | 2 | 3): void {
+    if (!isLspWatchedFile(this.options.workspaceRoot, filePath)) return;
+    const resolved = path.resolve(filePath);
+    const previous = this.pendingWatchedChanges.get(resolved);
+    // Preserve a create over its following content-change event; deletion always wins.
+    const nextType = type === 3 ? 3 : previous === 1 ? 1 : type;
+    this.pendingWatchedChanges.set(resolved, nextType);
+    if (this.watcherFlushTimer) clearTimeout(this.watcherFlushTimer);
+    this.watcherFlushTimer = setTimeout(() => this.flushWatchedFileChanges(), 100);
+  }
+
+  private flushWatchedFileChanges(): void {
+    this.watcherFlushTimer = undefined;
+    const connection = this.connection;
+    if (!connection || this.pendingWatchedChanges.size === 0) return;
+    const changes = Array.from(this.pendingWatchedChanges, ([filePath, type]) => ({
+      uri: pathToFileUri(filePath),
+      type,
+    }));
+    this.pendingWatchedChanges.clear();
+    void connection.sendNotification('workspace/didChangeWatchedFiles', { changes });
   }
 
   private unavailable(message: string): LspErrorResult {
@@ -353,4 +410,19 @@ export function pathToFileUri(filePath: string): string {
   const resolved = path.resolve(filePath).replace(/\\/g, '/');
   const withLeadingSlash = resolved.startsWith('/') ? resolved : `/${resolved}`;
   return `file://${encodeURI(withLeadingSlash).replace(/#/g, '%23')}`;
+}
+
+const LSP_WATCHED_EXTENSIONS = new Set([
+  '.txt', '.gui', '.yml', '.gfx', '.asset', '.cwt', '.entity', '.shader', '.fxh',
+]);
+
+export function isLspWatchedFile(workspaceRoot: string, filePath: string): boolean {
+  const relative = path.relative(path.resolve(workspaceRoot), path.resolve(filePath));
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return false;
+  const segments = relative.split(/[\\/]+/).map(segment => segment.toLowerCase());
+  if (segments.some(segment => segment === 'node_modules'
+    || segment === '.git'
+    || segment === '.cwtools'
+    || segment === '.cwtools-ai')) return false;
+  return LSP_WATCHED_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }

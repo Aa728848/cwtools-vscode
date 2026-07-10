@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "chokidar": "^4.0.3",
     "cwtools-shared": "0.1.0",
     "vscode-jsonrpc": "^8.2.0"
   }

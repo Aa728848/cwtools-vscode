@@ -31,6 +31,9 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri, opti
     const cssUri = webview.asWebviewUri(
         vs.Uri.joinPath(extensionUri, 'bin', 'client', 'webview', 'chatPanel.css')
     );
+    const mermaidScriptUri = webview.asWebviewUri(
+        vs.Uri.joinPath(extensionUri, 'bin', 'client', 'webview', 'mermaid.min.js')
+    );
     const stylesheetUris = [cssUri.toString(), ...(options?.extraStylesheets ?? [])];
     const stylesheetLinks = stylesheetUris.map(uri => `<link rel="stylesheet" href="${uri}">`).join('\n');
     const csp = webview.cspSource;
@@ -468,6 +471,7 @@ ${stylesheetLinks}
     </div>
 </div>
 
+<script src="${mermaidScriptUri}"></script>
 <script src="${scriptUri}"></script>
 </body>
 </html>`;

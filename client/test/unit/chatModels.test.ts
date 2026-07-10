@@ -26,6 +26,7 @@ import { renderMarkdown } from '../../webview/chat/markdown';
 import { mentionResultToActiveContext, stripConsumedMentionText, type ActiveContext } from '../../webview/chat/contextMentions';
 import { buildSlashCommands, filterSlashCommands, renderSlashCommandItems } from '../../webview/chat/slashCommands';
 import { buildWorkflowSummary, getWorkflowSlashCommand, normalizeWorkflowLabels, type WorkflowView } from '../../webview/chat/workflows';
+import { buildExploreModeSystemPrompt, buildPlanModeSystemPrompt } from '../../extension/ai/prompt/sections/modePrompts';
 
 describe('chat artifact model helpers', () => {
     const artifacts: ArtifactRecord[] = [
@@ -243,6 +244,17 @@ describe('chat view contract helpers', () => {
 });
 
 describe('chat markdown and mention helpers', () => {
+    it('teaches architecture modes to emit bounded safe Mermaid diagrams when useful', () => {
+        const explore = buildExploreModeSystemPrompt('', 'Stellaris');
+        const plan = buildPlanModeSystemPrompt('', 'Stellaris');
+
+        for (const prompt of [explore, plan]) {
+            expect(prompt).to.include('## Architecture Visualization');
+            expect(prompt).to.include('```mermaid');
+            expect(prompt).to.include('Do not emit Mermaid init/config directives');
+        }
+    });
+
     it('renders markdown headings, lists, tables, and code blocks from an extracted module', () => {
         const html = renderMarkdown([
             '# Title',
@@ -280,6 +292,21 @@ describe('chat markdown and mention helpers', () => {
         expect(html).to.include('Pick &lt;one&gt;');
         expect(html).to.include('data-suggest="Safe"');
         expect(html).to.include('<video src="demo.mp4"');
+    });
+
+    it('renders Mermaid fences as safe asynchronous diagram placeholders', () => {
+        const html = renderMarkdown([
+            '```mermaid',
+            'flowchart LR',
+            '  A["User <edit>"] --> B["CWTools model"]',
+            '```',
+        ].join('\n'));
+
+        expect(html).to.include('class="md-mermaid"');
+        expect(html).to.include('data-mermaid-state="pending"');
+        expect(html).to.include('flowchart LR');
+        expect(html).to.include('User &lt;edit&gt;');
+        expect(html).not.to.include('class="md-codeblock"');
     });
 
     it('converts mention results and strips consumed mention-only lines', () => {

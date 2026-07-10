@@ -159,7 +159,12 @@ export class LspToolHandler {
     invalidateCacheForFile(filePath: string): void {
         const normalized = filePath.replace(/\\/g, '/');
         for (const key of this.lspReadCache.keys()) {
-            if (key.includes(normalized)) this.lspReadCache.delete(key);
+            // Semantic graph queries may be query-only and therefore carry no file
+            // path in their cache key. Any project mutation can change their nodes,
+            // edges, ranking, or freshness, so invalidate them globally.
+            if (key.startsWith('semanticGraph:') || key.includes(normalized)) {
+                this.lspReadCache.delete(key);
+            }
         }
     }
 

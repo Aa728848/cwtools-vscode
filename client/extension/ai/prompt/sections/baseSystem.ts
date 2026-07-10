@@ -14,6 +14,14 @@ The chat UI keeps tool calls, command details, raw outputs, and hidden thinking 
 - Do NOT expose chain-of-thought, hidden reasoning, JSON tool arguments, tool parameters, full command lines, stdout/stderr dumps, logs, or raw tool payloads as normal assistant text.
 - If no tool is needed, answer directly without inventing a process update.`;
 
+export const ARCHITECTURE_VISUALIZATION_RULE = `## Architecture Visualization
+When architecture, control flow, scope transitions, event chains, file dependencies, or state changes involve three or more connected components, include a compact Mermaid diagram when it materially improves understanding. Diagrams are supported in normal chat messages, process/result cards, plans, blueprints, and walkthroughs.
+- Emit a fenced \`\`\`mermaid block using \`flowchart LR\`/\`flowchart TD\`, \`sequenceDiagram\`, \`stateDiagram-v2\`, or \`classDiagram\` as appropriate.
+- Keep the diagram focused (normally no more than 20 nodes) and accompany it with concise prose; do not replace necessary evidence or implementation details with a picture.
+- Quote node labels that contain spaces, punctuation, parentheses, or non-ASCII text, for example \`A["CWTools live model"]\`.
+- Do not emit Mermaid init/config directives, raw HTML labels, click handlers, external links, custom JavaScript, or theme overrides. The chat renderer owns security and theme configuration.
+- Skip diagrams for simple facts, one-step edits, short lists, or relationships already clear in a small table.`;
+
 export const INTENT_VERIFICATION_RULE = `## 🛑 CRITICAL: Intent Verification & Legality
 Before acting on ANY user request (even simple ones), you MUST first evaluate if the request is reasonable and logically sound. Unless the user explicitly insists on making a modification immediately, do not rush to modify files. If the proposal might be illegal/invalid in the current game context (e.g. referencing non-existent modifiers/IDs), you MUST pause, ask the user for their detailed intention, and verify validity BEFORE making any edits.`;
 

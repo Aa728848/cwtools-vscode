@@ -101,6 +101,7 @@ Below is the overall module interaction and data flow topology:
 * **Hotkeys**:
   - `Tab`: Cycle through agent modes (Build, Plan, Analyze, Review, Orchestrate, General).
 * **Operations**: Supports context memory compression (triggered at 70% threshold) and importing/exporting full JSON execution archives.
+* **Architecture Diagrams**: When a design or analysis contains several connected components, the Agent can emit Mermaid flow/sequence/state diagrams. Chat messages, live process text, tool-result cards, plans, blueprints, and walkthrough cards render them locally with VS Code theme colors, source copy, fullscreen viewing, and safe source fallback.
 
 ##### 📂 5. Vanilla Compare & Safe Merge
 * **Diff View**: When editing a mod file that shares the same name as a vanilla file, click the **Compare with Vanilla** CodeLens.
@@ -300,6 +301,7 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
   - `Tab`：快捷切换Agent模式，支持构建、计划、分析、审查、协调，通用，六大基础模式一键切换。
 * **特性操作**：会话支持完整的上下文压缩（超过 70% 时自动生成紧凑记忆）以及一键无损导入导出完整
 运行步骤的 JSON 归档。
+* **架构流程图**：当设计或分析包含多个相互关联的组件时，Agent 可以按需输出 Mermaid 流程图、时序图或状态图。聊天消息、实时过程文本、工具结果卡、计划、蓝图和 walkthrough 卡片都会使用 VS Code 主题在本地渲染，并支持复制源码、全屏查看和失败时安全回退到源码。
 
 ##### 📂 5. 原版对比与块级安全合并 (Vanilla Sync)
 * **一键对比**：插件激活后，当您编辑的 Mod 文件与原版游戏文件同名时，点击行上方的 CodeLens **Compare with Vanilla** 打开分屏 Diff。

@@ -999,6 +999,23 @@ describe('agent sprite candidate tool contract', () => {
         expect(result.searchedRoots).to.include('IndexService:workspaceSymbolIndex');
     });
 
+    it('invalidates query-only semantic graph cache entries after any project file mutation', () => {
+        const lspTools = require('../../extension/ai/tools/lspTools') as typeof import('../../extension/ai/tools/lspTools');
+        const handler = new lspTools.LspToolHandler(
+            { workspaceRoot },
+            () => ({}) as any,
+            () => [],
+        );
+        const cache = (handler as any).lspReadCache as Map<string, unknown>;
+        cache.set('semanticGraph:["event chain","",""]', { data: { graphVersion: 1 }, expiresAt: Date.now() + 3000 });
+        cache.set('unrelated-cache-entry', { data: { value: true }, expiresAt: Date.now() + 3000 });
+
+        handler.invalidateCacheForFile(path.join(workspaceRoot, 'events', 'changed.txt'));
+
+        expect(cache.has('semanticGraph:["event chain","",""]')).to.equal(false);
+        expect(cache.has('unrelated-cache-entry')).to.equal(true);
+    });
+
     it('parses project .asset sound candidates for show_sound repairs', async () => {
         const lspTools = require('../../extension/ai/tools/lspTools') as typeof import('../../extension/ai/tools/lspTools');
         const soundDir = path.join(workspaceRoot, 'sound');

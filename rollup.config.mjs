@@ -74,6 +74,7 @@ export default [
                 }
             }),
             copyFile('client/webview/chatPanel.css', 'release/bin/client/webview/chatPanel.css'),
+            copyFile('node_modules/mermaid/dist/mermaid.min.js', 'release/bin/client/webview/mermaid.min.js'),
         ],
     },
     // Agent Manager webview bundle

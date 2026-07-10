@@ -52,11 +52,15 @@ describe('shell env allowlist', () => {
             NPM_CONFIG_CACHE: 'C:/npm',
             CWT_AGENT_SCRATCH_DIR: 'C:/scratch',
             LC_ALL: 'en_US.UTF-8',
+            PYTHONUTF8: '1',
+            PYTHONIOENCODING: 'utf-8',
         }, { platform: 'win32' });
         expect(env.DOTNET_ROOT).to.not.equal(undefined);
         expect(env.NPM_CONFIG_CACHE).to.not.equal(undefined);
         expect(env.CWT_AGENT_SCRATCH_DIR).to.not.equal(undefined);
         expect(env.LC_ALL).to.not.equal(undefined);
+        expect(env.PYTHONUTF8).to.equal('1');
+        expect(env.PYTHONIOENCODING).to.equal('utf-8');
     });
 
     it('honors user additions case-insensitively', () => {

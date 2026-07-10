@@ -79,6 +79,12 @@ describe('webview smoke checks', () => {
         }
         expect(css).to.include('overflow-x:auto');
         expect(css).to.include('width:max-content');
+        expect(css).to.include('.artifact-file-status');
+        expect(css).to.include('.artifact-file-additions');
+        expect(css).to.include('.artifact-file-deletions');
+        expect(css).to.include('.ds-file-status');
+        expect(css).to.include('.side-diff-file-status');
+        expect(css).to.include('.aw-count');
         for (const id of ['chatArea', 'input', 'sendBtn', 'slashPopup', 'artifactDrawer', 'topicsPanel', 'btnWorkspace']) {
             expect(html).to.include(`id="${id}"`);
         }
@@ -173,17 +179,27 @@ describe('webview smoke checks', () => {
         const managerHtml = fs.readFileSync(path.join(root, 'client/extension/ai/agentManagerHtml.ts'), 'utf8');
         const managerCss = fs.readFileSync(path.join(root, 'client/webview/agentManager.css'), 'utf8');
         const managerEntry = fs.readFileSync(path.join(root, 'client/webview/agentManager.ts'), 'utf8');
+        const chatHtml = fs.readFileSync(path.join(root, 'client/extension/ai/chatHtml.ts'), 'utf8');
+        const chatScript = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        const codexRows = fs.readFileSync(path.join(root, 'client/webview/chat/codexToolRows.ts'), 'utf8');
         const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
         const hostBridge = fs.readFileSync(path.join(root, 'client/extension/ai/chat/bridge.ts'), 'utf8');
 
         expect(managerHtml).to.include("bodyClass: 'chat-empty agent-manager-shell'");
         expect(managerHtml).to.include("scriptName: 'agentManager.js'");
+        expect(chatHtml).to.include('const stylesheetUris = [cssUri.toString(), ...(options?.extraStylesheets ?? [])];');
         expect(managerCss).to.include('body.agent-manager-shell');
         expect(managerCss).to.include('.manager-overview');
         expect(managerCss).to.include('.manager-inspector-tabs');
         expect(managerCss).to.include('.topics-panel');
         expect(managerCss).to.include('.artifact-drawer');
         expect(managerEntry).to.include("import './chatPanel'");
+        expect(chatScript).to.include("subagentBody.innerHTML = `<div class=\"codex-live-host\">${renderAssistantTurnCodex('', []");
+        expect(chatScript).to.include('isSubagentView: true');
+        expect(chatScript).to.include('removeDuplicateDiffSummaryFiles');
+        expect(chatScript).to.include('data-auto-write-path');
+        expect(codexRows).to.include('data-codex-activity-row-toggle');
+        expect(codexRows).to.include('codex-activity-row-details');
         expect(managerEntry).to.include("import type { ManagerSnapshotMessage");
         expect(managerEntry).to.include("case 'managerSnapshot'");
         expect(managerEntry).to.include("case 'orchestratorProgress'");

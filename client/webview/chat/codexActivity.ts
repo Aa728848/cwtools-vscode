@@ -100,10 +100,63 @@ function compactPreview(value: unknown, max = 220): string {
     return normalized.length > max ? normalized.slice(0, max - 3) + '...' : normalized;
 }
 
+function resultSummary(result: Record<string, unknown>, isCommand: boolean): string {
+    if (isCommand) {
+        const exitCode = result.exitCode ?? result.exit_code ?? result.code;
+        if (exitCode !== undefined && exitCode !== null && String(exitCode) !== '0') return `exit ${exitCode}`;
+        if (result.success === false) return compactPreview(result.status || result.message || result.error);
+        return compactPreview(result.status);
+    }
+    return compactPreview(result.status || result.message || result.error || result.preview);
+}
+
 function isInternalThinkingNote(content: string): boolean {
     const text = content.trim();
     return /^\[(?:Tool Arg Repair|Tool Name Repair|VLM Image|SYSTEM)\]/i.test(text)
         || /^Repaired tool name:/i.test(text);
+}
+
+function lastActivityKind(items: CodexTurnItem[]): CodexActivityEvent['kind'] | undefined {
+    for (let index = items.length - 1; index >= 0; index--) {
+        const item = items[index];
+        if (item?.type === 'activity') return item.event.kind;
+        if (item?.type === 'group' && item.group.events.length) return item.group.events[item.group.events.length - 1]?.kind;
+        if (item?.type === 'text' && item.text.content.trim()) return undefined;
+    }
+    return undefined;
+}
+
+function looksLikeMeasureObjectOutput(lines: string[]): boolean {
+    const keys = new Set<string>();
+    for (const line of lines.slice(0, 10)) {
+        const match = /^\s*(Count|Average|Sum|Maximum|Minimum|Property)\s*:/i.exec(line);
+        if (match) keys.add(match[1]!.toLowerCase());
+    }
+    return keys.has('count') && (keys.has('average') || keys.has('sum') || keys.has('property'));
+}
+
+function looksLikeFileCountOutput(lines: string[]): boolean {
+    const matches = lines.filter(line => /^\s*[\w .-]+\.txt\s*:\s*\d+\s*$/i.test(line)).length;
+    return matches >= 2;
+}
+
+function isLikelyCommandOutputText(content: string): boolean {
+    const text = content.trim();
+    if (!text) return false;
+    const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if (!lines.length) return false;
+    const replacementCount = (text.match(/\uFFFD/g) || []).length;
+    if (/Traceback \(most recent call last\)|Unicode(?:Encode|Decode)Error|SyntaxError|ReferenceError|TypeError/i.test(text)) return true;
+    if (looksLikeMeasureObjectOutput(lines)) return true;
+    if (looksLikeFileCountOutput(lines)) return true;
+    return replacementCount >= 8 && lines.length >= 2;
+}
+
+function shouldSuppressTextSegment(content: string, items: CodexTurnItem[]): boolean {
+    if (/^\[WARNING:\s*The result of tool .* was automatically truncated to 1000 characters/i.test(content.trim())) {
+        return true;
+    }
+    return lastActivityKind(items) === 'command' && isLikelyCommandOutputText(content);
 }
 
 function commandDetailFrom(args: Record<string, unknown>, result: Record<string, unknown>, step?: StepLike): CodexCommandDetail {
@@ -120,8 +173,8 @@ function commandDetailFrom(args: Record<string, unknown>, result: Record<string,
     };
 }
 
-function toolSubject(toolName: string, args: Record<string, unknown>, step: StepLike): string {
-    if (COMMAND_TOOL_NAMES.has(toolName)) return commandFromArgs(args, step);
+function toolSubject(toolName: string, args: Record<string, unknown>, _step: StepLike): string {
+    if (COMMAND_TOOL_NAMES.has(toolName)) return '';
     const target = targetPathFromArgs(args);
     if (target) return fileBaseName(target);
     const query = queryFromArgs(args);
@@ -137,17 +190,19 @@ function createToolEvent(step: StepLike, labels: CodexI18nText, index: number): 
     const timestamp = timestampOf(step, Date.now() + index);
     let kind: CodexActivityEvent['kind'] = 'tool';
     let label = labels.activity.tool;
-    const groupKind: CodexGroupKind = 'tool';
+    let groupKind: CodexGroupKind = 'tool';
 
     if (COMMAND_TOOL_NAMES.has(toolName)) {
         kind = 'command';
         label = labels.activity.ranCommand;
+        groupKind = 'command';
     } else if (WRITE_LIKE_TOOL_NAMES.has(toolName)) {
         kind = 'file';
         label = toolName.includes('write') ? labels.activity.wroteFile : labels.activity.editedFile;
     } else if (READ_LIKE_TOOL_NAMES.has(toolName)) {
         kind = 'file';
         label = toolName === 'codegraph_explore' ? 'CodeGraph explore' : labels.activity.readFile;
+        groupKind = 'read';
     } else if (VALIDATION_TOOL_NAMES.has(toolName)) {
         kind = 'validation';
         label = labels.activity.validation;
@@ -176,15 +231,16 @@ function createToolEvent(step: StepLike, labels: CodexI18nText, index: number): 
 function applyToolResult(event: CodexActivityEvent, resultStep: StepLike): void {
     const result = getResultObject(resultStep);
     const args = asRecord((event.detailModel?.args as Record<string, unknown>) || {});
+    const isCommand = COMMAND_TOOL_NAMES.has(event.toolName || '');
     event.status = statusFromResult(result);
     event.durationMs = Number(resultStep.durationMs || 0) || Math.max(0, timestampOf(resultStep, event.timestamp) - event.timestamp);
-    event.detail = compactPreview(result.message || result.error || result.preview || result.output);
+    event.detail = resultSummary(result, isCommand);
     event.sourceStep = event.sourceStep || resultStep;
     event.detailModel = {
         ...event.detailModel,
         result,
         preview: compactPreview(result.preview || result.message || result.error || result.output),
-        command: COMMAND_TOOL_NAMES.has(event.toolName || '') ? commandDetailFrom(args, result, event.sourceStep as StepLike) : event.detailModel?.command,
+        command: isCommand ? commandDetailFrom(args, result, event.sourceStep as StepLike) : event.detailModel?.command,
         statusText: asString(result.status || result.message || result.error) || undefined,
     };
 }
@@ -193,18 +249,6 @@ function createStandaloneResult(step: StepLike, labels: CodexI18nText, index: nu
     const event = createToolEvent({ ...step, type: 'tool_call' }, labels, index);
     applyToolResult(event, step);
     return event;
-}
-
-function createThinkingEvent(content: string, labels: CodexI18nText, index: number, timestamp: number, sourceStep: StepLike | undefined, live: boolean): CodexActivityEvent {
-    return {
-        id: `thinking-${index}-${timestamp}`,
-        kind: 'thinking',
-        status: live ? 'running' : 'success',
-        label: labels.activity.thinking,
-        timestamp,
-        sourceStep,
-        detailModel: { preview: content },
-    };
 }
 
 function createSpecialEvent(step: StepLike, labels: CodexI18nText, index: number): CodexActivityEvent | undefined {
@@ -314,18 +358,87 @@ function groupStatus(events: CodexActivityEvent[]): CodexActivityStatus {
 }
 
 function labelForGroup(kind: CodexGroupKind, count: number, labels: CodexI18nText): string {
-    if (kind === 'command') return formatCount(labels.activity.ranCommands, count);
-    if (kind === 'read') return formatCount(labels.activity.readFiles, count);
+    if (kind === 'command') return count === 1 ? labels.activity.ranCommand : formatCount(labels.activity.ranCommands, count);
+    if (kind === 'read') return count === 1 ? labels.activity.readFile : formatCount(labels.activity.readFiles, count);
     if (kind === 'subagent') return `${count} ${labels.activity.subtask}`;
+    if (kind === 'thinking') return count === 1 ? labels.activity.thinking : `${labels.activity.thinking} (${count})`;
     return formatCount(labels.activity.toolCallsCount, count);
 }
 
+function itemTimestamp(item: CodexTurnItem): number {
+    if (item.type === 'group') return item.group.timestamp;
+    if (item.type === 'activity') return item.event.timestamp;
+    return item.text.timestamp;
+}
+
+function itemProgressText(item: CodexTurnItem, labels: CodexI18nText): string {
+    const progress = labels.progress;
+    if (item.type === 'group') {
+        if (item.group.kind === 'thinking') return progress.thinking;
+        if (item.group.kind === 'command') return progress.command;
+        if (item.group.kind === 'read') return progress.read;
+        if (item.group.events.some(event => event.kind === 'validation')) return progress.validation;
+        return item.group.kind === 'tool' || item.group.kind === 'subagent'
+            ? progress.tool
+            : progress.working;
+    }
+    if (item.type === 'activity') {
+        if (item.event.kind === 'thinking' || item.event.groupKind === 'thinking') return progress.thinking;
+        if (item.event.kind === 'command' || item.event.groupKind === 'command') return progress.command;
+        if (item.event.groupKind === 'read') return progress.read;
+        if (item.event.kind === 'validation') return progress.validation;
+        return item.event.kind === 'tool' || item.event.kind === 'file' || item.event.kind === 'subagent'
+            ? progress.tool
+            : progress.working;
+    }
+    return progress.working;
+}
+
+function isActivityLikeItem(item: CodexTurnItem): boolean {
+    if (item.type === 'group') return true;
+    if (item.type === 'activity') return item.event.kind !== 'permission';
+    return false;
+}
+
+function isGenericProcessText(content: string): boolean {
+    const text = content.trim().replace(/\s+/g, ' ');
+    if (!text) return false;
+    return /^(?:Analyzing request|Analyzing|Processing request|Processing utility engineering task|Reviewing code|Exploring codebase|Coordinating multi-agent work|Running Script mode pipeline)\.{0,3}$/i.test(text)
+        || /^(?:I am checking the result before answering|I am checking the request and gathering the context I need)\.{0,3}$/i.test(text)
+        || /^(?:我正在检查结果后再回复|我正在分析需求，并收集需要的上下文)\.{0,3}$/.test(text)
+        || /^(?:分析需求中|分析中|探索代码库中|处理请求中|处理泛用工程任务中|代码审查中|多 Agent 协调中|脚本模式运行中)\.{0,3}$/.test(text);
+}
+
+function hasUsefulProcessTextImmediatelyBefore(items: CodexTurnItem[]): boolean {
+    const previous = items[items.length - 1];
+    return previous?.type === 'text'
+        && previous.text.content.trim().length > 0
+        && !isGenericProcessText(previous.text.content);
+}
+
+function injectAutoProcessText(items: CodexTurnItem[], labels: CodexI18nText): CodexTurnItem[] {
+    const output: CodexTurnItem[] = [];
+    for (const item of items) {
+        if (isActivityLikeItem(item) && !hasUsefulProcessTextImmediatelyBefore(output)) {
+            const timestamp = itemTimestamp(item);
+            output.push({
+                type: 'text',
+                text: {
+                    id: `auto-progress-${timestamp}-${output.length}`,
+                    content: itemProgressText(item, labels),
+                    timestamp: Math.max(0, timestamp - 1),
+                    source: 'auto',
+                },
+            });
+        }
+        output.push(item);
+    }
+    return output;
+}
+
 function shouldGroup(kind: CodexGroupKind, count: number): boolean {
-    if (kind === 'tool') return count >= 1;
-    if (kind === 'command') return count >= 2;
-    if (kind === 'read') return count >= 3;
-    if (kind === 'subagent') return count >= 2;
-    return count >= 4;
+    void kind;
+    return count >= 1;
 }
 
 function groupTurnItems(items: CodexTurnItem[], labels: CodexI18nText): CodexTurnItem[] {
@@ -418,12 +531,18 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
     let streamedText = '';
     let thinkingBuffer = '';
     let thinkingStartedAt = 0;
+    let thinkingLastAt = 0;
     let thinkingSourceStep: StepLike | undefined;
     let processTextBuffer = '';
     let processTextStartedAt = 0;
 
     const flushText = () => {
         if (!textBuffer.trim()) {
+            textBuffer = '';
+            textStartedAt = 0;
+            return;
+        }
+        if (shouldSuppressTextSegment(textBuffer, rawItems)) {
             textBuffer = '';
             textStartedAt = 0;
             return;
@@ -448,6 +567,11 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
             processTextStartedAt = 0;
             return;
         }
+        if (shouldSuppressTextSegment(processTextBuffer, rawItems)) {
+            processTextBuffer = '';
+            processTextStartedAt = 0;
+            return;
+        }
         rawItems.push({
             type: 'text',
             text: {
@@ -461,26 +585,30 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
         processTextStartedAt = 0;
     };
 
-    const flushThinking = () => {
-        if (!thinkingBuffer.trim()) {
-            thinkingBuffer = '';
-            thinkingStartedAt = 0;
-            thinkingSourceStep = undefined;
-            return;
+    const flushThinking = (stillStreaming = false) => {
+        const content = thinkingBuffer.trim();
+        if (content && !shouldSuppressTextSegment(content, rawItems) && !isInternalThinkingNote(content)) {
+            rawItems.push({
+                type: 'activity',
+                event: {
+                    id: `thinking-${thinkingStartedAt || Date.now()}-${rawItems.length}`,
+                    kind: 'thinking',
+                    status: options.live && stillStreaming ? 'running' : 'success',
+                    label: labels.activity.thinking,
+                    timestamp: thinkingStartedAt || Date.now(),
+                    durationMs: thinkingLastAt && thinkingStartedAt ? Math.max(0, thinkingLastAt - thinkingStartedAt) : undefined,
+                    groupKind: 'thinking',
+                    sourceStep: thinkingSourceStep,
+                    detailModel: {
+                        preview: content,
+                        statusText: options.live && stillStreaming ? labels.status.processing : labels.status.processed,
+                    },
+                },
+            });
         }
-        rawItems.push({
-            type: 'activity',
-            event: createThinkingEvent(
-                thinkingBuffer,
-                labels,
-                rawItems.length,
-                thinkingStartedAt || Date.now(),
-                thinkingSourceStep,
-                !!options.live,
-            ),
-        });
         thinkingBuffer = '';
         thinkingStartedAt = 0;
+        thinkingLastAt = 0;
         thinkingSourceStep = undefined;
     };
 
@@ -529,6 +657,7 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
                 thinkingStartedAt = ts;
                 thinkingSourceStep = step;
             }
+            thinkingLastAt = ts;
             thinkingBuffer += asString(step.content);
             return;
         }
@@ -540,10 +669,6 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
             if (content && !isInternalThinkingNote(content)) {
                 if (!processTextBuffer) processTextStartedAt = ts;
                 processTextBuffer += content;
-            } else if (content) {
-                thinkingStartedAt = thinkingStartedAt || ts;
-                thinkingSourceStep = thinkingSourceStep || step;
-                thinkingBuffer += content;
             }
             return;
         }
@@ -557,10 +682,13 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
         flushThinking();
         flushProcessText();
 
-        if (type === 'tool_call' || type === 'permission_request') {
+        if (type === 'permission_request') {
+            return;
+        }
+        if (type === 'tool_call') {
             const event = createToolEvent(step, labels, index);
             rawItems.push({ type: 'activity', event });
-            if (type === 'tool_call') rememberPending(event);
+            rememberPending(event);
             return;
         }
         if (type === 'tool_result') {
@@ -590,7 +718,7 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
         }
     });
     flushText();
-    flushThinking();
+    flushThinking(options.live);
     flushProcessText();
 
     let finalText = (content || '').trim();
@@ -600,7 +728,7 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
         else if (finalText.startsWith(normalizedStream)) finalText = finalText.slice(normalizedStream.length).trim();
     }
 
-    const items = groupTurnItems(rawItems, labels);
+    const items = injectAutoProcessText(groupTurnItems(rawItems, labels), labels);
     return {
         summary: summarize(items, finalText, options),
         items,

@@ -1,4 +1,4 @@
-import { Icons, svgIcon, svgIconNoMargin, svgIconColored } from './svgIcons';
+import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
 import { routeLiveStep, buildToolPairHtml, buildToolGroupHtml, buildLocalisationPromptCardHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
 import { groupToolCalls } from './chat/toolPhrases';
 import {
@@ -15,6 +15,9 @@ import {
     type RunSummary as _FmtRunSummary,
 } from './chat/formatters';
 import {
+    artifactFileStatusTone,
+    formatArtifactFileDelta,
+    formatArtifactFileStatusLabel,
     getDiffArtifactFiles,
     restoreArtifactsFromMessages as restoreArtifactsFromHistory,
     sortArtifactsByNewest,
@@ -82,6 +85,53 @@ interface SideDiffEntry {
 interface SideDiffFocus {
     entryId?: string;
     file?: string;
+}
+
+function renderDiffFileStatusBadge(status?: string, classPrefix: 'ds' | 'side-diff' = 'ds'): string {
+    const tone = artifactFileStatusTone(status);
+    const label = formatArtifactFileStatusLabel(status);
+    return `<span class="${classPrefix}-file-status ${classPrefix}-file-status-${tone}">${_fmtEscapeHtml(label)}</span>`;
+}
+
+function renderDiffFileDelta(file: SideDiffFile, classPrefix: 'ds' | 'side-diff' = 'ds'): string {
+    const delta = formatArtifactFileDelta(file);
+    if (file.additions !== undefined || file.deletions !== undefined) {
+        return `<span class="${classPrefix}-file-delta" aria-label="${_fmtEscapeHtml(delta)}">` +
+            `<span class="${classPrefix}-file-additions">+${_fmtEscapeHtml(file.additions ?? 0)}</span>` +
+            `<span class="${classPrefix}-file-deletions">-${_fmtEscapeHtml(file.deletions ?? 0)}</span>` +
+            `</span>`;
+    }
+    return delta
+        ? `<span class="${classPrefix}-file-delta ${classPrefix}-file-delta-preview" title="${_fmtEscapeHtml(delta)}">${_fmtEscapeHtml(delta)}</span>`
+        : '';
+}
+
+function shouldShowSideDiffPreview(file: SideDiffFile): boolean {
+    if (!file.diffPreview) return false;
+    if (file.additions === undefined && file.deletions === undefined) return true;
+    return /truncated|too large|could not|store|read/i.test(file.diffPreview);
+}
+
+function normalizeDiffFilePath(file: string): string {
+    return (file || '').replace(/\\/g, '/').trim().toLowerCase();
+}
+
+function mergeSideDiffFiles(files: SideDiffFile[]): SideDiffFile[] {
+    const merged = new Map<string, SideDiffFile>();
+    const order: string[] = [];
+    for (const file of files) {
+        const key = normalizeDiffFilePath(file.file);
+        if (!key) continue;
+        const previous = merged.get(key);
+        if (!previous) order.push(key);
+        merged.set(key, {
+            ...cloneSideDiffFile(file),
+            status: previous?.status === 'created' || file.status === 'created'
+                ? 'created'
+                : file.status || previous?.status,
+        });
+    }
+    return order.map(key => merged.get(key)!).filter(Boolean);
 }
 
 interface UserMessageInputPayload {
@@ -782,7 +832,49 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function normalizeSideDiffFilePath(file: string): string {
-        return (file || '').replace(/\\/g, '/').trim().toLowerCase();
+        return normalizeDiffFilePath(file);
+    }
+
+    function removeSideDiffFilesFromExisting(files: SideDiffFile[], sourceKey?: string): void {
+        const fileKeys = new Set(files.map(file => normalizeSideDiffFilePath(file.file)).filter(Boolean));
+        if (fileKeys.size === 0) return;
+        for (let index = sideDiffEntries.length - 1; index >= 0; index--) {
+            const entry = sideDiffEntries[index]!;
+            if (entry.pending || entry.sourceKey === sourceKey) continue;
+            const nextFiles = entry.files.filter(file => !fileKeys.has(normalizeSideDiffFilePath(file.file)));
+            if (nextFiles.length === entry.files.length) continue;
+            if (nextFiles.length === 0) {
+                sideDiffEntries.splice(index, 1);
+            } else {
+                entry.files = nextFiles;
+            }
+        }
+    }
+
+    function removeDuplicateDiffSummaryFiles(files: SideDiffFile[], sourceKey?: string): void {
+        const fileKeys = new Set(files.map(file => normalizeSideDiffFilePath(file.file)).filter(Boolean));
+        if (fileKeys.size === 0) return;
+        document.querySelectorAll<HTMLElement>('.diff-summary-card').forEach(card => {
+            if (sourceKey && card.dataset.diffSummaryId === sourceKey) return;
+            let removed = false;
+            card.querySelectorAll<HTMLElement>('.ds-file').forEach(fileEl => {
+                const key = fileEl.dataset.diffFile || '';
+                if (fileKeys.has(key)) {
+                    fileEl.remove();
+                    removed = true;
+                }
+            });
+            if (!card.querySelector('.ds-file')) card.remove();
+            else if (removed) {
+                const remaining = Array.from(card.querySelectorAll<HTMLElement>('.ds-file'));
+                const additions = remaining.reduce((sum, fileEl) => sum + Number(fileEl.dataset.diffAdditions || 0), 0);
+                const deletions = remaining.reduce((sum, fileEl) => sum + Number(fileEl.dataset.diffDeletions || 0), 0);
+                const stats = card.querySelector<HTMLElement>('.ds-stats');
+                if (stats) {
+                    stats.innerHTML = `<span class="ds-add">+${additions}</span> <span class="ds-del">-${deletions}</span> · ${remaining.length} ${uiText.filesCount}`;
+                }
+            }
+        });
     }
 
     function getSideDiffSourceKey(title: string, files: SideDiffFile[], pending?: { messageId: string; isNewFile: boolean }): string {
@@ -857,30 +949,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
     }
 
-    /** SVG file-type icon based on extension. Returns a 14x14 inline SVG string with colored stroke. */
-    function fileTypeIconSvg(filename: string): string {
-        const ext = (filename.split('.').pop() || '').toLowerCase();
-        const colors: Record<string, string> = {
-            ts: '#3178c6', tsx: '#3178c6', js: '#f7df1e', jsx: '#f7df1e',
-            json: '#a8b1c2', css: '#264de4', scss: '#cf649a', less: '#1d365d',
-            py: '#3776ab', rs: '#dea584', go: '#00add8',
-            md: '#519aba', txt: '#888', yml: '#cb171e', yaml: '#cb171e',
-            fs: '#b845fc', fsx: '#b845fc', fsi: '#b845fc',
-            cwt: '#e68a00', log: '#888',
-            html: '#e44d26', xml: '#e44d26', svg: '#ffb13b',
-            sh: '#89e051', ps1: '#2b5b84', bat: '#c1f12e',
-            lua: '#000080', gfx: '#e68a00', gui: '#e68a00', asset: '#e68a00',
-        };
-        const c = colors[ext] || 'currentColor';
-        const codeExts = new Set(['ts', 'tsx', 'js', 'jsx', 'py', 'rs', 'go', 'fs', 'fsx', 'fsi', 'lua', 'sh', 'ps1', 'bat', 'css', 'scss', 'less', 'html', 'xml']);
-        if (codeExts.has(ext)) return svgIconColored('code', c);
-        const dataExts = new Set(['json', 'yml', 'yaml', 'cwt', 'gfx', 'gui', 'asset', 'txt', 'log']);
-        if (dataExts.has(ext)) return svgIconColored('fileText', c);
-        if (ext === 'md') return svgIconColored('file', c);
-        if (ext === 'svg' || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'dds', 'tga'].includes(ext)) return svgIconColored('image', c);
-        return Icons.file;
-    }
-
+    /** Render the side workspace diff overview with per-file change cards. */
     function createSideDiffView(entries: SideDiffEntry[], options: { title: string; focus?: SideDiffFocus }): HTMLElement {
         const view = document.createElement('div');
         view.className = 'side-diff-view';
@@ -922,23 +991,23 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             entryFiles.className = 'side-diff-entry-files';
             for (const file of entry.files) {
                 const item = document.createElement('section');
-                item.className = 'side-diff-file open';
+                item.className = `side-diff-file side-diff-file-${artifactFileStatusTone(file.status)} open`;
                 item.dataset.sideDiffFile = file.file;
                 const fileBaseName = fileBaseNameLocal(file.file);
-                const fileIcon = fileTypeIconSvg(fileBaseName);
                 const isUnseen = unseenDiffFiles.has(file.file);
                 const unseenDot = isUnseen ? '<span class="side-diff-unseen-dot"></span>' : '';
-                const stats = file.additions != null ? `<span class="ds-add">+${file.additions || 0}</span><span class="ds-del">-${file.deletions || 0}</span>` : escapeHtml(file.diffPreview || '');
-                const preview = file.diffPreview ? `<span class="side-diff-file-preview">${escapeHtml(file.diffPreview)}</span>` : '';
+                const statusBadge = renderDiffFileStatusBadge(file.status, 'side-diff');
+                const stats = renderDiffFileDelta(file, 'side-diff');
+                const preview = shouldShowSideDiffPreview(file) ? `<span class="side-diff-file-preview">${escapeHtml(file.diffPreview)}</span>` : '';
                 const fileHeader = document.createElement('button');
                 fileHeader.type = 'button';
                 fileHeader.className = 'side-diff-file-header';
                 fileHeader.innerHTML = `
+                    ${statusBadge}
                     <div class="side-diff-file-main">
                         <span class="side-diff-file-title">
                             ${unseenDot}
                             <span class="side-diff-chevron">&gt;</span>
-                            <span class="side-diff-file-icon">${fileIcon}</span>
                             <span class="side-diff-file-name" title="${escapeHtml(file.file)}">${escapeHtml(fileBaseName)}</span>
                         </span>
                         <span class="side-diff-file-path">${escapeHtml(file.file)}</span>
@@ -1019,10 +1088,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         title = uiText.fileChanges,
         options: { pending?: { messageId: string; isNewFile: boolean }; append?: boolean; sourceKey?: string; focusFile?: string } = {},
     ): void {
+        const mergedFiles = mergeSideDiffFiles(files);
+        if (mergedFiles.length === 0) return;
         // Mark incoming files as unseen
-        for (const f of files) unseenDiffFiles.add(f.file);
-        const sourceKey = options.sourceKey || getSideDiffSourceKey(title, files, options.pending);
-        const entry = createSideDiffEntry(files, title, options.pending, sourceKey);
+        for (const f of mergedFiles) unseenDiffFiles.add(f.file);
+        const sourceKey = options.sourceKey || getSideDiffSourceKey(title, mergedFiles, options.pending);
+        if (!options.pending) removeSideDiffFilesFromExisting(mergedFiles, sourceKey);
+        const entry = createSideDiffEntry(mergedFiles, title, options.pending, sourceKey);
         const activeEntry = upsertSideDiffEntry(entry);
         showSideDiffWorkspace(uiText.fileChanges, sideDiffEntries, {
             entryId: activeEntry.id,
@@ -3781,6 +3853,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         lastSummaryRenderAt: number;
         pendingThinkingRender: boolean;
         pendingTextRender: boolean;
+        pendingCodexRender: boolean;
+        pendingCodexFinalContent: string;
         lastSpecialKey: string | null;
         lastSpecialElement: HTMLElement | null;
     }
@@ -3843,6 +3917,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 lastSummaryRenderAt: 0,
                 pendingThinkingRender: false,
                 pendingTextRender: false,
+                pendingCodexRender: false,
+                pendingCodexFinalContent: '',
                 lastSpecialKey: null,
                 lastSpecialElement: null,
             };
@@ -4026,16 +4102,32 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     interface CodexTurnUiSnapshot {
         turnCollapsed: boolean;
         expandedGroupIds: Set<string>;
+        expandedGroupKeys: Set<string>;
+        expandedRowIds: Set<string>;
+        expandedRowKeys: Set<string>;
         hadExpandedGroup: boolean;
+    }
+
+    function codexGroupStableKey(group: HTMLElement): string {
+        return (group.dataset.activityGroupId || '').replace(/-\d+$/, '');
+    }
+
+    function codexRowStableKey(row: HTMLElement): string {
+        return row.dataset.invocationId || (row.dataset.activityId || '').replace(/-\d+$/, '');
     }
 
     function snapshotCodexTurnUiState(host: HTMLElement): CodexTurnUiSnapshot {
         const turn = host.querySelector(':scope > .codex-turn') as HTMLElement | null;
         const groups = Array.from(host.querySelectorAll<HTMLElement>('.codex-activity-group'));
         const expandedGroups = groups.filter(group => !group.classList.contains('codex-activity-group-collapsed'));
+        const rows = Array.from(host.querySelectorAll<HTMLElement>('.codex-activity-row'));
+        const expandedRows = rows.filter(row => row.querySelector('[data-codex-activity-row-toggle]') && !row.classList.contains('codex-activity-row-collapsed'));
         return {
             turnCollapsed: !!turn?.classList.contains('codex-turn-collapsed'),
             expandedGroupIds: new Set(expandedGroups.map(group => group.dataset.activityGroupId || '').filter(Boolean)),
+            expandedGroupKeys: new Set(expandedGroups.map(codexGroupStableKey).filter(Boolean)),
+            expandedRowIds: new Set(expandedRows.map(row => row.dataset.activityId || '').filter(Boolean)),
+            expandedRowKeys: new Set(expandedRows.map(codexRowStableKey).filter(Boolean)),
             hadExpandedGroup: expandedGroups.length > 0,
         };
     }
@@ -4049,13 +4141,23 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const groups = Array.from(host.querySelectorAll<HTMLElement>('.codex-activity-group'));
         let restoredExpandedGroup = false;
         for (const group of groups) {
-            const shouldExpand = snapshot.expandedGroupIds.has(group.dataset.activityGroupId || '');
+            const shouldExpand = snapshot.expandedGroupIds.has(group.dataset.activityGroupId || '')
+                || snapshot.expandedGroupKeys.has(codexGroupStableKey(group));
             if (shouldExpand) {
                 group.classList.remove('codex-activity-group-collapsed');
                 restoredExpandedGroup = true;
             }
             const toggle = group.querySelector('[data-codex-activity-group-toggle]') as HTMLElement | null;
             if (toggle) toggle.setAttribute('aria-expanded', group.classList.contains('codex-activity-group-collapsed') ? 'false' : 'true');
+        }
+
+        const rows = Array.from(host.querySelectorAll<HTMLElement>('.codex-activity-row'));
+        for (const row of rows) {
+            const shouldExpand = snapshot.expandedRowIds.has(row.dataset.activityId || '')
+                || snapshot.expandedRowKeys.has(codexRowStableKey(row));
+            if (shouldExpand) row.classList.remove('codex-activity-row-collapsed');
+            const toggle = row.querySelector('[data-codex-activity-row-toggle]') as HTMLElement | null;
+            if (toggle) toggle.setAttribute('aria-expanded', row.classList.contains('codex-activity-row-collapsed') ? 'false' : 'true');
         }
 
         if (snapshot.hadExpandedGroup && !restoredExpandedGroup && groups.length > 0) {
@@ -4082,6 +4184,19 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         enhanceTaskLists(host);
     }
 
+    function scheduleCodexLiveTurnRender(state: AgentStreamState, finalContent = ''): void {
+        if (finalContent) state.pendingCodexFinalContent = finalContent;
+        if (state.pendingCodexRender) return;
+        state.pendingCodexRender = true;
+        requestAnimationFrame(() => {
+            state.pendingCodexRender = false;
+            const pendingFinalContent = state.pendingCodexFinalContent;
+            state.pendingCodexFinalContent = '';
+            renderCodexLiveTurn(state, pendingFinalContent);
+            scrollBottom();
+        });
+    }
+
     function appendCodexLiveSyntheticStep(step: any): void {
         if (!currentAssistantDiv?.classList.contains('codex-message')) return;
         const state = getStreamState(undefined);
@@ -4093,8 +4208,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
         state.liveSteps.push(step);
         state.lastStepAt = Date.now();
-        renderCodexLiveTurn(state);
-        scrollBottom();
+        scheduleCodexLiveTurnRender(state);
     }
 
     function flushLiveText(state: AgentStreamState) {
@@ -4211,14 +4325,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 state.isComplete = true;
                 state.completedAt = Date.now();
             }
-            renderCodexLiveTurn(state, s.type === 'subtask_complete' ? (s.content || '') : '');
+            scheduleCodexLiveTurnRender(state, s.type === 'subtask_complete' ? (s.content || '') : '');
             if (s.agentId) {
                 updateSubagentCard(state, s.type === 'subtask_complete' ? (s.content || '') : undefined);
             }
             if (s.transactionCard && s.transactionCard.status === 'pending') {
                 showTransactionCard(s.transactionCard);
             }
-            scrollBottom();
             return;
         }
         const coalesced = coalesceLiveStep(state, s);
@@ -4479,6 +4592,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             if (!group) return;
             const collapsed = group.classList.toggle('codex-activity-group-collapsed');
             groupToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            return;
+        }
+
+        const rowToggle = (e.target as HTMLElement).closest('[data-codex-activity-row-toggle]') as HTMLElement | null;
+        if (rowToggle) {
+            const row = rowToggle.closest('.codex-activity-row') as HTMLElement | null;
+            if (!row) return;
+            const collapsed = row.classList.toggle('codex-activity-row-collapsed');
+            rowToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
             return;
         }
 
@@ -4806,12 +4928,23 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     // ── Diff card ──────────────────────────────────────────────────────────────
     function showAutoWriteCard(file: string, isNewFile: boolean) {
         const fileName = (file || '').split(/[\\/]/).pop() || file;
-        const wrap = document.createElement('div');
+        const fileKey = normalizeSideDiffFilePath(file);
+        const existing = fileKey
+            ? chatArea.querySelector<HTMLElement>(`.auto-write-row[data-auto-write-path="${CSS.escape(fileKey)}"]`)
+            : null;
+        const wrap = existing || document.createElement('div');
+        const nextCount = Number(wrap.dataset.autoWriteCount || 0) + 1;
+        const previousStatus = wrap.dataset.autoWriteStatus || '';
+        const status = previousStatus === 'created' || isNewFile ? 'created' : 'modified';
+        wrap.dataset.autoWritePath = fileKey;
+        wrap.dataset.autoWriteCount = String(nextCount);
+        wrap.dataset.autoWriteStatus = status;
         wrap.className = 'auto-write-row';
-        const tag = isNewFile ? '<span class="aw-tag aw-new">NEW</span>' : '<span class="aw-tag aw-mod">MOD</span>';
-        wrap.innerHTML = `${svgIconNoMargin('sparkles')} ${tag} <span class="aw-file">${escapeHtml(fileName)}</span>`;
+        const tag = status === 'created' ? '<span class="aw-tag aw-new">NEW</span>' : '<span class="aw-tag aw-mod">MOD</span>';
+        const count = nextCount > 1 ? `<span class="aw-count">×${nextCount}</span>` : '';
+        wrap.innerHTML = `${svgIconNoMargin('sparkles')} ${tag} <span class="aw-file" title="${escapeHtml(file)}">${escapeHtml(fileName)}</span>${count}`;
         wrap.title = file;
-        chatArea.appendChild(wrap);
+        if (!existing) chatArea.appendChild(wrap);
         scrollBottom();
     }
     function showPendingWriteCard(file: string, messageId: string, isNewFile: boolean, diff?: Partial<SideDiffFile>) {
@@ -6067,46 +6200,55 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'diffSummary': {
                 if (!msg.files || msg.files.length === 0) break;
-                const summaryFiles: SideDiffFile[] = msg.files.map((f: any) => ({
+                const summaryFiles: SideDiffFile[] = mergeSideDiffFiles(msg.files.map((f: any) => ({
                     file: f.file,
                     status: f.status,
                     diffPreview: f.diffPreview,
                     additions: f.additions,
                     deletions: f.deletions,
                     diffLines: f.diffLines,
-                }));
+                })));
+                if (summaryFiles.length === 0) break;
                 const summarySourceKey = msg.summaryId || getSideDiffSourceKey(uiText.fileChanges, summaryFiles);
+                removeDuplicateDiffSummaryFiles(summaryFiles, summarySourceKey);
                 const card = document.createElement('div');
                 card.className = 'diff-summary-card';
+                card.dataset.diffSummaryId = summarySourceKey;
 
                 // Header with total stats
                 let totalAdd = 0, totalDel = 0;
-                for (const f of msg.files) { totalAdd += f.additions || 0; totalDel += f.deletions || 0; }
+                for (const f of summaryFiles) { totalAdd += f.additions || 0; totalDel += f.deletions || 0; }
                 const collapseSummaryLabel = chatI18n.locale === 'zh-cn' ? '收起文件变更摘要' : 'Collapse file-change summary';
                 const expandSummaryLabel = chatI18n.locale === 'zh-cn' ? '展开文件变更摘要' : 'Expand file-change summary';
                 const headerHtml = `<div class="ds-header">
                     <button class="ds-collapse-btn" type="button" aria-label="${escapeHtml(collapseSummaryLabel)}" aria-expanded="true">▾</button>
                     <span class="ds-title">${svgIconNoMargin('edit')} ${escapeHtml(uiText.fileChanges)}</span>
-                    <span class="ds-stats"><span class="ds-add">+${totalAdd}</span> <span class="ds-del">-${totalDel}</span> · ${msg.files.length} ${uiText.filesCount}</span>
+                    <span class="ds-stats"><span class="ds-add">+${totalAdd}</span> <span class="ds-del">-${totalDel}</span> · ${summaryFiles.length} ${uiText.filesCount}</span>
                 </div>`;
                 card.innerHTML = headerHtml;
 
                 const filesList = document.createElement('div');
                 filesList.className = 'ds-files';
 
-                for (const f of msg.files) {
+                for (const f of summaryFiles) {
                     const fileEl = document.createElement('div');
-                    fileEl.className = 'ds-file';
+                    fileEl.className = `ds-file ds-file-${artifactFileStatusTone(f.status)}`;
+                    fileEl.dataset.diffFile = normalizeSideDiffFilePath(f.file);
+                    fileEl.dataset.diffAdditions = String(f.additions || 0);
+                    fileEl.dataset.diffDeletions = String(f.deletions || 0);
 
                     const baseName = f.file.replace(/\\/g, '/').split('/').pop() || f.file;
                     const relPath = f.file.replace(/\\/g, '/');
-                    const statusIcon = f.status === 'created' ? svgIconNoMargin('filePlus') : f.status === 'deleted' ? svgIconNoMargin('trash') : svgIconNoMargin('pencil');
-                    const statsText = f.additions != null ? `<span class="ds-add">+${f.additions}</span> <span class="ds-del">-${f.deletions || 0}</span>` : escapeHtml(f.diffPreview);
+                    const statusBadge = renderDiffFileStatusBadge(f.status, 'ds');
+                    const statsText = renderDiffFileDelta(f as SideDiffFile, 'ds');
 
                     const fileHeader = document.createElement('div');
                     fileHeader.className = 'ds-file-header';
-                    fileHeader.innerHTML = `<span class="ds-file-icon">${statusIcon}</span>
-                        <span class="ds-file-name" title="${escapeHtml(relPath)}">${escapeHtml(baseName)}</span>
+                    fileHeader.innerHTML = `${statusBadge}
+                        <span class="ds-file-main">
+                            <span class="ds-file-name" title="${escapeHtml(relPath)}">${escapeHtml(baseName)}</span>
+                            <span class="ds-file-path">${escapeHtml(relPath)}</span>
+                        </span>
                         <span class="ds-file-stats">${statsText}</span>
                         ${f.diffLines && f.diffLines.length > 0 ? '<span class="ds-expand-btn">▶</span>' : ''}`;
 

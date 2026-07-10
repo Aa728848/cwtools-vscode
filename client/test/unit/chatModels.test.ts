@@ -1,13 +1,16 @@
 import { expect } from 'chai';
 import {
     artifactPreviewPayload,
+    artifactFileStatusTone,
     filterArtifacts,
+    formatArtifactFileDelta,
     formatArtifactFileStats,
+    formatArtifactFileStatusLabel,
     restoreArtifactsFromMessages,
     sortArtifactsByNewest,
     type ArtifactRecord,
 } from '../../webview/chat/artifacts';
-import { renderArtifactEmpty, renderArtifactRowHtml } from '../../webview/chat/artifactDrawer';
+import { renderArtifactEmpty, renderArtifactFileCardHtml, renderArtifactRowHtml } from '../../webview/chat/artifactDrawer';
 import {
     buildTopicSummaryModel,
     formatTopicMoment,
@@ -49,6 +52,22 @@ describe('chat artifact model helpers', () => {
     it('formats diff file stats', () => {
         expect(formatArtifactFileStats({ file: 'common/a.txt', status: 'modified', additions: 2, deletions: 1 }))
             .to.equal('modified | +2 -1');
+        expect(formatArtifactFileDelta({ file: 'common/a.txt', additions: 2, deletions: 1 }))
+            .to.equal('+2 -1');
+        expect(formatArtifactFileStatusLabel('created')).to.equal('NEW');
+        expect(formatArtifactFileStatusLabel('modified')).to.equal('MOD');
+        expect(formatArtifactFileStatusLabel('deleted')).to.equal('DEL');
+        expect(artifactFileStatusTone('deleted')).to.equal('deleted');
+    });
+
+    it('renders diff file cards with Codex-style status and line counts', () => {
+        const card = renderArtifactFileCardHtml({ file: 'common/foo.txt', status: 'created', additions: 34, deletions: 2 });
+
+        expect(card).to.include('artifact-file-status-created');
+        expect(card).to.include('NEW');
+        expect(card).to.include('artifact-file-additions">+34');
+        expect(card).to.include('artifact-file-deletions">-2');
+        expect(card).to.include('foo.txt');
     });
 
     it('restores artifact records from history steps', () => {

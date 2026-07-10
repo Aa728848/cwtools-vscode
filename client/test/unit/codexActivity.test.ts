@@ -9,6 +9,18 @@ function build(steps: any[], content = '', locale: 'en' | 'zh-cn' = 'en') {
     return buildCodexTurnModel(content, steps, { locale, labels: i18n.codex });
 }
 
+function buildLive(steps: any[], content = '', locale: 'en' | 'zh-cn' = 'en') {
+    const i18n = getChatI18n(locale);
+    return buildCodexTurnModel(content, steps, { locale, labels: i18n.codex, live: true });
+}
+
+function firstGroup(model: ReturnType<typeof build>, kind?: string) {
+    const item = model.items.find(entry => entry.type === 'group' && (!kind || entry.group.kind === kind));
+    expect(item?.type).to.equal('group');
+    if (item?.type !== 'group') throw new Error('expected group');
+    return item.group;
+}
+
 describe('Codex activity view model', () => {
     it('pairs run_command call and result with command details', () => {
         const model = build([
@@ -16,13 +28,13 @@ describe('Codex activity view model', () => {
             { type: 'tool_result', toolName: 'run_command', invocationId: '1', toolResult: { success: true, exitCode: 0, stdout: 'ok' }, timestamp: 2500 },
         ]);
 
-        const item = model.items[0];
-        expect(item?.type).to.equal('group');
-        if (item?.type !== 'group') throw new Error('expected group');
-        const event = item.group.events[0];
+        expect(model.items[0]?.type).to.equal('text');
+        const group = firstGroup(model, 'command');
+        const event = group.events[0];
         expect(event?.kind).to.equal('command');
         expect(event?.status).to.equal('success');
         expect(event?.durationMs).to.equal(1500);
+        expect(event?.subject).to.equal('');
         expect(event?.detailModel?.command?.command).to.equal('npm run compile');
         expect(event?.detailModel?.command?.exitCode).to.equal(0);
     });
@@ -35,11 +47,50 @@ describe('Codex activity view model', () => {
             { type: 'tool_result', toolName: 'run_command', toolResult: { success: true }, timestamp: 1300 },
         ]);
 
-        expect(model.items[0]?.type).to.equal('group');
-        if (model.items[0]?.type !== 'group') throw new Error('expected group');
-        expect(model.items[0].group.kind).to.equal('tool');
-        expect(model.items[0].group.label).to.equal('Tool calls (2)');
-        expect(model.items[0].group.events).to.have.lengthOf(2);
+        const group = firstGroup(model, 'command');
+        expect(group.label).to.equal('Ran 2 commands');
+        expect(group.events).to.have.lengthOf(2);
+    });
+
+    it('adds process text before each activity group when the model did not provide it', () => {
+        const model = build([
+            { type: 'tool_call', toolName: 'run_command', invocationId: '1', toolArgs: { command: 'npm run compile' }, timestamp: 1000 },
+            { type: 'tool_result', toolName: 'run_command', invocationId: '1', toolResult: { success: true }, timestamp: 1100 },
+            { type: 'tool_call', toolName: 'read_file', invocationId: '2', toolArgs: { filePath: 'a.txt' }, timestamp: 1200 },
+            { type: 'tool_result', toolName: 'read_file', invocationId: '2', toolResult: { success: true }, timestamp: 1300 },
+        ]);
+
+        expect(model.items.map(item => item.type)).to.deep.equal(['text', 'group', 'text', 'group']);
+        expect(model.items[0]?.type === 'text' && model.items[0].text.source).to.equal('auto');
+        expect(model.items[2]?.type === 'text' && model.items[2].text.source).to.equal('auto');
+        expect(model.items[0]?.type === 'text' && model.items[0].text.content).to.include('running a command');
+        expect(model.items[2]?.type === 'text' && model.items[2].text.content).to.include('reading the relevant');
+    });
+
+    it('suppresses raw command output that would otherwise stream as transcript text', () => {
+        const model = build([
+            { type: 'tool_call', toolName: 'run_command', invocationId: '1', toolArgs: { command: 'measure tech files' }, timestamp: 1000 },
+            { type: 'tool_result', toolName: 'run_command', invocationId: '1', toolResult: { success: true, stdout: 'Count : 293' }, timestamp: 1200 },
+            { type: 'text_delta', content: 'Count : 293\nAverage :\nSum :\nMaximum :\nMinimum :\nProperty :', timestamp: 1300 },
+        ]);
+
+        expect(model.items.some(item => item.type === 'text' && item.text.content.includes('Count : 293'))).to.equal(false);
+        expect(model.streamedText).to.equal('');
+    });
+
+    it('suppresses command stdout and stderr that arrive as thinking steps', () => {
+        const model = build([
+            { type: 'tool_call', toolName: 'run_command', invocationId: '1', toolArgs: { command: 'python helper.py' }, timestamp: 1000 },
+            { type: 'thinking', content: 'Traceback (most recent call last):\nUnicodeEncodeError: gbk codec failed', timestamp: 1100 },
+            { type: 'tool_result', toolName: 'run_command', invocationId: '1', toolResult: { exitCode: 1, stderr: 'Traceback (most recent call last):\nUnicodeEncodeError: gbk codec failed' }, timestamp: 1200 },
+        ]);
+
+        const visibleText = model.items
+            .map(item => item.type === 'text' ? item.text.content : '')
+            .join('\n');
+        expect(visibleText).to.not.include('Traceback');
+        expect(visibleText).to.not.include('UnicodeEncodeError');
+        expect(firstGroup(model, 'command').status).to.equal('failed');
     });
 
     it('groups three consecutive read tools', () => {
@@ -49,10 +100,8 @@ describe('Codex activity view model', () => {
             { type: 'tool_call', toolName: 'read_file', toolArgs: { filePath: 'c.txt' }, timestamp: 1200 },
         ]);
 
-        expect(model.items[0]?.type).to.equal('group');
-        if (model.items[0]?.type !== 'group') throw new Error('expected group');
-        expect(model.items[0].group.kind).to.equal('tool');
-        expect(model.items[0].group.label).to.equal('Tool calls (3)');
+        const group = firstGroup(model, 'read');
+        expect(group.label).to.equal('Read 3 files');
     });
 
     it('keeps streamed text in transcript and removes duplicate final text', () => {
@@ -66,7 +115,7 @@ describe('Codex activity view model', () => {
         expect(model.finalText).to.equal('');
     });
 
-    it('renders streamed thinking as a status-only activity row', () => {
+    it('renders streamed reasoning_content as a collapsed thinking detail', () => {
         const model = build([
             { type: 'thinking_content', content: 'The', timestamp: 1000 },
             { type: 'thinking_content', content: ' user said', timestamp: 1001 },
@@ -74,13 +123,39 @@ describe('Codex activity view model', () => {
             { type: 'text_delta', content: '你好！', timestamp: 1100 },
         ]);
 
-        expect(model.items).to.have.lengthOf(2);
-        const thinking = model.items[0];
-        expect(thinking?.type).to.equal('activity');
-        if (thinking?.type !== 'activity') throw new Error('expected activity');
-        expect(thinking.event.kind).to.equal('thinking');
-        expect(thinking.event.detail).to.equal(undefined);
-        expect(thinking.event.detailModel?.preview).to.equal('The user said hello.');
+        const thinkingGroup = firstGroup(model, 'thinking');
+        expect(thinkingGroup.label).to.equal('Thinking');
+        expect(thinkingGroup.events[0]?.label).to.equal('Thinking');
+        expect(thinkingGroup.events[0]?.status).to.equal('success');
+        expect(thinkingGroup.events[0]?.detailModel?.preview).to.equal('The user said hello.');
+        expect(model.items.some(item => item.type === 'text' && item.text.content.includes('user said'))).to.equal(false);
+    });
+
+    it('keeps only the active trailing thinking row running in live mode', () => {
+        const stillThinking = buildLive([
+            { type: 'thinking_content', content: 'Checking schema', timestamp: 1000 },
+        ]);
+        expect(firstGroup(stillThinking, 'thinking').events[0]?.status).to.equal('running');
+
+        const movedOn = buildLive([
+            { type: 'thinking_content', content: 'Checking schema', timestamp: 1000 },
+            { type: 'tool_call', toolName: 'query_cwt_schema', invocationId: '1', toolArgs: { target: 'common/buildings' }, timestamp: 1100 },
+        ]);
+        expect(firstGroup(movedOn, 'thinking').events[0]?.status).to.equal('success');
+    });
+
+    it('suppresses legacy tool truncation warnings from transcript text', () => {
+        const warning = '[WARNING: The result of tool query_cwt_schema was automatically truncated to 1000 characters to prevent context window overflow (Original size was 48000 chars).]';
+        const model = build([
+            { type: 'tool_call', toolName: 'query_cwt_schema', invocationId: '1', toolArgs: { target: 'common/buildings' }, timestamp: 1000 },
+            { type: 'tool_result', toolName: 'query_cwt_schema', invocationId: '1', toolResult: { ok: true }, timestamp: 1100 },
+            { type: 'text_delta', content: warning, timestamp: 1200 },
+        ]);
+
+        const visibleText = model.items
+            .map(item => item.type === 'text' ? item.text.content : '')
+            .join('\n');
+        expect(visibleText).to.not.include('automatically truncated to 1000');
     });
 
     it('renders user-facing narrative thinking as process text between activity rows', () => {
@@ -101,9 +176,8 @@ describe('Codex activity view model', () => {
             { type: 'tool_call', toolName: 'query_references', invocationId: '1', toolArgs: { query: 'foo' }, timestamp: 1100 },
         ]);
 
-        expect(model.items[0]?.type).to.equal('activity');
-        if (model.items[0]?.type !== 'activity') throw new Error('expected thinking activity');
-        expect(model.items[0].event.kind).to.equal('thinking');
+        const group = firstGroup(model, 'tool');
+        expect(group.kind).to.equal('tool');
         expect(model.items.some(item => item.type === 'text' && item.text.content.includes('Tool Arg Repair'))).to.equal(false);
     });
 
@@ -136,16 +210,26 @@ describe('Codex activity view model', () => {
             },
         ]);
 
-        const item = model.items[0];
-        expect(item?.type).to.equal('group');
-        if (item?.type !== 'group') throw new Error('expected group');
-        expect(item.group.kind).to.equal('tool');
-        expect(item.group.status).to.equal('waiting');
-        expect(item.group.events[0]?.label).to.equal('Waiting for write confirmation');
-        expect(item.group.events[0]?.subject).to.equal('chatPanel.css');
+        const group = firstGroup(model, 'tool');
+        expect(group.status).to.equal('waiting');
+        expect(group.events[0]?.label).to.equal('Waiting for write confirmation');
+        expect(group.events[0]?.subject).to.equal('chatPanel.css');
     });
 
-    it('renders tool activity as a collapsed grouped card', () => {
+    it('does not count permission requests as command activity rows', () => {
+        const model = build([
+            { type: 'tool_call', toolName: 'run_command', invocationId: '1', toolArgs: { command: 'npm run compile' }, timestamp: 1000 },
+            { type: 'permission_request', toolName: 'run_command', invocationId: 'perm:1', toolArgs: { command: 'npm run compile' }, timestamp: 1050 },
+            { type: 'tool_result', toolName: 'run_command', invocationId: '1', toolResult: { success: true }, timestamp: 1200 },
+        ]);
+
+        const group = firstGroup(model, 'command');
+        expect(group.events).to.have.lengthOf(1);
+        expect(group.events[0]?.label).to.equal('Ran command');
+        expect(group.events.some(event => event.label === 'Waiting for permission')).to.equal(false);
+    });
+
+    it('renders tool activity and command output as collapsed details', () => {
         const i18n = getChatI18n('en');
         const model = build([
             { type: 'tool_call', toolName: 'run_command', invocationId: '1', toolArgs: { command: 'npm run compile' }, timestamp: 1000 },
@@ -159,10 +243,13 @@ describe('Codex activity view model', () => {
         expect(html).to.include('aria-expanded="false"');
         expect(html).to.include('codex-activity-group-items');
         expect(html).to.include('codex-activity-row');
-        expect(html).not.to.include('<details');
-        expect(html).not.to.include('<summary');
-        expect(html).not.to.include('codex-activity-details');
-        expect(html).not.to.include('codex-command-details');
+        expect(html).to.include('codex-activity-row-collapsed');
+        expect(html).to.include('data-codex-activity-row-toggle');
+        expect(html).to.include('codex-activity-row-details');
+        expect(html).to.include('stdout');
+        expect(html).to.include('ok');
+        expect(html).not.to.include('<span class="codex-activity-subject">npm run compile</span>');
+        expect(html).not.to.include('<span class="codex-activity-detail">ok</span>');
     });
 
     it('renders assistant turns with a collapsible status control', () => {
@@ -178,6 +265,8 @@ describe('Codex activity view model', () => {
         expect(html).to.include('data-codex-turn-toggle');
         expect(html).to.include('aria-expanded="true"');
         expect(html).to.include('codex-assistant-body');
+        expect(html).to.include('codex-auto-progress');
+        expect(html).to.include('I am running a command to verify the current state');
         expect(html).to.include('codex-final-answer');
     });
 
@@ -190,8 +279,7 @@ describe('Codex activity view model', () => {
         ], '', 'zh-cn');
 
         expect(model.summary.label).to.include('已处理');
-        expect(model.items[0]?.type).to.equal('group');
-        if (model.items[0]?.type !== 'group') throw new Error('expected group');
-        expect(model.items[0].group.label).to.equal('工具调用（2）');
+        const group = firstGroup(model, 'command');
+        expect(group.label).to.include('2');
     });
 });

@@ -56,12 +56,44 @@ export function fileBaseName(file: string): string {
 export function formatArtifactFileStats(file: DiffArtifactFileRecord): string {
     const parts: string[] = [];
     if (file.status) parts.push(file.status);
-    if (file.additions !== undefined || file.deletions !== undefined) {
-        parts.push(`+${file.additions ?? 0} -${file.deletions ?? 0}`);
-    } else if (file.diffPreview) {
-        parts.push(file.diffPreview);
-    }
+    const delta = formatArtifactFileDelta(file);
+    if (delta) parts.push(delta);
     return parts.join(' | ');
+}
+
+export function formatArtifactFileDelta(file: DiffArtifactFileRecord): string {
+    if (file.additions !== undefined || file.deletions !== undefined) {
+        return `+${file.additions ?? 0} -${file.deletions ?? 0}`;
+    }
+    return file.diffPreview || '';
+}
+
+export function formatArtifactFileStatusLabel(status?: string): string {
+    const normalized = (status || '').trim().toLowerCase();
+    switch (normalized) {
+        case 'created':
+        case 'new':
+        case 'added':
+            return 'NEW';
+        case 'modified':
+        case 'changed':
+        case 'mod':
+            return 'MOD';
+        case 'deleted':
+        case 'removed':
+        case 'delete':
+            return 'DEL';
+        default:
+            return normalized ? normalized.slice(0, 3).toUpperCase() : 'CHG';
+    }
+}
+
+export function artifactFileStatusTone(status?: string): 'created' | 'modified' | 'deleted' | 'unknown' {
+    const normalized = (status || '').trim().toLowerCase();
+    if (normalized === 'created' || normalized === 'new' || normalized === 'added') return 'created';
+    if (normalized === 'deleted' || normalized === 'removed' || normalized === 'delete') return 'deleted';
+    if (normalized === 'modified' || normalized === 'changed' || normalized === 'mod') return 'modified';
+    return 'unknown';
 }
 
 export const getDiffArtifactFiles = getDiffArtifactFilesForWebview;

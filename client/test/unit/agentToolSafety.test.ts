@@ -1116,6 +1116,42 @@ describe('agent tool topic artifacts', () => {
         expect(result.stdout).to.include('ok');
     });
 
+    it('keeps run_command stdout and stderr out of streamed UI steps', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const scriptDir = path.join(workspaceRoot, 'tools');
+        const scriptPath = path.join(scriptDir, 'emit-output.js');
+        fs.mkdirSync(scriptDir, { recursive: true });
+        fs.writeFileSync(scriptPath, [
+            "console.log('VISIBLE_STDOUT_MARKER');",
+            "console.error('VISIBLE_STDERR_MARKER');",
+            "console.log(process.env.PYTHONIOENCODING || '');",
+        ].join('\n'), 'utf8');
+        const steps: any[] = [];
+
+        const result = await handler.runCommand({
+            command: 'node "tools/emit-output.js"',
+            timeoutMs: 10000,
+        }, {
+            runnerOptions: {
+                mode: 'utility',
+                topicId: 'media-topic',
+                abortSignal: new AbortController().signal,
+            },
+            onPermissionRequest: async () => true,
+            onStep: (step: any) => steps.push(step),
+        } as any);
+
+        if (result.exitCode !== 0) {
+            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
+        }
+        expect(result.stdout).to.include('VISIBLE_STDOUT_MARKER');
+        expect(result.stdout).to.include('utf-8');
+        expect(result.stderr).to.include('VISIBLE_STDERR_MARKER');
+        const streamed = steps.map(step => String(step.content ?? '')).join('\n');
+        expect(streamed).to.not.include('VISIBLE_STDOUT_MARKER');
+        expect(streamed).to.not.include('VISIBLE_STDERR_MARKER');
+    });
+
     it('normalizes backslash-escaped quoted scratch script paths before running commands', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'scratch');

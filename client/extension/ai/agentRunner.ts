@@ -1121,8 +1121,7 @@ export class AgentRunner {
 
         const strContent = this.serializeToolResult(result);
 
-        // Auto-truncation threshold: 16000 chars (approx. 4000-8000 tokens)
-        const LIMIT = 16000;
+        const LIMIT = this.getToolResultArchiveLimit(toolName);
         if (strContent.length <= LIMIT) {
             await runLedger.appendEvent(
                 runId,
@@ -1180,7 +1179,7 @@ export class AgentRunner {
             return {
                 ok: true,
                 truncated: true,
-                message: `[WARNING: The result of tool ${toolName} was automatically truncated to 1000 characters to prevent context window overflow (Original size was ${strContent.length} chars). The full, un-truncated output has been securely archived on local disk for safety.]`,
+                message: `Tool result for ${toolName} was archived because it is large (${strContent.length} chars). Use the preview and resultRef, or retry with narrower arguments if more detail is needed.`,
                 preview,
                 fullResultLocalPath: relativeDiskPath,
                 resultRef: relativeDiskPath
@@ -1200,10 +1199,22 @@ export class AgentRunner {
             return {
                 ok: true,
                 truncated: true,
-                message: `[WARNING: The result of tool ${toolName} was truncated due to massive size (${strContent.length} chars).]`,
+                message: `Tool result for ${toolName} was truncated because it is very large (${strContent.length} chars). Retry with narrower arguments if more detail is needed.`,
                 preview: strContent.substring(0, 1000)
             };
         }
+    }
+
+    private getToolResultArchiveLimit(toolName: string): number {
+        const structuredReadTools = new Set([
+            'query_cwt_schema',
+            'query_rules',
+            'query_types',
+            'query_override_modes',
+            'search_rule_capabilities',
+            'explore_pdx_project',
+        ]);
+        return structuredReadTools.has(toolName) ? 60000 : 16000;
     }
 
     private serializeToolResult(result: any): string {

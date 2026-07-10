@@ -1074,9 +1074,12 @@ export class ExternalToolHandler {
         const shell = isWindows
             ? 'powershell.exe'
             : '/bin/sh';
+        const commandText = isWindows
+            ? '$OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $OutputEncoding; ' + args.command
+            : args.command;
         const shellArgs = isWindows
-            ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', args.command]
-            : ['-c', args.command];
+            ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', commandText]
+            : ['-c', commandText];
         const agentWorkspaceDir = getTopicStorageDir(topicId, this.ctx.workspaceRoot);
         const scratchDir = getTopicScratchDir(topicId, this.ctx.workspaceRoot);
         const helperScript = scratchDir ? path.join(scratchDir, 'agent_helper.py') : '';
@@ -1094,6 +1097,10 @@ export class ExternalToolHandler {
             CWT_AGENT_SCRATCH_DIR: scratchDir,
             CWT_AGENT_HELPER_SCRIPT: helperScript,
             CWT_AGENT_MEDIA_DIR: mediaDir,
+            PYTHONUTF8: '1',
+            PYTHONIOENCODING: 'utf-8',
+            LC_ALL: process.env.LC_ALL || 'C.UTF-8',
+            LANG: process.env.LANG || 'C.UTF-8',
         };
         // Env allowlist: 'log' shadow-reports what enforcement would drop; 'enforce' filters.
         let spawnEnv = commandEnv;
@@ -1193,7 +1200,7 @@ export class ExternalToolHandler {
                 const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
                 onStep?.({
                     type: 'orchestrator_progress',
-                    content: aiText(`run_command still running (${elapsed}s): ${args.command.slice(0, 120)}`, `run_command 正在执行中 (${elapsed}s): ${args.command.slice(0, 120)}`),
+                    content: aiText(`Command is still running (${elapsed}s).`, `命令仍在执行中 (${elapsed}s)。`),
                     timestamp: Date.now(),
                 });
             }, 15_000);
@@ -1211,23 +1218,10 @@ export class ExternalToolHandler {
             proc.stdout?.on('data', (chunk: Buffer) => {
                 const text = chunk.toString();
                 stdoutBuf += text;
-                // Stream chunks to UI in real time
-                const onStep = context?.onStep;
-                onStep?.({
-                    type: 'thinking',
-                    content: text.substring(0, 200),
-                    timestamp: Date.now(),
-                });
             });
 
             proc.stderr?.on('data', (chunk: Buffer) => {
                 stderrBuf += chunk.toString();
-                const onStep = context?.onStep;
-                onStep?.({
-                    type: 'thinking',
-                    content: chunk.toString().substring(0, 200),
-                    timestamp: Date.now(),
-                });
             });
 
             proc.on('close', code => {

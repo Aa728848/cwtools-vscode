@@ -14,7 +14,7 @@ export type CodexActivityKind =
     | 'artifact'
     | 'message';
 
-export type CodexGroupKind = 'command' | 'read' | 'subagent' | 'tool';
+export type CodexGroupKind = 'command' | 'read' | 'subagent' | 'thinking' | 'tool';
 
 export interface CodexCommandDetail {
     command?: string;
@@ -70,7 +70,7 @@ export interface CodexTextSegment {
     id: string;
     content: string;
     timestamp: number;
-    source: 'text_delta' | 'message';
+    source: 'text_delta' | 'message' | 'auto';
 }
 
 export type CodexTurnItem =

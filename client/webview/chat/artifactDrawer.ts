@@ -1,13 +1,16 @@
 import { svgIconNoMargin } from '../svgIcons';
 import { escapeHtml } from './formatters';
 import {
+    artifactFileStatusTone,
     artifactPreviewPayload,
     fileBaseName,
     filterArtifacts,
-    formatArtifactFileStats,
+    formatArtifactFileDelta,
+    formatArtifactFileStatusLabel,
     getDiffArtifactFiles,
     type ArtifactFilter,
     type ArtifactRecord,
+    type DiffArtifactFileRecord,
 } from './artifacts';
 import type { ChatI18nText } from './i18n';
 
@@ -152,13 +155,8 @@ export function toggleDiffArtifactDetails(
         for (const file of files) {
             const fileRow = document.createElement('button');
             fileRow.type = 'button';
-            fileRow.className = 'artifact-file-row';
-            const stats = formatArtifactFileStats(file);
-            fileRow.innerHTML = `
-                <span class="artifact-file-name" title="${escapeHtml(file.file)}">${escapeHtml(fileBaseName(file.file))}</span>
-                <span class="artifact-file-path">${escapeHtml(file.file)}</span>
-                ${stats ? `<span class="artifact-file-stats">${escapeHtml(stats)}</span>` : ''}
-            `;
+            fileRow.className = `artifact-file-row artifact-file-${artifactFileStatusTone(file.status)}`;
+            fileRow.innerHTML = renderArtifactFileCardHtml(file);
             fileRow.addEventListener('click', event => {
                 event.stopPropagation();
                 callbacks.openArtifact(artifact.id, file.file);
@@ -168,4 +166,27 @@ export function toggleDiffArtifactDetails(
     }
     row.insertAdjacentElement('afterend', details);
     row.classList.add('expanded');
+}
+
+export function renderArtifactFileCardHtml(file: DiffArtifactFileRecord): string {
+    const statusTone = artifactFileStatusTone(file.status);
+    const statusLabel = formatArtifactFileStatusLabel(file.status);
+    const delta = formatArtifactFileDelta(file);
+    const hasLineCounts = file.additions !== undefined || file.deletions !== undefined;
+    const stats = hasLineCounts
+        ? `<span class="artifact-file-delta" aria-label="${escapeHtml(delta)}">
+                <span class="artifact-file-additions">+${escapeHtml(file.additions ?? 0)}</span>
+                <span class="artifact-file-deletions">-${escapeHtml(file.deletions ?? 0)}</span>
+            </span>`
+        : delta
+            ? `<span class="artifact-file-delta artifact-file-delta-preview" title="${escapeHtml(delta)}">${escapeHtml(delta)}</span>`
+            : '';
+    return `
+        <span class="artifact-file-status artifact-file-status-${statusTone}">${escapeHtml(statusLabel)}</span>
+        <span class="artifact-file-main">
+            <span class="artifact-file-name" title="${escapeHtml(file.file)}">${escapeHtml(fileBaseName(file.file))}</span>
+            <span class="artifact-file-path">${escapeHtml(file.file)}</span>
+        </span>
+        ${stats}
+    `;
 }

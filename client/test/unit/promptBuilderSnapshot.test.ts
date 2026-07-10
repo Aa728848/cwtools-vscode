@@ -81,6 +81,24 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('common/storm_types');
     });
 
+    it('requires visible process updates for main, orchestrator, and slim prompts', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const builder = new PromptBuilder(process.cwd());
+        const buildPrompt = builder.buildSystemPromptForMode('build');
+        const orchestratorPrompt = builder.buildSystemPromptForMode('orchestrator');
+        const slimPrompt = builder.buildSlimSystemPromptForMode('build');
+
+        for (const prompt of [buildPrompt, orchestratorPrompt, slimPrompt]) {
+            expect(prompt).to.include('Visible Process Updates');
+            expect(prompt).to.include('Codex-style visible process narrative');
+            expect(prompt).to.include('what you will do next, how you will do it, and why');
+            expect(prompt).to.include('Avoid generic filler');
+            expect(prompt).to.include('Do NOT expose chain-of-thought');
+            expect(prompt).to.include('tool parameters');
+            expect(prompt).to.include('stdout/stderr dumps');
+        }
+    });
+
     it('验证 explore 模式的系统提示词关键特征', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());

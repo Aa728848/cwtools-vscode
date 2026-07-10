@@ -34,6 +34,76 @@ function statusIcon(status: string): string {
     return svgIconNoMargin('refresh');
 }
 
+function hasDetailValue(value: unknown): boolean {
+    if (value == null) return false;
+    if (typeof value === 'string') return value.trim().length > 0;
+    if (typeof value === 'object') return Object.keys(value as Record<string, unknown>).length > 0;
+    return true;
+}
+
+function detailText(value: unknown): string {
+    if (typeof value === 'string') return value;
+    try {
+        return JSON.stringify(value, null, 2);
+    } catch {
+        return String(value ?? '');
+    }
+}
+
+function clippedDetailText(value: unknown, max = 12000): string {
+    const text = detailText(value);
+    return text.length > max ? `${text.slice(0, max)}\n...` : text;
+}
+
+function withoutLargeOutput(value: unknown): unknown {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+    const outputKeys = new Set(['stdout', 'stderr', 'output']);
+    const result: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+        if (!outputKeys.has(key)) result[key] = entry;
+    }
+    return result;
+}
+
+function renderInlineDetail(label: string, value: unknown): string {
+    if (!hasDetailValue(value)) return '';
+    return `<div class="codex-detail-row">
+        <span class="codex-detail-label">${escapeHtml(label)}</span>
+        <code class="codex-detail-inline">${escapeHtml(detailText(value))}</code>
+    </div>`;
+}
+
+function renderBlockDetail(label: string, value: unknown, className = ''): string {
+    if (!hasDetailValue(value)) return '';
+    const extraClass = className ? ` ${escapeHtml(className)}` : '';
+    return `<div class="codex-detail-row codex-detail-row-block">
+        <span class="codex-detail-label">${escapeHtml(label)}</span>
+        <pre class="codex-detail-block${extraClass}"><code>${escapeHtml(clippedDetailText(value))}</code></pre>
+    </div>`;
+}
+
+function renderActivityDetails(event: CodexActivityEvent, options: CodexRenderOptions): string {
+    const details = event.detailModel;
+    if (!details) return '';
+    const labels = options.labels.details;
+    const command = details.command;
+    const rows = [
+        renderBlockDetail(labels.command, command?.command, 'codex-command-text'),
+        renderInlineDetail(labels.cwd, command?.cwd),
+        renderInlineDetail(labels.exitCode, command?.exitCode),
+        renderInlineDetail(labels.target, details.targetPath),
+        renderInlineDetail(labels.status, details.statusText && details.statusText !== event.detail ? details.statusText : ''),
+        renderBlockDetail(labels.stdout, command?.stdout, 'codex-command-output'),
+        renderBlockDetail(labels.stderr, command?.stderr, 'codex-command-error'),
+        renderBlockDetail(labels.output, command?.output, 'codex-command-output'),
+        renderBlockDetail(labels.preview, !command && details.preview && details.preview !== event.detail ? details.preview : ''),
+        renderBlockDetail(labels.arguments, command ? '' : details.args),
+        renderBlockDetail(labels.result, withoutLargeOutput(details.result)),
+    ].filter(Boolean);
+    if (!rows.length) return '';
+    return `<div class="codex-activity-row-details">${rows.join('')}</div>`;
+}
+
 export function renderActivityRow(event: CodexActivityEvent, options: CodexRenderOptions, nested = false): string {
     const duration = event.durationMs && event.durationMs > 0 ? formatDuration(event.durationMs) : '';
     const subject = event.subject ? `<span class="codex-activity-subject">${escapeHtml(event.subject)}</span>` : '';
@@ -41,9 +111,15 @@ export function renderActivityRow(event: CodexActivityEvent, options: CodexRende
     const invocationAttr = event.invocationId ? ` data-invocation-id="${escapeHtml(event.invocationId)}"` : '';
     const toolAttr = event.toolName ? ` data-tool-name="${escapeHtml(event.toolName)}"` : '';
     const nestedClass = nested ? ' codex-activity-child-row' : '';
-    void options;
-    return `<div class="codex-activity-row${nestedClass} codex-activity-${event.kind} codex-status-${event.status}" data-activity-id="${escapeHtml(event.id)}" data-activity-kind="${escapeHtml(event.kind)}"${invocationAttr}${toolAttr}>
-        <div class="codex-activity-summary">
+    const details = renderActivityDetails(event, options);
+    const detailsClass = details ? ' codex-activity-row-collapsed' : '';
+    const summaryTag = details ? 'button' : 'div';
+    const summaryAttrs = details
+        ? ' type="button" data-codex-activity-row-toggle aria-expanded="false"'
+        : '';
+    const disclosure = details ? '<span class="codex-activity-disclosure" aria-hidden="true">›</span>' : '';
+    return `<div class="codex-activity-row${nestedClass}${detailsClass} codex-activity-${event.kind} codex-status-${event.status}" data-activity-id="${escapeHtml(event.id)}" data-activity-kind="${escapeHtml(event.kind)}"${invocationAttr}${toolAttr}>
+        <${summaryTag}${summaryAttrs} class="codex-activity-summary${details ? ' codex-activity-row-toggle' : ''}">
             <span class="codex-activity-icon">${svgIconNoMargin(iconNameFor(event))}</span>
             <span class="codex-activity-main">
                 <span class="codex-activity-title">${escapeHtml(event.label)}${subject}</span>
@@ -51,7 +127,9 @@ export function renderActivityRow(event: CodexActivityEvent, options: CodexRende
             </span>
             ${duration ? `<span class="codex-activity-duration">${escapeHtml(duration)}</span>` : ''}
             <span class="codex-activity-status">${statusIcon(event.status)}</span>
-        </div>
+            ${disclosure}
+        </${summaryTag}>
+        ${details}
     </div>`;
 }
 
@@ -78,7 +156,8 @@ export function renderCodexTurnItem(item: CodexTurnItem, options: CodexRenderOpt
     if (item.type === 'group') return renderActivityGroup(item.group, options);
     if (item.type === 'activity') return renderActivityRow(item.event, options);
     const body = options.renderMarkdown ? options.renderMarkdown(item.text.content) : escapeHtml(item.text.content);
-    return `<div class="codex-process-text markdown-body" data-text-source="${item.text.source}">${body}</div>`;
+    const autoClass = item.text.source === 'auto' ? ' codex-auto-progress' : '';
+    return `<div class="codex-process-text${autoClass} markdown-body" data-text-source="${item.text.source}">${body}</div>`;
 }
 
 export function renderCodexTurnItems(items: CodexTurnItem[], options: CodexRenderOptions): string {

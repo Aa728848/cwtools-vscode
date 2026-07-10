@@ -17,7 +17,7 @@ const POSIX_BASELINE = [
 ];
 
 // Prefix allowances for toolchain runtime variables.
-const PREFIX_BASELINE = ['DOTNET_', 'LC_', 'NODE_', 'NPM_CONFIG_', 'JAVA_', 'POWERSHELL_', 'VSCODE_'];
+const PREFIX_BASELINE = ['DOTNET_', 'LC_', 'NODE_', 'NPM_CONFIG_', 'JAVA_', 'POWERSHELL_', 'PYTHON', 'VSCODE_'];
 
 export interface SandboxedEnvResult {
     env: Record<string, string | undefined>;

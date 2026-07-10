@@ -114,6 +114,14 @@ export interface ChatI18nText {
             status: string;
             noDetails: string;
         };
+        progress: {
+            thinking: string;
+            command: string;
+            read: string;
+            tool: string;
+            validation: string;
+            working: string;
+        };
     };
     annotations: {
         plan: AnnotationI18nText;
@@ -352,6 +360,14 @@ const EN: ChatI18nText = {
             target: 'Target',
             status: 'Status',
             noDetails: 'No additional details.',
+        },
+        progress: {
+            thinking: 'I am organizing the request and current context before choosing the next concrete step.',
+            command: 'I am running a command to verify the current state, then I will summarize the conclusion without showing raw output.',
+            read: 'I am reading the relevant project files so the next step is grounded in the current code.',
+            tool: 'I am calling the project tool that can gather the needed context for the next step.',
+            validation: 'I am checking the result now so I can report whether it is ready or needs another fix.',
+            working: 'I am checking the request and choosing the next concrete step.',
         },
     },
     annotations: {
@@ -627,6 +643,14 @@ const ZH_CN: ChatI18nText = {
             target: '目标',
             status: '状态',
             noDetails: '没有更多详情。',
+        },
+        progress: {
+            thinking: '我先梳理请求和当前上下文，确定下一步要检查的位置。',
+            command: '我先运行命令验证当前状态，随后只总结结论，不把原始输出展开到聊天里。',
+            read: '我先读取相关项目文件，用当前代码作为下一步判断依据。',
+            tool: '我先调用对应的项目工具收集上下文，再根据结果决定下一步。',
+            validation: '我先校验当前结果，确认可以交付还是还需要继续修正。',
+            working: '我先分析请求，并确定下一步具体要检查什么。',
         },
     },
     annotations: {

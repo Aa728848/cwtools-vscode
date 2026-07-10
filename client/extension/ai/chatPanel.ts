@@ -80,6 +80,12 @@ const TEMP_DIFF_SCRIPT_EXTENSIONS = new Set(['.bat', '.cmd', '.cjs', '.js', '.mj
 const TEMP_DIFF_SCRIPT_DIR_NAMES = new Set(['.tmp', 'scratch', 'temp', 'tmp']);
 const TEMP_DIFF_SCRIPT_NAME_PATTERN = /^(?:agent_helper|helper|tmp|temp|scratch|batch|bulk|replace|rewrite|fix|verify|check|search|scan)(?:[_\-.].*)?\.(?:bat|cmd|cjs|js|mjs|ps1|py|sh)$/i;
 
+function normalizeSnapshotFilePath(filePath: string, workspaceRoot = getProjectWorkspaceRoot()): string {
+    const resolved = path.isAbsolute(filePath) ? filePath : path.join(workspaceRoot, filePath);
+    const normalized = path.normalize(resolved);
+    return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
 function isTempScriptSnapshot(snapshot: FileSnapshot, workspaceRoot = getProjectWorkspaceRoot()): boolean {
     const relativePath = path.relative(workspaceRoot, snapshot.filePath).replace(/\\/g, '/');
     const segments = relativePath.split('/').filter(Boolean).map(segment => segment.toLowerCase());
@@ -1116,8 +1122,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         const files: DiffSummaryFile[] = [];
         const artifactFiles: DiffArtifactFile[] = [];
-
+        const netSnapshots = new Map<string, FileSnapshot>();
         for (const snap of snapshots) {
+            const key = normalizeSnapshotFilePath(snap.filePath);
+            if (!netSnapshots.has(key)) netSnapshots.set(key, snap);
+        }
+
+        for (const snap of netSnapshots.values()) {
             if (isTempScriptSnapshot(snap)) continue;
             const currentContentExists = fs.existsSync(snap.filePath);
             let currentContent: string | null = null;
@@ -1432,14 +1443,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private _recordFileSnapshot(filePath: string): void {
         const snapshots = this._currentMessageSnapshots;
         if (!snapshots) return;
-        if (snapshots.some(s => s.filePath === filePath)) return; // already recorded
+        const workspaceRoot = getProjectWorkspaceRoot();
+        const resolvedFilePath = path.isAbsolute(filePath) ? filePath : path.join(workspaceRoot, filePath);
+        const normalizedPath = normalizeSnapshotFilePath(resolvedFilePath, workspaceRoot);
+        if (snapshots.some(s => normalizeSnapshotFilePath(s.filePath, workspaceRoot) === normalizedPath)) return; // already recorded
         let previousContent: string | null = null;
         try {
-            if (fs.existsSync(filePath)) {
-                previousContent = fs.readFileSync(filePath, 'utf-8');
+            if (fs.existsSync(resolvedFilePath)) {
+                previousContent = fs.readFileSync(resolvedFilePath, 'utf-8');
             }
         } catch { /* treat as new file */ }
-        snapshots.push({ filePath, previousContent });
+        snapshots.push({ filePath: resolvedFilePath, previousContent });
     }
 
 

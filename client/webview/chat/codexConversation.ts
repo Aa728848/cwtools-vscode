@@ -2,7 +2,7 @@ import { escapeHtml } from './formatters';
 import { buildCodexTurnModel } from './codexActivity';
 import { renderCodexTurnItems } from './codexToolRows';
 import type { ChatI18nText } from './i18n';
-import type { CodexTurnModel, CodexTurnSummary } from './codexTypes';
+import type { CodexTurnItem, CodexTurnModel, CodexTurnSummary } from './codexTypes';
 
 export interface RenderCodexAssistantTurnOptions {
     i18n: ChatI18nText;
@@ -35,12 +35,40 @@ export function renderFinalAnswer(content: string, options: RenderCodexAssistant
     return `<div class="codex-final-answer msg-bubble markdown-body">${options.renderMarkdown(content)}</div>`;
 }
 
+function firstActivityKind(items: CodexTurnItem[]): string {
+    for (const item of items) {
+        if (item.type === 'group') return item.group.kind;
+        if (item.type === 'activity') return item.event.groupKind || item.event.kind;
+    }
+    return 'working';
+}
+
+function hasProcessText(items: CodexTurnItem[]): boolean {
+    return items.some(item => item.type === 'text' && item.text.content.trim().length > 0);
+}
+
+function renderAutoProgress(model: CodexTurnModel, options: RenderCodexAssistantTurnOptions): string {
+    if (hasProcessText(model.items) || model.items.length === 0) return '';
+    const progress = options.i18n.codex.progress;
+    const kind = firstActivityKind(model.items);
+    const text = kind === 'command'
+        ? progress.command
+        : kind === 'read'
+            ? progress.read
+            : kind === 'validation'
+                ? progress.validation
+                : kind === 'tool'
+                    ? progress.tool
+                    : progress.working;
+    return `<div class="codex-process-text codex-auto-progress markdown-body">${options.renderMarkdown(text)}</div>`;
+}
+
 export function renderAssistantTurnCodex(content: string, steps: Record<string, unknown>[] | undefined, options: RenderCodexAssistantTurnOptions): string {
     const model = buildCodexAssistantTurnModel(content, steps, options);
     const streamClass = options.live ? ' codex-turn-live' : '';
     const subagentClass = options.isSubagentView ? ' codex-turn-subagent' : '';
     const activity = model.items.length > 0
-        ? `<div class="codex-activity-stream">${renderCodexTurnItems(model.items, {
+        ? `<div class="codex-activity-stream">${renderAutoProgress(model, options)}${renderCodexTurnItems(model.items, {
             labels: options.i18n.codex,
             renderMarkdown: options.renderMarkdown,
         })}</div>`

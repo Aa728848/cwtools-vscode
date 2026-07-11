@@ -41,7 +41,7 @@ import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compa
 import type { CompactMessagesOptions } from './contextBudget';
 import { AGENT, SOURCE, aiText } from './messages';
 import { ErrorReporter } from './errorReporter';
-import { getProjectWorkspaceRoot, getTopicStorageDir, getTopicStorageDirCandidates } from './workspacePaths';
+import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from './workspacePaths';
 import {
     filterToolDefinitionsForMode,
     resolveMaxToolIterations,
@@ -56,6 +56,7 @@ import { runLedger } from './runner/runLedger';
 import { atomicWriteText, sha256Text } from './runner/durableStorage';
 import { loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
 import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT, type CompactionBudgetOptions } from './runner/compaction';
+import { refreshLiveVsCodeContext } from './runner/liveContext';
 import { executeFallbackRetry, isFallbackEligibleApiError } from './runner/fallbackPolicy';
 import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles, toolScheduler } from './runner/toolScheduler';
 import { buildToolInvocation } from './runner/toolInvocation';
@@ -187,6 +188,8 @@ export interface AgentRunnerOptions {
     model?: string;
     /** Dynamic maximum context tokens for this run */
     maxContextTokens?: number;
+    /** Optional durable-goal aggregate token budget for the run. */
+    tokenBudget?: number;
     /** Override the reasoning-loop iteration limit. Used by orchestrator role budgets. */
     maxIterations?: number;
     /** Agent mode: build (default), plan (read-only), explore (parallel read), general (research) */
@@ -446,7 +449,7 @@ export class AgentRunner {
             const pathModule = await import('path');
             const wsRoot = getProjectWorkspaceRoot();
 
-            const checkpointDir = getTopicStorageDir(topicId || 'default', wsRoot);
+            const checkpointDir = getPrivateTopicStorageDir(topicId || 'default', wsRoot);
             if (!checkpointDir) return;
             if (!fs.existsSync(checkpointDir)) fs.mkdirSync(checkpointDir, { recursive: true });
 
@@ -486,7 +489,7 @@ export class AgentRunner {
             const pathModule = await import('path');
             const wsRoot = getProjectWorkspaceRoot();
 
-            const checkpointPath = getTopicStorageDirCandidates(topicId, wsRoot)
+            const checkpointPath = getPrivateTopicStorageDirCandidates(topicId, wsRoot)
                 .map(dir => pathModule.join(dir, 'checkpoint.json'))
                 .find(candidate => fs.existsSync(candidate));
             if (!checkpointPath) return null;
@@ -540,7 +543,7 @@ export class AgentRunner {
             const fs = await import('fs');
             const pathModule = await import('path');
             const wsRoot = getProjectWorkspaceRoot();
-            for (const resumeDir of getTopicStorageDirCandidates(topicId, wsRoot)) {
+            for (const resumeDir of getPrivateTopicStorageDirCandidates(topicId, wsRoot)) {
                 const resumePath = pathModule.join(resumeDir, 'resume_state.json');
                 if (fs.existsSync(resumePath)) {
                     fs.unlinkSync(resumePath);
@@ -1199,6 +1202,7 @@ export class AgentRunner {
         );
         if (compacted === history) return { compacted: false, steps };
         history.splice(0, history.length, ...compacted);
+        refreshLiveVsCodeContext(history);
         return { compacted: true, steps };
     }
 
@@ -1245,14 +1249,14 @@ export class AgentRunner {
         try {
             const pathModule = await import('path');
             const wsRoot = getProjectWorkspaceRoot();
-            const runDir = pathModule.join(getTopicStorageDir(topicId, wsRoot), 'runs', runId, 'large_results');
+            const runDir = pathModule.join(getPrivateTopicStorageDir(topicId, wsRoot), 'runs', runId, 'large_results');
 
             const filePath = pathModule.join(runDir, `${invocationId}_result.json`);
             const archivedResult = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
             const resultSha256 = sha256Text(archivedResult);
             await atomicWriteText(filePath, archivedResult);
 
-            const relativeDiskPath = pathModule.relative(wsRoot, filePath);
+            const relativeDiskPath = pathModule.posix.join('runs', runId, 'large_results', `${invocationId}_result.json`);
             const preview = strContent.substring(0, 1000);
             await runLedger.appendEvent(
                 runId,
@@ -1398,7 +1402,7 @@ export class AgentRunner {
 
     private loadPinnedContextSummary(topicId: string, runId: string): { blocked?: string[]; decisions?: string[] } | undefined {
         try {
-            const summaryPath = path.join(getTopicStorageDir(topicId, getProjectWorkspaceRoot()), 'runs', runId, 'summary.json');
+            const summaryPath = path.join(getPrivateTopicStorageDir(topicId, getProjectWorkspaceRoot()), 'runs', runId, 'summary.json');
             if (!fs.existsSync(summaryPath)) return undefined;
             const parsed = JSON.parse(fs.readFileSync(summaryPath, 'utf-8'));
             return {
@@ -1571,6 +1575,14 @@ export class AgentRunner {
 
         while (iteration < maxToolIterations) {
             options?.abortSignal?.throwIfAborted();
+            if (options?.tokenBudget && tokenAccumulator && tokenAccumulator.total >= options.tokenBudget) {
+                emitStep({
+                    type: 'error',
+                    content: `Durable goal token budget reached (${tokenAccumulator.total}/${options.tokenBudget}).`,
+                    timestamp: Date.now(),
+                });
+                return `The durable goal token budget was reached (${tokenAccumulator.total}/${options.tokenBudget}). Progress is checkpointed; increase the goal budget or continue in a new turn.`;
+            }
             iteration++;
             if (runMetrics) runMetrics.iterations = iteration;
             if (options?.topicId) {
@@ -1665,6 +1677,7 @@ export class AgentRunner {
                         { status: 'running' }
                     );
                     this.compactMessagesInPlace(messages, toolResultBudget, compactionOptions);
+                    refreshLiveVsCodeContext(messages);
                     let afterTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
                         + activeToolSchemaTokens;
                     if (afterTokens > midLoopThreshold && afterTokens >= loopTokens * 0.90) {
@@ -1675,6 +1688,7 @@ export class AgentRunner {
                             tokenAccumulator,
                             { reservedTokens: activeToolSchemaTokens, force: true },
                         );
+                        refreshLiveVsCodeContext(messages);
                         afterTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
                             + activeToolSchemaTokens;
                     }
@@ -2838,6 +2852,7 @@ export class AgentRunner {
                         { status: 'running' }
                     );
                     this.compactMessagesInPlace(messages, toolResultBudget, compactionOptions);
+                    refreshLiveVsCodeContext(messages);
                     let afterEmergencyTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
                         + activeToolSchemaTokens;
                     if (afterEmergencyTokens > contextLimit * MID_LOOP_COMPACTION_RATIO) {
@@ -2848,6 +2863,7 @@ export class AgentRunner {
                             tokenAccumulator,
                             { reservedTokens: activeToolSchemaTokens, force: true },
                         );
+                        refreshLiveVsCodeContext(messages);
                         afterEmergencyTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
                             + activeToolSchemaTokens;
                     }

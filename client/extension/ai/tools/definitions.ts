@@ -730,7 +730,9 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                 properties: {
                     command: { type: 'string', description: 'The shell command to execute' },
                     cwd: { type: 'string', description: 'Working directory (defaults to workspace root)' },
-                    timeoutMs: { type: 'number', description: 'Timeout in milliseconds (default 30000, max 120000)' },
+                    timeoutMs: { type: 'number', description: 'Timeout in milliseconds for captured execution (default 30000, max 3600000)' },
+                    executionMode: { type: 'string', enum: ['captured', 'terminal'], description: 'captured runs through the enforced command broker and returns output. terminal launches a visible, interactive VS Code terminal and requires requestEscalation=true because terminal processes are not OS-sandboxed.' },
+                    networkAccess: { type: 'boolean', description: 'Allow the sandboxed command to access the network. Default false; true always requires approval.' },
                     requestEscalation: { type: 'boolean', description: 'Set to true ONLY if you previously attempted this command and it was blocked by the security sandbox. This triggers a high-danger prompt asking the user for a one-time privilege override.' },
                 },
                 required: ['command'],
@@ -941,13 +943,15 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'save_memory',
-            description: 'Persist a learned rule, convention, or important discovery to the current conversation topic memory file (.cwtools-ai/<topicId>/.cwtools-ai-memory.md). This memory persists when the topic is reopened. Use this sparingly for genuinely important, reusable insights (e.g. coding conventions, namespace patterns, recurring user preferences). Do NOT save transient/task-specific data.',
+            description: 'Persist a private structured memory with provenance, confidence, usage tracking, secret redaction, expiry, and bounded consolidation. Use sparingly for genuinely reusable rules or preferences. Project-shareable rules belong in AGENTS.md or an explicit workflow; do not save transient task state.',
             parameters: {
                 type: 'object',
                 properties: {
                     key: { type: 'string', description: 'Short descriptive label for this memory entry (e.g. "Event namespace convention").' },
                     content: { type: 'string', description: 'The rule or insight to persist. Be concise.' },
                     priority: { type: 'string', enum: ['high', 'normal', 'low'], description: 'Priority level. High = never pruned; low = pruned first when file grows too large. Default: normal.' },
+                    confidence: { type: 'number', description: 'Confidence from 0 to 1. Default 0.8.' },
+                    expiresInDays: { type: 'number', description: 'Optional expiry in days for facts that may become stale.' },
                 },
                 required: ['key', 'content'],
             },

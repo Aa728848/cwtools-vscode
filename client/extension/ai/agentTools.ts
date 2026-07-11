@@ -38,6 +38,8 @@ import { saveProjectWorkflow } from './workflowRegistry';
 import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
 import { aiText } from './messages';
 import { getTopicStorageDir } from './workspacePaths';
+import { TOOL_REGISTRY } from './tools/registry';
+import { runAgentHooks } from './runner/hookRunner';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
 const TOOL_TIMEOUTS: Record<string, number> = {
@@ -448,6 +450,21 @@ export class AgentToolExecutor {
             };
         }
 
+        const registryEntry = TOOL_REGISTRY.get(toolName as any);
+        if (vs.workspace.isTrusted === false && registryEntry) {
+            const blockedEffects = new Set(['workspace_write', 'network', 'shell', 'git', 'media', 'mcp']);
+            if (blockedEffects.has(registryEntry.effect) || registryEntry.mutating) {
+                return {
+                    success: false,
+                    error: aiText(
+                        `Tool '${toolName}' is unavailable while this workspace is in Restricted Mode. Trust the workspace to enable commands, network access, and mutations.`,
+                        `工作区处于受限模式，工具“${toolName}”不可用。请先信任工作区，再启用命令、网络访问和修改操作。`,
+                    ),
+                    workspaceTrustRequired: true,
+                };
+            }
+        }
+
         if (mode === 'plan') {
             const guard = validatePlanModeToolUse(toolName, args, this.workspaceRoot, context?.runnerOptions?.topicId);
             if (!guard.allowed) {
@@ -566,6 +583,13 @@ export class AgentToolExecutor {
                 } as import('./types').AgentToolContext
                 : undefined;
 
+            await runAgentHooks('preToolUse', {
+                toolName,
+                args,
+                runId: context?.runnerOptions?.runRecord?.runId,
+                threadId: context?.runnerOptions?.threadId,
+            });
+
             const racePromises: Promise<unknown>[] = [
                 this.executeInternal(toolName, args, toolContext),
                 abortPromise,
@@ -573,6 +597,12 @@ export class AgentToolExecutor {
 
             try {
                 const result = await Promise.race(racePromises);
+                await runAgentHooks('postToolUse', {
+                    toolName,
+                    success: !(result && typeof result === 'object' && ('error' in result || (result as any).success === false)),
+                    runId: context?.runnerOptions?.runRecord?.runId,
+                    threadId: context?.runnerOptions?.threadId,
+                });
                 const writtenFiles = this.extractResultWrittenFiles(result);
 
                 // ReadTracker read/write synchronization and Blackboard invalidation cascade (T2.2 & B3)

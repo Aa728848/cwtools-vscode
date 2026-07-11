@@ -382,6 +382,21 @@ describe('RunLedger Unit Tests', () => {
         expect((await fresh.listThreads('topic_threads_fork')).map(thread => thread.threadId)).to.include('thread_fork');
     });
 
+    it('forks a durable thread at the requested historical run', async () => {
+        const { runLedger } = loadRunLedgerModule();
+        const { ThreadStore } = loadThreadStoreModule();
+        const store = new ThreadStore();
+        const first = await runLedger.createRun('topic_exact_fork', 'build', 'first', undefined, 'first', { threadId: 'thread_exact', turnId: 'turn_1' });
+        await store.recordRun(first);
+        const second = await runLedger.createRun('topic_exact_fork', 'build', 'second', first.runId, 'second', { threadId: 'thread_exact', turnId: 'turn_2' });
+        await store.recordRun(second);
+
+        const fork = await store.forkThread('topic_exact_fork', 'thread_exact', 'thread_from_first', 'topic_from_first', first.runId, 1);
+        expect(fork?.currentRunId).to.equal(first.runId);
+        expect(fork?.runIds).to.deep.equal([first.runId]);
+        expect(fork?.forkedFromMessageIndex).to.equal(1);
+    });
+
     it('TurnRunner records a durable thread for each started turn', async () => {
         const { runLedger } = loadRunLedgerModule();
         const { TurnRunner } = loadTurnRunnerModule();
@@ -476,6 +491,69 @@ describe('RunLedger Unit Tests', () => {
         const thread = await store.markStatus('topic_protocol', 'thread_missing', 'active');
         expect(thread).to.equal(undefined);
     });
+
+    it('fails closed when no verified command sandbox backend exists', () => {
+        const { BrokeredSandboxRunner, detectSandboxBackend, SandboxUnavailableError } = require('../../extension/ai/runner/sandboxRunner') as typeof import('../../extension/ai/runner/sandboxRunner');
+        expect(detectSandboxBackend('aix')).to.equal(undefined);
+        if (process.platform === 'win32' && !detectSandboxBackend()) {
+            const runner = new BrokeredSandboxRunner((() => { throw new Error('must not spawn'); }) as any);
+            expect(() => runner.spawn({
+                command: 'cmd.exe',
+                args: ['/c', 'echo test'],
+                options: { cwd: process.cwd() },
+                profile: { sandboxMode: 'workspace-write', networkAccess: false },
+            })).to.throw(SandboxUnavailableError);
+        }
+    });
+
+    it('enforces private history age retention', async () => {
+        const { configureHistoryPolicy, enforceHistoryRetention } = require('../../extension/ai/runner/historyPolicy') as typeof import('../../extension/ai/runner/historyPolicy');
+        const root = fs.mkdtempSync(path.join(TEMP_BASE, 'history-policy-'));
+        try {
+            const oldFile = path.join(root, 'topics', 't', 'runs', 'old.json');
+            const newFile = path.join(root, 'topics', 't', 'runs', 'new.json');
+            fs.mkdirSync(path.dirname(oldFile), { recursive: true });
+            fs.writeFileSync(oldFile, 'old');
+            fs.writeFileSync(newFile, 'new');
+            const oldTime = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+            fs.utimesSync(oldFile, oldTime, oldTime);
+            configureHistoryPolicy({ persistence: 'full', maxAgeDays: 2, maxBytes: 1024 });
+            const result = await enforceHistoryRetention(root);
+            expect(result.deletedFiles).to.equal(1);
+            expect(fs.existsSync(oldFile)).to.equal(false);
+            expect(fs.existsSync(newFile)).to.equal(true);
+        } finally {
+            configureHistoryPolicy({ persistence: 'full', maxAgeDays: 30, maxBytes: 256 * 1024 * 1024 });
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('routes new run state to configured VS Code private storage while retaining legacy fallback', async () => {
+        const { RunLedger } = loadRunLedgerModule();
+        const workspacePaths = require('../../extension/ai/workspacePaths') as typeof import('../../extension/ai/workspacePaths');
+        const privateRoot = path.join(workspaceRoot, '.private-agent-state');
+        workspacePaths.configurePrivateAgentStorage(privateRoot);
+        try {
+            const ledger = new (RunLedger as any)() as InstanceType<typeof RunLedger>;
+            const run = await ledger.createRun('topic_private', 'build', 'private prompt', undefined, 'private prompt');
+            expect(fs.existsSync(path.join(privateRoot, 'topics', 'topic_private', 'runs', run.runId, 'run_state.json'))).to.equal(true);
+            expect(fs.existsSync(path.join(workspaceRoot, '.cwtools-ai', 'topic_private', 'runs', run.runId))).to.equal(false);
+        } finally {
+            workspacePaths.configurePrivateAgentStorage(undefined);
+        }
+    });
+
+    it('persists chat topic metadata without message content when metadata mode is selected', () => {
+        const { ChatTopicManager } = loadChatTopicsModule();
+        const storageRoot = path.join(workspaceRoot, '.chat-private');
+        const manager = new ChatTopicManager({ fsPath: storageRoot } as any, () => {}, 'metadata');
+        manager.createNewTopic('metadata topic');
+        manager.addHistoryMessage({ role: 'user', content: 'sensitive prompt', timestamp: Date.now() });
+        manager.saveTopics();
+        const stored = JSON.parse(fs.readFileSync(path.join(storageRoot, 'ai-chat-topics.json'), 'utf8'));
+        expect(stored[0].title).to.include('metadata topic');
+        expect(stored[0].messages).to.deep.equal([]);
+    });
 });
 
 function loadRunLedgerModule() {
@@ -548,6 +626,10 @@ function loadAgentRuntimeModule() {
     return loadModuleWithVscodeStub('../../extension/ai/runner/agentRuntime') as typeof import('../../extension/ai/runner/agentRuntime');
 }
 
+function loadChatTopicsModule() {
+    return loadModuleWithVscodeStub('../../extension/ai/chatTopics') as typeof import('../../extension/ai/chatTopics');
+}
+
 function loadBlackboardModule() {
     delete require.cache[require.resolve('../../extension/ai/orchestrator/blackboard')];
     return require('../../extension/ai/orchestrator/blackboard') as typeof import('../../extension/ai/orchestrator/blackboard');
@@ -587,5 +669,13 @@ async function waitForEvent(
 const vscodeStub = {
     workspace: {
         workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
+    },
+    window: {
+        createOutputChannel: () => ({
+            appendLine: () => undefined,
+            show: () => undefined,
+            clear: () => undefined,
+            dispose: () => undefined,
+        }),
     },
 };

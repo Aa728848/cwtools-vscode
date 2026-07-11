@@ -7,7 +7,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { getTopicStorageDir } from '../workspacePaths';
+import { getPrivateTopicStorageDir } from '../workspacePaths';
 import { aiText } from '../messages';
 
 // ─── Context type ────────────────────────────────────────────────────────────
@@ -31,7 +31,7 @@ export class MemoryToolHandler {
             return { success: false, message: 'Invalid arguments' };
         } else if (value.length > 500) {
             const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId ?? 'session';
-            const blackboardDir = path.join(getTopicStorageDir(topicId, this.ctx.workspaceRoot), 'blackboard');
+            const blackboardDir = path.join(getPrivateTopicStorageDir(topicId, this.ctx.workspaceRoot), 'blackboard');
             fs.mkdirSync(blackboardDir, { recursive: true });
             const safeKey = key.replace(/[^a-zA-Z0-9_-]/g, '_');
             const filePath = path.join(blackboardDir, `${safeKey}.txt`);
@@ -79,7 +79,7 @@ export class MemoryToolHandler {
     }
 
     /** save_memory tool execution */
-    async saveMemory(args: { key: string; content: string; priority?: 'high' | 'normal' | 'low' }, context?: import('../types').AgentToolContext): Promise<unknown> {
+    async saveMemory(args: { key: string; content: string; priority?: 'high' | 'normal' | 'low'; confidence?: number; expiresInDays?: number }, context?: import('../types').AgentToolContext): Promise<unknown> {
         const { key, content, priority } = args;
         if (!key || !content) {
             return { success: false, message: 'Missing key or content' };
@@ -87,7 +87,17 @@ export class MemoryToolHandler {
             const { MemoryParser } = await import('../memoryParser');
             const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId;
             const parser = new MemoryParser(this.ctx.workspaceRoot, topicId);
-            return await parser.appendMemory({ key, content, priority: priority || 'normal' });
+            return await parser.appendMemory({
+                key,
+                content,
+                priority: priority || 'normal',
+                confidence: args.confidence,
+                expiresAt: args.expiresInDays && args.expiresInDays > 0
+                    ? Date.now() + args.expiresInDays * 24 * 60 * 60 * 1000
+                    : undefined,
+                source: `run:${context?.runnerOptions?.runRecord?.runId ?? 'unknown'}`,
+                scope: 'private',
+            });
         }
     }
 

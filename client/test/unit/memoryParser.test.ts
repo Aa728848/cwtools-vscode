@@ -52,6 +52,34 @@ describe('MemoryParser topic storage', () => {
         expect(prompt).to.include('TOPIC_MEMORY');
         expect(prompt).to.include('LEGACY_MEMORY');
     });
+
+    it('persists structured provenance, redacts secrets, tracks usage, and expires stale entries', async () => {
+        const { MemoryParser } = loadMemoryParserModule();
+        const parser = new MemoryParser(workspaceRoot, 'topic_structured');
+        await parser.appendMemory({
+            key: 'private convention',
+            content: 'Use namespace alpha. token=sk-abcdefghijklmnopqrstuvwxyz123456',
+            priority: 'high',
+            confidence: 0.95,
+            source: 'run:test',
+        });
+        await parser.appendMemory({
+            key: 'expired fact',
+            content: 'This should disappear.',
+            priority: 'low',
+            expiresAt: Date.now() - 1,
+        });
+
+        const prompt = parser.getMemoryPrompt();
+        expect(prompt).to.include('private convention');
+        expect(prompt).to.include('[REDACTED_API_KEY]');
+        expect(prompt).to.not.include('expired fact');
+
+        const structured = JSON.parse(fs.readFileSync(parser.getStructuredMemoryFilePath(), 'utf8'));
+        expect(structured.entries).to.have.lengthOf(1);
+        expect(structured.entries[0].source).to.equal('run:test');
+        expect(structured.entries[0].usageCount).to.equal(1);
+    });
 });
 
 function loadMemoryParserModule() {

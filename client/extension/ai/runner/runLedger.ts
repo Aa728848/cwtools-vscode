@@ -1,11 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
-import { getAiStorageRootCandidates, getTopicStorageDir } from '../workspacePaths';
+import { getPrivateTopicRootCandidates, getPrivateTopicStorageDir } from '../workspacePaths';
 import { ErrorReporter } from '../errorReporter';
 import { AgentRunRecord } from '../types';
 import { isPathInsideOrEqual } from '../../pathScope';
 import { atomicWriteJson, readJsonWithBackup, sha256Text } from './durableStorage';
+import { getHistoryPolicy } from './historyPolicy';
 
 const RUN_LEDGER_FIELD_MAX_CHARS = 6000;
 const RUN_STATE_MAX_LOAD_BYTES = 4_000_000;
@@ -144,7 +145,7 @@ export class RunLedger {
         const runId = `run_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
         RunLedger.latestActiveRunId = runId;
         const now = Date.now();
-        const hasUserPrompt = typeof userPrompt === 'string';
+        const hasUserPrompt = typeof userPrompt === 'string' && getHistoryPolicy().persistence === 'full';
         const promptRef = hasUserPrompt ? 'prompt.json' : undefined;
         const promptSha256 = hasUserPrompt ? sha256Text(userPrompt) : undefined;
         const record: AgentRunRecord = {
@@ -431,11 +432,23 @@ export class RunLedger {
         return loaded.value.prompt;
     }
 
+    public async readResumeTranscript(runId: string, topicId?: string): Promise<import('../types').ChatMessage[] | undefined> {
+        const snapshot = await this.getOrLoadSnapshot(runId, topicId);
+        if (!snapshot) return undefined;
+        const runDir = this.resolveRunDir(snapshot.run.topicId, runId);
+        const transcriptPath = path.join(runDir, 'resume_transcript.json');
+        return readJsonWithBackup<import('../types').ChatMessage[]>(
+            transcriptPath,
+            (value): value is import('../types').ChatMessage[] => Array.isArray(value),
+        )?.value;
+    }
+
     public async writeJsonArtifact(
         runId: string,
         relativePath: string,
         value: unknown,
     ): Promise<{ ref: string; sha256: string } | undefined> {
+        if (getHistoryPolicy().persistence === 'off') return undefined;
         const run = this.activeRuns.get(runId);
         if (!run || path.isAbsolute(relativePath)) return undefined;
 
@@ -459,7 +472,7 @@ export class RunLedger {
     }
 
     private getRunDir(topicId: string, runId: string): string {
-        const topicDir = getTopicStorageDir(topicId);
+        const topicDir = getPrivateTopicStorageDir(topicId);
         return path.join(topicDir, 'runs', runId);
     }
 
@@ -472,11 +485,12 @@ export class RunLedger {
         event: AgentRunEvent,
         stateSnapshot: AgentRunRecord,
     ): Promise<void> {
+        if (getHistoryPolicy().persistence === 'off') return Promise.resolve();
         const previous = this.persistenceQueues.get(run.runId) ?? Promise.resolve();
         const current = previous
             .catch(() => {})
             .then(async () => {
-                await this.writeEventToDisk(run, event);
+                if (getHistoryPolicy().persistence === 'full') await this.writeEventToDisk(run, event);
                 await this.writeStateToDisk(stateSnapshot);
             });
         this.persistenceQueues.set(run.runId, current);
@@ -513,7 +527,10 @@ export class RunLedger {
                 await fs.promises.mkdir(dir, { recursive: true });
             }
             const file = path.join(dir, 'run_state.json');
-            await atomicWriteJson(file, run);
+            const persisted = getHistoryPolicy().persistence === 'metadata'
+                ? { ...run, userPromptPreview: '', steps: [], context: undefined }
+                : run;
+            await atomicWriteJson(file, persisted);
         } catch (e) {
             ErrorReporter.warn('RunLedger', `Failed to write state to disk for run ${run.runId}`, e);
         }
@@ -688,7 +705,7 @@ export class RunLedger {
             if (fs.existsSync(runDir)) return { topicId, runDir };
         }
 
-        for (const root of getAiStorageRootCandidates()) {
+        for (const root of getPrivateTopicRootCandidates()) {
             const topics = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => []);
             for (const topic of topics) {
                 if (!topic.isDirectory()) continue;
@@ -701,7 +718,7 @@ export class RunLedger {
 
     public async listRecentRunsFromDisk(limit = 50): Promise<AgentRunRecord[]> {
         const candidates: Array<{ topicId: string; runId: string; runDir: string; mtimeMs: number }> = [];
-        for (const root of getAiStorageRootCandidates()) {
+        for (const root of getPrivateTopicRootCandidates()) {
             const topics = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => []);
             for (const topic of topics) {
                 if (!topic.isDirectory()) continue;
@@ -731,7 +748,7 @@ export class RunLedger {
      */
     public async loadLatestRunForTopic(topicId: string): Promise<AgentRunRecord | undefined> {
         try {
-            const topicDir = getTopicStorageDir(topicId);
+            const topicDir = getPrivateTopicStorageDir(topicId);
             const runsDir = path.join(topicDir, 'runs');
             if (!fs.existsSync(runsDir)) return undefined;
 
@@ -765,7 +782,7 @@ export class RunLedger {
         const maxAgeDays = options.maxAgeDays ?? 14;
         const maxFiles = options.maxFiles ?? 50;
         const cutoff = Date.now() - Math.max(0, maxAgeDays) * 24 * 60 * 60 * 1000;
-        const topicDir = getTopicStorageDir(topicId);
+        const topicDir = getPrivateTopicStorageDir(topicId);
         const runsDir = path.join(topicDir, 'runs');
         if (!fs.existsSync(runsDir)) return result;
 

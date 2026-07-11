@@ -295,9 +295,9 @@ export async function routeWebviewMessage(
         case 'requestCompactedMemory': {
             const activeTopicId = provider.topicManager.currentTopic?.id || 'default';
             // wsRoot is resolved from getProjectWorkspaceRoot
-            const { getProjectWorkspaceRoot, getTopicStorageDir } = await import('../workspacePaths');
+            const { getProjectWorkspaceRoot, getPrivateTopicStorageDir } = await import('../workspacePaths');
             const root = getProjectWorkspaceRoot();
-            const topicStorage = getTopicStorageDir(activeTopicId, root);
+            const topicStorage = getPrivateTopicStorageDir(activeTopicId, root);
             
             let markdownContent = '';
             if (topicStorage) {

@@ -147,7 +147,7 @@ client/
       chatInit.ts             /init command handler
       gameKnowledge.ts        Per-game PDXScript knowledge blocks (9 games)
       skills.ts               SKILL.md index (built-in/user/project) + run_skill body loading
-      memoryParser.ts         Topic-scoped .cwtools-ai-memory.md long-term memory
+      memoryParser.ts         Private structured long-term memory and bounded consolidation
       workspacePaths.ts       AI storage root, topic/scratch dirs
       workspaceSandbox.ts     Path sanitization and scope classification
       runnerPolicy.ts         Mode-based tool filtering and iteration limits
@@ -279,7 +279,8 @@ Key constraints for tools:
 - `runnerPolicy.ts` manages mode-based tool filters, iteration limits, and output budgets.
 - `projectProfile.ts` scans the workspace during `/init`, extracting localization language, sampling namespaces, and determining games.
 - `gameKnowledge.ts` stores game-specific PDXScript rules (9 games total).
-- `memoryParser.ts` manages topic-scoped `.cwtools-ai/<topicId>/.cwtools-ai-memory.md` files (up to ~4000 characters).
+- `memoryParser.ts` manages private topic memory under VS Code workspace storage, with provenance, confidence, expiry, secret redaction, usage tracking, and a ~12000-character prompt bound. Project-shareable rules belong in `AGENTS.md` or explicit workflows.
+- Agent mutations, shell, network, Git, media, and MCP tools must honor VS Code Workspace Trust. Captured commands must use `runner/sandboxRunner.ts`; never label direct `child_process.spawn` as sandboxed.
 - For sub-tasks modifying only `.yml` localization files, the agent is automatically promoted to `loc_writer`, and general write tools are disabled.
 - Custom Provider uses `cwtools.ai.customApiFormat` to support 4 network protocols. Custom endpoints are stored in `cwtools.ai.providerEndpoints`.
 - `usageTracker.ts` persists token usage and costs across sessions.
@@ -509,7 +510,7 @@ client/
       chatInit.ts             /init command handler
       gameKnowledge.ts        Per-game PDXScript knowledge blocks (9 games)
       skills.ts               SKILL.md index (built-in/user/project) + run_skill body loading
-      memoryParser.ts         Topic-scoped .cwtools-ai-memory.md long-term memory
+      memoryParser.ts         Private structured long-term memory and bounded consolidation
       workspacePaths.ts       AI storage root, topic/scratch dirs
       workspaceSandbox.ts     Path sanitization and scope classification
       runnerPolicy.ts         Mode-based tool filtering and iteration limits
@@ -641,7 +642,8 @@ Webview 运行在浏览器沙盒中：
 - `runnerPolicy.ts` 集中管理模式级工具过滤、每种模式的迭代次数上限、slim sub-agent 输出预算。
 - `projectProfile.ts` 处理 `/init` 命令的项目扫描：目录检测、本地化语言/编码检测、命名空间/标识符采样、游戏检测、prompt card 生成和 `queryProjectProfile` 工具处理器。
 - `gameKnowledge.ts` 按 languageId 提供 9 款游戏的 PDXScript 知识块，由 `promptBuilder.ts` 动态选择注入。
-- `memoryParser.ts` 管理 topic 级长期记忆 `.cwtools-ai/<topicId>/.cwtools-ai-memory.md`（旧的工作区根目录文件仍作为读取回退）：按优先级自动裁剪，上限 ~4000 字符。
+- `memoryParser.ts` 在 VS Code workspace storage 中管理 topic 级私有结构化记忆，记录来源、置信度、过期、使用次数并做 secret 脱敏，提示词注入上限约 12000 字符；需要项目共享的规则应写入 `AGENTS.md` 或显式工作流。
+- Agent 的写入、命令、网络、Git、媒体和 MCP 工具必须遵守 VS Code Workspace Trust；captured 命令必须经过 `runner/sandboxRunner.ts`，不得把直接 `child_process.spawn` 标记为沙箱执行。
 - 多 Agent 协作中，`plannedFiles` 全部为本地化 `.yml` 的子任务会被自动升级为 `loc_writer` 角色，且沙盒会屏蔽通用写工具，只允许 `write_localisation`。
 - Custom Provider 通过 `cwtools.ai.customApiFormat` 支持四种线协议（`openai-chat-completions`、`openai-responses`、`anthropic-messages`、`gemini-generate-content`）；endpoint 按 Provider 存储在 `cwtools.ai.providerEndpoints`，旧的全局 `cwtools.ai.endpoint` 由 `migrateLegacyEndpoint()` 自动迁移，不要重新引入。
 - `usageTracker.ts` 跨会话持久化累计 token 用量、成本和缓存统计数据。

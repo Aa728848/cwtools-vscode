@@ -37,6 +37,17 @@
         "onCommand:cwtools.openTexturePreview",
         "onStartupFinished"
     ],
+    "capabilities": {
+        "untrustedWorkspaces": {
+            "supported": "limited",
+            "description": "%capabilities.untrustedWorkspaces.description%",
+            "restrictedConfigurations": [
+                "stellarisLanguageServices.ai.developer.disableSecuritySandbox",
+                "stellarisLanguageServices.ai.shell.envAllowlistAdditions",
+                "stellarisLanguageServices.ai.hooks.enabled"
+            ]
+        }
+    },
     "contributes": {
         "grammars": [
             {
@@ -311,6 +322,16 @@
             {
                 "command": "cwtools.ai.replayRun",
                 "title": "%commands.stellarisLanguageServices.ai.replayRun.title%",
+                "category": "Stellaris AI"
+            },
+            {
+                "command": "cwtools.ai.clearPrivateHistory",
+                "title": "%commands.stellarisLanguageServices.ai.clearPrivateHistory.title%",
+                "category": "Stellaris AI"
+            },
+            {
+                "command": "cwtools.ai.exportDiagnostics",
+                "title": "%commands.stellarisLanguageServices.ai.exportDiagnostics.title%",
                 "category": "Stellaris AI"
             },
             {
@@ -1029,6 +1050,40 @@
                     "type": "boolean",
                     "default": false,
                     "description": "%configuration.stellarisLanguageServices.ai.developer.disableSecuritySandbox.description%"
+                },
+                "stellarisLanguageServices.ai.history.persistence": {
+                    "scope": "window",
+                    "type": "string",
+                    "enum": ["off", "metadata", "full"],
+                    "default": "full",
+                    "description": "%configuration.stellarisLanguageServices.ai.history.persistence.description%"
+                },
+                "stellarisLanguageServices.ai.history.maxAgeDays": {
+                    "scope": "window",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 3650,
+                    "default": 30,
+                    "description": "%configuration.stellarisLanguageServices.ai.history.maxAgeDays.description%"
+                },
+                "stellarisLanguageServices.ai.history.maxBytes": {
+                    "scope": "window",
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 268435456,
+                    "description": "%configuration.stellarisLanguageServices.ai.history.maxBytes.description%"
+                },
+                "stellarisLanguageServices.ai.history.redactLocalPaths": {
+                    "scope": "window",
+                    "type": "boolean",
+                    "default": true,
+                    "description": "%configuration.stellarisLanguageServices.ai.history.redactLocalPaths.description%"
+                },
+                "stellarisLanguageServices.ai.hooks.enabled": {
+                    "scope": "window",
+                    "type": "boolean",
+                    "default": false,
+                    "description": "%configuration.stellarisLanguageServices.ai.hooks.enabled.description%"
                 },
                 "stellarisLanguageServices.ai.policy.preset": {
                     "scope": "window",

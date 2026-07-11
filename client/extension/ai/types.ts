@@ -1839,6 +1839,8 @@ export interface ChatHistoryMessage {
     code?: string;
     isValid?: boolean;
     timestamp: number;
+    /** Durable run that produced or consumed this turn, used for exact forks. */
+    runId?: string;
     steps?: AgentStep[];
     /** Base64 data-URL images attached to this user message (persisted with topic) */
     images?: string[];

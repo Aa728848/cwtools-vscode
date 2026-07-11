@@ -185,9 +185,12 @@ sequenceDiagram
 | `chatInit.ts` | Command handler for `/init`, triggers quick profile plus deep semantic generation and renders `CWTOOLS.md` |
 | `gameKnowledge.ts` | Paradox script rule-bases for 9 games mapped by language ID |
 | `skills.ts` | Skill index loader (`SKILL.md` for built-in, user, or project scopes) and `run_skill` execution |
-| `memoryParser.ts` | Topic-scoped `.cwtools-ai/<topicId>/.cwtools-ai-memory.md` long-term memory read/write and pruning |
-| `workspacePaths.ts` | Resolves AI data directories (`.cwtools-ai/`), topic and scratch directories |
+| `memoryParser.ts` | Private structured memory with provenance, confidence, usage, expiry, redaction, and bounded consolidation |
+| `workspacePaths.ts` | Separates project artifacts under `.cwtools-ai/` from private runtime state under `ExtensionContext.storageUri`, with legacy migration |
 | `workspaceSandbox.ts` | Input path cleaning, scope classification (project, workspace, outside, etc.), and trust checks |
+| `runner/sandboxRunner.ts` / `sandboxBroker.ts` | Fail-closed command broker with Bubblewrap, Seatbelt, or a packaged Windows helper backend |
+| `runner/threadStore.ts` / `goalStore.ts` | Durable thread lineage, exact-run forks, transcript recovery, and long-running goals |
+| `runner/historyPolicy.ts` | Private history persistence level, age/size retention, clear, and redacted export policy |
 | `usageTracker.ts` | Persists cumulative token usages, costs, and prompt cache stats across sessions |
 | `diffEngine.ts` | Structural diff engine |
 | `fileCache.ts` | Bounded file content cache |
@@ -277,6 +280,9 @@ The Runner restricts tools based on the active workflow and appends supplementar
 - `apply_patch`, `multi_replace_file_content`, and `ast_mutate` are retired. Internal execution routes them to `edit_file` or `replace_lines`.
 - Reads of a file queue behind pending writes via `writeCoordinator.afterCurrentWrites`.
 - Multi-agent systems use `dispatch_agents`, `query_blackboard`, and `merge_results`. Sub-agents are sandboxed in `orchestrator/subAgentSandbox.ts`.
+- VS Code Workspace Trust is the outer execution gate: Restricted Mode keeps read/LSP features but blocks mutations, shell, network, media, git, and MCP tools.
+- Captured commands use the fail-closed broker. Explicitly escalated interactive commands use a visible VS Code Terminal and are recorded by `processRegistry.ts`.
+- Private runs, checkpoints, goals, and learned memory use extension storage; only user-shareable plans, workflows, blueprints, and project rules remain in `.cwtools-ai/`.
 
 ##### Orchestrator
 
@@ -577,9 +583,12 @@ sequenceDiagram
 | `chatInit.ts` | `/init` 命令处理器、快速画像、深度语义生成和 CWTOOLS.md 渲染 |
 | `gameKnowledge.ts` | 按 languageId 选择的 9 款游戏 PDXScript 知识块 |
 | `skills.ts` | `SKILL.md` 技能索引（built-in/user/project）+ `run_skill` 按需正文加载 |
-| `memoryParser.ts` | topic 级 `.cwtools-ai/<topicId>/.cwtools-ai-memory.md` 长期记忆读写与自动裁剪 |
-| `workspacePaths.ts` | AI 存储根解析、topic/scratch 目录、多 workspace folder 支持 |
+| `memoryParser.ts` | 带来源、置信度、使用次数、过期、脱敏和有界合并的私有结构化长期记忆 |
+| `workspacePaths.ts` | 分离 `.cwtools-ai/` 项目产物与 `ExtensionContext.storageUri` 私有运行状态，并兼容迁移旧数据 |
 | `workspaceSandbox.ts` | 路径输入清洗、作用域分类（project/ai/workspace/outside）和信任判定 |
+| `runner/sandboxRunner.ts` / `sandboxBroker.ts` | 失败关闭的命令 Broker，支持 Bubblewrap、Seatbelt 或随扩展分发的 Windows helper |
+| `runner/threadStore.ts` / `goalStore.ts` | 持久 Thread 谱系、指定 Run 分叉、转录恢复与长任务目标 |
+| `runner/historyPolicy.ts` | 私有历史持久化级别、时间/容量保留、清理和脱敏导出策略 |
 | `usageTracker.ts` | 跨会话 token 用量、成本和缓存统计持久化 |
 | `diffEngine.ts` | 结构化 diff 引擎 |
 | `fileCache.ts` | 有界文件内容缓存 |
@@ -710,7 +719,7 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 
 ##### Run Ledger、Checkpoint 与 Compacted Memory
 
-`runner/runLedger.ts` 提供单例 `RunLedger`，把每次 Agent 运行抽象为 `AgentRunRecord` + 追加式 `AgentRunEvent` 序列流。per-run 写入队列保证 JSONL 顺序与单调递增 `sequence` 一致，`run_state.json` 使用原子替换并保留上一完整版本。完整原始 prompt 单独写入带 SHA-256 的 `prompt.json`，重启后可通过磁盘扫描恢复 run 与回放上下文。状态通过 `runSnapshot` 消息广播到聊天与 Agent Manager 面板。
+`runner/runLedger.ts` 提供单例 `RunLedger`，把每次 Agent 运行抽象为 `AgentRunRecord` + 追加式 `AgentRunEvent` 序列流。per-run 写入队列保证 JSONL 顺序与单调递增 `sequence` 一致，`run_state.json` 使用原子替换并保留上一完整版本。私有记录写入 VS Code workspace storage；`history.persistence` 支持 `off` / `metadata` / `full`，完整模式才保存带 SHA-256 的原始 prompt 和恢复转录。状态通过 `runSnapshot` 消息广播到聊天与 Agent Manager 面板，并在 Run 结束时生成确定性 invariant eval。
 
 `runner/contextTranscript.ts` 在压缩与恢复前统一规范化消息：移除孤立/重复工具结果，为未完成调用补合成 interrupted 回复，并保证切分不拆散 assistant-tool 组。`runner/checkpoint.ts` 产出 V3 `AgentResumeState`，原子保存压缩尾部和带 SHA-256/消息数的完整 transcript，损坏时回退上一完整版本，同时兼容读取 V2；进程重启后不恢复 `sessionOnly` 审批规则。
 
@@ -749,8 +758,10 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ##### Workspace Paths 与 Sandbox
 
-- `workspacePaths.ts` 解析 AI 存储根目录（`.cwtools-ai/`），支持多 workspace folder 场景下的 topic 目录、scratch 目录和多候选路径。
+- `workspacePaths.ts` 将计划、工作流、蓝图等可共享产物保留在 `.cwtools-ai/`，Thread、Ledger、Checkpoint、Goal 与自动学习记忆写入 `ExtensionContext.storageUri`；旧目录只作为迁移和兼容读取源。
 - `workspaceSandbox.ts` 负责路径输入清洗（去引号、去 code span、去自然语言前缀）、workspace folder 别名解析、`.cwtools-ai` 路径别名解析、以及四级作用域分类（`project`/`ai`/`workspace`/`outside`）和信任判定。
+- VS Code Restricted Mode 是外层门禁：未信任工作区保留读取/LSP 能力，但禁止写入、命令、网络、Git、媒体和 MCP 工具。
+- captured 命令经独立 `sandboxBroker` 执行；找不到可验证的操作系统后端时失败关闭。交互长任务必须显式升级授权后在可见 VS Code Terminal 中运行，并由 `processRegistry` 持久记录生命周期。
 
 ##### Runner Policy
 
@@ -783,11 +794,11 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ##### Memory Parser
 
-`memoryParser.ts` 管理 topic 级长期记忆文件 `.cwtools-ai/<topicId>/.cwtools-ai-memory.md`（旧的工作区根目录 `.cwtools-ai-memory.md` 仍作为读取回退，新写入一律落到 topic 路径）：
+`memoryParser.ts` 管理 topic 级私有结构化长期记忆；`memory.json` 是来源数据，`.cwtools-ai-memory.md` 是便于检查的镜像，旧工作区文件仍作为只读回退：
 
-- 按 topic 缓存读取（按签名检查刷新），多个 topic 可同时缓存
-- 追加新记忆条目（含日期和优先级标签），自动创建 topic 目录
-- 超出 `MAX_MEMORY_CHARS`（~4000 字符）时按优先级自动裁剪
+- 每条记忆记录来源、置信度、创建/更新时间、使用次数、最近使用时间、过期时间和作用域
+- 写入时脱敏 API Key、Bearer Token 和常见 secret 字段；同 key 合并而不是无限追加
+- 读取时移除过期项并更新使用统计；超过 `MAX_MEMORY_CHARS`（~12000 字符）时综合优先级、置信度和最近使用时间有界保留
 
 ##### Usage Tracker
 

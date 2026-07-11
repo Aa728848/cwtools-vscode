@@ -2,9 +2,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { ChatMessage, contentToString } from '../types';
 import { AIService } from '../aiService';
-import { getProjectWorkspaceRoot } from '../workspacePaths';
+import { getProjectWorkspaceRoot, getPrivateTopicStorageDir } from '../workspacePaths';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, aiText } from '../messages';
+import { getHistoryPolicy } from './historyPolicy';
 
 /**
  * 结构化历史状态记忆概况接口 (Phase 4 核心契约)
@@ -37,7 +38,7 @@ function ensureDir(dirPath: string) {
  */
 export function getRunStorageDir(topicId: string, runId: string): string {
     const wsRoot = getProjectWorkspaceRoot();
-    const storageDir = path.join(wsRoot, '.cwtools-ai', topicId, 'runs', runId);
+    const storageDir = path.join(getPrivateTopicStorageDir(topicId, wsRoot), 'runs', runId);
     ensureDir(storageDir);
     return storageDir;
 }
@@ -188,6 +189,7 @@ ${recentChatPreview}
         };
 
         // 4. 将概况同步写入本地 runs 存储目录，保存为 summary.json 与 summary.md
+        if (getHistoryPolicy().persistence === 'off') return finalSummary;
         const storageDir = getRunStorageDir(topicId, runId);
         const jsonPath = path.join(storageDir, 'summary.json');
         const mdPath = path.join(storageDir, 'summary.md');

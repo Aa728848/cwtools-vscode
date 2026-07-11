@@ -16,7 +16,7 @@ import { GuiPanel } from './guiPanel';
 import { EntityPanel } from './entityPanel';
 import { ParticlePanel } from './particlePanel';
 import { classifyAssetFile } from './particleSniff';
-import { UI, SOURCE, setAiMessageLocale } from './ai/messages';
+import { UI, SOURCE, aiText, setAiMessageLocale } from './ai/messages';
 import { ErrorReporter } from './ai/errorReporter';
 import { SolarSystemPanel } from './solarSystemPanel';
 import { EventChainPanel } from './eventChainPanel';
@@ -40,7 +40,10 @@ import { registerLocalisationAiCommands } from './localisationAiCommands';
 import { registerTranslationPreviewCommands } from './translationPreview';
 import { registerSpecialPathCommands } from './specialPaths';
 import { registerInspectionOverviewCommand } from './inspectionOverview';
-import { getProjectWorkspaceRoot } from './ai/workspacePaths';
+import { configurePrivateAgentStorage, getProjectWorkspaceRoot, getPrivateAiStorageRoot, migrateLegacyPrivateAgentState } from './ai/workspacePaths';
+import { configureHistoryPolicy, enforceHistoryRetention } from './ai/runner/historyPolicy';
+import { sha256Text } from './ai/runner/durableStorage';
+import { processRegistry } from './ai/runner/processRegistry';
 import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
 import type { GameProfile } from './gameProfiles';
 import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService';
@@ -1372,6 +1375,22 @@ export async function activate(context: ExtensionContext) {
 	// providers before opening settings cannot leak one provider's endpoint into another.
 	void aiService.migrateLegacyEndpoint();
 	const workspaceRoot = getProjectWorkspaceRoot();
+	const privateAgentRoot = context.storageUri?.fsPath
+		?? path.join(context.globalStorageUri.fsPath, 'agent-workspaces', sha256Text(workspaceRoot || 'empty-window').slice(0, 16));
+	configurePrivateAgentStorage(privateAgentRoot);
+	migrateLegacyPrivateAgentState(workspaceRoot);
+	const historyConfig = workspace.getConfiguration('stellarisLanguageServices.ai.history');
+	const historyPersistence = historyConfig.get<'off' | 'metadata' | 'full'>('persistence', 'full');
+	configureHistoryPolicy({
+		persistence: historyPersistence,
+		maxAgeDays: historyConfig.get<number>('maxAgeDays', 30),
+		maxBytes: historyConfig.get<number>('maxBytes', 268435456),
+		redactLocalPaths: historyConfig.get<boolean>('redactLocalPaths', true),
+	});
+	if (historyPersistence !== 'off') processRegistry.configureStorage(privateAgentRoot);
+	void enforceHistoryRetention(getPrivateAiStorageRoot()).catch(error =>
+		ErrorReporter.warn('AgentHistory', 'Failed to enforce Agent history retention', error)
+	);
 	// AgentToolExecutor gets a lazy getter so it can be registered before client starts
 	const toolExecutor = new AgentToolExecutor(() => defaultClient, workspaceRoot, indexService, context.globalStorageUri.fsPath, context.extensionPath);
 	const legacyMcpDirs = legacyPublisherStoragePaths(context)
@@ -1390,16 +1409,66 @@ export async function activate(context: ExtensionContext) {
 	const promptBuilder = new PromptBuilder(workspaceRoot, context.globalStorageUri.fsPath, context.extensionPath);
 	const agentRunner = new AgentRunner(aiService, toolExecutor, promptBuilder);
 	const usageTracker = new UsageTracker(context);
+	const chatStorageUri = historyPersistence === 'off'
+		? undefined
+		: context.storageUri ?? Uri.file(privateAgentRoot);
+	if (chatStorageUri) {
+		const legacyTopics = path.join(context.globalStorageUri.fsPath, 'ai-chat-topics.json');
+		const privateTopics = path.join(chatStorageUri.fsPath, 'ai-chat-topics.json');
+		if (fs.existsSync(legacyTopics) && !fs.existsSync(privateTopics)) {
+			fs.mkdirSync(path.dirname(privateTopics), { recursive: true });
+			fs.copyFileSync(legacyTopics, privateTopics);
+		}
+	}
 	const chatPanelProvider = new AIChatPanelProvider(
 		context.extensionUri,
 		agentRunner,
 		aiService,
 		usageTracker,
-		context.globalStorageUri
+		chatStorageUri,
+		historyPersistence,
 	);
 	context.subscriptions.push(
 		vs.window.registerWebviewViewProvider(AIChatPanelProvider.viewType, chatPanelProvider)
 	);
+
+	safeRegisterCommand(context, 'cwtools.ai.clearPrivateHistory', async () => {
+		const confirm = aiText('Clear private Agent history', '清除 Agent 私有历史');
+		const choice = await window.showWarningMessage(
+			aiText('This removes private runs, checkpoints, goals, and learned memory for this workspace. Project files and shared workflows are not affected.', '这会删除当前工作区的私有运行记录、检查点、目标和学习记忆，但不会影响项目文件和共享工作流。'),
+			{ modal: true },
+			confirm,
+		);
+		if (choice !== confirm) return;
+		await fs.promises.rm(path.join(getPrivateAiStorageRoot(), 'topics'), { recursive: true, force: true });
+		void window.showInformationMessage(aiText('Private Agent history cleared.', 'Agent 私有历史已清除。'));
+	});
+
+	safeRegisterCommand(context, 'cwtools.ai.exportDiagnostics', async () => {
+		const target = await window.showSaveDialog({
+			filters: { JSON: ['json'] },
+			saveLabel: aiText('Export diagnostics', '导出诊断'),
+			defaultUri: Uri.file(path.join(os.homedir(), 'cwtools-agent-diagnostics.json')),
+		});
+		if (!target) return;
+		const { runLedger } = require('./ai/runner/runLedger') as typeof import('./ai/runner/runLedger');
+		const runs = await runLedger.listRecentRunsFromDisk(50);
+		const redactPaths = workspace.getConfiguration('stellarisLanguageServices.ai.history').get<boolean>('redactLocalPaths', true);
+		const serialized = JSON.stringify({
+			version: 1,
+			exportedAt: new Date().toISOString(),
+			workspaceTrusted: workspace.isTrusted,
+			runs,
+		}, null, 2);
+		const output = redactPaths && workspaceRoot
+			? serialized
+				.split(workspaceRoot).join('${WORKSPACE_ROOT}')
+				.split(getPrivateAiStorageRoot()).join('${AGENT_PRIVATE_STORAGE}')
+				.split(os.homedir()).join('${USER_HOME}')
+			: serialized;
+		await workspace.fs.writeFile(target, Buffer.from(output, 'utf8'));
+		void window.showInformationMessage(aiText('Redacted Agent diagnostics exported.', '已导出脱敏后的 Agent 诊断。'));
+	});
 
 	// T4.2 — Replay a recorded agent run with optional overrides.
 	// Side-by-side diff of original vs new event streams is opened in the editor.

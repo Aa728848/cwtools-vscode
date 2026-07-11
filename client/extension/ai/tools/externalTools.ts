@@ -10,7 +10,7 @@ import type { TodoItem, TodoWriteResult } from '../types';
 import { preflightCommand } from '../runner/commandPreflight';
 import { PermissionPolicyStore } from '../runner/permissionPolicy';
 import { processRegistry } from '../runner/processRegistry';
-import { DirectSandboxRunner } from '../runner/sandboxRunner';
+import { BrokeredSandboxRunner, DirectSandboxRunner, type SandboxRunner } from '../runner/sandboxRunner';
 import { getAiStorageRoot, getAiStorageRootCandidates, getTopicScratchDir, getTopicStorageDir } from '../workspacePaths';
 import {
     escapeRegExp,
@@ -24,6 +24,14 @@ import { aiText } from '../messages';
 const COMMAND_SNAPSHOT_MAX_FILE_BYTES = 500_000;
 const COMMAND_SNAPSHOT_MAX_TOTAL_BYTES = 24_000_000;
 const COMMAND_SNAPSHOT_MAX_FILES = 8000;
+let sandboxRunnerFactory: (spawnFn: typeof import('child_process').spawn) => SandboxRunner = spawnFn => new BrokeredSandboxRunner(spawnFn);
+
+/** @internal Unit tests must opt into direct execution explicitly. */
+export function useDirectSandboxRunnerForTests(enabled: boolean): void {
+    sandboxRunnerFactory = enabled
+        ? spawnFn => new DirectSandboxRunner(spawnFn)
+        : spawnFn => new BrokeredSandboxRunner(spawnFn);
+}
 const COMMAND_SNAPSHOT_TEXT_EXTENSIONS = new Set([
     '.asset', '.cson', '.css', '.csv', '.cwt', '.fs', '.fsx', '.gfx', '.gui', '.html',
     '.ini', '.js', '.json', '.jsonc', '.jsx', '.loc', '.lua', '.md', '.mod', '.pdxtxt',
@@ -954,7 +962,7 @@ export class ExternalToolHandler {
 
     // ─── runCommand ──────────────────────────────────────────────────────────
 
-    async runCommand(args: { command: string; cwd?: string; timeoutMs?: number; requestEscalation?: boolean }, context?: import('../types').AgentToolContext): Promise<{
+    async runCommand(args: { command: string; cwd?: string; timeoutMs?: number; requestEscalation?: boolean; executionMode?: 'captured' | 'terminal'; networkAccess?: boolean }, context?: import('../types').AgentToolContext): Promise<{
         stdout: string;
         stderr: string;
         exitCode: number;
@@ -1039,6 +1047,14 @@ export class ExternalToolHandler {
         const bypassSandbox = isSecuritySandboxDisabled();
         let escalationReason = '';
 
+        if (args.executionMode === 'terminal' && !bypassSandbox && !args.requestEscalation) {
+            return {
+                stdout: '',
+                stderr: 'Interactive terminal execution is user-visible but not OS-sandboxed. Retry with requestEscalation=true to request explicit approval.',
+                exitCode: 1,
+            };
+        }
+
         if (!bypassSandbox) {
             let triggeredBlock: RegExp | null = null;
             for (const pat of ALWAYS_BLOCKED) {
@@ -1116,6 +1132,7 @@ export class ExternalToolHandler {
         if (preflight.requiresEscalation || currentEscalationReason) {
             requiresPermission = true;
         }
+        if (args.networkAccess === true) requiresPermission = true;
         // Interpreter inline commands (python -c, node -e) always require explicit user permission,
         // even in auto mode, to prevent silent arbitrary code execution.
         // let requiresPermission resolved by preflight store above
@@ -1130,7 +1147,8 @@ export class ExternalToolHandler {
                 classification: preflight.segments.map(s => s.classification),
                 riskLevel: preflight.riskLevel,
                 escalation: !!currentEscalationReason,
-                reasons: preflight.segments.map(s => s.reason)
+                reasons: preflight.segments.map(s => s.reason),
+                networkAccess: args.networkAccess === true,
             };
             const description = currentEscalationReason 
                 ? `[ESCALATION] AI requests a sandbox override (${currentEscalationReason}): ${args.command}`
@@ -1146,7 +1164,7 @@ export class ExternalToolHandler {
             return { stdout: '', stderr: 'run_command: no permission handler configured', exitCode: 1 };
         }
 
-        const timeoutMs = Math.min(args.timeoutMs ?? 30000, 120000);
+        const timeoutMs = Math.min(Math.max(args.timeoutMs ?? 30000, 1000), 3_600_000);
         const { spawn } = await import('child_process');
 
         // Parse command into binary + args on the platform shell
@@ -1200,12 +1218,48 @@ export class ExternalToolHandler {
             }
         } catch { /* allowlist must not break command execution */ }
 
+        const eventSink = context?.runEventSink ?? context?.runnerOptions?.runEventSink;
+        if (args.executionMode === 'terminal') {
+            const terminal = vs.window.createTerminal({
+                name: `CWTools Agent · ${topicId}`,
+                cwd,
+                env: spawnEnv,
+                isTransient: false,
+            });
+            const record = processRegistry.register(args.command, cwd, undefined, eventSink, {
+                sandboxMode: 'user-approved-terminal',
+                networkAccess: true,
+            }, {
+                executionMode: 'terminal',
+                runId: context?.runnerOptions?.runRecord?.runId,
+                threadId: context?.runnerOptions?.threadId,
+                terminate: () => terminal.dispose(),
+            });
+            void terminal.processId.then(pid => processRegistry.setPid(record.processId, pid));
+            const closeDisposable = vs.window.onDidCloseTerminal(closed => {
+                if (closed !== terminal) return;
+                const exitCode = closed.exitStatus?.code;
+                if (typeof exitCode === 'number') processRegistry.complete(record.processId, exitCode, eventSink);
+                else processRegistry.markTerminated(record.processId, eventSink);
+                closeDisposable.dispose();
+            });
+            terminal.show(true);
+            terminal.sendText(args.command, true);
+            return {
+                stdout: `Command started in a visible VS Code terminal. Process id: ${record.processId}`,
+                stderr: '',
+                exitCode: 0,
+                processId: record.processId,
+            };
+        }
+
         const stdoutBuf = new HeadTailTextBuffer(COMMAND_STDOUT_MAX_CHARS);
         const stderrBuf = new HeadTailTextBuffer(COMMAND_STDERR_MAX_CHARS);
-        const eventSink = context?.runEventSink ?? context?.runnerOptions?.runEventSink;
+        const directExecution = bypassSandbox || !!currentEscalationReason;
         const sandboxProfile = {
-            sandboxMode: bypassSandbox ? 'disabled' : 'direct-preflight',
-            networkAccess: true,
+            sandboxMode: directExecution ? 'disabled' : 'workspace-write',
+            networkAccess: directExecution ? true : args.networkAccess === true,
+            writableRoots: (vs.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath),
         };
         let commandChangeBaseline: Map<string, CommandFileState> | undefined;
         const shouldTrackCommandChanges = !(isAutoApproveSafeCommand && !hasShellControlOperator);
@@ -1227,7 +1281,7 @@ export class ExternalToolHandler {
             let proc: ReturnType<typeof spawn>;
             let processId: string | undefined;
             try {
-                const sandboxRunner = new DirectSandboxRunner(spawn);
+                const sandboxRunner = sandboxRunnerFactory(spawn);
                 proc = sandboxRunner.spawn({
                     command: shell,
                     args: shellArgs,
@@ -1240,7 +1294,12 @@ export class ExternalToolHandler {
                     },
                     profile: sandboxProfile,
                 });
-                processId = processRegistry.register(args.command, cwd, proc.pid, eventSink, sandboxProfile).processId;
+                processId = processRegistry.register(args.command, cwd, proc.pid, eventSink, sandboxProfile, {
+                    executionMode: 'captured',
+                    runId: context?.runnerOptions?.runRecord?.runId,
+                    threadId: context?.runnerOptions?.threadId,
+                    terminate: () => this.terminateProcessTree(proc, spawn),
+                }).processId;
             } catch (e) {
                 resolve({
                     stdout: '',

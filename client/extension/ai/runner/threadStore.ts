@@ -1,8 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentRunRecord } from '../types';
-import { getTopicStorageDir, getTopicStorageDirCandidates } from '../workspacePaths';
+import { getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from '../workspacePaths';
 import { atomicWriteJson, readJsonWithBackup } from './durableStorage';
+import { getHistoryPolicy } from './historyPolicy';
 
 export type AgentThreadStatus = 'active' | 'interrupted' | 'failed' | 'completed' | 'compacted' | 'archived';
 
@@ -16,6 +17,7 @@ export interface AgentThreadRecord {
     currentRunId?: string;
     forkedFromThreadId?: string;
     forkedFromRunId?: string;
+    forkedFromMessageIndex?: number;
     compactedFromRunId?: string;
     latestSummaryRef?: string;
     runIds: string[];
@@ -90,7 +92,7 @@ export class ThreadStore {
         const key = this.cacheKey(topicId, threadId);
         const cached = this.cache.get(key);
         if (cached) return cached;
-        for (const dir of getTopicStorageDirCandidates(topicId)) {
+        for (const dir of getPrivateTopicStorageDirCandidates(topicId)) {
             const loaded = readJsonWithBackup<AgentThreadRecord>(this.threadPathFromTopicDir(dir, threadId), isThreadRecord);
             if (loaded) {
                 this.cache.set(key, loaded.value);
@@ -100,21 +102,32 @@ export class ThreadStore {
         return undefined;
     }
 
-    async forkThread(topicId: string, sourceThreadId: string, newThreadId: string, newTopicId = topicId): Promise<AgentThreadRecord | undefined> {
+    async forkThread(
+        topicId: string,
+        sourceThreadId: string,
+        newThreadId: string,
+        newTopicId = topicId,
+        sourceRunId?: string,
+        messageIndex?: number,
+    ): Promise<AgentThreadRecord | undefined> {
         const source = await this.getThread(topicId, sourceThreadId);
         if (!source) return undefined;
         const now = Date.now();
+        const forkRunId = sourceRunId && source.runIds.includes(sourceRunId) ? sourceRunId : source.currentRunId;
+        const forkIndex = forkRunId ? source.runIds.indexOf(forkRunId) : -1;
+        const inheritedRuns = forkIndex >= 0 ? source.runIds.slice(0, forkIndex + 1) : [];
         const fork: AgentThreadRecord = {
             version: 1,
             threadId: newThreadId,
             topicId: newTopicId,
             parentThreadId: source.threadId,
-            parentRunId: source.currentRunId,
-            rootRunId: source.currentRunId,
-            currentRunId: source.currentRunId,
+            parentRunId: forkRunId,
+            rootRunId: inheritedRuns[0] ?? forkRunId,
+            currentRunId: forkRunId,
             forkedFromThreadId: source.threadId,
-            forkedFromRunId: source.currentRunId,
-            runIds: source.currentRunId ? [source.currentRunId] : [],
+            forkedFromRunId: forkRunId,
+            forkedFromMessageIndex: messageIndex,
+            runIds: inheritedRuns,
             createdAt: now,
             updatedAt: now,
             status: 'active',
@@ -144,7 +157,7 @@ export class ThreadStore {
     }
 
     async listThreads(topicId: string): Promise<AgentThreadRecord[]> {
-        const topicDir = getTopicStorageDir(topicId);
+        const topicDir = getPrivateTopicStorageDir(topicId);
         const threadsDir = path.join(topicDir, 'threads');
         if (!fs.existsSync(threadsDir)) return [];
         const records: AgentThreadRecord[] = [];
@@ -161,11 +174,12 @@ export class ThreadStore {
 
     private async save(record: AgentThreadRecord): Promise<void> {
         this.cache.set(this.cacheKey(record.topicId, record.threadId), record);
+        if (getHistoryPolicy().persistence === 'off') return;
         await atomicWriteJson(this.threadPath(record.topicId, record.threadId), record);
     }
 
     private threadPath(topicId: string, threadId: string): string {
-        return this.threadPathFromTopicDir(getTopicStorageDir(topicId), threadId);
+        return this.threadPathFromTopicDir(getPrivateTopicStorageDir(topicId), threadId);
     }
 
     private threadPathFromTopicDir(topicDir: string, threadId: string): string {

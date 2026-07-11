@@ -15,7 +15,7 @@ import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
 import { MemoryParser } from './memoryParser';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
-import { getExistingTopicFilePath } from './workspacePaths';
+import { getExistingTopicFilePath, getPrivateTopicStorageDir } from './workspacePaths';
 import {
     buildProfileSummary,
     getProjectProfilePath,
@@ -166,7 +166,7 @@ export class PromptBuilder {
         // 2. Compacted Summary (来自 Phase 4 结构化记忆压缩)
         if (topicId && runId) {
             const wsRoot = this.workspaceRoot;
-            const summaryMdPath = path.join(wsRoot, '.cwtools-ai', topicId, 'runs', runId, 'summary.md');
+            const summaryMdPath = path.join(getPrivateTopicStorageDir(topicId, wsRoot), 'runs', runId, 'summary.md');
             if (fs.existsSync(summaryMdPath)) {
                 try {
                     const summaryContent = fs.readFileSync(summaryMdPath, 'utf8').trim();
@@ -343,7 +343,7 @@ export class PromptBuilder {
         // 1. Compacted Summary (来自历史会话看板的压缩)
         if (topicId && runId) {
             const wsRoot = this.workspaceRoot;
-            const summaryMdPath = path.join(wsRoot, '.cwtools-ai', topicId, 'runs', runId, 'summary.md');
+            const summaryMdPath = path.join(getPrivateTopicStorageDir(topicId, wsRoot), 'runs', runId, 'summary.md');
             if (fs.existsSync(summaryMdPath)) {
                 try {
                     const summaryContent = fs.readFileSync(summaryMdPath, 'utf8').trim();

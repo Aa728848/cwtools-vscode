@@ -56,6 +56,7 @@ import { budgetToolResult } from './contextBudget';
 import {
     getAiStorageRoot,
     getProjectWorkspaceRoot,
+    getPrivateTopicStorageDirCandidates,
     getTopicFileCandidates,
     getTopicStorageDir,
     getTopicStorageDirCandidates,
@@ -193,10 +194,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         public agentRunner: AgentRunner,
         public aiService: AIService,
         public usageTracker: UsageTracker,
-        public storageUri: vs.Uri | undefined
+        public storageUri: vs.Uri | undefined,
+        public historyPersistence: 'off' | 'metadata' | 'full' = 'full',
     ) {
         this.agentRuntime = new AgentRuntime(agentRunner);
-        this.topicManager = new ChatTopicManager(storageUri, (msg) => this.postMessage(msg));
+        this.topicManager = new ChatTopicManager(storageUri, (msg) => this.postMessage(msg), historyPersistence);
         this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg), storageUri?.fsPath);
         this.contextReferences = new ContextReferenceManager(() => this.agentRunner.toolExecutor.blackboard);
         this.agentRunner.toolExecutor.onWorkflowSaved = () => this.sendWorkflowState();
@@ -968,6 +970,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const usedDispatchAgents = result.steps.some(s => s.toolName === 'dispatch_agents');
             const uiSteps = this.compactStepsForUi(result.steps);
             const uiResult = { ...result, steps: uiSteps };
+            const durableRunId = result.runId ?? this.currentRunId;
+            const latestUserHistory = [...(this.topicManager.currentTopic?.messages ?? [])]
+                .reverse()
+                .find(message => message.role === 'user' && !message.runId);
+            if (latestUserHistory && durableRunId) latestUserHistory.runId = durableRunId;
             const topicId = this.topicManager.currentTopic?.id || 'default';
             const wtPath = this.findGeneratedTopicFile(topicId, 'walkthrough.md');
             if (wtPath) {
@@ -982,6 +989,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     content: aiText('The plan has been generated and opened in the annotations view.', '计划已生成，已在批注视图中打开'),
                     timestamp: Date.now(),
                     steps: uiSteps,
+                    runId: durableRunId,
                 });
                 void this.savePlanFile(result.explanation, text, uiSteps);
             } else {
@@ -993,6 +1001,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     isValid: result.isValid,
                     timestamp: Date.now(),
                     steps: uiSteps,
+                    runId: durableRunId,
                 });
             }
             this.topicManager.saveTopics();
@@ -2067,7 +2076,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // Asynchronously clean up the disk folder corresponding to the topic (.cwtools-ai/{topicId}/),
         //Includes all derivative files such as plan, walkthrough, task, scratch, media, tmp, etc.
-        const topicDirs = getTopicStorageDirCandidates(topicId, getProjectWorkspaceRoot());
+        const topicDirs = Array.from(new Set([
+            ...getTopicStorageDirCandidates(topicId, getProjectWorkspaceRoot()),
+            ...getPrivateTopicStorageDirCandidates(topicId, getProjectWorkspaceRoot()),
+        ]));
         if (topicDirs.length > 0) {
             for (const topicDir of topicDirs) fs.promises.rm(topicDir, { recursive: true, force: true }).catch(() => {
                 // Silently ignore if the folder does not exist or fails to be deleted
@@ -2081,10 +2093,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      */
     public forkTopic(topicId: string, messageIndex: number): void {
         this.clearArtifacts();
+        const sourceRunId = this.topicManager.topics.find(topic => topic.id === topicId)?.messages[messageIndex]?.runId;
         this.conversationMessages = this.topicManager.forkTopic(topicId, messageIndex);
         const forkedTopicId = this.topicManager.currentTopic?.id;
         if (forkedTopicId) {
-            void this.agentRuntime.forkThread(topicId, topicId, forkedTopicId, forkedTopicId).catch(() => undefined);
+            void this.agentRuntime.forkThread(topicId, topicId, forkedTopicId, forkedTopicId, sourceRunId, messageIndex).catch(() => undefined);
         }
     }
 
@@ -2187,6 +2200,26 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 void this.agentRuntime.compactThread(topicId, topicId, this.currentRunId ?? latestRun?.runId).catch(() => undefined);
             }
             vs.window.showInformationMessage(result.compacted ? UI.CONTEXT_COMPACTED : UI.CONTEXT_COMPACT_EMPTY);
+        } else if (cmd.startsWith('goal:') || cmd.startsWith('/goal:')) {
+            const topicId = this.topicManager.currentTopic?.id;
+            if (!topicId) {
+                void vs.window.showInformationMessage(aiText('Start a topic before setting a durable goal.', '请先开始一个话题，再设置持久目标。'));
+                return;
+            }
+            const value = command.trim().replace(/^\//, '').slice('goal:'.length).trim();
+            if (value.toLowerCase() === 'complete' || value.toLowerCase() === 'blocked') {
+                const status = value.toLowerCase() === 'complete' ? 'completed' : 'blocked';
+                const updated = await this.agentRuntime.updateGoal(topicId, topicId, status);
+                void vs.window.showInformationMessage(updated
+                    ? aiText(`Durable goal marked ${updated.status}.`, `持久目标已标记为${updated.status === 'completed' ? '完成' : '受阻'}。`)
+                    : aiText('No durable goal exists for this topic.', '当前话题没有持久目标。'));
+            } else if (value) {
+                const budgetMatch = value.match(/^(\d+)\s*:\s*(.+)$/s);
+                const objective = budgetMatch?.[2]?.trim() || value;
+                const tokenBudget = budgetMatch?.[1] ? Number(budgetMatch[1]) : undefined;
+                await this.agentRuntime.setGoal(topicId, topicId, objective, tokenBudget);
+                void vs.window.showInformationMessage(aiText('Durable goal saved for this topic.', '已为当前话题保存持久目标。'));
+            }
         } else if (cmd.startsWith('mode:') || cmd.startsWith('/mode:')) {
             const mode = cmd.split(':')[1] as AgentMode;
             if (mode === 'general') {

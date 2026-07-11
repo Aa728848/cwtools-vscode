@@ -22,7 +22,8 @@ export class ChatTopicManager {
 
     constructor(
         private storageUri: vs.Uri | undefined,
-        private postMessage: PostMessageFn
+        private postMessage: PostMessageFn,
+        private persistence: 'off' | 'metadata' | 'full' = 'full',
     ) {
         this.loadTopics();
     }
@@ -35,6 +36,7 @@ export class ChatTopicManager {
     }
 
     loadTopics(): void {
+        if (this.persistence === 'off') return;
         const filePath = this.topicsFilePath;
         if (!filePath) return;
         try {
@@ -46,6 +48,7 @@ export class ChatTopicManager {
     }
 
     saveTopics(): void {
+        if (this.persistence === 'off') return;
         const filePath = this.topicsFilePath;
         if (!filePath) return;
         try {
@@ -54,7 +57,9 @@ export class ChatTopicManager {
                 fs.mkdirSync(dir, { recursive: true });
             }
             // Keep only the last 50 topics to limit file size
-            const toSave = this.topics.slice(0, 50);
+            const toSave = this.topics.slice(0, 50).map(topic => this.persistence === 'metadata'
+                ? { ...topic, messages: [] }
+                : topic);
             fs.writeFileSync(filePath, JSON.stringify(toSave, null, 2), 'utf-8');
         } catch { /* ignore */ }
     }

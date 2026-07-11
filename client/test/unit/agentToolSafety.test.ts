@@ -11,6 +11,7 @@ let stubConfigOverrides: Record<string, any> = {};
 const vscodeStub = {
     workspace: {
         workspaceFolders: [],
+        isTrusted: true,
         getConfiguration: () => ({
             get: <T>(key: string, defaultValue?: T): T | undefined => {
                 if (key in stubConfigOverrides) return stubConfigOverrides[key] as T;
@@ -786,6 +787,23 @@ describe('agent sprite candidate tool contract', () => {
         expect(definition.function.parameters.properties).to.have.property('source');
     });
 
+    it('blocks mutating tools when VS Code opens the workspace in Restricted Mode', async () => {
+        const workspaceRoot = makeWorkspace();
+        vscodeStub.workspace.isTrusted = false;
+        try {
+            const executor = new AgentToolExecutor({} as any, workspaceRoot);
+            const result = await executor.execute('write_file', {
+                filePath: 'blocked.txt',
+                content: 'must not be written',
+            }, { runnerOptions: { mode: 'build' } } as any) as any;
+            expect(result.workspaceTrustRequired).to.equal(true);
+            expect(fs.existsSync(path.join(workspaceRoot, 'blocked.txt'))).to.equal(false);
+        } finally {
+            vscodeStub.workspace.isTrusted = true;
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
+
     it('registers explore_pdx_project as the bounded semantic graph entry point', () => {
         const definition = TOOL_DEFINITIONS.find((tool: any) => tool.function.name === 'explore_pdx_project');
         if (!definition) {
@@ -1165,10 +1183,12 @@ describe('agent tool topic artifacts', () => {
     let workspaceRoot: string;
 
     beforeEach(() => {
+        externalTools.useDirectSandboxRunnerForTests(true);
         workspaceRoot = makeWorkspace();
     });
 
     afterEach(() => {
+        externalTools.useDirectSandboxRunnerForTests(false);
         cleanupWorkspace(workspaceRoot);
     });
 

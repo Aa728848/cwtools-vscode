@@ -96,7 +96,7 @@ The extension entry point, indexing layer, and AI game knowledge should prioriti
 `IndexService` is a shared knowledge layer used by both editor features and AI tools:
 
 - Localization keys are indexed during activation for hover, definitions, and AI lookups.
-- Heavier workspace/vanilla symbol indexes are lazy-loaded via `ensureWorkspaceSymbolsReady()` to avoid slow startup.
+- Heavier workspace/vanilla symbol indexes are lazy-loaded via `ensureWorkspaceSymbolsReady()` to avoid slow startup. Agent queries wait at most eight seconds, then consume the partial index while vanilla indexing continues in the background.
 - The symbol layer supports `.txt`, `.gfx`, `.asset`, `.gui`, storing `origin`, `updatedAt`, `fileVersion`, and light references.
 - File system watchers incrementally update `.yml` and symbol files; symbol indexes are garbage-collected when idle.
 - The AI consumes these indexes via `query_localisation_index` and `query_workspace_index`.
@@ -111,7 +111,7 @@ Because the graph reads the existing game model, scripted-type refreshes and ord
 
 ##### Project Knowledge Pack
 
-`/init` has a quick profile phase and a deep semantic phase. The deep phase calls the internal `cwtools.ai.exportProjectKnowledge` command against one coherently locked `IGame` snapshot, then atomically writes a normalized SQLite V2 database. Workspace definitions, embedded vanilla definitions, definition stacks, reference topology, archetypes, resource overwrite state, active CWT override modes, unresolved facts, and event semantics therefore share one generation boundary. Event semantics include nodes, event-call/phase edges, `on_action` and typed entry edges, plus flag, technology, variable, `fire_on_action`, and scope-bridge logic facts.
+`/init` has a quick profile phase and a deep semantic phase. `chatInit.ts` keeps a `ProgressLocation.Window` indicator in VS Code's lower-left status area while it waits for CWTools, exports the database, and publishes the artifacts. The deep phase calls the internal `cwtools.ai.exportProjectKnowledge` command against one coherently locked `IGame` snapshot, then atomically writes a normalized SQLite V2 database. Workspace definitions, embedded vanilla definitions, definition stacks, reference topology, archetypes, resource overwrite state, active CWT override modes, unresolved facts, and event semantics therefore share one generation boundary. Event semantics include nodes, event-call/phase edges, `on_action` and typed entry edges, plus flag, technology, variable, `fire_on_action`, and scope-bridge logic facts.
 
 The persistent layout is intentionally compact:
 
@@ -488,7 +488,7 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 `IndexService` 是 editor features 和 AI tools 共用的知识层：
 
 - 本地化 key 在激活阶段建立索引，用于 hover、definition 和 AI 查询。
-- 更重的 workspace/vanilla symbol 索引通过 `ensureWorkspaceSymbolsReady()` 懒加载，避免拖慢启动。
+- 更重的 workspace/vanilla symbol 索引通过 `ensureWorkspaceSymbolsReady()` 懒加载，避免拖慢启动。Agent 查询最多等待八秒，之后使用已完成的部分索引，同时让原版索引继续在后台构建。
 - 符号层支持 `.txt`、`.gfx`、`.asset`、`.gui`，记录 `origin`、`updatedAt`、`fileVersion` 和轻量引用。
 - watcher 对 `.yml` 与 symbol 文件做增量更新；symbol 索引闲置后可回收。
 - AI 通过 `query_localisation_index` 和 `query_workspace_index` 消费共享索引。
@@ -503,7 +503,7 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 
 ##### 项目知识包
 
-`/init` 现在分为快速画像阶段和深度语义阶段。深度阶段通过内部命令 `cwtools.ai.exportProjectKnowledge` 从同一个一致加锁的 `IGame` 快照原子生成规范化 SQLite V2 数据库，因此工作区定义、原版缓存定义、定义栈、引用拓扑、范例、资源覆盖状态、活动 CWT 覆盖模式、未解决事实和事件语义共享同一代数据边界。事件语义包括事件节点、事件调用与阶段边、`on_action`/类型入口边，以及 Flag、科技、变量、`fire_on_action` 和作用域桥接逻辑。
+`/init` 现在分为快速画像阶段和深度语义阶段。`chatInit.ts` 在等待 CWTools、导出数据库和发布产物期间，通过 `ProgressLocation.Window` 在 VS Code 左下角持续显示构建进度。深度阶段通过内部命令 `cwtools.ai.exportProjectKnowledge` 从同一个一致加锁的 `IGame` 快照原子生成规范化 SQLite V2 数据库，因此工作区定义、原版缓存定义、定义栈、引用拓扑、范例、资源覆盖状态、活动 CWT 覆盖模式、未解决事实和事件语义共享同一代数据边界。事件语义包括事件节点、事件调用与阶段边、`on_action`/类型入口边，以及 Flag、科技、变量、`fire_on_action` 和作用域桥接逻辑。
 
 持久化结构保持为两个核心产物：
 

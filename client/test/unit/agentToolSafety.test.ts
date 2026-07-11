@@ -902,6 +902,43 @@ describe('agent sprite candidate tool contract', () => {
         expect(ensureArgs).to.deep.equal({ includeVanilla: true });
     });
 
+    it('returns partial workspace index results after a bounded wait while vanilla indexing continues', async () => {
+        const clock = sinon.useFakeTimers();
+        try {
+            const fakeIndexService = {
+                status: 'ready',
+                workspaceSymbolStatus: 'indexing',
+                ensureWorkspaceSymbolsReady: () => new Promise<void>(() => undefined),
+                queryWorkspaceSymbols: () => [{
+                    name: 'crisis.100',
+                    kind: 'event',
+                    category: 'event',
+                    file: path.join('events', 'crisis.txt'),
+                    line: 3,
+                    source: 'script',
+                    origin: 'workspace',
+                }],
+                workspaceSymbolCount: 1,
+                workspaceSymbolUpdatedAt: 2000,
+            };
+            const executor = new AgentToolExecutor({} as any, workspaceRoot, fakeIndexService as any);
+            const pending = executor.execute('query_workspace_index', {
+                name: 'crisis',
+                prefix: true,
+                limit: 20,
+            }) as Promise<any>;
+
+            await clock.tickAsync(8_000);
+            const result = await pending;
+
+            expect(result.status).to.equal('indexing');
+            expect(result.entries[0].name).to.equal('crisis.100');
+            expect(result._hint).to.include('Partial indexed results');
+        } finally {
+            clock.restore();
+        }
+    });
+
     it('returns unavailable workspace index result without IndexService', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         const result = await executor.execute('query_workspace_index', { name: 'kuat.100' }) as any;

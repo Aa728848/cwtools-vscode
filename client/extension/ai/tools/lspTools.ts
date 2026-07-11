@@ -3613,9 +3613,18 @@ export class LspToolHandler {
         }
 
         const limit = Math.max(1, Math.min(Number(args.limit ?? 50) || 50, 200));
-        await this.ctx.indexService.ensureWorkspaceSymbolsReady?.({
+        const readiness = this.ctx.indexService.ensureWorkspaceSymbolsReady?.({
             includeVanilla: args.origin !== 'workspace',
         });
+        if (readiness) {
+            // A first query may trigger the large vanilla symbol scan. Return the
+            // already-built workspace/partial index after a bounded wait instead
+            // of holding the Agent tool open until its 45-second timeout.
+            await Promise.race([
+                readiness,
+                new Promise<void>(resolve => setTimeout(resolve, 8_000)),
+            ]);
+        }
         const entries = this.ctx.indexService.queryWorkspaceSymbols({
             name: args.name,
             kind: args.kind,
@@ -3628,9 +3637,10 @@ export class LspToolHandler {
             includeReferences: !!args.includeReferences,
             limit,
         });
+        const indexStatus = this.ctx.indexService.workspaceSymbolStatus ?? this.ctx.indexService.status;
 
         return {
-            status: this.ctx.indexService.status,
+            status: indexStatus,
             totalCount: entries.length,
             entries: entries.map(entry => ({
                 name: entry.name,
@@ -3647,9 +3657,9 @@ export class LspToolHandler {
             })),
             indexedSymbolNames: this.ctx.indexService.workspaceSymbolCount,
             indexUpdatedAt: this.ctx.indexService.workspaceSymbolUpdatedAt,
-            _hint: this.ctx.indexService.status === 'ready'
+            _hint: indexStatus === 'ready'
                 ? undefined
-                : 'Index may still be building; retry after the initial refresh completes.',
+                : 'Workspace/vanilla symbol indexing is still running. Partial indexed results were returned after an 8-second bounded wait; retry this targeted query shortly or use query_project_knowledge/explore_pdx_project for semantic lookup.',
         };
     }
 

@@ -18,6 +18,8 @@ describe('/init artifact generation', () => {
     it('keeps base artifacts and writes a recoverable manifest when the LSP export never becomes ready', async () => {
         const knowledgeRoot = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
         const manifestPath = path.join(knowledgeRoot, 'manifest.json');
+        const progressMessages: string[] = [];
+        let progressOptions: Record<string, unknown> | undefined;
         const vscodeStub = {
             workspace: {
                 workspaceFolders: [{ uri: { fsPath: workspaceRoot } }],
@@ -27,7 +29,16 @@ describe('/init artifact generation', () => {
                 showWarningMessage: async () => undefined,
                 showInformationMessage: async () => undefined,
                 showTextDocument: async () => undefined,
+                withProgress: async (options: Record<string, unknown>, task: (progress: { report(value: { message?: string }): void }) => Promise<unknown>) => {
+                    progressOptions = options;
+                    return task({
+                        report(value) {
+                            if (value.message) progressMessages.push(value.message);
+                        },
+                    });
+                },
             },
+            ProgressLocation: { Window: 10 },
             Uri: {
                 file: (filePath: string) => ({ fsPath: filePath }),
             },
@@ -67,6 +78,10 @@ describe('/init artifact generation', () => {
             expect(fs.existsSync(path.join(workspaceRoot, 'CWTOOLS.md'))).to.equal(true);
             expect(fs.existsSync(path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json'))).to.equal(true);
             expect(fs.existsSync(manifestPath)).to.equal(true);
+            expect(progressOptions?.location).to.equal(10);
+            expect(progressMessages.some(message => message.includes('Scanning workspace'))).to.equal(true);
+            expect(progressMessages.some(message => message.includes('Exporting project + vanilla knowledge'))).to.equal(true);
+            expect(progressMessages.some(message => message.includes('Publishing the knowledge database'))).to.equal(true);
         } finally {
             clock.restore();
             moduleLoader._load = originalLoad;

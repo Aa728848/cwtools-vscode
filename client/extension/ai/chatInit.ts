@@ -28,6 +28,7 @@ import {
 
 type PostMessageFn = (msg: HostMessage) => void;
 type RecordSnapshotFn = (filePath: string) => void;
+type InitProgress = vs.Progress<{ message?: string; increment?: number }>;
 
 export interface InitGenerationResult {
     success: boolean;
@@ -53,10 +54,17 @@ function isDeepKnowledgeReady(status: unknown): boolean {
         && pending.length === 0;
 }
 
-async function waitForDeepKnowledgeReadiness(): Promise<void> {
+async function waitForDeepKnowledgeReadiness(progress?: InitProgress): Promise<void> {
     if (typeof vs.commands?.executeCommand !== 'function') return;
+    const startedAt = Date.now();
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
+        progress?.report({
+            message: aiText(
+                `Waiting for the CWTools game model... ${Math.floor((Date.now() - startedAt) / 1000)}s`,
+                `正在等待 CWTools 游戏模型... ${Math.floor((Date.now() - startedAt) / 1000)} 秒`,
+            ),
+        });
         try {
             const status = await vs.commands.executeCommand('cwtools.ai.getValidationStatus');
             if (isDeepKnowledgeReady(status)) return;
@@ -67,13 +75,20 @@ async function waitForDeepKnowledgeReadiness(): Promise<void> {
     }
 }
 
-async function generateDeepKnowledgeWithRetry(root: string, profile: import('./types').ProjectProfile) {
-    await waitForDeepKnowledgeReadiness();
+async function generateDeepKnowledgeWithRetry(root: string, profile: import('./types').ProjectProfile, progress?: InitProgress) {
+    await waitForDeepKnowledgeReadiness(progress);
     const delays = [0, 2000, 5000];
     let lastError: unknown;
     let lastManifest: Awaited<ReturnType<typeof generateProjectKnowledge>> | undefined;
-    for (const delay of delays) {
+    for (let attempt = 0; attempt < delays.length; attempt++) {
+        const delay = delays[attempt]!;
         if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+        progress?.report({
+            message: aiText(
+                `Exporting project + vanilla knowledge (${attempt + 1}/${delays.length})...`,
+                `正在导出项目与原版知识（${attempt + 1}/${delays.length}）...`,
+            ),
+        });
         try {
             const manifest = await generateProjectKnowledge(root, profile, { mode: 'full' });
             lastManifest = manifest;
@@ -89,9 +104,10 @@ async function generateDeepKnowledgeWithRetry(root: string, profile: import('./t
 /**
  * Generate project rules and the machine-readable Agent project profile.
  */
-export async function generateInitFile(
+async function generateInitFileCore(
     postMessage: PostMessageFn,
-    recordFileSnapshot: RecordSnapshotFn
+    recordFileSnapshot: RecordSnapshotFn,
+    progress: InitProgress,
 ): Promise<InitGenerationResult> {
     const folders = vs.workspace.workspaceFolders;
     if (!folders || folders.length === 0) {
@@ -100,6 +116,12 @@ export async function generateInitFile(
     }
 
     const root = folders[0]!.uri.fsPath;
+    progress.report({
+        message: aiText(
+            'Scanning workspace and generating the project profile...',
+            '正在扫描工作区并生成项目画像...',
+        ),
+    });
     postMessage({
         type: 'agentStep',
         step: {
@@ -125,6 +147,12 @@ export async function generateInitFile(
         recordFileSnapshot(rulesPath);
         fs.writeFileSync(rulesPath, renderProjectRulesMarkdown(profile, customRules), 'utf8');
 
+        progress.report({
+            message: aiText(
+                'Waiting for the CWTools model before deep export...',
+                '正在等待 CWTools 模型并准备深层导出...',
+            ),
+        });
         postMessage({
             type: 'agentStep',
             step: {
@@ -139,7 +167,7 @@ export async function generateInitFile(
 
         let deepKnowledgeError: string | undefined;
         try {
-            const manifest = await generateDeepKnowledgeWithRetry(root, profile);
+            const manifest = await generateDeepKnowledgeWithRetry(root, profile, progress);
             profile.game.id = manifest.game || profile.game.id;
             profile.game.displayName = getKnownProfileByLanguageId(manifest.game)?.displayName ?? profile.game.displayName;
             profile.game.confidence = manifest.game && manifest.game !== 'paradox' ? 'high' : profile.game.confidence;
@@ -152,6 +180,12 @@ export async function generateInitFile(
             profile.validation.lspReady = 'not_ready';
             writeUnavailableProjectKnowledge(root, profile, deepKnowledgeError);
         }
+        progress.report({
+            message: aiText(
+                'Publishing the knowledge database and project rules...',
+                '正在发布知识数据库和项目规则...',
+            ),
+        });
         writeProjectProfile(root, profile);
 
         fs.writeFileSync(rulesPath, renderProjectRulesMarkdown(profile, customRules), 'utf8');
@@ -203,4 +237,30 @@ export async function generateInitFile(
         });
         return { success: false, message };
     }
+}
+
+/**
+ * Generate project rules and the machine-readable Agent project profile.
+ * ProgressLocation.Window renders the long-running /init phase in VS Code's
+ * lower-left status area until the knowledge database has been published.
+ */
+export async function generateInitFile(
+    postMessage: PostMessageFn,
+    recordFileSnapshot: RecordSnapshotFn,
+): Promise<InitGenerationResult> {
+    const run = (progress: InitProgress) => generateInitFileCore(postMessage, recordFileSnapshot, progress);
+    if (typeof vs.window.withProgress === 'function' && vs.ProgressLocation?.Window !== undefined) {
+        return vs.window.withProgress(
+            {
+                location: vs.ProgressLocation.Window,
+                title: aiText(
+                    'Eddy CWTool Code: Building project knowledge',
+                    'Eddy CWTool Code：正在构建项目知识',
+                ),
+                cancellable: false,
+            },
+            run,
+        );
+    }
+    return run({ report: () => undefined });
 }

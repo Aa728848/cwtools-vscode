@@ -537,6 +537,9 @@ export async function queryProjectKnowledge(
             generatedAt: typeof result.generatedAt === 'string' ? result.generatedAt : manifest.generatedAt,
             game: typeof result.game === 'string' ? result.game : manifest.game,
             graphVersion: typeof result.graphVersion === 'number' ? result.graphVersion : manifest.graphVersion,
+            retrieval: result.retrieval && typeof result.retrieval === 'object'
+                ? result.retrieval as QueryProjectKnowledgeResult['retrieval']
+                : undefined,
             staleReasons,
             domains: Array.isArray(result.domains) ? result.domains.filter((item): item is string => typeof item === 'string') : [],
             capabilities: Array.isArray(result.capabilities) ? result.capabilities as Array<Record<string, unknown>> : [],

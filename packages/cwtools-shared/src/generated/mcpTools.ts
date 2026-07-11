@@ -428,7 +428,7 @@ export const GENERATED_MCP_TOOLS = [
             "items": {
               "type": "string"
             },
-            "description": "Known or proposed IDs to prioritize."
+            "description": "Known or proposed IDs used as indexed graph seeds. Exact IDs and stable prefixes give the fastest, most accurate retrieval."
           },
           "entityTypes": {
             "type": "array",

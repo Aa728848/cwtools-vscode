@@ -118,7 +118,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                         items: { type: 'string' },
                         description: 'Subsystem domains to load, e.g. events, on_actions, special_projects, archaeology, situations, technology, ships, scripted_logic, assets, localisation.',
                     },
-                    identifiers: { type: 'array', items: { type: 'string' }, description: 'Known or proposed IDs to prioritize.' },
+                    identifiers: { type: 'array', items: { type: 'string' }, description: 'Known or proposed IDs used as indexed graph seeds. Exact IDs and stable prefixes give the fastest, most accurate retrieval.' },
                     entityTypes: { type: 'array', items: { type: 'string' }, description: 'CWTools entity types to prioritize.' },
                     includeProjectPatterns: { type: 'boolean', description: 'Include existing workspace examples. Default true.' },
                     includeVanillaArchetypes: { type: 'boolean', description: 'Include bounded vanilla examples with exact sources. Default true.' },

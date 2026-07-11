@@ -487,6 +487,7 @@ let private triggeredOnlyRegex = Regex(@"\bis_triggered_only\s*=\s*yes\b", regex
 let private hiddenEventRegex = Regex(@"\b(?:hide_window|is_hidden)\s*=\s*yes\b", regexOptions)
 let private meanTimeToHappenRegex = Regex(@"\bmean_time_to_happen\s*=\s*\{", regexOptions)
 let private fireOnActionRegex = Regex(@"\bfire_on_action\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
+let private eventIdentifierRegex = Regex(@"(?<![A-Za-z0-9_.-])([A-Za-z_][A-Za-z0-9_-]*\.[A-Za-z0-9_.-]+)(?![A-Za-z0-9_.-])", regexOptions)
 
 let private eventPhaseRegexes =
     [ "trigger", Regex(@"\btrigger\s*=\s*\{", regexOptions)
@@ -572,6 +573,13 @@ let private collectEventGraph (definitions: DefinitionFact list) (topology: Topo
         |> List.filter (fun definition -> definition.domain = "events" && definition.id.Contains('.'))
         |> List.distinctBy (fun definition -> normalizePath definition.file, definition.line, definition.id)
         |> List.sortBy (fun definition -> normalizePath definition.file, definition.line, definition.id)
+    let onActionDefinitions =
+        definitions
+        |> List.filter (fun definition ->
+            definition.domain = "on_actions"
+            && definition.entityType.StartsWith("on_action", StringComparison.OrdinalIgnoreCase))
+        |> List.distinctBy (fun definition -> normalizePath definition.file, definition.line, definition.id)
+        |> List.sortBy (fun definition -> normalizePath definition.file, definition.line, definition.id)
     let eventIds = eventDefinitions |> Seq.map (fun item -> item.id.ToLowerInvariant()) |> Set.ofSeq
     let nodes = ResizeArray<EventNodeFact>()
     let edges = ResizeArray<EventEdgeFact>()
@@ -622,6 +630,26 @@ let private collectEventGraph (definitions: DefinitionFact list) (topology: Topo
             |> List.collect (fun (relationType, phase, pattern) ->
                 collectPatternLogic definition.id definition.file definition.line relationType phase pattern text)
             |> logic.AddRange
+
+    // Vanilla on_actions are present in the typed definition cache even though
+    // the live topology snapshot intentionally scans workspace files only.
+    // Resolve event-like identifiers against known event IDs to add precise
+    // entry edges without treating unrelated dotted values as events.
+    for definition in onActionDefinitions do
+        let text = readDefinitionText textCache definition
+        if not (String.IsNullOrWhiteSpace text) then
+            for matched in eventIdentifierRegex.Matches(text) |> Seq.cast<Match> do
+                let target = matched.Groups.[1].Value
+                if eventIds.Contains(target.ToLowerInvariant()) then
+                    edges.Add
+                        { sourceKind = "on_action"
+                          sourceId = definition.id
+                          targetEventId = target
+                          edgeType = "on_action_entry"
+                          label = None
+                          sourceFile = normalizePath definition.file
+                          line = lineAtOffset definition.line text matched.Index
+                          confidence = "parsed" }
 
     let nodeByFile = Dictionary<string, EventNodeFact list>(pathComparer)
     for file, values in nodes |> Seq.groupBy (fun node -> normalizePath node.file) do
@@ -1190,14 +1218,21 @@ let private queryTokens (options: QueryOptions) =
     |> Seq.truncate 30
     |> Seq.toList
 
+let private queryIdentifiers (options: QueryOptions) =
+    options.identifiers
+    |> List.map (fun value -> value.Trim().ToLowerInvariant())
+    |> List.filter (String.IsNullOrWhiteSpace >> not)
+    |> List.distinct
+    |> List.truncate 20
+
 let private matchesTokens (tokens: string list) (values: string seq) =
     if tokens.IsEmpty then true
     else
         let text = String.Join(" ", values).ToLowerInvariant()
         tokens |> List.exists text.Contains
 
-let private sqliteTokenClause (command: SqliteCommand) (tokens: string list) (columns: string list) =
-    if tokens.IsEmpty then ""
+let private sqliteTokenPredicate (command: SqliteCommand) (tokens: string list) (columns: string list) =
+    if tokens.IsEmpty then None
     else
         tokens
         |> List.mapi (fun index token ->
@@ -1208,7 +1243,42 @@ let private sqliteTokenClause (command: SqliteCommand) (tokens: string list) (co
             |> String.concat " OR "
             |> fun clause -> "(" + clause + ")")
         |> String.concat " OR "
-        |> fun clause -> " WHERE " + clause
+        |> Some
+
+let private escapeLikePrefix (value: string) =
+    value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%"
+
+let private sqliteIndexedIdentifierPredicate (command: SqliteCommand) parameterPrefix (identifiers: string list) (columns: string list) =
+    if identifiers.IsEmpty then None
+    else
+        identifiers
+        |> List.mapi (fun index identifier ->
+            let exactParameter = $"${parameterPrefix}Exact{index}"
+            let prefixParameter = $"${parameterPrefix}Prefix{index}"
+            addParameter command exactParameter (box identifier)
+            addParameter command prefixParameter (box (escapeLikePrefix identifier))
+            columns
+            |> List.map (fun column ->
+                $"({column} COLLATE NOCASE = {exactParameter} OR {column} COLLATE NOCASE LIKE {prefixParameter} ESCAPE '\\')")
+            |> String.concat " OR "
+            |> fun clause -> "(" + clause + ")")
+        |> String.concat " OR "
+        |> Some
+
+let private sqliteValueSetPredicate (command: SqliteCommand) parameterPrefix (values: string list) column =
+    if values.IsEmpty then None
+    else
+        values
+        |> List.mapi (fun index value ->
+            let parameter = $"${parameterPrefix}{index}"
+            addParameter command parameter (box value)
+            parameter)
+        |> String.concat ","
+        |> fun parameters -> Some($"{column} COLLATE NOCASE IN ({parameters})")
+
+let private combineSqlPredicates predicates =
+    let clauses = predicates |> List.choose id
+    if clauses.IsEmpty then "" else " WHERE " + String.concat " AND " clauses
 
 let queryProjectKnowledgeDatabase (options: QueryOptions) =
     let databasePath = Path.GetFullPath options.databasePath
@@ -1226,6 +1296,7 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
         let getMetadata key fallback = match metadata.TryGetValue key with true, value -> value | _ -> fallback
         let limit = clamp 1 300 options.limit
         let tokens = queryTokens options
+        let identifiers = queryIdentifiers options
         let requestedDomains = options.domains |> List.map (fun item -> item.Trim().ToLowerInvariant()) |> List.filter (String.IsNullOrWhiteSpace >> not) |> List.distinct
         let allowedDomain (domain: string) = requestedDomains.IsEmpty || requestedDomains |> List.contains (domain.ToLowerInvariant())
 
@@ -1248,9 +1319,30 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                               Some("directories", JsonValue.Parse(domainReader.GetString 5)) ]) ])
 
         let evidence = ResizeArray<JsonValue>()
+        let evidenceKeys = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        let seedDefinitionRanges = ResizeArray<string * int * int>()
         use definitionCommand = connection.CreateCommand()
-        let definitionTokenClause = sqliteTokenClause definitionCommand tokens [ "symbol_id"; "entity_type"; "file_path"; "logical_path"; "domain" ]
-        definitionCommand.CommandText <- "SELECT id, symbol_id, entity_type, file_path, logical_path, line, end_line, origin, validate, overwrite_state, resource_scope, domain, override_path, override_strategy FROM definitions" + definitionTokenClause + " ORDER BY CASE origin WHEN 'workspace' THEN 0 ELSE 1 END, symbol_id LIMIT $limit"
+        let definitionSearchPredicate =
+            if identifiers.IsEmpty then
+                sqliteTokenPredicate definitionCommand tokens [ "symbol_id"; "entity_type"; "file_path"; "logical_path"; "domain" ]
+            else
+                sqliteIndexedIdentifierPredicate definitionCommand "definitionId" identifiers [ "symbol_id" ]
+        let definitionDomainPredicate = sqliteValueSetPredicate definitionCommand "definitionDomain" requestedDomains "domain"
+        let definitionTypePredicate =
+            options.entityTypes
+            |> List.map (fun value -> value.Trim().ToLowerInvariant())
+            |> List.filter (String.IsNullOrWhiteSpace >> not)
+            |> List.distinct
+            |> fun values -> sqliteIndexedIdentifierPredicate definitionCommand "definitionType" values [ "entity_type" ]
+        let definitionOriginPredicate =
+            match options.includeProjectPatterns, options.includeVanillaArchetypes with
+            | true, true -> None
+            | true, false -> Some("origin = 'workspace'")
+            | false, true -> Some("origin = 'vanilla'")
+            | false, false -> Some("0 = 1")
+        let definitionWhere =
+            combineSqlPredicates [ definitionSearchPredicate; definitionDomainPredicate; definitionTypePredicate; definitionOriginPredicate ]
+        definitionCommand.CommandText <- "SELECT id, symbol_id, entity_type, file_path, logical_path, line, end_line, origin, validate, overwrite_state, resource_scope, domain, override_path, override_strategy FROM definitions" + definitionWhere + " ORDER BY CASE origin WHEN 'workspace' THEN 0 ELSE 1 END, symbol_id LIMIT $limit"
         addParameter definitionCommand "$limit" (box (max 500 (limit * 20)))
         use definitionReader = definitionCommand.ExecuteReader()
         while definitionReader.Read() && evidence.Count < limit do
@@ -1265,37 +1357,45 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                 || (origin = "vanilla" && options.includeVanillaArchetypes)
             let allowedType = options.entityTypes.IsEmpty || options.entityTypes |> List.exists (fun item -> entityType.Contains(item, StringComparison.OrdinalIgnoreCase))
             if allowedDomain domain && allowedOrigin && allowedType && matchesTokens tokens [ symbolId; entityType; file; logicalPath; domain ] then
-                evidence.Add(
-                    jsonRecord
-                        [ Some("kind", JsonValue.String "definition")
-                          Some("id", JsonValue.String symbolId)
-                          Some("entityType", JsonValue.String entityType)
-                          Some("file", JsonValue.String file)
-                          Some("logicalPath", JsonValue.String logicalPath)
-                          Some("line", JsonValue.Number(decimal (definitionReader.GetInt64 5)))
-                          Some("endLine", JsonValue.Number(decimal (definitionReader.GetInt64 6)))
-                          Some("origin", JsonValue.String origin)
-                          Some("validate", JsonValue.Boolean(definitionReader.GetInt64 8 <> 0L))
-                          Some("overwrite", JsonValue.String(definitionReader.GetString 9))
-                          stringOrNone definitionReader 10 |> Option.map (fun value -> "resourceScope", JsonValue.String value)
-                          Some("domain", JsonValue.String domain)
-                          stringOrNone definitionReader 12 |> Option.map (fun value -> "overridePath", JsonValue.String value)
-                          stringOrNone definitionReader 13 |> Option.map (fun value -> "overrideStrategy", JsonValue.String value) ])
+                let line = int (definitionReader.GetInt64 5)
+                let endLine = int (definitionReader.GetInt64 6)
+                // CWTools may expose the same source definition through several
+                // subtype keys. Return one source fact so graph seeds stay diverse.
+                let key = $"definition|{symbolId}|{file}|{line}"
+                if evidenceKeys.Add key then
+                    evidence.Add(
+                        jsonRecord
+                            [ Some("kind", JsonValue.String "definition")
+                              Some("id", JsonValue.String symbolId)
+                              Some("entityType", JsonValue.String entityType)
+                              Some("file", JsonValue.String file)
+                              Some("logicalPath", JsonValue.String logicalPath)
+                              Some("line", JsonValue.Number(decimal line))
+                              Some("endLine", JsonValue.Number(decimal endLine))
+                              Some("origin", JsonValue.String origin)
+                              Some("validate", JsonValue.Boolean(definitionReader.GetInt64 8 <> 0L))
+                              Some("overwrite", JsonValue.String(definitionReader.GetString 9))
+                              stringOrNone definitionReader 10 |> Option.map (fun value -> "resourceScope", JsonValue.String value)
+                              Some("domain", JsonValue.String domain)
+                              stringOrNone definitionReader 12 |> Option.map (fun value -> "overridePath", JsonValue.String value)
+                              stringOrNone definitionReader 13 |> Option.map (fun value -> "overrideStrategy", JsonValue.String value) ])
+                    if not identifiers.IsEmpty && seedDefinitionRanges.Count < 40 then
+                        seedDefinitionRanges.Add(file, line, endLine)
         definitionReader.Close()
 
         if options.includeTopology && evidence.Count < limit then
-            use referenceCommand = connection.CreateCommand()
-            let referenceTokenClause = sqliteTokenClause referenceCommand tokens [ "source_file"; "source_logical_path"; "target_id"; "type_group"; "label"; "associated_type"; "domain" ]
-            referenceCommand.CommandText <- "SELECT source_file, source_logical_path, target_id, type_group, line, is_outgoing, reference_type, label, associated_type, domain FROM references_graph" + referenceTokenClause + " LIMIT $limit"
-            addParameter referenceCommand "$limit" (box (max 500 (limit * 20)))
-            use referenceReader = referenceCommand.ExecuteReader()
-            while referenceReader.Read() && evidence.Count < limit do
-                let sourceFile = referenceReader.GetString 0
-                let sourceLogicalPath = referenceReader.GetString 1
-                let targetId = referenceReader.GetString 2
-                let typeGroup = referenceReader.GetString 3
-                let domain = referenceReader.GetString 9
-                if allowedDomain domain && matchesTokens tokens [ sourceFile; sourceLogicalPath; targetId; typeGroup; domain ] then
+            let addReferenceRow (reader: SqliteDataReader) graphExpansion =
+                let sourceFile = reader.GetString 0
+                let sourceLogicalPath = reader.GetString 1
+                let targetId = reader.GetString 2
+                let typeGroup = reader.GetString 3
+                let line = int (reader.GetInt64 4)
+                let domain = reader.GetString 9
+                let key = $"reference|{sourceFile}|{line}|{targetId}|{typeGroup}"
+                if evidence.Count < limit
+                   && allowedDomain domain
+                   && (graphExpansion || matchesTokens tokens [ sourceFile; sourceLogicalPath; targetId; typeGroup; domain ])
+                   && evidenceKeys.Add key then
                     evidence.Add(
                         jsonRecord
                             [ Some("kind", JsonValue.String "reference")
@@ -1303,13 +1403,42 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                               Some("sourceLogicalPath", JsonValue.String sourceLogicalPath)
                               Some("targetId", JsonValue.String targetId)
                               Some("typeGroup", JsonValue.String typeGroup)
-                              Some("line", JsonValue.Number(decimal (referenceReader.GetInt64 4)))
-                              Some("isOutgoing", JsonValue.Boolean(referenceReader.GetInt64 5 <> 0L))
-                              Some("referenceType", JsonValue.String(referenceReader.GetString 6))
-                              stringOrNone referenceReader 7 |> Option.map (fun value -> "label", JsonValue.String value)
-                              stringOrNone referenceReader 8 |> Option.map (fun value -> "associatedType", JsonValue.String value)
-                              Some("domain", JsonValue.String domain) ])
+                              Some("line", JsonValue.Number(decimal line))
+                              Some("isOutgoing", JsonValue.Boolean(reader.GetInt64 5 <> 0L))
+                              Some("referenceType", JsonValue.String(reader.GetString 6))
+                              stringOrNone reader 7 |> Option.map (fun value -> "label", JsonValue.String value)
+                              stringOrNone reader 8 |> Option.map (fun value -> "associatedType", JsonValue.String value)
+                              Some("domain", JsonValue.String domain)
+                              Some("retrieval", JsonValue.String(if graphExpansion then "indexed_outgoing_graph" else if identifiers.IsEmpty then "token_match" else "indexed_incoming_graph")) ])
+
+            use referenceCommand = connection.CreateCommand()
+            let referenceSearchPredicate =
+                if identifiers.IsEmpty then
+                    sqliteTokenPredicate referenceCommand tokens [ "source_file"; "source_logical_path"; "target_id"; "type_group"; "label"; "associated_type"; "domain" ]
+                else
+                    sqliteIndexedIdentifierPredicate referenceCommand "referenceTarget" identifiers [ "target_id" ]
+            let referenceDomainPredicate = sqliteValueSetPredicate referenceCommand "referenceDomain" requestedDomains "domain"
+            let referenceWhere = combineSqlPredicates [ referenceSearchPredicate; referenceDomainPredicate ]
+            referenceCommand.CommandText <- "SELECT source_file, source_logical_path, target_id, type_group, line, is_outgoing, reference_type, label, associated_type, domain FROM references_graph" + referenceWhere + " LIMIT $limit"
+            addParameter referenceCommand "$limit" (box (max 500 (limit * 20)))
+            use referenceReader = referenceCommand.ExecuteReader()
+            while referenceReader.Read() && evidence.Count < limit do
+                addReferenceRow referenceReader false
             referenceReader.Close()
+
+            if not identifiers.IsEmpty && evidence.Count < limit then
+                use outgoingReferenceCommand = connection.CreateCommand()
+                outgoingReferenceCommand.CommandText <-
+                    "SELECT source_file, source_logical_path, target_id, type_group, line, is_outgoing, reference_type, label, associated_type, domain FROM references_graph WHERE source_file = $sourceFile AND line BETWEEN $startLine AND $endLine ORDER BY line LIMIT $limit"
+                prepareCommandParameters outgoingReferenceCommand
+                    [ "$sourceFile", box ""; "$startLine", box 0; "$endLine", box 0; "$limit", box limit ]
+                for sourceFile, startLine, endLine in seedDefinitionRanges do
+                    if evidence.Count < limit then
+                        setPreparedCommandParameters outgoingReferenceCommand
+                            [ "$sourceFile", box sourceFile; "$startLine", box startLine; "$endLine", box endLine; "$limit", box (limit - evidence.Count) ]
+                        use outgoingReader = outgoingReferenceCommand.ExecuteReader()
+                        while outgoingReader.Read() && evidence.Count < limit do
+                            addReferenceRow outgoingReader true
 
         let eventNodes = ResizeArray<JsonValue>()
         let eventEdges = ResizeArray<JsonValue>()
@@ -1320,8 +1449,12 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
         let returnedLogicKeys = HashSet<string>(StringComparer.OrdinalIgnoreCase)
         if options.includeEventGraph then
             use nodeCommand = connection.CreateCommand()
-            let nodeTokenClause = sqliteTokenClause nodeCommand tokens [ "event_id"; "event_type"; "title"; "file_path"; "logical_path" ]
-            nodeCommand.CommandText <- "SELECT event_id, event_type, title, file_path, logical_path, line, end_line, origin, is_triggered_only, is_hidden, has_mtth FROM event_nodes" + nodeTokenClause + " LIMIT $limit"
+            let nodeSearchPredicate =
+                if identifiers.IsEmpty then
+                    sqliteTokenPredicate nodeCommand tokens [ "event_id"; "event_type"; "title"; "file_path"; "logical_path" ]
+                else
+                    sqliteIndexedIdentifierPredicate nodeCommand "eventNode" identifiers [ "event_id" ]
+            nodeCommand.CommandText <- "SELECT event_id, event_type, title, file_path, logical_path, line, end_line, origin, is_triggered_only, is_hidden, has_mtth FROM event_nodes" + combineSqlPredicates [ nodeSearchPredicate ] + " LIMIT $limit"
             addParameter nodeCommand "$limit" (box (max 200 (limit * 10)))
             use nodeReader = nodeCommand.ExecuteReader()
             while nodeReader.Read() && eventNodes.Count < limit do
@@ -1340,8 +1473,12 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                               Some("isHidden", JsonValue.Boolean(nodeReader.GetInt64 9 <> 0L)); Some("hasMeanTimeToHappen", JsonValue.Boolean(nodeReader.GetInt64 10 <> 0L)) ])
             nodeReader.Close()
             use edgeCommand = connection.CreateCommand()
-            let edgeTokenClause = sqliteTokenClause edgeCommand tokens [ "source_kind"; "source_id"; "target_event_id"; "edge_type"; "label"; "source_file" ]
-            edgeCommand.CommandText <- "SELECT source_kind, source_id, target_event_id, edge_type, label, source_file, line, confidence FROM event_edges" + edgeTokenClause + " LIMIT $limit"
+            let edgeSearchPredicate =
+                if identifiers.IsEmpty then
+                    sqliteTokenPredicate edgeCommand tokens [ "source_kind"; "source_id"; "target_event_id"; "edge_type"; "label"; "source_file" ]
+                else
+                    sqliteIndexedIdentifierPredicate edgeCommand "eventEdge" identifiers [ "source_id"; "target_event_id" ]
+            edgeCommand.CommandText <- "SELECT source_kind, source_id, target_event_id, edge_type, label, source_file, line, confidence FROM event_edges" + combineSqlPredicates [ edgeSearchPredicate ] + " LIMIT $limit"
             addParameter edgeCommand "$limit" (box (max 500 (limit * 20)))
             use edgeReader = edgeCommand.ExecuteReader()
             while edgeReader.Read() && eventEdges.Count < limit do
@@ -1360,8 +1497,12 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                               Some("confidence", JsonValue.String(edgeReader.GetString 7)) ])
             edgeReader.Close()
             use logicCommand = connection.CreateCommand()
-            let logicTokenClause = sqliteTokenClause logicCommand tokens [ "event_id"; "relation_type"; "subject"; "scope"; "phase"; "source_file"; "details" ]
-            logicCommand.CommandText <- "SELECT event_id, relation_type, subject, scope, phase, source_file, line, details FROM event_logic" + logicTokenClause + " LIMIT $limit"
+            let logicSearchPredicate =
+                if identifiers.IsEmpty then
+                    sqliteTokenPredicate logicCommand tokens [ "event_id"; "relation_type"; "subject"; "scope"; "phase"; "source_file"; "details" ]
+                else
+                    sqliteIndexedIdentifierPredicate logicCommand "eventLogic" identifiers [ "event_id"; "subject" ]
+            logicCommand.CommandText <- "SELECT event_id, relation_type, subject, scope, phase, source_file, line, details FROM event_logic" + combineSqlPredicates [ logicSearchPredicate ] + " LIMIT $limit"
             addParameter logicCommand "$limit" (box (max 500 (limit * 20)))
             use logicReader = logicCommand.ExecuteReader()
             let addLogicRow (reader: SqliteDataReader) =
@@ -1461,6 +1602,14 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
               Some("generatedAt", JsonValue.String(getMetadata "generated_at" ""))
               Some("game", JsonValue.String(getMetadata "game" "unknown"))
               Some("graphVersion", JsonValue.Number(decimal (Int64.Parse(getMetadata "graph_version" "0"))))
+              Some("retrieval", jsonRecord
+                [ Some("strategy", JsonValue.String(if identifiers.IsEmpty then "bounded_token_scan" else "indexed_graph"))
+                  Some("seedIdentifiers", jsonStringArray identifiers)
+                  Some("seedDefinitions", JsonValue.Number(decimal seedDefinitionRanges.Count))
+                  Some("evidenceReturned", JsonValue.Number(decimal evidence.Count))
+                  Some("eventNodesReturned", JsonValue.Number(decimal eventNodes.Count))
+                  Some("eventEdgesReturned", JsonValue.Number(decimal eventEdges.Count))
+                  Some("eventLogicReturned", JsonValue.Number(decimal eventLogic.Count)) ])
               Some("domains", jsonStringArray (capabilities |> Seq.map (fun item -> item.GetProperty("domain").AsString())))
               Some("capabilities", JsonValue.Array(capabilities.ToArray()))
               Some("evidence", JsonValue.Array(evidence.ToArray()))

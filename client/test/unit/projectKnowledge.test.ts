@@ -160,6 +160,15 @@ describe('project knowledge SQLite V2', () => {
             ok: true,
             status: 'ready',
             domains: ['events'],
+            retrieval: {
+                strategy: 'indexed_graph',
+                seedIdentifiers: ['example.1'],
+                seedDefinitions: 1,
+                evidenceReturned: 1,
+                eventNodesReturned: 1,
+                eventEdgesReturned: 1,
+                eventLogicReturned: 1,
+            },
             capabilities: [],
             evidence: [],
             unresolved: [],
@@ -175,6 +184,8 @@ describe('project knowledge SQLite V2', () => {
             includeEventGraph: true,
         });
         expect(result.status).to.equal('ready');
+        expect(result.retrieval?.strategy).to.equal('indexed_graph');
+        expect(result.retrieval?.seedIdentifiers).to.deep.equal(['example.1']);
         expect(result.eventGraph?.edges[0]?.edgeType).to.equal('option');
         expect(result.eventGraph?.logic[0]?.relationType).to.equal('flag_set');
         expect(commandCalls[1]!.command).to.equal('cwtools.ai.queryProjectKnowledgeDb');

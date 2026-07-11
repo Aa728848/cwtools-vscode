@@ -599,6 +599,15 @@ export interface QueryProjectKnowledgeResult {
     generatedAt?: string;
     game?: string;
     graphVersion?: number;
+    retrieval?: {
+        strategy: 'indexed_graph' | 'bounded_token_scan';
+        seedIdentifiers: string[];
+        seedDefinitions: number;
+        evidenceReturned: number;
+        eventNodesReturned: number;
+        eventEdgesReturned: number;
+        eventLogicReturned: number;
+    };
     staleReasons?: string[];
     domains: string[];
     capabilities?: Array<Record<string, unknown>>;

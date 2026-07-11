@@ -2,15 +2,48 @@ import { expect } from 'chai';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as sinon from 'sinon';
 
 let nextSnapshot: Record<string, unknown>;
 let commandCalls: Array<{ command: string; args: unknown[] }> = [];
+let activeWorkspaceRoot = '';
+const watcherStubs: Array<{
+    change?: (uri: { fsPath: string }) => void;
+    create?: (uri: { fsPath: string }) => void;
+    delete?: (uri: { fsPath: string }) => void;
+    dispose: () => void;
+}> = [];
+
+class DisposableStub {
+    constructor(private readonly callback: () => void) {}
+    dispose(): void { this.callback(); }
+}
+
+class RelativePatternStub {
+    constructor(public readonly base: unknown, public readonly pattern: string) {}
+}
 
 const vscodeStub = {
     workspace: {
+        workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
         getConfiguration: () => ({
             get: <T>(_key: string, defaultValue?: T): T | undefined => defaultValue,
         }),
+        getWorkspaceFolder: () => activeWorkspaceRoot ? { uri: { fsPath: activeWorkspaceRoot } } : undefined,
+        createFileSystemWatcher: () => {
+            const watcher = {
+                change: undefined as ((uri: { fsPath: string }) => void) | undefined,
+                create: undefined as ((uri: { fsPath: string }) => void) | undefined,
+                delete: undefined as ((uri: { fsPath: string }) => void) | undefined,
+                onDidChange(callback: (uri: { fsPath: string }) => void) { this.change = callback; },
+                onDidCreate(callback: (uri: { fsPath: string }) => void) { this.create = callback; },
+                onDidDelete(callback: (uri: { fsPath: string }) => void) { this.delete = callback; },
+                dispose: () => undefined,
+            };
+            watcherStubs.push(watcher);
+            return watcher;
+        },
+        onDidChangeConfiguration: () => ({ dispose: () => undefined }),
     },
     commands: {
         executeCommand: async (command: string, ...args: unknown[]) => {
@@ -32,7 +65,11 @@ const vscodeStub = {
             clear: () => undefined,
             dispose: () => undefined,
         }),
+        onDidChangeWindowState: () => ({ dispose: () => undefined }),
     },
+    Uri: { file: (fsPath: string) => ({ fsPath }) },
+    RelativePattern: RelativePatternStub,
+    Disposable: DisposableStub,
 };
 
 function loadProjectKnowledge() {
@@ -57,6 +94,9 @@ describe('project knowledge SQLite V2', () => {
 
     beforeEach(() => {
         workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-project-knowledge-'));
+        activeWorkspaceRoot = workspaceRoot;
+        vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: workspaceRoot } }];
+        watcherStubs.length = 0;
         commandCalls = [];
     });
 
@@ -224,5 +264,49 @@ describe('project knowledge SQLite V2', () => {
         });
         expect(result.evidence.some(item => item.id === 'legacy.1')).to.equal(true);
         expect(commandCalls).to.have.length(0);
+    });
+
+    it('rebuilds the vanilla symbol cache and project knowledge in one .cwb refresh stage', async () => {
+        nextSnapshot = {
+            ok: true,
+            status: 'ready',
+            game: 'stellaris',
+            generatedAtUnixMs: Date.now(),
+            projectRoots: [workspaceRoot],
+            generationMode: 'full',
+            domains: [{ id: 'events' }],
+            counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
+            warnings: [],
+        };
+        const profile = { game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
+        fs.mkdirSync(path.join(workspaceRoot, '.cwtools-ai', 'project'), { recursive: true });
+        fs.writeFileSync(path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json'), JSON.stringify(profile));
+        const refreshedGames: Array<readonly string[] | undefined> = [];
+        const context = {
+            globalStorageUri: { fsPath: path.join(workspaceRoot, 'global-storage') },
+            subscriptions: [] as Array<{ dispose(): void }>,
+        };
+        projectKnowledge.registerProjectKnowledgeWatcher(context as any, {
+            refreshVanillaSymbols: async (gameIds?: readonly string[]) => { refreshedGames.push(gameIds); },
+        } as any);
+        expect(watcherStubs).to.have.length(2);
+
+        const clock = sinon.useFakeTimers();
+        try {
+            watcherStubs[1]!.change?.({ fsPath: path.join(context.globalStorageUri.fsPath, '.cwtools', 'stl.cwb') });
+            expect(projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)?.staleReasons).to.include('vanilla_cache_changed');
+            await clock.tickAsync(2000);
+            await clock.runAllAsync();
+        } finally {
+            clock.restore();
+            for (const disposable of context.subscriptions.reverse()) disposable.dispose();
+        }
+
+        expect(refreshedGames).to.deep.equal([['stellaris']]);
+        expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(2);
+        const manifest = projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)!;
+        expect(manifest.status).to.equal('ready');
+        expect(manifest.staleReasons).to.deep.equal([]);
     });
 });

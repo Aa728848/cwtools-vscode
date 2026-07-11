@@ -490,6 +490,30 @@ export function getCacheSettingKey(languageId: string): string {
 	return profile.cacheSettingKey.replace('stellarisLanguageServices.', '');
 }
 
+const VANILLA_CACHE_FILE_NAMES: Readonly<Record<string, string>> = {
+	stellaris: 'stl.cwb',
+	hoi4: 'hoi4.cwb',
+	eu4: 'eu4.cwb',
+	eu5: 'eu5.cwb',
+	ck2: 'ck2.cwb',
+	ck3: 'ck3.cwb',
+	imperator: 'ir.cwb',
+	vic2: 'vic2.cwb',
+	vic3: 'vic3.cwb',
+};
+
+/** Serialized vanilla cache file written beside the per-game rules folders. */
+export function getVanillaCacheFileName(languageId: string): string | undefined {
+	return VANILLA_CACHE_FILE_NAMES[languageId.toLowerCase()];
+}
+
+/** Resolve a serialized vanilla cache file back to its game language ID. */
+export function getGameIdForVanillaCacheFile(fileName: string): string | undefined {
+	const normalized = fileName.toLowerCase();
+	return Object.entries(VANILLA_CACHE_FILE_NAMES)
+		.find(([, candidate]) => candidate === normalized)?.[0];
+}
+
 /**
  * Returns the install detection metadata for a given language ID.
  */

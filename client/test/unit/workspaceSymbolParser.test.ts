@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import {
     addSymbolsToIndex,
     parseWorkspaceSymbols,
+    populateWorkspaceSymbolReferences,
     queryWorkspaceSymbolIndex,
     rebuildWorkspaceSymbolReferences,
     removeFileFromSymbolIndex,
@@ -118,6 +119,36 @@ describe('Workspace Symbol Parser (indexing)', () => {
         expect(queryWorkspaceSymbolIndex(index, { kind: 'sprite', source: 'asset', origin: 'vanilla' })[0]!.name).to.equal('GFX_evt_kuat_echo');
         expect(queryWorkspaceSymbolIndex(index, { category: 'game_entity' })[0]!.name).to.equal('tech_kuat_reactor');
         expect(queryWorkspaceSymbolIndex(index, { directory: 'common/technology' })[0]!.name).to.equal('tech_kuat_reactor');
+    });
+
+    it('uses lowercase keys for case-insensitive exact queries and sorted prefix ranges', () => {
+        const index = new Map<string, WorkspaceSymbolEntry[]>();
+        addSymbolsToIndex(index, [
+            { name: 'Tech_Kuat_Core', kind: 'technology', source: 'script', file: '/mod/common/technology/a.txt', line: 1 },
+            { name: 'tech_kuat_drive', kind: 'technology', source: 'script', file: '/mod/common/technology/b.txt', line: 1 },
+            { name: 'unrelated', kind: 'technology', source: 'script', file: '/mod/common/technology/c.txt', line: 1 },
+        ]);
+        const sortedNames = Array.from(index.keys()).sort((a, b) => a.localeCompare(b));
+
+        expect(queryWorkspaceSymbolIndex(index, { name: 'TECH_KUAT_CORE', exact: true }, sortedNames)[0]?.name)
+            .to.equal('Tech_Kuat_Core');
+        expect(queryWorkspaceSymbolIndex(index, { name: 'TECH_KUAT_', prefix: true }, sortedNames).map(entry => entry.name))
+            .to.deep.equal(['Tech_Kuat_Core', 'tech_kuat_drive']);
+    });
+
+    it('defers reference collection until matching files are supplied', () => {
+        const entries = parseWorkspaceSymbols([
+            'kuat_effect = {',
+            '    add_modifier = kuat_effect',
+            '}',
+        ].join('\n'), '/mod/common/scripted_effects/kuat.txt', { maxReferencesPerSymbol: 0 });
+        expect(entries[0]?.references).to.equal(undefined);
+
+        populateWorkspaceSymbolReferences(entries, new Map([
+            ['/mod/events/kuat.txt', 'country_event = {\n    immediate = { kuat_effect = yes }\n}'],
+        ]), 5);
+        expect(entries[0]?.references?.map(reference => `${reference.file}:${reference.line}`))
+            .to.deep.equal(['/mod/events/kuat.txt:2']);
     });
 
     it('rebuilds bounded cross-file references for indexed content', () => {

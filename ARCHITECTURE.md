@@ -96,8 +96,9 @@ The extension entry point, indexing layer, and AI game knowledge should prioriti
 `IndexService` is a shared knowledge layer used by both editor features and AI tools:
 
 - Localization keys are indexed during activation for hover, definitions, and AI lookups.
-- Heavier workspace/vanilla symbol indexes are lazy-loaded via `ensureWorkspaceSymbolsReady()` to avoid slow startup. Agent queries wait at most eight seconds, then consume the partial index while vanilla indexing continues in the background.
-- The symbol layer supports `.txt`, `.gfx`, `.asset`, `.gui`, storing `origin`, `updatedAt`, `fileVersion`, and light references.
+- Heavier workspace/vanilla symbol indexes are lazy-loaded via `ensureWorkspaceSymbolsReady()` to avoid slow startup. The workspace phase is published before the vanilla phase; Agent queries wait at most eight seconds, then consume the partial index while vanilla indexing continues in the background.
+- Workspace symbols persist in `.cwtools-ai/index/workspace-symbols.sqlite`; vanilla symbols use root-keyed SQLite files under extension global storage. Builds restore cached rows first, compare file `size + mtime`, parse only changed files with bounded concurrency, and use a sorted-name array plus binary-search prefix ranges.
+- The symbol layer supports `.txt`, `.gfx`, `.asset`, `.gui`, storing `origin`, `updatedAt`, and `fileVersion`. Initial parsing omits references; targeted queries load references only from the bounded result-file set.
 - File system watchers incrementally update `.yml` and symbol files; symbol indexes are garbage-collected when idle.
 - The AI consumes these indexes via `query_localisation_index` and `query_workspace_index`.
 
@@ -123,7 +124,7 @@ The persistent layout is intentionally compact:
    └─ knowledge.sqlite
 ```
 
-`manifest.json` contains freshness, fingerprints, counts, domains, and the portable database reference; normalized facts live only once in `knowledge.sqlite`. When the definition budget is reached, selection preserves every workspace definition and the complete event/on_action core, then allocates the remaining vanilla budget across priority and other domains instead of truncating alphabetically. A successful V1 migration removes the old capability/archetype/snapshot JSON set only after the new database and manifest are published. File/config watchers mark knowledge stale and rebuild the database; `cwtools.ai.queryProjectKnowledgeDb` is the read-only query command used by the extension and MCP. Explicit identifiers are resolved as indexed definition/event seeds, then expanded through incoming/outgoing references, event edges, and event logic; bounded token scanning is only the fallback for intent-only queries. Agents retrieve targeted evidence through `query_project_knowledge`; complex blueprints are gated on fresh project knowledge, project/vanilla evidence, event structure and logic evidence, active CWT/LSP legality evidence, and an empty critical-unresolved list.
+`manifest.json` contains freshness, fingerprints, counts, domains, and the portable database reference; normalized facts live only once in `knowledge.sqlite`. When the definition budget is reached, selection preserves every workspace definition and the complete event/on_action core, then allocates the remaining vanilla budget across priority and other domains instead of truncating alphabetically. A successful V1 migration removes the old capability/archetype/snapshot JSON set only after the new database and manifest are published. File/config watchers mark knowledge stale and rebuild the database. The vanilla fingerprint also includes the active game's serialized `.cwb`; a `.cwb` change runs one coordinated refresh stage that rebuilds the matching global vanilla-symbol SQLite cache before performing a full `knowledge.sqlite` export. `cwtools.ai.queryProjectKnowledgeDb` is the read-only query command used by the extension and MCP. Explicit identifiers are resolved as indexed definition/event seeds, then expanded through incoming/outgoing references, event edges, and event logic; bounded token scanning is only the fallback for intent-only queries. Agents retrieve targeted evidence through `query_project_knowledge`; complex blueprints are gated on fresh project knowledge, project/vanilla evidence, event structure and logic evidence, active CWT/LSP legality evidence, and an empty critical-unresolved list.
 
 #### Submodules
 
@@ -488,8 +489,9 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 `IndexService` 是 editor features 和 AI tools 共用的知识层：
 
 - 本地化 key 在激活阶段建立索引，用于 hover、definition 和 AI 查询。
-- 更重的 workspace/vanilla symbol 索引通过 `ensureWorkspaceSymbolsReady()` 懒加载，避免拖慢启动。Agent 查询最多等待八秒，之后使用已完成的部分索引，同时让原版索引继续在后台构建。
-- 符号层支持 `.txt`、`.gfx`、`.asset`、`.gui`，记录 `origin`、`updatedAt`、`fileVersion` 和轻量引用。
+- 更重的 workspace/vanilla symbol 索引通过 `ensureWorkspaceSymbolsReady()` 懒加载，避免拖慢启动。工作区阶段先于原版阶段发布；Agent 查询最多等待八秒，之后使用已完成的部分索引，同时让原版索引继续在后台构建。
+- 工作区符号持久化到 `.cwtools-ai/index/workspace-symbols.sqlite`；原版符号按原版根目录分库存入 extension global storage。构建时先恢复缓存行，再按文件 `size + mtime` 只解析变化文件，并使用有限并发、排序名称数组和二分前缀区间。
+- 符号层支持 `.txt`、`.gfx`、`.asset`、`.gui`，记录 `origin`、`updatedAt` 和 `fileVersion`。初始解析不收集引用；只有目标查询才从有界结果文件集合按需补充引用。
 - watcher 对 `.yml` 与 symbol 文件做增量更新；symbol 索引闲置后可回收。
 - AI 通过 `query_localisation_index` 和 `query_workspace_index` 消费共享索引。
 
@@ -515,7 +517,7 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
    └─ knowledge.sqlite
 ```
 
-`manifest.json` 只保存 freshness、指纹、计数、领域和可移植数据库引用；规范化事实只在 `knowledge.sqlite` 中保存一次。达到定义预算时，选择器会完整保留工作区定义与事件/`on_action` 核心，再把剩余原版预算分配给优先领域和其他领域，不再按字母序直接截断。V1 迁移只有在新数据库和 manifest 都发布成功后才清理旧的 capability/archetype/snapshot JSON。文件与配置 watcher 会标记 stale 并重建数据库；`cwtools.ai.queryProjectKnowledgeDb` 是 Extension 与 MCP 共用的只读查询命令。显式标识符会先通过定义/事件索引解析为种子，再沿入站/出站引用、事件边和事件逻辑进行扩展；只有纯意图查询才退回有界文本检索。Agent 通过 `query_project_knowledge` 按任务检索项目/原版证据、事件结构和逻辑关系；复杂蓝图仍必须完成活动 CWT/LSP 合法性验证，并确保关键未解决列表为空。
+`manifest.json` 只保存 freshness、指纹、计数、领域和可移植数据库引用；规范化事实只在 `knowledge.sqlite` 中保存一次。达到定义预算时，选择器会完整保留工作区定义与事件/`on_action` 核心，再把剩余原版预算分配给优先领域和其他领域，不再按字母序直接截断。V1 迁移只有在新数据库和 manifest 都发布成功后才清理旧的 capability/archetype/snapshot JSON。文件与配置 watcher 会标记 stale 并重建数据库。原版指纹同时包含当前游戏的序列化 `.cwb`；当 `.cwb` 变化时，同一刷新阶段会先重建对应的全局原版符号 SQLite，再执行完整的 `knowledge.sqlite` 导出。`cwtools.ai.queryProjectKnowledgeDb` 是 Extension 与 MCP 共用的只读查询命令。显式标识符会先通过定义/事件索引解析为种子，再沿入站/出站引用、事件边和事件逻辑进行扩展；只有纯意图查询才退回有界文本检索。Agent 通过 `query_project_knowledge` 按任务检索项目/原版证据、事件结构和逻辑关系；复杂蓝图仍必须完成活动 CWT/LSP 合法性验证，并确保关键未解决列表为空。
 
 #### 子模块
 

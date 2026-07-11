@@ -13,6 +13,8 @@ import {
     getGameExeList,
     getGameFolderMapping,
     getAlternativeSteamFolderNames,
+    getGameIdForVanillaCacheFile,
+    getVanillaCacheFileName,
 } from '../../extension/gameProfiles';
 
 describe('GameProfile Registry', () => {
@@ -214,5 +216,17 @@ describe('GameProfile Registry', () => {
         const profile = getProfileByLanguageId('ck3');
         expect(profile.localisation.directories).to.deep.equal(['localization']);
         expect(profile.folders.steamSubdir).to.equal('game');
+    });
+
+    it('maps every serialized vanilla cache file back to its game', () => {
+        const expected = new Map([
+            ['stellaris', 'stl.cwb'], ['hoi4', 'hoi4.cwb'], ['eu4', 'eu4.cwb'],
+            ['eu5', 'eu5.cwb'], ['ck2', 'ck2.cwb'], ['ck3', 'ck3.cwb'],
+            ['imperator', 'ir.cwb'], ['vic2', 'vic2.cwb'], ['vic3', 'vic3.cwb'],
+        ]);
+        for (const [gameId, fileName] of expected) {
+            expect(getVanillaCacheFileName(gameId)).to.equal(fileName);
+            expect(getGameIdForVanillaCacheFile(fileName.toUpperCase())).to.equal(gameId);
+        }
     });
 });

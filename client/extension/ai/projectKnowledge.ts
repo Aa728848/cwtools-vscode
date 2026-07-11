@@ -2,7 +2,8 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vs from 'vscode';
-import { getCacheSettingKey } from '../gameProfiles';
+import { getCacheSettingKey, getGameIdForVanillaCacheFile, getVanillaCacheFileName } from '../gameProfiles';
+import type { IndexService } from '../indexing/indexService';
 import { ErrorReporter } from './errorReporter';
 import type {
     ProjectProfile,
@@ -92,6 +93,10 @@ let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 const pendingChangedFiles = new Set<string>();
 let refreshInFlight: Promise<void> | undefined;
 let pendingFullRefresh = false;
+let pendingVanillaIndexAll = false;
+const pendingVanillaIndexGames = new Set<string>();
+const pendingStaleReasons = new Set<string>();
+let vanillaCacheDirectory: string | undefined;
 
 function knowledgeRoot(workspaceRoot: string): string {
     return path.join(workspaceRoot, PROJECT_KNOWLEDGE_RELATIVE_DIR);
@@ -171,6 +176,10 @@ function computeVanillaFingerprint(gameId: string): string {
     const vanillaPath = config.get<string>(getCacheSettingKey(gameId), '')?.trim() ?? '';
     if (!vanillaPath) return hashParts(['missing']);
     const parent = path.dirname(vanillaPath);
+    const cacheFileName = getVanillaCacheFileName(gameId);
+    const serializedCache = cacheFileName && vanillaCacheDirectory
+        ? path.join(vanillaCacheDirectory, cacheFileName)
+        : '';
     return hashParts([
         normalizePath(vanillaPath),
         pathStatFact(vanillaPath),
@@ -179,6 +188,7 @@ function computeVanillaFingerprint(gameId: string): string {
         pathStatFact(path.join(vanillaPath, 'checksum_manifest.txt')),
         pathStatFact(path.join(parent, 'checksum_manifest.txt')),
         pathStatFact(path.join(vanillaPath, 'launcher-settings.json')),
+        serializedCache ? pathStatFact(serializedCache) : 'cwb:unconfigured',
     ]);
 }
 
@@ -580,19 +590,33 @@ export function buildProjectKnowledgePrompt(workspaceRoot: string): string {
     return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: ${manifest.schemaVersion >= 2 ? 'manifest + SQLite V2' : 'legacy JSON V1'}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace + ${manifest.counts.vanillaDefinitions ?? 0} vanilla; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; events: ${manifest.counts.eventNodes ?? 0} nodes / ${manifest.counts.eventEdges ?? 0} structural edges / ${manifest.counts.eventLogic ?? 0} logic facts\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Load all involved domains, project/vanilla patterns, topology, unresolved facts, and the event graph. Verify event calls and entries together with flag, technology, variable, phase, and scope-bridge logic. A blueprint must cite exact evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
 }
 
-async function refreshFromWatcher(workspaceRoot: string): Promise<void> {
+async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexService): Promise<void> {
     if (refreshInFlight) return refreshInFlight;
     const files = Array.from(pendingChangedFiles);
     pendingChangedFiles.clear();
     const fullRefresh = pendingFullRefresh;
     pendingFullRefresh = false;
+    const refreshAllVanilla = pendingVanillaIndexAll;
+    pendingVanillaIndexAll = false;
+    const vanillaGames = Array.from(pendingVanillaIndexGames);
+    pendingVanillaIndexGames.clear();
+    const staleReasons = Array.from(pendingStaleReasons);
+    pendingStaleReasons.clear();
     refreshInFlight = (async () => {
+        if (indexService && (refreshAllVanilla || vanillaGames.length > 0)) {
+            try {
+                await indexService.refreshVanillaSymbols(refreshAllVanilla ? undefined : vanillaGames);
+            } catch (error) {
+                ErrorReporter.debug('ProjectKnowledge', 'Vanilla symbol cache refresh failed', error);
+            }
+        }
+        if (!fullRefresh && files.length === 0) return;
         const manifest = readProjectKnowledgeManifest(workspaceRoot);
         if (!manifest) return;
         const profilePath = path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json');
         const profile = readJson<ProjectProfile>(profilePath);
         if (!profile) return;
-        markProjectKnowledgeStale(workspaceRoot, ['workspace_files_changed']);
+        markProjectKnowledgeStale(workspaceRoot, staleReasons.length > 0 ? staleReasons : ['workspace_files_changed']);
         try {
             await generateProjectKnowledge(workspaceRoot, profile, {
                 mode: fullRefresh ? 'full' : 'incremental',
@@ -605,18 +629,20 @@ async function refreshFromWatcher(workspaceRoot: string): Promise<void> {
         }
     })().finally(() => {
         refreshInFlight = undefined;
-        if ((pendingChangedFiles.size > 0 || pendingFullRefresh) && !refreshTimer) {
+        if ((pendingChangedFiles.size > 0 || pendingFullRefresh || pendingVanillaIndexAll || pendingVanillaIndexGames.size > 0) && !refreshTimer) {
             refreshTimer = setTimeout(() => {
                 refreshTimer = undefined;
-                void refreshFromWatcher(workspaceRoot);
+                void refreshFromWatcher(workspaceRoot, indexService);
             }, 500);
         }
     });
     return refreshInFlight;
 }
 
-export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext): void {
+export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, indexService?: IndexService): void {
     if (watcherRegistration) return;
+    vanillaCacheDirectory = path.join(context.globalStorageUri.fsPath, '.cwtools');
+    fs.mkdirSync(vanillaCacheDirectory, { recursive: true });
     const watcher = vs.workspace.createFileSystemWatcher('**/*.{txt,gfx,asset,gui,yml,cwt,mod}');
     const schedule = (uri: vs.Uri) => {
         const workspaceFolder = vs.workspace.getWorkspaceFolder(uri);
@@ -624,10 +650,11 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext): v
         const relative = normalizePath(path.relative(workspaceFolder.uri.fsPath, uri.fsPath));
         if (!relative || relative.startsWith('.cwtools-ai/') || relative.startsWith('.git/') || relative.startsWith('node_modules/')) return;
         pendingChangedFiles.add(uri.fsPath);
+        pendingStaleReasons.add('workspace_files_changed');
         if (refreshTimer) clearTimeout(refreshTimer);
         refreshTimer = setTimeout(() => {
             refreshTimer = undefined;
-            void refreshFromWatcher(workspaceFolder.uri.fsPath);
+            void refreshFromWatcher(workspaceFolder.uri.fsPath, indexService);
         }, 1800);
     };
     watcher.onDidChange(schedule);
@@ -642,30 +669,61 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext): v
         const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!workspaceRoot || !readProjectKnowledgeManifest(workspaceRoot)) return;
         pendingFullRefresh = true;
+        pendingVanillaIndexAll = true;
+        pendingStaleReasons.add('rules_or_vanilla_configuration_changed');
         markProjectKnowledgeStale(workspaceRoot, ['rules_or_vanilla_configuration_changed']);
         if (refreshTimer) clearTimeout(refreshTimer);
         refreshTimer = setTimeout(() => {
             refreshTimer = undefined;
-            void refreshFromWatcher(workspaceRoot);
+            void refreshFromWatcher(workspaceRoot, indexService);
         }, 1800);
     });
+    const cwbWatcher = vs.workspace.createFileSystemWatcher(new vs.RelativePattern(vs.Uri.file(vanillaCacheDirectory), '*.cwb'));
+    const scheduleVanillaCacheRefresh = (uri: vs.Uri) => {
+        const gameId = getGameIdForVanillaCacheFile(path.basename(uri.fsPath));
+        if (!gameId) return;
+        pendingVanillaIndexGames.add(gameId);
+        const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const manifest = workspaceRoot ? readProjectKnowledgeManifest(workspaceRoot) : undefined;
+        if (workspaceRoot && manifest?.game === gameId) {
+            pendingFullRefresh = true;
+            pendingStaleReasons.add('vanilla_cache_changed');
+            markProjectKnowledgeStale(workspaceRoot, ['vanilla_cache_changed']);
+        }
+        if (!workspaceRoot) return;
+        if (refreshTimer) clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => {
+            refreshTimer = undefined;
+            void refreshFromWatcher(workspaceRoot, indexService);
+        }, 1800);
+    };
+    cwbWatcher.onDidChange(scheduleVanillaCacheRefresh);
+    cwbWatcher.onDidCreate(scheduleVanillaCacheRefresh);
+    cwbWatcher.onDidDelete(scheduleVanillaCacheRefresh);
     const focusWatcher = vs.window.onDidChangeWindowState(state => {
         if (!state.focused) return;
         const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
         const manifest = workspaceRoot ? readProjectKnowledgeManifest(workspaceRoot) : undefined;
-        if (!workspaceRoot || !manifest || currentStaleReasons(workspaceRoot, manifest).length === 0) return;
+        const reasons = workspaceRoot && manifest ? currentStaleReasons(workspaceRoot, manifest) : [];
+        if (!workspaceRoot || !manifest || reasons.length === 0) return;
         pendingFullRefresh = true;
+        for (const reason of reasons) pendingStaleReasons.add(reason);
+        if (reasons.includes('vanilla_changed')) pendingVanillaIndexAll = true;
         if (refreshTimer) clearTimeout(refreshTimer);
         refreshTimer = setTimeout(() => {
             refreshTimer = undefined;
-            void refreshFromWatcher(workspaceRoot);
+            void refreshFromWatcher(workspaceRoot, indexService);
         }, 1800);
     });
-    context.subscriptions.push(watcher, configWatcher, focusWatcher, new vs.Disposable(() => {
+    context.subscriptions.push(watcher, cwbWatcher, configWatcher, focusWatcher, new vs.Disposable(() => {
         watcherRegistration = undefined;
         if (refreshTimer) clearTimeout(refreshTimer);
         refreshTimer = undefined;
         pendingChangedFiles.clear();
         pendingFullRefresh = false;
+        pendingVanillaIndexAll = false;
+        pendingVanillaIndexGames.clear();
+        pendingStaleReasons.clear();
+        vanillaCacheDirectory = undefined;
     }));
 }

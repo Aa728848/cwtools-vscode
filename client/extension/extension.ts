@@ -1075,10 +1075,13 @@ export async function activate(context: ExtensionContext) {
 		}
 	}).catch((e) => ErrorReporter.warn(SOURCE.UPDATE_CHECKER, 'Failed to check for updates', e));
 
-	const indexService = new IndexService();
+	const indexService = new IndexService({
+		extensionPath: context.extensionPath,
+		globalStoragePath: context.globalStorageUri.fsPath,
+	});
 	context.subscriptions.push(indexService);
 	void indexService.start();
-	registerProjectKnowledgeWatcher(context);
+	registerProjectKnowledgeWatcher(context, indexService);
 
 	// Register localization enhancements (§ color highlighting, $REF$ hover/goto)
 	registerLocalizationFeatures(context, indexService);

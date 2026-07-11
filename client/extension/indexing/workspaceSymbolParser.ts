@@ -67,12 +67,19 @@ export function parseWorkspaceSymbols(
     if (SCRIPT_EXTENSIONS.has(ext)) {
         entries = parseScriptSymbols(content, filePath);
     } else if (NAMED_BLOCK_EXTENSIONS.has(ext)) {
-        entries = parseNamedBlockSymbols(content, filePath, ext === '.gui' ? 'gui' : 'asset');
+        entries = parseNamedBlockSymbols(
+            content,
+            filePath,
+            ext === '.gui' ? 'gui' : 'asset',
+            options.maxReferencesPerSymbol !== 0,
+        );
     } else {
         return [];
     }
     applyEntryMetadata(entries, options);
-    if (options.maxReferencesPerSymbol !== 0) {
+    if (options.maxReferencesPerSymbol === 0) {
+        for (const entry of entries) entry.references = undefined;
+    } else {
         attachReferences(entries, content, filePath, options.maxReferencesPerSymbol ?? 20);
     }
     return entries;
@@ -83,10 +90,15 @@ export function addSymbolsToIndex(
     entries: WorkspaceSymbolEntry[]
 ): void {
     for (const entry of entries) {
-        const bucket = index.get(entry.name) ?? [];
+        const key = entry.name.toLowerCase();
+        const bucket = index.get(key) ?? [];
         bucket.push(entry);
-        index.set(entry.name, bucket);
+        index.set(key, bucket);
     }
+}
+
+export function sortedWorkspaceSymbolNames(index: Map<string, WorkspaceSymbolEntry[]>): string[] {
+    return Array.from(index.keys()).sort((a, b) => a.localeCompare(b));
 }
 
 export function removeFileFromSymbolIndex(index: Map<string, WorkspaceSymbolEntry[]>, filePath: string): void {
@@ -103,7 +115,8 @@ export function removeFileFromSymbolIndex(index: Map<string, WorkspaceSymbolEntr
 
 export function queryWorkspaceSymbolIndex(
     index: Map<string, WorkspaceSymbolEntry[]>,
-    query: WorkspaceSymbolQuery
+    query: WorkspaceSymbolQuery,
+    sortedNames?: readonly string[],
 ): WorkspaceSymbolEntry[] {
     const limit = Math.max(1, Math.min(Number(query.limit ?? 50) || 50, 200));
     const name = (query.name ?? '').trim();
@@ -116,9 +129,23 @@ export function queryWorkspaceSymbolIndex(
     const nameLower = name.toLowerCase();
     const results: WorkspaceSymbolEntry[] = [];
 
-    const buckets: Iterable<WorkspaceSymbolEntry[]> = name && query.exact
-        ? [index.get(name) ?? []]
-        : index.values();
+    let buckets: Iterable<WorkspaceSymbolEntry[]>;
+    if (name && query.exact) {
+        buckets = [index.get(nameLower) ?? []];
+    } else if (nameLower && query.prefix) {
+        const names = sortedNames ?? sortedWorkspaceSymbolNames(index);
+        const start = lowerBound(names, nameLower);
+        const prefixBuckets: WorkspaceSymbolEntry[][] = [];
+        for (let i = start; i < names.length; i++) {
+            const key = names[i]!;
+            if (!key.startsWith(nameLower)) break;
+            const bucket = index.get(key);
+            if (bucket) prefixBuckets.push(bucket);
+        }
+        buckets = prefixBuckets;
+    } else {
+        buckets = index.values();
+    }
 
     for (const entries of buckets) {
         for (const entry of entries) {
@@ -139,6 +166,21 @@ export function queryWorkspaceSymbolIndex(
     }
 
     return results;
+}
+
+export function populateWorkspaceSymbolReferences(
+    entries: WorkspaceSymbolEntry[],
+    fileContents: Map<string, string>,
+    maxReferencesPerSymbol = 20,
+): void {
+    if (maxReferencesPerSymbol <= 0 || entries.length === 0 || fileContents.size === 0) return;
+    for (const entry of entries) {
+        entry.references = mergeReferences(
+            entry.references,
+            collectReferencesForEntry(entry, fileContents, maxReferencesPerSymbol),
+            maxReferencesPerSymbol,
+        );
+    }
 }
 
 function applyEntryMetadata(entries: WorkspaceSymbolEntry[], options: WorkspaceSymbolParseOptions): void {
@@ -230,6 +272,17 @@ function buildIdentifierRegex(name: string): RegExp {
     return new RegExp(`(^|[^A-Za-z0-9_.:-])${escaped}([^A-Za-z0-9_.:-]|$)`, 'i');
 }
 
+function lowerBound(values: readonly string[], target: string): number {
+    let low = 0;
+    let high = values.length;
+    while (low < high) {
+        const middle = low + ((high - low) >> 1);
+        if (values[middle]!.localeCompare(target) < 0) low = middle + 1;
+        else high = middle;
+    }
+    return low;
+}
+
 function parseScriptSymbols(content: string, filePath: string): WorkspaceSymbolEntry[] {
     const entries: WorkspaceSymbolEntry[] = [];
     const lines = content.split(/\r?\n/);
@@ -300,7 +353,8 @@ function parseScriptSymbols(content: string, filePath: string): WorkspaceSymbolE
 function parseNamedBlockSymbols(
     content: string,
     filePath: string,
-    source: WorkspaceSymbolSource
+    source: WorkspaceSymbolSource,
+    collectPropertyReferences: boolean,
 ): WorkspaceSymbolEntry[] {
     const entries: WorkspaceSymbolEntry[] = [];
     const lines = content.split(/\r?\n/);
@@ -323,7 +377,7 @@ function parseNamedBlockSymbols(
                 references: [],
             };
         } else if (openBlock && beforeDepth > 0) {
-            const assetRef = toAssetPropertyReference(line, filePath, i + 1);
+            const assetRef = collectPropertyReferences ? toAssetPropertyReference(line, filePath, i + 1) : undefined;
             if (assetRef && openBlock.references) {
                 openBlock.references.push(assetRef);
                 if (openBlock.entry) {

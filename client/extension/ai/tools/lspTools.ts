@@ -3616,16 +3616,16 @@ export class LspToolHandler {
         const readiness = this.ctx.indexService.ensureWorkspaceSymbolsReady?.({
             includeVanilla: args.origin !== 'workspace',
         });
-        if (readiness) {
+        if (readiness !== undefined) {
             // A first query may trigger the large vanilla symbol scan. Return the
             // already-built workspace/partial index after a bounded wait instead
             // of holding the Agent tool open until its 45-second timeout.
             await Promise.race([
-                readiness,
+                readiness.catch(() => undefined),
                 new Promise<void>(resolve => setTimeout(resolve, 8_000)),
             ]);
         }
-        const entries = this.ctx.indexService.queryWorkspaceSymbols({
+        const query = {
             name: args.name,
             kind: args.kind,
             category: args.category,
@@ -3636,7 +3636,12 @@ export class LspToolHandler {
             exact: !!args.exact,
             includeReferences: !!args.includeReferences,
             limit,
-        });
+        };
+        const queryAsync = (this.ctx.indexService as Partial<import('../../indexing/indexService').IndexService>)
+            .queryWorkspaceSymbolsAsync;
+        const entries = typeof queryAsync === 'function'
+            ? await queryAsync.call(this.ctx.indexService, query)
+            : this.ctx.indexService.queryWorkspaceSymbols(query);
         const indexStatus = this.ctx.indexService.workspaceSymbolStatus ?? this.ctx.indexService.status;
 
         return {

@@ -2243,7 +2243,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private async generateInitFile(): Promise<void> {
         const result = await generateInitFile(
             (msg) => this.postMessage(msg),
-            (filePath) => this._recordFileSnapshot(filePath)
+            (filePath) => this._recordFileSnapshot(filePath),
+            this.agentRunner.toolExecutor.indexService,
         );
         if (result.success) {
             this.agentRunner.clearPromptCache();

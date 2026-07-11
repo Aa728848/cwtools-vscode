@@ -47,6 +47,7 @@ import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService
 import { McpBridgeServer } from './ai/mcpBridgeServer';
 import { maybePromptForDefaultDarkModernTheme } from './themePrompt';
 import { registerProjectKnowledgeWatcher } from './ai/projectKnowledge';
+import { QuickPickSelectionGuard } from './quickPickSelectionGuard';
 
 export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
@@ -1715,7 +1716,21 @@ export async function activate(context: ExtensionContext) {
 		const internalSelected = new Set<string>(currentIgnored); // Initially selected from settings
 
 		let isUpdating = false;
-		let previousSelected = new Set<vs.QuickPickItem>();
+		const selectionGuard = new QuickPickSelectionGuard();
+		let previousSelectedIds = new Set<string>();
+
+		const selectionId = (item: vs.QuickPickItem): string => {
+			if (item === globalItem) return 'global';
+			const categoryCode = categoryCodeFromLabel(item.label);
+			return categoryCode ? `category:${categoryCode}` : `key:${item.label}`;
+		};
+
+		const suppressProgrammaticSelectionEvents = (items: readonly vs.QuickPickItem[]) => {
+			// QuickPick may emit onDidChangeSelection after items/selectedItems setters
+			// return. Preserve the expected stable IDs until the UI reports that state,
+			// so collapsing a category cannot be mistaken for clearing its selections.
+			selectionGuard.beginProgrammaticUpdate(items.map(selectionId));
+		};
 
 		const rebuildItems = (updateItems: boolean) => {
 			const newItems: vs.QuickPickItem[] = [globalItem];
@@ -1766,11 +1781,12 @@ export async function activate(context: ExtensionContext) {
 			}
 
 			isUpdating = true;
+			suppressProgrammaticSelectionEvents(newSelected);
 			if (updateItems) {
 				qp.items = newItems;
 			}
 			qp.selectedItems = newSelected;
-			previousSelected = new Set(newSelected);
+			previousSelectedIds = new Set(newSelected.map(selectionId));
 			isUpdating = false;
 		};
 
@@ -1787,19 +1803,20 @@ export async function activate(context: ExtensionContext) {
 		});
 
 		qp.onDidChangeSelection(selected => {
-			if (isUpdating) return;
+			const currentIds = new Set(selected.map(selectionId));
+			if (isUpdating || selectionGuard.shouldIgnore(currentIds)) return;
 
-			const currentSet = new Set(selected);
-			const toggledOn = selected.filter(item => !previousSelected.has(item));
-			const toggledOff = Array.from(previousSelected).filter(item => !currentSet.has(item));
+			const toggledOn = selected.filter(item => !previousSelectedIds.has(selectionId(item)));
+			const toggledOnIds = new Set(toggledOn.map(selectionId));
+			const toggledOff = Array.from(previousSelectedIds).filter(id => !currentIds.has(id));
 
 			if (toggledOn.length === 0 && toggledOff.length === 0) return;
 
-			if (toggledOn.includes(globalItem)) {
+			if (toggledOnIds.has('global')) {
 				for (const keys of candidatesByCode.values()) {
 					keys.forEach(k => internalSelected.add(k));
 				}
-			} else if (toggledOff.includes(globalItem)) {
+			} else if (toggledOff.includes('global')) {
 				for (const keys of candidatesByCode.values()) {
 					keys.forEach(k => internalSelected.delete(k));
 				}
@@ -1812,12 +1829,12 @@ export async function activate(context: ExtensionContext) {
 						internalSelected.add(item.label);
 					}
 				}
-				for (const item of toggledOff) {
-					const code = categoryCodeFromLabel(item.label);
-					if (code) {
+				for (const id of toggledOff) {
+					if (id.startsWith('category:')) {
+						const code = id.slice('category:'.length);
 						candidatesByCode.get(code)?.forEach(k => internalSelected.delete(k));
-					} else if (item.kind !== vs.QuickPickItemKind.Separator) {
-						internalSelected.delete(item.label);
+					} else if (id.startsWith('key:')) {
+						internalSelected.delete(id.slice('key:'.length));
 					}
 				}
 			}
@@ -1839,6 +1856,7 @@ export async function activate(context: ExtensionContext) {
 		});
 
 		qp.onDidHide(() => {
+			selectionGuard.dispose();
 			qp.dispose();
 		});
 

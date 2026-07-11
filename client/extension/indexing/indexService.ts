@@ -36,6 +36,7 @@ import { getAllProfiles, getLocalisationDirectoryGlob, getVanillaCacheFileName }
 import { parseLocFile, addEntriesToIndex, removeFileFromIndex, queryLocIndex } from './locParser';
 import {
 	WorkspaceSymbolSqliteCache,
+	getWorkspaceSymbolCachePath,
 	type WorkspaceSymbolCachedFile,
 	type WorkspaceSymbolFileFact,
 } from './workspaceSymbolCache';
@@ -685,7 +686,7 @@ export class IndexService implements vscode.Disposable {
 		if (!workspaceRoot || !this._options.extensionPath) return undefined;
 		const roots = (vscode.workspace.workspaceFolders ?? []).map(folder => IndexService._normalizeFilePath(folder.uri.fsPath)).sort();
 		const cache = new WorkspaceSymbolSqliteCache(
-			path.join(workspaceRoot, '.cwtools-ai', 'index', 'workspace-symbols.sqlite'),
+			getWorkspaceSymbolCachePath(workspaceRoot),
 			path.join(this._options.extensionPath, 'node_modules', 'sql.js', 'dist'),
 			workspaceRoot,
 			IndexService._hashParts(roots),

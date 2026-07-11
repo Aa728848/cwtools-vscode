@@ -97,7 +97,7 @@ The extension entry point, indexing layer, and AI game knowledge should prioriti
 
 - Localization keys are indexed during activation for hover, definitions, and AI lookups.
 - Heavier workspace/vanilla symbol indexes are lazy-loaded via `ensureWorkspaceSymbolsReady()` to avoid slow startup. The workspace phase is published before the vanilla phase; Agent queries wait at most eight seconds, then consume the partial index while vanilla indexing continues in the background.
-- Workspace symbols persist in `.cwtools-ai/index/workspace-symbols.sqlite`; vanilla symbols use root-keyed SQLite files under extension global storage. Builds restore cached rows first, compare file `size + mtime`, parse only changed files with bounded concurrency, and use a sorted-name array plus binary-search prefix ranges.
+- Workspace symbols persist in `.cwtools-ai/index/workspace-symbols.sqlite`; vanilla symbols use root-keyed SQLite files under extension global storage. Builds restore cached rows first, compare file `size + mtime`, parse only changed files with bounded concurrency, and use a sorted-name array plus binary-search prefix ranges. Normal queries remain lazy, while `/init` eagerly materializes the workspace database before deep knowledge export.
 - The symbol layer supports `.txt`, `.gfx`, `.asset`, `.gui`, storing `origin`, `updatedAt`, and `fileVersion`. Initial parsing omits references; targeted queries load references only from the bounded result-file set.
 - File system watchers incrementally update `.yml` and symbol files; symbol indexes are garbage-collected when idle.
 - The AI consumes these indexes via `query_localisation_index` and `query_workspace_index`.
@@ -490,7 +490,7 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 
 - 本地化 key 在激活阶段建立索引，用于 hover、definition 和 AI 查询。
 - 更重的 workspace/vanilla symbol 索引通过 `ensureWorkspaceSymbolsReady()` 懒加载，避免拖慢启动。工作区阶段先于原版阶段发布；Agent 查询最多等待八秒，之后使用已完成的部分索引，同时让原版索引继续在后台构建。
-- 工作区符号持久化到 `.cwtools-ai/index/workspace-symbols.sqlite`；原版符号按原版根目录分库存入 extension global storage。构建时先恢复缓存行，再按文件 `size + mtime` 只解析变化文件，并使用有限并发、排序名称数组和二分前缀区间。
+- 工作区符号持久化到 `.cwtools-ai/index/workspace-symbols.sqlite`；原版符号按原版根目录分库存入 extension global storage。构建时先恢复缓存行，再按文件 `size + mtime` 只解析变化文件，并使用有限并发、排序名称数组和二分前缀区间。普通查询仍保持懒加载，而 `/init` 会在深层知识导出前直接创建工作区数据库。
 - 符号层支持 `.txt`、`.gfx`、`.asset`、`.gui`，记录 `origin`、`updatedAt` 和 `fileVersion`。初始解析不收集引用；只有目标查询才从有界结果文件集合按需补充引用。
 - watcher 对 `.yml` 与 symbol 文件做增量更新；symbol 索引闲置后可回收。
 - AI 通过 `query_localisation_index` 和 `query_workspace_index` 消费共享索引。

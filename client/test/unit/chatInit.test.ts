@@ -18,8 +18,10 @@ describe('/init artifact generation', () => {
     it('keeps base artifacts and writes a recoverable manifest when the LSP export never becomes ready', async () => {
         const knowledgeRoot = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
         const manifestPath = path.join(knowledgeRoot, 'manifest.json');
+        const workspaceIndexPath = path.join(workspaceRoot, '.cwtools-ai', 'index', 'workspace-symbols.sqlite');
         const progressMessages: string[] = [];
         let progressOptions: Record<string, unknown> | undefined;
+        let workspaceIndexOptions: Record<string, unknown> | undefined;
         const vscodeStub = {
             workspace: {
                 workspaceFolders: [{ uri: { fsPath: workspaceRoot } }],
@@ -69,7 +71,13 @@ describe('/init artifact generation', () => {
         const clock = sinon.useFakeTimers();
         try {
             const { generateInitFile } = require('../../extension/ai/chatInit') as typeof import('../../extension/ai/chatInit');
-            const pending = generateInitFile(() => undefined, () => undefined);
+            const pending = generateInitFile(() => undefined, () => undefined, {
+                ensureWorkspaceSymbolsReady: async (options: Record<string, unknown>) => {
+                    workspaceIndexOptions = options;
+                    fs.mkdirSync(path.dirname(workspaceIndexPath), { recursive: true });
+                    fs.writeFileSync(workspaceIndexPath, 'sqlite');
+                },
+            } as any);
             await clock.runAllAsync();
             const result = await pending;
 
@@ -78,8 +86,11 @@ describe('/init artifact generation', () => {
             expect(fs.existsSync(path.join(workspaceRoot, 'CWTOOLS.md'))).to.equal(true);
             expect(fs.existsSync(path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json'))).to.equal(true);
             expect(fs.existsSync(manifestPath)).to.equal(true);
+            expect(fs.existsSync(workspaceIndexPath)).to.equal(true);
+            expect(workspaceIndexOptions).to.deep.equal({ includeVanilla: false });
             expect(progressOptions?.location).to.equal(10);
             expect(progressMessages.some(message => message.includes('Scanning workspace'))).to.equal(true);
+            expect(progressMessages.some(message => message.includes('persistent workspace symbol index'))).to.equal(true);
             expect(progressMessages.some(message => message.includes('Exporting project + vanilla knowledge'))).to.equal(true);
             expect(progressMessages.some(message => message.includes('Publishing the knowledge database'))).to.equal(true);
         } finally {

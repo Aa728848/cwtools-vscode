@@ -18,6 +18,8 @@ import {
 } from './projectKnowledge';
 import { getKnownProfileByLanguageId } from '../gameProfiles';
 import { ErrorReporter } from './errorReporter';
+import type { IndexService } from '../indexing/indexService';
+import { getWorkspaceSymbolCachePath } from '../indexing/workspaceSymbolCache';
 import {
     buildProjectProfile,
     extractCustomRules,
@@ -36,6 +38,7 @@ export interface InitGenerationResult {
     rulesPath?: string;
     profilePath?: string;
     knowledgeManifestPath?: string;
+    workspaceIndexPath?: string;
     message?: string;
 }
 
@@ -108,6 +111,7 @@ async function generateInitFileCore(
     postMessage: PostMessageFn,
     recordFileSnapshot: RecordSnapshotFn,
     progress: InitProgress,
+    indexService?: IndexService,
 ): Promise<InitGenerationResult> {
     const folders = vs.workspace.workspaceFolders;
     if (!folders || folders.length === 0) {
@@ -146,6 +150,28 @@ async function generateInitFileCore(
         writeProjectProfile(root, profile);
         recordFileSnapshot(rulesPath);
         fs.writeFileSync(rulesPath, renderProjectRulesMarkdown(profile, customRules), 'utf8');
+
+        const workspaceIndexPath = getWorkspaceSymbolCachePath(root);
+        if (indexService) {
+            progress.report({
+                message: aiText(
+                    'Building the persistent workspace symbol index...',
+                    '正在构建持久化工作区符号索引...',
+                ),
+            });
+            postMessage({
+                type: 'agentStep',
+                step: {
+                    type: 'thinking',
+                    content: aiText(
+                        `Building the incremental workspace symbol database -> ${workspaceIndexPath}`,
+                        `正在构建增量工作区符号数据库 -> ${workspaceIndexPath}`,
+                    ),
+                    timestamp: Date.now(),
+                },
+            });
+            await indexService.ensureWorkspaceSymbolsReady({ includeVanilla: false });
+        }
 
         progress.report({
             message: aiText(
@@ -203,8 +229,8 @@ async function generateInitFileCore(
                         `已生成 CWTOOLS.md、Agent 项目画像和可恢复知识包。LSP 深层导出仍待完成：${deepKnowledgeError}`,
                     )
                     : aiText(
-                        `Generated CWTOOLS.md, Agent profile, and semantic knowledge pack -> ${getProjectKnowledgeManifestPath(root)}`,
-                        `已生成 CWTOOLS.md、Agent 项目画像和语义知识包 -> ${getProjectKnowledgeManifestPath(root)}`,
+                        `Generated CWTOOLS.md, Agent profile, workspace symbol index, and semantic knowledge pack -> ${getProjectKnowledgeManifestPath(root)}`,
+                        `已生成 CWTOOLS.md、Agent 项目画像、工作区符号索引和语义知识包 -> ${getProjectKnowledgeManifestPath(root)}`,
                     ),
                 timestamp: Date.now(),
             },
@@ -227,6 +253,7 @@ async function generateInitFileCore(
             rulesPath,
             profilePath,
             knowledgeManifestPath: getProjectKnowledgeManifestPath(root),
+            workspaceIndexPath: indexService ? workspaceIndexPath : undefined,
             message: deepKnowledgeError,
         };
     } catch (e) {
@@ -247,8 +274,9 @@ async function generateInitFileCore(
 export async function generateInitFile(
     postMessage: PostMessageFn,
     recordFileSnapshot: RecordSnapshotFn,
+    indexService?: IndexService,
 ): Promise<InitGenerationResult> {
-    const run = (progress: InitProgress) => generateInitFileCore(postMessage, recordFileSnapshot, progress);
+    const run = (progress: InitProgress) => generateInitFileCore(postMessage, recordFileSnapshot, progress, indexService);
     if (typeof vs.window.withProgress === 'function' && vs.ProgressLocation?.Window !== undefined) {
         return vs.window.withProgress(
             {

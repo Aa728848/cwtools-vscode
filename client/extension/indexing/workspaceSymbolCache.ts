@@ -5,6 +5,11 @@ import type { WorkspaceSymbolEntry, WorkspaceSymbolOrigin } from './workspaceSym
 
 const SCHEMA_VERSION = 1;
 const PARSER_VERSION = 2;
+export const WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH = path.join('.cwtools-ai', 'index', 'workspace-symbols.sqlite');
+
+export function getWorkspaceSymbolCachePath(workspaceRoot: string): string {
+    return path.join(workspaceRoot, WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH);
+}
 
 export interface WorkspaceSymbolFileFact {
     path: string;

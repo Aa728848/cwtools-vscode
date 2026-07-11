@@ -463,7 +463,10 @@ describe('agent tool file path safety', () => {
         expect(getAgentToolTargetFiles('write_file', { file: 'common/relics/kuat.txt' }, workspaceRoot))
             .to.deep.equal([path.join(workspaceRoot, 'common', 'relics', 'kuat.txt')]);
         expect(getAgentToolTargetFiles('write_design_blueprint', {}, workspaceRoot, 'topic-123'))
-            .to.deep.equal([path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'design_blueprint.md')]);
+            .to.deep.equal([
+                path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'design_blueprint.md'),
+                path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'design_blueprint.json'),
+            ]);
 
         expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('write_file')).to.equal(true);
         expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('write_localisation')).to.equal(false);
@@ -484,6 +487,8 @@ describe('agent tool file path safety', () => {
             'cleanupPlan',
             'evidence',
             'dependencyOrder',
+            'featureManifest',
+            'taskPlan',
         ]);
     });
 
@@ -571,6 +576,39 @@ describe('agent tool file path safety', () => {
                 },
             ],
             dependencyOrder: ['common/on_actions/test.txt', 'events/test.txt'],
+            featureManifest: {
+                objective: 'Create a native-hook event with a closed flag lifecycle.',
+                entities: [
+                    { kind: 'event', id: 'test.1', operation: 'define' },
+                    { kind: 'flag', id: 'test_chain_active', operation: 'set' },
+                    { kind: 'flag', id: 'test_chain_active', operation: 'read' },
+                ],
+                requiredEdges: [
+                    { from: 'test.1', relation: 'set', to: 'test_chain_active' },
+                ],
+                invariants: ['The flag is read after it is set and removed at closure.'],
+                acceptanceCriteria: [
+                    { id: 'event_exists', description: 'The event is defined.', type: 'entity_exists', subject: 'test.1' },
+                    { id: 'flag_lifecycle', description: 'The flag is set and read.', type: 'flag_lifecycle', subject: 'test_chain_active' },
+                ],
+                expectsFileChanges: true,
+            },
+            taskPlan: [{
+                id: 'build_event',
+                agentType: 'build',
+                prompt: 'Implement test.1 with the approved flag lifecycle.',
+                plannedFiles: ['events/test.txt'],
+                produces: [
+                    { kind: 'event', id: 'test.1', operation: 'define' },
+                    { kind: 'flag', id: 'test_chain_active', operation: 'set' },
+                ],
+                consumes: [{ kind: 'flag', id: 'test_chain_active', operation: 'read' }],
+                dependencies: [],
+                acceptanceChecks: [
+                    { id: 'event_exists', description: 'The event is defined.', type: 'entity_exists', subject: 'test.1' },
+                    { id: 'flag_lifecycle', description: 'The flag is set and read.', type: 'flag_lifecycle', subject: 'test_chain_active' },
+                ],
+            }],
         }, makeContext('topic-blueprint'));
 
         expect(result.success).to.equal(true);
@@ -578,6 +616,13 @@ describe('agent tool file path safety', () => {
         expect(content).to.include('## Blueprint Completeness Gate');
         expect(content).to.include('Common Directory Capability Review');
         expect(content).to.include('Reward and Outcome Plan');
+        expect(content).to.include('Executable Feature Relationship Contract');
+        expect(content).to.include('Approved Multi-Agent Task DAG');
+        const dataPath = path.join(workspaceRoot, '.cwtools-ai', 'topic-blueprint', 'design_blueprint.json');
+        expect(result.dataFilePath).to.equal(dataPath);
+        const data = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
+        expect(data.schemaVersion).to.equal(2);
+        expect(data.featureManifest.requiredEdges[0].to).to.equal('test_chain_active');
     });
 
     it('lets orchestrator sub-agents write localisation without waiting for pending-write confirmation', async () => {
@@ -948,6 +993,14 @@ describe('agent sprite candidate tool contract', () => {
         expect(result.summary).to.include('Project: Kuat');
         expect(result.promptCard).to.equal('Build card');
         expect(result.data.workspaceKind).to.equal('paradox_mod');
+    });
+
+    it('excludes agent transcripts and backup artifacts from project reference searches', () => {
+        const { isExcludedModSearchPath } = require('../../extension/ai/tools/lspTools') as typeof import('../../extension/ai/tools/lspTools');
+        expect(isExcludedModSearchPath(workspaceRoot, path.join(workspaceRoot, '.cwtools-ai', 'topic', 'resume_transcript.json.bak'))).to.equal(true);
+        expect(isExcludedModSearchPath(workspaceRoot, path.join(workspaceRoot, 'events', 'legacy.txt.bak'))).to.equal(true);
+        expect(isExcludedModSearchPath(workspaceRoot, path.join(workspaceRoot, 'release', 'events', 'packed.txt'))).to.equal(true);
+        expect(isExcludedModSearchPath(workspaceRoot, path.join(workspaceRoot, 'events', 'live.txt'))).to.equal(false);
     });
 
     it('parses project .gfx spriteType candidates and ranks event pictures', async () => {

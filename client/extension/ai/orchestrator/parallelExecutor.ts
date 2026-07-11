@@ -262,6 +262,22 @@ export class ParallelExecutor {
                 node.tokenUsage = result.tokenUsage;
 
                 if (result.success) {
+                    for (const contract of node.produces ?? []) {
+                        blackboard.write(
+                            `__entity:${contract.kind}:${contract.id}`,
+                            JSON.stringify({ nodeId: node.id, contract }),
+                            'entity_registry',
+                            node.id,
+                        );
+                    }
+                    for (const contract of node.consumes ?? []) {
+                        blackboard.write(
+                            `__relation:${node.id}:${contract.kind}:${contract.id}:${contract.operation}`,
+                            JSON.stringify({ nodeId: node.id, contract }),
+                            'entity_relation',
+                            node.id,
+                        );
+                    }
                     this.graphEngine.markComplete(graph, node.id, result.output);
                     this.conflictDetector.clearIntent(agentId, blackboard);
                 } else {

@@ -9,6 +9,7 @@
  */
 
 import * as vs from 'vscode';
+import * as fs from 'fs';
 import * as path from 'path';
 import type { LanguageClient } from 'vscode-languageclient/node';
 import type {
@@ -35,6 +36,7 @@ import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard'
 import { saveProjectWorkflow } from './workflowRegistry';
 import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
 import { aiText } from './messages';
+import { getTopicStorageDir } from './workspacePaths';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
 const TOOL_TIMEOUTS: Record<string, number> = {
@@ -787,7 +789,7 @@ export class AgentToolExecutor {
                 result = await this.memoryHandler.queryBlackboard(args as any); break;
             case 'query_blackboard_disabled': break;
             case 'merge_results': {
-                result = this.executeMergeResults();
+                result = this.executeMergeResults(args);
                 break;
             }
 
@@ -1544,19 +1546,24 @@ export class AgentToolExecutor {
 
     /** The latest coordinator execution result (read by merge_results) */
     private _lastOrchestratorResult?: import('./orchestrator/types').OrchestratorResult;
+    private _lastOrchestratorGraph?: import('./orchestrator/types').TaskGraph;
+    private readonly _orchestratorValidationByRun = new Map<string, { success: boolean; summary: string }>();
 
     /** 
 * Execute the dispatch_agents tool: convert the task array built by AI into TaskGraph, 
 * Then trigger true multi-Agent parallel execution through Orchestrator.execute(). 
 */
     private async executeDispatchAgents(args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
-        const tasks = args.tasks as Array<{
+        let tasks = args.tasks as Array<{
             id: string;
             agentType: string;
             prompt: string;
             contextFiles?: string[];
             plannedFiles?: string[];
             plannedEntities?: string[];
+            produces?: import('./orchestrator/types').TaskEntityContract[];
+            consumes?: import('./orchestrator/types').TaskEntityContract[];
+            acceptanceChecks?: import('./orchestrator/types').AcceptanceCheck[];
             dependencies?: string[];
             maxIterations?: number;
             modelOverride?: string;
@@ -1565,10 +1572,55 @@ export class AgentToolExecutor {
 
         const runnerOptsForLimits = context?.runnerOptions ?? this.parentRunnerOptions;
         const isScriptMode = runnerOptsForLimits?.mode === 'script';
-        const maxTasksPerDispatch = isScriptMode ? 8 : 4;
+        const requiresStructuredWriteContract = isScriptMode || runnerOptsForLimits?.mode === 'orchestrator';
+        let featureManifest = args.featureManifest as import('./types').FeatureManifest | undefined;
+        const blueprintFile = typeof args.blueprintFile === 'string' ? args.blueprintFile.trim() : '';
+        const maxTasksPerDispatch = blueprintFile ? 64 : isScriptMode ? 8 : 4;
+        if (blueprintFile) {
+            const resolvedBlueprint = path.isAbsolute(blueprintFile)
+                ? path.resolve(blueprintFile)
+                : path.resolve(this.workspaceRoot, blueprintFile);
+            const relativeBlueprint = path.relative(this.workspaceRoot, resolvedBlueprint);
+            const insideWorkspace = relativeBlueprint
+                && !relativeBlueprint.startsWith('..')
+                && !path.isAbsolute(relativeBlueprint);
+            const normalizedRelative = relativeBlueprint.replace(/\\/g, '/').toLowerCase();
+            if (!insideWorkspace || (!normalizedRelative.includes('/.cwtools-ai/') && !normalizedRelative.startsWith('.cwtools-ai/'))) {
+                return { success: false, error: 'blueprintFile must be a topic-scoped design_blueprint.json inside the workspace .cwtools-ai directory.' };
+            }
+            if (path.basename(resolvedBlueprint).toLowerCase() !== 'design_blueprint.json') {
+                return { success: false, error: 'blueprintFile must point to design_blueprint.json.' };
+            }
+            const approvedTopicId = runnerOptsForLimits?.topicId;
+            if (approvedTopicId) {
+                const approvedTopicDir = path.resolve(getTopicStorageDir(approvedTopicId, this.workspaceRoot));
+                const topicRelative = path.relative(approvedTopicDir, resolvedBlueprint);
+                if (!topicRelative || topicRelative.startsWith('..') || path.isAbsolute(topicRelative)) {
+                    return { success: false, error: 'blueprintFile must belong to the current approved topic.' };
+                }
+            }
+            try {
+                const stat = fs.statSync(resolvedBlueprint);
+                if (!stat.isFile() || stat.size > 2 * 1024 * 1024) {
+                    return { success: false, error: 'Approved blueprint data is missing or exceeds the 2 MiB safety limit.' };
+                }
+                const approvedBlueprint = JSON.parse(fs.readFileSync(resolvedBlueprint, 'utf8')) as {
+                    schemaVersion?: number;
+                    featureManifest?: import('./types').FeatureManifest;
+                    taskPlan?: typeof tasks;
+                };
+                if (approvedBlueprint.schemaVersion !== 2 || !approvedBlueprint.featureManifest || !Array.isArray(approvedBlueprint.taskPlan)) {
+                    return { success: false, error: 'Approved blueprint data is not a valid schemaVersion 2 executable contract.' };
+                }
+                featureManifest = approvedBlueprint.featureManifest;
+                tasks = approvedBlueprint.taskPlan;
+            } catch (error) {
+                return { success: false, error: `Failed to load approved blueprint contract: ${error instanceof Error ? error.message : String(error)}` };
+            }
+        }
 
         if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
-            return { success: false, error: 'Provide a tasks array. Each task must include id, agentType, and prompt.' };
+            return { success: false, error: 'Provide tasks or blueprintFile. Each task must include id, agentType, and prompt.' };
         }
 
         if (tasks.length > maxTasksPerDispatch) {
@@ -1578,6 +1630,50 @@ export class AgentToolExecutor {
             };
         }
         const normalizedTasks = tasks.map(task => normalizeDispatchTaskForLocalisationYml(task));
+        const hasWriteTasks = normalizedTasks.some(task =>
+            ['build', 'loc_writer', 'gui_expert'].includes(task.agentType)
+            || (task.plannedFiles?.length ?? 0) > 0
+        );
+        if (requiresStructuredWriteContract && hasWriteTasks) {
+            const invalidWriter = normalizedTasks.find(task =>
+                ['build', 'loc_writer', 'gui_expert'].includes(task.agentType)
+                && (task.produces?.length ?? 0) === 0
+                && (task.consumes?.length ?? 0) === 0
+            );
+            const orphanLocWriter = normalizedTasks.find(task =>
+                task.agentType === 'loc_writer'
+                && task.produces?.some(contract => contract.kind === 'localisation')
+                && !task.consumes?.some(contract => contract.kind !== 'localisation')
+            );
+            if (!featureManifest?.objective || (featureManifest.acceptanceCriteria?.length ?? 0) === 0) {
+                return {
+                    success: false,
+                    error: aiText(
+                        'Orchestrator/Script write waves require featureManifest with objective and at least one acceptance criterion. Declare the required entities/edges before dispatching builders.',
+                        '协作/脚本模式写入批次必须提供 featureManifest，其中包含目标和至少一条验收条件。请先声明所需实体与关联边。',
+                    ),
+                };
+            }
+            if (invalidWriter) {
+                return {
+                    success: false,
+                    error: aiText(
+                        `Orchestrator/Script writer '${invalidWriter.id}' must declare produces and/or consumes entity contracts.`,
+                        `协作/脚本模式写入节点“${invalidWriter.id}”必须声明 produces 和/或 consumes 实体契约。`,
+                    ),
+                };
+            }
+            if (orphanLocWriter) {
+                return {
+                    success: false,
+                    error: aiText(
+                        `Localisation writer '${orphanLocWriter.id}' must consume its owning event/object entity so dependency ordering and orphan checks can be enforced.`,
+                        `本地化写入节点“${orphanLocWriter.id}”必须通过 consumes 声明其所属事件或对象，系统才能强制依赖顺序并检查孤立本地化。`,
+                    ),
+                };
+            }
+            featureManifest = { ...featureManifest, expectsFileChanges: featureManifest.expectsFileChanges ?? true };
+        }
 
         // Phase 3: reject over-privileged child tasks at dispatch time.
         {
@@ -1622,8 +1718,8 @@ export class AgentToolExecutor {
             }
 
             // Build TaskGraph
-            const userPrompt = (args.userPrompt as string) || 'Multi-agent collaboration task';
-            const graph = TaskGraphEngine.createGraph(userPrompt);
+            const userPrompt = (args.userPrompt as string) || featureManifest?.objective || 'Multi-agent collaboration task';
+            const graph = TaskGraphEngine.createGraph(userPrompt, featureManifest);
 
             for (const task of normalizedTasks) {
                 TaskGraphEngine.addNode(
@@ -1635,6 +1731,9 @@ export class AgentToolExecutor {
                         contextFiles: task.contextFiles,
                         plannedFiles: task.plannedFiles,
                         plannedEntities: task.plannedEntities,
+                        produces: task.produces,
+                        consumes: task.consumes,
+                        acceptanceChecks: task.acceptanceChecks,
                         dependencies: task.dependencies || [],
                         maxIterations: task.maxIterations,
                         modelOverride: task.modelOverride,
@@ -1642,6 +1741,7 @@ export class AgentToolExecutor {
                     },
                 );
             }
+            TaskGraphEngine.linkEntityDependencies(graph);
 
             // Instantiate Orchestrator
             const orchestrator = new Orchestrator(this.parentAgentRunner, {
@@ -1704,6 +1804,21 @@ export class AgentToolExecutor {
 
             // Cache results for use by merge_results
             this._lastOrchestratorResult = result;
+            this._lastOrchestratorGraph = graph;
+            const validationRunId = parentRun?.runId ?? parentRunSink?.runId;
+            if (validationRunId && (hasWriteTasks || result.qualityGate !== undefined)) {
+                this._orchestratorValidationByRun.set(validationRunId, {
+                    // A later quality-gated repair wave supersedes an earlier failed write wave.
+                    // Read-only fanout waves do not overwrite this validation state.
+                    success: result.success,
+                    summary: result.summary,
+                });
+                while (this._orchestratorValidationByRun.size > 100) {
+                    const oldest = this._orchestratorValidationByRun.keys().next().value as string | undefined;
+                    if (!oldest) break;
+                    this._orchestratorValidationByRun.delete(oldest);
+                }
+            }
 
             //Write execution results to Blackboard for subsequent query
             this.blackboard.write(
@@ -1727,6 +1842,8 @@ export class AgentToolExecutor {
                 dependencies?: string[];
                 plannedFiles?: string[];
                 plannedEntities?: string[];
+                produces?: import('./orchestrator/types').TaskEntityContract[];
+                consumes?: import('./orchestrator/types').TaskEntityContract[];
                 success: boolean;
                 filesWritten: string[];
                 tokenUsed: number;
@@ -1773,6 +1890,8 @@ export class AgentToolExecutor {
                     dependencies: taskMeta?.dependencies ?? [],
                     plannedFiles: taskMeta?.plannedFiles ?? [],
                     plannedEntities: taskMeta?.plannedEntities ?? [],
+                    produces: taskMeta?.produces ?? [],
+                    consumes: taskMeta?.consumes ?? [],
                     success: agentResult.success,
                     filesWritten: agentResult.writtenFiles,
                     tokenUsed: agentResult.tokenUsage.total,
@@ -1809,14 +1928,19 @@ export class AgentToolExecutor {
     /** 
 * Execute the merge_results tool: extract a summary from the results of the most recent coordinator execution. 
 */
-    private executeMergeResults(): unknown {
+    private executeMergeResults(args: Record<string, unknown>): unknown {
         if (!this._lastOrchestratorResult) {
             //Try to read from Blackboard
             const stored = this.blackboard.readValue('orchestrator:lastResult');
             if (stored) {
                 try {
                     const parsed = JSON.parse(stored);
-                    return { success: true, ...parsed, source: 'blackboard' };
+                    return {
+                        success: false,
+                        ...parsed,
+                        source: 'blackboard',
+                        message: 'Detailed node outputs are no longer in memory, so the requested nodeIds cannot be merged safely. Dispatch a new verification/integration wave.',
+                    };
                 } catch {
                     return { success: false, message: 'Failed to find the most recent orchestrator execution result. Please use dispatch_agents first.' };
                 }
@@ -1825,7 +1949,20 @@ export class AgentToolExecutor {
         }
 
         const r = this._lastOrchestratorResult;
-        const allWrittenFiles: string[] = [];
+        const graph = this._lastOrchestratorGraph;
+        const requestedNodeIds = Array.isArray(args.nodeIds)
+            ? args.nodeIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+            : [];
+        if (requestedNodeIds.length === 0) {
+            return { success: false, message: 'merge_results requires at least one nodeIds entry.' };
+        }
+        const unknownNodeIds = requestedNodeIds.filter(id => !r.agentResults.has(id));
+        if (unknownNodeIds.length > 0) {
+            return { success: false, message: `Unknown or unavailable task node IDs: ${unknownNodeIds.join(', ')}` };
+        }
+        const strategy = args.strategy === 'concatenate' || args.strategy === 'summary' ? args.strategy : 'structured';
+        const selectedIds = [...new Set(requestedNodeIds)];
+        const allWrittenFiles = new Set<string>();
         const agentOutputs: Array<{ id: string; output: string; files: string[] }> = [];
 
         //Smart truncation: the upper limit for a single Agent is 2000 characters, and the total budget is 8000 characters
@@ -1833,10 +1970,12 @@ export class AgentToolExecutor {
         const MAX_TOTAL = 8000;
         let totalOutputLen = 0;
 
-        for (const [id, agentResult] of r.agentResults) {
-            allWrittenFiles.push(...agentResult.writtenFiles);
+        for (const id of selectedIds) {
+            const agentResult = r.agentResults.get(id)!;
+            for (const file of agentResult.writtenFiles) allWrittenFiles.add(file);
             const remaining = Math.max(0, MAX_TOTAL - totalOutputLen);
-            const limit = Math.min(MAX_PER_AGENT, remaining);
+            const perAgentLimit = strategy === 'concatenate' ? MAX_PER_AGENT : strategy === 'summary' ? 800 : 1200;
+            const limit = Math.min(perAgentLimit, remaining);
             let output = agentResult.output;
             if (output.length > limit) {
                 output = compactAgentOutputForReport(agentResult.output, limit) || '';
@@ -1845,15 +1984,43 @@ export class AgentToolExecutor {
             agentOutputs.push({ id, output, files: agentResult.writtenFiles });
         }
 
+        const fileGroups = [...allWrittenFiles].map(file => ({
+            file,
+            nodeIds: selectedIds.filter(id => r.agentResults.get(id)?.writtenFiles.includes(file)),
+        }));
+        const entityContracts = selectedIds.map(id => {
+            const node = graph?.nodes.get(id);
+            return {
+                nodeId: id,
+                produces: node?.produces ?? [],
+                consumes: node?.consumes ?? [],
+                acceptanceChecks: node?.acceptanceChecks ?? [],
+                dependencies: node?.dependencies ?? [],
+            };
+        });
+        const selectedSucceeded = selectedIds.every(id => r.agentResults.get(id)?.success === true);
+        const mergedOutput = strategy === 'concatenate'
+            ? agentOutputs.map(item => `## ${item.id}\n${item.output}`).join('\n\n')
+            : undefined;
+
         return {
             success: true,
-            overallSuccess: r.success,
+            overallSuccess: r.success && selectedSucceeded,
+            strategy,
+            selectedNodeIds: selectedIds,
             summary: r.summary,
             totalTokens: r.totalTokenUsage.total,
             estimatedCostCny: r.totalTokenUsage.estimatedCostCny,
-            totalFilesWritten: allWrittenFiles.length,
-            writtenFiles: allWrittenFiles,
+            totalFilesWritten: allWrittenFiles.size,
+            writtenFiles: [...allWrittenFiles],
+            fileGroups,
             agentOutputs,
+            mergedOutput,
+            integration: {
+                featureManifest: graph?.metadata.featureManifest,
+                entityContracts,
+                qualityGate: r.qualityGate,
+            },
             failedNodes: r.failedNodes,
             cancelledNodes: r.cancelledNodes,
         };
@@ -1863,4 +2030,8 @@ export class AgentToolExecutor {
 
     getTodos(): TodoItem[] { return this.externalHandler.getTodos(); }
     clearTodos(): void { this.externalHandler.clearTodos(); }
+    clearOrchestratorValidation(runId: string): void { this._orchestratorValidationByRun.delete(runId); }
+    getOrchestratorValidation(runId: string): { success: boolean; summary: string } | undefined {
+        return this._orchestratorValidationByRun.get(runId);
+    }
 }

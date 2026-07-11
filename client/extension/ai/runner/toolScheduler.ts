@@ -95,7 +95,9 @@ export function getAgentToolTargetFiles(
             break;
         case 'write_design_blueprint':
             if (workspaceRoot) {
-                paths.push(path.join(getTopicStorageDir(topicId || 'default', workspaceRoot), 'design_blueprint.md'));
+                const blueprintDir = getTopicStorageDir(topicId || 'default', workspaceRoot);
+                paths.push(path.join(blueprintDir, 'design_blueprint.md'));
+                paths.push(path.join(blueprintDir, 'design_blueprint.json'));
             }
             break;
         case 'save_workflow':

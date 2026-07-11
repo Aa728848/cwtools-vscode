@@ -172,7 +172,8 @@ export class Orchestrator {
             for (const agentResult of result.agentResults.values()) {
                 allWrittenFiles.push(...agentResult.writtenFiles);
             }
-            if (allWrittenFiles.length > 0) {
+            {
+                if (allWrittenFiles.length > 0) {
                 // --- Localization Sweep Phase (Loc Sweep Phase) ---
                 emitStep({
                     type: 'orchestrator_progress',
@@ -247,6 +248,7 @@ export class Orchestrator {
                     });
                 }
                 // ----------------------------------------------
+                }
 
                 emitStep({
                     type: 'validation',
@@ -255,10 +257,14 @@ export class Orchestrator {
                 });
 
                 // Start Reviewer Agent
-                const reviewResult = await this.qualityGate.reviewOutput(
+                let reviewResult = await this.qualityGate.reviewOutput(
                     this.agentRunner,
                     allWrittenFiles,
-                    options
+                    options,
+                    {
+                        taskGraph,
+                        workspaceRoot: this.agentRunner.toolExecutor.workspaceRoot,
+                    },
                 );
 
                 if (reviewResult.passed) {
@@ -268,6 +274,7 @@ export class Orchestrator {
                     const config = this.qualityGate.getConfig();
                     
                     if (config.autoFix) {
+                        for (let fixCycle = 0; fixCycle < config.maxFixCycles && !reviewResult.passed; fixCycle++) {
                         emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.AUTOFIX_START, timestamp: Date.now() });
                         
                         const fixPrompt = this.qualityGate.buildFixPrompt(reviewResult.reviewReport, allWrittenFiles);
@@ -291,6 +298,18 @@ export class Orchestrator {
                                 ],
                             }
                         );
+                        for (const step of fixResult.steps ?? []) {
+                            if (!step.toolName || !WRITE_TOOLS.has(step.toolName as AgentToolName) || !step.toolArgs) continue;
+                            const targets = getAgentToolTargetFiles(
+                                step.toolName,
+                                step.toolArgs as Record<string, unknown>,
+                                this.agentRunner.toolExecutor.workspaceRoot,
+                                options.topicId,
+                            );
+                            for (const target of targets) {
+                                if (!allWrittenFiles.includes(target)) allWrittenFiles.push(target);
+                            }
+                        }
 
                         if (fixResult.isValid) {
                             emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.AUTOFIX_DONE, timestamp: Date.now() });
@@ -298,8 +317,36 @@ export class Orchestrator {
                         } else {
                             emitStep({ type: 'error', content: ORCHESTRATOR_MSG.AUTOFIX_FAIL, timestamp: Date.now() });
                         }
+                        reviewResult = await this.qualityGate.reviewOutput(
+                            this.agentRunner,
+                            allWrittenFiles,
+                            options,
+                            {
+                                taskGraph,
+                                workspaceRoot: this.agentRunner.toolExecutor.workspaceRoot,
+                            },
+                        );
+                        if (reviewResult.passed) {
+                            emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.QG_PASS, timestamp: Date.now() });
+                        }
+                        }
+                    }
+                    if (!reviewResult.passed) {
+                        result.success = false;
+                        if (!result.failedNodes.includes('quality_gate')) result.failedNodes.push('quality_gate');
+                        result.summary += aiText(
+                            `\n- Quality gate: failed (${reviewResult.diagnosticErrors} diagnostics, ${reviewResult.semanticIssues} semantic issues, ${reviewResult.logicIssues} review issues)`,
+                            `\n- 质量门：未通过（${reviewResult.diagnosticErrors} 个诊断、${reviewResult.semanticIssues} 个语义问题、${reviewResult.logicIssues} 个审查问题）`,
+                        );
                     }
                 }
+                result.qualityGate = reviewResult;
+                this.blackboard.write(
+                    '__quality_gate:final',
+                    JSON.stringify(reviewResult),
+                    'acceptance_evidence',
+                    '__quality_gate__',
+                );
             }
         }
 
@@ -530,6 +577,20 @@ export class Orchestrator {
 
         // Pre-read and inject contextFiles
         let effectivePrompt = taskNode.prompt;
+        if ((taskNode.produces?.length ?? 0) > 0 || (taskNode.consumes?.length ?? 0) > 0 || (taskNode.acceptanceChecks?.length ?? 0) > 0) {
+            effectivePrompt = [
+                '<system-entity-contract>',
+                JSON.stringify({
+                    produces: taskNode.produces ?? [],
+                    consumes: taskNode.consumes ?? [],
+                    acceptanceChecks: taskNode.acceptanceChecks ?? [],
+                }, null, 2),
+                'Implement only this contract. Before finishing, verify every required operation and cite its file/line in your result.',
+                '</system-entity-contract>',
+                '',
+                effectivePrompt,
+            ].join('\n');
+        }
         if (taskNode.contextFiles && taskNode.contextFiles.length > 0) {
             let injectedContext = '';
             for (const contextRef of taskNode.contextFiles) {

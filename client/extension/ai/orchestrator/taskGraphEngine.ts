@@ -5,7 +5,14 @@
 * This is the scheduling core of the multi-Agent collaboration system. 
 */
 
-import type { TaskGraph, TaskNode, TaskPriority } from './types';
+import type {
+    AcceptanceCheck,
+    FeatureManifest,
+    TaskEntityContract,
+    TaskGraph,
+    TaskNode,
+    TaskPriority,
+} from './types';
 
 /** 
 * DAG task graph engine. 
@@ -234,16 +241,48 @@ export class TaskGraphEngine {
         return { total: graph.nodes.size, pending, running, done, failed, cancelled };
     }
 
+    /**
+     * Add producer dependencies implied by entity contracts. This turns the
+     * task list into a data-flow DAG instead of relying only on model-authored
+     * dependency IDs.
+     */
+    static linkEntityDependencies(graph: TaskGraph): void {
+        const producers = new Map<string, string[]>();
+        for (const node of graph.nodes.values()) {
+            for (const contract of node.produces ?? []) {
+                const key = TaskGraphEngine.entityContractKey(contract);
+                const owners = producers.get(key) ?? [];
+                owners.push(node.id);
+                producers.set(key, owners);
+            }
+        }
+
+        for (const node of graph.nodes.values()) {
+            const dependencies = new Set(node.dependencies);
+            for (const contract of node.consumes ?? []) {
+                for (const producerId of producers.get(TaskGraphEngine.entityContractKey(contract)) ?? []) {
+                    if (producerId !== node.id) dependencies.add(producerId);
+                }
+            }
+            node.dependencies = [...dependencies];
+        }
+    }
+
+    private static entityContractKey(contract: TaskEntityContract): string {
+        return `${contract.kind}:${contract.id.trim().toLowerCase()}`;
+    }
+
     /** 
 * Create an empty task graph. 
 */
-    static createGraph(userPrompt: string): TaskGraph {
+    static createGraph(userPrompt: string, featureManifest?: FeatureManifest): TaskGraph {
         return {
             id: `tg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
             nodes: new Map(),
             metadata: {
                 userPrompt,
                 createdAt: Date.now(),
+                featureManifest,
             },
         };
     }
@@ -260,6 +299,9 @@ export class TaskGraphEngine {
             contextFiles?: string[];
             plannedFiles?: string[];
             plannedEntities?: string[];
+            produces?: TaskEntityContract[];
+            consumes?: TaskEntityContract[];
+            acceptanceChecks?: AcceptanceCheck[];
             dependencies?: string[];
             priority?: TaskPriority;
             maxIterations?: number;
@@ -268,13 +310,17 @@ export class TaskGraphEngine {
             providerOverride?: string;
         },
     ): TaskNode {
+        const contractEntities = (options?.produces ?? []).map(contract => `${contract.kind}:${contract.id}`);
         const node: TaskNode = {
             id,
             agentType,
             prompt,
             contextFiles: options?.contextFiles,
             plannedFiles: options?.plannedFiles,
-            plannedEntities: options?.plannedEntities,
+            plannedEntities: [...new Set([...(options?.plannedEntities ?? []), ...contractEntities])],
+            produces: options?.produces,
+            consumes: options?.consumes,
+            acceptanceChecks: options?.acceptanceChecks,
             dependencies: options?.dependencies ?? [],
             priority: options?.priority ?? 'normal',
             status: 'pending',

@@ -802,6 +802,9 @@ export class AgentRunner {
         const turnRuntime = await turnRuntimePromise;
         const runRecord = turnRuntime.run;
         const runId = runRecord.runId;
+        if (mode === 'script' || mode === 'orchestrator') {
+            this.toolExecutor.clearOrchestratorValidation(runId);
+        }
         options = {
             ...options,
             topicId,
@@ -1024,14 +1027,24 @@ export class AgentRunner {
 
             // Plan / Explore / General / Review / Orchestrator mode — or no code generated — just an explanation
             if (!code || mode === 'plan' || mode === 'explore' || mode === 'general' || mode === 'utility' || mode === 'review' || mode === 'orchestrator' || mode === 'script') {
-                updateRunStatus('completed');
+                const orchestratorValidation = mode === 'script' || mode === 'orchestrator'
+                    ? this.toolExecutor.getOrchestratorValidation(runId)
+                    : undefined;
+                const isValid = orchestratorValidation?.success ?? true;
+                updateRunStatus(isValid ? 'completed' : 'failed');
                 await clearResumeStateIfComplete();
                 return {
                     runId,
                     code: '',
                     explanation: finalMessage,
-                    validationErrors: [],
-                    isValid: true,
+                    validationErrors: isValid ? [] : [{
+                        code: 'orchestrator_quality_gate',
+                        severity: 'error',
+                        message: orchestratorValidation?.summary ?? aiText('Orchestrator quality gate failed.', '协作质量门未通过。'),
+                        line: 0,
+                        column: 0,
+                    }],
+                    isValid,
                     retryCount: 0,
                     steps,
                     tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,

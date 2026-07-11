@@ -190,10 +190,11 @@ export async function routeWebviewMessage(
 
             provider.switchWorkflow(null);
             provider.switchMode('script');
+            const approvedArtifacts = provider.getApprovedPlanArtifactContext();
             const prompt = aiText(
-                'Approved. Based on the latest generated plan, use the `dispatch_agents` tool to decompose it and assign the subtasks to suitable sub-agents.',
-                '同意执行。请根据最新生成的计划，使用 `dispatch_agents` 工具将该计划分解并分配给适当的子 Agent 执行。',
-            ) + contextStr;
+                'Approved. Execute the approved relationship design without reinterpreting it. If an Approved blueprintFile is listed below, call `dispatch_agents` with that exact `blueprintFile`; its featureManifest and taskPlan are canonical. Do not regenerate IDs, edges, produces/consumes, dependencies, or acceptance criteria.',
+                '同意执行。请直接执行已批准的构建关系设计，不要重新解释。如果下方列出了 Approved blueprintFile，请使用该精确路径调用 `dispatch_agents`；其中的 featureManifest 和 taskPlan 是唯一执行契约。不得重新生成 ID、关系边、produces/consumes、依赖或验收条件。',
+            ) + (approvedArtifacts ? `\n\n${approvedArtifacts}` : '') + contextStr;
             await provider.handleUserMessage(prompt, undefined, undefined, true, true);
             break;
         }
@@ -205,8 +206,8 @@ export async function routeWebviewMessage(
                 reviseContext = `\n\n${aiText('Annotations for the parts that need revision:', '需要修改的地方批注如下:')}\n` + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
             }
             const revisePrompt = aiText(
-                'Please revise and improve the existing execution plan based on my annotations.',
-                '请根据我的批注考虑改进现有的执行计划，重新完善计划。',
+                'Please revise the existing execution plan based on my annotations. If the task has a design blueprint, call write_design_blueprint again so both design_blueprint.md and the executable design_blueprint.json contract are updated before requesting approval again.',
+                '请根据我的批注修改现有执行计划。如果任务包含设计蓝图，必须再次调用 write_design_blueprint，同时更新 design_blueprint.md 和可执行的 design_blueprint.json 契约，然后再请求批准。',
             ) + reviseContext;
             await provider.handleUserMessage(revisePrompt, undefined, undefined, true, true);
             break;

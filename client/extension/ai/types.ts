@@ -19,6 +19,69 @@
  */
 export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'utility' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer' | 'orchestrator' | 'script';
 
+/** Domain entity kinds used by planning, orchestration, and semantic verification. */
+export type TaskEntityKind =
+    | 'event'
+    | 'scripted_effect'
+    | 'scripted_trigger'
+    | 'event_target'
+    | 'flag'
+    | 'localisation'
+    | 'modifier'
+    | 'asset'
+    | 'other';
+
+export type TaskEntityOperation =
+    | 'define'
+    | 'call'
+    | 'save'
+    | 'read'
+    | 'set'
+    | 'clear'
+    | 'localise'
+    | 'reference';
+
+export interface TaskEntityContract {
+    kind: TaskEntityKind;
+    id: string;
+    operation: TaskEntityOperation;
+    scope?: string;
+    required?: boolean;
+}
+
+export type AcceptanceCheckType =
+    | 'entity_exists'
+    | 'entity_referenced'
+    | 'flag_lifecycle'
+    | 'target_lifecycle'
+    | 'localisation_owner'
+    | 'scope'
+    | 'custom';
+
+export interface AcceptanceCheck {
+    id: string;
+    description: string;
+    type: AcceptanceCheckType;
+    subject?: string;
+    required?: boolean;
+}
+
+export interface FeatureEdge {
+    from: string;
+    relation: TaskEntityOperation;
+    to: string;
+    required?: boolean;
+}
+
+export interface FeatureManifest {
+    objective: string;
+    entities?: TaskEntityContract[];
+    requiredEdges?: FeatureEdge[];
+    invariants?: string[];
+    acceptanceCriteria?: AcceptanceCheck[];
+    expectsFileChanges?: boolean;
+}
+
 // ─── MCP Settings ────────────────────────────────────────────────────────────
 
 export interface MCPServerConfig {
@@ -1280,6 +1343,19 @@ export interface BlueprintEvidenceRef {
     insight: string;
 }
 
+/** Approved execution slice derived during design, before any builder is dispatched. */
+export interface BlueprintTaskPlan {
+    id: string;
+    agentType: 'explore' | 'plan' | 'build' | 'review' | 'loc_writer' | 'gui_expert';
+    prompt: string;
+    plannedFiles?: string[];
+    plannedEntities?: string[];
+    produces?: TaskEntityContract[];
+    consumes?: TaskEntityContract[];
+    dependencies: string[];
+    acceptanceChecks?: AcceptanceCheck[];
+}
+
 export interface WriteDesignBlueprintArgs {
     title: string;
     entities: BlueprintEntity[];
@@ -1296,6 +1372,10 @@ export interface WriteDesignBlueprintArgs {
     };
     localisationKeys?: string[];
     dependencyOrder: string[];
+    /** Executable entity/edge/acceptance contract approved by the user with this blueprint. */
+    featureManifest: FeatureManifest;
+    /** Executable DAG slices. Script/Orchestrator modes hydrate dispatch_agents from this plan. */
+    taskPlan: BlueprintTaskPlan[];
     riskRegister?: string[];
     notes?: string;
 }
@@ -1304,6 +1384,9 @@ export interface WriteDesignBlueprintResult {
     success: boolean;
     message: string;
     filePath: string;
+    /** Machine-readable approved contract stored beside the Markdown blueprint. */
+    dataFilePath?: string;
+    writtenFiles?: string[];
 }
 
 export type DiagnosticAnalysisCategory =

@@ -1557,6 +1557,23 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return written?.filePath ?? null;
     }
 
+    /** Paths injected into the approval continuation so execution consumes the approved contract verbatim. */
+    public getApprovedPlanArtifactContext(): string {
+        const topicId = this.topicManager.currentTopic?.id;
+        if (!topicId) return '';
+        const workspaceRoot = getProjectWorkspaceRoot();
+        const findExisting = (fileName: string) => getTopicFileCandidates(topicId, fileName, workspaceRoot)
+            .find(candidate => fs.existsSync(candidate));
+        const blueprintData = findExisting('design_blueprint.json');
+        const blueprintMarkdown = findExisting('design_blueprint.md');
+        const implementationPlan = findExisting('Implementation_Plan.md');
+        return [
+            blueprintData ? `Approved blueprintFile: ${blueprintData}` : '',
+            blueprintMarkdown ? `Approved blueprint: ${blueprintMarkdown}` : '',
+            implementationPlan ? `Approved implementation plan: ${implementationPlan}` : '',
+        ].filter(Boolean).join('\n');
+    }
+
     private _recordFileSnapshot(filePath: string): void {
         const snapshots = this._currentMessageSnapshots;
         if (!snapshots) return;

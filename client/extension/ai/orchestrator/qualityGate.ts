@@ -5,10 +5,10 @@
 * Supports multiple rounds of repair cycles (up to 3 rounds) to ensure code quality. 
 */
 
-import type { SubAgentResult } from './types';
-import type { QualityGateResult } from './types';
+import type { QualityGateResult, SubAgentResult, TaskGraph } from './types';
 import { aiText } from '../messages';
 import type { RunEventSink } from '../runner/runContext';
+import { SemanticVerifier } from './semanticVerifier';
 
 /** Quality gate configuration */
 export interface QualityGateConfig {
@@ -23,6 +23,11 @@ const DEFAULT_CONFIG: QualityGateConfig = {
     maxFixCycles: 3,
     autoFix: true,
 };
+
+export interface QualityGateReviewContext {
+    taskGraph?: TaskGraph;
+    workspaceRoot?: string;
+}
 
 export const PDX_DIAGNOSTIC_EXTENSIONS = ['.txt', '.gui'] as const;
 
@@ -84,7 +89,12 @@ export class QualityGate {
 * Generate comprehensive review prompt. 
 * Build targeted review instructions based on a list of all files written. 
 */
-    buildCombinedReviewPrompt(writtenFiles: string[], preFetchedDiagnostics?: string): string {
+    buildCombinedReviewPrompt(
+        writtenFiles: string[],
+        preFetchedDiagnostics?: string,
+        reviewContext?: QualityGateReviewContext,
+        semanticReport?: string,
+    ): string {
         const fileList = writtenFiles.length > 0
             ? writtenFiles.map(f => `- ${f}`).join('\n')
             : '(No file write records)';
@@ -104,15 +114,31 @@ export class QualityGate {
         const hasSoundDiagnostics = /show_sound|Expected value of type sound|type sound|sound\s*=|music|\.asset/i.test(preFetchedDiagnostics ?? '');
         const spriteSection = hasSpriteDiagnostics ? `\n${SPRITE_REPAIR_PROTOCOL}\n` : '';
         const soundSection = hasSoundDiagnostics ? `\n${SOUND_REPAIR_PROTOCOL}\n` : '';
+        const featureManifest = reviewContext?.taskGraph?.metadata.featureManifest;
+        const requestSection = reviewContext?.taskGraph
+            ? [
+                '## Original User Request',
+                reviewContext.taskGraph.metadata.userPrompt,
+                '',
+                '## Feature Manifest',
+                JSON.stringify(featureManifest ?? { objective: reviewContext.taskGraph.metadata.userPrompt }, null, 2),
+                '',
+            ]
+            : [];
+        const semanticSection = semanticReport
+            ? ['## Deterministic Semantic Report', semanticReport, '']
+            : [];
 
         return [
             '## Quality Gate Review Task',
             '',
+            ...requestSection,
             'Please review the code quality of the following files:',
             fileList,
             diagnosticsSection,
             spriteSection,
             soundSection,
+            ...semanticSection,
             'Review Checklist:',
             step1,
             '2. Check for logic conflict issues (e.g., an event has `option` but uses `hide_window = yes`, which is a contradiction). Such conflicts MUST be reported and fixed.',
@@ -120,13 +146,16 @@ export class QualityGate {
             '4. Verify the correctness of the scope chain.',
             '5. Check file structure integrity and functional completeness (Refer to Rule 3b).',
             diagnosticTargets.length > 0 ? `6. LSP diagnostic target files include: ${diagnosticTargets.join(', ')}` : '6. No LSP diagnostic target files were written.',
+            '7. Check every required Feature Manifest edge and acceptance criterion. Each passed criterion must cite concrete file/line or deterministic evidence; otherwise mark it failed.',
             '',
             'Output Format (You MUST output EXACTLY this JSON format in a markdown code block):',
             '```json',
             '{',
             '  "logicIssuesCount": <number>,',
             '  "logicIssues": ["<issue 1>", "<issue 2>"],',
-            '  "fixSuggestions": ["<suggestion 1>", "<suggestion 2>"]',
+            '  "fixSuggestions": ["<suggestion 1>", "<suggestion 2>"],',
+            '  "acceptanceEvidence": [{"id":"<criterion id>","passed":true,"evidence":"<file:line or deterministic evidence>"}],',
+            '  "acceptanceFailures": ["<required criterion without evidence>"]',
             '}',
             '```',
             'IMPORTANT: Do not output PASSED or FAILED. The system will automatically fail the quality gate if any LSP errors exist. You only need to report semantic or logic issues.',
@@ -141,14 +170,35 @@ export class QualityGate {
         agentRunner: import('../agentRunner').AgentRunner,
         writtenFiles: string[],
         options: Partial<import('../agentRunner').AgentRunnerOptions>,
+        reviewContext?: QualityGateReviewContext,
     ): Promise<QualityGateResult> {
-        if (writtenFiles.length === 0) {
-            return {
+        const taskGraph = reviewContext?.taskGraph;
+        const workspaceRoot = reviewContext?.workspaceRoot ?? agentRunner.toolExecutor.workspaceRoot;
+        const semantic = taskGraph
+            ? await new SemanticVerifier().verify(workspaceRoot, writtenFiles, taskGraph, agentRunner.toolExecutor)
+            : {
                 passed: true,
+                issues: [],
+                acceptanceFailures: [],
+                filesChecked: writtenFiles,
+                report: '',
+            };
+        const expectedChanges = taskGraph?.metadata.featureManifest?.expectsFileChanges === true
+            || [...(taskGraph?.nodes.values() ?? [])].some(node => ['build', 'loc_writer', 'gui_expert'].includes(node.agentType)
+                && ((node.plannedFiles?.length ?? 0) > 0 || (node.produces?.length ?? 0) > 0));
+        if (writtenFiles.length === 0) {
+            const acceptanceFailures = [...semantic.acceptanceFailures];
+            if (expectedChanges) acceptanceFailures.push('Expected project changes were not written.');
+            return {
+                passed: !expectedChanges && semantic.passed,
                 diagnosticErrors: 0,
-                logicIssues: 0,
+                logicIssues: semantic.issues.length,
+                semanticIssues: semantic.issues.length,
+                acceptanceFailures,
                 filesChecked: [],
-                reviewReport: aiText('No file changes', '无文件修改'),
+                semanticReport: semantic.report,
+                fixSuggestions: semantic.issues.map(issue => issue.message),
+                reviewReport: semantic.report || aiText('No file changes', '无文件修改'),
             };
         }
 
@@ -174,7 +224,7 @@ export class QualityGate {
             // ignore
         }
 
-        const prompt = this.buildCombinedReviewPrompt(writtenFiles, preFetchedDiagnostics);
+        const prompt = this.buildCombinedReviewPrompt(writtenFiles, preFetchedDiagnostics, reviewContext, semantic.report);
         
         //Execute Reviewer Agent
         const reviewResult = await agentRunner.run(
@@ -189,13 +239,30 @@ export class QualityGate {
 
         const parsed = this.parseReviewResult(reviewResult.explanation);
         const totalLogicIssues = parsed.logicIssuesCount || 0;
-        
-        const passed = diagnosticErrorCount === 0 && totalLogicIssues === 0;
+        const requiredCriteria = [
+            ...(taskGraph?.metadata.featureManifest?.acceptanceCriteria ?? []),
+            ...[...(taskGraph?.nodes.values() ?? [])].flatMap(node => node.acceptanceChecks ?? []),
+        ].filter(check => check.required !== false);
+        const missingAcceptanceEvidence = requiredCriteria
+            .filter(check => !parsed.acceptanceEvidence.some(item =>
+                item.id === check.id && item.passed === true && item.evidence.trim().length > 0))
+            .map(check => `${check.id}: ${check.description}`);
+        const acceptanceFailures = [...new Set([
+            ...semantic.acceptanceFailures,
+            ...parsed.acceptanceFailures,
+            ...missingAcceptanceEvidence,
+        ])];
+        const passed = diagnosticErrorCount === 0
+            && totalLogicIssues === 0
+            && semantic.issues.length === 0
+            && acceptanceFailures.length === 0;
 
         this.eventSink?.appendSoon('quality_gate_decision', {
             passed,
             diagnosticErrors: diagnosticErrorCount,
             logicIssues: totalLogicIssues,
+            semanticIssues: semantic.issues.length,
+            acceptanceFailures,
             filesChecked: writtenFiles,
             fixSuggestions: parsed.fixSuggestions || []
         });
@@ -204,9 +271,12 @@ export class QualityGate {
             passed,
             diagnosticErrors: diagnosticErrorCount,
             logicIssues: totalLogicIssues,
+            semanticIssues: semantic.issues.length,
+            acceptanceFailures,
             filesChecked: writtenFiles,
-            reviewReport: reviewResult.explanation,
-            fixSuggestions: parsed.fixSuggestions,
+            reviewReport: [semantic.report, reviewResult.explanation].filter(Boolean).join('\n\n'),
+            semanticReport: semantic.report,
+            fixSuggestions: [...new Set([...semantic.issues.map(issue => issue.message), ...parsed.fixSuggestions])],
         };
     }
 
@@ -249,7 +319,12 @@ export class QualityGate {
     /** 
 * Analyze the review report and determine whether it is passed. 
 */
-    parseReviewResult(reviewOutput: string): { logicIssuesCount: number; fixSuggestions: string[] } {
+    parseReviewResult(reviewOutput: string): {
+        logicIssuesCount: number;
+        fixSuggestions: string[];
+        acceptanceFailures: string[];
+        acceptanceEvidence: Array<{ id: string; passed: boolean; evidence: string }>;
+    } {
         try {
             // Try extracting JSON block
             const jsonMatch = reviewOutput.match(/```json\s*(\{[\s\S]*?\})\s*```/);
@@ -257,15 +332,37 @@ export class QualityGate {
                 const parsed = JSON.parse(jsonMatch[1]);
                 return {
                     logicIssuesCount: parsed.logicIssuesCount || 0,
-                    fixSuggestions: Array.isArray(parsed.fixSuggestions) ? parsed.fixSuggestions : []
+                    fixSuggestions: Array.isArray(parsed.fixSuggestions) ? parsed.fixSuggestions : [],
+                    acceptanceFailures: Array.isArray(parsed.acceptanceFailures) ? parsed.acceptanceFailures.map(String) : [],
+                    acceptanceEvidence: Array.isArray(parsed.acceptanceEvidence)
+                        ? parsed.acceptanceEvidence
+                            .filter((item: unknown) => !!item && typeof item === 'object')
+                            .map((item: any) => ({
+                                id: String(item.id ?? ''),
+                                passed: item.passed === true,
+                                evidence: String(item.evidence ?? ''),
+                            }))
+                        : [],
                 };
             }
             // Fallback for non-JSON formatted but contains logic issues count
             const match = reviewOutput.match(/(\d+)\s*(?:个|issues?|problems?|errors?)/i);
-            const logicIssuesCount = match ? parseInt(match[1]!, 10) : 0;
-            return { logicIssuesCount, fixSuggestions: [] };
+            const numericIssueMatch = reviewOutput.match(/(\d+)\s*(?:issues?|problems?|errors?)/i) ?? match;
+            if (/\bPASSED\b/i.test(reviewOutput)) return { logicIssuesCount: 0, fixSuggestions: [], acceptanceFailures: [], acceptanceEvidence: [] };
+            const logicIssuesCount = numericIssueMatch ? parseInt(numericIssueMatch[1]!, 10) : 1;
+            return {
+                logicIssuesCount,
+                fixSuggestions: numericIssueMatch ? [] : ['Reviewer output did not contain the required structured verdict.'],
+                acceptanceFailures: [],
+                acceptanceEvidence: [],
+            };
         } catch {
-            return { logicIssuesCount: 0, fixSuggestions: [] };
+            return {
+                logicIssuesCount: 1,
+                fixSuggestions: ['Reviewer output could not be parsed.'],
+                acceptanceFailures: [],
+                acceptanceEvidence: [],
+            };
         }
     }
 

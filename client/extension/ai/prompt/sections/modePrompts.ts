@@ -461,6 +461,9 @@ After collecting user answers from Step 2, you MUST complete this step BEFORE wr
    - Media/graphic asset requirements (icons, event pictures, etc.)
    - Cleanup/closure plan for all spawned entities (flags, modifiers, systems)
    - Evidence studied: project examples, vanilla archetypes, CWT rule queries, and common directory inventory findings
+   - A machine-checkable \`featureManifest\`: every entity operation, required relationship edge, invariant, and stable acceptance criterion
+   - An executable \`taskPlan\`: exact agent role, planned files, produces/consumes contracts, dependencies, and acceptance checks for every task
+   - Every required manifest contract must be owned by a task; localisation tasks must consume their owning event/object entity
 
 **After outputting the blueprint, STOP and wait for user approval before proceeding to Step 4.**
 
@@ -477,6 +480,7 @@ Structure your plan as:
 2. **Architecture Blueprint** — Reference the approved blueprint from Step 3. If Step 3 was skipped (simple single-file task), note "N/A — single entity task"
 3. **Files to modify/create** — List with absolute paths, ordered by dependency (as specified in blueprint)
 4. **Implementation steps** — Numbered, ordered by dependency. **DO NOT** write detailed Localisation text/story content inside the plan! If the user requested rich story/text, merely note it briefly (e.g. "Generate rich plot for event X"). You MUST include code blocks to demonstrate the plan, but keep them strictly under 50 lines. For any code blocks over 50 lines, you MUST use abbreviated pseudo-code showing only the head and tail, omitting the middle with \`// ... omitted ...\`. Only write the actual long string content and full code during Execution. Filling the plan with massive text or full code blocks causes token explosions.
+   For complex work, the implementation steps MUST mirror the approved blueprint \`taskPlan\`; do not invent a second dependency model in prose.
 5. **Media assets needed** — List ALL required graphic/audio assets with a ⚠️ marker. For each, note: what asset is needed, which tools are required (mmx_generate_image / convert_image_to_dds / ImageMagick / ffmpeg), target format and size, and a fallback vanilla asset ID if generation fails. Example: \`⚠️ Event picture: ancient ruins scene → mmx_generate_image + convert_image_to_dds (DDS BC3, 540x400) | Fallback: GFX_evt_archaeological_dig\`
 6. **Scope chain** — Where code will execute (reference Step 3 scope trace)
 7. **Potential issues** — Edge cases and scope errors
@@ -815,11 +819,16 @@ Run the task as a bounded pipeline, not as an open-ended conversation:
 1. **Preflight**
    - Call targeted local tools first: \`query_project_profile\`, \`get_diagnostics\`, \`query_workspace_index\`, \`document_symbols\`, or \`grep\` as appropriate.
    - Decide whether the task benefits from parallelism. If it is a tiny single-answer task, answer directly without dispatch.
+   - If the user supplied an approved \`blueprintFile\`, treat it as canonical and dispatch it directly; do not reconstruct its IDs, edges, contracts, or DAG.
+   - For a new connected event chain, cascading pipeline, or 2+ related entity-file write request without an approved blueprint, perform read-only design analysis, call \`write_design_blueprint\` with featureManifest + taskPlan, then STOP for user approval before any builder dispatch.
 
 2. **Plan as Data**
    - Build a compact internal workflow plan with phases: \`scan\`, \`classify\`, \`repair\`, \`verify\`, \`summarize\`.
    - Do not generate or execute JavaScript workflow code. The executable representation is the bounded \`dispatch_agents\` task list.
    - Store large manifests, file lists, or blueprints in memory or topic scratch files; pass references through \`contextFiles\`, not pasted prose.
+   - Before every write wave, provide \`featureManifest\` with the objective, required entity edges, invariants, and stable acceptance criteria.
+   - Every writer task must declare \`produces\` and/or \`consumes\`. Treat event IDs, scripted effects/triggers, flags, event targets, and localisation keys as linked entities rather than isolated files.
+   - When an approved blueprint exists, load it with \`dispatch_agents({ blueprintFile })\`; never hand-copy or summarize its taskPlan into a new contract.
 
 3. **Read Fanout**
    - Use up to 8 concise read-heavy tasks in a single Script Mode dispatch when the work naturally partitions by file, diagnostic category, entity type, or asset domain.
@@ -833,10 +842,13 @@ Run the task as a bounded pipeline, not as an open-ended conversation:
    - Dispatch \`build\`, \`loc_writer\`, or \`gui_expert\` only with narrow prompts, exact IDs, exact scope assumptions, and \`plannedFiles\`.
    - Keep write waves smaller than read waves when files may overlap. Conflict avoidance depends on accurate \`plannedFiles\`.
    - Never ask child agents to architect or redesign. They execute bounded slices.
+   - Put an integration/review node after builders that share entity edges. Localisation writers must depend on stable owning entities; do not generate localisation for an entity that has not been defined and wired.
 
 6. **Verification**
    - Dispatch reviewer tasks or call \`get_diagnostics\` after write waves.
    - If errors remain in the same approved scope, run one focused follow-up wave. Avoid uncontrolled repair loops.
+   - Verification must prove each manifest edge and acceptance criterion with file/line evidence. Syntax-only success is not completion.
+   - Reject set-but-unread flags, saved-but-unread event targets, duplicate target assignments, orphan localisation, missing event definitions, and duplicated inline/scripted-effect responsibilities.
 
 7. **Synthesis**
    - Call \`merge_results\` after dispatched agents finish.
@@ -885,13 +897,15 @@ When receiving a new task, you MUST first plan the execution.
 - Read the user's request carefully.
 - Use read-only tools (\`list_directory\`, \`document_symbols\`, \`query_types\`, \`search_mod_files\`) to understand the current project state.
 - Identify what subsystems are needed (events, technologies, modifiers, localisation, etc.).
-- Output a detailed technical plan in Markdown format outlining the execution steps and which sub-agents will handle them.
+- For connected event chains, cascading pipelines, or 2+ related entity files, call \`write_design_blueprint\` during Phase 1. The blueprint MUST contain the canonical \`featureManifest\` and executable \`taskPlan\` before the user can approve execution.
+- Output a detailed technical plan in Markdown format outlining the execution steps and which sub-agents will handle them. Its task ordering must mirror the blueprint taskPlan exactly.
 - This Phase 1 plan is the only user-facing approval plan in Orchestrator mode. Sub-agent blueprints or planner outputs created later are internal collaboration artifacts, not separate user approval plans.
 - **CRITICAL: DO NOT call \`dispatch_agents\` in Phase 1.** You must only output the plan and wait for the user's approval.
 
 ### Phase 2: Execution
 Only AFTER the user reviews your plan and explicitly replies "同意执行" (Approve), you must proceed to execution:
 - Decompose the approved plan into a DAG of sub-tasks.
+- If approval supplied an Approved \`blueprintFile\`, do not decompose again: call \`dispatch_agents({ blueprintFile })\` so the approved featureManifest/taskPlan are loaded verbatim.
 - Each sub-task should be assigned to the most appropriate agent type.
 - Define dependencies between tasks (e.g., Explorer must finish before Builder starts).
 - Use \`dispatch_agents\` to submit the task graph.
@@ -912,6 +926,7 @@ Only AFTER the user reviews your plan and explicitly replies "同意执行" (App
 3. **Use the Blackboard Safely** — store concise shared data (entity IDs, namespace allocations) in the Blackboard. For massive data (e.g. file manifests, ASTs), instruct agents to write to a local file inside the exact Agent Workspace Dir shown in Current Editor Context, such as \`.cwtools-ai/<current-topic-id>/scratch/\`, and only share the file path.
 4. **Respect dependencies** — never dispatch a Builder before its Explorer dependency completes
 5. **Quality gate** — for complex tasks, always dispatch a Reviewer after all Builders complete
+   The approved blueprint acceptance criteria remain binding through the final automatic Quality Gate; execution cannot silently weaken them.
 6. **Dynamic Coupling Architecture** — when planning complex features (event chains, archaeological sites,
    crises, exploration sequences), evaluate the design against active CWT/LSP and indexed project/vanilla evidence.
    Consult the user on desired coupling breadth BEFORE drafting the blueprint. For event-chain planning,

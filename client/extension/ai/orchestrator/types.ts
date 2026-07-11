@@ -5,7 +5,23 @@
 * Model selection inherits the supplier/model configured by the user in the settings panel and supports override by role. 
 */
 
-import type { AgentMode, TokenUsage, AgentStep } from '../types';
+import type {
+    AcceptanceCheck,
+    AgentMode,
+    AgentStep,
+    FeatureManifest,
+    TaskEntityContract,
+    TokenUsage,
+} from '../types';
+export type {
+    AcceptanceCheck,
+    AcceptanceCheckType,
+    FeatureEdge,
+    FeatureManifest,
+    TaskEntityContract,
+    TaskEntityKind,
+    TaskEntityOperation,
+} from '../types';
 
 // ─── Blackboard entry type ──────────────────────────────────────────────────
 
@@ -15,6 +31,8 @@ export type BlackboardEntryType =
     | 'scope_info'         // Scope information (from query_scope)
     | 'diag_result'        // Diagnostic results (from get_diagnostics)
     | 'entity_registry'    // Entity Registry (Created ID → Creator Agent)
+    | 'entity_relation'    // Producer/consumer relation between task entities
+    | 'acceptance_evidence'// Stable acceptance result/evidence
     | 'write_intent'       // Write intent statement (Agent declares the file to be written)
     | 'free_text';         // Free text (generic KV storage)
 
@@ -71,6 +89,12 @@ export interface TaskNode {
     plannedFiles?: string[];
     /** Agent declares the list of entities to be modified (for anti-collision) */
     plannedEntities?: string[];
+    /** Entity operations created by this task. */
+    produces?: TaskEntityContract[];
+    /** Entity operations this task expects to use. Producer dependencies are inferred from these. */
+    consumes?: TaskEntityContract[];
+    /** Node-local checks that must hold after integration. */
+    acceptanceChecks?: AcceptanceCheck[];
     /** Pre-dependent task ID list - this node can only be executed after all are completed */
     dependencies: string[];
     /** Task priority */
@@ -115,6 +139,8 @@ export interface TaskGraph {
         userPrompt: string;
         /** Creation time */
         createdAt: number;
+        /** Optional machine-checkable feature contract for write-heavy script tasks. */
+        featureManifest?: FeatureManifest;
     };
 }
 
@@ -210,6 +236,8 @@ export interface OrchestratorResult {
     failedNodes: string[];
     /** List of canceled node IDs */
     cancelledNodes: string[];
+    /** Final quality-gate result, when a gate was required. */
+    qualityGate?: QualityGateResult;
 }
 
 /** Orchestrator configuration options */
@@ -245,9 +273,12 @@ export interface QualityGateResult {
     passed: boolean;
     diagnosticErrors: number;
     logicIssues: number;
+    semanticIssues: number;
+    acceptanceFailures: string[];
     filesChecked: string[];
     reviewReport: string;
     fixSuggestions?: string[];
+    semanticReport?: string;
 }
 
 /** Agent running troubleshooting tracking data */

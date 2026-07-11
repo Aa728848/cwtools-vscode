@@ -1033,7 +1033,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_design_blueprint',
-            description: 'Write a structured design blueprint for a game entity pipeline to the Agent Workspace. You MUST use this tool in Plan Mode BEFORE writing any implementation plan when the task involves: (1) event chains (2+ connected events), (2) archaeological sites, special projects, relics, situations, or anomalies, (3) any task producing 2+ game entity files that reference each other. For these tasks, commonDirectoryReview, subsystemPlan, triggerPlan, rewardPlan, cleanupPlan, evidence, and dependencyOrder are hard requirements. The blueprint documents entity topology, common/ capability review, scope chains, reward implementation, lifecycle cleanup, ID allocations, branching logic, media asset requirements, and file dependency order. It is saved as design_blueprint.md and displayed to the user for approval before Build phase begins. NOTE: Research must follow the evidence hierarchy: CWT/LSP and typed indexes first, current project examples second, bounded vanilla archetype evidence third.',
+            description: 'Write a structured, executable design blueprint for a game entity pipeline to the Agent Workspace. Plan, Orchestrator, and Script modes MUST use it before implementation of connected multi-entity work. Besides human-readable topology, it requires featureManifest and taskPlan so the approved entity edges, produces/consumes contracts, dependencies, and acceptance criteria can be loaded directly by dispatch_agents without model reinterpretation. It saves design_blueprint.md plus design_blueprint.json. Research must follow the evidence hierarchy: CWT/LSP and typed indexes first, current project examples second, bounded vanilla archetype evidence third.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1176,6 +1176,115 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                         items: { type: 'string' },
                         description: 'File creation order (dependencies first). Files listed earlier must be written before later ones.',
                     },
+                    featureManifest: {
+                        type: 'object',
+                        description: 'Approved machine-checkable objective, entity operations, required cross-entity edges, invariants, and acceptance criteria.',
+                        properties: {
+                            objective: { type: 'string' },
+                            entities: {
+                                type: 'array',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        kind: { type: 'string', enum: ['event', 'scripted_effect', 'scripted_trigger', 'event_target', 'flag', 'localisation', 'modifier', 'asset', 'other'] },
+                                        id: { type: 'string' },
+                                        operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
+                                        scope: { type: 'string' },
+                                        required: { type: 'boolean' },
+                                    },
+                                    required: ['kind', 'id', 'operation'],
+                                },
+                            },
+                            requiredEdges: {
+                                type: 'array',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        from: { type: 'string' },
+                                        relation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
+                                        to: { type: 'string' },
+                                        required: { type: 'boolean' },
+                                    },
+                                    required: ['from', 'relation', 'to'],
+                                },
+                            },
+                            invariants: { type: 'array', items: { type: 'string' } },
+                            acceptanceCriteria: {
+                                type: 'array',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        id: { type: 'string' },
+                                        description: { type: 'string' },
+                                        type: { type: 'string', enum: ['entity_exists', 'entity_referenced', 'flag_lifecycle', 'target_lifecycle', 'localisation_owner', 'scope', 'custom'] },
+                                        subject: { type: 'string' },
+                                        required: { type: 'boolean' },
+                                    },
+                                    required: ['id', 'description', 'type'],
+                                },
+                            },
+                            expectsFileChanges: { type: 'boolean' },
+                        },
+                        required: ['objective', 'entities', 'requiredEdges', 'acceptanceCriteria'],
+                    },
+                    taskPlan: {
+                        type: 'array',
+                        description: 'Approved executable DAG slices. Connected writers declare produces/consumes and localisation writers consume their owning entity.',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                id: { type: 'string' },
+                                agentType: { type: 'string', enum: ['explore', 'plan', 'build', 'review', 'loc_writer', 'gui_expert'] },
+                                prompt: { type: 'string' },
+                                plannedFiles: { type: 'array', items: { type: 'string' } },
+                                plannedEntities: { type: 'array', items: { type: 'string' } },
+                                produces: {
+                                    type: 'array',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            kind: { type: 'string', enum: ['event', 'scripted_effect', 'scripted_trigger', 'event_target', 'flag', 'localisation', 'modifier', 'asset', 'other'] },
+                                            id: { type: 'string' },
+                                            operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
+                                            scope: { type: 'string' },
+                                            required: { type: 'boolean' },
+                                        },
+                                        required: ['kind', 'id', 'operation'],
+                                    },
+                                },
+                                consumes: {
+                                    type: 'array',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            kind: { type: 'string', enum: ['event', 'scripted_effect', 'scripted_trigger', 'event_target', 'flag', 'localisation', 'modifier', 'asset', 'other'] },
+                                            id: { type: 'string' },
+                                            operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
+                                            scope: { type: 'string' },
+                                            required: { type: 'boolean' },
+                                        },
+                                        required: ['kind', 'id', 'operation'],
+                                    },
+                                },
+                                dependencies: { type: 'array', items: { type: 'string' } },
+                                acceptanceChecks: {
+                                    type: 'array',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            id: { type: 'string' },
+                                            description: { type: 'string' },
+                                            type: { type: 'string', enum: ['entity_exists', 'entity_referenced', 'flag_lifecycle', 'target_lifecycle', 'localisation_owner', 'scope', 'custom'] },
+                                            subject: { type: 'string' },
+                                            required: { type: 'boolean' },
+                                        },
+                                        required: ['id', 'description', 'type'],
+                                    },
+                                },
+                            },
+                            required: ['id', 'agentType', 'prompt', 'dependencies'],
+                        },
+                    },
                     riskRegister: {
                         type: 'array',
                         items: { type: 'string' },
@@ -1183,7 +1292,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                     notes: { type: 'string', description: 'Additional design notes: scope chain transition warnings, edge cases, branching logic, or vanilla references studied.' },
                 },
-                required: ['title', 'entities', 'commonDirectoryReview', 'subsystemPlan', 'triggerPlan', 'rewardPlan', 'cleanupPlan', 'evidence', 'dependencyOrder'],
+                required: ['title', 'entities', 'commonDirectoryReview', 'subsystemPlan', 'triggerPlan', 'rewardPlan', 'cleanupPlan', 'evidence', 'dependencyOrder', 'featureManifest', 'taskPlan'],
             },
         },
     },
@@ -1258,10 +1367,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'dispatch_agents',
-            description: '[Orchestrator/Script Mode] Decompose the current task into multiple sub-tasks and dispatch them to specialist agents for parallel execution. Script Mode may dispatch up to 8 concise tasks per wave; classic Orchestrator mode remains limited to 4. Sub-agents include Explorer (read-only exploration), Builder (code generation), LocWriter (localisation), Reviewer (code review), etc. Agents exchange data via the shared Blackboard and execution order is guaranteed by a DAG. Any task that writes localisation/localization .yml files must be assigned to loc_writer and must use write_localisation, not generic edit tools.',
+            description: '[Orchestrator/Script Mode] Dispatch an approved executable blueprint or an explicitly supplied task DAG. For approved connected multi-entity work, pass blueprintFile=.cwtools-ai/<topic>/design_blueprint.json; the system loads its canonical featureManifest and taskPlan without model reinterpretation. Ad-hoc read waves may still pass tasks directly. Script Mode supports up to 8 tasks; classic Orchestrator mode supports 4.',
             parameters: {
                 type: 'object',
                 properties: {
+                    blueprintFile: {
+                        type: 'string',
+                        description: 'Approved topic-scoped design_blueprint.json. When provided, its featureManifest and taskPlan replace model-supplied tasks as the canonical approved contract.',
+                    },
                     tasks: {
                         type: 'array',
                         maxItems: 8,
@@ -1292,14 +1405,110 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                                     items: { type: 'string' },
                                     description: 'Optional list of domain entities this sub-task expects to create or modify, such as event IDs or scripted effect names. Used for concurrency conflict avoidance.',
                                 },
+                                produces: {
+                                    type: 'array',
+                                    description: 'Machine-checkable entity operations created by this task. Required for Script Mode writer tasks.',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            kind: { type: 'string', enum: ['event', 'scripted_effect', 'scripted_trigger', 'event_target', 'flag', 'localisation', 'modifier', 'asset', 'other'] },
+                                            id: { type: 'string' },
+                                            operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
+                                            scope: { type: 'string' },
+                                            required: { type: 'boolean' },
+                                        },
+                                        required: ['kind', 'id', 'operation'],
+                                    },
+                                },
+                                consumes: {
+                                    type: 'array',
+                                    description: 'Machine-checkable entity operations used by this task. Producer dependencies are inferred automatically.',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            kind: { type: 'string', enum: ['event', 'scripted_effect', 'scripted_trigger', 'event_target', 'flag', 'localisation', 'modifier', 'asset', 'other'] },
+                                            id: { type: 'string' },
+                                            operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
+                                            scope: { type: 'string' },
+                                            required: { type: 'boolean' },
+                                        },
+                                        required: ['kind', 'id', 'operation'],
+                                    },
+                                },
+                                acceptanceChecks: {
+                                    type: 'array',
+                                    description: 'Node-local post-integration checks with stable IDs.',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            id: { type: 'string' },
+                                            description: { type: 'string' },
+                                            type: { type: 'string', enum: ['entity_exists', 'entity_referenced', 'flag_lifecycle', 'target_lifecycle', 'localisation_owner', 'scope', 'custom'] },
+                                            subject: { type: 'string' },
+                                            required: { type: 'boolean' },
+                                        },
+                                        required: ['id', 'description', 'type'],
+                                    },
+                                },
                                 priority: { type: 'string', enum: ['critical', 'normal', 'low'], description: 'Task priority (default: normal)' },
                                 maxIterations: { type: 'integer', minimum: 1, maximum: 100, description: 'Optional per-agent reasoning-loop cap. Leave unset to use the role default.' },
                             },
                             required: ['id', 'agentType', 'prompt'],
                         },
                     },
+                    featureManifest: {
+                        type: 'object',
+                        description: 'Machine-checkable feature objective and acceptance contract. Required for Script Mode write waves.',
+                        properties: {
+                            objective: { type: 'string' },
+                            entities: {
+                                type: 'array',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        kind: { type: 'string', enum: ['event', 'scripted_effect', 'scripted_trigger', 'event_target', 'flag', 'localisation', 'modifier', 'asset', 'other'] },
+                                        id: { type: 'string' },
+                                        operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
+                                        scope: { type: 'string' },
+                                        required: { type: 'boolean' },
+                                    },
+                                    required: ['kind', 'id', 'operation'],
+                                },
+                            },
+                            requiredEdges: {
+                                type: 'array',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        from: { type: 'string' },
+                                        relation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
+                                        to: { type: 'string' },
+                                        required: { type: 'boolean' },
+                                    },
+                                    required: ['from', 'relation', 'to'],
+                                },
+                            },
+                            invariants: { type: 'array', items: { type: 'string' } },
+                            acceptanceCriteria: {
+                                type: 'array',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        id: { type: 'string' },
+                                        description: { type: 'string' },
+                                        type: { type: 'string', enum: ['entity_exists', 'entity_referenced', 'flag_lifecycle', 'target_lifecycle', 'localisation_owner', 'scope', 'custom'] },
+                                        subject: { type: 'string' },
+                                        required: { type: 'boolean' },
+                                    },
+                                    required: ['id', 'description', 'type'],
+                                },
+                            },
+                            expectsFileChanges: { type: 'boolean' },
+                        },
+                        required: ['objective', 'acceptanceCriteria'],
+                    },
                 },
-                required: ['tasks'],
+                required: [],
             },
         },
     },
@@ -1307,13 +1516,13 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_blackboard',
-            description: 'Query data from the shared Blackboard. The Blackboard is a cross-agent knowledge store supporting exact key lookup, prefix-based range queries, and type filtering. Types include: file_snapshot, scope_info, diag_result, entity_registry, write_intent, free_text.',
+            description: 'Query data from the shared Blackboard. The Blackboard is a cross-agent knowledge store supporting exact key lookup, prefix-based range queries, and type filtering. Types include entity registry/relation and acceptance evidence records.',
             parameters: {
                 type: 'object',
                 properties: {
                     key: { type: 'string', description: 'Exact key to look up (mutually exclusive with prefix/type)' },
                     prefix: { type: 'string', description: 'Key prefix for range queries (e.g. "entity:" matches all entries starting with "entity:")' },
-                    type: { type: 'string', enum: ['file_snapshot', 'scope_info', 'diag_result', 'entity_registry', 'write_intent', 'free_text'], description: 'Filter by data type' },
+                    type: { type: 'string', enum: ['file_snapshot', 'scope_info', 'diag_result', 'entity_registry', 'entity_relation', 'acceptance_evidence', 'write_intent', 'free_text'], description: 'Filter by data type' },
                 },
                 required: [],
             },

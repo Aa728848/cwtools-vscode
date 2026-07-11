@@ -35,6 +35,19 @@ function isAgentTempPath(filePath: string): boolean {
     return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
 }
 
+/** Generated agent state and backup artifacts must never count as project references. */
+export function isExcludedModSearchPath(workspaceRoot: string, filePath: string): boolean {
+    const relative = path.relative(workspaceRoot, filePath).replace(/\\/g, '/');
+    if (!relative || relative.startsWith('../') || path.isAbsolute(relative)) return true;
+    const lower = relative.toLowerCase();
+    const segments = lower.split('/');
+    if (segments.some(segment => ['.cwtools-ai', '.git', 'node_modules', 'release'].includes(segment))) return true;
+    const base = segments[segments.length - 1] ?? '';
+    return base.endsWith('.bak')
+        || base.endsWith('.tmp')
+        || /^resume_transcript.*\.json(?:\..+)?$/.test(base);
+}
+
 function buildAbsenceWarning(identifier: string): string {
     return `No matches for "${identifier}" are not proof that it is missing. PDX identifiers can live in vanilla cache, localisation, .gui/.gfx/.asset files, generated indexes, or a different AST type. Before declaring it nonexistent, verify with verify_pdx_identifier or at least two independent lookups such as query_definition_by_name, workspace_symbols/query_types, and search_mod_files(searchContext="both").`;
 }
@@ -2200,6 +2213,7 @@ export class LspToolHandler {
 
             const options: any = {
                 include: new vs.RelativePattern(this.ctx.workspaceRoot, includeGlob),
+                exclude: new vs.RelativePattern(this.ctx.workspaceRoot, '**/{.cwtools-ai,.git,node_modules,release}/**'),
                 maxResults: limit * 10,
                 previewOptions: { matchLines: 1, charsPerLine: 120 },
             };
@@ -2232,6 +2246,7 @@ export class LspToolHandler {
             if (typeof (vs.workspace as any).findTextInFiles === 'function') {
                 try {
                     await (vs.workspace as any).findTextInFiles(query, options, (result: any) => {
+                        if (isExcludedModSearchPath(this.ctx.workspaceRoot, result.uri.fsPath)) return;
                         if (fileMatches.size >= limit && !fileMatches.has(result.uri.fsPath)) {
                             limitReached = true;
                             return;
@@ -2260,7 +2275,11 @@ export class LspToolHandler {
             if (results.length < limit) {
                 try {
                     const globPattern = new vs.RelativePattern(this.ctx.workspaceRoot, includeGlob);
-                    const uris = await vs.workspace.findFiles(globPattern, '**/node_modules/**', limit * 20);
+                    const uris = (await vs.workspace.findFiles(
+                        globPattern,
+                        '**/{.cwtools-ai,.git,node_modules,release}/**',
+                        limit * 20,
+                    )).filter(uri => !isExcludedModSearchPath(this.ctx.workspaceRoot, uri.fsPath));
                     const regex = new RegExp(finalPattern, args.caseSensitive ? '' : 'i');
 
                     const CHUNK_SIZE = 30;
@@ -2929,11 +2948,13 @@ export class LspToolHandler {
 
         const options: any = {
             include: new vs.RelativePattern(this.ctx.workspaceRoot, includePattern),
+            exclude: new vs.RelativePattern(this.ctx.workspaceRoot, '**/{.cwtools-ai,.git,node_modules,release}/**'),
             maxResults: limit,
             previewOptions: { matchLines: 1, charsPerLine: 150 },
         };
 
         const pushMatch = (fsPath: string, line: number, content: string) => {
+            if (isExcludedModSearchPath(this.ctx.workspaceRoot, fsPath)) return;
             if (matches.length >= limit) {
                 truncated = true;
                 return;
@@ -2968,7 +2989,11 @@ export class LspToolHandler {
         if (matches.length < limit) {
             try {
                 const globPattern = new vs.RelativePattern(this.ctx.workspaceRoot, includePattern);
-                const uris = await vs.workspace.findFiles(globPattern, '**/node_modules/**', limit * 20);
+                const uris = (await vs.workspace.findFiles(
+                    globPattern,
+                    '**/{.cwtools-ai,.git,node_modules,release}/**',
+                    limit * 20,
+                )).filter(uri => !isExcludedModSearchPath(this.ctx.workspaceRoot, uri.fsPath));
                 const regex = new RegExp(pattern, args.caseSensitive ? '' : 'i');
 
                 const CHUNK_SIZE = 30;

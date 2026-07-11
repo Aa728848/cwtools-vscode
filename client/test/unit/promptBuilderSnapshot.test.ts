@@ -143,6 +143,20 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('plannedFiles');
         expect(prompt).to.include('Builder task');
         expect(prompt).to.include('dispatch the Explorer batch first');
+        expect(prompt).to.include('featureManifest');
+        expect(prompt).to.include('taskPlan');
+        expect(prompt).to.include('dispatch_agents({ blueprintFile })');
+    });
+
+    it('requires plan mode to design executable entity relationships before approval', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const builder = new PromptBuilder(process.cwd());
+        const prompt = builder.buildSystemPromptForMode('plan');
+
+        expect(prompt).to.include('machine-checkable `featureManifest`');
+        expect(prompt).to.include('executable `taskPlan`');
+        expect(prompt).to.include('produces/consumes');
+        expect(prompt).to.include('STOP and wait for user approval');
     });
 
     it('describes script mode as a dynamic PDXScript workflow coordinator', () => {
@@ -155,6 +169,8 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('dispatch_agents');
         expect(prompt).to.include('up to 8');
         expect(prompt).to.include('plannedFiles');
+        expect(prompt).to.include('approved `blueprintFile`');
+        expect(prompt).to.include('write_design_blueprint');
     });
 
     it('keeps slim localisation writers on write_localisation and concise completion', () => {

@@ -375,8 +375,11 @@ export class ContextReferenceManager {
 
         try {
             const raw = await vs.commands.executeCommand<any>(
-                'cwtools.executeServerCommand',
-                ['cwtools.ai.queryTypes', [vanillaType, vanillaId, 20, true]]
+                'cwtools.ai.queryTypes',
+                vanillaType,
+                vanillaId,
+                20,
+                true,
             );
             const instances = Array.isArray(raw?.instances) ? raw.instances : [];
             if (instances.length === 0 && vanillaId) {
@@ -570,8 +573,10 @@ export class ContextReferenceManager {
 
         try {
             const result = await vs.commands.executeCommand<any>(
-                'cwtools.executeServerCommand',
-                ['cwtools.ai.getScopeAtPosition', [uri.toString(), zeroLine, zeroColumn]]
+                'cwtools.ai.getScopeAtPosition',
+                uri.toString(),
+                zeroLine,
+                zeroColumn,
             );
             if (result && result.ok === true) {
                 return [
@@ -609,8 +614,11 @@ export class ContextReferenceManager {
         if (!vanillaType) return `Vanilla reference unavailable: missing type in ${ref.label}.`;
         try {
             const raw = await vs.commands.executeCommand<any>(
-                'cwtools.executeServerCommand',
-                ['cwtools.ai.queryTypes', [vanillaType, vanillaId, 20, true]]
+                'cwtools.ai.queryTypes',
+                vanillaType,
+                vanillaId,
+                20,
+                true,
             );
             return [
                 `Vanilla cache reference: ${vanillaType}${vanillaId ? `:${vanillaId}` : ''}`,

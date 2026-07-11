@@ -64,6 +64,58 @@ describe('project knowledge contract', () => {
       fs.rmSync(workspaceRoot, { recursive: true, force: true });
     }
   });
+
+  it('routes V2 knowledge queries through the read-only SQLite LSP command', async () => {
+    const workspaceRoot = fs.mkdtempSync(`${tempBase}-`);
+    try {
+      const knowledgeRoot = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+      fs.mkdirSync(knowledgeRoot, { recursive: true });
+      fs.writeFileSync(path.join(knowledgeRoot, 'manifest.json'), JSON.stringify({
+        schemaVersion: 2,
+        status: 'ready',
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        game: 'stellaris',
+        graphVersion: 9,
+        domains: ['events'],
+        staleReasons: [],
+        database: { path: 'knowledge.sqlite', format: 'sqlite', schemaVersion: 2 },
+      }), 'utf8');
+      fs.writeFileSync(path.join(knowledgeRoot, 'knowledge.sqlite'), 'test');
+      const calls: Array<{ command: string; args?: unknown[] }> = [];
+      const host = createFsHost(workspaceRoot);
+      host.lsp = {
+        async executeCommand(command, args) {
+          calls.push({ command, args });
+          return {
+            ok: true,
+            status: 'ready',
+            domains: ['events'],
+            evidence: [],
+            unresolved: [],
+            eventGraph: {
+              nodes: [{ eventId: 'example.1' }],
+              edges: [{ sourceId: 'example.1', targetEventId: 'example.2', edgeType: 'immediate' }],
+              logic: [{ eventId: 'example.1', relationType: 'technology_grant', subject: 'tech_example' }],
+            },
+          };
+        },
+      };
+
+      const result = await queryProjectKnowledgeWithHost(host, {
+        identifiers: ['example.1'],
+        includeEventGraph: true,
+      });
+      expect(result.ok).to.equal(true);
+      expect(result.status).to.equal('ready');
+      expect(calls[0]?.command).to.equal('cwtools.ai.queryProjectKnowledgeDb');
+      expect((calls[0]?.args?.[0] as Record<string, unknown>).includeEventGraph).to.equal(true);
+      const data = result.data as Record<string, any>;
+      expect(data.eventGraph.edges[0].edgeType).to.equal('immediate');
+      expect(data.eventGraph.logic[0].relationType).to.equal('technology_grant');
+    } finally {
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 function createFsHost(workspaceRoot: string): HostServices {

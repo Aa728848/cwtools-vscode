@@ -10,11 +10,11 @@ import type {
     QueryProjectKnowledgeResult,
 } from './types';
 
-export const PROJECT_KNOWLEDGE_SCHEMA_VERSION = 1;
+export const PROJECT_KNOWLEDGE_SCHEMA_VERSION = 2;
 export const PROJECT_KNOWLEDGE_RELATIVE_DIR = path.join('.cwtools-ai', 'project', 'knowledge');
 
 export interface ProjectKnowledgeManifest {
-    schemaVersion: 1;
+    schemaVersion: 1 | 2;
     generatedAt: string;
     generationMode: 'full' | 'incremental';
     status: 'ready' | 'stale' | 'loading' | 'unavailable' | 'error';
@@ -24,11 +24,15 @@ export interface ProjectKnowledgeManifest {
     domains: string[];
     counts: {
         definitions: number;
+        availableDefinitions?: number;
         workspaceDefinitions: number;
         vanillaDefinitions: number;
         definitionStacks: number;
         topologyFiles: number;
         topologyEdges: number;
+        eventNodes?: number;
+        eventEdges?: number;
+        eventLogic?: number;
     };
     fingerprints: {
         project: string;
@@ -39,6 +43,11 @@ export interface ProjectKnowledgeManifest {
     warnings: string[];
     staleReasons: string[];
     artifacts: string[];
+    database?: {
+        path: string;
+        format: 'sqlite';
+        schemaVersion: 2;
+    };
 }
 
 interface LspKnowledgeSnapshot {
@@ -50,6 +59,9 @@ interface LspKnowledgeSnapshot {
     generatedAtUnixMs?: number;
     graphVersion?: number;
     projectRoots?: string[];
+    databasePath?: string;
+    generationMode?: 'full' | 'incremental';
+    counts?: ProjectKnowledgeManifest['counts'];
     definitions?: Array<Record<string, unknown>>;
     typeSummaries?: Array<Record<string, unknown>>;
     definitionStacks?: Array<Record<string, unknown>>;
@@ -87,6 +99,10 @@ function knowledgeRoot(workspaceRoot: string): string {
 
 export function getProjectKnowledgeManifestPath(workspaceRoot: string): string {
     return path.join(knowledgeRoot(workspaceRoot), 'manifest.json');
+}
+
+export function getProjectKnowledgeDatabasePath(workspaceRoot: string): string {
+    return path.join(knowledgeRoot(workspaceRoot), 'knowledge.sqlite');
 }
 
 function normalizePath(value: string): string {
@@ -224,107 +240,38 @@ function domainsForChangedFiles(files: string[]): string[] {
     return Array.from(new Set(files.map(domainForPath)));
 }
 
-function collectUnresolved(snapshot: LspKnowledgeSnapshot): Array<Record<string, unknown>> {
-    const unresolved: Array<Record<string, unknown>> = [];
-    for (const stack of snapshot.definitionStacks ?? []) {
-        if (stack.resolution === 'ambiguous' || stack.resolution === 'consult_override_mode') {
-            unresolved.push({
-                kind: 'definition_resolution',
-                entityType: stack.entityType,
-                id: stack.id,
-                resolution: stack.resolution,
-                instruction: stack.resolution === 'consult_override_mode'
-                    ? 'Read overrideStrategy/override mode documentation before deciding which definition is effective.'
-                    : 'No authoritative effective definition could be selected from the current snapshot.',
-            });
-        }
-    }
-    for (const warning of snapshot.warnings ?? []) {
-        unresolved.push({ kind: 'snapshot_warning', message: warning });
-    }
-    return unresolved;
-}
+const LEGACY_KNOWLEDGE_ARTIFACTS = [
+    'snapshot.json',
+    'topology.json',
+    'definition-stacks.json',
+    'override-map.json',
+    'unresolved.json',
+];
 
-function buildCapabilityArtifact(snapshot: LspKnowledgeSnapshot, summary: Record<string, unknown>): Record<string, unknown> {
-    const domain = stringField(summary, 'id');
-    const definitions = (snapshot.definitions ?? []).filter(item => stringField(item, 'domain') === domain);
-    const definitionKeys = new Set(definitions.map(item => `${stringField(item, 'entityType').toLowerCase()}::${stringField(item, 'id').toLowerCase()}`));
-    const stacks = (snapshot.definitionStacks ?? []).filter(item => definitionKeys.has(`${stringField(item, 'entityType').toLowerCase()}::${stringField(item, 'id').toLowerCase()}`));
-    const topologyFiles = (snapshot.topology?.files ?? []).filter(item => stringField(item, 'domain') === domain);
-    const fileSet = new Set(topologyFiles.map(item => stringField(item, 'file')));
-    const topologyEdges = (snapshot.topology?.edges ?? []).filter(item => fileSet.has(stringField(item, 'sourceFile')));
-    return {
-        schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
-        generatedAt: new Date(snapshot.generatedAtUnixMs ?? Date.now()).toISOString(),
-        domain,
-        summary,
-        definitions,
-        definitionStacks: stacks,
-        topology: { files: topologyFiles, edges: topologyEdges },
-        projectExamples: summary.projectExamples ?? [],
-        vanillaArchetypes: summary.vanillaArchetypes ?? [],
-        evidencePolicy: {
-            schemaAndScope: 'Use active CWT/LSP queries for legality.',
-            archetypes: 'Use these exact source ranges as structural examples; do not treat examples as schema proof.',
-            overrides: 'Use override-map.json and matched mode documentation before planning replacements.',
-        },
-    };
-}
-
-function emptyDomainSummary(domain: string): Record<string, unknown> {
-    return {
-        id: domain,
-        definitionCount: 0,
-        workspaceCount: 0,
-        vanillaCount: 0,
-        entityTypes: [],
-        directories: [],
-        projectExamples: [],
-        vanillaArchetypes: [],
-    };
-}
-
-function buildTypeSummaries(definitions: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
-    const grouped = new Map<string, Array<Record<string, unknown>>>();
-    for (const definition of definitions) {
-        const entityType = stringField(definition, 'entityType');
-        if (!entityType) continue;
-        const group = grouped.get(entityType) ?? [];
-        group.push(definition);
-        grouped.set(entityType, group);
-    }
-    return Array.from(grouped.entries())
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([entityType, items]) => ({
-            entityType,
-            totalCount: items.length,
-            workspaceCount: items.filter(item => stringField(item, 'origin') === 'workspace').length,
-            vanillaCount: items.filter(item => stringField(item, 'origin') === 'vanilla').length,
-        }));
-}
-
-function removeObsoleteDomainArtifacts(root: string, domains: Set<string>): void {
+function removeLegacyKnowledgeArtifacts(root: string): void {
     for (const directory of ['capabilities', 'archetypes']) {
-        const artifactDir = path.join(root, directory);
-        if (!fs.existsSync(artifactDir)) continue;
-        for (const entry of fs.readdirSync(artifactDir, { withFileTypes: true })) {
-            if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.json') continue;
-            const domain = path.basename(entry.name, '.json');
-            if (!domains.has(domain)) fs.rmSync(path.join(artifactDir, entry.name), { force: true });
-        }
+        try { fs.rmSync(path.join(root, directory), { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+    for (const artifact of LEGACY_KNOWLEDGE_ARTIFACTS) {
+        try { fs.rmSync(path.join(root, artifact), { force: true }); } catch { /* ignore */ }
     }
 }
 
-async function requestLspKnowledgeSnapshot(options: GenerateProjectKnowledgeOptions): Promise<LspKnowledgeSnapshot> {
+async function requestLspKnowledgeSnapshot(
+    workspaceRoot: string,
+    options: GenerateProjectKnowledgeOptions,
+): Promise<LspKnowledgeSnapshot> {
     const result = await vs.commands.executeCommand<LspKnowledgeSnapshot>(
-        'cwtools.executeServerCommand',
-        ['cwtools.ai.exportProjectKnowledge', [{
+        'cwtools.ai.exportProjectKnowledge',
+        {
             domains: options.domains ?? [],
-            maxDefinitions: 12000,
+            maxDefinitions: 100000,
             maxTopologyFiles: 1200,
             maxEdges: 8000,
             archetypesPerDomain: 8,
-        }]],
+            databasePath: getProjectKnowledgeDatabasePath(workspaceRoot),
+            generationMode: options.mode ?? 'full',
+        },
     );
     if (!result || result.ok !== true) {
         throw new Error(result?.error || 'CWTools project knowledge export is unavailable.');
@@ -337,145 +284,39 @@ export async function generateProjectKnowledge(
     profile: ProjectProfile,
     options: GenerateProjectKnowledgeOptions = {},
 ): Promise<ProjectKnowledgeManifest> {
-    const mode = options.mode ?? 'full';
     const root = knowledgeRoot(workspaceRoot);
     fs.mkdirSync(root, { recursive: true });
-    const previousManifest = readProjectKnowledgeManifest(workspaceRoot);
-    const previousSnapshot = readJson<LspKnowledgeSnapshot>(path.join(root, 'snapshot.json'));
-    const previousTopology = readJson<{ files?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>> }>(path.join(root, 'topology.json'));
-    const previousStacks = readJson<{ definitions?: Array<Record<string, unknown>> }>(path.join(root, 'definition-stacks.json'));
-    const snapshot = await requestLspKnowledgeSnapshot(options);
+    const snapshot = await requestLspKnowledgeSnapshot(workspaceRoot, options);
+    const databasePath = getProjectKnowledgeDatabasePath(workspaceRoot);
+    if (!fs.existsSync(databasePath)) {
+        throw new Error('CWTools reported a successful export but knowledge.sqlite was not created.');
+    }
     const gameId = snapshot.game || profile.game.id;
-    const domainSummaries = snapshot.domains ?? [];
-    const returnedDomains = domainSummaries.map(item => stringField(item, 'id')).filter(Boolean);
-    const requestedDomains = (options.domains ?? []).map(domain => domain.trim().toLowerCase()).filter(Boolean);
-    const domains = mode === 'incremental'
-        ? Array.from(new Set([...(previousManifest?.domains ?? []), ...requestedDomains, ...returnedDomains])).sort()
-        : Array.from(new Set([...DOMAIN_NAMES, ...returnedDomains])).sort();
-    const artifacts = new Set<string>(mode === 'incremental' ? previousManifest?.artifacts ?? [] : []);
-
-    const changedDomainSet = new Set([...requestedDomains, ...returnedDomains]);
-    const previousFiles = previousTopology?.files ?? [];
-    const retainedFiles = mode === 'incremental'
-        ? previousFiles.filter(item => !changedDomainSet.has(stringField(item, 'domain')))
-        : [];
-    const nextFiles = [...retainedFiles, ...(snapshot.topology?.files ?? [])];
-    const replacedFilePaths = new Set(previousFiles
-        .filter(item => changedDomainSet.has(stringField(item, 'domain')))
-        .map(item => stringField(item, 'file')));
-    const retainedEdges = mode === 'incremental'
-        ? (previousTopology?.edges ?? []).filter(item => !replacedFilePaths.has(stringField(item, 'sourceFile')))
-        : [];
-    const nextEdges = [...retainedEdges, ...(snapshot.topology?.edges ?? [])];
-    writeJson(path.join(root, 'topology.json'), {
-        schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
-        generatedAt: new Date(snapshot.generatedAtUnixMs ?? Date.now()).toISOString(),
-        files: nextFiles,
-        edges: nextEdges,
-        truncated: snapshot.topology?.truncated === true,
-    });
-    artifacts.add('topology.json');
-    writeJson(path.join(root, 'override-map.json'), {
-        schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
-        generatedAt: new Date(snapshot.generatedAtUnixMs ?? Date.now()).toISOString(),
-        modes: snapshot.overrideModes ?? [],
-        modeInfo: snapshot.overrideModeInfo ?? [],
-    });
-    artifacts.add('override-map.json');
-    const retainedStacks = mode === 'incremental'
-        ? (previousStacks?.definitions ?? []).filter(stack => {
-            const definitions = Array.isArray(stack.definitions) ? stack.definitions as Array<Record<string, unknown>> : [];
-            return !definitions.some(definition => changedDomainSet.has(stringField(definition, 'domain')));
-        })
-        : [];
-    const nextStacks = [...retainedStacks, ...(snapshot.definitionStacks ?? [])];
-    writeJson(path.join(root, 'definition-stacks.json'), {
-        schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
-        definitions: nextStacks,
-    });
-    artifacts.add('definition-stacks.json');
-
-    const summariesByDomain = new Map(domainSummaries
-        .map(summary => [stringField(summary, 'id'), summary] as const)
-        .filter(([domain]) => !!domain));
-    const domainsToWrite = mode === 'incremental' ? changedDomainSet : new Set(domains);
-    for (const domain of domainsToWrite) {
-        const summary = summariesByDomain.get(domain) ?? emptyDomainSummary(domain);
-        const capability = buildCapabilityArtifact(snapshot, summary);
-        writeJson(path.join(root, 'capabilities', `${domain}.json`), capability);
-        writeJson(path.join(root, 'archetypes', `${domain}.json`), {
-            schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
-            domain,
-            vanillaArchetypes: capability.vanillaArchetypes,
-            projectExamples: capability.projectExamples,
-        });
-        artifacts.add(`capabilities/${domain}.json`);
-        artifacts.add(`archetypes/${domain}.json`);
-    }
-    if (mode === 'full') removeObsoleteDomainArtifacts(root, new Set(domains));
-
-    const previousDefinitions = previousSnapshot?.definitions ?? [];
-    const retainedDefinitions = mode === 'incremental'
-        ? previousDefinitions.filter(definition => !changedDomainSet.has(stringField(definition, 'domain')))
-        : [];
-    const nextDefinitions = [...retainedDefinitions, ...(snapshot.definitions ?? [])];
-    const mergedDomainSummaries = domains.map(domain => summariesByDomain.get(domain)
-        ?? readJson<Record<string, unknown>>(path.join(root, 'capabilities', `${domain}.json`))?.summary as Record<string, unknown> | undefined
-        ?? emptyDomainSummary(domain));
-    const mergedSnapshot: LspKnowledgeSnapshot = {
-        ...(mode === 'incremental' ? previousSnapshot : undefined),
-        ...snapshot,
-        definitions: nextDefinitions,
-        typeSummaries: buildTypeSummaries(nextDefinitions),
-        definitionStacks: nextStacks,
-        domains: mergedDomainSummaries,
-        topology: {
-            files: nextFiles,
-            edges: nextEdges,
-            truncated: snapshot.topology?.truncated === true,
-        },
+    const domains = Array.from(new Set((snapshot.domains ?? [])
+        .map(item => stringField(item, 'id'))
+        .filter(Boolean))).sort();
+    const counts = snapshot.counts ?? {
+        definitions: 0,
+        workspaceDefinitions: 0,
+        vanillaDefinitions: 0,
+        definitionStacks: 0,
+        topologyFiles: 0,
+        topologyEdges: 0,
+        eventNodes: 0,
+        eventEdges: 0,
+        eventLogic: 0,
     };
-    writeJson(path.join(root, 'snapshot.json'), mergedSnapshot);
-    artifacts.add('snapshot.json');
-
-    const unresolved = collectUnresolved({ ...snapshot, definitionStacks: nextStacks });
-    writeJson(path.join(root, 'unresolved.json'), {
-        schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
-        generatedAt: new Date().toISOString(),
-        entries: unresolved,
-    });
-    artifacts.add('unresolved.json');
-
-    let totalDefinitions = 0;
-    let totalWorkspaceDefinitions = 0;
-    let totalVanillaDefinitions = 0;
-    for (const domain of domains) {
-        const capability = readJson<Record<string, unknown>>(path.join(root, 'capabilities', `${domain}.json`));
-        const summary = capability?.summary && typeof capability.summary === 'object'
-            ? capability.summary as Record<string, unknown>
-            : undefined;
-        totalDefinitions += Number(summary?.definitionCount ?? 0) || 0;
-        totalWorkspaceDefinitions += Number(summary?.workspaceCount ?? 0) || 0;
-        totalVanillaDefinitions += Number(summary?.vanillaCount ?? 0) || 0;
-    }
 
     const manifest: ProjectKnowledgeManifest = {
         schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
         generatedAt: new Date(snapshot.generatedAtUnixMs ?? Date.now()).toISOString(),
-        generationMode: mode,
+        generationMode: snapshot.generationMode ?? 'full',
         status: snapshot.status,
         game: gameId,
         graphVersion: snapshot.graphVersion,
         projectRoots: snapshot.projectRoots ?? [workspaceRoot],
         domains,
-        counts: {
-            definitions: totalDefinitions || snapshot.definitions?.length || 0,
-            workspaceDefinitions: totalWorkspaceDefinitions,
-            vanillaDefinitions: totalVanillaDefinitions,
-            definitionStacks: nextStacks.length,
-            topologyFiles: nextFiles.length,
-            topologyEdges: nextEdges.length,
-        },
+        counts,
         fingerprints: {
             project: computeProjectKnowledgeFingerprint(workspaceRoot),
             vanilla: computeVanillaFingerprint(gameId),
@@ -484,7 +325,60 @@ export async function generateProjectKnowledge(
         freshness: snapshot.freshness,
         warnings: snapshot.warnings ?? [],
         staleReasons: [],
-        artifacts: Array.from(artifacts).sort(),
+        artifacts: ['knowledge.sqlite'],
+        database: {
+            path: 'knowledge.sqlite',
+            format: 'sqlite',
+            schemaVersion: 2,
+        },
+    };
+    // The database is atomically replaced by the server. Publish the compact
+    // manifest only after it exists, then remove V1 files so a failed migration
+    // always leaves the previous knowledge pack recoverable.
+    writeJson(getProjectKnowledgeManifestPath(workspaceRoot), manifest);
+    removeLegacyKnowledgeArtifacts(root);
+    return manifest;
+}
+
+export function writeUnavailableProjectKnowledge(
+    workspaceRoot: string,
+    profile: ProjectProfile,
+    reason: string,
+): ProjectKnowledgeManifest {
+    const root = knowledgeRoot(workspaceRoot);
+    fs.mkdirSync(root, { recursive: true });
+    const generatedAt = new Date().toISOString();
+    const gameId = profile.game.id || 'unknown';
+
+    const manifest: ProjectKnowledgeManifest = {
+        schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
+        generatedAt,
+        generationMode: 'full',
+        status: 'unavailable',
+        game: gameId,
+        projectRoots: [workspaceRoot],
+        domains: [...DOMAIN_NAMES],
+        counts: {
+            definitions: 0,
+            workspaceDefinitions: 0,
+            vanillaDefinitions: 0,
+            definitionStacks: 0,
+            topologyFiles: 0,
+            topologyEdges: 0,
+        },
+        fingerprints: {
+            project: computeProjectKnowledgeFingerprint(workspaceRoot),
+            vanilla: computeVanillaFingerprint(gameId),
+            rules: computeRulesFingerprint(gameId),
+        },
+        warnings: [reason],
+        staleReasons: ['lsp_export_unavailable'],
+        artifacts: fs.existsSync(getProjectKnowledgeDatabasePath(workspaceRoot)) ? ['knowledge.sqlite'] : [],
+        database: {
+            path: 'knowledge.sqlite',
+            format: 'sqlite',
+            schemaVersion: 2,
+        },
     };
     writeJson(getProjectKnowledgeManifestPath(workspaceRoot), manifest);
     return manifest;
@@ -525,7 +419,7 @@ function scoreEvidence(record: Record<string, unknown>, tokens: string[]): numbe
     return tokens.reduce((score, token) => score + (text.includes(token) ? (text.includes(`"id":"${token}`) ? 20 : 3) : 0), 0);
 }
 
-export function queryProjectKnowledge(workspaceRoot: string, args: QueryProjectKnowledgeArgs = {}): QueryProjectKnowledgeResult {
+function queryLegacyProjectKnowledge(workspaceRoot: string, args: QueryProjectKnowledgeArgs = {}): QueryProjectKnowledgeResult {
     const manifest = readProjectKnowledgeManifest(workspaceRoot);
     if (!manifest) {
         return {
@@ -595,11 +489,92 @@ export function queryProjectKnowledge(workspaceRoot: string, args: QueryProjectK
     };
 }
 
+export async function queryProjectKnowledge(
+    workspaceRoot: string,
+    args: QueryProjectKnowledgeArgs = {},
+): Promise<QueryProjectKnowledgeResult> {
+    const manifest = readProjectKnowledgeManifest(workspaceRoot);
+    if (!manifest || manifest.schemaVersion === 1) {
+        return queryLegacyProjectKnowledge(workspaceRoot, args);
+    }
+
+    const manifestPath = getProjectKnowledgeManifestPath(workspaceRoot);
+    const databasePath = path.resolve(knowledgeRoot(workspaceRoot), manifest.database?.path ?? 'knowledge.sqlite');
+    if (!fs.existsSync(databasePath)) {
+        return {
+            status: 'error',
+            manifestPath,
+            generatedAt: manifest.generatedAt,
+            game: manifest.game,
+            graphVersion: manifest.graphVersion,
+            staleReasons: ['knowledge_database_missing'],
+            domains: [],
+            evidence: [],
+            unresolved: [],
+            eventGraph: { nodes: [], edges: [], logic: [] },
+            error: 'knowledge.sqlite is missing. Rerun /init to rebuild the project knowledge database.',
+        };
+    }
+
+    const staleReasons = currentStaleReasons(workspaceRoot, manifest);
+    try {
+        const result = await vs.commands.executeCommand<Record<string, unknown>>(
+            'cwtools.ai.queryProjectKnowledgeDb',
+            {
+                databasePath,
+                ...args,
+                includeEventGraph: args.includeEventGraph !== false,
+            },
+        );
+        if (!result || result.ok !== true) {
+            const message = typeof result?.error === 'string' ? result.error : 'CWTools project knowledge query failed.';
+            throw new Error(message);
+        }
+        const resultStatus = String(result.status ?? manifest.status);
+        return {
+            status: staleReasons.length > 0 || resultStatus !== 'ready' ? 'stale' : 'ready',
+            manifestPath,
+            generatedAt: typeof result.generatedAt === 'string' ? result.generatedAt : manifest.generatedAt,
+            game: typeof result.game === 'string' ? result.game : manifest.game,
+            graphVersion: typeof result.graphVersion === 'number' ? result.graphVersion : manifest.graphVersion,
+            staleReasons,
+            domains: Array.isArray(result.domains) ? result.domains.filter((item): item is string => typeof item === 'string') : [],
+            capabilities: Array.isArray(result.capabilities) ? result.capabilities as Array<Record<string, unknown>> : [],
+            evidence: Array.isArray(result.evidence) ? result.evidence as Array<Record<string, unknown>> : [],
+            unresolved: Array.isArray(result.unresolved) ? result.unresolved as Array<Record<string, unknown>> : [],
+            eventGraph: result.eventGraph && typeof result.eventGraph === 'object'
+                ? result.eventGraph as QueryProjectKnowledgeResult['eventGraph']
+                : { nodes: [], edges: [], logic: [] },
+            requiredNextChecks: Array.isArray(result.requiredNextChecks)
+                ? result.requiredNextChecks.filter((item): item is string => typeof item === 'string')
+                : [],
+            _hint: staleReasons.length > 0
+                ? 'Knowledge is stale. The background watcher will refresh it when the LSP is ready; rerun /init for an immediate rebuild.'
+                : 'The SQLite knowledge graph is retrieval evidence. Exact CWT/LSP legality checks remain authoritative.',
+        };
+    } catch (error) {
+        return {
+            status: 'error',
+            manifestPath,
+            generatedAt: manifest.generatedAt,
+            game: manifest.game,
+            graphVersion: manifest.graphVersion,
+            staleReasons: Array.from(new Set([...staleReasons, 'knowledge_query_failed'])),
+            domains: [],
+            evidence: [],
+            unresolved: [],
+            eventGraph: { nodes: [], edges: [], logic: [] },
+            error: error instanceof Error ? error.message : String(error),
+            _hint: 'Keep the CWTools language server running and retry; rerun /init if the database is stale or damaged.',
+        };
+    }
+}
+
 export function buildProjectKnowledgePrompt(workspaceRoot: string): string {
     const manifest = readProjectKnowledgeManifest(workspaceRoot);
     if (!manifest) return '';
     const staleReasons = manifest.staleReasons ?? [];
-    return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace + ${manifest.counts.vanillaDefinitions ?? 0} vanilla; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Load all involved domains, include project patterns, vanilla archetypes, topology, and unresolved facts. A blueprint must cite exact evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
+    return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: ${manifest.schemaVersion >= 2 ? 'manifest + SQLite V2' : 'legacy JSON V1'}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace + ${manifest.counts.vanillaDefinitions ?? 0} vanilla; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; events: ${manifest.counts.eventNodes ?? 0} nodes / ${manifest.counts.eventEdges ?? 0} structural edges / ${manifest.counts.eventLogic ?? 0} logic facts\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Load all involved domains, project/vanilla patterns, topology, unresolved facts, and the event graph. Verify event calls and entries together with flag, technology, variable, phase, and scope-bridge logic. A blueprint must cite exact evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
 }
 
 async function refreshFromWatcher(workspaceRoot: string): Promise<void> {

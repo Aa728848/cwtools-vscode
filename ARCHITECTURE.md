@@ -111,7 +111,19 @@ Because the graph reads the existing game model, scripted-type refreshes and ord
 
 ##### Project Knowledge Pack
 
-`/init` now has a quick profile phase and a deep semantic phase. The deep phase calls the read-only `cwtools.ai.exportProjectKnowledge` command while holding the game-state read lock, so workspace definitions, embedded vanilla definitions, reference facts, definition stacks, resource overwrite state, and active CWT override modes come from one coherent `IGame` snapshot. `projectKnowledge.ts` splits the bounded export into domain capability packs, vanilla archetype catalogs, topology, override maps, unresolved facts, and a fingerprinted manifest under `.cwtools-ai/project/knowledge/`. File/config watchers refresh affected domains and mark the pack stale when the workspace, rules, or vanilla inputs change. Agents retrieve targeted evidence through `query_project_knowledge`; complex blueprints are gated on fresh project knowledge, vanilla archetype evidence, active CWT/LSP legality evidence, and an empty critical-unresolved list.
+`/init` has a quick profile phase and a deep semantic phase. The deep phase calls the internal `cwtools.ai.exportProjectKnowledge` command against one coherently locked `IGame` snapshot, then atomically writes a normalized SQLite V2 database. Workspace definitions, embedded vanilla definitions, definition stacks, reference topology, archetypes, resource overwrite state, active CWT override modes, unresolved facts, and event semantics therefore share one generation boundary. Event semantics include nodes, event-call/phase edges, `on_action` and typed entry edges, plus flag, technology, variable, `fire_on_action`, and scope-bridge logic facts.
+
+The persistent layout is intentionally compact:
+
+```text
+.cwtools-ai/project/
+├─ profile.json
+└─ knowledge/
+   ├─ manifest.json
+   └─ knowledge.sqlite
+```
+
+`manifest.json` contains freshness, fingerprints, counts, domains, and the portable database reference; normalized facts live only once in `knowledge.sqlite`. When the definition budget is reached, selection preserves every workspace definition and the complete event/on_action core, then allocates the remaining vanilla budget across priority and other domains instead of truncating alphabetically. A successful V1 migration removes the old capability/archetype/snapshot JSON set only after the new database and manifest are published. File/config watchers mark knowledge stale and rebuild the database; `cwtools.ai.queryProjectKnowledgeDb` is the read-only query command used by the extension and MCP. Agents retrieve targeted evidence through `query_project_knowledge`; complex blueprints are gated on fresh project knowledge, project/vanilla evidence, event structure and logic evidence, active CWT/LSP legality evidence, and an empty critical-unresolved list.
 
 #### Submodules
 
@@ -168,7 +180,7 @@ sequenceDiagram
 | `runnerPolicy.ts` | Mode-based tool exclusions, iteration limits, and sub-agent output token budgets |
 | `planModeGuard.ts` | Plan-mode write guards: limits writes to implementation plans and plan/blueprint/walkthrough output files; provides read-only `git_ops` checks (`validateGitOpsForMode`) |
 | `projectProfile.ts` | `/init` workspace scanning, project profile generation, and encoding/language detection |
-| `projectKnowledge.ts` | Deep `/init` knowledge-pack generation, domain artifacts, fingerprints, retrieval, and background refresh |
+| `projectKnowledge.ts` | Deep `/init` manifest + SQLite generation, V1 migration, fingerprints, retrieval, and background refresh |
 | `chatInit.ts` | Command handler for `/init`, triggers quick profile plus deep semantic generation and renders `CWTOOLS.md` |
 | `gameKnowledge.ts` | Paradox script rule-bases for 9 games mapped by language ID |
 | `skills.ts` | Skill index loader (`SKILL.md` for built-in, user, or project scopes) and `run_skill` execution |
@@ -491,7 +503,19 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 
 ##### 项目知识包
 
-`/init` 现在分为快速画像阶段和深度语义阶段。深度阶段在 game-state 读锁下调用只读命令 `cwtools.ai.exportProjectKnowledge`，因此工作区定义、原版缓存定义、引用事实、定义栈、资源覆盖状态和活动 CWT 覆盖模式来自同一个一致的 `IGame` 快照。`projectKnowledge.ts` 将有界快照拆分为领域能力包、原版范例目录、项目拓扑、覆盖映射、未解决事实和带指纹的 manifest，并写入 `.cwtools-ai/project/knowledge/`。文件与配置 watcher 会按受影响领域刷新，并在工作区、规则或原版输入变化时标记 stale。Agent 通过 `query_project_knowledge` 按任务检索证据；复杂蓝图必须基于新鲜知识包、原版范例和活动 CWT/LSP 合法性证据，并且关键未解决列表必须为空。
+`/init` 现在分为快速画像阶段和深度语义阶段。深度阶段通过内部命令 `cwtools.ai.exportProjectKnowledge` 从同一个一致加锁的 `IGame` 快照原子生成规范化 SQLite V2 数据库，因此工作区定义、原版缓存定义、定义栈、引用拓扑、范例、资源覆盖状态、活动 CWT 覆盖模式、未解决事实和事件语义共享同一代数据边界。事件语义包括事件节点、事件调用与阶段边、`on_action`/类型入口边，以及 Flag、科技、变量、`fire_on_action` 和作用域桥接逻辑。
+
+持久化结构保持为两个核心产物：
+
+```text
+.cwtools-ai/project/
+├─ profile.json
+└─ knowledge/
+   ├─ manifest.json
+   └─ knowledge.sqlite
+```
+
+`manifest.json` 只保存 freshness、指纹、计数、领域和可移植数据库引用；规范化事实只在 `knowledge.sqlite` 中保存一次。达到定义预算时，选择器会完整保留工作区定义与事件/`on_action` 核心，再把剩余原版预算分配给优先领域和其他领域，不再按字母序直接截断。V1 迁移只有在新数据库和 manifest 都发布成功后才清理旧的 capability/archetype/snapshot JSON。文件与配置 watcher 会标记 stale 并重建数据库；`cwtools.ai.queryProjectKnowledgeDb` 是 Extension 与 MCP 共用的只读查询命令。Agent 通过 `query_project_knowledge` 按任务检索项目/原版证据、事件结构和逻辑关系；复杂蓝图仍必须完成活动 CWT/LSP 合法性验证，并确保关键未解决列表为空。
 
 #### 子模块
 
@@ -547,7 +571,7 @@ sequenceDiagram
 | `runnerPolicy.ts` | 模式级工具过滤、迭代上限和 slim sub-agent 输出预算 |
 | `planModeGuard.ts` | 计划模式写入守卫：仅放行实现计划与 plan/blueprint/walkthrough 产物文件；并提供非写入模式的只读 `git_ops` 门控（`validateGitOpsForMode`） |
 | `projectProfile.ts` | `/init` 项目扫描、profile 构建/读写、语言/编码检测 |
-| `projectKnowledge.ts` | 深度 `/init` 知识包生成、领域产物、指纹、检索与后台刷新 |
+| `projectKnowledge.ts` | 深度 `/init` manifest + SQLite 生成、V1 迁移、指纹、检索与后台刷新 |
 | `chatInit.ts` | `/init` 命令处理器、快速画像、深度语义生成和 CWTOOLS.md 渲染 |
 | `gameKnowledge.ts` | 按 languageId 选择的 9 款游戏 PDXScript 知识块 |
 | `skills.ts` | `SKILL.md` 技能索引（built-in/user/project）+ `run_skill` 按需正文加载 |

@@ -11,6 +11,7 @@ export interface QueryProjectKnowledgeArgs {
   includeVanillaArchetypes?: boolean;
   includeTopology?: boolean;
   includeUnresolved?: boolean;
+  includeEventGraph?: boolean;
   limit?: number;
 }
 
@@ -70,6 +71,54 @@ export async function queryProjectKnowledgeWithHost(
         evidence: [],
         unresolved: [],
         _hint: 'Run /init in the VS Code extension and wait for the deep semantic phase to complete.',
+      },
+    };
+  }
+
+  if (Number(manifest.schemaVersion) >= 2) {
+    const database = asRecord(manifest.database);
+    const relativeDatabasePath = typeof database.path === 'string' && database.path.trim()
+      ? database.path
+      : 'knowledge.sqlite';
+    const databasePath = path.resolve(root, relativeDatabasePath);
+    const relative = path.relative(root, databasePath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      return {
+        ok: false,
+        status: 'error',
+        source: 'cwtools-project-knowledge-sqlite',
+        error: { code: 'invalid_database_path', message: 'Project knowledge database path escapes the knowledge directory.' },
+      };
+    }
+    const result = asRecord(await host.lsp.executeCommand(
+      'cwtools.ai.queryProjectKnowledgeDb',
+      [{ databasePath, ...args, includeEventGraph: args.includeEventGraph !== false }],
+      { timeoutMs: 30_000 },
+    ));
+    if (result.ok !== true) {
+      return {
+        ok: false,
+        status: 'error',
+        source: 'cwtools-project-knowledge-sqlite',
+        error: {
+          code: 'knowledge_query_failed',
+          message: typeof result.error === 'string' ? result.error : 'Project knowledge SQLite query failed.',
+        },
+        data: { manifestPath, databasePath },
+      };
+    }
+    const manifestStatus = String(manifest.status ?? 'stale');
+    const staleReasons = stringArray(manifest.staleReasons);
+    const ready = String(result.status ?? manifestStatus) === 'ready' && manifestStatus === 'ready' && staleReasons.length === 0;
+    return {
+      ok: true,
+      status: ready ? 'ready' : 'stale',
+      source: 'cwtools-project-knowledge-sqlite',
+      data: {
+        ...result,
+        status: ready ? 'ready' : 'stale',
+        manifestPath,
+        staleReasons,
       },
     };
   }

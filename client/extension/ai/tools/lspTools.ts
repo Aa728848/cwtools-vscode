@@ -345,8 +345,8 @@ export class LspToolHandler {
             // Strategy 1: structured LSP command
             try {
                 const structResult = await this.vsCommand<any>(
-                    'cwtools.executeServerCommand',
-                    ['cwtools.ai.getScopeAtPosition', [uri.toString(), args.line, args.column]]
+                    'cwtools.ai.getScopeAtPosition',
+                    [uri.toString(), args.line, args.column],
                 );
                 if (structResult && structResult.ok === true) {
                     return {

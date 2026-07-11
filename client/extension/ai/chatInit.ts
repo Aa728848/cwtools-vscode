@@ -11,8 +11,13 @@ import * as path from 'path';
 import * as fs from 'fs';
 import type { HostMessage } from './types';
 import { UI, aiText } from './messages';
-import { generateProjectKnowledge, getProjectKnowledgeManifestPath } from './projectKnowledge';
+import {
+    generateProjectKnowledge,
+    getProjectKnowledgeManifestPath,
+    writeUnavailableProjectKnowledge,
+} from './projectKnowledge';
 import { getKnownProfileByLanguageId } from '../gameProfiles';
+import { ErrorReporter } from './errorReporter';
 import {
     buildProjectProfile,
     extractCustomRules,
@@ -26,23 +31,58 @@ type RecordSnapshotFn = (filePath: string) => void;
 
 export interface InitGenerationResult {
     success: boolean;
+    degraded?: boolean;
     rulesPath?: string;
     profilePath?: string;
     knowledgeManifestPath?: string;
     message?: string;
 }
 
+function isDeepKnowledgeReady(status: unknown): boolean {
+    if (!status || typeof status !== 'object') return false;
+    const record = status as Record<string, unknown>;
+    const loading = record.loading && typeof record.loading === 'object'
+        ? record.loading as Record<string, unknown>
+        : undefined;
+    const pending = Array.isArray(record.pendingGlobalKinds) ? record.pendingGlobalKinds : [];
+    return record.ok === true
+        && record.inProgress !== true
+        && record.validationInProgress !== true
+        && record.loadingInProgress !== true
+        && loading?.inProgress !== true
+        && pending.length === 0;
+}
+
+async function waitForDeepKnowledgeReadiness(): Promise<void> {
+    if (typeof vs.commands?.executeCommand !== 'function') return;
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+        try {
+            const status = await vs.commands.executeCommand('cwtools.ai.getValidationStatus');
+            if (isDeepKnowledgeReady(status)) return;
+        } catch {
+            return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+}
+
 async function generateDeepKnowledgeWithRetry(root: string, profile: import('./types').ProjectProfile) {
-    const delays = [0, 1200, 3000, 6000];
+    await waitForDeepKnowledgeReadiness();
+    const delays = [0, 2000, 5000];
     let lastError: unknown;
+    let lastManifest: Awaited<ReturnType<typeof generateProjectKnowledge>> | undefined;
     for (const delay of delays) {
         if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
         try {
-            return await generateProjectKnowledge(root, profile, { mode: 'full' });
+            const manifest = await generateProjectKnowledge(root, profile, { mode: 'full' });
+            lastManifest = manifest;
+            if (manifest.status === 'ready') return manifest;
         } catch (error) {
             lastError = error;
         }
     }
+    if (lastManifest) return lastManifest;
     throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'Knowledge export failed'));
 }
 
@@ -82,6 +122,8 @@ export async function generateInitFile(
 
         recordFileSnapshot(profilePath);
         writeProjectProfile(root, profile);
+        recordFileSnapshot(rulesPath);
+        fs.writeFileSync(rulesPath, renderProjectRulesMarkdown(profile, customRules), 'utf8');
 
         postMessage({
             type: 'agentStep',
@@ -95,16 +137,23 @@ export async function generateInitFile(
             },
         });
 
-        const manifest = await generateDeepKnowledgeWithRetry(root, profile);
-        profile.game.id = manifest.game || profile.game.id;
-        profile.game.displayName = getKnownProfileByLanguageId(manifest.game)?.displayName ?? profile.game.displayName;
-        profile.game.confidence = manifest.game && manifest.game !== 'paradox' ? 'high' : profile.game.confidence;
-        profile.game.evidence = Array.from(new Set([...profile.game.evidence, 'active CWTools LSP game model']));
-        profile.validation.lspReady = manifest.status === 'ready' ? 'ready' : 'not_ready';
-        profile.validation.vanillaCache = manifest.counts.vanillaDefinitions > 0 ? 'configured' : 'missing';
+        let deepKnowledgeError: string | undefined;
+        try {
+            const manifest = await generateDeepKnowledgeWithRetry(root, profile);
+            profile.game.id = manifest.game || profile.game.id;
+            profile.game.displayName = getKnownProfileByLanguageId(manifest.game)?.displayName ?? profile.game.displayName;
+            profile.game.confidence = manifest.game && manifest.game !== 'paradox' ? 'high' : profile.game.confidence;
+            profile.game.evidence = Array.from(new Set([...profile.game.evidence, 'active CWTools LSP game model']));
+            profile.validation.lspReady = manifest.status === 'ready' ? 'ready' : 'not_ready';
+            profile.validation.vanillaCache = manifest.counts.vanillaDefinitions > 0 ? 'configured' : 'missing';
+        } catch (error) {
+            deepKnowledgeError = error instanceof Error ? error.message : String(error);
+            ErrorReporter.warn('ChatInit', 'Deep project knowledge export was unavailable; wrote a recoverable knowledge pack.', error);
+            profile.validation.lspReady = 'not_ready';
+            writeUnavailableProjectKnowledge(root, profile, deepKnowledgeError);
+        }
         writeProjectProfile(root, profile);
 
-        recordFileSnapshot(rulesPath);
         fs.writeFileSync(rulesPath, renderProjectRulesMarkdown(profile, customRules), 'utf8');
 
         const doc = await vs.workspace.openTextDocument(vs.Uri.file(rulesPath));
@@ -114,19 +163,38 @@ export async function generateInitFile(
             type: 'agentStep',
             step: {
                 type: 'validation',
-                content: aiText(
-                    `Generated CWTOOLS.md, Agent profile, and semantic knowledge pack -> ${getProjectKnowledgeManifestPath(root)}`,
-                    `已生成 CWTOOLS.md、Agent 项目画像和语义知识包 -> ${getProjectKnowledgeManifestPath(root)}`,
-                ),
+                content: deepKnowledgeError
+                    ? aiText(
+                        `Generated CWTOOLS.md, Agent profile, and a recoverable knowledge pack. Deep LSP export is pending: ${deepKnowledgeError}`,
+                        `已生成 CWTOOLS.md、Agent 项目画像和可恢复知识包。LSP 深层导出仍待完成：${deepKnowledgeError}`,
+                    )
+                    : aiText(
+                        `Generated CWTOOLS.md, Agent profile, and semantic knowledge pack -> ${getProjectKnowledgeManifestPath(root)}`,
+                        `已生成 CWTOOLS.md、Agent 项目画像和语义知识包 -> ${getProjectKnowledgeManifestPath(root)}`,
+                    ),
                 timestamp: Date.now(),
             },
         });
 
-        vs.window.showInformationMessage(aiText(
-            `Eddy CWTool Code: generated project + vanilla knowledge for ${path.basename(root)}`,
-            `Eddy CWTool Code：已为 ${path.basename(root)} 生成项目与原版知识包`,
-        ));
-        return { success: true, rulesPath, profilePath, knowledgeManifestPath: getProjectKnowledgeManifestPath(root) };
+        if (deepKnowledgeError) {
+            vs.window.showWarningMessage(aiText(
+                `Eddy CWTool Code: base /init artifacts were generated for ${path.basename(root)}; deep LSP knowledge will retry when ready.`,
+                `Eddy CWTool Code：已为 ${path.basename(root)} 生成 /init 基础产物；LSP 就绪后将重试深层知识导出。`,
+            ));
+        } else {
+            vs.window.showInformationMessage(aiText(
+                `Eddy CWTool Code: generated project + vanilla knowledge for ${path.basename(root)}`,
+                `Eddy CWTool Code：已为 ${path.basename(root)} 生成项目与原版知识包`,
+            ));
+        }
+        return {
+            success: true,
+            degraded: !!deepKnowledgeError,
+            rulesPath,
+            profilePath,
+            knowledgeManifestPath: getProjectKnowledgeManifestPath(root),
+            message: deepKnowledgeError,
+        };
     } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         postMessage({

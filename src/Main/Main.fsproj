@@ -42,5 +42,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="LibGit2Sharp" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
   </ItemGroup>
 </Project>

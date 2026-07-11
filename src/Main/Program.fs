@@ -4530,6 +4530,7 @@ type Server(client: ILanguageClient) =
                                           "cwtools.ai.queryDefinitionByName"
                                           "cwtools.ai.exploreProject"
                                           "cwtools.ai.exportProjectKnowledge"
+                                          "cwtools.ai.queryProjectKnowledgeDb"
                                           "cwtools.ai.queryScriptedEffects"
                                           "cwtools.ai.queryScriptedTriggers"
                                           "cwtools.ai.queryEnums"
@@ -6603,6 +6604,48 @@ type Server(client: ILanguageClient) =
             |> catchError { documentChanges = None; changes = Map.empty }
 
         member this.ExecuteCommand(p: ExecuteCommandParams) : Async<ExecuteCommandResponse option> =
+            let queryProjectKnowledgeDbCommand args =
+                let optionsRecord =
+                    args
+                    |> List.tryHead
+                    |> Option.bind (function JsonValue.Record fields -> Some fields | _ -> None)
+                    |> Option.defaultValue [||]
+                let tryProperty name = optionsRecord |> Array.tryPick (fun (key, value) -> if key = name then Some value else None)
+                let stringProperty name =
+                    match tryProperty name with
+                    | Some (JsonValue.String value) when not (String.IsNullOrWhiteSpace value) -> Some value
+                    | _ -> None
+                let stringArray name =
+                    match tryProperty name with
+                    | Some (JsonValue.Array values) -> values |> Array.choose (function JsonValue.String value -> Some value | _ -> None) |> Array.toList
+                    | _ -> []
+                let boolProperty name fallback =
+                    match tryProperty name with Some (JsonValue.Boolean value) -> value | _ -> fallback
+                let intProperty name fallback =
+                    match tryProperty name with Some (JsonValue.Number value) -> int value | _ -> fallback
+                match stringProperty "databasePath" with
+                | None ->
+                    JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "error"; "error", JsonValue.String "databasePath is required." |]
+                | Some databasePath ->
+                    let queryOptions: Main.ProjectKnowledge.QueryOptions =
+                        { databasePath = databasePath
+                          intent = stringProperty "intent"
+                          domains = stringArray "domains"
+                          identifiers = stringArray "identifiers"
+                          entityTypes = stringArray "entityTypes"
+                          includeProjectPatterns = boolProperty "includeProjectPatterns" true
+                          includeVanillaArchetypes = boolProperty "includeVanillaArchetypes" true
+                          includeTopology = boolProperty "includeTopology" true
+                          includeUnresolved = boolProperty "includeUnresolved" true
+                          includeEventGraph = boolProperty "includeEventGraph" true
+                          limit = intProperty "limit" 80 }
+                    try
+                        Main.ProjectKnowledge.queryProjectKnowledgeDatabase queryOptions
+                    with error ->
+                        JsonValue.Record
+                            [| "ok", JsonValue.Boolean false
+                               "status", JsonValue.String "error"
+                               "error", JsonValue.String error.Message |]
             async {
                 return
                     match gameObj with
@@ -7271,35 +7314,33 @@ type Server(client: ILanguageClient) =
                             else
                                 // Query a coherent model snapshot. UpdateFile, incremental type
                                 // commits, deletes, and RefreshCaches all hold the matching write lock.
-                                gameStateLock.EnterReadLock()
-                                try
-                                    let validation = validationRuntimeSnapshot ()
-                                    let loading = loadingRuntimeSnapshot ()
-                                    let pendingKinds = pendingRefreshDomainList ()
-                                    let status =
-                                        if loading.inProgress then "loading"
-                                        elif validation.inProgress || not pendingKinds.IsEmpty then "stale"
-                                        else "ready"
-                                    let runtime: RuntimeMetadata =
-                                        { graphVersion = diagnosticEpoch.Value
-                                          status = status
-                                          validationInProgress = validation.inProgress
-                                          loadingInProgress = loading.inProgress
-                                          pendingGlobalKinds = pendingKinds
-                                          lastGlobalRefreshAtUnixMs = dateTimeToUnixMs lastGlobalRefreshAt }
-                                    let visitor =
-                                        { new IGameVisitor<JsonValue> with
-                                            member _.Visit game = exploreProject game options runtime }
-                                    match gameDispatcher.Dispatch visitor with
-                                    | Some result -> Some result
-                                    | None ->
-                                        Some(
-                                            JsonValue.Record
-                                                [| "ok", JsonValue.Boolean false
-                                                   "status", JsonValue.String "unavailable"
-                                                   "error", JsonValue.String "LSP server has not loaded a game model yet." |])
-                                finally
-                                    gameStateLock.ExitReadLock()
+                                // LanguageServer already executes this read-only command under the
+                                // matching read lock; acquiring it again would throw LockRecursionException.
+                                let validation = validationRuntimeSnapshot ()
+                                let loading = loadingRuntimeSnapshot ()
+                                let pendingKinds = pendingRefreshDomainList ()
+                                let status =
+                                    if loading.inProgress then "loading"
+                                    elif validation.inProgress || not pendingKinds.IsEmpty then "stale"
+                                    else "ready"
+                                let runtime: RuntimeMetadata =
+                                    { graphVersion = diagnosticEpoch.Value
+                                      status = status
+                                      validationInProgress = validation.inProgress
+                                      loadingInProgress = loading.inProgress
+                                      pendingGlobalKinds = pendingKinds
+                                      lastGlobalRefreshAtUnixMs = dateTimeToUnixMs lastGlobalRefreshAt }
+                                let visitor =
+                                    { new IGameVisitor<JsonValue> with
+                                        member _.Visit game = exploreProject game options runtime }
+                                match gameDispatcher.Dispatch visitor with
+                                | Some result -> Some result
+                                | None ->
+                                    Some(
+                                        JsonValue.Record
+                                            [| "ok", JsonValue.Boolean false
+                                               "status", JsonValue.String "unavailable"
+                                               "error", JsonValue.String "LSP server has not loaded a game model yet." |])
 
                         // - cwtools.ai.exportProjectKnowledge -
                         // Exports a bounded, provenance-rich snapshot for /init. The command
@@ -7327,12 +7368,18 @@ type Server(client: ILanguageClient) =
                                 match tryProperty name with
                                 | Some (JsonValue.Number value) -> int value
                                 | _ -> fallback
+                            let stringProperty name =
+                                match tryProperty name with
+                                | Some (JsonValue.String value) when not (String.IsNullOrWhiteSpace value) -> Some value
+                                | _ -> None
                             let exportOptions: Main.ProjectKnowledge.ExportOptions =
                                 { domains = stringArray "domains"
-                                  maxDefinitions = intProperty "maxDefinitions" 12000
+                                  maxDefinitions = intProperty "maxDefinitions" 100000
                                   maxTopologyFiles = intProperty "maxTopologyFiles" 1200
                                   maxEdges = intProperty "maxEdges" 8000
-                                  archetypesPerDomain = intProperty "archetypesPerDomain" 8 }
+                                  archetypesPerDomain = intProperty "archetypesPerDomain" 8
+                                  databasePath = stringProperty "databasePath"
+                                  generationMode = stringProperty "generationMode" |> Option.defaultValue "full" }
                             let projectRoots =
                                 match workspaceFolders with
                                 | folders when not folders.IsEmpty -> folders |> List.map (fun folder -> folder.uri.LocalPath)
@@ -7352,26 +7399,27 @@ type Server(client: ILanguageClient) =
                                 | VIC2 -> "vic2"
                                 | VIC3 -> "vic3"
                                 | Custom -> "paradox"
-                            gameStateLock.EnterReadLock()
+                            // This command writes the generated SQLite cache and is therefore
+                            // scheduled under the protocol-level write lock.
+                            let validation = validationRuntimeSnapshot ()
+                            let loading = loadingRuntimeSnapshot ()
+                            let pendingKinds = pendingRefreshDomainList ()
+                            let status =
+                                if loading.inProgress then "loading"
+                                elif validation.inProgress || not pendingKinds.IsEmpty then "stale"
+                                else "ready"
+                            let runtime: Main.ProjectKnowledge.RuntimeMetadata =
+                                { graphVersion = diagnosticEpoch.Value
+                                  status = status
+                                  validationInProgress = validation.inProgress
+                                  loadingInProgress = loading.inProgress
+                                  pendingGlobalKinds = pendingKinds
+                                  lastGlobalRefreshAtUnixMs = dateTimeToUnixMs lastGlobalRefreshAt }
+                            let visitor =
+                                { new IGameVisitor<JsonValue> with
+                                    member _.Visit game =
+                                        Main.ProjectKnowledge.exportProjectKnowledge gameName projectRoots exportOptions runtime game }
                             try
-                                let validation = validationRuntimeSnapshot ()
-                                let loading = loadingRuntimeSnapshot ()
-                                let pendingKinds = pendingRefreshDomainList ()
-                                let status =
-                                    if loading.inProgress then "loading"
-                                    elif validation.inProgress || not pendingKinds.IsEmpty then "stale"
-                                    else "ready"
-                                let runtime: Main.ProjectKnowledge.RuntimeMetadata =
-                                    { graphVersion = diagnosticEpoch.Value
-                                      status = status
-                                      validationInProgress = validation.inProgress
-                                      loadingInProgress = loading.inProgress
-                                      pendingGlobalKinds = pendingKinds
-                                      lastGlobalRefreshAtUnixMs = dateTimeToUnixMs lastGlobalRefreshAt }
-                                let visitor =
-                                    { new IGameVisitor<JsonValue> with
-                                        member _.Visit game =
-                                            Main.ProjectKnowledge.exportProjectKnowledge gameName projectRoots exportOptions runtime game }
                                 match gameDispatcher.Dispatch visitor with
                                 | Some result -> Some result
                                 | None ->
@@ -7380,8 +7428,17 @@ type Server(client: ILanguageClient) =
                                             [| "ok", JsonValue.Boolean false
                                                "status", JsonValue.String "unavailable"
                                                "error", JsonValue.String "LSP server has not loaded a game model yet." |])
-                            finally
-                                gameStateLock.ExitReadLock()
+                            with error ->
+                                Some(
+                                    JsonValue.Record
+                                        [| "ok", JsonValue.Boolean false
+                                           "status", JsonValue.String "error"
+                                           "error", JsonValue.String error.Message |])
+
+                        // - cwtools.ai.queryProjectKnowledgeDb -
+                        | { command = "cwtools.ai.queryProjectKnowledgeDb"
+                            arguments = args } ->
+                            Some(queryProjectKnowledgeDbCommand args)
 
                         // - cwtools.ai.queryScriptedEffects -
                         // Returns all scripted effects with name, scope constraints and type
@@ -8038,7 +8095,11 @@ type Server(client: ILanguageClient) =
 
                         | _ -> None
 
-                    | None -> None
+                    | None ->
+                        match p with
+                        | { command = "cwtools.ai.queryProjectKnowledgeDb"
+                            arguments = args } -> Some(queryProjectKnowledgeDbCommand args)
+                        | _ -> None
             }
             |> catchError None
 

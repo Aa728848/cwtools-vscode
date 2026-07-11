@@ -588,6 +588,8 @@ export interface QueryProjectKnowledgeArgs {
     includeVanillaArchetypes?: boolean;
     includeTopology?: boolean;
     includeUnresolved?: boolean;
+    /** Include event nodes, structural call/entry edges, and state/scope logic relations. */
+    includeEventGraph?: boolean;
     limit?: number;
 }
 
@@ -602,6 +604,11 @@ export interface QueryProjectKnowledgeResult {
     capabilities?: Array<Record<string, unknown>>;
     evidence: Array<Record<string, unknown>>;
     unresolved: Array<Record<string, unknown>>;
+    eventGraph?: {
+        nodes: Array<Record<string, unknown>>;
+        edges: Array<Record<string, unknown>>;
+        logic: Array<Record<string, unknown>>;
+    };
     requiredNextChecks?: string[];
     _hint?: string;
     error?: string;

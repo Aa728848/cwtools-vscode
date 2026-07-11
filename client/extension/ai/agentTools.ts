@@ -638,7 +638,7 @@ export class AgentToolExecutor {
             case 'query_project_profile':
                 result = queryProjectProfile(this.workspaceRoot, args as any); break;
             case 'query_project_knowledge':
-                result = queryProjectKnowledge(this.workspaceRoot, args as any); break;
+                result = await queryProjectKnowledge(this.workspaceRoot, args as any); break;
             case 'run_skill':
                 result = this.runSkill(args); break;
             case 'query_rules':

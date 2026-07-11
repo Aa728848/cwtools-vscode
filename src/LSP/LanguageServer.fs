@@ -329,7 +329,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 | "cwtools.ai.queryDefinition"
                 | "cwtools.ai.queryDefinitionByName"
                 | "cwtools.ai.exploreProject"
-                | "cwtools.ai.exportProjectKnowledge"
+                | "cwtools.ai.queryProjectKnowledgeDb"
                 | "cwtools.ai.queryScriptedEffects"
                 | "cwtools.ai.queryScriptedTriggers"
                 | "cwtools.ai.queryEnums"

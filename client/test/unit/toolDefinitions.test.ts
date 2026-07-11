@@ -17,6 +17,7 @@ describe('tool definitions', () => {
             'includeVanillaArchetypes',
             'includeTopology',
             'includeUnresolved',
+            'includeEventGraph',
         ]);
         const registry = TOOL_REGISTRY.get('query_project_knowledge');
         expect(registry?.isReadOnly).to.equal(true);

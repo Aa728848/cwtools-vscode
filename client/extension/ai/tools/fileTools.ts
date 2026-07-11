@@ -1852,12 +1852,13 @@ export class FileToolHandler {
                 return failBlueprint('Design blueprint refused: complex plans require the /init project + vanilla semantic knowledge pack. Run /init and wait for the deep phase before approving this blueprint.');
             }
             if (complexBlueprint && knowledgeManifest) {
-                const knowledge = queryProjectKnowledge(this.ctx.workspaceRoot, {
+                const knowledge = await queryProjectKnowledge(this.ctx.workspaceRoot, {
                     intent: args.title,
                     includeProjectPatterns: true,
                     includeVanillaArchetypes: true,
                     includeTopology: true,
                     includeUnresolved: true,
+                    includeEventGraph: true,
                     limit: 120,
                 });
                 if (knowledge.status !== 'ready') {

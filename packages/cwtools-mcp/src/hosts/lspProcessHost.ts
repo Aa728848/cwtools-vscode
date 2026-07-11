@@ -199,6 +199,7 @@ export class LspProcessHost implements LspHost {
         rulesCache: rulesCacheRoot,
         bundledRulesPath: rulesFolder ?? '',
         rules_version: 'manual',
+        defaultRepoPath: '',
         repoPath: '',
         diagnosticLogging: false,
       },

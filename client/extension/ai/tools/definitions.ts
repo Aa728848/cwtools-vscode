@@ -108,7 +108,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_project_knowledge',
-            description: 'Query the /init-generated project + vanilla semantic knowledge pack for complex cross-subsystem work. Returns project patterns, bounded vanilla archetypes, definition stacks, dependency edges, freshness, and unresolved facts with source paths. Use this before write_design_blueprint or any plan spanning events, on_actions, special projects, situations, archaeology, technology, ships, assets, or localisation. CWT/LSP exact checks remain authoritative.',
+            description: 'Query the /init-generated project + vanilla SQLite knowledge graph for complex cross-subsystem work. Returns project patterns, bounded vanilla archetypes, definition stacks, dependency edges, event structure (calls, phases, on_action/typed entries), event logic (flags, technologies, variables, scope bridges), freshness, and unresolved facts with source paths. Use this before write_design_blueprint or any plan spanning events, on_actions, special projects, situations, archaeology, technology, ships, assets, or localisation. CWT/LSP exact checks remain authoritative.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -124,6 +124,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     includeVanillaArchetypes: { type: 'boolean', description: 'Include bounded vanilla examples with exact sources. Default true.' },
                     includeTopology: { type: 'boolean', description: 'Include project dependency/reference edges. Default true.' },
                     includeUnresolved: { type: 'boolean', description: 'Include ambiguous definition stacks and snapshot warnings. Default true.' },
+                    includeEventGraph: { type: 'boolean', description: 'Include event nodes, structural call/entry edges, and state/scope logic relations. Default true.' },
                     limit: { type: 'number', minimum: 1, maximum: 300, description: 'Maximum ranked evidence records. Default 80.' },
                 },
                 required: [],

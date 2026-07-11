@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.16] - 2026-07-11
+
+### 功能与优化 / Features & Optimizations
+- **[优化] 提升了Agent的项目理解能力，建议使用/init**
+  English: [Optimization] Improved Agent's project understanding, recommend using /init.
+
 ## [2.8.15] - 2026-07-11
 
 ### 功能与优化 / Features & Optimizations

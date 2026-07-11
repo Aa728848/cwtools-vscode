@@ -46,6 +46,7 @@ import type { GameProfile } from './gameProfiles';
 import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService';
 import { McpBridgeServer } from './ai/mcpBridgeServer';
 import { maybePromptForDefaultDarkModernTheme } from './themePrompt';
+import { registerProjectKnowledgeWatcher } from './ai/projectKnowledge';
 
 export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
@@ -1077,6 +1078,7 @@ export async function activate(context: ExtensionContext) {
 	const indexService = new IndexService();
 	context.subscriptions.push(indexService);
 	void indexService.start();
+	registerProjectKnowledgeWatcher(context);
 
 	// Register localization enhancements (§ color highlighting, $REF$ hover/goto)
 	registerLocalizationFeatures(context, indexService);

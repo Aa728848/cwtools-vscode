@@ -366,6 +366,8 @@ Sub-agent mode is active. Skip direct user clarification and do not wait for app
 Run this step once the clarification rules allow planning, or immediately when the user already supplied a concrete premise. For broad requests with no usable premise, ask the required high-level clarification first; after the user answers, return here and perform the analysis before writing any plan.
 
 **1a. Project Context Scan**: Use read-only tools to understand the current mod state:
+   - Call \`query_project_profile(section="summary", mode="plan")\`, then call \`query_project_knowledge\` for every subsystem implied by the request. Include project patterns, vanilla archetypes, topology, and unresolved facts.
+   - If the knowledge pack is missing or stale, do not treat absence as evidence. Wait for its background refresh or tell the user to rerun \`/init\` before approving a complex blueprint.
    - \`list_directory\` on relevant \`common/\` and \`events/\` directories
    - \`list_directory("common")\` to inventory available current-game common subsystems before narrowing the design
    - \`document_symbols\` on files the user referenced or that relate to the request
@@ -415,6 +417,8 @@ Now that you understand the pipeline structure, ask **targeted, per-node questio
 
 After collecting user answers from Step 2, you MUST complete this step BEFORE writing any implementation plan:
 
+**Knowledge Preflight Gate**: Re-run \`query_project_knowledge\` with the finalized intent and selected subsystem domains. Build an evidence matrix covering project pattern, vanilla archetype, CWT/LSP legality, override mode, and unresolved facts. Critical unresolved facts block blueprint approval; continue research instead of guessing.
+
 **3a. Finalize Pipeline**: Integrate user answers into the pipeline topology from Step 1.
    Resolve all ambiguities. Confirm branching paths and convergence points.
 
@@ -447,6 +451,7 @@ After collecting user answers from Step 2, you MUST complete this step BEFORE wr
    localisation key prefixes in a single allocation table.
 
 **3e. Output Blueprint**: Call \`write_design_blueprint\` with the complete structured pipeline data.
+   Set \`unresolvedCritical\` explicitly. It MUST be \`[]\` before the tool will approve a complex blueprint. Evidence MUST cite \`query_project_knowledge\`, at least one exact vanilla archetype, and active CWT/LSP legality results.
    The blueprint must include:
    - Common directory capability review: considered \`common/\` directories, selected/rejected status, and rationale
    - Engine subsystem plan: which subsystem layers are used and how they serve the user's requirement

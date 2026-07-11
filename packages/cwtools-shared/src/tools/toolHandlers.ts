@@ -8,6 +8,7 @@ import {
   searchRuleCapabilitiesWithHost,
 } from '../knowledge/rules';
 import { queryProjectProfileWithHost } from '../project/profile';
+import { queryProjectKnowledgeWithHost } from '../project/knowledge';
 import { editPdxBlockWithHost } from '../safety/pdxEdit';
 import { writeLocalisationWithHost } from '../safety/localisation';
 import { getPdxBlockWithHost } from './pdxBlock';
@@ -63,6 +64,9 @@ export const defaultSharedToolDispatcher: SharedToolDispatcher = async (host, na
   switch (name) {
     case 'query_project_profile':
       return queryProjectProfileWithHost(host, args);
+
+    case 'query_project_knowledge':
+      return queryProjectKnowledgeWithHost(host, args);
 
     case 'query_workspace_index': {
       if (!host.indexing) {

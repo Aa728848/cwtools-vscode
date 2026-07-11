@@ -3,6 +3,27 @@ import { TOOL_DEFINITIONS } from '../../extension/ai/tools/definitions';
 import { TOOL_REGISTRY } from '../../extension/ai/tools/registry';
 
 describe('tool definitions', () => {
+    it('registers project knowledge as a read-only planning evidence tool', () => {
+        const tool = TOOL_DEFINITIONS.find(def => def.function.name === 'query_project_knowledge');
+        expect(tool).to.not.equal(undefined);
+        const parameters = tool!.function.parameters as {
+            properties?: Record<string, unknown>;
+            required?: string[];
+        };
+        expect(parameters.required).to.deep.equal([]);
+        expect(Object.keys(parameters.properties ?? {})).to.include.members([
+            'intent',
+            'domains',
+            'includeVanillaArchetypes',
+            'includeTopology',
+            'includeUnresolved',
+        ]);
+        const registry = TOOL_REGISTRY.get('query_project_knowledge');
+        expect(registry?.isReadOnly).to.equal(true);
+        expect(registry?.effect).to.equal('workspace_read');
+        expect(registry?.allowedModes.has('plan')).to.equal(true);
+    });
+
     it('keeps get_completion_at arguments aligned with the runtime handler', () => {
         const tool = TOOL_DEFINITIONS.find(def => def.function.name === 'get_completion_at');
         expect(tool).to.not.equal(undefined);

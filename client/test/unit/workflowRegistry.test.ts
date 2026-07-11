@@ -119,6 +119,12 @@ describe('AI Workflow Registry', () => {
         }
     });
 
+    it('all workflows can query the /init project knowledge pack', () => {
+        for (const wf of getAllWorkflows()) {
+            expect(wf.toolPolicy.tools, wf.id).to.include('query_project_knowledge');
+        }
+    });
+
     // ── Tool policy derivation ─────────────────────────────────────────
 
     it('getWorkflowAllowedTools returns allowlist directly for allowlist strategy', () => {

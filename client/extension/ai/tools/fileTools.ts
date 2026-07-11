@@ -25,6 +25,7 @@ import {
     type WorkspacePathResolution,
 } from '../workspaceSandbox';
 import { GRAPHICS_EXTS, matchesExt } from '../../fileExtensions';
+import { queryProjectKnowledge, readProjectKnowledgeManifest } from '../projectKnowledge';
 
 // - Shared file-system helpers -
 
@@ -1841,6 +1842,45 @@ export class FileToolHandler {
                 .map(([name]) => name);
             if (missingSections.length > 0) {
                 return failBlueprint(`Design blueprint refused: missing required planning section(s): ${missingSections.join(', ')}. Complex pipelines also require an executable feature manifest and task DAG before approval.`);
+            }
+
+            const complexBlueprint = args.entities.length >= 3
+                || (args.subsystemPlan?.length ?? 0) >= 2
+                || new Set((args.commonDirectoryReview ?? []).filter(item => item.selected).map(item => item.directory)).size >= 2;
+            const knowledgeManifest = readProjectKnowledgeManifest(this.ctx.workspaceRoot);
+            if (complexBlueprint && !knowledgeManifest) {
+                return failBlueprint('Design blueprint refused: complex plans require the /init project + vanilla semantic knowledge pack. Run /init and wait for the deep phase before approving this blueprint.');
+            }
+            if (complexBlueprint && knowledgeManifest) {
+                const knowledge = queryProjectKnowledge(this.ctx.workspaceRoot, {
+                    intent: args.title,
+                    includeProjectPatterns: true,
+                    includeVanillaArchetypes: true,
+                    includeTopology: true,
+                    includeUnresolved: true,
+                    limit: 120,
+                });
+                if (knowledge.status !== 'ready') {
+                    return failBlueprint(`Design blueprint refused: project knowledge is ${knowledge.status}${knowledge.staleReasons?.length ? ` (${knowledge.staleReasons.join(', ')})` : ''}. Wait for background refresh or rerun /init.`);
+                }
+                if (!Array.isArray(args.unresolvedCritical)) {
+                    return failBlueprint('Design blueprint refused: complex plans must set unresolvedCritical after reviewing query_project_knowledge results. Use [] only when every critical design fact is resolved.');
+                }
+                if (args.unresolvedCritical.length > 0) {
+                    return failBlueprint(`Design blueprint refused: unresolved critical fact(s): ${args.unresolvedCritical.join('; ')}`);
+                }
+                const evidenceKinds = (args.evidence ?? []).map(item => `${item.sourceType} ${item.source}`.toLowerCase());
+                const hasKnowledge = evidenceKinds.some(value => value.includes('project_knowledge') || value.includes('query_project_knowledge') || value.includes('.cwtools-ai/project/knowledge'));
+                const hasVanilla = evidenceKinds.some(value => value.includes('vanilla'));
+                const hasCwt = evidenceKinds.some(value => /\b(cwt|lsp|schema|rule)\b/.test(value));
+                const missingEvidence = [
+                    !hasKnowledge ? 'project knowledge pack' : '',
+                    !hasVanilla ? 'vanilla archetype' : '',
+                    !hasCwt ? 'CWT/LSP legality' : '',
+                ].filter(Boolean);
+                if (missingEvidence.length > 0) {
+                    return failBlueprint(`Design blueprint refused: complex plans must cite ${missingEvidence.join(', ')} evidence.`);
+                }
             }
 
             const manifest = args.featureManifest;

@@ -139,7 +139,7 @@ registerWorkflow({
 			'explore_pdx_project',
 			// Read & analyze
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
-			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
+			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			// Query rules
 			'query_scope', 'query_types', 'query_cwt_schema', 'query_rules', 'query_override_modes', 'query_references',
 			'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
@@ -210,7 +210,7 @@ registerWorkflow({
 			'explore_pdx_project',
 			// Read & analyze
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
-			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'list_directory', 'glob_files',
+			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
 			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			// Query
 			'query_types', 'query_definition_by_name',
@@ -268,7 +268,7 @@ registerWorkflow({
 			'explore_pdx_project',
 			// Read-only analysis
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
-			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'list_directory', 'glob_files',
+			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
 			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			// Deep API
 			'query_scope', 'query_types', 'query_cwt_schema', 'query_rules', 'query_override_modes', 'query_references',
@@ -351,7 +351,7 @@ registerWorkflow({
 		tools: [
 			'explore_pdx_project',
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
-			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'list_directory', 'glob_files',
+			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
 			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			'query_scope', 'query_types', 'query_cwt_schema', 'query_rules', 'query_override_modes', 'query_references',
 			'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
@@ -406,7 +406,7 @@ registerWorkflow({
 		tools: [
 			'explore_pdx_project',
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
-			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'list_directory', 'glob_files',
+			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
 			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			'find_sprite_candidates', 'find_sound_candidates',
 			'query_cwt_schema', 'query_rules', 'query_override_modes',

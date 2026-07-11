@@ -109,6 +109,10 @@ The core constraint of this layer is: if the shared index can answer the query, 
 
 Because the graph reads the existing game model, scripted-type refreshes and ordinary file updates become visible through the same cache/locking lifecycle as diagnostics and completion. User buffer changes are debounced into `UpdateFile`; agent writes and watched file-system changes force a disk-backed update; creates, changes, and deletes update or remove typed indexes; and graph reads hold the game-state read lock while incremental commits/full refreshes hold the write lock. Query-only graph caches are invalidated on every relevant workspace mutation. Standalone MCP uses a bounded Chokidar watcher to forward the same LSP watched-file events. Empty results from a loading or stale snapshot are explicitly non-authoritative.
 
+##### Project Knowledge Pack
+
+`/init` now has a quick profile phase and a deep semantic phase. The deep phase calls the read-only `cwtools.ai.exportProjectKnowledge` command while holding the game-state read lock, so workspace definitions, embedded vanilla definitions, reference facts, definition stacks, resource overwrite state, and active CWT override modes come from one coherent `IGame` snapshot. `projectKnowledge.ts` splits the bounded export into domain capability packs, vanilla archetype catalogs, topology, override maps, unresolved facts, and a fingerprinted manifest under `.cwtools-ai/project/knowledge/`. File/config watchers refresh affected domains and mark the pack stale when the workspace, rules, or vanilla inputs change. Agents retrieve targeted evidence through `query_project_knowledge`; complex blueprints are gated on fresh project knowledge, vanilla archetype evidence, active CWT/LSP legality evidence, and an empty critical-unresolved list.
+
 #### Submodules
 
 The repository depends on two submodules with different responsibilities:
@@ -164,7 +168,8 @@ sequenceDiagram
 | `runnerPolicy.ts` | Mode-based tool exclusions, iteration limits, and sub-agent output token budgets |
 | `planModeGuard.ts` | Plan-mode write guards: limits writes to implementation plans and plan/blueprint/walkthrough output files; provides read-only `git_ops` checks (`validateGitOpsForMode`) |
 | `projectProfile.ts` | `/init` workspace scanning, project profile generation, and encoding/language detection |
-| `chatInit.ts` | Command handler for `/init`, triggers profile generation and renders `CWTOOLS.md` |
+| `projectKnowledge.ts` | Deep `/init` knowledge-pack generation, domain artifacts, fingerprints, retrieval, and background refresh |
+| `chatInit.ts` | Command handler for `/init`, triggers quick profile plus deep semantic generation and renders `CWTOOLS.md` |
 | `gameKnowledge.ts` | Paradox script rule-bases for 9 games mapped by language ID |
 | `skills.ts` | Skill index loader (`SKILL.md` for built-in, user, or project scopes) and `run_skill` execution |
 | `memoryParser.ts` | Topic-scoped `.cwtools-ai/<topicId>/.cwtools-ai-memory.md` long-term memory read/write and pruning |
@@ -286,7 +291,7 @@ The orchestrator structures DAG sub-tasks, schedules parallel processes, shares 
 
 #### Out-of-the-Box MCP Server
 
-The packages `packages/cwtools-shared` and `packages/cwtools-mcp` implement a **read-only** Model Context Protocol (MCP) server. It exports 26 semantic tools of CWTools to external hosts.
+The packages `packages/cwtools-shared` and `packages/cwtools-mcp` implement a **read-only** Model Context Protocol (MCP) server. It exports 27 semantic tools of CWTools to external hosts.
 
 ##### Scope & Structure
 
@@ -484,6 +489,10 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 
 语义图复用现有 game model，因此 scripted type 增量刷新和普通文件更新会沿诊断与补全相同的缓存/锁生命周期生效。用户未保存缓冲区经过防抖后进入 `UpdateFile`；Agent 写入和文件系统 watcher 事件强制从磁盘更新；创建、修改和删除会更新或移除 typed index；语义图读取持有 game-state 读锁，而增量提交和完整刷新持有写锁。任何相关工作区变更都会使纯 query 语义图缓存失效。Standalone MCP 通过有界 Chokidar watcher 转发相同的 LSP 文件事件。加载中或 stale snapshot 的空结果会被明确标记为非权威。
 
+##### 项目知识包
+
+`/init` 现在分为快速画像阶段和深度语义阶段。深度阶段在 game-state 读锁下调用只读命令 `cwtools.ai.exportProjectKnowledge`，因此工作区定义、原版缓存定义、引用事实、定义栈、资源覆盖状态和活动 CWT 覆盖模式来自同一个一致的 `IGame` 快照。`projectKnowledge.ts` 将有界快照拆分为领域能力包、原版范例目录、项目拓扑、覆盖映射、未解决事实和带指纹的 manifest，并写入 `.cwtools-ai/project/knowledge/`。文件与配置 watcher 会按受影响领域刷新，并在工作区、规则或原版输入变化时标记 stale。Agent 通过 `query_project_knowledge` 按任务检索证据；复杂蓝图必须基于新鲜知识包、原版范例和活动 CWT/LSP 合法性证据，并且关键未解决列表必须为空。
+
 #### 子模块
 
 仓库依赖两个职责不同的子模块：
@@ -538,7 +547,8 @@ sequenceDiagram
 | `runnerPolicy.ts` | 模式级工具过滤、迭代上限和 slim sub-agent 输出预算 |
 | `planModeGuard.ts` | 计划模式写入守卫：仅放行实现计划与 plan/blueprint/walkthrough 产物文件；并提供非写入模式的只读 `git_ops` 门控（`validateGitOpsForMode`） |
 | `projectProfile.ts` | `/init` 项目扫描、profile 构建/读写、语言/编码检测 |
-| `chatInit.ts` | `/init` 命令处理器、profile 生成和 CWTOOLS.md 渲染 |
+| `projectKnowledge.ts` | 深度 `/init` 知识包生成、领域产物、指纹、检索与后台刷新 |
+| `chatInit.ts` | `/init` 命令处理器、快速画像、深度语义生成和 CWTOOLS.md 渲染 |
 | `gameKnowledge.ts` | 按 languageId 选择的 9 款游戏 PDXScript 知识块 |
 | `skills.ts` | `SKILL.md` 技能索引（built-in/user/project）+ `run_skill` 按需正文加载 |
 | `memoryParser.ts` | topic 级 `.cwtools-ai/<topicId>/.cwtools-ai-memory.md` 长期记忆读写与自动裁剪 |
@@ -789,7 +799,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ##### 工具集与单一事实源
 
-- 当前工具为 **26 个只读工具**（`cwtools-shared/src/tools/names.ts`），其中 `explore_pdx_project` 是有界语义图入口；其余工具覆盖规则、作用域、诊断、类型/定义/引用、本地化与 workspace 索引、结构化 block、补全及深层语义查询。
+- 当前工具为 **27 个只读工具**（`cwtools-shared/src/tools/names.ts`），其中 `query_project_knowledge` 提供 `/init` 项目知识包检索，`explore_pdx_project` 是 live 有界语义图入口；其余工具覆盖规则、作用域、诊断、类型/定义/引用、本地化与 workspace 索引、结构化 block、补全及深层语义查询。
 - schema 由 `tools/generate-mcp-schema.cjs` 从上游 `definitions.ts` + `registry.ts` 生成到 `cwtools-shared/src/generated/mcpTools.ts`，**不手写**；白名单同时存在于 `names.ts` 与生成脚本，须保持一致，contract 测试检测漂移。
 - 共享 dispatcher（`tools/toolHandlers.ts`）把每个工具路由到对应 `cwtools.ai.*` LSP 命令或 host 调用。新增语义能力必须先在 `src/LSP`/`src/Main` 增加 `cwtools.ai.*` 命令（只读命令同时登记到 `LanguageServer.fs` 的 `isReadCmd`），再在 dispatcher 接线，不在 MCP 内重写 CWTools 语义。
 

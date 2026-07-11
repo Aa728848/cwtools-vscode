@@ -10,7 +10,9 @@ import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { HostMessage } from './types';
-import { UI } from './messages';
+import { UI, aiText } from './messages';
+import { generateProjectKnowledge, getProjectKnowledgeManifestPath } from './projectKnowledge';
+import { getKnownProfileByLanguageId } from '../gameProfiles';
 import {
     buildProjectProfile,
     extractCustomRules,
@@ -26,7 +28,22 @@ export interface InitGenerationResult {
     success: boolean;
     rulesPath?: string;
     profilePath?: string;
+    knowledgeManifestPath?: string;
     message?: string;
+}
+
+async function generateDeepKnowledgeWithRetry(root: string, profile: import('./types').ProjectProfile) {
+    const delays = [0, 1200, 3000, 6000];
+    let lastError: unknown;
+    for (const delay of delays) {
+        if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+        try {
+            return await generateProjectKnowledge(root, profile, { mode: 'full' });
+        } catch (error) {
+            lastError = error;
+        }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'Knowledge export failed'));
 }
 
 /**
@@ -47,7 +64,10 @@ export async function generateInitFile(
         type: 'agentStep',
         step: {
             type: 'thinking',
-            content: 'Scanning workspace and building Agent project profile...',
+            content: aiText(
+                'Scanning workspace and building the Agent project profile...',
+                '正在扫描工作区并构建 Agent 项目画像...',
+            ),
             timestamp: Date.now(),
         },
     });
@@ -63,6 +83,27 @@ export async function generateInitFile(
         recordFileSnapshot(profilePath);
         writeProjectProfile(root, profile);
 
+        postMessage({
+            type: 'agentStep',
+            step: {
+                type: 'thinking',
+                content: aiText(
+                    'Waiting for the CWTools game model and exporting project + vanilla semantic knowledge...',
+                    '正在等待 CWTools 游戏模型，并导出当前项目与原版游戏的语义知识...',
+                ),
+                timestamp: Date.now(),
+            },
+        });
+
+        const manifest = await generateDeepKnowledgeWithRetry(root, profile);
+        profile.game.id = manifest.game || profile.game.id;
+        profile.game.displayName = getKnownProfileByLanguageId(manifest.game)?.displayName ?? profile.game.displayName;
+        profile.game.confidence = manifest.game && manifest.game !== 'paradox' ? 'high' : profile.game.confidence;
+        profile.game.evidence = Array.from(new Set([...profile.game.evidence, 'active CWTools LSP game model']));
+        profile.validation.lspReady = manifest.status === 'ready' ? 'ready' : 'not_ready';
+        profile.validation.vanillaCache = manifest.counts.vanillaDefinitions > 0 ? 'configured' : 'missing';
+        writeProjectProfile(root, profile);
+
         recordFileSnapshot(rulesPath);
         fs.writeFileSync(rulesPath, renderProjectRulesMarkdown(profile, customRules), 'utf8');
 
@@ -73,13 +114,19 @@ export async function generateInitFile(
             type: 'agentStep',
             step: {
                 type: 'validation',
-                content: `Generated CWTOOLS.md and Agent profile -> ${profilePath}`,
+                content: aiText(
+                    `Generated CWTOOLS.md, Agent profile, and semantic knowledge pack -> ${getProjectKnowledgeManifestPath(root)}`,
+                    `已生成 CWTOOLS.md、Agent 项目画像和语义知识包 -> ${getProjectKnowledgeManifestPath(root)}`,
+                ),
                 timestamp: Date.now(),
             },
         });
 
-        vs.window.showInformationMessage(`Eddy CWTool Code: generated CWTOOLS.md and profile.json for ${path.basename(root)}`);
-        return { success: true, rulesPath, profilePath };
+        vs.window.showInformationMessage(aiText(
+            `Eddy CWTool Code: generated project + vanilla knowledge for ${path.basename(root)}`,
+            `Eddy CWTool Code：已为 ${path.basename(root)} 生成项目与原版知识包`,
+        ));
+        return { success: true, rulesPath, profilePath, knowledgeManifestPath: getProjectKnowledgeManifestPath(root) };
     } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         postMessage({

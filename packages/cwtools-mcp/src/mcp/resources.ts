@@ -5,12 +5,14 @@ import {
   queryWorkflowHints,
   type HostServices,
 } from 'cwtools-shared';
+import * as path from 'path';
 
 export const RESOURCE_URIS = [
   'cwtools://knowledge/game',
   'cwtools://knowledge/diagnostic-routing',
   'cwtools://knowledge/workflow-hints',
   'cwtools://project/profile',
+  'cwtools://project/knowledge-manifest',
 ] as const;
 
 export function listResources() {
@@ -37,6 +39,12 @@ export function listResources() {
       uri: 'cwtools://project/profile',
       name: 'CWTools project profile',
       description: 'The generated .cwtools-ai/project/profile.json if available.',
+      mimeType: 'application/json',
+    },
+    {
+      uri: 'cwtools://project/knowledge-manifest',
+      name: 'CWTools project knowledge manifest',
+      description: 'Freshness, domains, counts, and fingerprints for the /init-generated semantic knowledge pack.',
       mimeType: 'application/json',
     },
   ];
@@ -80,6 +88,17 @@ async function readResourceData(host: HostServices, uri: string): Promise<unknow
             status: 'missing',
             profilePath,
             _hint: 'Run /init in the VS Code extension or create .cwtools-ai/project/profile.json.',
+          };
+    }
+    case 'cwtools://project/knowledge-manifest': {
+      const manifestPath = path.join(host.workspaceRoot, '.cwtools-ai', 'project', 'knowledge', 'manifest.json');
+      const read = await host.filesystem.readTextFile(manifestPath);
+      return read.exists
+        ? JSON.parse(read.content)
+        : {
+            status: 'missing',
+            manifestPath,
+            _hint: 'Run /init in the VS Code extension and wait for the deep semantic phase.',
           };
     }
     default:

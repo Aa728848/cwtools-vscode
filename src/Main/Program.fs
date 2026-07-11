@@ -4529,6 +4529,7 @@ type Server(client: ILanguageClient) =
                                           "cwtools.ai.queryDefinition"
                                           "cwtools.ai.queryDefinitionByName"
                                           "cwtools.ai.exploreProject"
+                                          "cwtools.ai.exportProjectKnowledge"
                                           "cwtools.ai.queryScriptedEffects"
                                           "cwtools.ai.queryScriptedTriggers"
                                           "cwtools.ai.queryEnums"
@@ -7299,6 +7300,88 @@ type Server(client: ILanguageClient) =
                                                    "error", JsonValue.String "LSP server has not loaded a game model yet." |])
                                 finally
                                     gameStateLock.ExitReadLock()
+
+                        // - cwtools.ai.exportProjectKnowledge -
+                        // Exports a bounded, provenance-rich snapshot for /init. The command
+                        // reads the same coherent IGame model used by diagnostics/completion,
+                        // so workspace definitions, embedded vanilla data, references, and
+                        // active override modes cannot drift between separate tool calls.
+                        | { command = "cwtools.ai.exportProjectKnowledge"
+                            arguments = args } ->
+                            let optionsRecord =
+                                args
+                                |> List.tryHead
+                                |> Option.bind (function JsonValue.Record fields -> Some fields | _ -> None)
+                                |> Option.defaultValue [||]
+                            let tryProperty name =
+                                optionsRecord
+                                |> Array.tryPick (fun (key, value) -> if key = name then Some value else None)
+                            let stringArray name =
+                                match tryProperty name with
+                                | Some (JsonValue.Array values) ->
+                                    values
+                                    |> Array.choose (function JsonValue.String value when not (String.IsNullOrWhiteSpace value) -> Some value | _ -> None)
+                                    |> Array.toList
+                                | _ -> []
+                            let intProperty name fallback =
+                                match tryProperty name with
+                                | Some (JsonValue.Number value) -> int value
+                                | _ -> fallback
+                            let exportOptions: Main.ProjectKnowledge.ExportOptions =
+                                { domains = stringArray "domains"
+                                  maxDefinitions = intProperty "maxDefinitions" 12000
+                                  maxTopologyFiles = intProperty "maxTopologyFiles" 1200
+                                  maxEdges = intProperty "maxEdges" 8000
+                                  archetypesPerDomain = intProperty "archetypesPerDomain" 8 }
+                            let projectRoots =
+                                match workspaceFolders with
+                                | folders when not folders.IsEmpty -> folders |> List.map (fun folder -> folder.uri.LocalPath)
+                                | _ ->
+                                    rootUri
+                                    |> Option.map (fun uri -> uri.LocalPath)
+                                    |> Option.toList
+                            let gameName =
+                                match activeGame with
+                                | STL -> "stellaris"
+                                | HOI4 -> "hoi4"
+                                | EU4 -> "eu4"
+                                | EU5 -> "eu5"
+                                | CK2 -> "ck2"
+                                | CK3 -> "ck3"
+                                | IR -> "imperator"
+                                | VIC2 -> "vic2"
+                                | VIC3 -> "vic3"
+                                | Custom -> "paradox"
+                            gameStateLock.EnterReadLock()
+                            try
+                                let validation = validationRuntimeSnapshot ()
+                                let loading = loadingRuntimeSnapshot ()
+                                let pendingKinds = pendingRefreshDomainList ()
+                                let status =
+                                    if loading.inProgress then "loading"
+                                    elif validation.inProgress || not pendingKinds.IsEmpty then "stale"
+                                    else "ready"
+                                let runtime: Main.ProjectKnowledge.RuntimeMetadata =
+                                    { graphVersion = diagnosticEpoch.Value
+                                      status = status
+                                      validationInProgress = validation.inProgress
+                                      loadingInProgress = loading.inProgress
+                                      pendingGlobalKinds = pendingKinds
+                                      lastGlobalRefreshAtUnixMs = dateTimeToUnixMs lastGlobalRefreshAt }
+                                let visitor =
+                                    { new IGameVisitor<JsonValue> with
+                                        member _.Visit game =
+                                            Main.ProjectKnowledge.exportProjectKnowledge gameName projectRoots exportOptions runtime game }
+                                match gameDispatcher.Dispatch visitor with
+                                | Some result -> Some result
+                                | None ->
+                                    Some(
+                                        JsonValue.Record
+                                            [| "ok", JsonValue.Boolean false
+                                               "status", JsonValue.String "unavailable"
+                                               "error", JsonValue.String "LSP server has not loaded a game model yet." |])
+                            finally
+                                gameStateLock.ExitReadLock()
 
                         // - cwtools.ai.queryScriptedEffects -
                         // Returns all scripted effects with name, scope constraints and type

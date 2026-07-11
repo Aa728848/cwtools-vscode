@@ -9,6 +9,7 @@ import { TOOL_DEFINITIONS } from './tools/definitions';
 import { getGameKnowledge } from './gameKnowledge';
 import { getProjectProfilePath, queryProjectProfile, readProjectProfile } from './projectProfile';
 import { ErrorReporter } from './errorReporter';
+import { getProjectKnowledgeManifestPath, readProjectKnowledgeManifest } from './projectKnowledge';
 
 const BRIDGE_PROTOCOL_VERSION = 1;
 const MANIFEST_FILE_NAME = 'bridge-manifest.json';
@@ -23,6 +24,7 @@ const MCP_BRIDGE_TOOL_NAMES = [
     'get_diagnostics',
     'analyze_diagnostic_error',
     'query_project_profile',
+    'query_project_knowledge',
     'query_workspace_index',
     'explore_pdx_project',
     'query_localisation_index',
@@ -48,6 +50,7 @@ const RESOURCE_URIS = [
     'cwtools://knowledge/diagnostic-routing',
     'cwtools://knowledge/workflow-hints',
     'cwtools://project/profile',
+    'cwtools://project/knowledge-manifest',
 ] as const;
 
 interface BridgeJsonRpcRequest {
@@ -296,6 +299,12 @@ export class McpBridgeServer implements Disposable {
     }
 
     private async readResourceData(uri: string): Promise<unknown> {
+        if (!(RESOURCE_URIS as readonly string[]).includes(uri)) {
+            return {
+                status: 'error',
+                error: { code: 'resource_not_found', message: `Unknown CWTools MCP resource: ${uri}` },
+            };
+        }
         switch (uri) {
             case 'cwtools://knowledge/game': {
                 const languageId = this.resolveGameId();
@@ -332,6 +341,14 @@ export class McpBridgeServer implements Disposable {
                     status: 'missing',
                     profilePath,
                     _hint: 'Run /init in the extension AI chat or create .cwtools-ai/project/profile.json.',
+                };
+            }
+            case 'cwtools://project/knowledge-manifest': {
+                const manifestPath = getProjectKnowledgeManifestPath(this.options.workspaceRoot);
+                return readProjectKnowledgeManifest(this.options.workspaceRoot) ?? {
+                    status: 'missing',
+                    manifestPath,
+                    _hint: 'Run /init in the extension AI chat and wait for the deep semantic phase.',
                 };
             }
             default:
@@ -474,6 +491,12 @@ function listResources() {
             uri: 'cwtools://project/profile',
             name: 'CWTools project profile',
             description: 'The generated .cwtools-ai/project/profile.json if available.',
+            mimeType: 'application/json',
+        },
+        {
+            uri: 'cwtools://project/knowledge-manifest',
+            name: 'CWTools project knowledge manifest',
+            description: 'Freshness, domains, counts, and fingerprints for the /init semantic knowledge pack.',
             mimeType: 'application/json',
         },
     ];

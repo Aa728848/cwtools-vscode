@@ -31,6 +31,7 @@ import { MemoryToolHandler } from './tools/memoryTools';
 import type { IndexService } from '../indexing/indexService';
 import { validateToolAccess, evaluateMcpPermission } from './tools/permissions';
 import { queryProjectProfile } from './projectProfile';
+import { queryProjectKnowledge } from './projectKnowledge';
 import { loadSkill } from './skills';
 import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 import { saveProjectWorkflow } from './workflowRegistry';
@@ -46,6 +47,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_workspace_index: 45_000,
     explore_pdx_project: 45_000,
     query_project_profile: 5_000,
+    query_project_knowledge: 10_000,
     query_rules: 45_000,
     query_override_modes: 45_000,
     search_rule_capabilities: 45_000,
@@ -635,6 +637,8 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.explorePdxProject(args as any); break;
             case 'query_project_profile':
                 result = queryProjectProfile(this.workspaceRoot, args as any); break;
+            case 'query_project_knowledge':
+                result = queryProjectKnowledge(this.workspaceRoot, args as any); break;
             case 'run_skill':
                 result = this.runSkill(args); break;
             case 'query_rules':

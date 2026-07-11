@@ -407,6 +407,73 @@ export const GENERATED_MCP_TOOLS = [
   },
   {
     "tool": {
+      "name": "query_project_knowledge",
+      "description": "Query the /init-generated project + vanilla semantic knowledge pack for complex cross-subsystem work. Returns project patterns, bounded vanilla archetypes, definition stacks, dependency edges, freshness, and unresolved facts with source paths. Use this before write_design_blueprint or any plan spanning events, on_actions, special projects, situations, archaeology, technology, ships, assets, or localisation. CWT/LSP exact checks remain authoritative.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "intent": {
+            "type": "string",
+            "description": "Concise design or investigation intent used to rank evidence."
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Subsystem domains to load, e.g. events, on_actions, special_projects, archaeology, situations, technology, ships, scripted_logic, assets, localisation."
+          },
+          "identifiers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Known or proposed IDs to prioritize."
+          },
+          "entityTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "CWTools entity types to prioritize."
+          },
+          "includeProjectPatterns": {
+            "type": "boolean",
+            "description": "Include existing workspace examples. Default true."
+          },
+          "includeVanillaArchetypes": {
+            "type": "boolean",
+            "description": "Include bounded vanilla examples with exact sources. Default true."
+          },
+          "includeTopology": {
+            "type": "boolean",
+            "description": "Include project dependency/reference edges. Default true."
+          },
+          "includeUnresolved": {
+            "type": "boolean",
+            "description": "Include ambiguous definition stacks and snapshot warnings. Default true."
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 300,
+            "description": "Maximum ranked evidence records. Default 80."
+          }
+        },
+        "required": []
+      }
+    },
+    "registry": {
+      "name": "query_project_knowledge",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "parallel"
+    }
+  },
+  {
+    "tool": {
       "name": "query_workspace_index",
       "description": "Query the shared incremental workspace index for PDXScript symbols and named .gfx/.asset/.gui assets without scanning files. Use this before broad grep/search when looking for event IDs, scripted triggers/effects, technologies, buildings, sprites, sounds, GUI elements, or other named project symbols. Results report indexedSymbolNames, indexUpdatedAt, fileVersion, and optional lightweight references for freshness/coverage awareness.",
       "inputSchema": {

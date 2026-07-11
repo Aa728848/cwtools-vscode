@@ -107,6 +107,32 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'query_project_knowledge',
+            description: 'Query the /init-generated project + vanilla semantic knowledge pack for complex cross-subsystem work. Returns project patterns, bounded vanilla archetypes, definition stacks, dependency edges, freshness, and unresolved facts with source paths. Use this before write_design_blueprint or any plan spanning events, on_actions, special projects, situations, archaeology, technology, ships, assets, or localisation. CWT/LSP exact checks remain authoritative.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    intent: { type: 'string', description: 'Concise design or investigation intent used to rank evidence.' },
+                    domains: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'Subsystem domains to load, e.g. events, on_actions, special_projects, archaeology, situations, technology, ships, scripted_logic, assets, localisation.',
+                    },
+                    identifiers: { type: 'array', items: { type: 'string' }, description: 'Known or proposed IDs to prioritize.' },
+                    entityTypes: { type: 'array', items: { type: 'string' }, description: 'CWTools entity types to prioritize.' },
+                    includeProjectPatterns: { type: 'boolean', description: 'Include existing workspace examples. Default true.' },
+                    includeVanillaArchetypes: { type: 'boolean', description: 'Include bounded vanilla examples with exact sources. Default true.' },
+                    includeTopology: { type: 'boolean', description: 'Include project dependency/reference edges. Default true.' },
+                    includeUnresolved: { type: 'boolean', description: 'Include ambiguous definition stacks and snapshot warnings. Default true.' },
+                    limit: { type: 'number', minimum: 1, maximum: 300, description: 'Maximum ranked evidence records. Default 80.' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'explore_pdx_project',
             description: 'Primary semantic exploration entry point for large Paradox projects. Queries the live CWTools type/reference graph and returns bounded entry points, typed nodes, dependency edges, file facts, provenance, truncation, and freshness without scanning or reading whole files. Use this FIRST for questions such as how an entity is connected, what calls or references an ID, what a file depends on, or what may be affected by a change. Follow with exact query_rules/query_scope/query_types/get_pdx_block checks before writing.',
             parameters: {
@@ -1289,6 +1315,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                         type: 'array',
                         items: { type: 'string' },
                         description: 'Known implementation risks, scope uncertainties, performance concerns, or user decisions that remain sensitive.',
+                    },
+                    unresolvedCritical: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'Critical facts still unresolved after query_project_knowledge and exact CWT/LSP verification. Complex blueprints are refused unless this array is present and empty.',
                     },
                     notes: { type: 'string', description: 'Additional design notes: scope chain transition warnings, edge cases, branching logic, or vanilla references studied.' },
                 },

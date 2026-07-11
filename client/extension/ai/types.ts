@@ -575,6 +575,38 @@ export interface ExplorePdxProjectResult {
     error?: string;
 }
 
+export interface QueryProjectKnowledgeArgs {
+    /** Concise complex-flow intent used to rank definitions, topology edges, and archetypes. */
+    intent?: string;
+    /** Knowledge domains to load, e.g. events, on_actions, special_projects, situations, assets. */
+    domains?: string[];
+    /** Optional exact or partial identifiers to prioritize. */
+    identifiers?: string[];
+    /** Optional CWTools entity types to prioritize. */
+    entityTypes?: string[];
+    includeProjectPatterns?: boolean;
+    includeVanillaArchetypes?: boolean;
+    includeTopology?: boolean;
+    includeUnresolved?: boolean;
+    limit?: number;
+}
+
+export interface QueryProjectKnowledgeResult {
+    status: 'ready' | 'stale' | 'missing' | 'error';
+    manifestPath: string;
+    generatedAt?: string;
+    game?: string;
+    graphVersion?: number;
+    staleReasons?: string[];
+    domains: string[];
+    capabilities?: Array<Record<string, unknown>>;
+    evidence: Array<Record<string, unknown>>;
+    unresolved: Array<Record<string, unknown>>;
+    requiredNextChecks?: string[];
+    _hint?: string;
+    error?: string;
+}
+
 export interface SearchRuleCapabilitiesArgs {
     intent?: string;
     category?: QueryRulesArgs['category'] | 'all';
@@ -981,6 +1013,7 @@ export type ToolArgs =
     | QueryWorkspaceIndexArgs
     | ExplorePdxProjectArgs
     | QueryProjectProfileArgs
+    | QueryProjectKnowledgeArgs
     | QueryRulesArgs
     | QueryCwtSchemaArgs
     | SearchRuleCapabilitiesArgs
@@ -1018,6 +1051,7 @@ export type ToolResult =
     | QueryWorkspaceIndexResult
     | ExplorePdxProjectResult
     | QueryProjectProfileResult
+    | QueryProjectKnowledgeResult
     | QueryRulesResult
     | QueryCwtSchemaResult
     | SearchRuleCapabilitiesResult
@@ -1054,6 +1088,7 @@ export type AgentToolName =
     | 'query_workspace_index'
     | 'explore_pdx_project'
     | 'query_project_profile'
+    | 'query_project_knowledge'
     | 'run_skill'
     | 'query_rules'
     | 'query_cwt_schema'
@@ -1377,6 +1412,8 @@ export interface WriteDesignBlueprintArgs {
     /** Executable DAG slices. Script/Orchestrator modes hydrate dispatch_agents from this plan. */
     taskPlan: BlueprintTaskPlan[];
     riskRegister?: string[];
+    /** Critical knowledge gaps remaining after query_project_knowledge and exact CWT/LSP checks. Must be empty before approving a complex blueprint. */
+    unresolvedCritical?: string[];
     notes?: string;
 }
 

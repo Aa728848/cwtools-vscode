@@ -22,6 +22,7 @@ import {
     getPromptCardForMode,
     readProjectProfile,
 } from './projectProfile';
+import { buildProjectKnowledgePrompt, readProjectKnowledgeManifest } from './projectKnowledge';
 import type { ProjectProfile } from './types';
 
 // ─── Parsed CWTOOLS.md Structure ─────────────────────────────────────────────
@@ -120,6 +121,11 @@ export class PromptBuilder {
             const knownLangs = ['stellaris', 'hoi4', 'eu4', 'ck2', 'ck3', 'vic2', 'vic3', 'imperator', 'eu5', 'paradox'];
             if (knownLangs.includes(langId)) return langId;
         }
+        const knownLangs = ['stellaris', 'hoi4', 'eu4', 'ck2', 'ck3', 'vic2', 'vic3', 'imperator', 'eu5', 'paradox'];
+        const profileGame = readProjectProfile(this.workspaceRoot)?.game?.id;
+        if (profileGame && knownLangs.includes(profileGame)) return profileGame;
+        const knowledgeGame = readProjectKnowledgeManifest(this.workspaceRoot)?.game;
+        if (knowledgeGame && knownLangs.includes(knowledgeGame)) return knowledgeGame;
         // Fallback: avoid leaking Stellaris-specific rules into other PDX games.
         return 'paradox';
     }
@@ -145,7 +151,8 @@ export class PromptBuilder {
             blockedSubAgents?: string[];
             decisions?: string[];
         },
-        includeMemory = true
+        includeMemory = true,
+        includeProjectKnowledge = true
     ): string {
         const gameId = languageId ?? this.detectGameLanguageId();
         const gameKnowledge = getGameKnowledge(gameId);
@@ -233,6 +240,10 @@ export class PromptBuilder {
             }
         }
         if (projectRules) finalPrompt += projectRules + '\n';
+        if (includeProjectKnowledge) {
+            const projectKnowledge = buildProjectKnowledgePrompt(this.workspaceRoot);
+            if (projectKnowledge) finalPrompt += projectKnowledge + '\n';
+        }
 
         if (includeMemory) {
             const memoryPrompt = this.memoryParser.getMemoryPrompt(topicId);
@@ -271,7 +282,7 @@ export class PromptBuilder {
         if (cached !== undefined) return cached;
 
         // Force stable mode by leaving topicId, runId, pinned, and memory undefined.
-        const prompt = this.buildSystemPromptForMode(mode, providerId, languageId, undefined, undefined, undefined, false);
+        const prompt = this.buildSystemPromptForMode(mode, providerId, languageId, undefined, undefined, undefined, false, false);
         // LRU eviction: drop oldest entry once we exceed the cap (Map iterates in insertion order).
         if (this._frozenPromptCache.size >= PromptBuilder.FROZEN_PROMPT_CACHE_MAX) {
             const oldestKey = this._frozenPromptCache.keys().next().value;
@@ -302,6 +313,8 @@ export class PromptBuilder {
         runtime?: RuntimePromptState
     ): ChatMessage[] {
         const dynamicParts: string[] = [];
+        const projectKnowledge = buildProjectKnowledgePrompt(this.workspaceRoot);
+        if (projectKnowledge) dynamicParts.push(projectKnowledge);
         if (runtime?.mode || runtime?.workflow) {
             const lines: string[] = [];
             if (runtime.mode) {

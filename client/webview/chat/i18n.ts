@@ -236,7 +236,7 @@ const EN: ChatI18nText = {
         script: { label: 'Script Mode - dynamic PDXScript workflow pipeline', bodyClass: 'script-mode' },
     },
     slashDescriptions: {
-        '/init': 'Scan the project and generate Agent profile + CWTOOLS.md',
+        '/init': 'Build the project + vanilla semantic knowledge pack and CWTOOLS.md',
         '/clear': 'Clear the current conversation and start a new topic',
         '/compact': 'Summarize the active Agent context while keeping the topic transcript',
         '/fork': 'Fork the conversation from the current point',
@@ -519,7 +519,7 @@ const ZH_CN: ChatI18nText = {
         script: { label: '脚本模式 - 动态流水线并行处理 PDXScript', bodyClass: 'script-mode' },
     },
     slashDescriptions: {
-        '/init': '扫描项目，生成 Agent 画像和 CWTOOLS.md',
+        '/init': '构建当前项目与原版游戏的语义知识包，并生成 CWTOOLS.md',
         '/clear': '清空当前对话，开始新话题',
         '/compact': '压缩 Agent 活动上下文，同时保留话题聊天记录',
         '/fork': '从当前位置分叉对话',

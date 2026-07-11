@@ -14,6 +14,7 @@ describe('MCP resources contract', () => {
       'cwtools://knowledge/diagnostic-routing',
       'cwtools://knowledge/workflow-hints',
       'cwtools://project/profile',
+      'cwtools://project/knowledge-manifest',
     ]);
   });
 

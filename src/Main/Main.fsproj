@@ -36,6 +36,7 @@
     <Compile Include="Completion.fs" />
     <Compile Include="GraphTypes.fs" />
     <Compile Include="SemanticGraph.fs" />
+    <Compile Include="ProjectKnowledge.fs" />
     <Compile Include="DiagnosticMerge.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

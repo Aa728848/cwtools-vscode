@@ -2325,7 +2325,7 @@ export class FileToolHandler {
      * Only works when the workspace has a git repository.
      */
     async gitOps(args: { action: 'status' | 'diff' | 'checkout'; file?: string }): Promise<{ success: boolean; message: string; output?: string; writtenFiles?: string[] }> {
-        const { execSync } = await import('child_process');
+        const { execFileSync } = await import('child_process');
         const wsRoot = this.ctx.workspaceRoot;
 
         // Check if git repo exists
@@ -2339,7 +2339,7 @@ export class FileToolHandler {
         try {
             switch (args.action) {
                 case 'status': {
-                    const raw = execSync('git status --porcelain', { cwd: wsRoot, encoding: 'utf-8', timeout: 15_000 });
+                    const raw = execFileSync('git', ['status', '--porcelain'], { cwd: wsRoot, encoding: 'utf-8', timeout: 15_000 });
                     const lines = raw.trim().split('\n').filter(Boolean);
                     if (lines.length === 0) {
                         return { success: true, message: 'Working tree clean - no modified files.', output: '' };
@@ -2355,8 +2355,12 @@ export class FileToolHandler {
                     if (!args.file) {
                         return { success: false, message: 'The "diff" action requires a "file" parameter.' };
                     }
-                    const filePath = path.isAbsolute(args.file) ? path.relative(wsRoot, args.file) : args.file;
-                    const raw = execSync(`git diff HEAD -- "${filePath.replace(/"/g, '\\"')}"`, { cwd: wsRoot, encoding: 'utf-8', timeout: 15_000 });
+                    const absPath = path.resolve(wsRoot, args.file);
+                    const filePath = path.relative(wsRoot, absPath);
+                    if (filePath.startsWith('..') || path.isAbsolute(filePath)) {
+                        return { success: false, message: 'git diff file must stay inside the workspace.' };
+                    }
+                    const raw = execFileSync('git', ['diff', 'HEAD', '--', filePath], { cwd: wsRoot, encoding: 'utf-8', timeout: 15_000 });
                     if (!raw.trim()) {
                         return { success: true, message: `No changes detected for ${filePath}.`, output: '' };
                     }
@@ -2372,6 +2376,9 @@ export class FileToolHandler {
                     }
                     const absPath = path.isAbsolute(args.file) ? args.file : path.join(wsRoot, args.file);
                     const relPath = path.relative(wsRoot, absPath);
+                    if (relPath.startsWith('..') || path.isAbsolute(relPath)) {
+                        return { success: false, message: 'git checkout file must stay inside the workspace.' };
+                    }
 
                     // Snapshot for retract support
                     if (fs.existsSync(absPath)) {
@@ -2379,7 +2386,7 @@ export class FileToolHandler {
                         this.ctx.onBeforeFileWrite?.(absPath, prev);
                     }
 
-                    execSync(`git checkout HEAD -- "${relPath.replace(/"/g, '\\"')}"`, { cwd: wsRoot, encoding: 'utf-8', timeout: 15_000 });
+                    execFileSync('git', ['checkout', 'HEAD', '--', relPath], { cwd: wsRoot, encoding: 'utf-8', timeout: 15_000 });
 
                     // Reset edit failure counter since the file is now back to a known-good state
                     this.editFailCount.delete(absPath);

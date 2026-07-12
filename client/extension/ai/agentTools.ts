@@ -40,6 +40,10 @@ import { aiText } from './messages';
 import { getTopicStorageDir } from './workspacePaths';
 import { TOOL_REGISTRY } from './tools/registry';
 import { runAgentHooks } from './runner/hookRunner';
+import { getAgentToolTargetFiles } from './runner/toolScheduler';
+import { buildProfile, resolvePolicy, subjectForEffect, type PolicyPresetId, type PolicyRule } from './runner/policyEngine';
+import { preflightCommand } from './runner/commandPreflight';
+import { sessionFileWriteMode, sessionPolicyPreset } from './runner/sessionPermissions';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
 const TOOL_TIMEOUTS: Record<string, number> = {
@@ -418,6 +422,114 @@ export class AgentToolExecutor {
         return this.externalHandler;
     }
 
+    private extractNetworkHosts(args: Record<string, unknown>): string[] {
+        const values: string[] = [];
+        for (const [key, value] of Object.entries(args)) {
+            if (typeof value !== 'string') continue;
+            if (/url|endpoint|host/i.test(key) || key === 'command') values.push(value);
+        }
+        const hosts = new Set<string>();
+        for (const value of values) {
+            for (const match of value.matchAll(/https?:\/\/([^\s/'"`<>]+)/gi)) {
+                try { hosts.add(new URL(`https://${match[1]}`).hostname.toLowerCase()); } catch { /* malformed URL stays unscoped */ }
+            }
+        }
+        return [...hosts];
+    }
+
+    /** The single enforced policy boundary for every model-visible tool call. */
+    private async enforcePolicy(
+        toolName: string,
+        args: Record<string, unknown>,
+        mode: import('./types').AgentMode,
+        context?: import('./types').AgentToolContext,
+    ): Promise<{ allowed: boolean; error?: string }> {
+        const entry = TOOL_REGISTRY.get(toolName as any)
+            ?? (toolName.startsWith('mcp_') ? TOOL_REGISTRY.get('mcp_call') : undefined);
+        if (!entry) return { allowed: false, error: `Unknown tool: ${toolName}` };
+        const subject = subjectForEffect(entry.effect);
+        if (!subject) return { allowed: true };
+
+        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
+        const sessionPreset = sessionPolicyPreset(this.workspaceRoot);
+        const persistentFullAccess = vs.workspace.getConfiguration('stellarisLanguageServices.ai.developer')
+            .get<boolean>('disableSecuritySandbox') === true;
+        const preset = sessionPreset
+            ?? (persistentFullAccess ? 'full-access' : cfg.get<PolicyPresetId>('policy.preset', 'workspace-auto'));
+        const effectiveWriteMode = sessionFileWriteMode(this.workspaceRoot) ?? this.fileWriteMode;
+        this.fileWriteMode = effectiveWriteMode;
+        const profileRules: PolicyRule[] = [];
+        if (subject === 'edit' && effectiveWriteMode === 'auto' && preset !== 'read-only') {
+            profileRules.push({ id: 'effective-auto-write', subject: 'edit', pathGlob: '**', action: 'allow', riskMax: 2, scope: 'session' });
+        }
+        const profile = buildProfile(preset, this.workspaceRoot, profileRules);
+        const targets = getAgentToolTargetFiles(toolName, args, this.workspaceRoot, context?.runnerOptions?.topicId);
+        const command = typeof args.command === 'string' ? args.command : undefined;
+        const commandPreflight = command ? preflightCommand(command) : undefined;
+        const gitAction = toolName === 'git_ops' && typeof args.action === 'string' ? args.action : undefined;
+        const riskLevel = commandPreflight?.riskLevel
+            ?? (gitAction === 'status' || gitAction === 'diff' ? 0 : gitAction === 'checkout' ? 3 : entry.riskLevel);
+        const mcpServer = typeof args.server === 'string' ? args.server : undefined;
+        const mcpTool = typeof args.tool === 'string' ? args.tool : undefined;
+        const networkHosts = this.extractNetworkHosts(args);
+        const decision = resolvePolicy({
+            toolName,
+            subject,
+            riskLevel,
+            workspaceRoot: this.workspaceRoot,
+            command,
+            cwd: typeof args.cwd === 'string' ? args.cwd : this.workspaceRoot,
+            targetPaths: targets,
+            networkHosts,
+            mcpServer,
+            mcpTool,
+            taskRole: mode,
+        }, profile);
+        context?.runEventSink?.appendSoon('policy_resolved', {
+            tool: toolName,
+            subject,
+            riskLevel,
+            action: decision.action,
+            matchedRules: decision.matchedRules,
+            profileId: profile.id,
+            shadow: false,
+        });
+        // Rich command/file/media/MCP handlers request approval with their full
+        // domain-specific context. Other subjects use the shared card here.
+        const selfManaged = entry.effect === 'shell' || entry.effect === 'workspace_write'
+            || entry.effect === 'media' || entry.effect === 'mcp';
+        if (decision.action === 'deny' && !decision.denial?.approvalPath) {
+            return { allowed: false, error: decision.denial?.whyDenied ?? `Policy '${profile.id}' denied ${toolName}.` };
+        }
+        if (decision.action === 'allow') return { allowed: true };
+        if (selfManaged) return { allowed: true };
+        const requestPermission = context?.onPermissionRequest;
+        if (!requestPermission) return { allowed: false, error: `Policy requires approval for ${toolName}, but no permission handler is available.` };
+        const id = `policy_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const allowed = await requestPermission(
+            id,
+            toolName,
+            aiText(`AI requests permission to use ${toolName}`, `AI 请求使用 ${toolName}`),
+            command,
+            {
+                ...context,
+                preflight: {
+                    riskLevel,
+                    classification: [subject],
+                    cwd: this.workspaceRoot,
+                    reasons: [`Policy profile: ${profile.id}`],
+                    networkAccess: subject === 'network',
+                    networkHosts,
+                    sandboxMode: profile.sandboxMode,
+                    targetPaths: targets,
+                    mcpServer,
+                    mcpTool,
+                },
+            },
+        );
+        return allowed ? { allowed: true } : { allowed: false, error: `Permission denied for ${toolName}.` };
+    }
+
     async execute(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
         // Redirect retired edit tools to the consolidated edit toolset instead of failing
         if (toolName === 'apply_patch' || toolName === 'multi_replace_file_content' || toolName === 'ast_mutate') {
@@ -483,6 +595,11 @@ export class AgentToolExecutor {
                     error: guard.reason,
                 };
             }
+        }
+
+        const policy = await this.enforcePolicy(toolName, args, mode, context);
+        if (!policy.allowed) {
+            return { success: false, error: policy.error, policyDenied: true };
         }
 
         const replaySession = (context?.runnerOptions as any)?.replaySession;
@@ -763,6 +880,14 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.webFetch(args as any, context); break;
             case 'run_command':
                 result = await this.externalHandler.runCommand(args as any, context); break;
+            case 'list_processes':
+                result = this.externalHandler.listProcesses(args as any, context); break;
+            case 'read_process':
+                result = this.externalHandler.readProcess(args as any, context); break;
+            case 'write_process_stdin':
+                result = this.externalHandler.writeProcessStdin(args as any, context); break;
+            case 'terminate_process':
+                result = this.externalHandler.terminateProcess(args as any, context); break;
             case 'search_web':
                 result = await this.externalHandler.searchWeb(args as any, context); break;
             case 'codesearch':
@@ -1520,7 +1645,29 @@ export class AgentToolExecutor {
         } catch { /* configuration unavailable (tests) — fall back to defaults */ }
         const permission = evaluateMcpPermission(serverName, toolName, { isSubAgent, rules: mcpRules });
         if (!permission.allowed) {
-            return { success: false, error: permission.reason };
+            if (!isSubAgent && permission.action === 'ask' && context?.onPermissionRequest) {
+                const permissionId = `mcp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+                const approved = await context.onPermissionRequest(
+                    permissionId,
+                    'mcp_call',
+                    aiText(`AI requests to call MCP tool ${serverName}/${toolName}`, `AI 请求调用 MCP 工具 ${serverName}/${toolName}`),
+                    undefined,
+                    {
+                        ...context,
+                        preflight: {
+                            riskLevel: 2,
+                            classification: ['mcp'],
+                            reasons: [permission.reason ?? `Matched MCP permission rule ${permission.matchedPattern ?? ''}`],
+                            sandboxMode: 'mcp-server',
+                            mcpServer: serverName,
+                            mcpTool: toolName,
+                        },
+                    },
+                );
+                if (!approved) return { success: false, error: `User denied MCP tool ${serverName}/${toolName}.` };
+            } else {
+                return { success: false, error: permission.reason };
+            }
         }
 
         const CONNECTION_ERRORS = /ECONNREFUSED|EPIPE|disconnect|not connected|ECONNRESET/i;

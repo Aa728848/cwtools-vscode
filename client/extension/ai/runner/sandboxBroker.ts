@@ -8,6 +8,7 @@ interface BrokerConfig {
     args: string[];
     cwd: string;
     writableRoots: string[];
+    protectedPaths: string[];
     networkAccess: boolean;
 }
 
@@ -16,6 +17,8 @@ function parseConfig(): BrokerConfig {
     if (!encoded) throw new Error('Missing sandbox broker configuration');
     const value = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as BrokerConfig;
     if (!value.command || !value.backendExecutable || !Array.isArray(value.args)) throw new Error('Invalid sandbox broker configuration');
+    value.writableRoots = Array.isArray(value.writableRoots) ? value.writableRoots : [];
+    value.protectedPaths = Array.isArray(value.protectedPaths) ? value.protectedPaths : [];
     return value;
 }
 
@@ -23,6 +26,11 @@ function bubblewrapArgs(config: BrokerConfig): string[] {
     const args = ['--die-with-parent', '--new-session', '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp'];
     for (const root of config.writableRoots.filter(Boolean)) {
         if (fs.existsSync(root)) args.push('--bind', root, root);
+    }
+    // Re-apply protected descendants after writable roots. This prevents a
+    // workspace bind from making Git metadata and agent policy stores writable.
+    for (const protectedPath of config.protectedPaths.filter(Boolean)) {
+        if (fs.existsSync(protectedPath)) args.push('--ro-bind', protectedPath, protectedPath);
     }
     if (!config.networkAccess) args.push('--unshare-net');
     args.push('--chdir', config.cwd, '--', config.command, ...config.args);
@@ -39,6 +47,9 @@ function seatbeltProfile(config: BrokerConfig): string {
         '(allow sysctl-read)',
         ...readableSystem.map(root => `(allow file-read* (subpath "${escape(root)}"))`),
         ...config.writableRoots.filter(Boolean).map(root => `(allow file-read* file-write* (subpath "${escape(root)}"))`),
+        ...config.protectedPaths.filter(Boolean).map(protectedPath => fs.existsSync(protectedPath) && fs.statSync(protectedPath).isDirectory()
+            ? `(deny file-write* (subpath "${escape(protectedPath)}"))`
+            : `(deny file-write* (literal "${escape(protectedPath)}"))`),
         '(allow file-read* file-write* (subpath "/private/tmp"))',
     ];
     if (config.networkAccess) rules.push('(allow network*)');
@@ -53,7 +64,10 @@ function launch(config: BrokerConfig): void {
     } else if (config.backend === 'seatbelt') {
         args = ['-p', seatbeltProfile(config), config.command, ...config.args];
     } else {
-        args = ['--cwd', config.cwd, '--network', config.networkAccess ? 'allow' : 'deny', '--', config.command, ...config.args];
+        args = ['--cwd', config.cwd, '--network', config.networkAccess ? 'allow' : 'deny'];
+        for (const root of config.writableRoots.filter(Boolean)) args.push('--write-root', root);
+        for (const protectedPath of config.protectedPaths.filter(Boolean)) args.push('--protect', protectedPath);
+        args.push('--', config.command, ...config.args);
     }
 
     const child = spawn(executable, args, {

@@ -224,8 +224,10 @@ sequenceDiagram
 | `toolInvocation.ts` | Normalizes raw LLM actions to validated `ToolInvocation` envelopes with risk metadata |
 | `commandPreflight.ts` | Command string tokenization and risk level auditing for terminal actions |
 | `permissionPolicy.ts` | Resolves low-risk automatic grants and scopes via `cwdScope` |
-| `policyEngine.ts` | Hierarchical permission resolution and sandbox shadow audits |
-| `autoReviewer.ts` | Read-only automated LLM reviewer: caches decisions, falls back safely to user prompts |
+| `policyEngine.ts` | Enforced hierarchical permission profiles, protected-path rules, and actionable denials |
+| `autoReviewer.ts` | Optional read-only LLM reviewer with exact-action caching and denial circuit breaking |
+| `runtimeItems.ts` | Canonical command, process, and permission item lifecycle types |
+| `sessionPermissions.ts` | Workspace-session permission profile overrides; never persisted by the quick selector |
 | `shellEnv.ts` | White-lists environment variables for child processes |
 | `runLedger.ts` | Ordered JSONL events, atomic run snapshots, prompt artifacts, and disk-backed run discovery |
 | `runReducers.ts` | Pure event projection reducers: reconstructs run topologies, stats, and timelines |
@@ -366,8 +368,8 @@ Webviews are completely sandboxed. **Node.js (fs, path) and vscode APIs cannot b
 ##### Write Concurrency
 `PartitionedWriteQueue` serializes edits per file. Multi-file actions acquire locks in dictionary path order to prevent deadlocks.
 
-##### Command Sanitization
-`run_command` commands are tokenized in `runner/commandPreflight.ts`. Path traversals are blocked using `path.relative`.
+##### Command and Permission Boundary
+Every model-visible tool passes the enforced `policyEngine.ts` boundary before its domain handler. `run_command` uses action-sensitive Git and shell preflight classification; approving additional cwd or network scope keeps the OS sandbox enabled, while disabling the sandbox requires a separate explicit `unsandboxed` request. Approved Git-only commands can receive a visible one-shot `.git` metadata override without dropping the rest of the sandbox. Writable workspace binds otherwise re-protect `.git`, `.agents`, `.codex`, and legacy private run-state subdirectories under `.cwtools-ai` while leaving shareable topic artifacts writable. Permission and process work is persisted as `item_started` / `item_updated` / `item_completed` events with stable item ids, and process inspection/control is limited to the owning task thread.
 
 ##### Context Metrics
 `agentRunner.ts` extracts cache hits (`usage.cached_tokens`, etc.) and pricing calculations. The frontend displays these inside a 3-bar sparkline.
@@ -622,8 +624,10 @@ sequenceDiagram
 | `toolInvocation.ts` | 把模型 tool call 包装为带风险元数据和稳定 ID 的 `ToolInvocation` |
 | `commandPreflight.ts` | `run_command` 命令分词与风险分级 |
 | `permissionPolicy.ts` | 低风险预批准规则和 `cwdScope` 校验 |
-| `policyEngine.ts` | 分层权限 profile 解析、类型化规则匹配与可执行拒绝（shadow 模式） |
-| `autoReviewer.ts` | 只读 LLM 审批 reviewer：决策缓存、fail-open 到 ask_user，绝不放宽沙盒 |
+| `policyEngine.ts` | 强制执行的分层权限 profile、受保护路径规则和可操作拒绝 |
+| `autoReviewer.ts` | 可选只读 LLM 审批 reviewer：精确 action 缓存、拒绝熔断、失败回退到用户 |
+| `runtimeItems.ts` | 命令、进程与权限请求的统一 Item 生命周期类型 |
+| `sessionPermissions.ts` | 当前工作区会话的权限 profile 覆盖；快捷选择不会持久化为全局设置 |
 | `shellEnv.ts` | Shell 环境变量白名单构建（按平台基线 + 用户追加） |
 | `runLedger.ts` | 有序 JSONL、原子 run snapshot、prompt artifact、磁盘 run 发现和前端 `runSnapshot` 数据源 |
 | `runReducers.ts` | 纯事件投影 reducer：run 状态、工具时间线、Agent 拓扑图、缓存统计 |
@@ -761,7 +765,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 - `workspacePaths.ts` 将计划、工作流、蓝图等可共享产物保留在 `.cwtools-ai/`，Thread、Ledger、Checkpoint、Goal 与自动学习记忆写入 `ExtensionContext.storageUri`；旧目录只作为迁移和兼容读取源。
 - `workspaceSandbox.ts` 负责路径输入清洗（去引号、去 code span、去自然语言前缀）、workspace folder 别名解析、`.cwtools-ai` 路径别名解析、以及四级作用域分类（`project`/`ai`/`workspace`/`outside`）和信任判定。
 - VS Code Restricted Mode 是外层门禁：未信任工作区保留读取/LSP 能力，但禁止写入、命令、网络、Git、媒体和 MCP 工具。
-- captured 命令经独立 `sandboxBroker` 执行；找不到可验证的操作系统后端时失败关闭。交互长任务必须显式升级授权后在可见 VS Code Terminal 中运行，并由 `processRegistry` 持久记录生命周期。
+- captured 命令经独立 `sandboxBroker` 执行；找不到可验证的操作系统后端时失败关闭并在权限选择器显示后端健康状态。工作区写绑定会重新把 `.git`、`.agents`、`.codex` 以及 `.cwtools-ai` 内兼容保留的私有运行状态子目录设为只读，同时保留 topic 共享产物可写。交互长任务必须显式授权后在可见 VS Code Terminal 中运行，并由 `processRegistry` 持久记录生命周期、输出尾部和控制句柄。
 
 ##### Runner Policy
 
@@ -998,7 +1002,7 @@ Webview 与 Extension Host 是完全隔离的运行环境。Webview 运行在受
 
 ##### 权限与命令安全
 
-`run_command` 命令进入执行前先由 `runner/commandPreflight.ts` 分词分类；`runner/permissionPolicy.ts` 用 `path.relative` 做严格的 `cwdScope` 父子目录判定，只放行预批准的低风险命令，其余必须经由用户授权。
+所有模型可见工具在领域 handler 前先经过强制执行的 `runner/policyEngine.ts`。`run_command` 再由 `runner/commandPreflight.ts` 做 action-sensitive Git/Shell 分类；普通升级只增加获批的 cwd/network scope 并保留操作系统沙箱，纯 Git 命令可在审批卡明确展示后获得单次 `.git` 元数据写入覆盖，只有独立的 `unsandboxed` 请求可以关闭整个沙箱。`runner/permissionPolicy.ts` 用 `path.relative` 做严格的 `cwdScope` 判定，低风险会话规则绑定精确命令前缀。审批与进程统一写入带稳定 Item ID 的 `item_started` / `item_updated` / `item_completed` 事件，进程查看与控制只允许所属任务 Thread。
 
 ##### 子 Agent 沙盒
 

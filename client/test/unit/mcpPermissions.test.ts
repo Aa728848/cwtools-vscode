@@ -87,7 +87,7 @@ describe('evaluateMcpPermission', () => {
         expect(decision.reason).to.include('Do not retry');
     });
 
-    it('fails closed on ask patterns for the main agent until approval flow exists', () => {
+    it('routes ask patterns for the main agent to the interactive approval flow', () => {
         const decision = evaluateMcpPermission('github', 'create_issue', {
             isSubAgent: false,
             rules: { 'github_create_*': 'ask' },

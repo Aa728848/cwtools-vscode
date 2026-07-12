@@ -91,7 +91,7 @@ const TOOL_ICON_LABELS: Record<string, string> = {
     get_file_context: '📄', get_diagnostics: '🩺', get_completion_at: '💡',
     document_symbols: '🔖', workspace_symbols: '🔖', query_scope: '🔭',
     query_types: '📏', query_rules: '📏', query_references: '🔗',
-    todo_write: '📋', run_command: '⚡', search_web: '🌐', codesearch: '🔎',
+    todo_write: '📋', run_command: '⚡', list_processes: '⚡', read_process: '⚡', write_process_stdin: '⚡', terminate_process: '⚡', search_web: '🌐', codesearch: '🔎',
     glob_files: '📁', delete_file: '🗑️', apply_patch: '🩹',
     web_fetch: '🌐',
     permission_request: '🔑',

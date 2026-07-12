@@ -14,6 +14,9 @@ const RUN_EVENTS_MAX_LOAD_BYTES = 4_000_000;
 
 export type AgentRunEventType =
     | 'run_created'
+    | 'item_started'
+    | 'item_updated'
+    | 'item_completed'
     | 'status_changed'
     | 'step_appended'
     | 'model_call_start'

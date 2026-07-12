@@ -103,6 +103,12 @@ describe('policyEngine approval policy semantics', () => {
         expect(resolvePolicy(descriptor({}), p).action).to.equal('deny');
         expect(resolvePolicy(read, p).action).to.equal('allow');
     });
+
+    it('full access explicitly removes approvals and protected-path boundaries', () => {
+        const full = buildProfile('full-access', WS);
+        expect(resolvePolicy(descriptor({ subject: 'bash', toolName: 'run_command', riskLevel: 3 }), full).action).to.equal('allow');
+        expect(resolvePolicy(descriptor({ targetPaths: [path.join(WS, '.env')], riskLevel: 1 }), full).action).to.equal('allow');
+    });
 });
 
 describe('policyEngine layer merge and tighten-only', () => {
@@ -193,10 +199,12 @@ describe('policyEngine specificity', () => {
 describe('policyEngine protected paths', () => {
     it('lowers protectedPaths into global-default deny rules', () => {
         const rules = buildProtectedPathRules(['.env', '.git/**']);
-        expect(rules.map(r => r.id)).to.include.members(['protected_edit:.env', 'protected_read:.git/**']);
+        expect(rules.map(r => r.id)).to.include('protected_edit:.git/**');
+        expect(rules.map(r => r.id)).to.include('protected_read:.env');
+        expect(rules.map(r => r.id)).to.not.include('protected_read:.git/**');
     });
 
-    it('denies protected writes by default and lets explicit user allow override', () => {
+    it('denies protected writes and no user/session allow can override the boundary', () => {
         const d = descriptor({ targetPaths: [path.join(WS, '.env')], riskLevel: 2 });
         const decision = resolvePolicy(d, profile());
         expect(decision.action).to.equal('deny');
@@ -205,12 +213,22 @@ describe('policyEngine protected paths', () => {
         const loosened = profile({
             rules: [rule({ id: 'u-env', subject: 'edit', pathGlob: '.env', action: 'allow' })],
         });
-        expect(resolvePolicy(d, loosened).action).to.equal('allow');
+        const stillDenied = resolvePolicy(d, loosened);
+        expect(stillDenied.action).to.equal('deny');
+        expect(stillDenied.denial?.code).to.equal('protected_path');
+        expect(stillDenied.denial?.approvalPath).to.equal(undefined);
     });
 
     it('denies key files at any depth', () => {
         const d = descriptor({ targetPaths: [path.join(WS, 'config', 'server.pem')] });
         expect(resolvePolicy(d, profile()).action).to.equal('deny');
+    });
+
+    it('protects private legacy run state without blocking shareable topic artifacts', () => {
+        const privateRun = descriptor({ targetPaths: [path.join(WS, '.cwtools-ai', 'topic', 'runs', 'run-1', 'events.jsonl')] });
+        const blueprint = descriptor({ targetPaths: [path.join(WS, '.cwtools-ai', 'topic', 'blueprint.md')] });
+        expect(resolvePolicy(privateRun, profile()).action).to.equal('deny');
+        expect(resolvePolicy(blueprint, profile()).action).to.equal('ask');
     });
 });
 

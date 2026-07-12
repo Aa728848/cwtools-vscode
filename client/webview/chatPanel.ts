@@ -322,7 +322,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let activeWorkflowId: string | null = null;
     let quickModelOptions: string[] = [];
     let quickModelCurrent = '';
-    let quickWriteMode: 'confirm' | 'auto' | 'auto_review' | 'full' = 'auto_review';
+    let quickWriteMode: 'confirm' | 'auto' | 'auto_review' | 'full' = 'auto';
+    let fullAccessArmedUntil = 0;
     /** Last known host-side cwtools.ai.developer.disableSecuritySandbox value (the 'full' tier). */
     let settingsSandboxDisabled = false;
     let sideWorkspaceContent: HTMLElement | null = null;
@@ -1594,28 +1595,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             .filter((ctx): ctx is ActiveContext => !!ctx);
     }
 
-    function findLastTextNode(node: Node | undefined): Text | null {
-        if (!node) return null;
-        if (node.nodeType === Node.TEXT_NODE) return node as Text;
-        for (let child = node.lastChild; child; child = child.previousSibling) {
-            const found = findLastTextNode(child);
-            if (found) return found;
-        }
-        return null;
-    }
-
-    function getLastTextNodeBeforeCaret(range = getActiveInputRange()): { node: Text; offset: number } | null {
-        if (!isRangeInsideInput(range)) return null;
-        const node = range.startContainer;
-        const offset = range.startOffset;
-        if (node.nodeType === Node.TEXT_NODE) return { node: node as Text, offset };
-        for (let i = Math.min(offset, node.childNodes.length) - 1; i >= 0; i--) {
-            const textNode = findLastTextNode(node.childNodes[i]);
-            if (textNode) return { node: textNode, offset: textNode.length };
-        }
-        return null;
-    }
-
     function getComposerTextBeforeRange(range: Range): string {
         if (!isRangeInsideInput(range)) return '';
         const before = document.createRange();
@@ -2337,8 +2316,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (trigger) {
             trigger.classList.toggle('write-mode-elevated', quickWriteMode === 'auto_review');
             trigger.classList.toggle('write-mode-danger', quickWriteMode === 'full');
-            trigger.title = (chatI18n.locale === 'zh-cn' ? `写入模式：${display}` : `Write mode: ${display}`)
+            trigger.title = (chatI18n.locale === 'zh-cn' ? `权限配置：${display}` : `Permission profile: ${display}`)
                 + (getQuickWriteModeDesc(quickWriteMode) ? ` — ${getQuickWriteModeDesc(quickWriteMode)}` : '');
+            trigger.dataset.baseTitle = trigger.title;
         }
         renderQuickWriteModeMenu();
     }
@@ -2354,12 +2334,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function getQuickWriteModeDesc(mode: 'confirm' | 'auto' | 'auto_review' | 'full'): string {
         if (chatI18n.locale === 'zh-cn') {
-            if (mode === 'full') return '解除沙箱与审批边界：所有命令与写入直接执行（高危，仅限可信任务）';
+            if (mode === 'full') return '仅当前工作区会话解除沙箱与审批边界（高危，关闭 VS Code 后失效）';
             if (mode === 'auto_review') return '自动写入 + 评审模型审批大部分命令；拿不准或高危才询问';
             if (mode === 'auto') return '文件直接写入；风险操作仍询问';
             return '写入前出 diff 确认';
         }
-        if (mode === 'full') return 'Removes sandbox and approval boundaries; everything runs without asking (dangerous)';
+        if (mode === 'full') return 'Removes sandbox and approval boundaries for this workspace session only (dangerous)';
         if (mode === 'auto_review') return 'Auto write + reviewer screens most calls; only uncertain or destructive ones ask';
         if (mode === 'auto') return 'Files write directly; risky calls still ask';
         return 'Diff confirmation before writes';
@@ -2368,7 +2348,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function renderQuickWriteModeMenu(): void {
         const list = document.getElementById('writeModeMenuList');
         const title = document.getElementById('writeModeMenuTitle');
-        if (title) title.textContent = chatI18n.locale === 'zh-cn' ? '写入模式' : 'Write mode';
+        if (title) title.textContent = chatI18n.locale === 'zh-cn' ? '权限配置' : 'Permission profile';
         if (!list) return;
         list.innerHTML = '';
         (['confirm', 'auto', 'auto_review', 'full'] as const).forEach(mode => {
@@ -2386,6 +2366,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             btn.appendChild(descEl);
             btn.classList.toggle('active', mode === quickWriteMode);
             btn.addEventListener('click', () => {
+                if (mode === 'full' && quickWriteMode !== 'full' && Date.now() > fullAccessArmedUntil) {
+                    fullAccessArmedUntil = Date.now() + 10_000;
+                    nameEl.textContent = tr('Confirm Full access', '确认完全放行');
+                    descEl.textContent = tr('Click again within 10 seconds to remove sandbox and approval boundaries for this workspace session.', '请在 10 秒内再次点击，以解除当前工作区会话的沙箱与审批边界。');
+                    btn.focus();
+                    return;
+                }
+                fullAccessArmedUntil = 0;
                 updateQuickWriteModeSelector(mode);
                 syncSettingsControlsToWriteTier();
                 refreshSettingsOverview();
@@ -5163,129 +5151,96 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     // ── Permission request card ─────────────────────────────────────────────────
-    function showPermissionCard(permissionId: string, tool: string, description: string, command: string, allowAlways?: boolean, preflight?: any) {
+    function showPermissionCard(permissionId: string, tool: string, description: string, command: string, allowAlways?: boolean, preflight?: any, availableDecisions?: string[], proposedRule?: any) {
         if (!permissionId || floatingPermissionIds.has(permissionId)) return;
         floatingPermissionIds.add(permissionId);
         const div = document.createElement('div');
-        div.className = 'permission-card';
+        div.className = `permission-card${preflight?.unsandboxed ? ' permission-card-critical' : ''}`;
         div.dataset.permId = permissionId;
+        div.setAttribute('role', 'alertdialog');
+        div.setAttribute('aria-label', tr('Permission required', '需要权限'));
         const safeId = escapeHtml(permissionId);
-        
-        let actionsHtml = `<div class="permission-card-actions">` +
-            `<button class="permission-allow-btn" data-permid="${safeId}">${svgIcon('check')}${tr('Allow', '允许')}</button>` +
-            `<button class="permission-deny-btn" data-permid="${safeId}">${svgIcon('x')}${tr('Deny', '拒绝')}</button>`;
-            
-        if (tool === 'run_command' && allowAlways) {
-            const isHighRisk = preflight && preflight.riskLevel > 1;
-            const labelText = isHighRisk
-                ? tr('Always allow this chat', '本次对话一直允许')
-                : (preflight && preflight.riskLevel <= 1 ? tr('Always allow (read-only prefix)', '一直允许 (只读前缀)') : tr('Always allow', '一直允许'));
-            const titleText = isHighRisk
-                ? tr('Always allow the same kind of high-risk command during this chat', '当前会话期间一直允许相同类型的高风险指令')
-                : tr('Always allow the same kind of read-only command during this chat', '当前会话期间一直允许相同类型的只读指令');
-            actionsHtml += `<button class="permission-always-btn" data-permid="${safeId}" style="margin-left:auto; font-size:0.8em; opacity:0.9" title="${escapeHtml(titleText)}">${svgIcon('check')}${labelText}</button>`;
+        const decisions = new Set(availableDecisions || ['accept', 'decline', 'cancel']);
+        const allowLabel = preflight?.unsandboxed
+            ? tr('Run unsandboxed once', '仅本次无沙箱运行')
+            : preflight?.networkAccess
+                ? tr('Allow requested access once', '仅本次允许所请求权限')
+                : tr('Allow once', '仅允许本次');
+        let actionsHtml = `<div class="permission-card-actions">`
+            + (decisions.has('accept') ? `<button class="permission-allow-btn${preflight?.unsandboxed ? ' permission-unsandboxed-btn' : ''}" data-permid="${safeId}">${svgIcon('check')}${allowLabel}</button>` : '')
+            + (decisions.has('decline') ? `<button class="permission-deny-btn" data-permid="${safeId}">${svgIcon('x')}${tr('Deny', '拒绝')}</button>` : '')
+            + (decisions.has('cancel') ? `<button class="permission-cancel-btn" data-permid="${safeId}">${tr('Cancel request', '取消请求')}</button>` : '');
+        if (tool === 'run_command' && allowAlways && decisions.has('acceptForSession')) {
+            const title = proposedRule?.commandPrefix?.length
+                ? `${proposedRule.commandPrefix.join(' ')} @ ${proposedRule.cwdScope}`
+                : tr('Allow this exact low-risk prefix for the current extension session', '在当前扩展会话允许此精确低风险前缀');
+            actionsHtml += `<button class="permission-always-btn" data-permid="${safeId}" title="${escapeHtml(title)}">${svgIcon('check')}${tr('Allow rule for session', '本会话允许此规则')}</button>`;
         }
         actionsHtml += `</div>`;
-        
-        // Modern Safety Assessment Telemetry panel
+
         let preflightHtml = '';
         if (preflight) {
-            const riskMap: Record<number, { text: string, color: string, bg: string }> = {
-                0: { text: tr('Low Risk', '低风险 (Low Risk)'), color: '#4caf50', bg: 'rgba(76,175,80,0.1)' },
-                1: { text: tr('Medium Risk', '中风险 (Medium Risk)'), color: '#ff9800', bg: 'rgba(255,152,0,0.1)' },
-                2: { text: tr('High Risk / Escalation', '高风险 (High Risk / Escalation)'), color: '#f44336', bg: 'rgba(244,67,54,0.1)' }
+            const riskMap: Record<number, { text: string; color: string; bg: string }> = {
+                0: { text: tr('Low risk', '低风险'), color: 'var(--vscode-testing-iconPassed)', bg: 'var(--vscode-editor-inactiveSelectionBackground)' },
+                1: { text: tr('Moderate risk', '中风险'), color: 'var(--vscode-editorWarning-foreground)', bg: 'var(--vscode-editor-inactiveSelectionBackground)' },
+                2: { text: tr('High risk / extra scope', '高风险 / 额外权限'), color: 'var(--vscode-editorWarning-foreground)', bg: 'var(--vscode-editor-inactiveSelectionBackground)' },
+                3: { text: tr('Critical / destructive', '严重风险 / 破坏性操作'), color: 'var(--vscode-errorForeground)', bg: 'var(--vscode-inputValidation-errorBackground)' },
             };
-            const risk = riskMap[preflight.riskLevel] || riskMap[1] || { text: tr('Medium Risk', '中风险 (Medium Risk)'), color: '#ff9800', bg: 'rgba(255,152,0,0.1)' };
-            
+            const risk = riskMap[preflight.riskLevel] || riskMap[1]!;
             const classLabels: Record<string, string> = {
-                read: tr('Read-only query', '只读查询'),
-                write: tr('File write/change', '写入修改'),
-                network: tr('Network access', '网络访问'),
-                script: tr('Inline execution', '内联执行'),
-                destructive: tr('Destructive operation', '高危破坏')
+                read: tr('Read-only query', '只读查询'), readonly: tr('Read-only query', '只读查询'),
+                write: tr('File write/change', '写入修改'), network: tr('Network access', '网络访问'),
+                script: tr('Inline execution', '内联执行'), interpreter: tr('Interpreter execution', '解释器执行'),
+                destructive: tr('Destructive operation', '高危破坏'),
             };
-            const badges = (preflight.classification || []).map((c: string) => 
-                `<span class="preflight-badge" style="background:var(--vscode-badge-background,rgba(128,128,128,0.1)); color:var(--vscode-badge-foreground); padding:2px 6px; border-radius:3px; font-size:10px; font-weight:600; margin-right:4px;">[${classLabels[c] || c}]</span>`
-            ).join('');
-
-            const details = (preflight.reasons || []).map((r: string) => 
-                `<li style="margin-bottom:2px; font-size:11px; opacity:0.85; text-align:left;">${escapeHtml(r)}</li>`
-            ).join('');
-
-            preflightHtml = 
-                `<div class="preflight-assessment-panel" style="margin-top:8px; border:1px solid var(--border, rgba(128,128,128,0.2)); border-radius:4px; padding:8px; background:var(--vscode-editor-background, #1e1e1e); text-align:left;">` +
-                `<div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border, rgba(128,128,128,0.1)); padding-bottom:4px; margin-bottom:6px;">` +
-                `<span style="font-weight:600; font-size:11px; color:var(--vscode-descriptionForeground, #a0a0a0);">🛡️ ${tr('AI safety preflight', 'AI 安全预检评估')}</span>` +
-                `<span style="color:${risk.color}; background:${risk.bg}; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:bold;">${risk.text}</span>` +
-                `</div>` +
-                `<div style="margin-bottom:6px;">${badges}</div>` +
-                (preflight.cwd ? `<div style="font-size:10px; opacity:0.7; font-family:monospace; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${tr('Workspace', '工作区')}: ${escapeHtml(preflight.cwd)}</div>` : '') +
-                (details ? `<ul style="margin:4px 0 0 0; padding-left:14px; color:var(--vscode-editor-foreground);">${details}</ul>` : '') +
-                `</div>`;
+            const badges = (preflight.classification || []).map((value: string) => `<span class="preflight-badge">${escapeHtml(classLabels[value] || value)}</span>`).join('');
+            const details = (preflight.reasons || []).map((reason: string) => `<li>${escapeHtml(reason)}</li>`).join('');
+            const scopeRows = [
+                preflight.unsandboxed ? tr('Filesystem and process sandbox: unrestricted for this command', '文件系统与进程沙箱：此命令不受限制') : '',
+                preflight.cwd ? `${tr('Working directory', '工作目录')}: ${preflight.cwd}` : '',
+                preflight.sandboxMode ? `${tr('Sandbox after approval', '批准后的沙箱')}: ${preflight.sandboxMode}` : '',
+                preflight.networkAccess ? `${tr('Network', '网络')}: ${(preflight.networkHosts || []).length ? preflight.networkHosts.join(', ') : tr('Any destination', '任意目标')}` : '',
+                Array.isArray(preflight.writableRoots) && preflight.writableRoots.length ? `${tr('Writable roots', '可写目录')}: ${preflight.writableRoots.join(', ')}` : '',
+                Array.isArray(preflight.targetPaths) && preflight.targetPaths.length ? `${tr('Target paths', '目标路径')}: ${preflight.targetPaths.join(', ')}` : '',
+                preflight.mcpServer || preflight.mcpTool ? `MCP: ${preflight.mcpServer || '?'} / ${preflight.mcpTool || '?'}` : '',
+                Array.isArray(preflight.protectedPathOverrides) && preflight.protectedPathOverrides.length ? `${tr('One-time protected path override', '单次受保护路径覆盖')}: ${preflight.protectedPathOverrides.join(', ')}` : '',
+                proposedRule?.commandPrefix?.length ? `${tr('Proposed session rule', '拟议会话规则')}: ${proposedRule.commandPrefix.join(' ')} @ ${proposedRule.cwdScope}` : '',
+            ].filter(Boolean).map(row => `<div class="permission-scope-row">${escapeHtml(row)}</div>`).join('');
+            preflightHtml = `<div class="preflight-assessment-panel">`
+                + `<div class="preflight-assessment-header"><span>${tr('Requested capability change', '请求的能力变更')}</span><span style="color:${risk.color};background:${risk.bg}">${risk.text}</span></div>`
+                + `<div>${badges}</div>${scopeRows}`
+                + (details ? `<ul>${details}</ul>` : '')
+                + `</div>`;
         }
 
-        div.innerHTML =
-            `<div class="permission-card-header">` +
-            `<span class="permission-card-icon">${svgIconNoMargin('key')}</span>` +
-            `<div class="permission-card-body">` +
-            `<div class="permission-card-title">${escapeHtml(description)}</div>` +
-            (command ? `<div class="permission-card-cmd" style="font-family:var(--vscode-editor-font-family,monospace); background:var(--vscode-textCodeBlock-background,rgba(0,0,0,0.2)); padding:6px; border-radius:4px; font-size:11px; margin-top:4px; overflow-x:auto; white-space:pre-wrap; word-break:break-all; text-align:left;">${escapeHtml(command)}</div>` : '') +
-            preflightHtml +
-            `</div></div>` +
-            actionsHtml;
-        (div.querySelector('.permission-allow-btn') as HTMLButtonElement).addEventListener('click', function () {
-            this.disabled = true; 
-            const denyBtn = div.querySelector('.permission-deny-btn') as HTMLButtonElement;
-            if (denyBtn) denyBtn.disabled = true;
-            const alwaysBtn = div.querySelector('.permission-always-btn') as HTMLButtonElement;
-            if (alwaysBtn) alwaysBtn.disabled = true;
-            
-            this.innerHTML = svgIcon('check') + tr('Allowed', '已允许');
-            vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true });
+        div.innerHTML = `<div class="permission-card-header"><span class="permission-card-icon">${svgIconNoMargin('key')}</span><div class="permission-card-body">`
+            + `<div class="permission-card-title">${escapeHtml(description)}</div>`
+            + (command ? `<div class="permission-card-cmd">${escapeHtml(command)}</div>` : '')
+            + `${preflightHtml}</div></div>${actionsHtml}`;
+
+        const finish = (decision: string, button: HTMLButtonElement) => {
+            div.querySelectorAll<HTMLButtonElement>('button').forEach(item => { item.disabled = true; });
+            button.setAttribute('aria-pressed', 'true');
+            vscode.postMessage({ type: 'permissionResponse', permissionId, decision });
             dismissCard(div, 400, () => {
                 floatingPermissionIds.delete(permissionId);
                 isShowingFloatingCard = false;
                 processFloatingCardQueue();
             });
+        };
+        div.querySelector<HTMLButtonElement>('.permission-allow-btn')?.addEventListener('click', function () { finish('accept', this); });
+        div.querySelector<HTMLButtonElement>('.permission-deny-btn')?.addEventListener('click', function () { finish('decline', this); });
+        div.querySelector<HTMLButtonElement>('.permission-cancel-btn')?.addEventListener('click', function () { finish('cancel', this); });
+        div.querySelector<HTMLButtonElement>('.permission-always-btn')?.addEventListener('click', function () { finish('acceptForSession', this); });
+        div.addEventListener('keydown', event => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            div.querySelector<HTMLButtonElement>('.permission-cancel-btn')?.click();
         });
-        
-        (div.querySelector('.permission-deny-btn') as HTMLButtonElement).addEventListener('click', function () {
-            this.disabled = true; 
-            const allowBtn = div.querySelector('.permission-allow-btn') as HTMLButtonElement;
-            if (allowBtn) allowBtn.disabled = true;
-            const alwaysBtn = div.querySelector('.permission-always-btn') as HTMLButtonElement;
-            if (alwaysBtn) alwaysBtn.disabled = true;
-            
-            this.textContent = tr('Denied', '已拒绝');
-            vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: false });
-            dismissCard(div, 400, () => {
-                floatingPermissionIds.delete(permissionId);
-                isShowingFloatingCard = false;
-                processFloatingCardQueue();
-            });
-        });
-        
-        const alwaysBtn = div.querySelector('.permission-always-btn') as HTMLButtonElement;
-        if (alwaysBtn) {
-            alwaysBtn.addEventListener('click', function() {
-                this.disabled = true;
-                const denyBtn = div.querySelector('.permission-deny-btn') as HTMLButtonElement;
-                if (denyBtn) denyBtn.disabled = true;
-                const allowBtn = div.querySelector('.permission-allow-btn') as HTMLButtonElement;
-                if (allowBtn) allowBtn.disabled = true;
-                
-                this.innerHTML = svgIcon('check') + tr('Always allowed', '已一直允许');
-                vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true, alwaysAllow: true });
-                dismissCard(div, 400, () => {
-                    floatingPermissionIds.delete(permissionId);
-                    isShowingFloatingCard = false;
-                    processFloatingCardQueue();
-                });
-            });
-        }
-        
+
         floatingCardQueue.push(div);
         processFloatingCardQueue();
+        queueMicrotask(() => div.querySelector<HTMLButtonElement>('button')?.focus());
     }
 
     function prepareSingleFileArtifactCard(card: HTMLElement, kind: string, filePath?: string, relPath?: string): void {
@@ -5668,7 +5623,27 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     toolResult: msg.preflight ? { preflight: msg.preflight } : undefined,
                     timestamp: Date.now(),
                 });
-                showPermissionCard(msg.permissionId, msg.tool || '', msg.description || '', msg.command || '', !!msg.allowAlways, msg.preflight);
+                showPermissionCard(msg.permissionId, msg.tool || '', msg.description || '', msg.command || '', !!msg.allowAlways, msg.preflight, msg.availableDecisions, msg.proposedRule);
+                break;
+            }
+
+            case 'permissionResolved': {
+                floatingPermissionIds.delete(msg.permissionId);
+                removeQueuedFloatingCards(card => card.dataset.permId === msg.permissionId);
+                document.querySelectorAll<HTMLElement>('.permission-card[data-perm-id]').forEach(card => {
+                    if (card.dataset.permId === msg.permissionId && !card.querySelector('[aria-pressed="true"]')) dismissResolvedCard(card);
+                });
+                const labels: Record<string, string> = {
+                    accept: tr('Allowed once', '已允许一次'),
+                    acceptForSession: tr('Allowed for this session', '已在本会话允许'),
+                    decline: tr('Denied', '已拒绝'),
+                    cancel: tr('Cancelled', '已取消'),
+                };
+                appendCodexLiveSyntheticStep({
+                    type: 'thinking',
+                    content: `${tr('Permission', '权限')} · ${labels[msg.decision] || msg.decision} · ${msg.reviewer}`,
+                    timestamp: Date.now(),
+                });
                 break;
             }
 
@@ -5783,6 +5758,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (msg.thinkingModelPrefixes) settingsThinkingPrefixes = msg.thinkingModelPrefixes;
                 updateQuickModelSelector(msg.providers, msg.current, msg.ollamaModels);
                 updateQuickWriteModeSelector(deriveWriteTier(msg.current));
+                {
+                    const trigger = document.getElementById('quickWriteModeTrigger');
+                    const unavailable = msg.current?.sandboxBackend?.available === false && !msg.current?.securitySandboxDisabled;
+                    trigger?.classList.toggle('sandbox-backend-unavailable', unavailable);
+                    if (trigger) {
+                        const baseTitle = trigger.dataset.baseTitle || trigger.title;
+                        trigger.dataset.baseTitle = baseTitle;
+                        trigger.title = unavailable && msg.current?.sandboxBackend?.message
+                            ? `${baseTitle}${baseTitle ? ' — ' : ''}${msg.current.sandboxBackend.message}`
+                            : baseTitle;
+                    }
+                }
                 {
                     const managerSettingsVisible = isManagerShell()
                         && document.body.dataset.managerActiveTab === 'settings'

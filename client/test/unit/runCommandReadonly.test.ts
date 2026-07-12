@@ -35,6 +35,11 @@ describe('ExternalToolHandler.isReadOnlyRunCommand (POSIX 跨平台)', () => {
             'ln -s a b',
             'tee out.txt',
             'echo hi > f.txt',
+            'git branch -D feature',
+            'git tag -d v1',
+            'git remote set-url origin https://example.com/x',
+            'git config user.name agent',
+            'git diff --output=out.patch',
         ]) {
             expect(isReadOnly(cmd), cmd).to.equal(false);
         }

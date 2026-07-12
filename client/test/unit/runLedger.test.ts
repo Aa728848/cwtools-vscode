@@ -330,10 +330,13 @@ describe('RunLedger Unit Tests', () => {
         const sink = createRunEventSink({ runId: run.runId });
         const registry = new ProcessRegistry();
 
+        let stdin = '';
         const process = registry.register('echo hello', workspaceRoot, 1234, sink, {
             sandboxMode: 'direct-preflight',
             networkAccess: true,
-        });
+        }, { writeStdin: text => { stdin += text; } });
+        expect(registry.writeStdin(process.processId, 'continue\n')).to.equal(true);
+        expect(stdin).to.equal('continue\n');
         registry.appendOutput(process.processId, 'stdout', 'hello\n', sink);
         registry.complete(process.processId, 0, sink);
 
@@ -343,6 +346,9 @@ describe('RunLedger Unit Tests', () => {
             'process_started',
             'process_output_delta',
             'process_completed',
+            'item_started',
+            'item_updated',
+            'item_completed',
         ]);
         const started = snapshot?.events.find(event => event.type === 'process_started');
         expect(started?.payload.sandboxMode).to.equal('direct-preflight');

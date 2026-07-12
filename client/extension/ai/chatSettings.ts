@@ -14,6 +14,15 @@ import { promisify } from 'util';
 import type { PanelSettings, HostMessage, CustomApiFormat } from './types';
 import type { AIService } from './aiService';
 import { aiText } from './messages';
+import { getProjectWorkspaceRoot } from './workspacePaths';
+import {
+    getSessionPermissionMode,
+    isSessionFullAccess,
+    sessionApprovalsReviewer,
+    sessionFileWriteMode,
+    setSessionPermissionMode,
+} from './runner/sessionPermissions';
+import { detectSandboxBackend } from './runner/sandboxRunner';
 
 const execAsync = promisify(cp.exec);
 
@@ -243,6 +252,7 @@ export class ChatSettingsManager {
         // Fold any legacy global endpoint into the per-provider map before reading config.
         await this.aiService.migrateLegacyEndpoint();
         const config = this.aiService.getConfig();
+        const detectedSandbox = detectSandboxBackend();
 
         const providers = Object.values(BUILTIN_PROVIDERS).map(p => {
             const customNonFim = p.id === 'custom' && config.customApiFormat !== 'openai-chat-completions';
@@ -272,11 +282,19 @@ export class ChatSettingsManager {
             endpoint: config.endpoint || '',
             customApiFormat: config.customApiFormat,
             maxContextTokens: config.maxContextTokens,
-            agentFileWriteMode: config.agentFileWriteMode,
+            agentFileWriteMode: sessionFileWriteMode(getProjectWorkspaceRoot()) ?? config.agentFileWriteMode,
             approvals: {
-                reviewer: vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<'user' | 'auto_review'>('approvals.reviewer', 'auto_review'),
+                reviewer: sessionApprovalsReviewer(getProjectWorkspaceRoot())
+                    ?? vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<'user' | 'auto_review'>('approvals.reviewer', 'user'),
             },
-            securitySandboxDisabled: vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<boolean>('developer.disableSecuritySandbox') === true,
+            securitySandboxDisabled: getSessionPermissionMode(getProjectWorkspaceRoot())
+                ? isSessionFullAccess(getProjectWorkspaceRoot())
+                : vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<boolean>('developer.disableSecuritySandbox') === true,
+            sandboxBackend: detectedSandbox
+                ? { available: true, backend: detectedSandbox.backend, message: aiText(`Enforced command sandbox: ${detectedSandbox.backend}`, `强制命令沙箱：${detectedSandbox.backend}`) }
+                : { available: false, message: process.platform === 'win32'
+                    ? aiText('Native Windows sandbox helper is not installed. Captured commands fail closed; use WSL2/Dev Container or an explicitly approved terminal run.', '未安装原生 Windows 沙箱助手。捕获命令将安全拒绝；请使用 WSL2/开发容器，或明确批准终端运行。')
+                    : aiText('No supported OS command sandbox backend is available. Captured commands fail closed.', '没有可用的操作系统命令沙箱后端。捕获命令将安全拒绝。') },
             reasoningEffort: config.reasoningEffort,
             braveSearchApiKey: (() => {
                 const k = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('braveSearchApiKey') ?? '';
@@ -360,26 +378,7 @@ export class ChatSettingsManager {
      * The tier fully determines all underlying settings.
      */
     async quickChangeWriteMode(mode: 'confirm' | 'auto' | 'auto_review' | 'full'): Promise<void> {
-        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-        const nextWriteMode = mode === 'confirm' ? 'confirm' : 'auto';
-        const nextReviewer = mode === 'auto_review' ? 'auto_review' : 'user';
-        await cfg.update('agentFileWriteMode', nextWriteMode, vs.ConfigurationTarget.Global);
-        await cfg.update('approvals.reviewer', nextReviewer, vs.ConfigurationTarget.Global);
-
-        const sandboxDisabled = cfg.get<boolean>('developer.disableSecuritySandbox') === true;
-        if ((mode === 'full') !== sandboxDisabled) {
-            await cfg.update('developer.disableSecuritySandbox', mode === 'full' ? true : undefined, vs.ConfigurationTarget.Global);
-        }
-
-        // Keep the shadow policy preset aligned with the ladder, but never clobber a
-        // manual read-only / trusted-automation choice.
-        const LADDER_PRESETS: Record<string, string> = { confirm: 'workspace-auto', auto: 'workspace-auto', auto_review: 'workspace-auto-review', full: 'full-access' };
-        const ladderPresetValues = new Set(Object.values(LADDER_PRESETS));
-        const preset = cfg.get<string>('policy.preset', 'workspace-auto-review');
-        const nextPreset = LADDER_PRESETS[mode]!;
-        if (ladderPresetValues.has(preset) && preset !== nextPreset) {
-            await cfg.update('policy.preset', nextPreset, vs.ConfigurationTarget.Global);
-        }
+        setSessionPermissionMode(getProjectWorkspaceRoot(), mode);
         await this.buildAndSendSettingsData();
     }
 

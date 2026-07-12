@@ -3,6 +3,18 @@ import { TOOL_DEFINITIONS } from '../../extension/ai/tools/definitions';
 import { TOOL_REGISTRY } from '../../extension/ai/tools/registry';
 
 describe('tool definitions', () => {
+    it('registers task-scoped process inspection and control with explicit effects', () => {
+        for (const name of ['list_processes', 'read_process', 'write_process_stdin', 'terminate_process']) {
+            expect(TOOL_DEFINITIONS.some(definition => definition.function.name === name), name).to.equal(true);
+        }
+        expect(TOOL_REGISTRY.get('list_processes')?.isReadOnly).to.equal(true);
+        expect(TOOL_REGISTRY.get('read_process')?.isReadOnly).to.equal(true);
+        expect(TOOL_REGISTRY.get('write_process_stdin')?.effect).to.equal('process');
+        expect(TOOL_REGISTRY.get('write_process_stdin')?.isReadOnly).to.equal(false);
+        expect(TOOL_REGISTRY.get('terminate_process')?.effect).to.equal('process');
+        expect(TOOL_REGISTRY.get('terminate_process')?.isReadOnly).to.equal(false);
+    });
+
     it('registers project knowledge as a read-only planning evidence tool', () => {
         const tool = TOOL_DEFINITIONS.find(def => def.function.name === 'query_project_knowledge');
         expect(tool).to.not.equal(undefined);

@@ -4,6 +4,7 @@ import {
     reduceToolTimeline,
     reduceAgentGraph,
     reduceCacheStats,
+    reduceRuntimeItems,
     reduceAll,
 } from '../../extension/ai/runner/runReducers';
 import type { AgentRunEvent } from '../../extension/ai/runner/runLedger';
@@ -179,6 +180,20 @@ describe('RunReducers — pure event projections (T3.2)', () => {
         });
     });
 
+    describe('reduceRuntimeItems', () => {
+        it('replays canonical item lifecycle events into a stable latest snapshot', () => {
+            const events: AgentRunEvent[] = [
+                ev('item_started', { timestamp: 10 }, { itemId: 'permission_1', type: 'permission', status: 'awaitingApproval', title: 'Run command' }),
+                ev('item_updated', { timestamp: 11 }, { itemId: 'permission_1', status: 'inProgress', metadata: { reviewer: 'user' } }),
+                ev('item_completed', { timestamp: 12 }, { itemId: 'permission_1', status: 'completed', metadata: { decision: 'accept' } }),
+            ];
+            const snap = reduceRuntimeItems(events);
+            expect(snap.items).to.have.length(1);
+            expect(snap.byId.get('permission_1')).to.include({ status: 'completed', completedAt: 12 });
+            expect(snap.byId.get('permission_1')?.metadata).to.deep.equal({ reviewer: 'user', decision: 'accept' });
+        });
+    });
+
     describe('reduceAll', () => {
         it('returns the same shape for one-shot consumers', () => {
             const snap = reduceAll([ev('run_created', { timestamp: 1 })]);
@@ -186,6 +201,7 @@ describe('RunReducers — pure event projections (T3.2)', () => {
             expect(snap.toolTimeline.entries).to.have.length(0);
             expect(snap.agentGraph.nodes.length).to.be.greaterThanOrEqual(0);
             expect(snap.cacheStats.totalCachedTokens).to.equal(0);
+            expect(snap.runtimeItems.items).to.have.length(0);
         });
     });
 });

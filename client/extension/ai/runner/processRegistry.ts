@@ -3,6 +3,8 @@ import * as path from 'path';
 import type { RunEventSink } from './runContext';
 import { atomicWriteJson, readJsonWithBackup } from './durableStorage';
 
+const MAX_PROCESS_RECORDS = 200;
+
 export interface BackgroundProcessRecord {
     processId: string;
     pid?: number;
@@ -11,6 +13,7 @@ export interface BackgroundProcessRecord {
     startedAt: number;
     sandboxMode?: string;
     networkAccess?: boolean;
+    authorization?: { type: 'full-access' | 'one-shot'; permissionId?: string };
     executionMode?: 'captured' | 'terminal';
     runId?: string;
     threadId?: string;
@@ -22,6 +25,7 @@ export interface BackgroundProcessRecord {
 
 interface ProcessControl {
     terminate?: () => void;
+    writeStdin?: (text: string) => void;
 }
 
 export class ProcessRegistry {
@@ -29,6 +33,7 @@ export class ProcessRegistry {
     private readonly processes = new Map<string, BackgroundProcessRecord>();
     private readonly controls = new Map<string, ProcessControl>();
     private storageFile?: string;
+    private persistChain: Promise<void> = Promise.resolve();
 
     static getInstance(): ProcessRegistry {
         if (!ProcessRegistry.instance) ProcessRegistry.instance = new ProcessRegistry();
@@ -46,6 +51,7 @@ export class ProcessRegistry {
             if (record.status === 'running') record.status = 'orphaned';
             this.processes.set(record.processId, record);
         }
+        this.pruneCompletedRecords();
         this.persistSoon();
     }
 
@@ -54,8 +60,8 @@ export class ProcessRegistry {
         cwd: string,
         pid?: number,
         eventSink?: RunEventSink,
-        sandbox?: { sandboxMode?: string; networkAccess?: boolean },
-        options: { executionMode?: 'captured' | 'terminal'; runId?: string; threadId?: string; terminate?: () => void } = {},
+        sandbox?: { sandboxMode?: string; networkAccess?: boolean; authorization?: { type: 'full-access' | 'one-shot'; permissionId?: string } },
+        options: { executionMode?: 'captured' | 'terminal'; runId?: string; threadId?: string; terminate?: () => void; writeStdin?: (text: string) => void } = {},
     ): BackgroundProcessRecord {
         const record: BackgroundProcessRecord = {
             processId: `proc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -65,14 +71,27 @@ export class ProcessRegistry {
             startedAt: Date.now(),
             sandboxMode: sandbox?.sandboxMode,
             networkAccess: sandbox?.networkAccess,
+            authorization: sandbox?.authorization,
             executionMode: options.executionMode ?? 'captured',
             runId: options.runId,
             threadId: options.threadId,
             status: 'running',
         };
         this.processes.set(record.processId, record);
-        if (options.terminate) this.controls.set(record.processId, { terminate: options.terminate });
+        this.pruneCompletedRecords();
+        if (options.terminate || options.writeStdin) this.controls.set(record.processId, { terminate: options.terminate, writeStdin: options.writeStdin });
         eventSink?.appendSoon('process_started', { ...record }, { status: 'running' });
+        eventSink?.appendSoon('item_started', {
+            itemId: record.processId,
+            threadId: record.threadId,
+            type: 'process',
+            status: 'inProgress',
+            title: record.command,
+            command: record.command,
+            cwd: record.cwd,
+            startedAt: record.startedAt,
+            metadata: { sandboxMode: record.sandboxMode, networkAccess: record.networkAccess, authorization: record.authorization },
+        }, { invocationId: record.processId, status: 'running' });
         this.persistSoon();
         return record;
     }
@@ -92,12 +111,13 @@ export class ProcessRegistry {
         eventSink?.appendSoon('process_output_delta', {
             processId, stream, size: text.length, preview: text.slice(0, 240),
         }, { status: 'running' });
+        eventSink?.appendSoon('item_updated', { itemId: processId, type: 'process', status: 'inProgress', stream, preview: text.slice(0, 240) }, { invocationId: processId, status: 'running' });
         this.persistSoon();
     }
 
     complete(processId: string, exitCode: number, eventSink?: RunEventSink): void {
         const record = this.processes.get(processId);
-        if (!record) return;
+        if (!record || record.status !== 'running') return;
         record.completedAt = Date.now();
         record.exitCode = exitCode;
         record.status = exitCode === 0 ? 'completed' : 'failed';
@@ -105,18 +125,34 @@ export class ProcessRegistry {
         eventSink?.appendSoon('process_completed', {
             processId, exitCode, durationMs: record.completedAt - record.startedAt,
         }, { status: record.status === 'completed' ? 'done' : 'failed' });
+        eventSink?.appendSoon('item_completed', {
+            itemId: processId,
+            type: 'process',
+            status: record.status === 'completed' ? 'completed' : 'failed',
+            completedAt: record.completedAt,
+            exitCode,
+        }, { invocationId: processId, status: record.status === 'completed' ? 'done' : 'failed' });
+        this.pruneCompletedRecords();
         this.persistSoon();
     }
 
     markTerminated(processId: string, eventSink?: RunEventSink): void {
         const record = this.processes.get(processId);
-        if (!record) return;
+        if (!record || record.status !== 'running') return;
         record.completedAt = Date.now();
         record.status = 'terminated';
         this.controls.delete(processId);
         eventSink?.appendSoon('process_completed', {
             processId, exitCode: -1, terminated: true, durationMs: record.completedAt - record.startedAt,
         }, { status: 'cancelled' });
+        eventSink?.appendSoon('item_completed', {
+            itemId: processId,
+            type: 'process',
+            status: 'cancelled',
+            completedAt: record.completedAt,
+            exitCode: -1,
+        }, { invocationId: processId, status: 'cancelled' });
+        this.pruneCompletedRecords();
         this.persistSoon();
     }
 
@@ -128,15 +164,42 @@ export class ProcessRegistry {
         return true;
     }
 
+    writeStdin(processId: string, text: string): boolean {
+        const record = this.processes.get(processId);
+        const control = this.controls.get(processId);
+        if (!record || record.status !== 'running' || !control?.writeStdin) return false;
+        try {
+            control.writeStdin(text);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
     list(): BackgroundProcessRecord[] { return [...this.processes.values()].sort((a, b) => b.startedAt - a.startedAt); }
     get(processId: string): BackgroundProcessRecord | undefined { return this.processes.get(processId); }
+
+    private pruneCompletedRecords(): void {
+        if (this.processes.size <= MAX_PROCESS_RECORDS) return;
+        const removable = [...this.processes.values()]
+            .filter(record => record.status !== 'running')
+            .sort((a, b) => a.startedAt - b.startedAt);
+        for (const record of removable) {
+            if (this.processes.size <= MAX_PROCESS_RECORDS) break;
+            this.processes.delete(record.processId);
+            this.controls.delete(record.processId);
+        }
+    }
 
     private persistSoon(): void {
         if (!this.storageFile) return;
         const file = this.storageFile;
         const records = this.list();
-        void fs.promises.mkdir(path.dirname(file), { recursive: true })
-            .then(() => atomicWriteJson(file, records))
+        this.persistChain = this.persistChain
+            .then(async () => {
+                await fs.promises.mkdir(path.dirname(file), { recursive: true });
+                await atomicWriteJson(file, records);
+            })
             .catch(() => {});
     }
 }

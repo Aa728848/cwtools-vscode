@@ -252,8 +252,9 @@ When adding or changing an AI tool, update the coordinated surfaces together:
 Key constraints for tools:
 
 - `tools/registry.ts` is the single source of truth for mode gating, read/write classification, and sub-agent availability; it derives `effect`, `riskLevel`, and `concurrencyClass`.
+- Every model-visible tool must pass the enforced `runner/policyEngine.ts` boundary before its handler. Do not add shadow-only permission paths or handler-local policy bypasses.
 - Structure reading is preferred over shell commands: prioritize `query_workspace_index`, `document_symbols`, `get_pdx_block`, and `get_file_context`.
-- `run_command` must be classified by `runner/commandPreflight.ts` risks; destructive or escalated commands cannot bypass manual approval.
+- `run_command` must be classified by `runner/commandPreflight.ts` risks. Extra cwd/network approvals keep the OS sandbox enabled; only the explicit `unsandboxed` field may request a one-shot bypass. Process control uses `list_processes`, `read_process`, `write_process_stdin`, and `terminate_process`.
 - `runner/permissionPolicy.ts` only allows low-risk pre-approved rules; `cwdScope` validation must use `path.relative`, not prefix tests.
 - File writes go through `PartitionedWriteQueue` in path dictionary order.
 - Localisation `.yml` files must use `write_localisation`, not generic text writes.
@@ -615,8 +616,9 @@ Webview 运行在浏览器沙盒中：
 工具设计注意点：
 
 - `tools/registry.ts` 是模式门控、读写分类和子 Agent 可用性的事实来源；同时派生 `effect`、`riskLevel`、`concurrencyClass`。
+- 所有模型可见工具必须先通过强制执行的 `runner/policyEngine.ts` 再进入领域 handler；不得新增仅 shadow 的权限路径或 handler 本地绕过。
 - 结构化读取优先于原始命令读取：先考虑 `query_workspace_index`、`document_symbols`、`get_pdx_block`、`get_file_context`。
-- `run_command` 必须经过 `runner/commandPreflight.ts` 风险分级；高危/升级类命令不能经预批准规则自动放行。
+- `run_command` 必须经过 `runner/commandPreflight.ts` 风险分级；增加 cwd/network 权限后仍须保留操作系统沙箱，只有显式 `unsandboxed` 字段可以请求单次绕过。进程控制统一使用 `list_processes`、`read_process`、`write_process_stdin`、`terminate_process`。
 - `runner/permissionPolicy.ts` 只放行低风险预批准命令；`cwdScope` 校验必须保留 `path.relative` 形式，不要退回 `startsWith`。
 - 写文件工具由 `PartitionedWriteQueue` 按文件路径串行化；多文件写入按路径字典序获取锁。
 - `.yml` 本地化文件必须用 `write_localisation`，不要用通用写入或替换工具直接写。

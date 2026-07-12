@@ -65,19 +65,59 @@ function loadToolModules() {
             agentTools: require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools'),
             agentRunner: require('../../extension/ai/agentRunner') as typeof import('../../extension/ai/agentRunner'),
             permissionPolicy: require('../../extension/ai/runner/permissionPolicy') as typeof import('../../extension/ai/runner/permissionPolicy'),
+            processRegistry: require('../../extension/ai/runner/processRegistry') as typeof import('../../extension/ai/runner/processRegistry'),
         };
     } finally {
         moduleLoader._load = originalLoad;
     }
 }
 
-const { fileTools, externalTools, agentTools, agentRunner, permissionPolicy } = loadToolModules();
+const { fileTools, externalTools, agentTools, agentRunner, permissionPolicy, processRegistry: processRegistryModule } = loadToolModules();
 const { FileToolHandler } = fileTools;
 const { ExternalToolHandler, HeadTailTextBuffer } = externalTools;
 const { AgentToolExecutor, TOOL_DEFINITIONS } = agentTools;
 const { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } = agentRunner;
 const { PermissionPolicyStore } = permissionPolicy;
+const { processRegistry } = processRegistryModule;
 const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
+
+describe('enforced central tool policy', () => {
+    let workspaceRoot: string;
+
+    beforeEach(() => {
+        workspaceRoot = makeWorkspace();
+        stubConfigOverrides = {};
+    });
+
+    afterEach(() => {
+        stubConfigOverrides = {};
+        cleanupWorkspace(workspaceRoot);
+    });
+
+    it('blocks workspace writes when the effective policy preset is read-only', async () => {
+        stubConfigOverrides['policy.preset'] = 'read-only';
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        executor.fileWriteMode = 'auto';
+        const target = path.join(workspaceRoot, 'blocked.txt');
+        const result = await executor.execute('write_file', { file: target, content: 'nope' }, { runnerOptions: { mode: 'build', topicId: 'policy-test' } } as any) as any;
+        expect(result.policyDenied).to.equal(true);
+        expect(fs.existsSync(target)).to.equal(false);
+    });
+
+    it('emits a non-shadow policy decision before a safe read', async () => {
+        stubConfigOverrides['policy.preset'] = 'workspace-auto';
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        const target = path.join(workspaceRoot, 'read.txt');
+        fs.writeFileSync(target, 'ok');
+        const events: any[] = [];
+        const result = await executor.execute('read_file', { file: target }, {
+            runnerOptions: { mode: 'build', topicId: 'policy-test' },
+            runEventSink: { appendSoon: (type: string, payload: any) => events.push({ type, payload }) },
+        } as any) as any;
+        expect(result.content).to.include('ok');
+        expect(events.some(event => event.type === 'policy_resolved' && event.payload.shadow === false && event.payload.action === 'allow')).to.equal(true);
+    });
+});
 
 describe('HeadTailTextBuffer', () => {
     it('keeps bounded head and tail output while recording omitted chars', () => {
@@ -136,6 +176,17 @@ describe('agent tool file path safety', () => {
     function createFileHandler() {
         return new FileToolHandler({ workspaceRoot, fileWriteMode: 'auto' });
     }
+
+    it('rejects git_ops file arguments outside the workspace before invoking git', async () => {
+        fs.mkdirSync(path.join(workspaceRoot, '.git'));
+        const handler = createFileHandler();
+        const diff = await handler.gitOps({ action: 'diff', file: '../outside.txt' });
+        const checkout = await handler.gitOps({ action: 'checkout', file: '../outside.txt' });
+        expect(diff.success).to.equal(false);
+        expect(diff.message).to.include('inside the workspace');
+        expect(checkout.success).to.equal(false);
+        expect(checkout.message).to.include('inside the workspace');
+    });
 
     it('remaps legacy .cwtools-ai/scratch writes into the current topic folder', async () => {
         const handler = createFileHandler();
@@ -1200,6 +1251,23 @@ describe('agent tool topic artifacts', () => {
         expect(fs.existsSync(dir)).to.equal(true);
     });
 
+    it('scopes process inspection and control to the owning task thread', () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const terminate = sinon.spy();
+        const record = processRegistry.register('long task', workspaceRoot, 123, undefined, undefined, {
+            threadId: 'thread-owner',
+            terminate,
+        });
+        const foreignContext = { runnerOptions: { threadId: 'thread-other' } } as any;
+        const ownerContext = { runnerOptions: { threadId: 'thread-owner' } } as any;
+
+        expect(handler.listProcesses({}, foreignContext).processes.some(item => item.processId === record.processId)).to.equal(false);
+        expect(handler.readProcess({ processId: record.processId }, foreignContext).success).to.equal(false);
+        expect(handler.terminateProcess({ processId: record.processId }, foreignContext).success).to.equal(false);
+        expect(handler.terminateProcess({ processId: record.processId }, ownerContext).success).to.equal(true);
+        expect(terminate.calledOnce).to.equal(true);
+    });
+
     it('rejects run_command working directories outside the workspace boundary', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         const result = await handler.runCommand({
@@ -1209,6 +1277,32 @@ describe('agent tool topic artifacts', () => {
 
         expect(result.exitCode).to.equal(1);
         expect(result.stderr).to.include('Working directory must be within the workspace root');
+    });
+
+    it('requires explicit unsandboxed approval before generic shell commands mutate protected control paths', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const directPath = await handler.runCommand({ command: 'mkdir .git', requestEscalation: true }, {
+            ...makeContext('media-topic'),
+            onPermissionRequest: async () => true,
+        } as any);
+        expect(directPath.exitCode).to.equal(1);
+        expect(directPath.stderr).to.include('protected Git/agent control paths');
+    });
+
+    it('grants approved Git commands only a visible one-shot .git metadata override', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        let preflight: any;
+        const result = await handler.runCommand({ command: 'git init', timeoutMs: 10_000 }, {
+            ...makeContext('media-topic'),
+            onPermissionRequest: async (_id: string, _tool: string, _description: string, _command: string, context: any) => {
+                preflight = context.preflight;
+                return true;
+            },
+        } as any);
+        expect(result.exitCode).to.equal(0);
+        expect(preflight.protectedPathOverrides).to.deep.equal(['.git']);
+        expect(preflight.unsandboxed).to.equal(false);
+        expect(preflight.escalation).to.equal(true);
     });
 
     it('relativizes quoted workspace script paths before running commands', async () => {
@@ -1682,16 +1776,31 @@ describe('agent tool progress and aborts', () => {
         });
         const invalidate = sinon.spy();
 
+        const permission = sinon.stub().resolves(true);
         const result = await executor.execute('git_ops', { action: 'checkout', file: 'events/scripted_change.txt' }, {
             runnerOptions: { mode: 'build' },
             agentRunner: { readTracker: { invalidate } },
+            onPermissionRequest: permission,
         } as any) as any;
 
+        expect(permission.calledOnce).to.equal(true);
         expect(invalidate.calledWith(changedFile)).to.equal(true);
         expect(sendRequest.calledOnce).to.equal(true);
         expect(sendRequest.firstCall.args[0]).to.equal('workspace/executeCommand');
         expect(sendRequest.firstCall.args[1].command).to.equal('cwtools.ai.revalidateFiles');
         expect(result.revalidation.ok).to.equal(true);
+    });
+
+    it('keeps read-only git_ops status behind the registry but outside approval prompts', async () => {
+        const executor = createExecutor();
+        sinon.stub(executor as any, 'executeInternal').resolves({ success: true, output: '' });
+        const permission = sinon.stub().resolves(true);
+        const result = await executor.execute('git_ops', { action: 'status' }, {
+            runnerOptions: { mode: 'build' },
+            onPermissionRequest: permission,
+        } as any) as any;
+        expect(result.success).to.equal(true);
+        expect(permission.called).to.equal(false);
     });
 
     it('emits heartbeat progress while a tool is still running and stops after abort', async () => {

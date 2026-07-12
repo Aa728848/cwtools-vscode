@@ -18,6 +18,7 @@ import type {
     HostMessage,
     AgentStep,
     AgentMode,
+    PermissionDecision,
     AgentArtifact,
     AgentArtifactKind,
     DiffArtifactData,
@@ -43,6 +44,8 @@ import { AgentSessionCoordinator } from './agentSessionCoordinator';
 import { runLedger, type AgentRunEvent } from './runner/runLedger';
 import { AgentRuntime } from './runner/agentRuntime';
 import { PermissionPolicyStore, deriveCommandPrefix, hasInlineEvalPayload } from './runner/permissionPolicy';
+import { sessionApprovalsReviewer } from './runner/sessionPermissions';
+import type { RuntimeItem } from './runner/runtimeItems';
 import { isSecuritySandboxDisabled } from './workspaceSandbox';
 import { AutoReviewer } from './runner/autoReviewer';
 import { AgentUiBroadcaster } from './agentUiBroadcaster';
@@ -2158,7 +2161,24 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.aiService.cancel();
 
         // Clean up all pending permission approval resolvers to prevent orphaned Promise and UI residual cards
-        for (const resolver of this.pendingPermissionResolvers.values()) {
+        for (const [permissionId, resolver] of this.pendingPermissionResolvers.entries()) {
+            const details = this.pendingPermissionDetails.get(permissionId);
+            const card = this.pendingPermissionCards.get(permissionId);
+            const eventRunId = details?.runId ?? this.currentRunId;
+            if (eventRunId) {
+                runLedger.appendEvent(eventRunId, 'permission_resolved', { allowed: false, decision: 'cancel', reviewer: 'user' }, { invocationId: permissionId }).catch(() => {});
+                runLedger.appendEvent(eventRunId, 'item_completed', {
+                    itemId: details?.itemId ?? permissionId,
+                    type: 'permission',
+                    status: 'cancelled',
+                    completedAt: Date.now(),
+                    decision: 'cancel',
+                }, { invocationId: permissionId, status: 'cancelled' }).catch(() => {});
+            }
+            if (card) {
+                this.postMessage({ type: 'permissionResolved', permissionId, itemId: card.itemId, threadId: card.threadId, turnId: card.turnId, decision: 'cancel', reviewer: 'user' });
+            }
+            activePendingInteractions.delete(permissionId);
             resolver(false);
         }
         this.pendingPermissionResolvers.clear();
@@ -2289,7 +2309,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private pendingPermissionResolvers = new Map<string, (allowed: boolean) => void>();
     private pendingPermissionModes = new Map<string, AgentMode>();
-    private pendingPermissionDetails = new Map<string, { command?: string, cwd?: string, preflight?: any }>();
+    private pendingPermissionDetails = new Map<string, { command?: string, cwd?: string, preflight?: any, runId?: string, threadId?: string, turnId?: string, itemId: string }>();
     private pendingPermissionCards = new Map<string, PendingPermissionCardMessage>();
 
     /**
@@ -2303,8 +2323,22 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         command?: string,
         context?: any
     ): Promise<boolean> {
-        if (this.currentRunId) {
-            runLedger.appendEvent(this.currentRunId, 'permission_requested', { tool, command, description }, { invocationId: id }).catch(() => {});
+        const permissionRunId = context?.runnerOptions?.runRecord?.runId ?? this.currentRunId;
+        if (permissionRunId) {
+            runLedger.appendEvent(permissionRunId, 'permission_requested', { tool, command, description }, { invocationId: id }).catch(() => {});
+            const item: RuntimeItem = {
+                itemId: id,
+                threadId: context?.runnerOptions?.threadId,
+                turnId: context?.runnerOptions?.turnId,
+                type: 'permission',
+                status: 'awaitingApproval',
+                title: description,
+                command,
+                cwd: context?.preflight?.cwd,
+                startedAt: Date.now(),
+                metadata: { tool },
+            };
+            runLedger.appendEvent(permissionRunId, 'item_started', item as any, { invocationId: id, status: 'pending' }).catch(() => {});
         }
         activePendingInteractions.set(id, command ? `[run_command] ${command}` : `[${tool}] ${description}`);
         const requestMode = this.currentMode;
@@ -2313,16 +2347,25 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const isEscalationRequest = context?.preflight?.escalation === true
             || context?.preflight?.requiresEscalation === true
             || context?.escalation === true
-            || /\[ESCALATION\]|escalation/i.test(description);
+            || /\[ESCALATION\]|\[UNSANDBOXED\]|escalation|unsandboxed/i.test(description);
         const resolveAutomatically = (reason: string): Promise<boolean> => {
             activePendingInteractions.delete(id);
-            if (this.currentRunId) {
+            if (permissionRunId) {
                 runLedger.appendEvent(
-                    this.currentRunId,
+                    permissionRunId,
                     'permission_resolved',
                     { allowed: true, alwaysAllow: false, autoApproved: true, reason },
                     { invocationId: id }
                 ).catch(() => {});
+                runLedger.appendEvent(permissionRunId, 'item_completed', {
+                    itemId: id,
+                    type: 'permission',
+                    status: 'completed',
+                    completedAt: Date.now(),
+                    decision: 'accept',
+                    reviewer: 'policy',
+                    reason,
+                }, { invocationId: id, status: 'done' }).catch(() => {});
             }
             return Promise.resolve(true);
         };
@@ -2352,15 +2395,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // Auto-review: reviewer swap at the approval boundary; ask_user falls through to the card.
         // Mode-agnostic: utility/build/script all share this exact funnel.
-        const reviewerMode = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('approvals.reviewer', 'auto_review');
+        const reviewerMode = sessionApprovalsReviewer(getProjectWorkspaceRoot())
+            ?? vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('approvals.reviewer', 'user');
         if (reviewerMode === 'auto_review' && !isEscalationRequest) {
             return this.runAutoReview(id, tool, description, command, context).then(decision => {
                 if (decision !== undefined) return decision;
-                return this.promptUserPermission(id, tool, description, command, context, requestMode);
+                return this.promptUserPermission(id, tool, description, command, context, requestMode, permissionRunId);
             });
         }
 
-        return this.promptUserPermission(id, tool, description, command, context, requestMode);
+        return this.promptUserPermission(id, tool, description, command, context, requestMode, permissionRunId);
     }
 
     private promptUserPermission(
@@ -2369,7 +2413,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         description: string,
         command: string | undefined,
         context: any,
-        requestMode: AgentMode
+        requestMode: AgentMode,
+        permissionRunId?: string,
     ): Promise<boolean> {
         return new Promise<boolean>((resolve) => {
             this.pendingPermissionResolvers.set(id, (allowed: boolean) => {
@@ -2379,19 +2424,35 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.pendingPermissionDetails.set(id, {
                 command,
                 cwd: context?.preflight?.cwd,
-                preflight: context?.preflight
+                preflight: context?.preflight,
+                runId: permissionRunId,
+                threadId: context?.runnerOptions?.threadId,
+                turnId: context?.runnerOptions?.turnId,
+                itemId: id,
             });
 
-            const isEscalation = /\[ESCALATION\]|escalation/i.test(description);
+            const isEscalation = context?.preflight?.escalation === true || /\[ESCALATION\]|\[UNSANDBOXED\]|escalation/i.test(description);
             const riskLevel = context?.preflight?.riskLevel ?? 2;
+            const allowAlways = tool === 'run_command' && !isEscalation && riskLevel <= 1;
+            const prefixWords = command ? deriveCommandPrefix(command) : [];
             const card: PendingPermissionCardMessage = {
                 type: 'permissionRequest',
                 permissionId: id,
+                itemId: id,
+                threadId: context?.runnerOptions?.threadId,
+                turnId: context?.runnerOptions?.turnId,
                 tool,
                 description,
                 command,
                 preflight: context?.preflight,
-                allowAlways: tool === 'run_command' && !isEscalation && riskLevel <= 1,
+                allowAlways,
+                availableDecisions: allowAlways ? ['accept', 'acceptForSession', 'decline', 'cancel'] : ['accept', 'decline', 'cancel'],
+                proposedRule: allowAlways && prefixWords.length > 0 ? {
+                    commandPrefix: prefixWords,
+                    cwdScope: context?.preflight?.cwd || getProjectWorkspaceRoot(),
+                    riskMax: 1,
+                    scope: 'session',
+                } : undefined,
             };
             this.pendingPermissionCards.set(id, card);
             this.postMessage(card);
@@ -2423,56 +2484,98 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         context: any
     ): Promise<boolean | undefined> {
         const preflight = context?.preflight;
+        const reviewRunId = context?.runnerOptions?.runRecord?.runId ?? this.currentRunId;
         const decision = await this.getAutoReviewer().review({
             id,
-            runId: this.currentRunId,
+            runId: reviewRunId,
             toolName: tool,
             riskLevel: preflight?.riskLevel ?? 2,
             command,
             cwd: preflight?.cwd ?? context?.cwd,
             classification: preflight?.classification,
+            targetPaths: preflight?.targetPaths,
+            mcpServer: preflight?.mcpServer,
+            mcpTool: preflight?.mcpTool,
+            networkHosts: preflight?.networkHosts,
             systemReason: description,
             escalation: !!preflight?.escalation || !!preflight?.requiresEscalation,
             inlineEval: !!command && hasInlineEvalPayload(command),
+            conversationSummary: this.conversationMessages.slice(-8).map(message => ({
+                role: message.role,
+                content: contentToString(message.content).slice(0, 1200),
+            })),
         });
-        if (this.currentRunId) {
-            runLedger.appendEvent(this.currentRunId, 'reviewer_decision', {
+        if (reviewRunId) {
+            runLedger.appendEvent(reviewRunId, 'reviewer_decision', {
                 tool, command, verdict: decision.verdict, rationale: decision.rationale, fromCache: !!decision.fromCache,
             }, { invocationId: id }).catch(() => {});
         }
         if (decision.verdict === 'ask_user') return undefined;
+        if (decision.circuitBreaker && reviewRunId) {
+            this.agentRuntime.interruptTurn(reviewRunId, decision.rationale);
+        }
         activePendingInteractions.delete(id);
         const allowed = decision.verdict !== 'deny';
-        if (allowed && decision.verdict === 'approve_with_rule' && tool === 'run_command' && command) {
-            // Reviewer rules are session-scoped and capped at risk 2 — never exempt destructive calls.
-            const prefixWords = deriveCommandPrefix(command);
-            if (prefixWords[0]) {
-                const created = PermissionPolicyStore.getInstance().addRule({
-                    tool: 'run_command',
-                    commandPrefix: prefixWords,
-                    cwdScope: preflight?.cwd || getProjectWorkspaceRoot(),
-                    riskMax: Math.min(2, Math.max(1, preflight?.riskLevel ?? 1)) as 1 | 2,
-                    sessionOnly: true,
-                });
-                if (this.currentRunId) {
-                    runLedger.appendEvent(this.currentRunId, 'approval_rule_created', {
-                        ruleId: created.id, tool: 'run_command', commandPrefix: prefixWords, scope: 'session', createdBy: 'auto_review',
-                    }, { invocationId: id }).catch(() => {});
-                }
-            }
-        }
-        if (this.currentRunId) {
-            runLedger.appendEvent(this.currentRunId, 'permission_resolved', {
+        if (reviewRunId) {
+            runLedger.appendEvent(reviewRunId, 'permission_resolved', {
                 allowed, reviewer: 'auto_review', rationale: decision.rationale,
             }, { invocationId: id }).catch(() => {});
+            runLedger.appendEvent(reviewRunId, 'item_completed', {
+                itemId: id,
+                type: 'permission',
+                status: allowed ? 'completed' : 'declined',
+                completedAt: Date.now(),
+                decision: allowed ? 'accept' : 'decline',
+                reviewer: 'auto_review',
+                rationale: decision.rationale,
+            }, { invocationId: id, status: allowed ? 'done' : 'failed' }).catch(() => {});
         }
+        this.postMessage({
+            type: 'permissionResolved',
+            permissionId: id,
+            itemId: id,
+            threadId: context?.runnerOptions?.threadId,
+            turnId: context?.runnerOptions?.turnId,
+            decision: allowed ? 'accept' : 'decline',
+            reviewer: 'auto_review',
+        });
         return allowed;
     }
 
-    public resolvePermissionRequest(permissionId: string, allowed: boolean, alwaysAllow?: boolean): void {
+    public resolvePermissionRequest(permissionId: string, decision: PermissionDecision): void {
+        if (!this.pendingPermissionResolvers.has(permissionId)
+            && !this.pendingPermissionCards.has(permissionId)
+            && !this.pendingPermissionDetails.has(permissionId)) return;
+        const card = this.pendingPermissionCards.get(permissionId);
+        const resolvedDecision: PermissionDecision = card?.availableDecisions.includes(decision) ? decision : 'decline';
+        const allowed = resolvedDecision === 'accept' || resolvedDecision === 'acceptForSession';
+        const alwaysAllow = resolvedDecision === 'acceptForSession';
         activePendingInteractions.delete(permissionId);
-        if (this.currentRunId) {
-            runLedger.appendEvent(this.currentRunId, 'permission_resolved', { allowed, alwaysAllow }, { invocationId: permissionId }).catch(() => {});
+        const details = this.pendingPermissionDetails.get(permissionId);
+        const eventRunId = details?.runId ?? this.currentRunId;
+        if (eventRunId) {
+            runLedger.appendEvent(eventRunId, 'permission_resolved', { allowed, alwaysAllow, decision: resolvedDecision, reviewer: 'user' }, { invocationId: permissionId }).catch(() => {});
+            runLedger.appendEvent(eventRunId, 'item_completed', {
+                itemId: details?.itemId ?? permissionId,
+                threadId: details?.threadId,
+                turnId: details?.turnId,
+                type: 'permission',
+                status: resolvedDecision === 'decline' ? 'declined' : resolvedDecision === 'cancel' ? 'cancelled' : 'completed',
+                completedAt: Date.now(),
+                decision: resolvedDecision,
+                reviewer: 'user',
+            }, { invocationId: permissionId, status: allowed ? 'done' : resolvedDecision === 'cancel' ? 'cancelled' : 'failed' }).catch(() => {});
+        }
+        if (card) {
+            this.postMessage({
+                type: 'permissionResolved',
+                permissionId,
+                itemId: card.itemId,
+                threadId: card.threadId,
+                turnId: card.turnId,
+                decision: resolvedDecision,
+                reviewer: 'user',
+            });
         }
         this.pendingPermissionCards.delete(permissionId);
         const resolver = this.pendingPermissionResolvers.get(permissionId);
@@ -2480,7 +2583,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.pendingPermissionResolvers.delete(permissionId);
             this.pendingPermissionModes.delete(permissionId);
             
-            const details = this.pendingPermissionDetails.get(permissionId);
             this.pendingPermissionDetails.delete(permissionId);
 
             if (alwaysAllow && allowed) {
@@ -2496,16 +2598,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                             riskMax: 1,
                             sessionOnly: true
                         });
-                        if (this.currentRunId) {
-                            runLedger.appendEvent(this.currentRunId, 'approval_rule_created', {
+                        if (eventRunId) {
+                            runLedger.appendEvent(eventRunId, 'approval_rule_created', {
                                 ruleId: created.id, tool: 'run_command', commandPrefix: prefixWords, scope: 'session', createdBy: 'user',
                             }, { invocationId: permissionId }).catch(() => {});
                         }
                         // Rule-set change invalidates cached reviewer decisions.
                         if (this.autoReviewer) {
                             this.autoReviewer.invalidateCache();
-                            if (this.currentRunId) {
-                                runLedger.appendEvent(this.currentRunId, 'reviewer_cache_invalidated', { reason: 'approval_rule_created' }).catch(() => {});
+                            if (eventRunId) {
+                                runLedger.appendEvent(eventRunId, 'reviewer_cache_invalidated', { reason: 'approval_rule_created' }).catch(() => {});
                             }
                         }
                     }

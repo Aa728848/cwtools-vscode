@@ -1138,6 +1138,10 @@ export type AgentToolName =
     | 'codesearch'
     | 'grep'
     | 'run_command'
+    | 'list_processes'
+    | 'read_process'
+    | 'write_process_stdin'
+    | 'terminate_process'
     | 'apply_patch'
     | 'analyze_diagnostic_error'
     | 'set_memory'
@@ -1915,6 +1919,26 @@ export type ContextItem = CodeSelectionContext | FileContext | FolderContext | D
 
 // ─── WebView Communication ───────────────────────────────────────────────────
 
+export type PermissionDecision = 'accept' | 'acceptForSession' | 'decline' | 'cancel';
+
+export interface PermissionRequestPreflight {
+    command?: string;
+    cwd?: string;
+    classification?: string[];
+    riskLevel?: 0 | 1 | 2 | 3;
+    escalation?: boolean;
+    reasons?: string[];
+    networkAccess?: boolean;
+    networkHosts?: string[];
+    sandboxMode?: string;
+    unsandboxed?: boolean;
+    writableRoots?: string[];
+    targetPaths?: string[];
+    mcpServer?: string;
+    mcpTool?: string;
+    protectedPathOverrides?: string[];
+}
+
 export type WebViewMessage =
     | { type: 'sendMessage'; text: string; attachedFiles?: string[]; images?: string[] }
     | { type: 'steerGeneration'; text: string; images?: string[] }
@@ -1953,7 +1977,7 @@ export type WebViewMessage =
     | { type: 'quickChangeModel'; model: string }
     | { type: 'quickChangeWriteMode'; mode: 'confirm' | 'auto' | 'auto_review' | 'full' }
     | { type: 'slashCommand'; command: string }
-    | { type: 'permissionResponse'; permissionId: string; allowed: boolean; alwaysAllow?: boolean }
+    | { type: 'permissionResponse'; permissionId: string; decision?: PermissionDecision; allowed?: boolean; alwaysAllow?: boolean }
     /** Submit inline annotations collected in the webview back to AI for revision */
     | { type: 'submitPlanAnnotations'; annotations: Array<{ section: string; note: string }> }
     | { type: 'revisePlanWithAnnotations'; annotations: Array<{ section: string; note: string }> }
@@ -2016,7 +2040,8 @@ export type HostMessage =
     | { type: 'autoWriteFile'; file: string; isNewFile: boolean }
     | { type: 'topicTitleGenerated'; topicId: string; title: string }
     | { type: 'topicForked'; newTopicId: string; title: string }
-    | { type: 'permissionRequest'; permissionId: string; tool: string; description: string; command?: string; allowAlways?: boolean; preflight?: any }
+    | { type: 'permissionRequest'; permissionId: string; itemId: string; threadId?: string; turnId?: string; tool: string; description: string; command?: string; allowAlways?: boolean; availableDecisions: PermissionDecision[]; proposedRule?: { commandPrefix: string[]; cwdScope: string; riskMax: number; scope: 'session' }; preflight?: PermissionRequestPreflight }
+    | { type: 'permissionResolved'; permissionId: string; itemId: string; threadId?: string; turnId?: string; decision: PermissionDecision; reviewer: 'user' | 'auto_review' | 'policy' }
     | { type: 'floatingCardResolved'; card: 'permission' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
     /** Restore mode state after webview rebuild (panel visibility change) */
     | { type: 'setMode'; mode: AgentMode }
@@ -2114,6 +2139,7 @@ export interface PanelSettings {
     approvals?: { reviewer?: 'user' | 'auto_review' };
     /** Mirror of stellarisLanguageServices.ai.developer.disableSecuritySandbox — the 'full' write tier. */
     securitySandboxDisabled?: boolean;
+    sandboxBackend?: { available: boolean; backend?: string; message: string };
     /** Reasoning effort / thinking depth (multi-provider) */
     reasoningEffort: 'low' | 'medium' | 'high' | 'max';
     /** Brave Search API key for web_search tool (optional) */
@@ -2283,8 +2309,9 @@ export type ToolEffect =
   | 'network'
   | 'shell'
   | 'git'
-  | 'media'
-  | 'mcp';
+    | 'media'
+    | 'mcp'
+    | 'process';
 
 export type ToolConcurrencyClass =
   | 'parallel'

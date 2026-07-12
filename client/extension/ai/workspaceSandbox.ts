@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import * as vs from 'vscode';
 import { getAiStorageRoot, getAiStorageRootCandidates } from './workspacePaths';
 import { isPathInsideOrEqual } from '../pathScope';
+import { getProjectWorkspaceRoot } from './workspacePaths';
+import { getSessionPermissionMode } from './runner/sessionPermissions';
 
 export type WorkspacePathScope = 'project' | 'ai' | 'workspace' | 'outside';
 
@@ -27,6 +29,8 @@ export function escapeRegExp(value: string): string {
 }
 
 export function isSecuritySandboxDisabled(): boolean {
+    const sessionMode = getSessionPermissionMode(getProjectWorkspaceRoot());
+    if (sessionMode) return sessionMode === 'full';
     return vs.workspace.getConfiguration('stellarisLanguageServices.ai.developer').get<boolean>('disableSecuritySandbox') === true;
 }
 
@@ -130,4 +134,3 @@ export function resolveWorkspacePathInput(
         isWithinAnyWorkspace: scope === 'project' || scope === 'ai' || scope === 'workspace',
     };
 }
-

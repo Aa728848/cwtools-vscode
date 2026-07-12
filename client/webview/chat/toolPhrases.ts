@@ -62,6 +62,10 @@ const TOOL_PHRASES: Record<string, ToolPhraseEntry> = {
     validate_code:             { category: 'validate',    icon: '🩺', en: 'Validate code', zh: '验证代码' },
 
     run_command:               { category: 'execute',     icon: '⚡', en: 'Run command', zh: '执行命令' },
+    list_processes:            { category: 'execute',     icon: '⚡', en: 'List command processes', zh: '列出命令进程' },
+    read_process:              { category: 'execute',     icon: '⚡', en: 'Read command process', zh: '读取命令进程' },
+    write_process_stdin:       { category: 'execute',     icon: '⚡', en: 'Send process input', zh: '发送进程输入' },
+    terminate_process:         { category: 'execute',     icon: '⚡', en: 'Stop command process', zh: '停止命令进程' },
 
     dispatch_agents:           { category: 'orchestrate', icon: '🎯', en: 'Dispatch subtasks', zh: '分派子任务' },
     merge_results:             { category: 'orchestrate', icon: '🎯', en: 'Merge results', zh: '合并结果' },

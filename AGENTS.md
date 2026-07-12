@@ -152,6 +152,8 @@ Key constraints:
 
 - `tools/registry.ts` is the source of truth for mode gating, read/write
   classification, `effect`, `riskLevel`, and `concurrencyClass`.
+- Every model-visible call passes the enforced `runner/policyEngine.ts` boundary
+  before its domain handler. Policy presets are not shadow-only.
 - `runner/toolInvocation.ts` normalizes tool calls, repairs args, derives risk
   metadata, extracts target paths, and assigns stable invocation IDs.
 - `runner/toolScheduler.ts` enforces concurrency classes and per-file write
@@ -159,6 +161,10 @@ Key constraints:
   `writeCoordinator.afterCurrentWrites`.
 - `runner/commandPreflight.ts` classifies `run_command`; high-risk or escalated
   commands require permission.
+- Additional cwd/network approvals keep the OS sandbox active. Only an explicit
+  `unsandboxed` request may ask for a one-shot bypass. Background process control
+  tools are `list_processes`, `read_process`, `write_process_stdin`, and
+  `terminate_process`.
 - `planModeGuard.ts` gates writes and read-only `git_ops` in non-writing modes.
 - `runner/permissionPolicy.ts` must keep hardened `cwdScope` checks based on
   `path.relative`, not string-prefix tests.

@@ -20,7 +20,7 @@ export interface TimelineEvent {
     payload: any;
 }
 
-export type TimelineGroupId = 'model' | 'tools' | 'files' | 'permissions' | 'validation' | 'context' | 'subagents' | 'other';
+export type TimelineGroupId = 'model' | 'tools' | 'processes' | 'files' | 'permissions' | 'validation' | 'context' | 'subagents' | 'other';
 
 export interface TimelineGroup {
     id: TimelineGroupId;
@@ -37,6 +37,9 @@ const EVENT_GROUP_MAP: Record<string, TimelineGroupId> = {
     'tool_call_start': 'tools',
     'tool_call_end': 'tools',
     'tool_output_delta': 'tools',
+    'process_started': 'processes',
+    'process_output_delta': 'processes',
+    'process_completed': 'processes',
     'permission_requested': 'permissions',
     'permission_resolved': 'permissions',
     'write_confirmation_requested': 'permissions',
@@ -74,6 +77,7 @@ export function groupTimelineEvents(events: TimelineEvent[], i18n?: ChatI18nText
     const groups: Record<TimelineGroupId, TimelineEvent[]> = {
         model: [],
         tools: [],
+        processes: [],
         files: [],
         permissions: [],
         validation: [],
@@ -82,8 +86,21 @@ export function groupTimelineEvents(events: TimelineEvent[], i18n?: ChatI18nText
         other: [],
     };
 
+    const canonicalItemKeys = new Set(events
+        .filter(event => event.type === 'item_started' || event.type === 'item_updated' || event.type === 'item_completed')
+        .map(event => `${event.payload?.type ?? 'toolCall'}:${event.payload?.itemId ?? event.invocationId ?? ''}`));
+
     for (const evt of events) {
-        const groupId = EVENT_GROUP_MAP[evt.type] ?? 'other';
+        const processKey = `${'process'}:${evt.payload?.processId ?? evt.invocationId ?? ''}`;
+        const permissionKey = `${'permission'}:${evt.invocationId ?? evt.payload?.itemId ?? ''}`;
+        if (evt.type.startsWith('process_') && canonicalItemKeys.has(processKey)) continue;
+        if (evt.type.startsWith('permission_') && canonicalItemKeys.has(permissionKey)) continue;
+        const itemGroup: Partial<Record<string, TimelineGroupId>> = {
+            process: 'processes', permission: 'permissions', fileChange: 'files', commandExecution: 'processes', toolCall: 'tools',
+        };
+        const groupId = evt.type.startsWith('item_')
+            ? (itemGroup[evt.payload?.type] ?? 'tools')
+            : (EVENT_GROUP_MAP[evt.type] ?? 'other');
         groups[groupId].push(evt);
     }
 
@@ -91,6 +108,7 @@ export function groupTimelineEvents(events: TimelineEvent[], i18n?: ChatI18nText
     const labels: Record<TimelineGroupId, { label: string; icon: string }> = {
         model:       { label: g?.model       ?? 'Model Calls',      icon: svgIcon('sparkles') },
         tools:       { label: g?.tools       ?? 'Tool Invocations', icon: svgIcon('gear') },
+        processes:   { label: g?.processes ?? 'Command Processes', icon: svgIcon('zap') },
         files:       { label: g?.files       ?? 'File Changes',     icon: svgIcon('file') },
         permissions: { label: g?.permissions ?? 'Permissions',      icon: svgIcon('shield') },
         validation:  { label: g?.validation  ?? 'Validation',       icon: svgIcon('check') },

@@ -19,7 +19,7 @@ export interface CommandPreflightResult {
 
 // Low-risk read-only commands
 const READONLY_COMMANDS = new Set([
-    'git status', 'git diff', 'git log', 'git show', 'git branch', 'git tag', 'git rev-parse',
+    'git status', 'git diff', 'git log', 'git show', 'git rev-parse',
     'grep', 'rg', 'find', 'locate', 'which', 'where', 'whereis',
     'cat', 'head', 'tail', 'less', 'more', 'wc', 'du', 'df',
     // Unambiguous read-only POSIX utilities (no write/exec capability).
@@ -29,7 +29,10 @@ const READONLY_COMMANDS = new Set([
     'ls', 'dir', 'pwd', 'echo', 'type', 'print',
     'get-childitem', 'gci', 'select-string', 'sls', 'get-content', 'gc', 'cat',
     'get-location', 'gl', 'pwd', 'resolve-path', 'rvpa', 'test-path',
-    'git remote', 'git config'
+    'where-object', '?', 'select-object', 'sort-object', 'measure-object',
+    'format-table', 'format-list', 'format-wide', 'out-string',
+    // Git branch/tag/remote/config are classified by classifyGitCommand below;
+    // their base subcommand is not inherently read-only (for example branch -D).
 ]);
 
 // Write and modification commands
@@ -80,6 +83,108 @@ function isForceRecursiveRm(cmd: string): boolean {
     return hasRecursive && hasForce;
 }
 
+type GitClassification = Pick<CommandSegment, 'classification' | 'reason'> & {
+    riskLevel: 0 | 1 | 2 | 3;
+    requiresPermission: boolean;
+    requiresEscalation: boolean;
+};
+
+const GIT_READONLY_SUBCOMMANDS = new Set(['status', 'log', 'show', 'rev-parse']);
+const GIT_NETWORK_SUBCOMMANDS = new Set(['clone', 'fetch', 'pull', 'push', 'ls-remote', 'submodule']);
+const GIT_DESTRUCTIVE_SUBCOMMANDS = new Set(['clean', 'reset', 'rebase', 'filter-branch', 'filter-repo']);
+
+function onlyFlags(args: string[], allowed: Set<string>): boolean {
+    return args.every(arg => allowed.has(arg.toLowerCase()));
+}
+
+/**
+ * Git subcommands are action-sensitive. Treating `git branch`, `git tag`, or
+ * `git remote` as read-only by prefix silently permits delete/config mutations.
+ */
+export function classifyGitCommand(words: string[]): GitClassification | undefined {
+    if ((words[0] ?? '').toLowerCase() !== 'git') return undefined;
+    const subcommand = (words[1] ?? '').toLowerCase();
+    const args = words.slice(2);
+    const read = (reason: string): GitClassification => ({
+        classification: 'readonly', reason, riskLevel: 0, requiresPermission: false, requiresEscalation: false,
+    });
+    const write = (reason: string, destructive = false): GitClassification => ({
+        classification: destructive ? 'destructive' : 'write',
+        reason,
+        riskLevel: destructive ? 3 : 2,
+        requiresPermission: true,
+        requiresEscalation: destructive,
+    });
+
+    if (GIT_READONLY_SUBCOMMANDS.has(subcommand)) {
+        // Output/config overrides can write or execute helpers even on nominally
+        // read-only Git commands. Keep the automatic surface deliberately small.
+        if (args.some(arg => /^(?:--output(?:=|$)|--config(?:=|$)|-c$|--exec-path(?:=|$)|--ext-diff$|--textconv$)/i.test(arg))) {
+            return write(aiText('Git output/config override may write files or invoke external helpers', 'Git 输出/配置覆盖可能写文件或调用外部程序'));
+        }
+        return read(aiText('Read-only Git query', '只读 Git 查询'));
+    }
+    if (subcommand === 'diff') {
+        if (args.some(arg => /^(?:--output(?:=|$)|--ext-diff$|--textconv$)/i.test(arg))) {
+            return write(aiText('Git diff output/helper option may write files or execute code', 'Git diff 输出/辅助选项可能写文件或执行代码'));
+        }
+        return read(aiText('Read-only Git diff', '只读 Git 差异查询'));
+    }
+    if (subcommand === 'stash' && (args[0] ?? '').toLowerCase() === 'list') {
+        return read(aiText('Read-only Git stash listing', '只读 Git stash 列表'));
+    }
+    if (subcommand === 'stash' && ['drop', 'clear'].includes((args[0] ?? '').toLowerCase())) {
+        return write(aiText('Git stash removal permanently discards saved changes', 'Git stash 删除会永久丢弃已保存的更改'), true);
+    }
+    if (subcommand === 'checkout' || subcommand === 'restore') {
+        const discardsFiles = subcommand === 'restore'
+            || args.includes('--')
+            || args.some(arg => /^(?:-f|--force|--ours|--theirs|--source(?:=|$))$/i.test(arg));
+        return write(
+            discardsFiles
+                ? aiText('Git checkout/restore may discard uncommitted file changes', 'Git checkout/restore 可能丢弃未提交的文件更改')
+                : aiText('Git checkout changes the current branch or worktree', 'Git checkout 会更改当前分支或工作树'),
+            discardsFiles,
+        );
+    }
+    if (subcommand === 'branch') {
+        const safe = args.length === 0 || onlyFlags(args, new Set(['--show-current', '--list', '-l', '-a', '-r', '-v', '-vv', '--verbose']));
+        return safe
+            ? read(aiText('Read-only Git branch listing', '只读 Git 分支列表'))
+            : write(aiText('Git branch operation mutates repository metadata', 'Git 分支操作会修改仓库元数据'), args.some(arg => /^-(?:d|D)$/.test(arg)));
+    }
+    if (subcommand === 'tag') {
+        const safe = args.length === 0 || onlyFlags(args, new Set(['--list', '-l']));
+        return safe
+            ? read(aiText('Read-only Git tag listing', '只读 Git 标签列表'))
+            : write(aiText('Git tag operation mutates repository metadata', 'Git 标签操作会修改仓库元数据'), args.some(arg => /^-(?:d|D|f)$|^--delete$|^--force$/.test(arg)));
+    }
+    if (subcommand === 'remote') {
+        const safe = args.length === 0 || (args.length === 1 && args[0] === '-v');
+        return safe
+            ? read(aiText('Read-only Git remote listing', '只读 Git 远程列表'))
+            : write(aiText('Git remote operation changes configuration or contacts a remote', 'Git remote 操作会修改配置或访问远程'));
+    }
+    if (subcommand === 'config') {
+        const readFlags = new Set(['--get', '--get-all', '--get-regexp', '--list', '-l', '--show-origin', '--show-scope', '--name-only']);
+        const safe = args.length > 0 && args.some(arg => readFlags.has(arg.toLowerCase()))
+            && !args.some(arg => /^(?:--add|--unset|--unset-all|--replace-all|--rename-section|--remove-section|--edit|-e|--global|--system|--local|--worktree)$/i.test(arg));
+        return safe
+            ? read(aiText('Read-only Git configuration query', '只读 Git 配置查询'))
+            : write(aiText('Git config operation may modify repository or user configuration', 'Git config 操作可能修改仓库或用户配置'));
+    }
+    if (GIT_NETWORK_SUBCOMMANDS.has(subcommand)) {
+        if (subcommand === 'push' && args.some(arg => /^(?:-f|--force|--force-with-lease|--delete|-d)$/i.test(arg))) {
+            return write(aiText('Force/delete push can rewrite or remove remote history', '强制或删除 push 可能重写或移除远端历史'), true);
+        }
+        return { classification: 'network', reason: aiText('Git command contacts a remote repository', 'Git 命令会访问远程仓库'), riskLevel: 2, requiresPermission: true, requiresEscalation: false };
+    }
+    if (GIT_DESTRUCTIVE_SUBCOMMANDS.has(subcommand)) {
+        return write(aiText('Git history/worktree operation may discard or rewrite data', 'Git 历史/工作树操作可能丢弃或重写数据'), true);
+    }
+    return write(aiText('Git command may mutate repository state', 'Git 命令可能修改仓库状态'));
+}
+
 /**
  * Preflight a shell command line to determine risks and requirements.
  */
@@ -110,9 +215,27 @@ export function preflightCommand(commandLine: string): CommandPreflightResult {
 
         // Check for redirects (>, >>, <) which imply writing/reading files
         const hasRedirect = trimmed.includes('>') || trimmed.includes('>>') || trimmed.includes('<');
+        const hasDynamicShellSyntax = /\$\(|[{}]|`/.test(trimmed) || /(?:^|\s)&\s*\S/.test(trimmed);
+        const hasDestructiveSyntax = DESTRUCTIVE_COMMANDS.has(baseCmd)
+            || DESTRUCTIVE_COMMANDS.has(trimmed.toLowerCase())
+            || isForceRecursiveRm(trimmed)
+            || trimmed.toLowerCase().includes('del /s')
+            || DESTRUCTIVE_POSIX_PATTERNS.some(pattern => pattern.test(trimmed));
 
         // Match classifications
-        if (DESTRUCTIVE_COMMANDS.has(baseCmd) || DESTRUCTIVE_COMMANDS.has(trimmed.toLowerCase()) || isForceRecursiveRm(trimmed) || trimmed.toLowerCase().includes('del /s') || DESTRUCTIVE_POSIX_PATTERNS.some(p => p.test(trimmed))) {
+        const gitClassification = classifyGitCommand(words);
+        if (hasDynamicShellSyntax && !hasDestructiveSyntax) {
+            classification = 'interpreter';
+            reason = aiText('Shell substitution or script block can execute arbitrary nested commands', 'Shell 替换或脚本块可执行任意嵌套命令');
+            riskLevel = Math.max(riskLevel, 2) as 0 | 1 | 2 | 3;
+            requiresPermission = true;
+        } else if (gitClassification) {
+            classification = gitClassification.classification;
+            reason = gitClassification.reason;
+            riskLevel = Math.max(riskLevel, gitClassification.riskLevel) as 0 | 1 | 2 | 3;
+            requiresPermission ||= gitClassification.requiresPermission;
+            requiresEscalation ||= gitClassification.requiresEscalation;
+        } else if (hasDestructiveSyntax) {
             classification = 'destructive';
             reason = aiText('High-risk destructive command that may cause data loss or system damage', '高危破坏性指令，可能导致数据丢失或系统损坏');
             riskLevel = Math.max(riskLevel, 3) as any;

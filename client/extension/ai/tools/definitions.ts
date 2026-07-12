@@ -733,10 +733,44 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     timeoutMs: { type: 'number', description: 'Timeout in milliseconds for captured execution (default 30000, max 3600000)' },
                     executionMode: { type: 'string', enum: ['captured', 'terminal'], description: 'captured runs through the enforced command broker and returns output. terminal launches a visible, interactive VS Code terminal and requires requestEscalation=true because terminal processes are not OS-sandboxed.' },
                     networkAccess: { type: 'boolean', description: 'Allow the sandboxed command to access the network. Default false; true always requires approval.' },
-                    requestEscalation: { type: 'boolean', description: 'Set to true ONLY if you previously attempted this command and it was blocked by the security sandbox. This triggers a high-danger prompt asking the user for a one-time privilege override.' },
+                    networkHosts: { type: 'array', items: { type: 'string' }, description: 'Exact network hostnames the command is expected to contact. Required for a scoped approval when known; omit only when the destination cannot be determined.' },
+                    requestEscalation: { type: 'boolean', description: 'Set to true ONLY if a prior attempt was blocked by the sandbox. Approval grants only the requested cwd/network scope while keeping the OS sandbox enabled.' },
+                    unsandboxed: { type: 'boolean', description: 'DANGEROUS: disable the OS sandbox for this command. Requires requestEscalation=true and explicit one-time user approval. Never use when an additional cwd or network permission is sufficient.' },
                 },
                 required: ['command'],
             },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'list_processes',
+            description: 'List command processes started by the agent, including running, completed, failed, terminated, or orphaned status.',
+            parameters: { type: 'object', properties: { status: { type: 'string', enum: ['running', 'completed', 'failed', 'terminated', 'orphaned'] } } },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'read_process',
+            description: 'Read the current status and retained output tail for an agent command process.',
+            parameters: { type: 'object', properties: { processId: { type: 'string' } }, required: ['processId'] },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'write_process_stdin',
+            description: 'Write input to a running interactive VS Code terminal process started by the agent.',
+            parameters: { type: 'object', properties: { processId: { type: 'string' }, text: { type: 'string' }, submit: { type: 'boolean', description: 'Submit with Enter; defaults true.' } }, required: ['processId', 'text'] },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'terminate_process',
+            description: 'Terminate a running command process started by the agent.',
+            parameters: { type: 'object', properties: { processId: { type: 'string' } }, required: ['processId'] },
         },
     },
     {

@@ -90,7 +90,10 @@ const LOOSEN_CAPABLE = new Set<PolicyLayerId>(['user', 'approvals']);
 const WRITE_LIKE = new Set<PolicySubject>(['edit', 'bash', 'git', 'media', 'mcp', 'task']);
 
 export const DEFAULT_PROTECTED_PATHS = [
-    '.git/**', '.env', '.env.*',
+    '.git/**', '.agents/**', '.codex/**',
+    '.cwtools-ai/*/runs/**', '.cwtools-ai/*/threads/**', '.cwtools-ai/*/goals/**',
+    '.cwtools-ai/*/blackboard/**', '.cwtools-ai/*/resume_state.json*',
+    '.env', '.env.*',
     '**/*.pem', '**/*.key', '**/id_rsa*', '**/id_ed25519*', '**/.npmrc',
 ];
 
@@ -110,6 +113,7 @@ export function subjectForEffect(effect: string): PolicySubject | undefined {
         case 'network': return 'network';
         case 'mcp': return 'mcp';
         case 'media': return 'media';
+        case 'process': return 'task';
         default: return undefined;
     }
 }
@@ -270,7 +274,7 @@ export const POLICY_PRESETS: Record<PolicyPresetId, Omit<PermissionProfile, 'wri
 };
 
 export function buildProfile(preset: PolicyPresetId, workspaceRoot: string, rules: PolicyRule[] = []): PermissionProfile {
-    const base = POLICY_PRESETS[preset] ?? POLICY_PRESETS['workspace-auto-review'];
+    const base = POLICY_PRESETS[preset] ?? POLICY_PRESETS['workspace-auto'];
     return { ...base, writableRoots: [workspaceRoot], rules };
 }
 
@@ -279,12 +283,17 @@ export function newRuleId(prefix = 'rule'): string {
     return `${prefix}_${Date.now()}_${++ruleSeq}`;
 }
 
-/** protectedPaths lower into global-default deny rules — no separate decision path. */
+const READABLE_BUT_WRITE_PROTECTED_PREFIXES = ['.git/', '.agents/', '.codex/', '.cwtools-ai/'];
+
+/** Protected agent/Git stores remain readable; secret-like paths deny reads too. */
 export function buildProtectedPathRules(protectedPaths: string[]): PolicyRule[] {
     const rules: PolicyRule[] = [];
     for (const glob of protectedPaths) {
         rules.push({ id: `protected_edit:${glob}`, subject: 'edit', pathGlob: glob, action: 'deny' });
-        rules.push({ id: `protected_read:${glob}`, subject: 'read', pathGlob: glob, action: 'deny' });
+        const normalized = glob.replace(/\\/g, '/').toLowerCase();
+        if (!READABLE_BUT_WRITE_PROTECTED_PREFIXES.some(prefix => normalized.startsWith(prefix))) {
+            rules.push({ id: `protected_read:${glob}`, subject: 'read', pathGlob: glob, action: 'deny' });
+        }
     }
     return rules;
 }
@@ -293,7 +302,7 @@ export function buildProtectedPathRules(protectedPaths: string[]): PolicyRule[] 
 
 function baseAction(d: PolicyCallDescriptor, profile: PermissionProfile): PermissionAction {
     if (profile.sandboxMode === 'read-only' && WRITE_LIKE.has(d.subject)) return 'deny';
-    if (profile.sandboxMode === 'danger-full-access') return d.riskLevel >= 3 ? 'ask' : 'allow';
+    if (profile.sandboxMode === 'danger-full-access') return 'allow';
     let base: PermissionAction = d.riskLevel >= 3 ? 'deny' : d.riskLevel === 0 ? 'allow' : 'ask';
     if (d.subject === 'network' && !profile.networkAccess && base === 'allow') base = 'ask';
     switch (profile.approvalPolicy) {
@@ -325,7 +334,10 @@ export function resolvePolicy(
     extraLayers: PolicyLayer[] = []
 ): PolicyDecision {
     const layers = new Map<PolicyLayerId, PolicyLayer>();
-    layers.set('global-defaults', { id: 'global-defaults', rules: buildProtectedPathRules(profile.protectedPaths) });
+    layers.set('global-defaults', {
+        id: 'global-defaults',
+        rules: profile.sandboxMode === 'danger-full-access' ? [] : buildProtectedPathRules(profile.protectedPaths),
+    });
     layers.set('user', { id: 'user', rules: profile.rules });
     for (const layer of extraLayers) layers.set(layer.id, layer);
 
@@ -346,11 +358,17 @@ export function resolvePolicy(
         const winner = pickWinner(layer.rules.filter(rule => ruleMatches(rule, d)));
         if (!winner) continue;
         if (!LOOSEN_CAPABLE.has(layerId) && SEVERITY[winner.action] < SEVERITY[action]) continue;
-        // outside_writable_roots is a sandbox boundary — rules cannot loosen it.
-        if (denialCode === 'outside_writable_roots') { matchedRules.push(winner.id); continue; }
+        // Writable-root and protected-path denials are sandbox boundaries;
+        // session/user approval rules cannot loosen them.
+        if (denialCode === 'outside_writable_roots' || denialCode === 'protected_path') {
+            matchedRules.push(winner.id);
+            continue;
+        }
         action = winner.action;
         matchedRules.push(winner.id);
-        if (action === 'deny') denialCode = `rule:${winner.id}`;
+        if (action === 'deny') {
+            denialCode = layerId === 'global-defaults' ? 'protected_path' : `rule:${winner.id}`;
+        }
     }
 
     // approvalPolicy 'never': anything still needing approval fails closed.
@@ -361,7 +379,9 @@ export function resolvePolicy(
 
     const decision: PolicyDecision = { action, matchedRules };
     if (action === 'deny') {
-        const canEscalate = denialCode !== 'outside_writable_roots' && profile.approvalPolicy !== 'never';
+        const canEscalate = profile.sandboxMode !== 'read-only'
+            && denialCode !== 'outside_writable_roots' && denialCode !== 'protected_path'
+            && profile.approvalPolicy !== 'never';
         decision.denial = {
             code: denialCode || 'denied',
             matchedRules,

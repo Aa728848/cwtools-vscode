@@ -156,7 +156,10 @@ export async function routeWebviewMessage(
             break;
         case 'permissionResponse':
             provider.postMessage({ type: 'floatingCardResolved', card: 'permission', id: msg.permissionId });
-            provider.resolvePermissionRequest(msg.permissionId, msg.allowed, msg.alwaysAllow);
+            provider.resolvePermissionRequest(
+                msg.permissionId,
+                msg.decision ?? (msg.alwaysAllow && msg.allowed === true ? 'acceptForSession' : msg.allowed === true ? 'accept' : 'decline'),
+            );
             break;
         case 'openPlanFile': {
             const planPath = provider.resolveArtifactFilePath(msg.filePath);

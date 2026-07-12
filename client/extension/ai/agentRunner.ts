@@ -1362,44 +1362,6 @@ export class AgentRunner {
         };
     }
 
-    /** Phase 0 shadow mode: resolve the layered policy and log it without enforcing. */
-    private shadowPolicyResolve(
-        ci: { toolName: string; toolArgs: any; effect: string; riskLevel?: 0 | 1 | 2 | 3; targetPaths: string[]; invocationId: string },
-        runId: string
-    ): void {
-        try {
-            const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-            if (!cfg.get<boolean>('policy.shadow', true)) return;
-            const { resolvePolicy, buildProfile, subjectForEffect } = require('./runner/policyEngine') as typeof import('./runner/policyEngine');
-            const subject = subjectForEffect(ci.effect);
-            if (!subject) return;
-            const { getToolMetadata } = require('./runner/toolInvocation') as typeof import('./runner/toolInvocation');
-            const riskLevel = ci.riskLevel ?? getToolMetadata(ci.toolName).riskLevel;
-            const profile = buildProfile(cfg.get<string>('policy.preset', 'workspace-auto-review') as any, this.toolExecutor.workspaceRoot);
-            const args = ci.toolArgs || {};
-            const decision = resolvePolicy({
-                toolName: ci.toolName,
-                subject,
-                riskLevel,
-                workspaceRoot: this.toolExecutor.workspaceRoot,
-                command: typeof args.command === 'string' ? args.command : undefined,
-                cwd: typeof args.cwd === 'string' ? args.cwd : this.toolExecutor.workspaceRoot,
-                targetPaths: ci.targetPaths,
-                mcpServer: typeof args.server === 'string' ? args.server : undefined,
-                mcpTool: typeof args.tool === 'string' ? args.tool : undefined,
-            }, profile);
-            runLedger.appendEvent(runId, 'policy_resolved', {
-                tool: ci.toolName,
-                subject,
-                riskLevel,
-                action: decision.action,
-                matchedRules: decision.matchedRules,
-                profileId: profile.id,
-                shadow: true,
-            }, { invocationId: ci.invocationId }).catch(() => {});
-        } catch { /* shadow mode must never affect execution */ }
-    }
-
     private loadPinnedContextSummary(topicId: string, runId: string): { blocked?: string[]; decisions?: string[] } | undefined {
         try {
             const summaryPath = path.join(getPrivateTopicStorageDir(topicId, getProjectWorkspaceRoot()), 'runs', runId, 'summary.json');
@@ -2538,8 +2500,6 @@ export class AgentRunner {
                         continue;
                     }
                 }
-
-                this.shadowPolicyResolve(ci, runRecord.runId);
 
                 if (READ_ONLY_TOOLS.has(toolName)) {
                     // Collect consecutive read-only tools to batch them in parallel

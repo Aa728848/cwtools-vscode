@@ -16,6 +16,7 @@
  */
 
 import type { AgentRunEvent, AgentRunEventType } from './runLedger';
+import type { RuntimeItem, RuntimeItemStatus, RuntimeItemType } from './runtimeItems';
 
 // ─── Run state ───────────────────────────────────────────────────────────────
 
@@ -442,12 +443,49 @@ export function reducePolicyActivity(events: AgentRunEvent[]): PolicyActivitySna
 
 // ─── Aggregate snapshot (one-shot helper for broadcasters) ───────────────────
 
+export interface RuntimeItemsSnapshot {
+    items: RuntimeItem[];
+    byId: Map<string, RuntimeItem>;
+}
+
+/** Rebuilds the latest state of permission, process, command, file, and tool items. */
+export function reduceRuntimeItems(events: AgentRunEvent[]): RuntimeItemsSnapshot {
+    const byId = new Map<string, RuntimeItem>();
+    const order: string[] = [];
+    for (const event of events) {
+        if (event.type !== 'item_started' && event.type !== 'item_updated' && event.type !== 'item_completed') continue;
+        const payload = (event.payload as Record<string, unknown>) ?? {};
+        const itemId = typeof payload.itemId === 'string' ? payload.itemId : event.invocationId;
+        if (!itemId) continue;
+        const existing = byId.get(itemId);
+        if (!existing) order.push(itemId);
+        const item: RuntimeItem = {
+            ...(existing ?? {
+                itemId,
+                type: (payload.type as RuntimeItemType | undefined) ?? 'toolCall',
+                status: (payload.status as RuntimeItemStatus | undefined) ?? 'inProgress',
+                startedAt: typeof payload.startedAt === 'number' ? payload.startedAt : event.timestamp,
+            }),
+            ...payload,
+            itemId,
+            metadata: {
+                ...(existing?.metadata ?? {}),
+                ...((payload.metadata as Record<string, unknown> | undefined) ?? {}),
+            },
+        } as RuntimeItem;
+        if (event.type === 'item_completed' && item.completedAt === undefined) item.completedAt = event.timestamp;
+        byId.set(itemId, item);
+    }
+    return { items: order.map(itemId => byId.get(itemId)!), byId };
+}
+
 export interface RunReducerSnapshot {
     state: RunStateSnapshot;
     toolTimeline: ToolTimelineSnapshot;
     agentGraph: AgentGraphSnapshot;
     cacheStats: CacheStatsSnapshot;
     policy: PolicyActivitySnapshot;
+    runtimeItems: RuntimeItemsSnapshot;
 }
 
 export function reduceAll(events: AgentRunEvent[]): RunReducerSnapshot {
@@ -457,6 +495,7 @@ export function reduceAll(events: AgentRunEvent[]): RunReducerSnapshot {
         agentGraph: reduceAgentGraph(events),
         cacheStats: reduceCacheStats(events),
         policy: reducePolicyActivity(events),
+        runtimeItems: reduceRuntimeItems(events),
     };
 }
 

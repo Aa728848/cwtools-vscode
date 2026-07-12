@@ -13,6 +13,20 @@ rawFs.readFileSync = function(p: any, opts: any) {
 describe('webview smoke checks', () => {
     const root = path.resolve(__dirname, '../../..');
 
+    it('permission cards expose scoped decisions, critical risk, and accessible state', () => {
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
+        expect(script).to.include("3: { text: tr('Critical / destructive'");
+        expect(script).to.include("setAttribute('role', 'alertdialog')");
+        expect(script).to.include("finish('acceptForSession'");
+        expect(script).to.include("case 'permissionResolved'");
+        expect(script).to.include('fullAccessArmedUntil = Date.now() + 10_000');
+        const host = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        expect(host).to.include('availableDecisions.includes(decision)');
+        expect(css).to.include('var(--vscode-errorForeground)');
+        expect(css).to.include('.permission-scope-row');
+    });
+
     it('chat webview source exposes expected bootstrap controls', () => {
         const html = fs.readFileSync(path.join(root, 'client/extension/ai/chatHtml.ts'), 'utf8');
         const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');

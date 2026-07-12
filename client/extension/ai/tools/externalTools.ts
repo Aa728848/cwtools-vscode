@@ -708,42 +708,11 @@ export class ExternalToolHandler {
 
     // Conservative auto-approval classifier for shell commands that only read or format output.
     private isReadOnlyRunCommand(command: string): boolean {
-        const trimmed = command.trim();
-        if (!trimmed) return false;
-
-        const unsafePatterns = [
-            /&&/,
-            /;\s*\S/,
-            /\d*>{1,2}\s*\S/,
-            /</,
-            /(^|[^&])&(?!&)/,
-            /\b(?:rm|del|erase|rmdir|remove-item|ri|rd|format|shutdown|reboot|mkfs|shred)\b/i,
-            /\b(?:set-content|add-content|out-file|tee-object|export-\w+|new-item|ni|copy-item|cp|move-item|mv|rename-item|ren|set-item|set-location|cd|push-location|pop-location)\b/i,
-            // POSIX write/modify commands — never classify as read-only
-            /\b(?:mkdir|touch|ln|chmod|chown|truncate|tee|install|mkfifo)\b/i,
-            // Hidden writes/exec behind flags: sed -i, find -delete/-exec, awk redirect/system()
-            /\bsed\b[^|]*\s-i\b/i,
-            /\bfind\b[^|]*\s-(?:delete|exec|execdir|ok)\b/i,
-            /\bawk\b[^|]*(?:>|\bsystem\s*\()/i,
-            /\b(?:start-process|invoke-expression|iex|invoke-webrequest|iwr|invoke-restmethod|curl|wget)\b/i,
-            /\b(?:node|python|py|powershell|pwsh)\s+-(?:e|c|command|encodedcommand)\b/i,
-        ];
-        if (unsafePatterns.some(pattern => pattern.test(trimmed))) return false;
-
-        const readOnlySegmentPatterns = [
-            /^git\s+(?:log|status|diff|show|rev-parse|branch|tag|remote)(?:\s|$)/i,
-            /^git\s+stash\s+list(?:\s|$)/i,
-            /^(?:dotnet\s+(?:--version|--info)|node\s+--version|npm\s+(?:list|ls|--version)|npx\s+--version|mmx\s+--version)$/i,
-            /^(?:cat|type|echo|dir|ls|grep|rg|wc|head|tail|which|where|findstr|stat|file|basename|dirname|realpath|readlink|printenv|cut|tr|comm|column|nl|tree)(?:\s|$)/i,
-            /^(?:get-childitem|gci|get-content|gc|select-string|sls|get-item|gi|test-path|resolve-path|get-location|pwd|get-command|get-help|get-module)(?:\s|$)/i,
-            /^(?:where-object|\?|select-object|sort-object|measure-object|format-table|format-list|format-wide|out-string)(?:\s|$)/i,
-        ];
-
-        return trimmed
-            .split('|')
-            .map(segment => segment.trim())
-            .filter(Boolean)
-            .every(segment => readOnlySegmentPatterns.some(pattern => pattern.test(segment)));
+        const result = preflightCommand(command);
+        return result.segments.length > 0
+            && !result.requiresPermission
+            && !result.requiresEscalation
+            && result.segments.every(segment => segment.classification === 'readonly');
     }
 
     async todoWrite(args: { todos: TodoItem[] }, context?: import('../types').AgentToolContext): Promise<TodoWriteResult> {
@@ -762,6 +731,41 @@ export class ExternalToolHandler {
 
     getTodos(): TodoItem[] { return [...this.currentTodos]; }
     clearTodos(): void { this.currentTodos = []; }
+
+    private canAccessProcess(record: ReturnType<typeof processRegistry.get>, context?: import('../types').AgentToolContext): boolean {
+        if (!record) return false;
+        const threadId = context?.runnerOptions?.threadId;
+        const runId = context?.runnerOptions?.runRecord?.runId;
+        if (!threadId && !runId) return true;
+        if (threadId && record.threadId) return record.threadId === threadId;
+        if (runId && record.runId) return record.runId === runId;
+        return false;
+    }
+
+    listProcesses(args: { status?: string } = {}, context?: import('../types').AgentToolContext): { processes: ReturnType<typeof processRegistry.list> } {
+        const processes = processRegistry.list().filter(record => this.canAccessProcess(record, context) && (!args.status || record.status === args.status));
+        return { processes };
+    }
+
+    readProcess(args: { processId: string }, context?: import('../types').AgentToolContext): { success: boolean; process?: ReturnType<typeof processRegistry.get>; error?: string } {
+        const process = processRegistry.get(args.processId);
+        return this.canAccessProcess(process, context) ? { success: true, process } : { success: false, error: `Unknown or inaccessible process: ${args.processId}` };
+    }
+
+    writeProcessStdin(args: { processId: string; text: string; submit?: boolean }, context?: import('../types').AgentToolContext): { success: boolean; error?: string } {
+        if (!this.canAccessProcess(processRegistry.get(args.processId), context)) return { success: false, error: `Unknown or inaccessible process: ${args.processId}` };
+        const text = args.submit === false ? args.text : `${args.text.replace(/\r?\n$/, '')}\n`;
+        return processRegistry.writeStdin(args.processId, text)
+            ? { success: true }
+            : { success: false, error: `Process ${args.processId} is not running or does not accept input.` };
+    }
+
+    terminateProcess(args: { processId: string }, context?: import('../types').AgentToolContext): { success: boolean; error?: string } {
+        if (!this.canAccessProcess(processRegistry.get(args.processId), context)) return { success: false, error: `Unknown or inaccessible process: ${args.processId}` };
+        return processRegistry.terminate(args.processId, context?.runEventSink)
+            ? { success: true }
+            : { success: false, error: `Process ${args.processId} is not running.` };
+    }
 
     // ─── ignoreValidationError ───────────────────────────────────────────────
 
@@ -962,11 +966,12 @@ export class ExternalToolHandler {
 
     // ─── runCommand ──────────────────────────────────────────────────────────
 
-    async runCommand(args: { command: string; cwd?: string; timeoutMs?: number; requestEscalation?: boolean; executionMode?: 'captured' | 'terminal'; networkAccess?: boolean }, context?: import('../types').AgentToolContext): Promise<{
+    async runCommand(args: { command: string; cwd?: string; timeoutMs?: number; requestEscalation?: boolean; unsandboxed?: boolean; executionMode?: 'captured' | 'terminal'; networkAccess?: boolean; networkHosts?: string[] }, context?: import('../types').AgentToolContext): Promise<{
         stdout: string;
         stderr: string;
         exitCode: number;
         processId?: string;
+        status?: 'started' | 'completed';
         timedOut?: boolean;
         changedFiles?: string[];
         writtenFiles?: string[];
@@ -1046,6 +1051,31 @@ export class ExternalToolHandler {
 
         const bypassSandbox = isSecuritySandboxDisabled();
         let escalationReason = '';
+        const detectedNetworkHosts = [...args.command.matchAll(/https?:\/\/([^\s/'"`<>]+)/gi)]
+            .map(match => match[1]!.split(':')[0]!.toLowerCase());
+        const requestedNetworkHosts = [...new Set([...(args.networkHosts ?? []), ...detectedNetworkHosts]
+            .map(host => host.trim().toLowerCase()).filter(Boolean))];
+        const isPrivateNetworkHost = (host: string) => host === 'localhost' || host.endsWith('.local')
+            || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)
+            || /^172\.(?:1[6-9]|2\d|3[01])\./.test(host) || host === '::1';
+        if (args.networkAccess && requestedNetworkHosts.some(isPrivateNetworkHost) && !args.requestEscalation && !bypassSandbox) {
+            return {
+                stdout: '',
+                stderr: 'Blocked: local/private network destinations require requestEscalation=true and explicit approval.',
+                exitCode: 1,
+            };
+        }
+        if (args.networkAccess && requestedNetworkHosts.some(isPrivateNetworkHost) && args.requestEscalation) {
+            escalationReason = aiText('local/private network destination', '本地/私有网络目标');
+        }
+
+        if (args.unsandboxed && !args.requestEscalation && !bypassSandbox) {
+            return {
+                stdout: '',
+                stderr: 'Unsandboxed execution requires requestEscalation=true and an explicit one-time user approval.',
+                exitCode: 1,
+            };
+        }
 
         if (args.executionMode === 'terminal' && !bypassSandbox && !args.requestEscalation) {
             return {
@@ -1106,7 +1136,21 @@ export class ExternalToolHandler {
 
         // Preflight shell command segment risk analysis
         const preflight = preflightCommand(args.command);
+        const gitMetadataMutation = preflight.segments.length > 0
+            && preflight.segments.every(segment => /^git(?:\.exe)?\s/i.test(segment.raw))
+            && preflight.segments.some(segment => segment.classification !== 'readonly');
+        const mutatesProtectedPath = preflight.segments.some(segment => segment.classification !== 'readonly'
+            && /(?:^|[\s"'\\/])\.(?:git|agents|codex)(?:$|[\s"'\\/])/i.test(segment.raw));
+        if (mutatesProtectedPath && !args.unsandboxed && !bypassSandbox) {
+            return {
+                stdout: '',
+                stderr: 'Blocked: commands cannot mutate protected Git/agent control paths inside the workspace sandbox. Retry only with requestEscalation=true and unsandboxed=true for a one-time explicit approval.',
+                exitCode: 1,
+            };
+        }
         const currentEscalationReason = escalationReason || (preflight.requiresEscalation ? preflight.blockedReason : '');
+        const requestedWritableRoots = [this.ctx.workspaceRoot];
+        if (currentEscalationReason && !isPathInsideOrEqual(cwd, this.ctx.workspaceRoot)) requestedWritableRoots.push(cwd);
         
         // Destructive check
         if (!preflight.safe && !args.requestEscalation && !bypassSandbox) {
@@ -1133,25 +1177,44 @@ export class ExternalToolHandler {
             requiresPermission = true;
         }
         if (args.networkAccess === true) requiresPermission = true;
+        // The explicit workspace-session/persistent Full Access profile disables
+        // the approval boundary as advertised. One-shot `unsandboxed` calls do
+        // not set bypassSandbox and still require their own approval.
+        if (bypassSandbox) requiresPermission = false;
         // Interpreter inline commands (python -c, node -e) always require explicit user permission,
         // even in auto mode, to prevent silent arbitrary code execution.
         // let requiresPermission resolved by preflight store above
         const onPermissionRequest = context?.onPermissionRequest;
+        let grantedPermissionId: string | undefined;
 
         if (requiresPermission && onPermissionRequest) {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const leavesOsSandbox = args.unsandboxed === true || args.executionMode === 'terminal';
             // Build rich detailed telemetry payload for Webview visual enhancement
             const preflightPayload = {
                 command: args.command,
                 cwd,
                 classification: preflight.segments.map(s => s.classification),
                 riskLevel: preflight.riskLevel,
-                escalation: !!currentEscalationReason,
-                reasons: preflight.segments.map(s => s.reason),
-                networkAccess: args.networkAccess === true,
+                escalation: !!currentEscalationReason || args.unsandboxed === true || gitMetadataMutation,
+                reasons: [
+                    ...preflight.segments.map(s => s.reason),
+                    ...(gitMetadataMutation ? [aiText('This approval temporarily permits Git metadata writes for this command only.', '此审批仅为本次命令临时允许写入 Git 元数据。')] : []),
+                    ...(args.executionMode === 'terminal' ? [aiText('The agent may send input to or terminate this task-owned terminal through process controls.', 'Agent 可通过进程控制向此任务所属终端发送输入或终止它。')] : []),
+                ],
+                networkAccess: leavesOsSandbox || args.networkAccess === true,
+                networkHosts: requestedNetworkHosts,
+                sandboxMode: args.executionMode === 'terminal' ? 'user-approved-terminal' : args.unsandboxed ? 'disabled' : 'workspace-write',
+                unsandboxed: leavesOsSandbox,
+                writableRoots: leavesOsSandbox ? undefined : [...new Set(requestedWritableRoots.map(root => path.resolve(root)))],
+                protectedPathOverrides: gitMetadataMutation ? ['.git'] : undefined,
             };
-            const description = currentEscalationReason 
-                ? `[ESCALATION] AI requests a sandbox override (${currentEscalationReason}): ${args.command}`
+            const description = args.executionMode === 'terminal'
+                ? `[UNSANDBOXED TERMINAL] AI requests a one-time visible VS Code terminal with unrestricted process, filesystem, and network access: ${args.command}`
+                : args.unsandboxed
+                ? `[UNSANDBOXED] AI requests a one-time command run with the OS sandbox disabled: ${args.command}`
+                : currentEscalationReason
+                ? `[ESCALATION] AI requests additional sandbox scope (${currentEscalationReason}): ${args.command}`
                 : aiText(`AI requests to run terminal command: ${args.command}`, `AI 请求执行终端命令：${args.command}`);
             
             const allowed = await this.requestPermissionWithAbort(
@@ -1160,6 +1223,7 @@ export class ExternalToolHandler {
             if (!allowed) {
                 return { stdout: '', stderr: aiText('User denied permission to run this command', '用户拒绝了此命令的执行权限'), exitCode: 1 };
             }
+            grantedPermissionId = permId;
         } else if (requiresPermission) {
             return { stdout: '', stderr: 'run_command: no permission handler configured', exitCode: 1 };
         }
@@ -1229,11 +1293,15 @@ export class ExternalToolHandler {
             const record = processRegistry.register(args.command, cwd, undefined, eventSink, {
                 sandboxMode: 'user-approved-terminal',
                 networkAccess: true,
+                authorization: bypassSandbox
+                    ? { type: 'full-access' }
+                    : { type: 'one-shot', permissionId: grantedPermissionId },
             }, {
                 executionMode: 'terminal',
                 runId: context?.runnerOptions?.runRecord?.runId,
                 threadId: context?.runnerOptions?.threadId,
                 terminate: () => terminal.dispose(),
+                writeStdin: text => terminal.sendText(text.replace(/\r?\n$/, ''), /\r?\n$/.test(text)),
             });
             void terminal.processId.then(pid => processRegistry.setPid(record.processId, pid));
             const closeDisposable = vs.window.onDidCloseTerminal(closed => {
@@ -1250,16 +1318,47 @@ export class ExternalToolHandler {
                 stderr: '',
                 exitCode: 0,
                 processId: record.processId,
+                status: 'started',
             };
         }
 
         const stdoutBuf = new HeadTailTextBuffer(COMMAND_STDOUT_MAX_CHARS);
         const stderrBuf = new HeadTailTextBuffer(COMMAND_STDERR_MAX_CHARS);
-        const directExecution = bypassSandbox || !!currentEscalationReason;
+        // Approval and sandboxing are independent. A normal escalation grants
+        // only the requested cwd/network scope; direct execution requires the
+        // explicit unsandboxed flag (or the persistent full-access setting).
+        const directExecution = bypassSandbox || args.unsandboxed === true;
+        const workspaceRoots = [...new Set([this.ctx.workspaceRoot, ...(vs.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath)].filter(Boolean))];
+        const writableRoots = requestedWritableRoots;
+        const protectedNames = gitMetadataMutation && !!grantedPermissionId
+            ? ['.agents', '.codex']
+            : ['.git', '.agents', '.codex'];
+        const rootsToProtect = [...new Set([...workspaceRoots, cwd])];
+        const protectedPaths = rootsToProtect.flatMap(root => protectedNames.map(name => path.join(root, name)));
+        for (const root of rootsToProtect) {
+            const gitMarker = path.join(root, '.git');
+            try {
+                if (fs.statSync(gitMarker).isFile()) {
+                    const match = fs.readFileSync(gitMarker, 'utf8').match(/^gitdir:\s*(.+)$/im);
+                    if (match?.[1]) protectedPaths.push(path.resolve(root, match[1].trim()));
+                }
+            } catch { /* non-worktree or inaccessible marker */ }
+            const agentRoot = path.join(root, '.cwtools-ai');
+            const privateNames = ['runs', 'threads', 'goals', 'blackboard', 'resume_state.json', 'resume_state.json.bak'];
+            try {
+                for (const topic of fs.readdirSync(agentRoot, { withFileTypes: true }).filter(entry => entry.isDirectory())) {
+                    for (const name of privateNames) protectedPaths.push(path.join(agentRoot, topic.name, name));
+                }
+            } catch { /* no legacy/project Agent storage */ }
+        }
         const sandboxProfile = {
             sandboxMode: directExecution ? 'disabled' : 'workspace-write',
             networkAccess: directExecution ? true : args.networkAccess === true,
-            writableRoots: (vs.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath),
+            writableRoots: [...new Set(writableRoots.map(root => path.resolve(root)))],
+            protectedPaths: [...new Set(protectedPaths.map(protectedPath => path.resolve(protectedPath)))],
+            authorization: directExecution
+                ? (bypassSandbox ? { type: 'full-access' as const } : { type: 'one-shot' as const, permissionId: grantedPermissionId })
+                : undefined,
         };
         let commandChangeBaseline: Map<string, CommandFileState> | undefined;
         const shouldTrackCommandChanges = !(isAutoApproveSafeCommand && !hasShellControlOperator);

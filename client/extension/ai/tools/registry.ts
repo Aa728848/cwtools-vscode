@@ -9,7 +9,7 @@ export type AgentToolName =
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
     | 'verify_pdx_identifier' | 'todo_write' | 'read_file' | 'write_file' | 'edit_file'
     | 'replace_lines' | 'list_directory' | 'get_lsp_status' | 'get_diagnostics' | 'analyze_diagnostic_error'
-    | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command'
+    | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command' | 'list_processes' | 'read_process' | 'write_process_stdin' | 'terminate_process'
     | 'search_web' | 'codesearch' | 'apply_patch' | 'multi_replace_file_content'
     | 'query_definition' | 'query_definition_by_name' | 'query_scripted_effects'
     | 'query_scripted_triggers' | 'query_enums' | 'get_entity_info'
@@ -28,7 +28,8 @@ export type ToolEffect =
     | 'shell'
     | 'git'
     | 'media'
-    | 'mcp';
+    | 'mcp'
+    | 'process';
 
 export type ToolConcurrencyClass =
     | 'parallel'
@@ -71,13 +72,13 @@ const EDIT: AgentToolName[] = [
 ];
 const MEMORY: AgentToolName[] = ['todo_write', 'set_memory', 'get_memory', 'search_memory', 'save_memory'];
 const NETWORK: AgentToolName[] = ['web_fetch', 'search_web', 'codesearch'];
-const UTILITY: AgentToolName[] = ['run_command', 'git_ops', 'analyze_diagnostic_error'];
+const UTILITY: AgentToolName[] = ['run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process', 'git_ops', 'analyze_diagnostic_error'];
 const MEDIA: AgentToolName[] = ['convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
 const _MCP: AgentToolName[] = ['mcp_call'];
 const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results'];
 
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
-const SUB_AGENT_EXCLUDES_SET = new Set<string>(['web_fetch', 'search_web', 'codesearch', 'run_command', 'git_ops', 'save_workflow', ...MEDIA]);
+const SUB_AGENT_EXCLUDES_SET = new Set<string>(['web_fetch', 'search_web', 'codesearch', 'run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process', 'git_ops', 'save_workflow', ...MEDIA]);
 const FILE_SCOPED_WRITE_TOOLS_SET = new Set<string>([
     'write_file',
     'edit_file',
@@ -100,6 +101,8 @@ const MUTATING_TOOLS_SET = new Set<string>([
     'set_memory',
     'save_memory',
     'merge_results',
+    'write_process_stdin',
+    'terminate_process',
 ]);
 
 // Storm-exempt tools: 廉价状态检查 / 协作信号,允许在同一轮反复调用,不计入 doom-loop 窗口。
@@ -127,6 +130,8 @@ const LOC_MODES = new Set([
 ]);
 const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...NETWORK, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
 const SCRIPT_MODES = new Set([...BASE_READ, ...NETWORK, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
+const GENERAL_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, 'mcp_call']);
+const UTILITY_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, 'mcp_call']);
 
 for (const schema of SCHEMA_DEFINITIONS) {
     const name = schema.function.name as AgentToolName;
@@ -139,9 +144,10 @@ for (const schema of SCHEMA_DEFINITIONS) {
     if (SCRIPT_MODES.has(name)) allowed.add('script');
     if (BUILD_MODES.has(name)) { allowed.add('build'); allowed.add('gui_expert'); }
     
-    // For general and utility mode, we do inverse exclusions:
-    if (!['todo_write', ...ORCHESTRATION].includes(name)) allowed.add('general');
-    if (!ORCHESTRATION.includes(name)) allowed.add('utility');
+    // Security-sensitive modes use positive allowlists. New tools must be
+    // deliberately assigned instead of becoming available by omission.
+    if (GENERAL_MODES.has(name)) allowed.add('general');
+    if (UTILITY_MODES.has(name)) allowed.add('utility');
 
     // 动态推演 effect、riskLevel 与 concurrencyClass 以维护单一事实源
     let effect: ToolEffect = 'none';
@@ -171,6 +177,14 @@ for (const schema of SCHEMA_DEFINITIONS) {
     } else if (name === 'run_command') {
         effect = 'shell';
         riskLevel = 2;
+        concurrencyClass = 'interactive';
+    } else if (name === 'list_processes' || name === 'read_process') {
+        effect = 'none';
+        riskLevel = 0;
+        concurrencyClass = 'parallel';
+    } else if (name === 'write_process_stdin' || name === 'terminate_process') {
+        effect = 'process';
+        riskLevel = 0;
         concurrencyClass = 'interactive';
     } else if (name === 'git_ops') {
         effect = 'git';
@@ -206,11 +220,14 @@ for (const schema of SCHEMA_DEFINITIONS) {
         }
     }
 
+    const isReadOnly = effect === 'workspace_read'
+        || effect === 'network'
+        || (effect === 'none' && !mutating && !ORCHESTRATION.includes(name));
     TOOL_REGISTRY.set(name, {
         name,
         schema,
         isWrite: WRITE_TOOLS_SET.has(name),
-        isReadOnly: !WRITE_TOOLS_SET.has(name),
+        isReadOnly,
         allowSubAgent: !SUB_AGENT_EXCLUDES_SET.has(name),
         allowedModes: allowed,
         effect,
@@ -228,4 +245,4 @@ export const WRITE_TOOLS = WRITE_TOOLS_SET;
 export const MUTATING_TOOLS = MUTATING_TOOLS_SET;
 export const FILE_SCOPED_WRITE_TOOLS = FILE_SCOPED_WRITE_TOOLS_SET;
 export const SUB_AGENT_EXCLUDES = SUB_AGENT_EXCLUDES_SET;
-export const READ_ONLY_TOOLS = new Set(SCHEMA_DEFINITIONS.map(s => s.function.name).filter(n => !WRITE_TOOLS_SET.has(n)));
+export const READ_ONLY_TOOLS = new Set([...TOOL_REGISTRY.values()].filter(entry => entry.isReadOnly).map(entry => entry.name));

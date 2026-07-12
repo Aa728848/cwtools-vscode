@@ -133,6 +133,7 @@ export interface ChatI18nText {
         groups: {
             model: string;
             tools: string;
+            processes: string;
             files: string;
             permissions: string;
             validation: string;
@@ -457,6 +458,7 @@ const EN: ChatI18nText = {
         groups: {
             model: 'Model Calls',
             tools: 'Tool Invocations',
+            processes: 'Command Processes',
             files: 'File Changes',
             permissions: 'Permissions',
             validation: 'Validation',
@@ -742,6 +744,7 @@ const ZH_CN: ChatI18nText = {
         groups: {
             model: '模型调用',
             tools: '工具调用',
+            processes: '命令进程',
             files: '文件变更',
             permissions: '权限',
             validation: '校验',

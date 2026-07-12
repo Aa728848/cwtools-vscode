@@ -157,11 +157,11 @@ export function evaluateMcpPermission(
             reason: `MCP tool '${server}/${tool}' is denied by permission pattern '${matched.pattern}'. Do not retry this tool; if the call is required, the user must change the rule in stellarisLanguageServices.ai.permissions.mcp.`,
         };
     }
-    // 'ask': interactive MCP approval is not implemented yet — fail closed with guidance.
+    // 'ask' is resolved by AgentToolExecutor through the shared approval item flow.
     return {
         allowed: false,
         action: 'ask',
         matchedPattern: matched.pattern,
-        reason: `MCP tool '${server}/${tool}' matches permission pattern '${matched.pattern}' which requires approval, and interactive MCP approval is not implemented yet. Failing closed; the user can permit it via ${settingHint}.`,
+        reason: `MCP tool '${server}/${tool}' matches permission pattern '${matched.pattern}' and requires approval through the interactive flow.`,
     };
 }

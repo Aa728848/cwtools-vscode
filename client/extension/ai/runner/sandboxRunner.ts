@@ -12,6 +12,7 @@ export interface SandboxSpawnRequest {
         sandboxMode?: string;
         networkAccess?: boolean;
         writableRoots?: string[];
+        protectedPaths?: string[];
     };
 }
 
@@ -21,7 +22,7 @@ export interface SandboxRunner {
 
 export class SandboxUnavailableError extends Error {
     constructor(public readonly platform: NodeJS.Platform) {
-        super(`No enforced command sandbox is available for ${platform}. Retry with requestEscalation=true for an explicitly approved unsandboxed run.`);
+        super(`No enforced command sandbox is available for ${platform}. Retry with requestEscalation=true and unsandboxed=true only for an explicitly approved one-shot bypass.`);
         this.name = 'SandboxUnavailableError';
     }
 }
@@ -52,7 +53,7 @@ export function detectSandboxBackend(platform = process.platform): { backend: Sa
 /**
  * Runs commands through a separate broker. Enforced profiles fail closed when
  * the host has no verified OS sandbox backend; direct execution is used only
- * for an explicit security bypass/escalation.
+ * for Full Access or an explicitly approved one-shot `unsandboxed` bypass.
  */
 export class BrokeredSandboxRunner implements SandboxRunner {
     constructor(private readonly spawnFn: typeof import('child_process').spawn) {}
@@ -73,6 +74,7 @@ export class BrokeredSandboxRunner implements SandboxRunner {
             args: request.args,
             cwd: request.options.cwd,
             writableRoots: request.profile?.writableRoots ?? [String(request.options.cwd ?? '')],
+            protectedPaths: request.profile?.protectedPaths ?? [],
             networkAccess: request.profile?.networkAccess === true,
         }), 'utf8').toString('base64url');
 
@@ -86,7 +88,7 @@ export class BrokeredSandboxRunner implements SandboxRunner {
     }
 }
 
-/** Kept for explicitly approved full-access execution and compatibility tests. */
+/** Kept for Full Access, one-shot unsandboxed execution, and compatibility tests. */
 export class DirectSandboxRunner implements SandboxRunner {
     constructor(private readonly spawnFn: typeof import('child_process').spawn) {}
     spawn(request: SandboxSpawnRequest): ChildProcess {

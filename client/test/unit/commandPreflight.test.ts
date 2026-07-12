@@ -71,6 +71,51 @@ describe('CommandPreflight Unit Tests', () => {
         expect(r.requiresPermission).to.be.true;
         expect(r.requiresEscalation).to.be.false;
     });
+
+    it('does not classify mutating Git subcommands as read-only', () => {
+        const { preflightCommand } = loadCommandPreflightModule();
+        for (const cmd of ['git branch -D feature', 'git tag -d v1', 'git remote set-url origin https://example.com/x', 'git config user.name agent', 'git diff --output=out.patch']) {
+            const r = preflightCommand(cmd);
+            expect(r.requiresPermission, cmd).to.be.true;
+            expect(r.segments[0]!.classification, cmd).to.not.equal('readonly');
+        }
+    });
+
+    it('keeps narrow Git listing forms read-only', () => {
+        const { preflightCommand } = loadCommandPreflightModule();
+        for (const cmd of ['git status', 'git branch --show-current', 'git branch -a', 'git tag --list', 'git remote -v', 'git config --get user.name']) {
+            const r = preflightCommand(cmd);
+            expect(r.requiresPermission, cmd).to.be.false;
+            expect(r.segments[0]!.classification, cmd).to.equal('readonly');
+        }
+    });
+
+    it('escalates Git actions that discard or rewrite local/remote history', () => {
+        const { preflightCommand } = loadCommandPreflightModule();
+        for (const command of [
+            'git checkout -- src/file.ts',
+            'git restore src/file.ts',
+            'git stash drop',
+            'git push --force origin main',
+        ]) {
+            const result = preflightCommand(command);
+            expect(result.riskLevel, command).to.equal(3);
+            expect(result.requiresEscalation, command).to.equal(true);
+        }
+    });
+
+    it('does not auto-approve script blocks hidden behind read-only pipeline cmdlets', () => {
+        const { preflightCommand } = loadCommandPreflightModule();
+        for (const command of [
+            'Get-Content file.txt | Where-Object { Remove-Item secret.txt; $_ }',
+            'cat "$(rm file.txt)"',
+            'Get-Content `"$(Write-Output path)`"',
+        ]) {
+            const result = preflightCommand(command);
+            expect(result.requiresPermission, command).to.equal(true);
+            expect(result.segments.some(segment => segment.classification === 'interpreter'), command).to.equal(true);
+        }
+    });
 });
 
 function loadCommandPreflightModule() {

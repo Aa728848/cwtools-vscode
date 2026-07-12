@@ -254,7 +254,7 @@ Key constraints for tools:
 - `tools/registry.ts` is the single source of truth for mode gating, read/write classification, and sub-agent availability; it derives `effect`, `riskLevel`, and `concurrencyClass`.
 - Every model-visible tool must pass the enforced `runner/policyEngine.ts` boundary before its handler. Do not add shadow-only permission paths or handler-local policy bypasses.
 - Structure reading is preferred over shell commands: prioritize `query_workspace_index`, `document_symbols`, `get_pdx_block`, and `get_file_context`.
-- `run_command` must be classified by `runner/commandPreflight.ts` risks. Extra cwd/network approvals keep the OS sandbox enabled; only the explicit `unsandboxed` field may request a one-shot bypass. Process control uses `list_processes`, `read_process`, `write_process_stdin`, and `terminate_process`.
+- `run_command` must be classified by `runner/commandPreflight.ts` risks. Extra cwd/network approvals keep the OS sandbox enabled; only the explicit `unsandboxed` field may request a one-shot bypass. `networkHosts` is approval/audit metadata: current shell backends enforce broad network allow/deny, not hostname filtering. Captured background commands return a `processId`; process control uses `list_processes`, `read_process`, `write_process_stdin`, and `terminate_process`.
 - `runner/permissionPolicy.ts` only allows low-risk pre-approved rules; `cwdScope` validation must use `path.relative`, not prefix tests.
 - File writes go through `PartitionedWriteQueue` in path dictionary order.
 - Localisation `.yml` files must use `write_localisation`, not generic text writes.
@@ -281,7 +281,7 @@ Key constraints for tools:
 - `projectProfile.ts` scans the workspace during `/init`, extracting localization language, sampling namespaces, and determining games.
 - `gameKnowledge.ts` stores game-specific PDXScript rules (9 games total).
 - `memoryParser.ts` manages private topic memory under VS Code workspace storage, with provenance, confidence, expiry, secret redaction, usage tracking, and a ~12000-character prompt bound. Project-shareable rules belong in `AGENTS.md` or explicit workflows.
-- Agent mutations, shell, network, Git, media, and MCP tools must honor VS Code Workspace Trust. Captured commands must use `runner/sandboxRunner.ts`; never label direct `child_process.spawn` as sandboxed.
+- Agent mutations, shell, network, Git, media, and MCP tools must honor VS Code Workspace Trust. Captured commands must use `runner/sandboxRunner.ts`; never label direct `child_process.spawn` as sandboxed. Backend order is native Windows helper when explicitly installed, WSL2 + Bubblewrap on Windows, Bubblewrap on Linux/Dev Containers, and Seatbelt on macOS; unavailable enforced backends fail closed.
 - For sub-tasks modifying only `.yml` localization files, the agent is automatically promoted to `loc_writer`, and general write tools are disabled.
 - Custom Provider uses `cwtools.ai.customApiFormat` to support 4 network protocols. Custom endpoints are stored in `cwtools.ai.providerEndpoints`.
 - `usageTracker.ts` persists token usage and costs across sessions.
@@ -618,7 +618,7 @@ Webview 运行在浏览器沙盒中：
 - `tools/registry.ts` 是模式门控、读写分类和子 Agent 可用性的事实来源；同时派生 `effect`、`riskLevel`、`concurrencyClass`。
 - 所有模型可见工具必须先通过强制执行的 `runner/policyEngine.ts` 再进入领域 handler；不得新增仅 shadow 的权限路径或 handler 本地绕过。
 - 结构化读取优先于原始命令读取：先考虑 `query_workspace_index`、`document_symbols`、`get_pdx_block`、`get_file_context`。
-- `run_command` 必须经过 `runner/commandPreflight.ts` 风险分级；增加 cwd/network 权限后仍须保留操作系统沙箱，只有显式 `unsandboxed` 字段可以请求单次绕过。进程控制统一使用 `list_processes`、`read_process`、`write_process_stdin`、`terminate_process`。
+- `run_command` 必须经过 `runner/commandPreflight.ts` 风险分级；增加 cwd/network 权限后仍须保留操作系统沙箱，只有显式 `unsandboxed` 字段可以请求单次绕过。`networkHosts` 仅用于审批范围与审计；当前 shell 后端强制的是广泛网络允许/禁止，而不是按域名过滤。captured 后台命令会返回 `processId`，进程控制统一使用 `list_processes`、`read_process`、`write_process_stdin`、`terminate_process`。
 - `runner/permissionPolicy.ts` 只放行低风险预批准命令；`cwdScope` 校验必须保留 `path.relative` 形式，不要退回 `startsWith`。
 - 写文件工具由 `PartitionedWriteQueue` 按文件路径串行化；多文件写入按路径字典序获取锁。
 - `.yml` 本地化文件必须用 `write_localisation`，不要用通用写入或替换工具直接写。
@@ -645,7 +645,7 @@ Webview 运行在浏览器沙盒中：
 - `projectProfile.ts` 处理 `/init` 命令的项目扫描：目录检测、本地化语言/编码检测、命名空间/标识符采样、游戏检测、prompt card 生成和 `queryProjectProfile` 工具处理器。
 - `gameKnowledge.ts` 按 languageId 提供 9 款游戏的 PDXScript 知识块，由 `promptBuilder.ts` 动态选择注入。
 - `memoryParser.ts` 在 VS Code workspace storage 中管理 topic 级私有结构化记忆，记录来源、置信度、过期、使用次数并做 secret 脱敏，提示词注入上限约 12000 字符；需要项目共享的规则应写入 `AGENTS.md` 或显式工作流。
-- Agent 的写入、命令、网络、Git、媒体和 MCP 工具必须遵守 VS Code Workspace Trust；captured 命令必须经过 `runner/sandboxRunner.ts`，不得把直接 `child_process.spawn` 标记为沙箱执行。
+- Agent 的写入、命令、网络、Git、媒体和 MCP 工具必须遵守 VS Code Workspace Trust；captured 命令必须经过 `runner/sandboxRunner.ts`，不得把直接 `child_process.spawn` 标记为沙箱执行。后端顺序为：显式安装的 Windows 原生 helper、Windows 上的 WSL2 + Bubblewrap、Linux/开发容器中的 Bubblewrap、macOS Seatbelt；缺少强制后端时必须失败关闭。
 - 多 Agent 协作中，`plannedFiles` 全部为本地化 `.yml` 的子任务会被自动升级为 `loc_writer` 角色，且沙盒会屏蔽通用写工具，只允许 `write_localisation`。
 - Custom Provider 通过 `cwtools.ai.customApiFormat` 支持四种线协议（`openai-chat-completions`、`openai-responses`、`anthropic-messages`、`gemini-generate-content`）；endpoint 按 Provider 存储在 `cwtools.ai.providerEndpoints`，旧的全局 `cwtools.ai.endpoint` 由 `migrateLegacyEndpoint()` 自动迁移，不要重新引入。
 - `usageTracker.ts` 跨会话持久化累计 token 用量、成本和缓存统计数据。

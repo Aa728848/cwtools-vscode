@@ -124,8 +124,32 @@
                     "match": "@[A-Za-z_][A-Za-z0-9_.:-]*"
                 },
                 {
+                    "name": "meta.concept.stellaris-localisation",
+                    "begin": "(\\[\\s*)('[^'\\]\\r\\n]+')(\\s*,\\s*')",
+                    "beginCaptures": {
+                        "1": { "name": "punctuation.definition.concept.begin.stellaris-localisation" },
+                        "2": { "name": "entity.name.concept.stellaris-localisation" },
+                        "3": { "name": "punctuation.separator.concept.stellaris-localisation" }
+                    },
+                    "end": "('\\s*\\])",
+                    "endCaptures": {
+                        "1": { "name": "punctuation.definition.concept.end.stellaris-localisation" }
+                    },
+                    "contentName": "string.unquoted.concept-label.stellaris-localisation",
+                    "patterns": [
+                        {
+                            "name": "constant.character.format.color.stellaris-localisation",
+                            "match": "\\u00a7[A-Za-z0-9!%-]"
+                        },
+                        {
+                            "name": "constant.character.escape.stellaris-localisation",
+                            "match": "\\\\."
+                        }
+                    ]
+                },
+                {
                     "name": "entity.name.concept.stellaris-localisation",
-                    "match": "\\[\\s*'[^'\\]\\r\\n]+'(?:\\s+[^\\]\\r\\n]*)?\\]"
+                    "match": "\\[\\s*'[^'\\]\\r\\n]+'(?:\\s+[^\\]\\r\\n]*)?\\s*\\]"
                 },
                 {
                     "name": "support.function.scope-expression.stellaris-localisation",

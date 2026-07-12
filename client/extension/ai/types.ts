@@ -1930,6 +1930,7 @@ export interface PermissionRequestPreflight {
     reasons?: string[];
     networkAccess?: boolean;
     networkHosts?: string[];
+    networkEnforcement?: 'blocked' | 'broad' | 'declared-only' | 'unrestricted';
     sandboxMode?: string;
     unsandboxed?: boolean;
     writableRoots?: string[];

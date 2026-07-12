@@ -35,4 +35,16 @@ describe('Paradox Grammar', () => {
         const codeIncludes = grammar.repository.code.patterns.map((pattern: any) => pattern.include);
         expect(codeIncludes).to.include('#parameters');
     });
+
+    it('recognizes comma-form concept labels with color markers inside the label', () => {
+        const pattern = grammar.repository.strings.patterns.find((entry: any) => entry.name === 'meta.concept.paradox');
+        expect(pattern).to.not.equal(undefined);
+        const regex = new RegExp(pattern.begin);
+        const correct = "['concept_SRA_set_terrified_3','\u00a7R恐惧。\u00a7!']";
+        const match = correct.match(regex);
+        expect(match).to.not.equal(null);
+        expect(match![2]).to.equal("'concept_SRA_set_terrified_3'");
+        const colorPattern = pattern.patterns.find((entry: any) => entry.name === 'constant.character.format.color.paradox');
+        expect(correct.match(new RegExp(colorPattern.match, 'g'))).to.deep.equal(['\u00a7R', '\u00a7!']);
+    });
 });

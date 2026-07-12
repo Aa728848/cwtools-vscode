@@ -101,6 +101,14 @@ building_kuat_command_center_auto:0 "Command Center"
         expect(stripLocalisationColorMarkers('§HHeader§! and §Oorange§!')).to.equal('Header and orange');
     });
 
+    it('keeps color markers inside comma-form concept labels tokenizable', () => {
+        const text = "['concept_SRA_set_terrified_3','\u00a7R恐惧。\u00a7!']";
+        const tokens = tokenizeLocalisationRichText(text, 0);
+        expect(tokens.some(token => token.type === 'concept' && token.text === text)).to.equal(true);
+        expect(tokens.some(token => token.type === 'colorMarker' && token.text === '\u00a7R')).to.equal(true);
+        expect(tokens.some(token => token.type === 'colorRange' && token.colorCode === '\u00a7R' && token.text === '恐惧。')).to.equal(true);
+    });
+
     it('detects localisation completion contexts only inside values', () => {
         const line = ' my_key:0 "§Y$PLANET| [Root. £energy" # §R comment';
 

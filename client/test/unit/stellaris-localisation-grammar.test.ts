@@ -92,6 +92,10 @@ describe('Stellaris Localisation Grammar & Language Configuration', () => {
         expect(byName('variable.other.localisation-reference.stellaris-localisation').test('$PLANET|Y$')).to.be.true;
         expect(byName('variable.other.scripted-variable.stellaris-localisation').test('@scripted_var')).to.be.true;
         expect(byName('entity.name.concept.stellaris-localisation').test('[\'concept_test\' Concept text]')).to.be.true;
+        const concept = patterns.find((entry: any) => entry.name === 'meta.concept.stellaris-localisation');
+        expect(new RegExp(concept.begin).test("['concept_test','\u00a7R恐惧。\u00a7!']")).to.be.true;
+        const conceptColor = concept.patterns.find((entry: any) => entry.name === 'constant.character.format.color.stellaris-localisation');
+        expect("\u00a7R恐惧。\u00a7!".match(new RegExp(conceptColor.match, 'g'))).to.deep.equal(['\u00a7R', '\u00a7!']);
         expect(byName('support.function.scope-expression.stellaris-localisation').test('[Root.GetName]')).to.be.true;
     });
 

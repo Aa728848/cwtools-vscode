@@ -5199,7 +5199,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 preflight.unsandboxed ? tr('Filesystem and process sandbox: unrestricted for this command', '文件系统与进程沙箱：此命令不受限制') : '',
                 preflight.cwd ? `${tr('Working directory', '工作目录')}: ${preflight.cwd}` : '',
                 preflight.sandboxMode ? `${tr('Sandbox after approval', '批准后的沙箱')}: ${preflight.sandboxMode}` : '',
-                preflight.networkAccess ? `${tr('Network', '网络')}: ${(preflight.networkHosts || []).length ? preflight.networkHosts.join(', ') : tr('Any destination', '任意目标')}` : '',
+                preflight.networkAccess ? `${tr('Network', '网络')}: ${
+                    preflight.networkEnforcement === 'declared-only'
+                        ? `${(preflight.networkHosts || []).join(', ')} ${tr('(declared/audited; sandbox grants broad network access)', '（仅声明/审计；沙箱实际授予广泛网络访问）')}`
+                        : preflight.networkEnforcement === 'unrestricted'
+                            ? tr('Unrestricted because this run leaves the OS sandbox', '因本次运行离开 OS 沙箱而不受限制')
+                            : tr('Any destination (broad network grant)', '任意目标（广泛网络授权）')
+                }` : `${tr('Network', '网络')}: ${tr('blocked by sandbox', '由沙箱阻止')}`,
                 Array.isArray(preflight.writableRoots) && preflight.writableRoots.length ? `${tr('Writable roots', '可写目录')}: ${preflight.writableRoots.join(', ')}` : '',
                 Array.isArray(preflight.targetPaths) && preflight.targetPaths.length ? `${tr('Target paths', '目标路径')}: ${preflight.targetPaths.join(', ')}` : '',
                 preflight.mcpServer || preflight.mcpTool ? `MCP: ${preflight.mcpServer || '?'} / ${preflight.mcpTool || '?'}` : '',

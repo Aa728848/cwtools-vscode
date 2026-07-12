@@ -188,7 +188,7 @@ sequenceDiagram
 | `memoryParser.ts` | Private structured memory with provenance, confidence, usage, expiry, redaction, and bounded consolidation |
 | `workspacePaths.ts` | Separates project artifacts under `.cwtools-ai/` from private runtime state under `ExtensionContext.storageUri`, with legacy migration |
 | `workspaceSandbox.ts` | Input path cleaning, scope classification (project, workspace, outside, etc.), and trust checks |
-| `runner/sandboxRunner.ts` / `sandboxBroker.ts` | Fail-closed command broker with Bubblewrap, Seatbelt, or a packaged Windows helper backend |
+| `runner/sandboxRunner.ts` / `sandboxBroker.ts` | Fail-closed command broker: verified native Windows helper when configured, WSL2 + Bubblewrap fallback, Linux Bubblewrap, or macOS Seatbelt |
 | `runner/threadStore.ts` / `goalStore.ts` | Durable thread lineage, exact-run forks, transcript recovery, and long-running goals |
 | `runner/historyPolicy.ts` | Private history persistence level, age/size retention, clear, and redacted export policy |
 | `usageTracker.ts` | Persists cumulative token usages, costs, and prompt cache stats across sessions |
@@ -283,7 +283,7 @@ The Runner restricts tools based on the active workflow and appends supplementar
 - Reads of a file queue behind pending writes via `writeCoordinator.afterCurrentWrites`.
 - Multi-agent systems use `dispatch_agents`, `query_blackboard`, and `merge_results`. Sub-agents are sandboxed in `orchestrator/subAgentSandbox.ts`.
 - VS Code Workspace Trust is the outer execution gate: Restricted Mode keeps read/LSP features but blocks mutations, shell, network, media, git, and MCP tools.
-- Captured commands use the fail-closed broker. Explicitly escalated interactive commands use a visible VS Code Terminal and are recorded by `processRegistry.ts`.
+- Captured commands use the fail-closed broker. A configured Windows helper must pass the protocol-v1 self-test and report enforced filesystem plus allow/deny networking before selection. Background captured commands retain piped output/stdin controls through `processRegistry.ts`; explicitly escalated interactive commands use a visible VS Code Terminal. Shell networking is enforced as broad allow/deny, while declared hostnames remain approval/audit metadata and are labelled that way in permission cards.
 - Private runs, checkpoints, goals, and learned memory use extension storage; only user-shareable plans, workflows, blueprints, and project rules remain in `.cwtools-ai/`.
 
 ##### Orchestrator
@@ -588,7 +588,7 @@ sequenceDiagram
 | `memoryParser.ts` | 带来源、置信度、使用次数、过期、脱敏和有界合并的私有结构化长期记忆 |
 | `workspacePaths.ts` | 分离 `.cwtools-ai/` 项目产物与 `ExtensionContext.storageUri` 私有运行状态，并兼容迁移旧数据 |
 | `workspaceSandbox.ts` | 路径输入清洗、作用域分类（project/ai/workspace/outside）和信任判定 |
-| `runner/sandboxRunner.ts` / `sandboxBroker.ts` | 失败关闭的命令 Broker，支持 Bubblewrap、Seatbelt 或随扩展分发的 Windows helper |
+| `runner/sandboxRunner.ts` / `sandboxBroker.ts` | 失败关闭的命令 Broker：优先使用已配置并验证的 Windows 原生 helper，其次回退到 WSL2 + Bubblewrap，并支持 Linux Bubblewrap 与 macOS Seatbelt |
 | `runner/threadStore.ts` / `goalStore.ts` | 持久 Thread 谱系、指定 Run 分叉、转录恢复与长任务目标 |
 | `runner/historyPolicy.ts` | 私有历史持久化级别、时间/容量保留、清理和脱敏导出策略 |
 | `usageTracker.ts` | 跨会话 token 用量、成本和缓存统计持久化 |
@@ -765,7 +765,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 - `workspacePaths.ts` 将计划、工作流、蓝图等可共享产物保留在 `.cwtools-ai/`，Thread、Ledger、Checkpoint、Goal 与自动学习记忆写入 `ExtensionContext.storageUri`；旧目录只作为迁移和兼容读取源。
 - `workspaceSandbox.ts` 负责路径输入清洗（去引号、去 code span、去自然语言前缀）、workspace folder 别名解析、`.cwtools-ai` 路径别名解析、以及四级作用域分类（`project`/`ai`/`workspace`/`outside`）和信任判定。
 - VS Code Restricted Mode 是外层门禁：未信任工作区保留读取/LSP 能力，但禁止写入、命令、网络、Git、媒体和 MCP 工具。
-- captured 命令经独立 `sandboxBroker` 执行；找不到可验证的操作系统后端时失败关闭并在权限选择器显示后端健康状态。工作区写绑定会重新把 `.git`、`.agents`、`.codex` 以及 `.cwtools-ai` 内兼容保留的私有运行状态子目录设为只读，同时保留 topic 共享产物可写。交互长任务必须显式授权后在可见 VS Code Terminal 中运行，并由 `processRegistry` 持久记录生命周期、输出尾部和控制句柄。
+- captured 命令经独立 `sandboxBroker` 执行；Windows 后端按“已验证原生 helper → WSL2 + Bubblewrap”选择，其中 helper 必须通过 protocol-v1 自检，并明确报告文件系统强制隔离和网络允许/禁止能力；Linux/开发容器使用 Bubblewrap，macOS 使用 Seatbelt。找不到可验证的操作系统后端时失败关闭并在权限选择器显示后端健康状态。工作区写绑定会重新把 `.git`、`.agents`、`.codex` 以及 `.cwtools-ai` 内兼容保留的私有运行状态子目录设为只读，同时保留 topic 共享产物可写。captured 后台任务保留管道输出与 stdin/终止控制；交互任务必须显式授权后在可见 VS Code Terminal 中运行。shell 网络隔离只强制广泛允许/禁止，域名列表仅作为审批和审计声明，并在权限卡片中明确标注。
 
 ##### Runner Policy
 

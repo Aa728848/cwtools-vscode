@@ -22,7 +22,7 @@ import {
     sessionFileWriteMode,
     setSessionPermissionMode,
 } from './runner/sessionPermissions';
-import { detectSandboxBackend } from './runner/sandboxRunner';
+import { detectSandboxBackendAsync } from './runner/sandboxRunner';
 
 const execAsync = promisify(cp.exec);
 
@@ -252,7 +252,7 @@ export class ChatSettingsManager {
         // Fold any legacy global endpoint into the per-provider map before reading config.
         await this.aiService.migrateLegacyEndpoint();
         const config = this.aiService.getConfig();
-        const detectedSandbox = detectSandboxBackend();
+        const detectedSandbox = await detectSandboxBackendAsync();
 
         const providers = Object.values(BUILTIN_PROVIDERS).map(p => {
             const customNonFim = p.id === 'custom' && config.customApiFormat !== 'openai-chat-completions';
@@ -293,7 +293,7 @@ export class ChatSettingsManager {
             sandboxBackend: detectedSandbox
                 ? { available: true, backend: detectedSandbox.backend, message: aiText(`Enforced command sandbox: ${detectedSandbox.backend}`, `强制命令沙箱：${detectedSandbox.backend}`) }
                 : { available: false, message: process.platform === 'win32'
-                    ? aiText('Native Windows sandbox helper is not installed. Captured commands fail closed; use WSL2/Dev Container or an explicitly approved terminal run.', '未安装原生 Windows 沙箱助手。捕获命令将安全拒绝；请使用 WSL2/开发容器，或明确批准终端运行。')
+                    ? aiText('No enforced Windows command backend is ready. Install bubblewrap in WSL2, use a Dev Container, configure a verified native helper, or explicitly approve a terminal run.', 'Windows 强制命令后端尚未就绪。请在 WSL2 中安装 bubblewrap、使用开发容器、配置已验证的原生 helper，或明确批准终端运行。')
                     : aiText('No supported OS command sandbox backend is available. Captured commands fail closed.', '没有可用的操作系统命令沙箱后端。捕获命令将安全拒绝。') },
             reasoningEffort: config.reasoningEffort,
             braveSearchApiKey: (() => {

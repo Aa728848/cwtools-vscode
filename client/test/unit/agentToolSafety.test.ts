@@ -1268,6 +1268,51 @@ describe('agent tool topic artifacts', () => {
         expect(terminate.calledOnce).to.equal(true);
     });
 
+    it('starts and controls a captured command in the background', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const context = makeContext('background-process');
+        const result = await handler.runCommand({
+            command: `node -e "process.stdin.setEncoding('utf8'); process.stdin.once('data', function(d) { console.log(d.trim()); process.exit(0); }); setTimeout(function() { process.exit(2); }, 5000)"`,
+            background: true,
+            timeoutMs: 10_000,
+            requestEscalation: true,
+        }, {
+            ...context,
+            onPermissionRequest: async () => true,
+        } as any);
+
+        expect(result.status).to.equal('started');
+        expect(result.processId).to.be.a('string');
+        expect(handler.writeProcessStdin({ processId: result.processId!, text: 'hello background' }, context).success).to.equal(true);
+        for (let attempt = 0; attempt < 40; attempt++) {
+            if (handler.readProcess({ processId: result.processId! }, context).process?.status !== 'running') break;
+            await new Promise(resolve => setTimeout(resolve, 25));
+        }
+        const record = handler.readProcess({ processId: result.processId! }, context).process;
+        expect(record?.status).to.equal('completed');
+        expect(record?.outputPreview).to.include('hello background');
+    });
+
+    it('marks network host scopes as declared-only in approval metadata', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        let preflight: any;
+        const result = await handler.runCommand({
+            command: 'node --version',
+            networkAccess: true,
+            networkHosts: ['example.com'],
+        }, {
+            ...makeContext('network-scope'),
+            onPermissionRequest: async (_id: string, _tool: string, _description: string, _command: string, context: any) => {
+                preflight = context.preflight;
+                return true;
+            },
+        } as any);
+
+        expect(result.exitCode).to.equal(0);
+        expect(preflight.networkHosts).to.deep.equal(['example.com']);
+        expect(preflight.networkEnforcement).to.equal('declared-only');
+    });
+
     it('rejects run_command working directories outside the workspace boundary', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         const result = await handler.runCommand({

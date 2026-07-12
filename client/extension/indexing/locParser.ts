@@ -323,6 +323,26 @@ export function tokenizeLocalisationRichText(value: string, baseOffset = 0): Loc
 						end: baseOffset + end + 1,
 						text,
 					});
+					// A concept's display label may contain Stellaris color markers,
+					// for example ['concept_key','§RLabel§!']. Keep the concept as
+					// one semantic span while also exposing its nested color spans.
+					if (type === 'concept') {
+						for (let markerIndex = i + 1; markerIndex < end; markerIndex++) {
+							if (value[markerIndex] !== '\u00a7' || !isColorMarkerCode(value[markerIndex + 1])) continue;
+							const markerText = value.slice(markerIndex, markerIndex + 2);
+							const markerToken: LocalisationRichToken = {
+								type: 'colorMarker',
+								start: baseOffset + markerIndex,
+								end: baseOffset + markerIndex + 2,
+								text: markerText,
+								marker: markerText,
+								colorCode: markerText,
+							};
+							tokens.push(markerToken);
+							colorMarkers.push(markerToken);
+							markerIndex++;
+						}
+					}
 					i = end + 1;
 					continue;
 				}

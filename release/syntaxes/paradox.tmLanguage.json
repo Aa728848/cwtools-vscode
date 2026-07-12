@@ -304,8 +304,26 @@
 			},
 			"patterns": [
 				{
+					"name": "meta.concept.paradox",
+					"begin": "(\\[\\s*)('[A-Za-z0-9_.:-]+')(\\s*,\\s*')",
+					"beginCaptures": {
+						"1": { "name": "punctuation.definition.concept.begin.paradox" },
+						"2": { "name": "entity.name.concept.paradox" },
+						"3": { "name": "punctuation.separator.concept.paradox" }
+					},
+					"end": "('\\s*\\])",
+					"endCaptures": {
+						"1": { "name": "punctuation.definition.concept.end.paradox" }
+					},
+					"contentName": "string.unquoted.concept-label.paradox",
+					"patterns": [
+						{ "name": "constant.character.format.color.paradox", "match": "\\u00a7[A-Za-z0-9!%-]" },
+						{ "name": "constant.character.escape.paradox", "match": "\\\\." }
+					]
+				},
+				{
 					"name": "constant.other.paradox",
-					"match": "§[A-Za-z!]"
+					"match": "\\u00a7[A-Za-z0-9!%-]"
 				}
 			]
 		}

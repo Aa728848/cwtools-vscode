@@ -1,8 +1,8 @@
 import * as fs from 'fs';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 
 interface BrokerConfig {
-    backend: 'bubblewrap' | 'seatbelt' | 'windows-helper';
+    backend: 'bubblewrap' | 'seatbelt' | 'windows-helper' | 'wsl-bubblewrap';
     backendExecutable: string;
     command: string;
     args: string[];
@@ -10,6 +10,12 @@ interface BrokerConfig {
     writableRoots: string[];
     protectedPaths: string[];
     networkAccess: boolean;
+    distro?: string;
+    environment?: Record<string, string>;
+}
+
+function pathLikeWindows(value: string): boolean {
+    return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\');
 }
 
 function parseConfig(): BrokerConfig {
@@ -22,15 +28,15 @@ function parseConfig(): BrokerConfig {
     return value;
 }
 
-function bubblewrapArgs(config: BrokerConfig): string[] {
+function bubblewrapArgs(config: BrokerConfig, validatePaths = true): string[] {
     const args = ['--die-with-parent', '--new-session', '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp'];
     for (const root of config.writableRoots.filter(Boolean)) {
-        if (fs.existsSync(root)) args.push('--bind', root, root);
+        if (!validatePaths || fs.existsSync(root)) args.push('--bind', root, root);
     }
     // Re-apply protected descendants after writable roots. This prevents a
     // workspace bind from making Git metadata and agent policy stores writable.
     for (const protectedPath of config.protectedPaths.filter(Boolean)) {
-        if (fs.existsSync(protectedPath)) args.push('--ro-bind', protectedPath, protectedPath);
+        if (!validatePaths || fs.existsSync(protectedPath)) args.push('--ro-bind', protectedPath, protectedPath);
     }
     if (!config.networkAccess) args.push('--unshare-net');
     args.push('--chdir', config.cwd, '--', config.command, ...config.args);
@@ -57,10 +63,35 @@ function seatbeltProfile(config: BrokerConfig): string {
 }
 
 function launch(config: BrokerConfig): void {
-    const executable = config.backendExecutable;
+    let executable = config.backendExecutable;
     let args: string[];
     if (config.backend === 'bubblewrap') {
         args = bubblewrapArgs(config);
+    } else if (config.backend === 'wsl-bubblewrap') {
+        const prefix = config.distro ? ['--distribution', config.distro] : [];
+        const translate = (value: string): string => {
+            const result = spawnSync(config.backendExecutable, [...prefix, '--exec', 'wslpath', '-a', value], {
+                encoding: 'utf8', timeout: 4000, windowsHide: true,
+            });
+            if (result.status !== 0) throw new Error(`WSL path translation failed for ${value}: ${result.stderr || result.stdout}`);
+            return String(result.stdout).trim();
+        };
+        const translated: BrokerConfig = {
+            ...config,
+            backend: 'bubblewrap',
+            backendExecutable: '/usr/bin/bwrap',
+            cwd: translate(config.cwd),
+            writableRoots: config.writableRoots.filter(root => fs.existsSync(root)).map(translate),
+            protectedPaths: config.protectedPaths.filter(protectedPath => fs.existsSync(protectedPath)).map(translate),
+        };
+        const environment = Object.entries(config.environment ?? {}).map(([key, value]) => {
+            const translatedValue = /_(?:DIR|ROOT|SCRIPT)$/.test(key) && pathLikeWindows(value) ? translate(value) : value;
+            return `${key}=${translatedValue}`;
+        });
+        translated.command = '/usr/bin/env';
+        translated.args = [...environment, config.command, ...config.args];
+        executable = config.backendExecutable;
+        args = [...prefix, '--exec', '/usr/bin/bwrap', ...bubblewrapArgs(translated, false)];
     } else if (config.backend === 'seatbelt') {
         args = ['-p', seatbeltProfile(config), config.command, ...config.args];
     } else {
@@ -73,7 +104,7 @@ function launch(config: BrokerConfig): void {
     const child = spawn(executable, args, {
         cwd: config.cwd,
         env: process.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['inherit', 'pipe', 'pipe'],
         windowsHide: true,
     });
     child.stdout?.pipe(process.stdout);

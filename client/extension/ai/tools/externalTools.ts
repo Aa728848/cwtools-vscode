@@ -10,7 +10,7 @@ import type { TodoItem, TodoWriteResult } from '../types';
 import { preflightCommand } from '../runner/commandPreflight';
 import { PermissionPolicyStore } from '../runner/permissionPolicy';
 import { processRegistry } from '../runner/processRegistry';
-import { BrokeredSandboxRunner, DirectSandboxRunner, type SandboxRunner } from '../runner/sandboxRunner';
+import { BrokeredSandboxRunner, DirectSandboxRunner, detectSandboxBackendAsync, type SandboxRunner } from '../runner/sandboxRunner';
 import { getAiStorageRoot, getAiStorageRootCandidates, getTopicScratchDir, getTopicStorageDir } from '../workspacePaths';
 import {
     escapeRegExp,
@@ -966,7 +966,7 @@ export class ExternalToolHandler {
 
     // ─── runCommand ──────────────────────────────────────────────────────────
 
-    async runCommand(args: { command: string; cwd?: string; timeoutMs?: number; requestEscalation?: boolean; unsandboxed?: boolean; executionMode?: 'captured' | 'terminal'; networkAccess?: boolean; networkHosts?: string[] }, context?: import('../types').AgentToolContext): Promise<{
+    async runCommand(args: { command: string; cwd?: string; timeoutMs?: number; background?: boolean; requestEscalation?: boolean; unsandboxed?: boolean; executionMode?: 'captured' | 'terminal'; networkAccess?: boolean; networkHosts?: string[] }, context?: import('../types').AgentToolContext): Promise<{
         stdout: string;
         stderr: string;
         exitCode: number;
@@ -1050,6 +1050,7 @@ export class ExternalToolHandler {
         const isAutoApproveSafeCommand = isReadOnlyCommand || isSingleSafeCommand;
 
         const bypassSandbox = isSecuritySandboxDisabled();
+        const directExecution = bypassSandbox || args.unsandboxed === true;
         let escalationReason = '';
         const detectedNetworkHosts = [...args.command.matchAll(/https?:\/\/([^\s/'"`<>]+)/gi)]
             .map(match => match[1]!.split(':')[0]!.toLowerCase());
@@ -1204,6 +1205,11 @@ export class ExternalToolHandler {
                 ],
                 networkAccess: leavesOsSandbox || args.networkAccess === true,
                 networkHosts: requestedNetworkHosts,
+                networkEnforcement: leavesOsSandbox
+                    ? 'unrestricted'
+                    : args.networkAccess === true
+                    ? (requestedNetworkHosts.length > 0 ? 'declared-only' : 'broad')
+                    : 'blocked',
                 sandboxMode: args.executionMode === 'terminal' ? 'user-approved-terminal' : args.unsandboxed ? 'disabled' : 'workspace-write',
                 unsandboxed: leavesOsSandbox,
                 writableRoots: leavesOsSandbox ? undefined : [...new Set(requestedWritableRoots.map(root => path.resolve(root)))],
@@ -1233,13 +1239,24 @@ export class ExternalToolHandler {
 
         // Parse command into binary + args on the platform shell
         const isWindows = process.platform === 'win32';
-        const shell = isWindows
+        const detectedSandbox = directExecution ? undefined : await detectSandboxBackendAsync();
+        const useWslSandbox = isWindows && detectedSandbox?.backend === 'wsl-bubblewrap';
+        if (useWslSandbox && preflight.segments.some(segment => /^(?:get-|set-|new-|remove-|select-|where-|format-|out-|write-|resolve-|test-)/i.test(segment.command))) {
+            return {
+                stdout: '',
+                stderr: 'The enforced Windows fallback is WSL2 + bubblewrap, but this command uses PowerShell-only cmdlets. Use a portable command, install the native Windows helper, or request a visible terminal explicitly.',
+                exitCode: 1,
+            };
+        }
+        const shell = useWslSandbox
+            ? '/bin/sh'
+            : isWindows
             ? 'powershell.exe'
             : '/bin/sh';
-        const commandText = isWindows
+        const commandText = isWindows && !useWslSandbox
             ? '$OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $OutputEncoding; ' + args.command
             : args.command;
-        const shellArgs = isWindows
+        const shellArgs = isWindows && !useWslSandbox
             ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', commandText]
             : ['-c', commandText];
         const agentWorkspaceDir = getTopicStorageDir(topicId, this.ctx.workspaceRoot);
@@ -1327,7 +1344,6 @@ export class ExternalToolHandler {
         // Approval and sandboxing are independent. A normal escalation grants
         // only the requested cwd/network scope; direct execution requires the
         // explicit unsandboxed flag (or the persistent full-access setting).
-        const directExecution = bypassSandbox || args.unsandboxed === true;
         const workspaceRoots = [...new Set([this.ctx.workspaceRoot, ...(vs.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath)].filter(Boolean))];
         const writableRoots = requestedWritableRoots;
         const protectedNames = gitMetadataMutation && !!grantedPermissionId
@@ -1367,6 +1383,80 @@ export class ExternalToolHandler {
                 commandChangeBaseline = await this.collectCommandFileState(!!this.getCommandSnapshotCallback(context));
             } catch {
                 commandChangeBaseline = undefined;
+            }
+        }
+
+        if (args.background) {
+            try {
+                const sandboxRunner = sandboxRunnerFactory(spawn);
+                const proc = sandboxRunner.spawn({
+                    command: shell,
+                    args: shellArgs,
+                    options: {
+                        cwd,
+                        env: spawnEnv,
+                        stdio: ['pipe', 'pipe', 'pipe'],
+                        detached: !isWindows,
+                        windowsHide: true,
+                    },
+                    profile: sandboxProfile,
+                });
+                const record = processRegistry.register(args.command, cwd, proc.pid, eventSink, sandboxProfile, {
+                    executionMode: 'captured',
+                    runId: context?.runnerOptions?.runRecord?.runId,
+                    threadId: context?.runnerOptions?.threadId,
+                    terminate: () => this.terminateProcessTree(proc, spawn),
+                    writeStdin: text => {
+                        if (!proc.stdin || proc.stdin.destroyed) throw new Error('Process stdin is unavailable');
+                        proc.stdin.write(text);
+                    },
+                });
+                let capturedChanges = false;
+                const captureChanges = () => {
+                    if (capturedChanges) return;
+                    capturedChanges = true;
+                    void this.recordCommandFileChanges(commandChangeBaseline, context).then(changes => {
+                        if (changes.changedFiles.length > 0) {
+                            context?.onStep?.({
+                                type: 'thinking',
+                                content: `run_command recorded ${changes.changedFiles.length} background workspace file change(s).`,
+                                timestamp: Date.now(),
+                            });
+                        }
+                    }).catch(() => {});
+                };
+                proc.stdout?.on('data', (chunk: Buffer) => processRegistry.appendOutput(record.processId, 'stdout', chunk.toString(), eventSink));
+                proc.stderr?.on('data', (chunk: Buffer) => processRegistry.appendOutput(record.processId, 'stderr', chunk.toString(), eventSink));
+                proc.on('error', (error: Error) => {
+                    processRegistry.appendOutput(record.processId, 'stderr', `spawn error: ${error.message}`, eventSink);
+                    processRegistry.complete(record.processId, 1, eventSink);
+                    captureChanges();
+                });
+                proc.on('close', code => {
+                    processRegistry.complete(record.processId, code ?? 0, eventSink);
+                    captureChanges();
+                });
+                const timer = setTimeout(() => {
+                    this.terminateProcessTree(proc, spawn);
+                    processRegistry.appendOutput(record.processId, 'stderr', '\n[... stopped after timeout]', eventSink);
+                    processRegistry.markTerminated(record.processId, eventSink);
+                    captureChanges();
+                }, timeoutMs);
+                timer.unref?.();
+                proc.once('close', () => clearTimeout(timer));
+                return {
+                    stdout: `Captured background command started. Process id: ${record.processId}`,
+                    stderr: '',
+                    exitCode: 0,
+                    processId: record.processId,
+                    status: 'started',
+                };
+            } catch (error) {
+                return {
+                    stdout: '',
+                    stderr: `Failed to start background command in cwd "${cwd}": ${error instanceof Error ? error.message : String(error)}`,
+                    exitCode: 1,
+                };
             }
         }
 

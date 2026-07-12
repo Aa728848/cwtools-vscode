@@ -8,6 +8,10 @@ import { BUILTIN_PROVIDERS } from './defaults';
  * Model-level vision capability map.
  */
 export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
+    'gpt-5.6': true,
+    'gpt-5.6-sol': true,
+    'gpt-5.6-terra': true,
+    'gpt-5.6-luna': true,
     'gpt-5.5': true,
     'gpt-5.5-pro': true,
     'gpt-5.5-instant': true,
@@ -235,6 +239,10 @@ export const OPENCODE_GO_MODEL_LIMITS: Record<string, { context: number; output:
  * Per-model context window sizes (tokens).
  */
 export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
+    'gpt-5.6': 1050000,
+    'gpt-5.6-sol': 1050000,
+    'gpt-5.6-terra': 1050000,
+    'gpt-5.6-luna': 400000,
     'gpt-5.5': 1050000,
     'gpt-5.5-pro': 1050000,
     'gpt-5.5-instant': 200000,

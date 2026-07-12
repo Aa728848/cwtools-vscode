@@ -35,6 +35,13 @@ describe('isModelVisionCapable', () => {
         expect(isModelVisionCapable('gpt-4o')).to.equal(true);
     });
 
+    it('returns true for every GPT-5.6 tier', () => {
+        expect(isModelVisionCapable('gpt-5.6')).to.equal(true);
+        expect(isModelVisionCapable('gpt-5.6-sol')).to.equal(true);
+        expect(isModelVisionCapable('gpt-5.6-terra')).to.equal(true);
+        expect(isModelVisionCapable('gpt-5.6-luna')).to.equal(true);
+    });
+
     it('returns true for claude model with vision', () => {
         expect(isModelVisionCapable('claude-opus-4-7')).to.equal(true);
     });
@@ -674,7 +681,18 @@ describe('BUILTIN_PROVIDERS', () => {
     });
 
     it('uses current direct-provider defaults and supported model IDs', () => {
-        expect(BUILTIN_PROVIDERS['openai']!.models).to.include('gpt-5.4-pro');
+        expect(BUILTIN_PROVIDERS['openai']!.models).to.include.members([
+            'gpt-5.6',
+            'gpt-5.6-sol',
+            'gpt-5.6-terra',
+            'gpt-5.6-luna',
+            'gpt-5.4-pro',
+        ]);
+        expect(BUILTIN_PROVIDERS['openai']!.defaultModel).to.equal('gpt-5.5');
+        expect(getModelContextTokens('gpt-5.6')).to.equal(1050000);
+        expect(getModelContextTokens('gpt-5.6-sol')).to.equal(1050000);
+        expect(getModelContextTokens('gpt-5.6-terra')).to.equal(1050000);
+        expect(getModelContextTokens('gpt-5.6-luna')).to.equal(400000);
         expect(getModelContextTokens('gpt-5.4-pro')).to.equal(1050000);
         expect(BUILTIN_PROVIDERS['claude']!.models).to.include('claude-sonnet-5');
         expect(BUILTIN_PROVIDERS['glm']!.defaultModel).to.equal('glm-5.2');

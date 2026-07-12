@@ -2500,6 +2500,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             systemReason: description,
             escalation: !!preflight?.escalation || !!preflight?.requiresEscalation,
             inlineEval: !!command && hasInlineEvalPayload(command),
+            userMessages: this.conversationMessages
+                .filter(message => message.role === 'user')
+                .slice(-4)
+                .map(message => contentToString(message.content).slice(0, 1200)),
             conversationSummary: this.conversationMessages.slice(-8).map(message => ({
                 role: message.role,
                 content: contentToString(message.content).slice(0, 1200),
@@ -2507,7 +2511,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         });
         if (reviewRunId) {
             runLedger.appendEvent(reviewRunId, 'reviewer_decision', {
-                tool, command, verdict: decision.verdict, rationale: decision.rationale, fromCache: !!decision.fromCache,
+                tool,
+                command,
+                verdict: decision.verdict,
+                rationale: decision.rationale,
+                riskLevel: decision.riskLevel,
+                userAuthorization: decision.userAuthorization,
+                decisionSource: decision.decisionSource,
+                fromCache: !!decision.fromCache,
             }, { invocationId: id }).catch(() => {});
         }
         if (decision.verdict === 'ask_user') return undefined;
@@ -2518,7 +2529,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const allowed = decision.verdict !== 'deny';
         if (reviewRunId) {
             runLedger.appendEvent(reviewRunId, 'permission_resolved', {
-                allowed, reviewer: 'auto_review', rationale: decision.rationale,
+                allowed,
+                reviewer: 'auto_review',
+                rationale: decision.rationale,
+                riskLevel: decision.riskLevel,
+                userAuthorization: decision.userAuthorization,
+                decisionSource: decision.decisionSource,
             }, { invocationId: id }).catch(() => {});
             runLedger.appendEvent(reviewRunId, 'item_completed', {
                 itemId: id,
@@ -2528,6 +2544,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 decision: allowed ? 'accept' : 'decline',
                 reviewer: 'auto_review',
                 rationale: decision.rationale,
+                riskLevel: decision.riskLevel,
+                userAuthorization: decision.userAuthorization,
+                decisionSource: decision.decisionSource,
             }, { invocationId: id, status: allowed ? 'done' : 'failed' }).catch(() => {});
         }
         this.postMessage({

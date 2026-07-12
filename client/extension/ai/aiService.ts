@@ -350,6 +350,8 @@ export class AIService {
             onTextDelta?: (text: string) => void;
             /** Real-time callback for incremental tool call fragments */
             onToolCallDelta?: (toolName: string, argsBuf: string) => void;
+            /** Stable seed used only by the OpenAI Responses fast path for prompt-cache routing. */
+            promptCacheKey?: string;
             /** External AbortSignal for caller-controlled cancellation */
             abortSignal?: AbortSignal;
             /** Absolute wall-clock timeout for a single chat completion call. */
@@ -502,7 +504,13 @@ export class AIService {
             // MiniMax Token Plan uses Anthropic Messages API format
             const isAnthropicCompat = providerId === 'claude' || providerId === 'minimax-token-plan' || effectiveApiFormat === 'anthropic-messages';
             if (effectiveApiFormat === 'openai-responses') {
-                return await this.callOpenAIResponses(endpoint, apiKey, request, providerId, controller, options?.onTextDelta);
+                return await this.callOpenAIResponses(endpoint, apiKey, request, providerId, controller, {
+                    onThinking: options?.onThinking,
+                    onTextDelta: options?.onTextDelta,
+                    onToolCallDelta: options?.onToolCallDelta,
+                    promptCacheKey: options?.promptCacheKey,
+                    reasoningSummary: options?.onThinking && !options?.disableThinking ? 'auto' : undefined,
+                });
             }
             if (effectiveApiFormat === 'gemini-generate-content') {
                 return await this.callGeminiGenerateContent(endpoint, apiKey, request, providerId, controller, options?.onTextDelta, options?.onToolCallDelta);
@@ -1105,12 +1113,20 @@ export class AIService {
         } as ChatCompletionResponse;
     }
 
-    private buildOpenAIResponsesPayload(request: ChatCompletionRequest): Record<string, unknown> {
+    private buildOpenAIResponsesPayload(
+        request: ChatCompletionRequest,
+        options?: {
+            fastPath?: boolean;
+            promptCacheKey?: string;
+            reasoningSummary?: 'auto' | 'concise' | 'detailed';
+        }
+    ): Record<string, unknown> {
         const payload: Record<string, unknown> = {
             model: request.model,
             input: this.toResponsesInput(request.messages),
             temperature: request.temperature,
             max_output_tokens: request.max_tokens,
+            ...(options?.fastPath ? { stream: true } : {}),
         };
         if (request.tools && request.tools.length > 0) {
             payload.tools = request.tools.map(t => ({
@@ -1120,9 +1136,20 @@ export class AIService {
                 parameters: t.function.parameters,
             }));
             payload.tool_choice = 'auto';
+            if (options?.fastPath) payload.parallel_tool_calls = true;
         }
-        if (request.reasoning_effort) {
-            payload.reasoning = { effort: request.reasoning_effort };
+        const reasoningSummary = options?.fastPath ? options.reasoningSummary : undefined;
+        if (request.reasoning_effort || reasoningSummary) {
+            payload.reasoning = {
+                ...(request.reasoning_effort ? { effort: request.reasoning_effort } : {}),
+                ...(reasoningSummary ? { summary: reasoningSummary } : {}),
+            };
+        }
+        if (options?.fastPath && options.promptCacheKey) {
+            payload.prompt_cache_key = `cwtools:${crypto.createHash('sha256')
+                .update(options.promptCacheKey)
+                .digest('hex')
+                .slice(0, 32)}`;
         }
         return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
     }
@@ -1186,17 +1213,28 @@ export class AIService {
         request: ChatCompletionRequest,
         providerId: string,
         controller: AbortController,
-        onTextDelta?: (text: string) => void
+        callbacks?: {
+            onThinking?: (text: string) => void;
+            onTextDelta?: (text: string) => void;
+            onToolCallDelta?: (toolName: string, argsBuf: string) => void;
+            promptCacheKey?: string;
+            reasoningSummary?: 'auto' | 'concise' | 'detailed';
+        }
     ): Promise<ChatCompletionResponse> {
         const cleanEndpoint = endpoint.replace(/\/+$/, '');
         const url = cleanEndpoint.endsWith('/responses') ? cleanEndpoint : `${cleanEndpoint}/responses`;
+        const useOpenAIFastPath = providerId === 'openai';
         const response = await this.fetchWithRetry(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 ...this.buildAuthHeaders(providerId, apiKey),
             },
-            body: JSON.stringify(this.buildOpenAIResponsesPayload(request)),
+            body: JSON.stringify(this.buildOpenAIResponsesPayload(request, useOpenAIFastPath ? {
+                fastPath: true,
+                promptCacheKey: callbacks?.promptCacheKey,
+                reasoningSummary: callbacks?.reasoningSummary,
+            } : undefined)),
             signal: controller.signal,
         }, providerId);
 
@@ -1205,7 +1243,145 @@ export class AIService {
             throw new Error(`${getProvider(providerId).name} Responses API error (${response.status}): ${errorText}`);
         }
 
-        const data = await response.json() as any;
+        const contentType = response.headers?.get?.('content-type') ?? '';
+        if (!useOpenAIFastPath || !response.body || /application\/json/i.test(contentType)) {
+            const data = await response.json() as any;
+            const result = this.buildOpenAIResponsesCompletion(data, request);
+            const text = result.choices[0]?.message?.content;
+            if (typeof text === 'string' && text) callbacks?.onTextDelta?.(text);
+            return result;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let streamedText = '';
+        let finalResponse: any = undefined;
+        let responseMeta: any = { model: request.model };
+        const toolCallMap = new Map<number, {
+            id: string;
+            responseItemId?: string;
+            name: string;
+            arguments: string;
+        }>();
+        const itemIndex = new Map<string, number>();
+
+        const ensureToolCall = (event: any, item?: any) => {
+            const itemId = String(item?.id ?? event?.item_id ?? '');
+            let index = typeof event?.output_index === 'number'
+                ? event.output_index
+                : (itemId ? itemIndex.get(itemId) : undefined);
+            if (index === undefined) index = toolCallMap.size;
+            const existing = toolCallMap.get(index) ?? {
+                id: String(item?.call_id ?? event?.call_id ?? (itemId || `call_${index}`)),
+                name: String(item?.name ?? event?.name ?? ''),
+                arguments: '',
+            };
+            if (itemId) {
+                itemIndex.set(itemId, index);
+                if (isResponsesFunctionCallItemId(itemId)) existing.responseItemId = itemId;
+            }
+            if (item?.call_id || event?.call_id) existing.id = String(item?.call_id ?? event?.call_id);
+            if (item?.name || event?.name) existing.name = String(item?.name ?? event?.name);
+            toolCallMap.set(index, existing);
+            return existing;
+        };
+
+        const processEvent = (event: any) => {
+            const type = String(event?.type ?? '');
+            if (event?.response && typeof event.response === 'object') {
+                responseMeta = { ...responseMeta, ...event.response };
+            }
+            if (type === 'response.output_text.delta' && typeof event.delta === 'string') {
+                streamedText += event.delta;
+                callbacks?.onTextDelta?.(event.delta);
+                return;
+            }
+            if (type === 'response.reasoning_summary_text.delta' && typeof event.delta === 'string') {
+                callbacks?.onThinking?.(event.delta);
+                return;
+            }
+            if ((type === 'response.output_item.added' || type === 'response.output_item.done')
+                && event.item?.type === 'function_call') {
+                const call = ensureToolCall(event, event.item);
+                if (typeof event.item.arguments === 'string' && event.item.arguments) {
+                    call.arguments = event.item.arguments;
+                }
+                return;
+            }
+            if (type === 'response.function_call_arguments.delta' && typeof event.delta === 'string') {
+                const call = ensureToolCall(event);
+                call.arguments += event.delta;
+                callbacks?.onToolCallDelta?.(call.name, call.arguments);
+                return;
+            }
+            if (type === 'response.function_call_arguments.done') {
+                const call = ensureToolCall(event);
+                if (typeof event.arguments === 'string') call.arguments = event.arguments;
+                return;
+            }
+            if (type === 'response.completed' || type === 'response.incomplete') {
+                finalResponse = event.response ?? responseMeta;
+                return;
+            }
+            if (type === 'response.failed') {
+                const failed = event.response ?? event;
+                const message = failed?.error?.message ?? failed?.message ?? 'Responses stream failed.';
+                throw new Error(`${getProvider(providerId).name} Responses API error: ${message}`);
+            }
+            if (type === 'error') {
+                throw new Error(`${getProvider(providerId).name} Responses stream error: ${event.message ?? event.error?.message ?? 'Unknown error'}`);
+            }
+        };
+
+        const processRecord = (record: string) => {
+            const data = record.split(/\r?\n/)
+                .filter(line => line.startsWith('data:'))
+                .map(line => line.slice(5).trimStart())
+                .join('\n')
+                .trim();
+            if (!data || data === '[DONE]') return;
+            try {
+                processEvent(JSON.parse(data));
+            } catch (error) {
+                if (error instanceof SyntaxError) return;
+                throw error;
+            }
+        };
+
+        while (true) {
+            const { done, value } = await this.readWithTimeout(reader, controller, 600000);
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const records = buffer.split(/\r?\n\r?\n/);
+            buffer = records.pop() ?? '';
+            for (const record of records) processRecord(record);
+        }
+        buffer += decoder.decode();
+        if (buffer.trim()) processRecord(buffer);
+
+        const streamedToolCalls: NonNullable<ChatMessage['tool_calls']> = [...toolCallMap.entries()]
+            .sort(([a], [b]) => a - b)
+            .map(([, call]) => ({
+                id: call.id,
+                ...(call.responseItemId ? { responseItemId: call.responseItemId } : {}),
+                type: 'function' as const,
+                function: { name: call.name, arguments: call.arguments },
+            }));
+        return this.buildOpenAIResponsesCompletion(
+            finalResponse ?? responseMeta,
+            request,
+            streamedText || undefined,
+            streamedToolCalls.length > 0 ? streamedToolCalls : undefined,
+        );
+    }
+
+    private buildOpenAIResponsesCompletion(
+        data: any,
+        request: ChatCompletionRequest,
+        textOverride?: string,
+        toolCallsOverride?: NonNullable<ChatMessage['tool_calls']>,
+    ): ChatCompletionResponse {
         const outputItems: any[] = Array.isArray(data.output) ? data.output : [];
         const contentParts: string[] = [];
         const toolCalls: NonNullable<ChatMessage['tool_calls']> = [];
@@ -1236,8 +1412,8 @@ export class AIService {
             }
         }
 
-        const text = contentParts.join('');
-        if (text) onTextDelta?.(text);
+        const text = textOverride ?? contentParts.join('');
+        const effectiveToolCalls = toolCallsOverride ?? toolCalls;
         const usage = data.usage ?? {};
         const promptTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
         const completionTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
@@ -1252,9 +1428,9 @@ export class AIService {
                 message: {
                     role: 'assistant',
                     content: text || null,
-                    ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+                    ...(effectiveToolCalls.length > 0 ? { tool_calls: effectiveToolCalls } : {}),
                 },
-                finish_reason: toolCalls.length > 0 ? 'tool_calls' : (data.status === 'incomplete' ? 'length' : 'stop'),
+                finish_reason: effectiveToolCalls.length > 0 ? 'tool_calls' : (data.status === 'incomplete' ? 'length' : 'stop'),
             }],
             usage: {
                 prompt_tokens: promptTokens,

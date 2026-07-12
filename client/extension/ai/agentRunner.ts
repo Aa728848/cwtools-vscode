@@ -1813,7 +1813,7 @@ export class AgentRunner {
                     maxTokens: requestMaxTokens,
                     disableThinking: requestDisableThinking,
                     promptCacheKey: options?.threadId ? `agent-thread:${options.threadId}` : undefined,
-                    // 🔴 Key fix: propagate abort signal to HTTP request layer
+                    // Key fix: propagate abort signal to HTTP request layer
                     // The absence of this parameter will cause the child agent to wait for the LLM streaming response
                     // Cannot be interrupted at all by the parent's cancelGeneration/abort
                     abortSignal: modelAbortController.signal,

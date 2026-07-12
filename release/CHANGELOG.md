@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.17] - 2026-07-12
+
+### 功能与优化 / Features & Optimizations
+- **[优化] 优化AI审批边界**：优化了 AI 在执行任务时的自动审批与权限判定边界，降低了对低风险工具和常用查询命令的误拦截，同时细化并收紧了核心高危及敏感操作的安全校验。
+  English: [Optimization] Optimized AI approval boundaries and policy enforcement, reducing false blocks on low-risk tools and common query commands while refining security verification for critical sensitive operations.
+
 ## [2.8.16] - 2026-07-11
 
 ### 功能与优化 / Features & Optimizations

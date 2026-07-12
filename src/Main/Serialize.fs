@@ -29,4 +29,15 @@ let deserialize path =
         resources, files
     with e ->
         CWTools.Utilities.Utils.logError (sprintf "Failed to deserialize cache %s: %s" path (e.ToString()))
-        [], []
+        // Do not continue with an empty embedded dataset: that turns every
+        // vanilla reference into a misleading workspace diagnostic. Removing
+        // the metadata makes the next startup rebuild this incompatible cache.
+        let metadataPath = path + ".meta.json"
+        try
+            if File.Exists metadataPath then
+                File.Delete metadataPath
+        with metadataError ->
+            CWTools.Utilities.Utils.logError (
+                sprintf "Failed to invalidate vanilla cache metadata %s: %s" metadataPath (metadataError.ToString())
+            )
+        reraise ()

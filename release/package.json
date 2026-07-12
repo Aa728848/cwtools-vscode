@@ -1054,7 +1054,11 @@
                 "stellarisLanguageServices.ai.history.persistence": {
                     "scope": "window",
                     "type": "string",
-                    "enum": ["off", "metadata", "full"],
+                    "enum": [
+                        "off",
+                        "metadata",
+                        "full"
+                    ],
                     "default": "full",
                     "description": "%configuration.stellarisLanguageServices.ai.history.persistence.description%"
                 },

@@ -3783,7 +3783,7 @@ type Server(client: ILanguageClient) =
 
     /// Bump this when the serialized vanilla cache format or serializer inputs
     /// become incompatible with caches produced by older extension builds.
-    let vanillaCacheSchemaVersion = 1
+    let vanillaCacheSchemaVersion = 2
 
     let vanillaCacheMetadataPath (cacheFilePath: string) =
         cacheFilePath + ".meta.json"

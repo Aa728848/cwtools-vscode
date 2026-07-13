@@ -191,6 +191,7 @@ describe('webview smoke checks', () => {
     it('gui preview runtime CSS is bundled with its webview script', () => {
         const host = fs.readFileSync(path.join(root, 'client/extension/guiPanel.ts'), 'utf8');
         const rollup = fs.readFileSync(path.join(root, 'rollup.config.mjs'), 'utf8');
+        const script = fs.readFileSync(path.join(root, 'client/webview/guiPreview.ts'), 'utf8');
         const css = fs.readFileSync(path.join(root, 'client/webview/guiPreview.css'), 'utf8');
 
         expect(host).to.include("path.join(this._webviewRootPath, 'guiPreview.css')");
@@ -198,6 +199,28 @@ describe('webview smoke checks', () => {
         expect(css).to.include('#toolbar');
         expect(css).to.include('#main-layout');
         expect(css).to.include('#search-bar.hidden { display: none; }');
+        for (const control of [
+            'id="btn-inspect"',
+            'id="btn-fit-screen"',
+            'id="btn-fit-selection"',
+            'id="btn-actual-size"',
+            'id="btn-save"',
+            'id="inspector-resizer"',
+            'id="layer-filter"',
+        ]) {
+            expect(host).to.include(control);
+        }
+        expect(script).to.include('function setWorkspaceMode(');
+        expect(script).to.include('function measureViewBounds(');
+        expect(script).to.include('function applyLayerFilters(');
+        expect(script).to.include('function requestDocumentSave(');
+        expect(script).to.include("vscode.postMessage({ command: 'saveDocument' });");
+        expect(host).to.include("case 'saveDocument':");
+        expect(host.match(/await doc\.save\(\);/g)).to.have.length(1);
+        expect(css).to.include('var(--vscode-editor-background)');
+        expect(css).to.include('#side-panel #layers-panel,');
+        expect(css).to.include('body.overlay-focus');
+        expect(css).to.include('@media (prefers-reduced-motion: reduce)');
     });
 
     it('solar-system preview exposes the redesigned editor shell and bounded rendering', () => {

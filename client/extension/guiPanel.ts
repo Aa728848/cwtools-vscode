@@ -19,7 +19,8 @@ type GuiPanelMessage =
     | { command: 'addBackground'; parentEndLine: number; sprite?: string }
     | { command: 'reparentElement'; startLine: number; endLine: number; newParentEndLine: number; positionAdjust?: { dx: number; dy: number } }
     | { command: 'unparentElement'; startLine: number; endLine: number; parentEndLine: number; positionAdjust?: { dx: number; dy: number } }
-    | { command: 'vscodeUndo' };
+    | { command: 'vscodeUndo' }
+    | { command: 'saveDocument' };
 
 export class GuiPanel {
     public static currentPanel: GuiPanel | undefined;
@@ -45,7 +46,15 @@ export class GuiPanel {
             this._contentSnapshots.shift();
         }
     }
-    private _messageQueue: Promise<void> = Promise.resolve();  // serial queue for property updates
+    private _messageQueue: Promise<void> = Promise.resolve();  // serialize draft edits and explicit saves
+    private _queueOperation(operation: () => Promise<void>): void {
+        this._messageQueue = this._messageQueue
+            .then(operation, operation)
+            .catch(error => {
+                const detail = error instanceof Error ? error.message : String(error);
+                void vscode.window.showErrorMessage(`${panelText('GUI edit failed', 'GUI 编辑失败')}: ${detail}`);
+            });
+    }
     private _spriteIndexCache: Map<string, import('./guiParser').SpriteInfo> | null = null;
     private _effectNamesCache: string[] | null = null;
 
@@ -97,34 +106,47 @@ export class GuiPanel {
                         break;
                     }
                     case 'updateProperty':
-                        this._messageQueue = this._messageQueue.then(() => this._handleUpdateProperty(msg));
+                        this._queueOperation(() => this._handleUpdateProperty(msg));
                         break;
                     case 'addElement':
-                        await this._handleAddElement(msg);
+                        this._queueOperation(() => this._handleAddElement(msg));
                         break;
                     case 'deleteElement':
-                        await this._handleDeleteElement(msg);
+                        this._queueOperation(() => this._handleDeleteElement(msg));
                         break;
                     case 'duplicateElement':
-                        await this._handleDuplicateElement(msg);
+                        this._queueOperation(() => this._handleDuplicateElement(msg));
                         break;
                     case 'removePropertyLine':
-                        await this._handleRemovePropertyLine(msg);
+                        this._queueOperation(() => this._handleRemovePropertyLine(msg));
                         break;
                     case 'addBackground':
-                        await this._handleAddBackground(msg);
+                        this._queueOperation(() => this._handleAddBackground(msg));
                         break;
                     case 'reparentElement':
-                        await this._handleReparentElement(msg);
+                        this._queueOperation(() => this._handleReparentElement(msg));
                         break;
                     case 'unparentElement':
-                        await this._handleUnparentElement(msg);
+                        this._queueOperation(() => this._handleUnparentElement(msg));
                         break;
                     case 'vscodeUndo':
-                        await this._handleVscodeUndo();
+                        this._queueOperation(() => this._handleVscodeUndo());
+                        break;
+                    case 'saveDocument':
+                        this._queueOperation(() => this._handleSaveDocument());
                         break;
                 }
             }, null, this._disposables),
+        );
+
+        // Draft edits update the TextDocument buffer but remain off disk until an
+        // explicit save. Keep the Webview's save affordance in sync with VS Code.
+        this._disposables.push(
+            vscode.workspace.onDidChangeTextDocument(event => {
+                if (event.document.uri.fsPath === document.uri.fsPath) {
+                    this._postDocumentState();
+                }
+            }),
         );
 
         // Watch for document saves to auto-refresh preview
@@ -133,11 +155,13 @@ export class GuiPanel {
                 if (savedDoc.uri.fsPath === document.uri.fsPath) {
                     if (this._skipNextReload) {
                         this._skipNextReload = false;
+                        this._postDocumentState(false, true);
                         return;
                     }
                     this._textureCache.clear();
                     this._textureCacheBytes = 0;
                     await this._loadAndRender(savedDoc);
+                    this._postDocumentState(false, true);
                 }
             }),
         );
@@ -230,6 +254,16 @@ export class GuiPanel {
             fileName: path.basename(document.fileName),
             spriteNames,
             effectNames,
+            dirty: document.isDirty,
+        });
+    }
+
+    private _postDocumentState(saving = false, saved = false): void {
+        this._panel.webview.postMessage({
+            command: 'documentState',
+            dirty: this._document?.isDirty ?? false,
+            saving,
+            saved,
         });
     }
 
@@ -408,7 +442,28 @@ export class GuiPanel {
         }
     }
 
-    // ── Visual Editor: Source File Editing ─────────────────────────────────
+    // ── Visual Editor: Draft Buffer Editing ────────────────────────────────
+
+    private async _handleSaveDocument(): Promise<void> {
+        const doc = this._document;
+        if (!doc) return;
+        if (!doc.isDirty) {
+            this._postDocumentState(false, true);
+            return;
+        }
+
+        this._postDocumentState(true);
+        this._skipNextReload = true;
+        const saved = await doc.save();
+        if (!saved) {
+            this._skipNextReload = false;
+            void vscode.window.showErrorMessage(panelText(
+                'Unable to save the GUI document.',
+                '无法保存 GUI 文档。',
+            ));
+        }
+        this._postDocumentState(false, saved);
+    }
 
     /**
      * Apply a line-level edit to the source file.
@@ -421,9 +476,7 @@ export class GuiPanel {
         const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
         const edit = new vscode.WorkspaceEdit();
         edit.replace(doc.uri, line.range, `${indent}${newContent.trimStart()}`);
-        this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
     }
 
     /**
@@ -438,9 +491,7 @@ export class GuiPanel {
         );
         const edit = new vscode.WorkspaceEdit();
         edit.replace(doc.uri, range, newContent);
-        this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
     }
 
     /**
@@ -452,9 +503,7 @@ export class GuiPanel {
         const line = doc.lineAt(lineNumber - 1);
         const edit = new vscode.WorkspaceEdit();
         edit.insert(doc.uri, new vscode.Position(line.range.end.line, line.range.end.character), '\n' + content);
-        this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
     }
 
     /**
@@ -485,9 +534,7 @@ export class GuiPanel {
                 const newText = `${indent}${serializePosition(val.x, val.y)}`;
                 const edit = new vscode.WorkspaceEdit();
                 edit.replace(doc.uri, line.range, newText);
-                this._skipNextReload = true;
                 await vscode.workspace.applyEdit(edit);
-                await doc.save();
             } else {
                 // Check if position exists inline on the same line
                 const line = doc.lineAt(msg.line - 1);
@@ -496,9 +543,7 @@ export class GuiPanel {
                     const newText = line.text.replace(posRegex, `position = { x = ${val.x} y = ${val.y} }`);
                     const edit = new vscode.WorkspaceEdit();
                     edit.replace(doc.uri, line.range, newText);
-                    this._skipNextReload = true;
                     await vscode.workspace.applyEdit(edit);
-                    await doc.save();
                 } else {
                     // Scan forward for existing position on nearby lines
                     const posRegexScan = /position\s*=\s*\{[^}]*\}/;
@@ -512,9 +557,7 @@ export class GuiPanel {
                         const newText = existingLine.text.replace(posRegexScan, `position = { x = ${val.x} y = ${val.y} }`);
                         const edit = new vscode.WorkspaceEdit();
                         edit.replace(doc.uri, existingLine.range, newText);
-                        this._skipNextReload = true;
                         await vscode.workspace.applyEdit(edit);
-                        await doc.save();
                     } else {
                         const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
                         const childIndent = indent + '\t';
@@ -531,9 +574,7 @@ export class GuiPanel {
                 const newText = `${indent}${serializeSize(val.width, val.height, val.useXY)}`;
                 const edit = new vscode.WorkspaceEdit();
                 edit.replace(doc.uri, line.range, newText);
-                this._skipNextReload = true;
                 await vscode.workspace.applyEdit(edit);
-                await doc.save();
             } else {
                 const line = doc.lineAt(msg.line - 1);
                 const sizeRegex = /size\s*=\s*\{\s*(?:x\s*=\s*-?\d+\s+y\s*=\s*-?\d+|width\s*=\s*-?\d+\s+height\s*=\s*-?\d+)\s*\}/;
@@ -544,9 +585,7 @@ export class GuiPanel {
                     });
                     const edit = new vscode.WorkspaceEdit();
                     edit.replace(doc.uri, line.range, newText);
-                    this._skipNextReload = true;
                     await vscode.workspace.applyEdit(edit);
-                    await doc.save();
                 } else {
                     // Scan forward for existing size on nearby lines
                     const sizeRegexScan = /size\s*=\s*\{\s*(?:x\s*=\s*-?\d+\s+y\s*=\s*-?\d+|width\s*=\s*-?\d+\s+height\s*=\s*-?\d+)\s*\}/;
@@ -563,9 +602,7 @@ export class GuiPanel {
                         });
                         const edit = new vscode.WorkspaceEdit();
                         edit.replace(doc.uri, existingLine.range, newText);
-                        this._skipNextReload = true;
                         await vscode.workspace.applyEdit(edit);
-                        await doc.save();
                     } else {
                         const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
                         const childIndent = indent + '\t';
@@ -583,9 +620,7 @@ export class GuiPanel {
                 const newText = `${indent}${serializeProperty(msg.property, msg.value)}`;
                 const edit = new vscode.WorkspaceEdit();
                 edit.replace(doc.uri, line.range, newText);
-                this._skipNextReload = true;
                 await vscode.workspace.applyEdit(edit);
-                await doc.save();
                 // Sprite changes need full re-render to resolve new texture
                 if (isSpriteChange) {
                     this._textureCache.clear();
@@ -605,9 +640,7 @@ export class GuiPanel {
                     const newText = line.text.replace(inlineRegex, `$1${serializedVal}`);
                     const edit = new vscode.WorkspaceEdit();
                     edit.replace(doc.uri, line.range, newText);
-                    this._skipNextReload = true;
                     await vscode.workspace.applyEdit(edit);
-                    await doc.save();
                     if (isSpriteChange) {
                         this._textureCache.clear();
                         this._textureCacheBytes = 0;
@@ -635,9 +668,7 @@ export class GuiPanel {
                         const newText = existingLine.text.replace(propRegex, `$1${serializedVal}`);
                         const edit = new vscode.WorkspaceEdit();
                         edit.replace(doc.uri, existingLine.range, newText);
-                        this._skipNextReload = true;
                         await vscode.workspace.applyEdit(edit);
-                        await doc.save();
                         if (isSpriteChange) {
                             this._textureCache.clear();
                             this._textureCacheBytes = 0;
@@ -672,9 +703,7 @@ export class GuiPanel {
             : new vscode.Position(0, 0);
         const endPos = new vscode.Position(lineIdx, doc.lineAt(lineIdx).text.length);
         edit.delete(doc.uri, new vscode.Range(startPos, endPos));
-        this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         // Re-render to refresh line numbers
         await this._loadAndRender(doc);
     }
@@ -693,9 +722,7 @@ export class GuiPanel {
             doc.lineAt(doc.lineCount - 1).range.end,
         );
         edit.replace(doc.uri, fullRange, snapshot);
-        this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         await this._loadAndRender(doc);
     }
 
@@ -721,9 +748,7 @@ export class GuiPanel {
         // Insert before the container's closing brace
         const insertPos = new vscode.Position(msg.parentEndLine - 1, 0);
         edit.insert(doc.uri, insertPos, bgCode + '\n');
-        this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         await this._loadAndRender(doc);
     }
 
@@ -744,9 +769,7 @@ export class GuiPanel {
         const edit = new vscode.WorkspaceEdit();
         const insertPos = new vscode.Position(msg.parentEndLine - 1, 0);
         edit.insert(doc.uri, insertPos, newElement + '\n');
-        this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         // Full re-render to pick up the new element
         await this._loadAndRender(doc);
     }
@@ -766,9 +789,7 @@ export class GuiPanel {
             : new vscode.Position(0, 0);
         const endPos = new vscode.Position(msg.endLine - 1, doc.lineAt(msg.endLine - 1).text.length);
         edit.delete(doc.uri, new vscode.Range(startPos, endPos));
-        this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         // Full re-render
         await this._loadAndRender(doc);
     }
@@ -799,9 +820,7 @@ export class GuiPanel {
         const edit = new vscode.WorkspaceEdit();
         const insertPos = new vscode.Position(msg.endLine - 1, doc.lineAt(msg.endLine - 1).text.length);
         edit.insert(doc.uri, insertPos, '\n' + block);
-        this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         // Full re-render
         await this._loadAndRender(doc);
     }
@@ -872,9 +891,7 @@ export class GuiPanel {
         const insertPos = new vscode.Position(msg.newParentEndLine - 1, 0);
         edit.insert(doc.uri, insertPos, block + '\n');
 
-        this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         await this._loadAndRender(doc);
     }
 
@@ -939,9 +956,7 @@ export class GuiPanel {
         const insertPos = new vscode.Position(msg.parentEndLine - 1, doc.lineAt(msg.parentEndLine - 1).text.length);
         edit.insert(doc.uri, insertPos, '\n' + block);
 
-        this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         await this._loadAndRender(doc);
     }
 
@@ -960,39 +975,23 @@ export class GuiPanel {
     <link href="${styleUri}" rel="stylesheet" />
     <title>${title}</title>
 </head>
-<body>
-    <div id="toolbar">
+<body class="mode-inspect overlay-focus">
+    <header id="toolbar">
         <div id="title-area">
-            <span id="title">${title}</span>
-            <span id="title-status">${panelText('No element selected', '未选择元素')}</span>
+            <span class="app-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 8h10M7 12h6M7 16h8"></path></svg></span>
+            <span class="title-copy"><span class="title-kicker">${panelText('GUI WORKBENCH', 'GUI 工作台')}</span><strong id="title">${title}</strong></span>
+        </div>
+        <div id="mode-switch" role="group" aria-label="${panelText('Workspace mode', '工作模式')}">
+            <button id="btn-preview" type="button" aria-pressed="false">${panelText('Preview', '预览')}</button>
+            <button id="btn-inspect" class="active" type="button" aria-pressed="true">${panelText('Inspect', '检查')}</button>
+            <button id="btn-edit" type="button" aria-pressed="false">${panelText('Edit', '编辑')}</button>
         </div>
         <div id="controls">
-            <button id="btn-edit" title="${panelText('Toggle edit mode (E)', '切换编辑模式 (E)')}" class="edit-toggle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button>
-            <span class="separator">|</span>
-            <button id="btn-zoom-in" title="${panelText('Zoom in', '放大')}">+</button>
-            <span id="zoom-level">100%</span>
-            <button id="btn-zoom-out" title="${panelText('Zoom out', '缩小')}">−</button>
-            <button id="btn-fit" title="${panelText('Fit to window', '适应窗口')}">⊡</button>
-            <button id="btn-reset" title="${panelText('Reset', '重置')}">↻</button>
-            <button id="btn-preview" title="${panelText('Preview mode (hide outlines)', '预览模式 (隐藏边框)')}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
-            <button id="btn-anim" title="${panelText('Play sprite animation', '播放精灵动画')}">▶</button>
-            <select id="resolution-select" title="${panelText('Preview resolution', '预览分辨率')}">
-                <option value="auto">${panelText('Auto fit', '自适应')}</option>
-                <option value="1920x1080">1080p</option>
-                <option value="2560x1440">1440p</option>
-                <option value="3840x2160">4K</option>
-            </select>
-            <button id="btn-search" title="${panelText('Search elements (Ctrl+F)', '搜索元素 (Ctrl+F)')}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>
-            <button id="btn-layers" title="${panelText('Toggle layers panel', '切换图层面板')}" class="active">☰</button>
-            <span class="separator edit-only">|</span>
-            <button id="btn-align-left" title="${panelText('Align left', '左对齐')}" class="edit-only align-btn" disabled>⬅</button>
-            <button id="btn-align-hcenter" title="${panelText('Center horizontally', '水平居中')}" class="edit-only align-btn" disabled>⬌</button>
-            <button id="btn-align-right" title="${panelText('Align right', '右对齐')}" class="edit-only align-btn" disabled>➡</button>
-            <button id="btn-align-top" title="${panelText('Align top', '上对齐')}" class="edit-only align-btn" disabled>⬆</button>
-            <button id="btn-align-vcenter" title="${panelText('Center vertically', '垂直居中')}" class="edit-only align-btn" disabled>⬍</button>
-            <button id="btn-align-bottom" title="${panelText('Align bottom', '下对齐')}" class="edit-only align-btn" disabled>⬇</button>
+            <span id="title-status" role="status">${panelText('No element selected', '未选择元素')}</span>
+            <button id="btn-search" type="button" aria-label="${panelText('Search elements', '搜索元素')}" title="${panelText('Search elements (Ctrl+F)', '搜索元素 (Ctrl+F)')}"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg></button>
+            <button id="btn-layers" class="active" type="button" aria-pressed="true" aria-label="${panelText('Toggle inspector', '切换检视器')}" title="${panelText('Toggle inspector', '切换检视器')}"><svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"></path><path d="m3 12 9 5 9-5M3 16l9 5 9-5"></path></svg></button>
         </div>
-    </div>
+    </header>
     <div id="search-bar" class="hidden">
         <input id="search-input" type="text" placeholder="${panelText('Search element name...', '搜索元素名称...')}" />
         <span id="search-count"></span>
@@ -1016,29 +1015,84 @@ export class GuiPanel {
         <button data-action="unparent">${panelText('Move out of container (Shift+P)', '移出容器 (Shift+P)')}</button>
     </div>
     <div id="main-layout">
-        <div id="viewport">
+        <main id="viewport" aria-label="${panelText('Interactive GUI canvas', '交互式 GUI 画布')}">
+            <div id="view-toolbar" role="toolbar" aria-label="${panelText('View controls', '视图控制')}">
+                <div class="tool-cluster zoom-cluster">
+                    <button id="btn-zoom-out" type="button" aria-label="${panelText('Zoom out', '缩小')}">−</button>
+                    <strong id="zoom-level">100%</strong>
+                    <button id="btn-zoom-in" type="button" aria-label="${panelText('Zoom in', '放大')}">+</button>
+                </div>
+                <div class="tool-cluster fit-cluster">
+                    <button id="btn-fit" class="text-button" type="button" title="${panelText('Fit authored GUI content', '适应实际 GUI 内容')}">${panelText('Fit content', '适应内容')}</button>
+                    <button id="btn-fit-screen" class="text-button" type="button" title="${panelText('Fit the complete game screen', '适应完整游戏屏幕')}">${panelText('Full screen', '完整屏幕')}</button>
+                    <button id="btn-fit-selection" class="text-button" type="button" disabled title="${panelText('Fit selected element', '适应选中元素')}">${panelText('Selection', '选中项')}</button>
+                    <button id="btn-actual-size" class="text-button" type="button" title="${panelText('Show native pixels at 100%', '以 100% 显示原始像素')}">1:1</button>
+                    <button id="btn-reset" type="button" aria-label="${panelText('Reset view', '重置视图')}" title="${panelText('Reset view', '重置视图')}">↻</button>
+                </div>
+                <div class="tool-cluster select-cluster">
+                    <label for="overlay-select">${panelText('Overlays', '叠加')}</label>
+                    <select id="overlay-select" title="${panelText('Overlay density', '叠加层密度')}">
+                        <option value="focus">${panelText('Focused', '聚焦')}</option>
+                        <option value="all">${panelText('All', '全部')}</option>
+                        <option value="clean">${panelText('Clean', '干净')}</option>
+                    </select>
+                    <label for="resolution-select">${panelText('Screen', '屏幕')}</label>
+                    <select id="resolution-select" title="${panelText('Game screen resolution', '游戏屏幕分辨率')}">
+                        <option value="auto">${panelText('Auto', '自动')}</option>
+                        <option value="1920x1080">1080p</option>
+                        <option value="2560x1440">1440p</option>
+                        <option value="3840x2160">4K</option>
+                    </select>
+                    <button id="btn-anim" type="button" aria-pressed="false" title="${panelText('Play sprite animation', '播放精灵动画')}">▶</button>
+                </div>
+            </div>
+            <div id="edit-toolbar" class="edit-only" role="toolbar" aria-label="${panelText('Editing actions', '编辑操作')}">
+                <div class="tool-cluster save-cluster">
+                    <button id="btn-save" class="primary-action" type="button" disabled title="${panelText('Save GUI changes (Ctrl+S)', '保存 GUI 更改 (Ctrl+S)')}">${panelText('Save', '保存')}</button>
+                    <span id="edit-save-state" role="status" aria-live="polite">${panelText('Saved', '已保存')}</span>
+                </div>
+                <span class="toolbar-divider"></span>
+                <button id="btn-undo" type="button" title="${panelText('Undo (Ctrl+Z)', '撤销 (Ctrl+Z)')}">↶</button>
+                <button id="btn-redo" type="button" title="${panelText('Redo (Ctrl+Y)', '重做 (Ctrl+Y)')}">↷</button>
+                <button id="btn-duplicate" type="button" disabled title="${panelText('Duplicate (Ctrl+D)', '复制 (Ctrl+D)')}">${panelText('Duplicate', '复制')}</button>
+                <button id="btn-delete" type="button" disabled title="${panelText('Delete (Del)', '删除 (Del)')}">${panelText('Delete', '删除')}</button>
+                <span class="toolbar-divider"></span>
+                <button id="btn-align-left" title="${panelText('Align left', '左对齐')}" class="align-btn" disabled>⬅</button>
+                <button id="btn-align-hcenter" title="${panelText('Center horizontally', '水平居中')}" class="align-btn" disabled>⬌</button>
+                <button id="btn-align-right" title="${panelText('Align right', '右对齐')}" class="align-btn" disabled>➡</button>
+                <button id="btn-align-top" title="${panelText('Align top', '上对齐')}" class="align-btn" disabled>⬆</button>
+                <button id="btn-align-vcenter" title="${panelText('Center vertically', '垂直居中')}" class="align-btn" disabled>⬍</button>
+                <button id="btn-align-bottom" title="${panelText('Align bottom', '下对齐')}" class="align-btn" disabled>⬇</button>
+            </div>
             <div id="canvas-container">
                 <div id="snap-guides"></div>
                 <div id="gui-root"></div>
             </div>
-        </div>
-        <div id="side-panel">
-            <div id="side-panel-tabs">
-                <button id="tab-layers" class="tab active">${panelText('Layers', '图层')}</button>
-                <button id="tab-properties" class="tab">${panelText('Properties', '属性')}</button>
+            <div id="viewport-hint" role="note">${panelText('Wheel to zoom · Alt/middle-drag to pan · Double-click an element to open source', '滚轮缩放 · Alt/中键拖动平移 · 双击元素打开源码')}</div>
+        </main>
+        <div id="inspector-resizer" role="separator" aria-orientation="vertical" aria-label="${panelText('Resize inspector', '调整检视器宽度')}" tabindex="0"></div>
+        <aside id="side-panel" aria-label="${panelText('GUI inspector', 'GUI 检视器')}">
+            <div id="inspector-header"><span><small>${panelText('INSPECTOR', '检视器')}</small><strong id="inspector-title">${panelText('GUI structure', 'GUI 结构')}</strong></span><button id="btn-close-inspector" type="button" aria-label="${panelText('Close inspector', '关闭检视器')}">×</button></div>
+            <div id="side-panel-tabs" role="tablist">
+                <button id="tab-layers" class="tab active" role="tab" aria-selected="true">${panelText('Layers', '图层')}</button>
+                <button id="tab-properties" class="tab" role="tab" aria-selected="false">${panelText('Properties', '属性')}</button>
             </div>
-            <div id="layers-panel">
+            <div id="layers-panel" role="tabpanel">
                 <div id="layers-header">
-                    <span>${panelText('Layers', '图层')}</span>
-                    <button id="layers-collapse-all" title="${panelText('Collapse all', '全部折叠')}">▾</button>
-                    <button id="layers-expand-all" title="${panelText('Expand all', '全部展开')}">▸</button>
+                    <span><strong>${panelText('Layer tree', '图层树')}</strong><small id="layer-count"></small></span>
+                    <button id="layers-collapse-all" title="${panelText('Collapse all', '全部折叠')}">▸</button>
+                    <button id="layers-expand-all" title="${panelText('Expand all', '全部展开')}">▾</button>
+                </div>
+                <div id="layer-filter-bar">
+                    <input id="layer-filter" type="search" placeholder="${panelText('Filter by name or type…', '按名称或类型筛选…')}" aria-label="${panelText('Filter layers', '筛选图层')}" />
+                    <select id="layer-type-filter" aria-label="${panelText('Filter by element type', '按元素类型筛选')}"><option value="">${panelText('All types', '全部类型')}</option></select>
                 </div>
                 <div id="layers-tree"></div>
             </div>
-            <div id="properties-panel" class="hidden">
-                <div id="props-content">${panelText('Select an element to edit properties', '选择一个元素以编辑属性')}</div>
+            <div id="properties-panel" class="hidden" role="tabpanel">
+                <div id="props-content">${panelText('Select an element to inspect its properties', '选择一个元素以检查属性')}</div>
             </div>
-        </div>
+        </aside>
     </div>
     <div id="tooltip" class="hidden"></div>
     <script nonce="${nonce}" src="${scriptUri}"></script>

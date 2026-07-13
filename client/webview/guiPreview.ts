@@ -11,6 +11,75 @@ function tr(en: string, zh: string): string {
     return isZh ? zh : en;
 }
 
+type WorkspaceMode = 'preview' | 'inspect' | 'edit';
+type OverlayMode = 'clean' | 'focus' | 'all';
+type FitMode = 'content' | 'screen' | 'selection' | 'actual';
+
+interface PersistedWorkbenchState {
+    mode?: WorkspaceMode;
+    overlay?: OverlayMode;
+    resolution?: string;
+    inspectorCollapsed?: boolean;
+    inspectorWidth?: number;
+}
+
+const persistedWorkbenchState = (vscode.getState() ?? {}) as PersistedWorkbenchState;
+let workspaceMode: WorkspaceMode = persistedWorkbenchState.mode ?? 'inspect';
+let overlayMode: OverlayMode = persistedWorkbenchState.overlay ?? 'focus';
+let inspectorCollapsed = persistedWorkbenchState.inspectorCollapsed ?? false;
+let inspectorWidth = Math.min(620, Math.max(290, persistedWorkbenchState.inspectorWidth ?? 360));
+let lastFitMode: FitMode | null = null;
+let documentDirty = false;
+let saveInProgress = false;
+
+function persistWorkbenchState(): void {
+    vscode.setState({
+        mode: workspaceMode,
+        overlay: overlayMode,
+        resolution: currentResolution,
+        inspectorCollapsed,
+        inspectorWidth,
+    } satisfies PersistedWorkbenchState);
+}
+
+function setDocumentState(dirty: boolean, saving = false, saved = false): void {
+    documentDirty = dirty;
+    saveInProgress = saving;
+    document.body.classList.toggle('document-dirty', dirty);
+
+    const button = document.getElementById('btn-save') as HTMLButtonElement | null;
+    if (button) {
+        button.disabled = !dirty || saving;
+        button.classList.toggle('dirty', dirty);
+        button.textContent = saving ? tr('Saving…', '保存中…') : tr('Save', '保存');
+    }
+
+    const state = document.getElementById('edit-save-state');
+    if (state) {
+        state.classList.toggle('dirty', dirty);
+        state.classList.toggle('saving', saving);
+        state.classList.toggle('saved', saved && !dirty && !saving);
+        state.textContent = saving
+            ? tr('Saving changes', '正在保存更改')
+            : dirty
+                ? tr('Unsaved changes', '有未保存的更改')
+                : tr('Saved', '已保存');
+    }
+
+    const modeNote = document.querySelector<HTMLElement>('.inspector-mode-note.editable > span');
+    if (modeNote) {
+        modeNote.textContent = dirty
+            ? tr('Edit draft · click Save to write changes to the file', '编辑草稿 · 点击“保存”后才会写入文件')
+            : tr('Edit mode · changes remain a draft until Save', '编辑模式 · 更改会保留为草稿，直到点击“保存”');
+    }
+}
+
+function requestDocumentSave(): void {
+    if (!editMode || !documentDirty || saveInProgress) return;
+    setDocumentState(documentDirty, true);
+    vscode.postMessage({ command: 'saveDocument' });
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface GuiElement {
@@ -94,13 +163,15 @@ let panX = 20;
 let panY = 60;
 let isDragging = false;
 let lastMX = 0, lastMY = 0;
-let currentResolution: string = 'auto';
+let currentResolution: string = persistedWorkbenchState.resolution ?? 'auto';
 let animatingSprites = false;
 
 function updateTransform() {
     const c = document.getElementById('canvas-container')!;
     c.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
     document.getElementById('zoom-level')!.textContent = `${Math.round(scale * 100)}%`;
+    document.body.classList.toggle('native-scale', Math.abs(scale - 1) < 0.001);
+    updateFitControls();
     updateViewportStatus();
 }
 
@@ -636,15 +707,13 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
     });
     div.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (editMode) {
-            if (e.ctrlKey) {
-                toggleSelection(el, div);
-            } else {
-                selectElement(el, div);
-            }
-        } else {
-            vscode.postMessage({ command: 'goToLine', line: el.line });
-        }
+        if (workspaceMode === 'preview') return;
+        if (editMode && e.ctrlKey) toggleSelection(el, div);
+        else selectElement(el, div, { openProperties: workspaceMode === 'inspect' });
+    });
+    div.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ command: 'goToLine', line: el.line });
     });
 
     // Edit mode: drag to move (skip if Ctrl held — Ctrl is for multi-select)
@@ -785,15 +854,13 @@ function renderAll(elements: GuiElement[], fileName: string) {
     canvas.style.width = `${screenW}px`;
     canvas.style.height = `${screenH}px`;
     canvas.style.position = 'relative';
-    canvas.style.backgroundColor = 'rgba(20,20,30,0.5)';
-    canvas.style.border = '1px solid #444';
     canvas.style.margin = '20px auto';
     canvas.style.overflow = 'visible';
 
     // Resolution label
     if (currentResolution !== 'auto') {
         const resLabel = document.createElement('div');
-        resLabel.style.cssText = 'position:absolute;top:-22px;right:4px;font-size:11px;color:#888;pointer-events:none;';
+        resLabel.className = 'resolution-label';
         resLabel.textContent = `${screenW}×${screenH}`;
         canvas.appendChild(resLabel);
     }
@@ -815,21 +882,92 @@ function renderAll(elements: GuiElement[], fileName: string) {
 
 // ─── Viewport ───────────────────────────────────────────────────────────────
 
-function fitToView() {
-    const root = document.getElementById('gui-root')!;
+interface ViewBounds {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+}
+
+function measureViewBounds(mode: Exclude<FitMode, 'actual'>): ViewBounds | null {
+    const container = document.getElementById('canvas-container')!;
+    const previousTransform = container.style.transform;
+    container.style.transform = 'translate(0px, 0px) scale(1)';
+    const containerRect = container.getBoundingClientRect();
+
+    let nodes: HTMLElement[];
+    if (mode === 'screen') {
+        nodes = Array.from(document.querySelectorAll<HTMLElement>('#gui-root > .card-body'));
+    } else if (mode === 'selection') {
+        nodes = selectedElements.map(item => item.div);
+    } else {
+        nodes = Array.from(document.querySelectorAll<HTMLElement>('#gui-root .el[data-line]'));
+    }
+
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const node of nodes) {
+        if (getComputedStyle(node).display === 'none') continue;
+        const rect = node.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        left = Math.min(left, rect.left - containerRect.left);
+        top = Math.min(top, rect.top - containerRect.top);
+        right = Math.max(right, rect.right - containerRect.left);
+        bottom = Math.max(bottom, rect.bottom - containerRect.top);
+    }
+
+    container.style.transform = previousTransform;
+    return Number.isFinite(left) ? { left, top, right, bottom } : null;
+}
+
+function applyBoundsToViewport(bounds: ViewBounds, maxScale: number, padding = 56): void {
     const vp = document.getElementById('viewport')!;
-    if (!root.firstChild) return;
-    const vpR = vp.getBoundingClientRect();
-    // Measure content at scale=1
-    const oldT = document.getElementById('canvas-container')!.style.transform;
-    document.getElementById('canvas-container')!.style.transform = 'translate(0,0) scale(1)';
-    const rR = root.getBoundingClientRect();
-    document.getElementById('canvas-container')!.style.transform = oldT;
-    if (rR.width === 0 || rR.height === 0) return;
-    scale = Math.min((vpR.width - 40) / rR.width, (vpR.height - 40) / rR.height, 1.5);
-    panX = 20;
-    panY = 20;
+    const viewportRect = vp.getBoundingClientRect();
+    const contentWidth = Math.max(1, bounds.right - bounds.left);
+    const contentHeight = Math.max(1, bounds.bottom - bounds.top);
+    const availableWidth = Math.max(1, viewportRect.width - padding * 2);
+    const availableHeight = Math.max(1, viewportRect.height - padding * 2);
+    scale = Math.max(0.1, Math.min(availableWidth / contentWidth, availableHeight / contentHeight, maxScale));
+    panX = (viewportRect.width - contentWidth * scale) / 2 - bounds.left * scale;
+    panY = (viewportRect.height - contentHeight * scale) / 2 - bounds.top * scale;
     updateTransform();
+}
+
+function fitViewport(mode: Exclude<FitMode, 'actual'>): void {
+    const fallbackMode = mode === 'selection' && selectedElements.length === 0 ? 'content' : mode;
+    const bounds = measureViewBounds(fallbackMode);
+    if (!bounds) return;
+    const maxScale = fallbackMode === 'screen' ? 1.5 : fallbackMode === 'selection' ? 4.5 : 3.5;
+    lastFitMode = fallbackMode;
+    applyBoundsToViewport(bounds, maxScale, fallbackMode === 'selection' ? 72 : 56);
+}
+
+function fitToView(): void {
+    fitViewport('content');
+}
+
+function showActualSize(): void {
+    const bounds = measureViewBounds(selectedElements.length > 0 ? 'selection' : 'content');
+    if (!bounds) return;
+    const vp = document.getElementById('viewport')!.getBoundingClientRect();
+    scale = 1;
+    panX = vp.width / 2 - (bounds.left + bounds.right) / 2;
+    panY = vp.height / 2 - (bounds.top + bounds.bottom) / 2;
+    lastFitMode = 'actual';
+    updateTransform();
+}
+
+function updateFitControls(): void {
+    const mapping: Array<[string, FitMode]> = [
+        ['btn-fit', 'content'],
+        ['btn-fit-screen', 'screen'],
+        ['btn-fit-selection', 'selection'],
+        ['btn-actual-size', 'actual'],
+    ];
+    for (const [id, mode] of mapping) {
+        document.getElementById(id)?.classList.toggle('active', lastFitMode === mode);
+    }
+    const selectionButton = document.getElementById('btn-fit-selection') as HTMLButtonElement | null;
+    if (selectionButton) selectionButton.disabled = selectedElements.length === 0;
 }
 
 function setupControls() {
@@ -838,13 +976,14 @@ function setupControls() {
     vp.addEventListener('mousedown', (e) => {
         if (e.button === 1 || (e.button === 0 && e.altKey)) {
             isDragging = true;
+            lastFitMode = null;
             lastMX = e.clientX;
             lastMY = e.clientY;
             vp.style.cursor = 'grabbing';
             e.preventDefault();
         }
-        // Click on empty area in edit mode → deselect
-        if (editMode && e.button === 0 && !e.altKey && (e.target === vp || (e.target as HTMLElement).id === 'canvas-container' || (e.target as HTMLElement).id === 'gui-root' || (e.target as HTMLElement).classList.contains('card-body'))) {
+        // Click on empty area in inspect/edit mode → deselect
+        if (workspaceMode !== 'preview' && e.button === 0 && !e.altKey && (e.target === vp || (e.target as HTMLElement).id === 'canvas-container' || (e.target as HTMLElement).id === 'gui-root' || (e.target as HTMLElement).classList.contains('card-body'))) {
             clearSelection();
             updateViewportStatus();
         }
@@ -863,6 +1002,7 @@ function setupControls() {
 
     vp.addEventListener('wheel', (e) => {
         e.preventDefault();
+        lastFitMode = null;
         const d = e.deltaY > 0 ? -0.08 : 0.08;
         const ns = Math.max(0.1, Math.min(5, scale + d));
         const rect = vp.getBoundingClientRect();
@@ -874,20 +1014,30 @@ function setupControls() {
         updateTransform();
     }, { passive: false });
 
-    document.getElementById('btn-zoom-in')!.onclick = () => { scale = Math.min(5, scale + 0.2); updateTransform(); };
-    document.getElementById('btn-zoom-out')!.onclick = () => { scale = Math.max(0.1, scale - 0.2); updateTransform(); };
+    document.getElementById('btn-zoom-in')!.onclick = () => { lastFitMode = null; scale = Math.min(5, scale + 0.2); updateTransform(); };
+    document.getElementById('btn-zoom-out')!.onclick = () => { lastFitMode = null; scale = Math.max(0.1, scale - 0.2); updateTransform(); };
     document.getElementById('btn-fit')!.onclick = fitToView;
-    document.getElementById('btn-reset')!.onclick = () => { scale = 1; panX = 20; panY = 20; updateTransform(); };
-    document.getElementById('btn-preview')!.onclick = () => {
-        document.body.classList.toggle('preview-mode');
-        document.getElementById('btn-preview')!.classList.toggle('active');
-    };
+    document.getElementById('btn-fit-screen')!.onclick = () => fitViewport('screen');
+    document.getElementById('btn-fit-selection')!.onclick = () => fitViewport('selection');
+    document.getElementById('btn-actual-size')!.onclick = showActualSize;
+    document.getElementById('btn-reset')!.onclick = fitToView;
+    document.getElementById('btn-preview')!.onclick = () => setWorkspaceMode('preview');
+    document.getElementById('btn-inspect')!.onclick = () => setWorkspaceMode('inspect');
+    document.getElementById('btn-edit')!.onclick = () => setWorkspaceMode('edit');
+
+    const overlaySelect = document.getElementById('overlay-select') as HTMLSelectElement | null;
+    if (overlaySelect) {
+        overlaySelect.value = overlayMode;
+        overlaySelect.onchange = () => setOverlayMode(overlaySelect.value as OverlayMode);
+    }
 
     // Resolution selector
     const resSel = document.getElementById('resolution-select') as HTMLSelectElement | null;
     if (resSel) {
+        resSel.value = currentResolution;
         resSel.onchange = () => {
             currentResolution = resSel.value;
+            persistWorkbenchState();
             hasRendered = false; // force fitToView on re-render
             if (allElements.length > 0) {
                 renderAll(allElements, document.getElementById('title')?.textContent?.replace('GUI Preview: ', '') || '');
@@ -904,15 +1054,14 @@ function setupControls() {
             animatingSprites = !animatingSprites;
             animBtn.textContent = animatingSprites ? '⏸' : '▶';
             animBtn.classList.toggle('active', animatingSprites);
+            animBtn.setAttribute('aria-pressed', String(animatingSprites));
             toggleSpriteAnimations(animatingSprites);
         };
     }
-    document.getElementById('btn-edit')!.onclick = toggleEditMode;
     document.getElementById('btn-layers')!.onclick = () => {
-        const sp = document.getElementById('side-panel')!;
-        sp.classList.toggle('hidden');
-        document.getElementById('btn-layers')!.classList.toggle('active');
+        setInspectorCollapsed(!inspectorCollapsed);
     };
+    document.getElementById('btn-close-inspector')!.onclick = () => setInspectorCollapsed(true);
     document.getElementById('layers-collapse-all')!.onclick = () => {
         document.querySelectorAll('.layer-children').forEach(el => el.classList.add('collapsed'));
         document.querySelectorAll('.layer-expand').forEach(el => el.textContent = '▸');
@@ -921,6 +1070,12 @@ function setupControls() {
         document.querySelectorAll('.layer-children').forEach(el => el.classList.remove('collapsed'));
         document.querySelectorAll('.layer-expand').forEach(el => el.textContent = '▾');
     };
+
+    document.getElementById('btn-undo')!.onclick = undo;
+    document.getElementById('btn-redo')!.onclick = redo;
+    document.getElementById('btn-save')!.onclick = requestDocumentSave;
+    document.getElementById('btn-duplicate')!.onclick = duplicateSelected;
+    document.getElementById('btn-delete')!.onclick = deleteSelected;
 
 }
 
@@ -988,6 +1143,7 @@ function appendLayerGroup(
     item.className = 'layer-item layer-group';
     item.style.paddingLeft = `${6 + depth * 12}px`;
     item.dataset.search = `${group.stem} ${group.type} ${group.items.map(el => el.name).join(' ')}`.toLowerCase();
+    item.dataset.layerType = group.type;
 
     const expand = document.createElement('button');
     expand.className = 'layer-expand';
@@ -1064,6 +1220,7 @@ function appendLayerElement(el: GuiElement, container: HTMLElement, depth: numbe
     item.style.paddingLeft = `${6 + depth * 12}px`;
     item.dataset.line = String(el.line);
     item.dataset.search = `${el.name || '(unnamed)'} ${el.type} ${c.tag}`.toLowerCase();
+    item.dataset.layerType = el.type;
 
     const expand = document.createElement('button');
     expand.className = 'layer-expand';
@@ -1130,10 +1287,10 @@ function appendLayerElement(el: GuiElement, container: HTMLElement, depth: numbe
         }
 
         const entry = elMap.get(el.line);
-        if (editMode) {
+        if (workspaceMode !== 'preview') {
             if (!entry) return;
-            if (e.ctrlKey) toggleSelection(entry.el, entry.div, { focusCanvas: true });
-            else selectElement(entry.el, entry.div, { focusCanvas: true });
+            if (editMode && e.ctrlKey) toggleSelection(entry.el, entry.div, { focusCanvas: true });
+            else selectElement(entry.el, entry.div, { focusCanvas: true, openProperties: workspaceMode === 'inspect' });
         } else {
             document.querySelectorAll('.layer-item.active').forEach(i => i.classList.remove('active'));
             item.classList.add('active');
@@ -1143,8 +1300,11 @@ function appendLayerElement(el: GuiElement, container: HTMLElement, depth: numbe
                 focusElementInViewport(entry.div);
                 updateViewportStatus(entry.el);
             }
-            vscode.postMessage({ command: 'goToLine', line: el.line });
         }
+    };
+    item.ondblclick = (event) => {
+        event.stopPropagation();
+        vscode.postMessage({ command: 'goToLine', line: el.line });
     };
 
     item.draggable = true;
@@ -1212,6 +1372,57 @@ function updateLayersPanel(elements: GuiElement[]) {
     if (!tree) return;
     tree.innerHTML = '';
     buildLayerTree(elements, tree);
+    populateLayerTypeFilter(elements);
+    applyLayerFilters();
+}
+
+function collectLayerTypes(elements: GuiElement[], result = new Set<string>()): Set<string> {
+    for (const element of elements) {
+        if (isRenderableLayerElement(element)) result.add(element.type);
+        collectLayerTypes(element.children, result);
+    }
+    return result;
+}
+
+function populateLayerTypeFilter(elements: GuiElement[]): void {
+    const select = document.getElementById('layer-type-filter') as HTMLSelectElement | null;
+    if (!select) return;
+    const selected = select.value;
+    const allLabel = tr('All types', '全部类型');
+    select.innerHTML = `<option value="">${allLabel}</option>`;
+    for (const type of [...collectLayerTypes(elements)].sort((a, b) => a.localeCompare(b))) {
+        const option = document.createElement('option');
+        option.value = type;
+        option.textContent = type;
+        select.appendChild(option);
+    }
+    if (Array.from(select.options).some(option => option.value === selected)) select.value = selected;
+}
+
+function applyLayerFilters(): void {
+    const query = (document.getElementById('layer-filter') as HTMLInputElement | null)?.value.trim().toLowerCase() ?? '';
+    const type = (document.getElementById('layer-type-filter') as HTMLSelectElement | null)?.value ?? '';
+    let visible = 0;
+    let total = 0;
+    document.querySelectorAll<HTMLElement>('.layer-item').forEach(item => {
+        const isElement = !!item.dataset.line;
+        if (isElement) total++;
+        const matchesQuery = !query || (item.dataset.search ?? '').includes(query);
+        const matchesType = !type || item.dataset.layerType === type;
+        const matches = matchesQuery && matchesType;
+        item.classList.toggle('filtered-out', !matches);
+        if (matches && isElement) visible++;
+    });
+    if (query || type) {
+        document.querySelectorAll('.layer-children').forEach(element => element.classList.remove('collapsed'));
+    }
+    const count = document.getElementById('layer-count');
+    if (count) count.textContent = visible === total ? `${total}` : `${visible}/${total}`;
+}
+
+function setupLayerFilters(): void {
+    document.getElementById('layer-filter')?.addEventListener('input', applyLayerFilters);
+    document.getElementById('layer-type-filter')?.addEventListener('change', applyLayerFilters);
 }
 
 function revealLayerItem(line: number) {
@@ -1382,7 +1593,7 @@ function setupSearch() {
 
 // ─── Visual Editor ──────────────────────────────────────────────────────────
 
-let editMode = false;
+let editMode = workspaceMode === 'edit';
 let allElements: GuiElement[] = [];
 let spriteNames: string[] = [];
 let effectNames: string[] = [];
@@ -1390,11 +1601,129 @@ let hasRendered = false;  // track whether first render has occurred
 const elMap = new Map<number, { el: GuiElement; div: HTMLElement }>();
 let selectedElements: Array<{ el: GuiElement; div: HTMLElement }> = [];
 
+function setOverlayMode(mode: OverlayMode): void {
+    overlayMode = ['clean', 'focus', 'all'].includes(mode) ? mode : 'focus';
+    document.body.classList.remove('overlay-clean', 'overlay-focus', 'overlay-all');
+    document.body.classList.add(`overlay-${overlayMode}`);
+    const select = document.getElementById('overlay-select') as HTMLSelectElement | null;
+    if (select) select.value = overlayMode;
+    persistWorkbenchState();
+}
+
+function setWorkspaceMode(mode: WorkspaceMode): void {
+    workspaceMode = mode;
+    editMode = mode === 'edit';
+    document.body.classList.remove('mode-preview', 'mode-inspect', 'mode-edit');
+    document.body.classList.add(`mode-${mode}`);
+    document.body.classList.toggle('preview-mode', mode === 'preview');
+    document.body.classList.toggle('edit-mode', editMode);
+
+    for (const [id, value] of [['btn-preview', 'preview'], ['btn-inspect', 'inspect'], ['btn-edit', 'edit']] as const) {
+        const button = document.getElementById(id);
+        const active = value === mode;
+        button?.classList.toggle('active', active);
+        button?.setAttribute('aria-pressed', String(active));
+    }
+
+    if (mode === 'preview') {
+        clearSelection();
+    } else {
+        for (const selected of selectedElements) removeResizeHandles(selected.div);
+        if (editMode && selectedElements.length === 1) {
+            addResizeHandles(selectedElements[0]!.div, selectedElements[0]!.el);
+        }
+    }
+
+    const inspectorTitle = document.getElementById('inspector-title');
+    if (inspectorTitle) inspectorTitle.textContent = mode === 'edit'
+        ? tr('Editable properties', '可编辑属性')
+        : mode === 'inspect'
+            ? tr('Read-only inspection', '只读检查')
+            : tr('GUI structure', 'GUI 结构');
+    updatePropertiesPanel();
+    updateSelectionCommands();
+    persistWorkbenchState();
+}
+
+function showInspectorTab(tab: 'layers' | 'properties'): void {
+    const tabLayers = document.getElementById('tab-layers');
+    const tabProps = document.getElementById('tab-properties');
+    const layersPanel = document.getElementById('layers-panel');
+    const propsPanel = document.getElementById('properties-panel');
+    if (!tabLayers || !tabProps || !layersPanel || !propsPanel) return;
+    const showLayers = tab === 'layers';
+    tabLayers.classList.toggle('active', showLayers);
+    tabProps.classList.toggle('active', !showLayers);
+    tabLayers.setAttribute('aria-selected', String(showLayers));
+    tabProps.setAttribute('aria-selected', String(!showLayers));
+    layersPanel.classList.toggle('hidden', !showLayers);
+    propsPanel.classList.toggle('hidden', showLayers);
+}
+
+function setInspectorCollapsed(collapsed: boolean): void {
+    inspectorCollapsed = collapsed;
+    document.getElementById('side-panel')?.classList.toggle('hidden', collapsed);
+    document.getElementById('inspector-resizer')?.classList.toggle('hidden', collapsed);
+    const button = document.getElementById('btn-layers');
+    button?.classList.toggle('active', !collapsed);
+    button?.setAttribute('aria-pressed', String(!collapsed));
+    persistWorkbenchState();
+    if (lastFitMode && lastFitMode !== 'actual') {
+        requestAnimationFrame(() => fitViewport(lastFitMode as Exclude<FitMode, 'actual'>));
+    }
+}
+
+function setupInspectorResizer(): void {
+    const resizer = document.getElementById('inspector-resizer');
+    const panel = document.getElementById('side-panel');
+    if (!resizer || !panel) return;
+    const applyWidth = (width: number) => {
+        inspectorWidth = Math.min(620, Math.max(290, width));
+        panel.style.width = `${inspectorWidth}px`;
+    };
+    applyWidth(inspectorWidth);
+
+    let resizing = false;
+    resizer.addEventListener('pointerdown', (event) => {
+        resizing = true;
+        resizer.setPointerCapture(event.pointerId);
+        document.body.classList.add('resizing-inspector');
+        event.preventDefault();
+    });
+    resizer.addEventListener('pointermove', (event) => {
+        if (!resizing) return;
+        applyWidth(window.innerWidth - event.clientX);
+    });
+    resizer.addEventListener('pointerup', (event) => {
+        if (!resizing) return;
+        resizing = false;
+        resizer.releasePointerCapture(event.pointerId);
+        document.body.classList.remove('resizing-inspector');
+        persistWorkbenchState();
+        if (lastFitMode && lastFitMode !== 'actual') {
+            fitViewport(lastFitMode as Exclude<FitMode, 'actual'>);
+        }
+    });
+    resizer.addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        applyWidth(inspectorWidth + (event.key === 'ArrowLeft' ? 16 : -16));
+        persistWorkbenchState();
+        event.preventDefault();
+    });
+}
+
+function updateSelectionCommands(): void {
+    const hasSelection = selectedElements.length > 0;
+    for (const id of ['btn-delete', 'btn-duplicate']) {
+        const button = document.getElementById(id) as HTMLButtonElement | null;
+        if (button) button.disabled = !editMode || !hasSelection;
+    }
+    updateFitControls();
+}
+
 // ── Edit Mode Toggle ──
 function toggleEditMode() {
-    editMode = !editMode;
-    document.body.classList.toggle('edit-mode', editMode);
-    document.getElementById('btn-edit')!.classList.toggle('active', editMode);
+    setWorkspaceMode(editMode ? 'inspect' : 'edit');
     if (!editMode) {
         clearSelection();
         hideContextMenu();
@@ -1403,11 +1732,11 @@ function toggleEditMode() {
 }
 
 // ── Selection ──
-function selectElement(el: GuiElement, div: HTMLElement, options: { focusCanvas?: boolean } = {}) {
+function selectElement(el: GuiElement, div: HTMLElement, options: { focusCanvas?: boolean; openProperties?: boolean } = {}) {
     clearSelection();
     selectedElements = [{ el, div }];
     div.classList.add('selected');
-    addResizeHandles(div, el);
+    if (editMode) addResizeHandles(div, el);
     updatePropertiesPanel();
     updateAlignButtons();
     document.querySelectorAll('.layer-item.active').forEach(i => i.classList.remove('active'));
@@ -1415,10 +1744,15 @@ function selectElement(el: GuiElement, div: HTMLElement, options: { focusCanvas?
     if (layerItem) layerItem.classList.add('active');
     revealLayerItem(el.line);
     if (options.focusCanvas) focusElementInViewport(div);
+    if (options.openProperties) {
+        setInspectorCollapsed(false);
+        showInspectorTab('properties');
+    }
+    updateSelectionCommands();
     updateViewportStatus();
 }
 
-function toggleSelection(el: GuiElement, div: HTMLElement, options: { focusCanvas?: boolean } = {}) {
+function toggleSelection(el: GuiElement, div: HTMLElement, options: { focusCanvas?: boolean; openProperties?: boolean } = {}) {
     const idx = selectedElements.findIndex(s => s.el.line === el.line);
     if (idx >= 0) {
         selectedElements[idx]!.div.classList.remove('selected');
@@ -1430,15 +1764,23 @@ function toggleSelection(el: GuiElement, div: HTMLElement, options: { focusCanva
     } else {
         selectedElements.push({ el, div });
         div.classList.add('selected');
-        if (selectedElements.length === 1) addResizeHandles(div, el);
         // Highlight in layers
         const layerItem = document.querySelector(`.layer-item[data-line="${el.line}"]`);
         if (layerItem) layerItem.classList.add('active');
         revealLayerItem(el.line);
         if (options.focusCanvas) focusElementInViewport(div);
     }
+    for (const selected of selectedElements) removeResizeHandles(selected.div);
+    if (editMode && selectedElements.length === 1) {
+        addResizeHandles(selectedElements[0]!.div, selectedElements[0]!.el);
+    }
     updatePropertiesPanel();
     updateAlignButtons();
+    if (options.openProperties) {
+        setInspectorCollapsed(false);
+        showInspectorTab('properties');
+    }
+    updateSelectionCommands();
     updateViewportStatus();
 }
 
@@ -1452,6 +1794,7 @@ function clearSelection() {
     document.querySelectorAll('.layer-item.active').forEach(i => i.classList.remove('active'));
     updatePropertiesPanel();
     updateAlignButtons();
+    updateSelectionCommands();
     updateViewportStatus();
 }
 
@@ -2001,7 +2344,9 @@ function updatePropertiesPanel() {
     const content = document.getElementById('props-content');
     if (!content) return;
     if (selectedElements.length === 0) {
-        content.innerHTML = `<div class="empty-state">${tr('Select an element to edit properties', '选择一个元素以编辑属性')}</div>`;
+        content.innerHTML = `<div class="empty-state">${workspaceMode === 'edit'
+            ? tr('Select an element to edit properties', '选择一个元素以编辑属性')
+            : tr('Select an element to inspect its properties', '选择一个元素以检查属性')}</div>`;
         return;
     }
     if (selectedElements.length > 1) {
@@ -2046,6 +2391,7 @@ function updatePropertiesPanel() {
                 (input as HTMLInputElement).value = '0';
             });
         });
+        applyPropertiesMode(content);
         return;
     }
     const { el } = selectedElements[0]!;
@@ -2104,7 +2450,7 @@ function updatePropertiesPanel() {
 
     // Info
     html += `<div class="prop-group"><div class="prop-group-title">${tr('Source', '源码')}</div>`;
-    html += propRow(tr('Line', '行号'), `<span style="font-size:11px;color:#7888a8">${el.line} — ${el.endLine}</span>`);
+    html += propRow(tr('Line', '行号'), `<span class="source-line">${el.line} — ${el.endLine}</span>`);
     html += `</div>`;
 
     content.innerHTML = html;
@@ -2132,6 +2478,31 @@ function updatePropertiesPanel() {
 
     // Setup custom effect autocomplete dropdown
     setupAutocomplete(content, '#effect-search', 'effect-dropdown-global', effectNames);
+    applyPropertiesMode(content);
+}
+
+function applyPropertiesMode(content: HTMLElement): void {
+    const readOnly = workspaceMode !== 'edit';
+    content.querySelectorAll<HTMLInputElement | HTMLSelectElement>('.prop-input, .prop-select, .prop-checkbox, .prop-slider')
+        .forEach(control => { control.disabled = readOnly; });
+
+    const note = document.createElement('div');
+    note.className = `inspector-mode-note ${readOnly ? 'read-only' : 'editable'}`;
+    const label = document.createElement('span');
+    label.textContent = readOnly
+        ? tr('Inspection mode · properties are read-only', '检查模式 · 属性为只读')
+        : documentDirty
+            ? tr('Edit draft · click Save to write changes to the file', '编辑草稿 · 点击“保存”后才会写入文件')
+            : tr('Edit mode · changes remain a draft until Save', '编辑模式 · 更改会保留为草稿，直到点击“保存”');
+    note.appendChild(label);
+    if (selectedElements.length === 1) {
+        const sourceButton = document.createElement('button');
+        sourceButton.type = 'button';
+        sourceButton.textContent = tr('Open source', '打开源码');
+        sourceButton.onclick = () => vscode.postMessage({ command: 'goToLine', line: selectedElements[0]!.el.line });
+        note.appendChild(sourceButton);
+    }
+    content.prepend(note);
 }
 
 /** Reusable autocomplete dropdown for input fields */
@@ -2558,14 +2929,15 @@ function startReparentTargetSelection() {
     if (selectedElements.length !== 1) return;
     reparentSource = selectedElements[0]!.el;
     reparentMode = true;
+    document.body.dataset.reparentMessage = tr(
+        'Choose a target container in the layer tree · Esc to cancel',
+        '在图层树中选择目标容器 · Esc 取消',
+    );
     // Show visual indicator
     document.body.classList.add('reparent-mode');
     // Open side panel if closed
-    const sp = document.getElementById('side-panel')!;
-    if (sp.classList.contains('hidden')) {
-        sp.classList.remove('hidden');
-        document.getElementById('btn-layers')!.classList.add('active');
-    }
+    setInspectorCollapsed(false);
+    showInspectorTab('layers');
     // Highlight valid targets in layers panel
     document.querySelectorAll('.layer-item').forEach(item => {
         const line = parseInt((item as HTMLElement).dataset.line ?? '0');
@@ -2650,6 +3022,12 @@ function duplicateSelected() {
 // ── Keyboard Shortcuts ──
 function setupEditorKeyboard() {
     document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && editMode) {
+            e.preventDefault();
+            requestDocumentSave();
+            return;
+        }
+
         // Don't intercept keys when focus is in an input/select/textarea
         const tag = (document.activeElement?.tagName ?? '').toLowerCase();
         if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
@@ -2724,22 +3102,10 @@ function setupEditorKeyboard() {
 function setupSidePanelTabs() {
     const tabLayers = document.getElementById('tab-layers');
     const tabProps = document.getElementById('tab-properties');
-    const layersPanel = document.getElementById('layers-panel');
-    const propsPanel = document.getElementById('properties-panel');
-    if (!tabLayers || !tabProps || !layersPanel || !propsPanel) return;
+    if (!tabLayers || !tabProps) return;
 
-    tabLayers.onclick = () => {
-        tabLayers.classList.add('active');
-        tabProps.classList.remove('active');
-        layersPanel.classList.remove('hidden');
-        propsPanel.classList.add('hidden');
-    };
-    tabProps.onclick = () => {
-        tabProps.classList.add('active');
-        tabLayers.classList.remove('active');
-        propsPanel.classList.remove('hidden');
-        layersPanel.classList.add('hidden');
-    };
+    tabLayers.onclick = () => showInspectorTab('layers');
+    tabProps.onclick = () => showInspectorTab('properties');
 }
 
 // ── Sync Visuals ──
@@ -2791,6 +3157,9 @@ window.addEventListener('message', e => {
         renderAll(e.data.data, e.data.fileName);
         updateLayersPanel(e.data.data);
         clearSelection();
+        setDocumentState(Boolean(e.data.dirty));
+    } else if (e.data.command === 'documentState') {
+        setDocumentState(Boolean(e.data.dirty), Boolean(e.data.saving), Boolean(e.data.saved));
     }
 });
 
@@ -2800,7 +3169,17 @@ setupEditorKeyboard();
 setupContextMenu();
 setupSidePanelTabs();
 setupAlignButtons();
+setupLayerFilters();
+setupInspectorResizer();
+setOverlayMode(overlayMode);
+setWorkspaceMode(workspaceMode);
+setInspectorCollapsed(inspectorCollapsed);
+setDocumentState(false);
 updateTransform();
+window.addEventListener('resize', () => {
+    if (lastFitMode === 'actual') showActualSize();
+    else if (lastFitMode) fitViewport(lastFitMode);
+});
 vscode.postMessage({ command: 'ready' });
 
 export {};

@@ -364,23 +364,32 @@ export function tokenizeLocalisationRichText(value: string, baseOffset = 0): Loc
 		i++;
 	}
 
-	for (let i = 0; i < colorMarkers.length; i++) {
-		const marker = colorMarkers[i]!;
-		if (marker.colorCode === '\u00a7!') continue;
-		if (!marker.colorCode || !LOCALISATION_COLOR_MAP[marker.colorCode]) continue;
+	const colorStack: string[] = [];
+	let rangeStart = baseOffset;
+	const addActiveColorRange = (rangeEnd: number): void => {
+		const colorCode = colorStack[colorStack.length - 1];
+		if (!colorCode || !LOCALISATION_COLOR_MAP[colorCode] || rangeStart >= rangeEnd) return;
+		tokens.push({
+			type: 'colorRange',
+			start: rangeStart,
+			end: rangeEnd,
+			text: value.slice(rangeStart - baseOffset, rangeEnd - baseOffset),
+			colorCode,
+		});
+	};
 
-		const rangeStart = marker.end;
-		const rangeEnd = i + 1 < colorMarkers.length ? colorMarkers[i + 1]!.start : baseOffset + value.length;
-		if (rangeStart < rangeEnd) {
-			tokens.push({
-				type: 'colorRange',
-				start: rangeStart,
-				end: rangeEnd,
-				text: value.slice(rangeStart - baseOffset, rangeEnd - baseOffset),
-				colorCode: marker.colorCode,
-			});
+	for (const marker of colorMarkers) {
+		addActiveColorRange(marker.start);
+		if (marker.colorCode === '\u00a7!') {
+			colorStack.pop();
+		} else if (marker.colorCode) {
+			// Keep unknown color codes on the stack so their reset marker does not
+			// accidentally close a supported outer color.
+			colorStack.push(marker.colorCode);
 		}
+		rangeStart = marker.end;
 	}
+	addActiveColorRange(baseOffset + value.length);
 
 	return tokens.sort(tokenSort);
 }

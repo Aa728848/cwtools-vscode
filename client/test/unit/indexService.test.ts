@@ -97,6 +97,31 @@ building_kuat_command_center_auto:0 "Command Center"
         expect(tokens.some(token => token.type === 'scriptedVariable' && token.text === '@scripted_var')).to.be.true;
     });
 
+    it('restores the outer color after a nested color closes', () => {
+        const text = '\u00a7Hgold \u00a7Bblue\u00a7! gold again\u00a7! plain';
+        const colorRanges = tokenizeLocalisationRichText(text, 10)
+            .filter(token => token.type === 'colorRange')
+            .map(token => ({ colorCode: token.colorCode, text: token.text }));
+
+        expect(colorRanges).to.deep.equal([
+            { colorCode: '\u00a7H', text: 'gold ' },
+            { colorCode: '\u00a7B', text: 'blue' },
+            { colorCode: '\u00a7H', text: ' gold again' },
+        ]);
+    });
+
+    it('pairs resets with unknown nested color markers before restoring the outer color', () => {
+        const text = '\u00a7Hgold \u00a7Zunknown\u00a7! gold again\u00a7!';
+        const colorRanges = tokenizeLocalisationRichText(text)
+            .filter(token => token.type === 'colorRange')
+            .map(token => ({ colorCode: token.colorCode, text: token.text }));
+
+        expect(colorRanges).to.deep.equal([
+            { colorCode: '\u00a7H', text: 'gold ' },
+            { colorCode: '\u00a7H', text: ' gold again' },
+        ]);
+    });
+
     it('strips all localisation color markers for plain hover previews', () => {
         expect(stripLocalisationColorMarkers('§HHeader§! and §Oorange§!')).to.equal('Header and orange');
     });

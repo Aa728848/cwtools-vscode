@@ -36,6 +36,7 @@ interface TechNode {
     area: 'physics' | 'society' | 'engineering' | 'unknown';
     tier: number;
     category: string;
+    categoryLabel?: string;
     cost: number;
     weight: number;
     icon: string;
@@ -332,7 +333,7 @@ function formatTier(node: TechNode): string {
 
 function formatTechLabel(node: TechNode): string {
     const title = truncateText(node.title && node.title !== node.id ? node.title : node.id, 24);
-    const category = truncateText(node.category || areaLabel[node.area] || node.area, 16);
+    const category = truncateText(node.categoryLabel || node.category || areaLabel[node.area] || node.area, 16);
     const cost = node.cost > 0 ? formatNumber(node.cost) : '-';
     const weight = node.weight > 0 ? formatNumber(node.weight) : '-';
     return `${title}\n${category} - ${formatTier(node)}\n${t('Cost', '花费')}: ${cost}, ${t('Weight', '权重')}: ${weight}`;
@@ -694,7 +695,7 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
         ${data.description ? `<p class="details-description">${escapeHtml(data.description)}</p>` : ''}
         <dl class="details-list">
             <div><dt>${t('Tier', '层级')}</dt><dd>${escapeHtml(formatTier(data as TechNode))}</dd></div>
-            <div><dt>${t('Category', '分类')}</dt><dd>${escapeHtml(data.category || '-')}</dd></div>
+            <div><dt>${t('Category', '分类')}</dt><dd>${escapeHtml(data.categoryLabel || data.category || '-')}</dd></div>
             <div><dt>${t('Cost', '费用')}</dt><dd>${Number(data.cost) > 0 ? escapeHtml(data.cost) : '-'}</dd></div>
             <div><dt>${t('Weight', '权重')}</dt><dd>${Number(data.weight) > 0 ? escapeHtml(formatNumber(data.weight)) : '-'}</dd></div>
             <div><dt>${t('Dependencies', '依赖')}</dt><dd>${t(`${incoming} prerequisites / ${outgoing} dependents`, `${incoming} 个前置 / ${outgoing} 个后续`)}</dd></div>
@@ -1072,6 +1073,7 @@ function render(nodes: TechNode[], edges: TechEdge[]) {
                 area: node.area,
                 tier: node.tier,
                 category: node.category,
+                categoryLabel: node.categoryLabel,
                 cost: node.cost,
                 weight: node.weight,
                 icon: node.icon,

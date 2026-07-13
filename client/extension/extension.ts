@@ -51,6 +51,7 @@ import { McpBridgeServer } from './ai/mcpBridgeServer';
 import { maybePromptForDefaultDarkModernTheme } from './themePrompt';
 import { registerProjectKnowledgeWatcher } from './ai/projectKnowledge';
 import { QuickPickSelectionGuard } from './quickPickSelectionGuard';
+import { getDefaultLocalisationLanguagesForUiLocale } from './localisationLanguagePreference';
 
 export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
@@ -2685,12 +2686,12 @@ function hasLocLanguageSetting(value: readonly string[] | undefined): boolean {
 }
 
 function defaultLocLanguagesForUi(): string[] {
-	return isChineseLocale() ? ['Chinese'] : ['English'];
+	return getDefaultLocalisationLanguagesForUiLocale(vs.env.language);
 }
 
 /**
  * Chooses the default validation language from the VS Code UI language.
- * Chinese VS Code uses Chinese; every other UI language falls back to English.
+ * Supported Stellaris languages follow the matching VS Code UI language.
  * User-configured values still win over this automatic default.
  */
 async function autoDetectLocLanguage(context: ExtensionContext): Promise<void> {

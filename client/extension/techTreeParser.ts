@@ -22,6 +22,8 @@ export interface TechNode {
     area: TechArea;
     tier: number;
     category: string;
+    /** Resolved localisation for the research category, when available. */
+    categoryLabel?: string;
     cost: number;
     weight: number;
     icon: string;
@@ -48,6 +50,22 @@ export interface TechEdge {
 export interface TechGraph {
     nodes: TechNode[];
     edges: TechEdge[];
+}
+
+export function applyTechLocalisation(
+    nodes: TechNode[],
+    resolveLocKey: (key: string) => string | undefined,
+): void {
+    for (const node of nodes) {
+        const title = resolveLocKey(node.id);
+        if (title) node.title = title;
+
+        const description = resolveLocKey(`${node.id}_desc`);
+        if (description) node.description = description;
+
+        const categoryLabel = node.category ? resolveLocKey(node.category) : undefined;
+        if (categoryLabel) node.categoryLabel = categoryLabel;
+    }
 }
 
 // ─── Parser ──────────────────────────────────────────────────────────────────

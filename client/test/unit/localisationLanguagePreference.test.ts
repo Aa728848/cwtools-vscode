@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import {
+	getDefaultLocalisationLanguagesForUiLocale,
 	getPreferredLocalisationLanguageTags,
 	localisationLanguageRank,
 	sortLocalisationEntriesByLanguagePreference,
@@ -7,6 +8,14 @@ import {
 import type { LocEntry } from '../../extension/indexing/indexService';
 
 describe('localisation language preference', () => {
+	it('maps supported VS Code UI locales to Stellaris localisation settings', () => {
+		expect(getDefaultLocalisationLanguagesForUiLocale('zh-cn')).to.deep.equal(['Chinese']);
+		expect(getDefaultLocalisationLanguagesForUiLocale('de')).to.deep.equal(['German']);
+		expect(getDefaultLocalisationLanguagesForUiLocale('pt-BR')).to.deep.equal(['Braz_Por']);
+		expect(getDefaultLocalisationLanguagesForUiLocale('ja')).to.deep.equal(['Japanese']);
+		expect(getDefaultLocalisationLanguagesForUiLocale('unsupported')).to.deep.equal(['English']);
+	});
+
 	it('maps extension language settings to localisation header tags', () => {
 		expect(getPreferredLocalisationLanguageTags(['Chinese', 'English'])).to.deep.equal([
 			'l_simp_chinese',

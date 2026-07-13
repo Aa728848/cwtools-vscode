@@ -18,6 +18,7 @@ import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { getLocalisationDirectoryGlob } from './gameProfiles';
 import { parseLocFile, stripLocalisationColorMarkers } from './indexing/locParser';
 import {
+    applyTechLocalisation,
     parseTechFile,
     mergeTechGraphs,
     extractTechSubgraph,
@@ -282,13 +283,7 @@ export class TechTreePanel {
         const locMap = await this._loadLocalisationMap();
         if (locMap.size === 0) return;
 
-        for (const node of nodes) {
-            const title = this._resolveLocKey(node.id, locMap);
-            if (title) node.title = title;
-
-            const description = this._resolveLocKey(`${node.id}_desc`, locMap);
-            if (description) node.description = description;
-        }
+        applyTechLocalisation(nodes, key => this._resolveLocKey(key, locMap));
     }
 
     private async _loadLocalisationMap(): Promise<Map<string, string>> {

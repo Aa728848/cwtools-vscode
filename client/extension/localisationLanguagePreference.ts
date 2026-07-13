@@ -16,7 +16,26 @@ const LANGUAGE_SETTING_TO_TAG: Record<string, string> = {
 	turkish: 'l_turkish',
 };
 
+const UI_LANGUAGE_TO_SETTING: Record<string, string> = {
+	en: 'English',
+	fr: 'French',
+	de: 'German',
+	es: 'Spanish',
+	ru: 'Russian',
+	pt: 'Braz_Por',
+	pl: 'Polish',
+	zh: 'Chinese',
+	ko: 'Korean',
+	ja: 'Japanese',
+	tr: 'Turkish',
+};
+
 export const DEFAULT_LOCALISATION_LANGUAGE_TAGS = ['l_english'];
+
+export function getDefaultLocalisationLanguagesForUiLocale(uiLanguage: string | undefined): string[] {
+	const languageCode = uiLanguage?.trim().toLowerCase().split(/[-_]/, 1)[0] ?? '';
+	return [UI_LANGUAGE_TO_SETTING[languageCode] ?? 'English'];
+}
 
 export interface LocalisationLanguageEntry {
 	language?: string;

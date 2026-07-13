@@ -1408,7 +1408,11 @@
                 "stellarisLanguageServices.ai.web.mode": {
                     "scope": "window",
                     "type": "string",
-                    "enum": ["disabled", "indexed", "live"],
+                    "enum": [
+                        "disabled",
+                        "indexed",
+                        "live"
+                    ],
                     "enumDescriptions": [
                         "%configuration.stellarisLanguageServices.ai.web.mode.disabled%",
                         "%configuration.stellarisLanguageServices.ai.web.mode.indexed%",
@@ -1420,35 +1424,65 @@
                 "stellarisLanguageServices.ai.web.provider": {
                     "scope": "window",
                     "type": "string",
-                    "enum": ["auto", "openai", "brave", "exa", "tavily", "serper", "serpapi", "searxng", "duckduckgo"],
+                    "enum": [
+                        "auto",
+                        "openai",
+                        "brave",
+                        "exa",
+                        "tavily",
+                        "serper",
+                        "serpapi",
+                        "searxng",
+                        "duckduckgo"
+                    ],
                     "default": "auto",
                     "description": "%configuration.stellarisLanguageServices.ai.web.provider.description%"
                 },
                 "stellarisLanguageServices.ai.web.fallbackProviders": {
                     "scope": "window",
                     "type": "array",
-                    "items": { "type": "string", "enum": ["openai", "brave", "exa", "tavily", "serper", "serpapi", "searxng", "duckduckgo"] },
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "openai",
+                            "brave",
+                            "exa",
+                            "tavily",
+                            "serper",
+                            "serpapi",
+                            "searxng",
+                            "duckduckgo"
+                        ]
+                    },
                     "default": [],
                     "description": "%configuration.stellarisLanguageServices.ai.web.fallbackProviders.description%"
                 },
                 "stellarisLanguageServices.ai.web.contextSize": {
                     "scope": "window",
                     "type": "string",
-                    "enum": ["low", "medium", "high"],
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high"
+                    ],
                     "default": "medium",
                     "description": "%configuration.stellarisLanguageServices.ai.web.contextSize.description%"
                 },
                 "stellarisLanguageServices.ai.web.allowedDomains": {
                     "scope": "window",
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                        "type": "string"
+                    },
                     "default": [],
                     "description": "%configuration.stellarisLanguageServices.ai.web.allowedDomains.description%"
                 },
                 "stellarisLanguageServices.ai.web.blockedDomains": {
                     "scope": "window",
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                        "type": "string"
+                    },
                     "default": [],
                     "description": "%configuration.stellarisLanguageServices.ai.web.blockedDomains.description%"
                 },

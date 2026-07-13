@@ -650,25 +650,6 @@ body.agent-manager-shell .manager-command-change strong {
     color: var(--manager-fg);
 }
 
-body.agent-manager-shell .manager-command-cache {
-    gap: 7px;
-}
-
-body.agent-manager-shell .manager-cache-meter {
-    width: clamp(180px, 16vw, 320px);
-    height: 5px;
-    border-radius: 999px;
-    overflow: hidden;
-    background: color-mix(in srgb, var(--border) 60%, transparent);
-}
-
-body.agent-manager-shell .manager-cache-meter span {
-    display: block;
-    height: 100%;
-    border-radius: inherit;
-    background: var(--vscode-charts-green, #4caf50);
-}
-
 body.agent-manager-shell .manager-command-run {
     color: var(--manager-muted);
     border-color: transparent;
@@ -717,142 +698,6 @@ body.agent-manager-shell .manager-command-stop {
 body.agent-manager-shell .manager-command-stop:disabled {
     opacity: 0.35;
     cursor: default;
-}
-
-body.agent-manager-shell .manager-overview-main,
-body.agent-manager-shell .manager-overview-heading {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-}
-
-body.agent-manager-shell .manager-overview-main {
-    gap: 8px;
-}
-
-body.agent-manager-shell .manager-overview-identity {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-body.agent-manager-shell .manager-status-dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 999px;
-    background: var(--vscode-charts-green, #4caf50);
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--vscode-charts-green, #4caf50) 16%, transparent);
-    flex: 0 0 auto;
-}
-
-body.agent-manager-shell .manager-status-dot.is-idle {
-    background: var(--vscode-descriptionForeground);
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--vscode-descriptionForeground) 13%, transparent);
-}
-
-body.agent-manager-shell .manager-overview-kicker {
-    color: var(--vscode-descriptionForeground);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0;
-    text-transform: uppercase;
-}
-
-body.agent-manager-shell .manager-overview-title {
-    color: var(--fg);
-    font-size: 13px;
-    font-weight: 700;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-body.agent-manager-shell .manager-overview-pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-body.agent-manager-shell .manager-stat-cluster {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(58px, 1fr));
-    gap: 6px;
-    align-items: stretch;
-}
-
-body.agent-manager-shell .manager-stat-card {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 2px;
-    border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--bg) 88%, #24303a);
-    color: var(--fg);
-    padding: 7px 9px;
-    font-family: inherit;
-    cursor: pointer;
-    text-align: left;
-    transition: background 0.15s, border-color 0.15s, transform 0.15s;
-}
-
-body.agent-manager-shell .manager-stat-card:hover {
-    background: color-mix(in srgb, var(--bg) 78%, #2c3944);
-    border-color: color-mix(in srgb, var(--focus-ring) 65%, var(--border));
-    transform: translateY(-1px);
-}
-
-body.agent-manager-shell .manager-stat-value {
-    font-size: 16px;
-    line-height: 1;
-    font-weight: 750;
-}
-
-body.agent-manager-shell .manager-stat-label {
-    color: var(--vscode-descriptionForeground);
-    font-size: 10px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-body.agent-manager-shell .manager-overview-actions {
-    display: flex;
-    align-items: stretch;
-    gap: 6px;
-}
-
-body.agent-manager-shell .manager-status-action {
-    min-width: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--bg) 90%, #202832);
-    color: var(--fg);
-    padding: 0 10px;
-    font-family: inherit;
-    font-size: 11px;
-    font-weight: 650;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-
-body.agent-manager-shell .manager-status-action svg {
-    width: 14px;
-    height: 14px;
-}
-
-body.agent-manager-shell .manager-status-action:hover,
-body.agent-manager-shell .manager-status-action.active {
-    border-color: rgba(100, 166, 255, 0.42);
-    background: rgba(100, 166, 255, 0.13);
-    color: #b9d8ff;
 }
 
 body.agent-manager-shell .manager-inspector-tabs {
@@ -916,14 +761,6 @@ body.agent-manager-shell .artifact-empty {
     margin: auto 0;
 }
 
-body.agent-manager-shell .artifact-drawer[data-active-tab="agents"] .artifact-filter-row:not(.manager-inspector-tabs),
-body.agent-manager-shell .artifact-drawer[data-active-tab="tasks"] .artifact-filter-row:not(.manager-inspector-tabs),
-body.agent-manager-shell .artifact-drawer[data-active-tab="workspace"] .artifact-filter-row:not(.manager-inspector-tabs),
-body.agent-manager-shell .artifact-drawer[data-active-tab="settings"] .artifact-filter-row:not(.manager-inspector-tabs),
-body.agent-manager-shell .artifact-drawer[data-active-tab="runs"] .artifact-filter-row:not(.manager-inspector-tabs) {
-    display: none;
-}
-
 body.agent-manager-shell .manager-agent-summary,
 body.agent-manager-shell .manager-agent-lane,
 body.agent-manager-shell .manager-task-item {
@@ -948,38 +785,6 @@ body.agent-manager-shell .manager-task-done {
 body.agent-manager-shell .manager-agent-failed {
     border-color: color-mix(in srgb, var(--vscode-charts-red, #f14c4c) 45%, var(--border));
     background: color-mix(in srgb, var(--vscode-charts-red, #f14c4c) 8%, var(--bg));
-}
-
-body.agent-manager-shell .manager-pill,
-body.agent-manager-shell .manager-meta {
-    font-size: 11px;
-    line-height: 1.3;
-    border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-    background: color-mix(in srgb, var(--bg) 90%, #2a2f35);
-    color: var(--muted);
-    border-radius: 999px;
-    padding: 3px 7px;
-    white-space: nowrap;
-}
-
-body.agent-manager-shell .manager-pill-status.is-running {
-    border-color: color-mix(in srgb, var(--vscode-charts-green, #4caf50) 55%, var(--border));
-    color: var(--vscode-charts-green, #4caf50);
-    background: color-mix(in srgb, var(--vscode-charts-green, #4caf50) 10%, transparent);
-}
-
-body.agent-manager-shell .manager-pill-status.is-idle {
-    color: var(--vscode-descriptionForeground);
-}
-
-body.agent-manager-shell .manager-pill-mode {
-    border-color: color-mix(in srgb, #9fc7ff 28%, var(--border));
-    color: #b9d8ff;
-}
-
-body.agent-manager-shell .manager-pill-workflow {
-    border-color: color-mix(in srgb, #e8a838 30%, var(--border));
-    color: #e8c46f;
 }
 
 body.agent-manager-shell .chat-area {
@@ -1198,10 +1003,6 @@ body.agent-manager-shell .manager-task-mark {
         grid-template-columns: 1fr;
     }
 
-    body.agent-manager-shell .manager-overview-actions {
-        justify-content: flex-start;
-    }
-
     body.agent-manager-shell .artifact-drawer-header {
         display: flex;
         padding: 13px 14px 10px;
@@ -1272,15 +1073,6 @@ body.agent-manager-shell .manager-task-mark {
         grid-template-columns: 1fr;
     }
 
-    body.agent-manager-shell .manager-stat-cluster {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    body.agent-manager-shell .manager-overview-actions {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-
     body.agent-manager-shell .floating-card-area,
     body.agent-manager-shell .slash-popup {
         left: 12px;
@@ -1291,29 +1083,6 @@ body.agent-manager-shell .manager-task-mark {
 }
 
 /* Run Timeline & Inspector Styles */
-.manager-pill-run {
-    border-color: var(--vscode-charts-purple) !important;
-    color: var(--vscode-charts-purple) !important;
-    background: color-mix(in srgb, var(--vscode-charts-purple) 8%, transparent) !important;
-}
-
-/* T3.3 — Prefix-cache hit rate badge (green/amber/red tiers). */
-.manager-pill-cache {
-    border-color: var(--vscode-charts-green) !important;
-    color: var(--vscode-charts-green) !important;
-    background: color-mix(in srgb, var(--vscode-charts-green) 8%, transparent) !important;
-}
-.manager-pill-cache-mid {
-    border-color: var(--vscode-charts-yellow, var(--vscode-charts-orange)) !important;
-    color: var(--vscode-charts-yellow, var(--vscode-charts-orange)) !important;
-    background: color-mix(in srgb, var(--vscode-charts-yellow, var(--vscode-charts-orange)) 8%, transparent) !important;
-}
-.manager-pill-cache-low {
-    border-color: var(--vscode-charts-red) !important;
-    color: var(--vscode-charts-red) !important;
-    background: color-mix(in srgb, var(--vscode-charts-red) 8%, transparent) !important;
-}
-
 .manager-run-summary {
     background: var(--manager-card);
     border: 1px solid var(--manager-border);
@@ -1326,26 +1095,7 @@ body.agent-manager-shell .manager-task-mark {
     box-shadow: none;
 }
 
-.manager-run-workbench {
-    display: grid;
-    grid-template-columns: minmax(280px, 1.12fr) minmax(190px, 0.88fr);
-    gap: 12px;
-    align-items: start;
-}
-
-.manager-run-main,
-.manager-run-side {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
 @media (max-width: 1500px) {
-    .manager-run-workbench {
-        grid-template-columns: 1fr;
-    }
-
     .run-metrics-grid {
         grid-template-columns: 1fr;
     }
@@ -1453,74 +1203,12 @@ body.agent-manager-shell .manager-run-summary .artifact-item-summary {
     font-size: 10.5px;
 }
 
-.manager-delivery-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-}
-
-.manager-delivery-card {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    border: 1px solid var(--manager-border);
-    border-radius: 6px;
-    background: var(--manager-card);
-    padding: 12px;
-    cursor: pointer;
-}
-
-.manager-delivery-card:hover {
-    border-color: var(--manager-border);
-    background: var(--manager-card-hover);
-}
-
-.manager-delivery-value {
-    color: var(--fg);
-    font-size: 18px;
-    line-height: 1;
-    font-weight: 750;
-}
-
-.manager-delivery-label {
-    color: var(--vscode-descriptionForeground);
-    font-size: 10.5px;
-}
-
 .manager-side-card,
 .manager-selected-event-card {
     border: 1px solid var(--manager-border);
     border-radius: 6px;
     background: var(--manager-card);
     padding: 12px;
-}
-
-.manager-workspace-card {
-    border: 1px solid var(--manager-border);
-    border-radius: 6px;
-    background: var(--manager-card);
-    padding: 8px;
-}
-
-.manager-workspace-wide {
-    width: 100%;
-    min-height: 54px;
-    display: grid;
-    grid-template-columns: 30px minmax(0, 1fr);
-    gap: 10px;
-    align-items: center;
-    border: 0;
-    border-radius: 5px;
-    background: transparent;
-    color: var(--manager-fg);
-    padding: 6px;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-}
-
-.manager-workspace-wide:hover {
-    background: rgba(47, 129, 247, 0.1);
 }
 
 .manager-side-item {
@@ -2479,170 +2167,6 @@ body.agent-manager-shell .manager-workspace-external-host .annotatable-plan.ap-c
     display: none;
 }
 
-/* ── 次级 inspector 侧滑栏（问题4）─────────────────────────────── */
-/*
- * 侧滑栏挂在 document.body，fixed 定位，贴 artifactDrawer 左边界向左弹出。
- * JS 在 updateInspectorSliderVisibility() 中动态计算 right 值（= artifactDrawer 宽度）。
- */
-.run-inspector-slider {
-    position: fixed;
-    top: 42px; /* header 高度 */
-    bottom: 0;
-    right: 0; /* 初始贴右边，JS 会更新为 artifactDrawer 的 offsetWidth */
-    width: 0;
-    overflow: hidden;
-    background: var(--bg);
-    background: color-mix(in srgb, var(--bg) 88%, #2b2b2b);
-    border-left: 1px solid rgba(255, 255, 255, 0.14);
-    border-right: none;
-    display: flex;
-    flex-direction: column;
-    z-index: 200;
-    visibility: hidden;
-    transition: width 0.2s ease, visibility 0.2s ease;
-    pointer-events: none;
-    box-shadow: -24px 0 42px rgba(0, 0, 0, 0.36);
-}
-
-body.agent-manager-shell .run-inspector-slider {
-    display: none !important;
-}
-
-.run-inspector-slider.open {
-    width: clamp(280px, 24vw, 440px);
-    pointer-events: auto;
-    visibility: visible;
-}
-
-.run-inspector-slider-header {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    justify-content: space-between;
-    padding: 16px 16px 12px;
-    border-bottom: 1px solid var(--border);
-    flex: 0 0 auto;
-}
-
-.run-inspector-slider-title {
-    color: #f3f3f3;
-    font-size: 17px;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: 1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.run-inspector-slider-title svg {
-    flex: 0 0 auto;
-    opacity: 0.9;
-}
-
-.run-inspector-slider-close {
-    background: rgba(255, 255, 255, 0.055);
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    color: var(--vscode-icon-foreground, var(--fg));
-    cursor: pointer;
-    width: 28px;
-    height: 28px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 7px;
-    line-height: 0;
-    flex: 0 0 auto;
-    transition: background 0.15s, border-color 0.15s;
-}
-
-.run-inspector-slider-close:hover {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.24);
-}
-
-.run-inspector-slider-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px 14px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.run-inspector-slider-body .run-inspector {
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 7px;
-    padding: 12px;
-}
-
-.run-inspector-slider-body .run-inspector-actions {
-    margin-bottom: 12px;
-}
-
-.run-inspector-slider-body .run-action-btn {
-    background: rgba(255, 255, 255, 0.025);
-    border-color: rgba(255, 255, 255, 0.14);
-    min-height: 26px;
-    padding: 4px 10px;
-}
-
-.run-inspector-slider-body .run-action-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.09);
-    border-color: rgba(255, 255, 255, 0.24);
-}
-
-.run-inspector-slider-body .inspector-header {
-    align-items: center;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-}
-
-.run-inspector-slider-body .event-time {
-    color: var(--vscode-descriptionForeground);
-    font-size: 10px;
-}
-
-.run-inspector-slider-body .event-type-badge,
-.run-inspector-slider-body .agent-badge,
-.run-inspector-slider-body .badge,
-.run-inspector-slider-body .run-inspector code {
-    background: rgba(255, 255, 255, 0.07);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    color: var(--fg);
-    font-size: 10px;
-    padding: 2px 6px;
-}
-
-.run-inspector-slider-body .inspector-section {
-    color: var(--fg);
-    line-height: 1.45;
-}
-
-.run-inspector-slider-body .inspector-section strong,
-.run-inspector-slider-body .inspector-tool-call h4,
-.run-inspector-slider-body .inspector-tool-result h4,
-.run-inspector-slider-body .inspector-file-change h4,
-.run-inspector-slider-body .inspector-subagent-result h4,
-.run-inspector-slider-body .inspector-compaction h4 {
-    color: #f3f3f3;
-}
-
-.run-inspector-slider-body .inspector-section pre,
-.run-inspector-slider-body .run-inspector pre {
-    background: color-mix(in srgb, var(--vscode-editor-background) 90%, #15181b);
-    border: 1px solid color-mix(in srgb, var(--vscode-border) 40%, transparent);
-    border-radius: 6px;
-    margin: 6px 0 0;
-    padding: 10px;
-    font-size: 11px;
-}
-
 /* Steps 折叠区域 */
 .run-steps-section {
     border: 1px solid var(--vscode-border);
@@ -2671,10 +2195,717 @@ body.agent-manager-shell .run-inspector-slider {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .run-inspector-slider {
-        transition: none;
-    }
     .timeline-group-header::after {
         transition: none;
+    }
+}
+
+/* Focused review workbench ------------------------------------------------- */
+body.agent-manager-shell {
+    --manager-left-width: clamp(248px, 16vw, 320px);
+    --manager-right-width: clamp(600px, 42vw, 960px);
+    grid-template-columns: var(--manager-active-left-width) minmax(520px, 1fr) 0;
+}
+
+body.agent-manager-shell.artifact-drawer-open {
+    grid-template-columns: var(--manager-active-left-width) minmax(520px, 1fr) var(--manager-right-width);
+}
+
+body.agent-manager-shell .manager-overview {
+    min-height: 50px;
+    padding: 0 14px;
+    background: color-mix(in srgb, var(--manager-bg) 97%, var(--manager-panel));
+}
+
+body.agent-manager-shell .manager-command-left,
+body.agent-manager-shell .manager-command-actions {
+    gap: 7px;
+}
+
+body.agent-manager-shell .manager-command-workflow {
+    max-width: 230px;
+    background: transparent;
+    border-color: transparent;
+    padding-inline: 6px;
+}
+
+body.agent-manager-shell .manager-command-workflow small {
+    min-width: 0;
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--manager-muted);
+    font-size: 10px;
+    font-weight: 500;
+}
+
+body.agent-manager-shell .manager-command-status {
+    min-height: 24px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: transparent;
+}
+
+body.agent-manager-shell .manager-command-change {
+    min-height: 30px;
+    gap: 9px;
+    border-color: var(--manager-border-soft);
+    background: transparent;
+}
+
+body.agent-manager-shell .manager-command-change:hover,
+body.agent-manager-shell .manager-command-change.active {
+    border-color: color-mix(in srgb, var(--manager-blue) 52%, var(--manager-border));
+    background: color-mix(in srgb, var(--manager-blue) 10%, transparent);
+}
+
+body.agent-manager-shell .manager-command-delta {
+    display: inline-flex;
+    gap: 5px;
+    font-family: var(--vscode-editor-font-family, monospace);
+}
+
+body.agent-manager-shell .manager-command-delta strong,
+body.agent-manager-shell .manager-review-delta strong,
+body.agent-manager-shell .manager-file-delta strong {
+    color: var(--vscode-charts-green, #4caf50);
+}
+
+body.agent-manager-shell .manager-command-delta em,
+body.agent-manager-shell .manager-review-delta em,
+body.agent-manager-shell .manager-file-delta em {
+    color: var(--vscode-charts-red, #f14c4c);
+    font-style: normal;
+}
+
+body.agent-manager-shell .manager-inspector-tabs {
+    grid-template-columns: repeat(2, minmax(80px, auto));
+    min-height: 43px;
+    gap: 24px;
+    padding: 0 18px;
+    align-items: end;
+}
+
+body.agent-manager-shell .manager-inspector-tabs .artifact-filter {
+    height: 35px;
+    padding-bottom: 9px;
+}
+
+body.agent-manager-shell .artifact-drawer[data-active-tab="changes"] .artifact-list,
+body.agent-manager-shell .artifact-drawer[data-active-tab="activity"] .artifact-list {
+    display: block;
+    padding: 0;
+    gap: 0;
+}
+
+body.agent-manager-shell .manager-changes-page,
+body.agent-manager-shell .manager-activity-page {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+body.agent-manager-shell .manager-review-summary,
+body.agent-manager-shell .manager-activity-header {
+    min-height: 58px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--manager-border);
+    background: color-mix(in srgb, var(--manager-panel) 94%, var(--manager-bg));
+}
+
+body.agent-manager-shell .manager-review-summary > span:first-child,
+body.agent-manager-shell .manager-activity-header {
+    min-width: 0;
+}
+
+body.agent-manager-shell .manager-review-summary > span:first-child {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+body.agent-manager-shell .manager-review-summary strong,
+body.agent-manager-shell .manager-activity-header strong {
+    color: var(--manager-fg);
+    font-size: 13px;
+}
+
+body.agent-manager-shell .manager-review-summary small,
+body.agent-manager-shell .manager-activity-header span {
+    color: var(--manager-muted);
+    font-size: 10.5px;
+}
+
+body.agent-manager-shell .manager-review-delta {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+    font-family: var(--vscode-editor-font-family, monospace);
+}
+
+body.agent-manager-shell .manager-review-delta i {
+    color: var(--manager-muted);
+    font-family: var(--vscode-font-family, sans-serif);
+    font-size: 10.5px;
+    font-style: normal;
+}
+
+body.agent-manager-shell .manager-review-files {
+    min-width: 0;
+}
+
+body.agent-manager-shell .manager-file-change-row {
+    min-height: 0;
+    display: block;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid var(--manager-border);
+    border-radius: 0;
+    background: transparent;
+}
+
+body.agent-manager-shell .manager-file-change-row + .manager-file-change-row {
+    margin-top: 0;
+}
+
+body.agent-manager-shell .manager-file-change-header {
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    min-height: 44px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 30px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px 0 8px;
+    border-bottom: 1px solid var(--manager-border-soft);
+    background: color-mix(in srgb, var(--manager-panel) 96%, var(--manager-bg));
+}
+
+body.agent-manager-shell .manager-file-change-toggle {
+    min-width: 0;
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 0;
+    background: transparent;
+    color: var(--manager-fg);
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+}
+
+body.agent-manager-shell .manager-file-chevron {
+    width: 0;
+    height: 0;
+    flex: 0 0 auto;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 5px solid var(--manager-muted);
+    transform: rotate(90deg);
+    transition: transform 0.12s ease;
+}
+
+body.agent-manager-shell .manager-file-change-row.is-collapsed .manager-file-chevron {
+    transform: rotate(0deg);
+}
+
+body.agent-manager-shell .manager-file-identity {
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+body.agent-manager-shell .manager-file-identity strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--manager-fg);
+    font-size: 11.5px;
+    white-space: nowrap;
+}
+
+body.agent-manager-shell .manager-file-identity small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--manager-muted);
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 9.5px;
+    white-space: nowrap;
+}
+
+body.agent-manager-shell .manager-file-delta {
+    display: inline-flex;
+    gap: 6px;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 10.5px;
+}
+
+body.agent-manager-shell .manager-file-delta i {
+    color: var(--manager-muted);
+    font-style: normal;
+}
+
+body.agent-manager-shell .manager-file-open {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--manager-muted);
+    cursor: pointer;
+}
+
+body.agent-manager-shell .manager-file-open:hover {
+    border-color: var(--manager-border);
+    background: var(--manager-button);
+    color: var(--manager-fg);
+}
+
+body.agent-manager-shell .manager-workspace-diff-preview {
+    max-height: none;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: var(--vscode-editor-background, #1e1e1e);
+}
+
+body.agent-manager-shell .manager-workspace-diff-preview table {
+    font-size: 11.5px;
+    line-height: 1.55;
+}
+
+body.agent-manager-shell .manager-diff-line td {
+    padding: 1px 7px;
+}
+
+body.agent-manager-shell .manager-diff-line-add td:last-child {
+    box-shadow: inset 2px 0 0 color-mix(in srgb, var(--vscode-charts-green, #4caf50) 74%, transparent);
+}
+
+body.agent-manager-shell .manager-diff-line-remove td:last-child {
+    box-shadow: inset 2px 0 0 color-mix(in srgb, var(--vscode-charts-red, #f14c4c) 74%, transparent);
+}
+
+body.agent-manager-shell .manager-diff-line-omitted td {
+    padding: 4px 8px;
+    border-block: 1px solid var(--manager-border-soft);
+    background: color-mix(in srgb, var(--manager-panel) 82%, var(--manager-bg));
+    text-align: center;
+}
+
+body.agent-manager-shell .manager-diff-line-omitted button,
+body.agent-manager-shell .manager-diff-load-more {
+    border: 0;
+    background: transparent;
+    color: var(--vscode-textLink-foreground, #4daafc);
+    font: inherit;
+    cursor: pointer;
+}
+
+body.agent-manager-shell .manager-diff-load-more {
+    width: 100%;
+    min-height: 34px;
+    border-top: 1px solid var(--manager-border-soft);
+    background: color-mix(in srgb, var(--manager-panel) 72%, transparent);
+}
+
+body.agent-manager-shell .manager-workspace-diff-empty {
+    min-height: 72px;
+    justify-content: center;
+    padding: 12px 18px 14px 36px;
+}
+
+body.agent-manager-shell .manager-review-empty {
+    min-height: 180px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 24px;
+    color: var(--manager-muted);
+    text-align: center;
+}
+
+body.agent-manager-shell .manager-review-empty strong {
+    color: var(--manager-fg);
+    font-size: 13px;
+}
+
+body.agent-manager-shell .manager-workspace-host-card {
+    border: 0;
+    border-bottom: 1px solid var(--manager-border);
+    border-radius: 0;
+}
+
+body.agent-manager-shell .manager-workspace-host-card[hidden] {
+    display: none;
+}
+
+body.agent-manager-shell .manager-activity-page {
+    gap: 0;
+    padding-bottom: 22px;
+}
+
+body.agent-manager-shell .manager-activity-hero,
+body.agent-manager-shell .manager-activity-section,
+body.agent-manager-shell .manager-selected-event-card,
+body.agent-manager-shell .manager-activity-diagnostics {
+    margin: 0;
+    border: 0;
+    border-bottom: 1px solid var(--manager-border);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+body.agent-manager-shell .manager-activity-hero,
+body.agent-manager-shell .manager-activity-section,
+body.agent-manager-shell .manager-selected-event-card {
+    padding: 14px 18px;
+}
+
+body.agent-manager-shell .manager-activity-section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+body.agent-manager-shell .manager-activity-section-title strong {
+    color: var(--manager-fg);
+    font-size: 12px;
+}
+
+body.agent-manager-shell .manager-activity-section-title span,
+body.agent-manager-shell .manager-agent-summary-line {
+    color: var(--manager-muted);
+    font-size: 10.5px;
+}
+
+body.agent-manager-shell .manager-agent-summary-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+body.agent-manager-shell .manager-agent-summary-line em {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-style: normal;
+    white-space: nowrap;
+}
+
+body.agent-manager-shell .manager-agent-lanes,
+body.agent-manager-shell .manager-task-list,
+body.agent-manager-shell .manager-artifact-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+body.agent-manager-shell .manager-agent-lane {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 9px;
+    min-height: 40px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.028);
+}
+
+body.agent-manager-shell .manager-agent-state {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--manager-muted);
+}
+
+body.agent-manager-shell .manager-agent-running .manager-agent-state {
+    background: var(--manager-green);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--manager-green) 15%, transparent);
+}
+
+body.agent-manager-shell .manager-agent-failed .manager-agent-state {
+    background: var(--vscode-charts-red, #f14c4c);
+}
+
+body.agent-manager-shell .manager-agent-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+body.agent-manager-shell .manager-agent-main strong,
+body.agent-manager-shell .manager-agent-main em {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.agent-manager-shell .manager-agent-main strong {
+    color: var(--manager-fg);
+    font-size: 11px;
+}
+
+body.agent-manager-shell .manager-agent-main em,
+body.agent-manager-shell .manager-agent-metrics {
+    color: var(--manager-muted);
+    font-size: 10px;
+    font-style: normal;
+}
+
+body.agent-manager-shell .manager-task-item {
+    min-height: 34px;
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    align-items: start;
+    gap: 7px;
+    padding: 7px 8px;
+    border: 0;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.028);
+    color: var(--manager-fg);
+    font-size: 11px;
+}
+
+body.agent-manager-shell .manager-task-done {
+    color: var(--manager-muted);
+}
+
+body.agent-manager-shell .manager-side-item {
+    width: 100%;
+    min-height: 44px;
+    border: 0;
+    background: rgba(255, 255, 255, 0.028);
+    color: var(--manager-fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+body.agent-manager-shell .manager-side-item:hover {
+    background: var(--manager-card-hover);
+}
+
+body.agent-manager-shell .manager-activity-diagnostics summary {
+    padding: 12px 18px;
+    color: var(--manager-muted);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+body.agent-manager-shell .manager-activity-diagnostics-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 18px 16px;
+}
+
+body.agent-manager-shell .manager-activity-diagnostics .manager-context-card,
+body.agent-manager-shell .manager-activity-diagnostics .manager-side-card {
+    border-color: var(--manager-border-soft);
+    background: rgba(255, 255, 255, 0.025);
+}
+
+body.agent-manager-shell .manager-pane-resizer {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    z-index: 190;
+    width: 7px;
+    outline: none;
+    cursor: col-resize;
+    transform: translateX(-50%);
+}
+
+body.agent-manager-shell .manager-pane-resizer::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: 1px;
+    background: transparent;
+}
+
+body.agent-manager-shell .manager-pane-resizer:hover::after,
+body.agent-manager-shell .manager-pane-resizer:focus-visible::after,
+body.agent-manager-shell.manager-resizing .manager-pane-resizer::after {
+    width: 2px;
+    background: var(--manager-blue);
+}
+
+body.agent-manager-shell .manager-left-resizer {
+    left: var(--manager-active-left-width);
+}
+
+body.agent-manager-shell .manager-right-resizer {
+    right: calc(var(--manager-active-right-width) - 3px);
+    display: none;
+}
+
+body.agent-manager-shell.artifact-drawer-open:not(.side-workspace-open) .manager-right-resizer {
+    display: block;
+}
+
+body.agent-manager-shell.manager-topics-collapsed .manager-left-resizer {
+    display: none;
+}
+
+body.agent-manager-shell.manager-resizing,
+body.agent-manager-shell.manager-resizing * {
+    cursor: col-resize !important;
+    user-select: none !important;
+}
+
+@media (max-width: 1560px) {
+    body.agent-manager-shell .manager-command-workflow small {
+        display: none;
+    }
+
+    body.agent-manager-shell .manager-command-settings {
+        min-width: 34px;
+        width: 34px;
+        padding: 0;
+    }
+
+    body.agent-manager-shell .manager-command-settings span {
+        display: none;
+    }
+}
+
+@media (max-width: 1360px) {
+    body.agent-manager-shell,
+    body.agent-manager-shell.artifact-drawer-open {
+        grid-template-columns: var(--manager-active-left-width) minmax(420px, 1fr);
+    }
+
+    body.agent-manager-shell .manager-overview {
+        grid-column: 2 / 3;
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    body.agent-manager-shell .artifact-drawer {
+        position: fixed;
+        top: 50px;
+        right: 0;
+        bottom: 0;
+        width: min(760px, calc(100vw - 48px));
+        transform: translateX(104%) !important;
+        border-left: 1px solid var(--manager-border);
+        overflow: visible;
+        visibility: visible;
+        pointer-events: auto;
+        box-shadow: -24px 0 42px rgba(0, 0, 0, 0.36);
+        z-index: 160;
+    }
+
+    body.agent-manager-shell.artifact-drawer-open .artifact-drawer {
+        width: min(760px, calc(100vw - 48px));
+        transform: translateX(0) !important;
+    }
+
+    body.agent-manager-shell .artifact-drawer-header {
+        display: flex;
+        min-height: 58px;
+        padding: 12px 16px 10px;
+        background: var(--manager-panel);
+    }
+
+    body.agent-manager-shell .artifact-scrim {
+        display: block !important;
+        inset: 50px 0 0;
+    }
+
+    body.agent-manager-shell .manager-pane-resizer {
+        display: none !important;
+    }
+}
+
+@media (max-width: 980px) {
+    body.agent-manager-shell,
+    body.agent-manager-shell.artifact-drawer-open {
+        grid-template-columns: 1fr;
+    }
+
+    body.agent-manager-shell .manager-overview {
+        grid-column: 1 / 2;
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    body.agent-manager-shell .manager-command-status {
+        display: none;
+    }
+
+    body.agent-manager-shell .artifact-drawer,
+    body.agent-manager-shell.artifact-drawer-open .artifact-drawer {
+        width: min(100vw, 760px);
+    }
+}
+
+@media (max-width: 700px) {
+    body.agent-manager-shell .manager-overview {
+        padding-inline: 8px;
+    }
+
+    body.agent-manager-shell .manager-command-workflow,
+    body.agent-manager-shell .manager-command-change > span:last-child,
+    body.agent-manager-shell .manager-command-workbench {
+        display: none;
+    }
+
+    body.agent-manager-shell .manager-command-topic-title {
+        max-width: 44vw;
+        padding-inline: 4px;
+    }
+
+    body.agent-manager-shell .artifact-drawer,
+    body.agent-manager-shell.artifact-drawer-open .artifact-drawer {
+        width: 100vw;
+        max-width: none;
+    }
+
+    body.agent-manager-shell .manager-file-identity small {
+        display: none;
+    }
+
+    body.agent-manager-shell .manager-file-change-header {
+        grid-template-columns: minmax(0, 1fr) auto 30px;
+    }
+
+    body.agent-manager-shell .manager-agent-lane {
+        grid-template-columns: 8px minmax(0, 1fr);
+    }
+
+    body.agent-manager-shell .manager-agent-metrics {
+        grid-column: 2;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.agent-manager-shell .manager-file-chevron,
+    body.agent-manager-shell .artifact-drawer,
+    body.agent-manager-shell .artifact-scrim {
+        transition: none !important;
     }
 }

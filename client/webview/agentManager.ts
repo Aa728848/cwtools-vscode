@@ -8,7 +8,14 @@ import { svgIcon, svgIconNoMargin } from './svgIcons';
 import type { ManagerSnapshotMessage, OrchestratorProgressMessage } from './chat/messages.manager';
 import type { TopicListItem, TopicStats } from './chat/messages.shared';
 
-type ManagerTab = 'agents' | 'runs' | 'artifacts' | 'tasks' | 'workspace' | 'settings';
+type ManagerTab = 'changes' | 'activity' | 'settings';
+
+type PersistedManagerUiState = {
+    activeTab?: 'changes' | 'activity';
+    drawerOpen?: boolean;
+    leftWidth?: number;
+    rightWidth?: number;
+};
 
 type ManagerEnhancementState = {
     topics: TopicListItem[];
@@ -24,8 +31,6 @@ type ManagerEnhancementState = {
     run: any | null;
     runEvents: any[];
     selectedRunEventId?: string;
-    /** 当前展开的事件 inspector 面板是否可见（侧滑栏） */
-    inspectorPanelOpen: boolean;
     compactedMemoryContent?: string;
     cleanupResult?: { deletedCount: number; keptCount: number; reclaimedBytes: number };
     copiedEventAt?: number;
@@ -62,7 +67,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     run: null,
     runEvents: [],
     selectedRunEventId: undefined,
-    inspectorPanelOpen: false,
     compactedMemoryContent: undefined,
     cleanupResult: undefined,
     copiedEventAt: undefined,
@@ -78,12 +82,12 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     const artifactDrawerEl = artifactDrawer;
     const artifactListEl = artifactList;
 
-    if ((window.innerWidth || document.documentElement.clientWidth) > 1280) {
-        document.body.classList.add('artifact-drawer-open');
-    }
-
     const state: ManagerEnhancementState = { ...DEFAULT_STATE };
-    let activeTab: ManagerTab = 'runs';
+    const vscode = (window as any).__cwtoolsVscode;
+    const persistedRootState = vscode?.getState?.() || {};
+    const persistedUi = (persistedRootState.agentManager || {}) as PersistedManagerUiState;
+    let activeTab: ManagerTab = persistedUi.activeTab === 'activity' ? 'activity' : 'changes';
+    let hasUserSelectedPrimaryTab = !!persistedUi.activeTab;
     let settingsRequestPending = false;
     let topicTitleEditing = false;
     let lastKnownTopicId: string | null = null;
@@ -92,19 +96,33 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     let workspaceRenderRevision = 0;
     const collapsedTimelineGroups = new Set<string>();
     const collapsedWorkspaceFiles = new Set<string>();
+    const expandedWorkspaceDiffFiles = new Set<string>();
+    const expandedWorkspaceContextFiles = new Set<string>();
     const cacheStatsByRunId = new Map<string, NonNullable<ManagerEnhancementState['cacheStats']>>();
-    const vscode = (window as any).__cwtoolsVscode;
     document.body.dataset.managerActiveTab = activeTab;
+
+    const initialDrawerOpen = persistedUi.drawerOpen ?? ((window.innerWidth || document.documentElement.clientWidth) > 1280);
+    document.body.classList.toggle('artifact-drawer-open', initialDrawerOpen);
+    artifactDrawerEl.setAttribute('aria-hidden', initialDrawerOpen ? 'false' : 'true');
+    document.getElementById('btnArtifacts')?.setAttribute('aria-expanded', initialDrawerOpen ? 'true' : 'false');
+    if (Number.isFinite(persistedUi.leftWidth)) {
+        document.body.style.setProperty('--manager-left-width', `${persistedUi.leftWidth}px`);
+    }
+    if (Number.isFinite(persistedUi.rightWidth)) {
+        document.body.style.setProperty('--manager-right-width', `${persistedUi.rightWidth}px`);
+    }
 
     // 从 HTML body 的 data-locale 属性读取 locale（由 agentManagerHtml.ts 注入）
     const locale = normalizeChatLocale((document.body as HTMLElement).dataset.locale);
     const i18n = getChatI18n(locale);
     const m = i18n.manager;
     const RUN_MAX_RENDERED_EVENTS = 300;
+    const DIFF_INITIAL_RENDER_LINES = 240;
+    const DIFF_CONTEXT_EDGE_LINES = 3;
     const ui = locale === 'zh-cn'
         ? {
             topicsTitle: 'Agent 话题',
-            tabs: { runs: '运行', artifacts: '产物', tasks: '任务', workspace: '工作区', settings: '设置' },
+            tabs: { changes: '变更', activity: '活动' },
             actions: { workbench: '工作台', closeWorkbench: '关闭工作台', settings: '设置', showTopics: '显示话题', toggleTopics: '折叠话题栏', newTopic: '新话题', archived: '已归档', exportTopic: '导出', searchTopics: '搜索话题...', renameTopic: '重命名话题' },
             workflow: { build: '构建工作流', plan: '计划工作流', review: '审查工作流', explore: '探索工作流', orchestrator: '多 Agent 工作流', script: '脚本模式工作流' },
             status: { paused: '已暂停', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消', idle: '空闲' },
@@ -127,6 +145,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 noArtifacts: '暂无产物',
                 noFileChanges: '暂无文件变更',
                 changed: '已变更',
+                currentRound: '当前轮次',
+                previousRound: '上一轮',
+                runDetails: '运行详情',
             },
             workspace: {
                 title: '工作区',
@@ -139,6 +160,22 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 noWorkspaceHint: '批注、计划确认和文件差异会在这里集中显示。',
                 fileChanges: '文件变更',
                 openWorkspaceHint: '工作区内容会跟随批注和文件变更自动更新。',
+                reviewTitle: '审阅变更',
+                reviewSubtitle: '逐文件检查本轮修改。',
+                noChanges: '本轮暂无文件变更',
+                openFile: '打开文件',
+                showRemaining: '显示剩余 {count} 行',
+                showAllContext: '展开未修改的上下文',
+                collapseFile: '折叠文件',
+                expandFile: '展开文件',
+            },
+            activity: {
+                title: '运行活动',
+                agents: 'Agent',
+                tasks: '任务',
+                artifacts: '产物',
+                timeline: '事件时间线',
+                noActivity: '暂无运行活动',
             },
             settings: {
                 title: '设置',
@@ -149,7 +186,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         }
         : {
             topicsTitle: 'Agent Topics',
-            tabs: { runs: 'Runs', artifacts: 'Artifacts', tasks: 'Tasks', workspace: 'Workspace', settings: 'Settings' },
+            tabs: { changes: 'Changes', activity: 'Activity' },
             actions: { workbench: 'Workbench', closeWorkbench: 'Close Workbench', settings: 'Settings', showTopics: 'Show topics', toggleTopics: 'Toggle topics', newTopic: 'New topic', archived: 'Archived', exportTopic: 'Export', searchTopics: 'Search topics...', renameTopic: 'Rename topic' },
             workflow: { build: 'Build Workflow', plan: 'Plan Workflow', review: 'Review Workflow', explore: 'Explore Workflow', orchestrator: 'Multi-Agent Workflow', script: 'Script Mode Workflow' },
             status: { paused: 'Paused', running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', idle: 'Idle' },
@@ -172,6 +209,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 noArtifacts: 'No artifacts yet',
                 noFileChanges: 'No file changes yet',
                 changed: 'changed',
+                currentRound: 'Current round',
+                previousRound: 'Previous round',
+                runDetails: 'Run details',
             },
             workspace: {
                 title: 'Workspace',
@@ -184,6 +224,22 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 noWorkspaceHint: 'Annotations, plan approvals, and file diffs will appear here.',
                 fileChanges: 'File Changes',
                 openWorkspaceHint: 'Workspace content follows annotations and file changes automatically.',
+                reviewTitle: 'Review changes',
+                reviewSubtitle: 'Inspect this round file by file.',
+                noChanges: 'No file changes in this round',
+                openFile: 'Open file',
+                showRemaining: 'Show {count} more lines',
+                showAllContext: 'Expand unchanged context',
+                collapseFile: 'Collapse file',
+                expandFile: 'Expand file',
+            },
+            activity: {
+                title: 'Run activity',
+                agents: 'Agents',
+                tasks: 'Tasks',
+                artifacts: 'Artifacts',
+                timeline: 'Event timeline',
+                noActivity: 'No run activity yet',
             },
             settings: {
                 title: 'Settings',
@@ -346,6 +402,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         if (!options.preserveCache) cacheStatsByRunId.clear();
         collapsedTimelineGroups.clear();
         collapsedWorkspaceFiles.clear();
+        expandedWorkspaceDiffFiles.clear();
+        expandedWorkspaceContextFiles.clear();
         workspaceRenderRevision++;
         lastWorkspaceRenderSignature = '';
     }
@@ -375,6 +433,31 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         return parts.join(' | ');
     }
 
+    function compactDiffContextRows(lines: any[], showAllContext: boolean): Array<{ line?: any; omitted?: number }> {
+        if (showAllContext) return lines.map(line => ({ line }));
+        const rows: Array<{ line?: any; omitted?: number }> = [];
+        let index = 0;
+        while (index < lines.length) {
+            if (lines[index]?.type !== 'ctx') {
+                rows.push({ line: lines[index] });
+                index++;
+                continue;
+            }
+            let end = index + 1;
+            while (end < lines.length && lines[end]?.type === 'ctx') end++;
+            const count = end - index;
+            if (count <= DIFF_CONTEXT_EDGE_LINES * 2 + 2) {
+                for (let i = index; i < end; i++) rows.push({ line: lines[i] });
+            } else {
+                for (let i = index; i < index + DIFF_CONTEXT_EDGE_LINES; i++) rows.push({ line: lines[i] });
+                rows.push({ omitted: count - DIFF_CONTEXT_EDGE_LINES * 2 });
+                for (let i = end - DIFF_CONTEXT_EDGE_LINES; i < end; i++) rows.push({ line: lines[i] });
+            }
+            index = end;
+        }
+        return rows;
+    }
+
     function renderWorkspaceDiffLines(file: WorkspaceFileRecord): string {
         const lines = Array.isArray(file.diffLines) ? file.diffLines : [];
         if (!lines.length) {
@@ -383,7 +466,15 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 <span>${escapeHtml(formatFileStats(file))}</span>
             </div>`;
         }
-        const rows = lines.slice(0, 160).map(line => {
+        const showAllLines = expandedWorkspaceDiffFiles.has(file.file);
+        const renderedLines = showAllLines ? lines : lines.slice(0, DIFF_INITIAL_RENDER_LINES);
+        const rows = compactDiffContextRows(renderedLines, expandedWorkspaceContextFiles.has(file.file)).map(row => {
+            if (row.omitted) {
+                return `<tr class="manager-diff-line manager-diff-line-omitted">
+                    <td colspan="4"><button type="button" data-diff-expand-context="${escapeHtml(file.file)}">${escapeHtml(ui.workspace.showAllContext)} · ${row.omitted}</button></td>
+                </tr>`;
+            }
+            const line = row.line || {};
             const type = line.type === 'add' ? 'add' : line.type === 'remove' ? 'remove' : 'ctx';
             const prefix = type === 'add' ? '+' : type === 'remove' ? '-' : ' ';
             const oldNo = line.oldLineNo != null ? String(line.oldLineNo) : '';
@@ -395,7 +486,11 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 <td>${escapeHtml(String(line.content || ''))}</td>
             </tr>`;
         }).join('');
-        return `<div class="manager-workspace-diff-preview"><table><tbody>${rows}</tbody></table></div>`;
+        const remaining = Math.max(0, lines.length - renderedLines.length);
+        const loadMore = remaining > 0
+            ? `<button type="button" class="manager-diff-load-more" data-diff-expand-file="${escapeHtml(file.file)}">${escapeHtml(ui.workspace.showRemaining.replace('{count}', String(remaining)))}</button>`
+            : '';
+        return `<div class="manager-workspace-diff-preview"><table><tbody>${rows}</tbody></table>${loadMore}</div>`;
     }
 
     function currentWorkspaceEntries(): Array<{ content: HTMLElement; title?: string; subtitle?: string; kind?: string; sourceKey?: string; wide?: boolean }> {
@@ -419,6 +514,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 preview: file.diffPreview || '',
                 lineCount: Array.isArray(file.diffLines) ? file.diffLines.length : 0,
                 collapsed: collapsedWorkspaceFiles.has(file.file),
+                expandedLines: expandedWorkspaceDiffFiles.has(file.file),
+                expandedContext: expandedWorkspaceContextFiles.has(file.file),
             })),
         });
     }
@@ -481,19 +578,18 @@ const DEFAULT_STATE: ManagerEnhancementState = {
 
     const drawerTitle = artifactDrawerEl.querySelector<HTMLElement>('.artifact-drawer-title');
     const drawerSubtitle = artifactDrawerEl.querySelector<HTMLElement>('.artifact-drawer-subtitle');
-    if (drawerTitle) drawerTitle.innerHTML = `${svgIcon('layers')}${ui.actions.workbench}`;
-    if (drawerSubtitle) drawerSubtitle.textContent = ui.workspace.openWorkspaceHint;
+    if (drawerTitle) drawerTitle.innerHTML = `${svgIcon('edit')}${ui.workspace.reviewTitle}`;
+    if (drawerSubtitle) drawerSubtitle.textContent = ui.workspace.reviewSubtitle;
 
     const tabActiveClass = (tab: ManagerTab): string => activeTab === tab ? 'active' : '';
 
     const tabs = document.createElement('div');
     tabs.className = 'manager-inspector-tabs artifact-filter-row';
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', ui.actions.workbench);
     tabs.innerHTML = `
-        <button type="button" class="artifact-filter ${tabActiveClass('runs')}" data-manager-tab="runs">${ui.tabs.runs}</button>
-        <button type="button" class="artifact-filter ${tabActiveClass('artifacts')}" data-manager-tab="artifacts">${ui.tabs.artifacts}</button>
-        <button type="button" class="artifact-filter ${tabActiveClass('tasks')}" data-manager-tab="tasks">${ui.tabs.tasks}</button>
-        <button type="button" class="artifact-filter ${tabActiveClass('workspace')}" data-manager-tab="workspace">${ui.tabs.workspace}</button>
-        <button type="button" class="artifact-filter ${tabActiveClass('settings')}" data-manager-tab="settings">${ui.tabs.settings}</button>
+        <button type="button" role="tab" aria-selected="${activeTab === 'changes'}" class="artifact-filter ${tabActiveClass('changes')}" data-manager-tab="changes">${ui.tabs.changes}</button>
+        <button type="button" role="tab" aria-selected="${activeTab === 'activity'}" class="artifact-filter ${tabActiveClass('activity')}" data-manager-tab="activity">${ui.tabs.activity}</button>
     `;
     artifactDrawerEl.querySelector('.artifact-drawer-header')?.after(tabs);
     artifactDrawerEl.setAttribute('data-active-tab', activeTab);
@@ -527,20 +623,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         exportTopicButton.innerHTML = `${svgIcon('save')}${ui.actions.exportTopic}`;
     }
 
-    // 次级 inspector 侧滑栏（问题4）- 挂到 body，fixed 定位，贴 artifactDrawer 左侧
-    const inspectorSlider = document.createElement('div');
-    inspectorSlider.className = 'run-inspector-slider';
-    inspectorSlider.innerHTML = `
-        <div class="run-inspector-slider-header">
-            <span class="run-inspector-slider-title">${svgIcon('layers')}${m.runs.eventDetail}</span>
-            <button type="button" class="run-inspector-slider-close" data-run-action="close-inspector" title="${m.runs.closeInspector}">${svgIconNoMargin('x')}</button>
-        </div>
-        <div class="run-inspector-slider-body" id="runInspectorSliderBody"></div>
-    `;
-    document.body.appendChild(inspectorSlider);
-
-    // 原生 artifact-filter-row（全部/计划/验证/变更）引用
     const artifactNativeFilterRow = artifactDrawerEl.querySelector<HTMLElement>('.artifact-filter-row:not(.manager-inspector-tabs)');
+    if (artifactNativeFilterRow) artifactNativeFilterRow.style.display = 'none';
 
     function clickNativeButton(id: string): void {
         const button = document.getElementById(id) as HTMLButtonElement | null;
@@ -552,6 +636,108 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         if (!force && state.settingsContent) return;
         settingsRequestPending = true;
         vscode?.postMessage?.({ type: 'openSettings' });
+    }
+
+    function currentManagerUiState(): PersistedManagerUiState {
+        const leftWidth = Number.parseFloat(getComputedStyle(document.body).getPropertyValue('--manager-left-width'));
+        const rightWidth = Number.parseFloat(getComputedStyle(document.body).getPropertyValue('--manager-right-width'));
+        return {
+            activeTab: activeTab === 'settings' ? (persistedUi.activeTab || 'changes') : activeTab,
+            drawerOpen: document.body.classList.contains('artifact-drawer-open'),
+            leftWidth: Number.isFinite(leftWidth) ? Math.round(leftWidth) : undefined,
+            rightWidth: Number.isFinite(rightWidth) ? Math.round(rightWidth) : undefined,
+        };
+    }
+
+    function persistManagerUiState(): void {
+        if (!vscode?.setState) return;
+        const root = vscode.getState?.() || {};
+        const next = currentManagerUiState();
+        Object.assign(persistedUi, next);
+        vscode.setState({ ...root, agentManager: next });
+    }
+
+    function setManagerDrawerOpen(open: boolean): void {
+        document.body.classList.toggle('artifact-drawer-open', open);
+        artifactDrawerEl.setAttribute('aria-hidden', open ? 'false' : 'true');
+        document.getElementById('btnArtifacts')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+        persistManagerUiState();
+        renderOverview();
+    }
+
+    const leftResizer = document.createElement('div');
+    leftResizer.className = 'manager-pane-resizer manager-left-resizer';
+    leftResizer.tabIndex = 0;
+    leftResizer.setAttribute('role', 'separator');
+    leftResizer.setAttribute('aria-orientation', 'vertical');
+    leftResizer.setAttribute('aria-label', locale === 'zh-cn' ? '调整任务栏宽度' : 'Resize task sidebar');
+    const rightResizer = document.createElement('div');
+    rightResizer.className = 'manager-pane-resizer manager-right-resizer';
+    rightResizer.tabIndex = 0;
+    rightResizer.setAttribute('role', 'separator');
+    rightResizer.setAttribute('aria-orientation', 'vertical');
+    rightResizer.setAttribute('aria-label', locale === 'zh-cn' ? '调整审阅栏宽度' : 'Resize review pane');
+    document.body.append(leftResizer, rightResizer);
+
+    function clampPaneWidth(side: 'left' | 'right', rawWidth: number): number {
+        if (side === 'left') return Math.max(220, Math.min(380, rawWidth));
+        const leftWidth = topicsPanel?.getBoundingClientRect().width || 0;
+        const maxRight = Math.max(440, window.innerWidth - leftWidth - 520);
+        return Math.max(440, Math.min(Math.min(1100, maxRight), rawWidth));
+    }
+
+    function setPaneWidth(side: 'left' | 'right', rawWidth: number): void {
+        const width = Math.round(clampPaneWidth(side, rawWidth));
+        document.body.style.setProperty(side === 'left' ? '--manager-left-width' : '--manager-right-width', `${width}px`);
+        const resizer = side === 'left' ? leftResizer : rightResizer;
+        resizer.setAttribute('aria-valuenow', String(width));
+        resizer.setAttribute('aria-valuemin', side === 'left' ? '220' : '440');
+        resizer.setAttribute('aria-valuemax', side === 'left' ? '380' : '1100');
+    }
+
+    function installPaneResizer(resizer: HTMLElement, side: 'left' | 'right'): void {
+        const currentWidth = (): number => side === 'left'
+            ? (topicsPanel?.getBoundingClientRect().width || 280)
+            : (artifactDrawerEl.getBoundingClientRect().width || 720);
+        resizer.addEventListener('pointerdown', event => {
+            if (window.innerWidth <= 1280) return;
+            event.preventDefault();
+            document.body.classList.add('manager-resizing');
+            resizer.setPointerCapture(event.pointerId);
+            const move = (moveEvent: PointerEvent): void => {
+                setPaneWidth(side, side === 'left' ? moveEvent.clientX : window.innerWidth - moveEvent.clientX);
+            };
+            const finish = (): void => {
+                document.body.classList.remove('manager-resizing');
+                resizer.removeEventListener('pointermove', move);
+                resizer.removeEventListener('pointerup', finish);
+                resizer.removeEventListener('pointercancel', finish);
+                persistManagerUiState();
+            };
+            resizer.addEventListener('pointermove', move);
+            resizer.addEventListener('pointerup', finish);
+            resizer.addEventListener('pointercancel', finish);
+        });
+        resizer.addEventListener('keydown', event => {
+            if (!['ArrowLeft', 'ArrowRight'].includes(event.key) || window.innerWidth <= 1280) return;
+            event.preventDefault();
+            const direction = event.key === 'ArrowRight' ? 1 : -1;
+            const delta = side === 'left' ? direction * 16 : direction * -16;
+            setPaneWidth(side, currentWidth() + delta);
+            persistManagerUiState();
+        });
+        resizer.addEventListener('dblclick', () => {
+            setPaneWidth(side, side === 'left' ? 288 : 720);
+            persistManagerUiState();
+        });
+        setPaneWidth(side, currentWidth());
+    }
+
+    installPaneResizer(leftResizer, 'left');
+    installPaneResizer(rightResizer, 'right');
+
+    function suggestedPrimaryTab(): Exclude<ManagerTab, 'settings'> {
+        return collectWorkspaceFiles(state.run).length > 0 ? 'changes' : 'activity';
     }
 
     function commitCurrentTopicTitle(rawTitle: string): void {
@@ -593,25 +779,26 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             return true;
         }
         if (action === 'workspace') {
-            document.body.classList.add('artifact-drawer-open');
-            setActiveTab('workspace');
+            setManagerDrawerOpen(true);
+            hasUserSelectedPrimaryTab = true;
+            setActiveTab('changes');
             return true;
         }
         if (action === 'workbench') {
             if (document.body.classList.contains('artifact-drawer-open')) {
-                document.body.classList.remove('artifact-drawer-open');
+                setManagerDrawerOpen(false);
                 return true;
             }
-            document.body.classList.add('artifact-drawer-open');
-            setActiveTab(activeTab === 'settings' ? 'settings' : (activeTab === 'artifacts' || activeTab === 'tasks' ? activeTab : 'workspace'));
+            setManagerDrawerOpen(true);
+            setActiveTab(activeTab === 'settings' ? suggestedPrimaryTab() : activeTab);
             return true;
         }
         if (action === 'settings') {
             if (document.body.classList.contains('artifact-drawer-open') && activeTab === 'settings') {
-                document.body.classList.remove('artifact-drawer-open');
+                setManagerDrawerOpen(false);
                 return true;
             }
-            document.body.classList.add('artifact-drawer-open');
+            setManagerDrawerOpen(true);
             setActiveTab('settings', { forceSettingsRefresh: true });
             return true;
         }
@@ -627,7 +814,17 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         if (!button) return;
         const nextTab = button.dataset.managerTab as ManagerTab | undefined;
         if (!nextTab) return;
+        hasUserSelectedPrimaryTab = true;
         setActiveTab(nextTab, { forceSettingsRefresh: nextTab === 'settings' });
+    });
+
+    tabs.addEventListener('keydown', event => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        const nextTab: ManagerTab = activeTab === 'changes' ? 'activity' : 'changes';
+        event.preventDefault();
+        hasUserSelectedPrimaryTab = true;
+        setActiveTab(nextTab);
+        tabs.querySelector<HTMLButtonElement>(`[data-manager-tab="${nextTab}"]`)?.focus();
     });
 
     overview.addEventListener('click', event => {
@@ -640,7 +837,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         if (!button) return;
         const nextTab = button.dataset.managerJump as ManagerTab | undefined;
         if (!nextTab) return;
-        document.body.classList.add('artifact-drawer-open');
+        if (nextTab !== 'settings') hasUserSelectedPrimaryTab = true;
+        setManagerDrawerOpen(true);
         setActiveTab(nextTab);
     });
 
@@ -694,8 +892,30 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             return;
         }
 
+        const artifactTarget = target?.closest<HTMLElement>('[data-manager-artifact-id]');
+        if (artifactTarget?.dataset.managerArtifactId) {
+            vscode?.postMessage?.({ type: 'openArtifact', artifactId: artifactTarget.dataset.managerArtifactId });
+            return;
+        }
+
         if (target?.closest('.annotatable-plan .ap-header')) {
             lastWorkspaceRenderSignature = workspaceRenderSignature(collectWorkspaceFiles(state.run));
+            return;
+        }
+
+        const expandDiffButton = target?.closest<HTMLElement>('[data-diff-expand-file]');
+        if (expandDiffButton?.dataset.diffExpandFile) {
+            expandedWorkspaceDiffFiles.add(expandDiffButton.dataset.diffExpandFile);
+            lastWorkspaceRenderSignature = '';
+            renderInspector();
+            return;
+        }
+
+        const expandContextButton = target?.closest<HTMLElement>('[data-diff-expand-context]');
+        if (expandContextButton?.dataset.diffExpandContext) {
+            expandedWorkspaceContextFiles.add(expandContextButton.dataset.diffExpandContext);
+            lastWorkspaceRenderSignature = '';
+            renderInspector();
             return;
         }
 
@@ -751,28 +971,11 @@ const DEFAULT_STATE: ManagerEnhancementState = {
 
         // Keep event details inside the workbench so the right column stays spatially stable.
         const eventRow = target?.closest<HTMLElement>('.timeline-event');
-        if (activeTab === 'runs' && eventRow?.dataset.eventId) {
+        if (activeTab === 'activity' && eventRow?.dataset.eventId) {
             state.selectedRunEventId = eventRow.dataset.eventId;
-            state.inspectorPanelOpen = false;
-            updateInspectorSliderVisibility();
             renderInspector();
         }
     });
-
-    // inspector 侧滑栏关闭按钮
-    inspectorSlider.addEventListener('click', event => {
-        const target = event.target as HTMLElement | null;
-        if (target?.closest('[data-run-action="close-inspector"]')) {
-            state.inspectorPanelOpen = false;
-            updateInspectorSliderVisibility();
-        }
-    });
-
-    function currentTopicMessageCount(): number {
-        const currentId = state.stats.currentTopicId;
-        if (!currentId) return state.messageCount;
-        return state.topics.find(topic => topic.id === currentId)?.messageCount ?? state.messageCount;
-    }
 
     function compactNumber(value: number | undefined): string {
         const n = Number(value || 0);
@@ -842,21 +1045,15 @@ const DEFAULT_STATE: ManagerEnhancementState = {
 
     function renderOverview(): void {
         const runStatus = typeof state.run?.status === 'string' ? state.run.status : '';
-        const metrics = state.run?.metrics || {};
         const isActive = state.isGenerating || isRunActive(runStatus);
         const statusText = runStatusLabel(runStatus, state.isGenerating);
         const statusClass = isActive ? 'is-running' : 'is-idle';
-        const changedCount = collectChangedFiles(state.run).length;
+        const workspaceFiles = collectWorkspaceFiles(state.run);
+        const changedCount = workspaceFiles.length;
+        const additions = workspaceFiles.reduce((sum, file) => sum + Number(file.additions || 0), 0);
+        const deletions = workspaceFiles.reduce((sum, file) => sum + Number(file.deletions || 0), 0);
         const currentTopic = state.topics.find(topic => topic.id === state.stats.currentTopicId);
         const topicTitle = currentTopic?.title || state.stats.currentTopicTitle || ui.run.noActiveTopic;
-        const cacheStats = state.cacheStats;
-        let cachePercent = metrics.promptTokens && metrics.cachedTokens
-            ? Math.round((Number(metrics.cachedTokens) / Math.max(1, Number(metrics.promptTokens))) * 100)
-            : 0;
-        if (cacheStats && cacheStats.totalInputTokens > 0) {
-            cachePercent = Math.round(cacheStats.aggregateHitRate * 100);
-        }
-        cachePercent = Math.max(0, Math.min(100, cachePercent));
         const drawerOpen = document.body.classList.contains('artifact-drawer-open');
         const overviewSignature = JSON.stringify({
             drawerOpen,
@@ -865,10 +1062,10 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             workflow: state.workflowId || state.mode,
             statusText,
             statusClass,
-            tokens: compactNumber(metrics.totalTokens),
-            cachePercent,
-            cost: costLabel(metrics.costCny),
             changedCount,
+            additions,
+            deletions,
+            activeTab,
         });
         if (overviewSignature === lastOverviewSignature) return;
         lastOverviewSignature = overviewSignature;
@@ -883,25 +1080,20 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                         <span>${escapeHtml(topicTitle)}</span>
                     </button>
                 `}
-                <button type="button" class="manager-command-workflow" data-manager-jump="runs" title="${escapeHtml(state.workflowId || state.mode)}">
+                <button type="button" class="manager-command-workflow" data-manager-jump="activity" title="${escapeHtml(state.workflowId || state.mode)}">
                     ${svgIconNoMargin('gitBranch')}
-                    <span>${escapeHtml(workflowLabel(state.mode, state.workflowId))}</span>
-                    <span class="manager-command-chevron">v</span>
+                    <span>${escapeHtml(isActive ? ui.run.currentRound : ui.run.previousRound)}</span>
+                    <small>${escapeHtml(workflowLabel(state.mode, state.workflowId))}</small>
                 </button>
                 <span class="manager-command-status ${statusClass}">
                     ${svgIconNoMargin(isActive ? 'link' : 'check')}
                     <span>${escapeHtml(statusText)}</span>
                 </span>
-                <span class="manager-command-metric">${ui.metrics.tokens} <strong>${compactNumber(metrics.totalTokens)}</strong></span>
-                <span class="manager-command-metric manager-command-cache">
-                    ${ui.metrics.cache} <strong>${cachePercent}%</strong>
-                    <span class="manager-cache-meter" aria-hidden="true"><span style="width:${cachePercent}%"></span></span>
-                </span>
-                <span class="manager-command-metric">${ui.metrics.cost} <strong>¥${costLabel(metrics.costCny)}</strong></span>
             </div>
             <div class="manager-command-actions">
-                <button type="button" class="manager-command-metric manager-command-change" data-manager-jump="workspace">
-                    <strong>${changedCount}</strong> ${ui.metrics.filesChanged}
+                <button type="button" class="manager-command-metric manager-command-change ${activeTab === 'changes' && drawerOpen ? 'active' : ''}" data-manager-jump="changes">
+                    <span class="manager-command-delta"><strong>+${additions}</strong><em>-${deletions}</em></span>
+                    <span>${changedCount} ${ui.metrics.filesChanged}</span>
                 </button>
                 <button type="button" class="manager-command-settings manager-command-workbench" data-manager-action="workbench" title="${drawerOpen ? ui.actions.closeWorkbench : ui.actions.workbench}" aria-label="${drawerOpen ? ui.actions.closeWorkbench : ui.actions.workbench}">
                     ${svgIconNoMargin('layers')}
@@ -920,55 +1112,39 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         document.body.dataset.managerActiveTab = activeTab;
         artifactDrawerEl.setAttribute('data-active-tab', activeTab);
         tabs.querySelectorAll<HTMLElement>('[data-manager-tab]').forEach(button => {
-            button.classList.toggle('active', button.dataset.managerTab === activeTab);
+            const selected = button.dataset.managerTab === activeTab;
+            button.classList.toggle('active', selected);
+            button.setAttribute('aria-selected', selected ? 'true' : 'false');
         });
 
-        // 原生筛选行（全部/计划/验证/变更）仅在 artifacts tab 时显示
-        if (artifactNativeFilterRow) {
-            artifactNativeFilterRow.style.display = activeTab === 'artifacts' ? '' : 'none';
-        }
-
-        // 切换到非 runs 时关闭 inspector 侧滑栏
-        if (activeTab !== 'runs') {
-            state.inspectorPanelOpen = false;
-            updateInspectorSliderVisibility();
-        }
-
         renderOverview();
-        if (activeTab === 'runs') {
+        if (activeTab === 'activity') {
             vscode?.postMessage?.({ type: 'requestUsageStats' });
         }
         if (activeTab === 'settings' && !options.suppressSettingsRequest) {
             ensureSettingsContent(!!options.forceSettingsRefresh);
         }
 
-        if (activeTab === 'artifacts') {
-            window.dispatchEvent(new MessageEvent('message', {
-                data: { type: 'artifactList', artifacts: state.artifacts },
-            }));
-            return;
-        }
-
+        if (activeTab !== 'settings') persistManagerUiState();
         renderInspector();
     }
 
-    function updateInspectorSliderVisibility(): void {
-        const isOpen = state.inspectorPanelOpen && activeTab === 'runs';
-        inspectorSlider.classList.toggle('open', isOpen);
-        if (isOpen) {
-            // 动态定位：侧滑栏 right = artifactDrawer 的 offsetWidth，从其左边界向左弹出
-            const drawerRect = artifactDrawerEl.getBoundingClientRect();
-            inspectorSlider.style.right = `${window.innerWidth - drawerRect.left}px`;
-            inspectorSlider.style.top = `${drawerRect.top}px`;
-        } else {
-            inspectorSlider.style.top = '';
-        }
+    function syncSuggestedPrimaryTab(): void {
+        if (hasUserSelectedPrimaryTab || activeTab === 'settings') return;
+        const nextTab = suggestedPrimaryTab();
+        if (nextTab === activeTab) return;
+        activeTab = nextTab;
+        document.body.dataset.managerActiveTab = activeTab;
+        artifactDrawerEl.setAttribute('data-active-tab', activeTab);
+        tabs.querySelectorAll<HTMLElement>('[data-manager-tab]').forEach(button => {
+            const selected = button.dataset.managerTab === activeTab;
+            button.classList.toggle('active', selected);
+            button.setAttribute('aria-selected', selected ? 'true' : 'false');
+        });
     }
 
     function renderInspector(): void {
-        if (activeTab === 'artifacts') return;
-
-        if (activeTab === 'workspace') {
+        if (activeTab === 'changes') {
             const run = state.run;
             const workspaceFiles = collectWorkspaceFiles(run);
             const workspaceEntries = currentWorkspaceEntries();
@@ -977,29 +1153,35 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 return;
             }
             lastWorkspaceRenderSignature = signature;
+            const additions = workspaceFiles.reduce((sum, file) => sum + Number(file.additions || 0), 0);
+            const deletions = workspaceFiles.reduce((sum, file) => sum + Number(file.deletions || 0), 0);
             const changedFilesHtml = workspaceFiles.length ? workspaceFiles.map(file => `
-                <article class="manager-file-change-row ${collapsedWorkspaceFiles.has(file.file) ? 'is-collapsed' : ''}" data-workspace-file-toggle="${escapeHtml(file.file)}">
-                    <button type="button" class="manager-file-change-toggle" data-workspace-file-toggle="${escapeHtml(file.file)}" aria-expanded="${collapsedWorkspaceFiles.has(file.file) ? 'false' : 'true'}">
-                        <span title="${escapeHtml(file.file)}">${svgIconNoMargin('file')}${escapeHtml(fileBasename(file.file))}<small>${escapeHtml(file.file)}</small></span>
-                        <em>${escapeHtml(formatFileStats(file))}</em>
-                    </button>
+                <article class="manager-file-change-row ${collapsedWorkspaceFiles.has(file.file) ? 'is-collapsed' : ''}">
+                    <header class="manager-file-change-header">
+                        <button type="button" class="manager-file-change-toggle" data-workspace-file-toggle="${escapeHtml(file.file)}" aria-expanded="${collapsedWorkspaceFiles.has(file.file) ? 'false' : 'true'}" title="${escapeHtml(collapsedWorkspaceFiles.has(file.file) ? ui.workspace.expandFile : ui.workspace.collapseFile)}">
+                            <span class="manager-file-chevron" aria-hidden="true"></span>
+                            <span class="manager-file-identity" title="${escapeHtml(file.file)}"><strong>${escapeHtml(fileBasename(file.file))}</strong><small>${escapeHtml(file.file)}</small></span>
+                        </button>
+                        <span class="manager-file-delta" aria-label="${escapeHtml(formatFileStats(file))}">
+                            ${file.additions !== undefined || file.deletions !== undefined ? `<strong>+${file.additions ?? 0}</strong><em>-${file.deletions ?? 0}</em>` : `<i>${escapeHtml(file.status || ui.run.changed)}</i>`}
+                        </span>
+                        <button type="button" class="manager-file-open open-result-link" data-path="${escapeHtml(file.file)}" title="${escapeHtml(ui.workspace.openFile)}" aria-label="${escapeHtml(ui.workspace.openFile)}">${svgIconNoMargin('file')}</button>
+                    </header>
                     ${collapsedWorkspaceFiles.has(file.file) ? '' : renderWorkspaceDiffLines(file)}
                 </article>
-            `).join('') : `<div class="manager-side-empty">${ui.workspace.noFiles}</div>`;
+            `).join('') : `<div class="manager-review-empty"><strong>${ui.workspace.noChanges}</strong><span>${ui.workspace.noWorkspaceHint}</span></div>`;
             const hasExternalWorkspace = workspaceEntries.length > 0;
             artifactListEl.innerHTML = `
-                <div class="manager-workspace-page">
-                    <section class="manager-side-card manager-workspace-hero">
-                        <div class="manager-card-title">${escapeHtml(ui.workspace.title)} <span>${escapeHtml(state.workflowId || state.mode)}</span></div>
-                        <p>${escapeHtml(ui.workspace.subtitle)}</p>
-                    </section>
-                    <section class="manager-side-card manager-workspace-host-card ${hasExternalWorkspace ? 'has-content' : ''}">
+                <div class="manager-workspace-page manager-changes-page">
+                    <header class="manager-review-summary">
+                        <span><strong>${state.isGenerating || isRunActive(String(run?.status || '')) ? ui.run.currentRound : ui.run.previousRound}</strong><small>${escapeHtml(state.workflowId || workflowLabel(state.mode, null))}</small></span>
+                        <span class="manager-review-delta"><strong>+${additions}</strong><em>-${deletions}</em><i>${workspaceFiles.length} ${ui.metrics.filesChanged}</i></span>
+                    </header>
+                    <section class="manager-workspace-host-card ${hasExternalWorkspace ? 'has-content' : ''}" ${hasExternalWorkspace ? '' : 'hidden'}>
                         <div id="managerWorkspaceExternalHost" class="manager-workspace-external-host">
-                            ${hasExternalWorkspace ? '' : `<div class="manager-workspace-empty-card"><strong>${ui.workspace.noWorkspace}</strong><span>${ui.workspace.noWorkspaceHint}</span></div>`}
                         </div>
                     </section>
-                    <section class="manager-side-card">
-                        <div class="manager-card-title">${ui.workspace.fileChanges} <span>${workspaceFiles.length}</span></div>
+                    <section class="manager-review-files" aria-label="${escapeHtml(ui.workspace.fileChanges)}">
                         ${changedFilesHtml}
                     </section>
                 </div>
@@ -1050,28 +1232,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             return;
         }
 
-        if (activeTab === 'tasks') {
-            artifactListEl.innerHTML = state.todos.length
-                ? state.todos.map(todo => `
-                    <article class="artifact-item manager-task-item manager-task-${escapeHtml(todo.status)}">
-                        <div class="manager-task-line">
-                            <span class="manager-task-mark">${taskStatusMark(todo.status)}</span>
-                            <span class="artifact-item-title">${escapeHtml(todo.content)}</span>
-                        </div>
-                    </article>
-                `).join('')
-                : `<div class="artifact-empty">${m.tasks.noTasks}</div>`;
-            return;
-        }
-
-        if (activeTab === 'runs') {
+        if (activeTab === 'activity') {
             const run = state.run;
-            if (!run) {
-                artifactListEl.innerHTML = `<div class="artifact-empty">${m.runs.noRun}</div>`;
-                return;
-            }
-
-            const metrics = run.metrics || { totalTokens: 0, promptTokens: 0, completionTokens: 0, costCny: 0, iterations: 0, toolCalls: 0 };
+            const metrics = run?.metrics || { totalTokens: 0, promptTokens: 0, completionTokens: 0, costCny: 0, iterations: 0, toolCalls: 0 };
             const events = getRenderableRunEvents(Array.isArray(state.runEvents) ? state.runEvents : []);
             if (events.length > 0 && (!state.selectedRunEventId || !events.some((evt: any) => evt.eventId === state.selectedRunEventId))) {
                 state.selectedRunEventId = events[events.length - 1]?.eventId;
@@ -1114,14 +1277,12 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             const eventGroups = groupTimelineEvents(events, i18n).filter(group => group.id !== 'other');
             const eventTimelineHtml = eventGroups.length ? renderTimelineHTML(eventGroups, true, collapsedTimelineGroups) : '';
             const progressPercent = runProgressPercent(run);
-            const startedAt = Number(run.startedAt || run.createdAt || Date.now());
-            const finishedAt = Number(run.completedAt || Date.now());
+            const startedAt = Number(run?.startedAt || run?.createdAt || Date.now());
+            const finishedAt = Number(run?.completedAt || Date.now());
             const startedLabel = new Date(startedAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            const contextUsed = Number(run.context?.estimatedPromptTokens || metrics.promptTokens || 0);
-            const contextLimit = Number(run.context?.contextLimit || 0);
+            const contextUsed = Number(run?.context?.estimatedPromptTokens || metrics.promptTokens || 0);
+            const contextLimit = Number(run?.context?.contextLimit || 0);
             const contextPct = contextPercent(run);
-            const changedFiles = collectChangedFiles(run, events);
-            const currentTopic = state.topics.find(topic => topic.id === state.stats.currentTopicId);
             const selectedEventContextMeter = contextUsed && contextLimit ? {
                 estimatedPromptTokens: contextUsed,
                 contextLimit,
@@ -1138,50 +1299,15 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                     </div>
                 </section>
             ` : '';
-            const runOverviewCardsHtml = `
-                <section class="manager-delivery-grid">
-                    <article class="manager-delivery-card" data-manager-jump="runs">
-                        <span class="manager-delivery-value">${run ? 1 : 0}</span>
-                        <span class="manager-delivery-label">${ui.run.activeRun}</span>
-                    </article>
-                    <article class="manager-delivery-card" data-manager-jump="artifacts">
-                        <span class="manager-delivery-value">${state.artifacts.length}</span>
-                        <span class="manager-delivery-label">${ui.run.artifacts}</span>
-                    </article>
-                    <article class="manager-delivery-card" data-manager-jump="workspace">
-                        <span class="manager-delivery-value">${changedFiles.length}</span>
-                        <span class="manager-delivery-label">${ui.run.filesChanged}</span>
-                    </article>
-                    <article class="manager-delivery-card">
-                        <span class="manager-delivery-value">${compactNumber(contextUsed)}</span>
-                        <span class="manager-delivery-label">${ui.run.contextTokens}</span>
-                    </article>
-                </section>
-            `;
-            const currentTopicHtml = `
-                <section class="manager-side-card">
-                    <div class="manager-card-title">${ui.run.currentTopic} <span>${currentTopic ? escapeHtml(formatDuration(Date.now() - (currentTopic.updatedAt || Date.now()))) : ''}</span></div>
-                    <div class="manager-workspace-detail-row">
-                        <strong>${escapeHtml(currentTopic?.title || state.stats.currentTopicTitle || ui.run.noActiveTopic)}</strong>
-                        <span>${currentTopic?.messageCount ?? currentTopicMessageCount()} ${ui.run.messages}</span>
-                    </div>
-                </section>
-            `;
-            const artifactCardsHtml = state.artifacts.length ? state.artifacts.slice(0, 4).map((artifact: any) => `
-                <article class="manager-side-item">
+            const artifactCardsHtml = state.artifacts.length ? state.artifacts.slice(0, 12).map((artifact: any) => `
+                <button type="button" class="manager-side-item" data-manager-artifact-id="${escapeHtml(artifact.id)}">
                     <span class="manager-side-icon">${svgIconNoMargin(artifact.kind === 'diff' ? 'pencil' : artifact.kind === 'validation' ? 'check' : 'fileText')}</span>
                     <span class="manager-side-main">
                         <strong>${escapeHtml(artifact.title || artifact.kind || 'Artifact')}</strong>
                         <em>${escapeHtml(artifact.summary || artifact.status || artifact.kind || '')}</em>
                     </span>
-                </article>
+                </button>
             `).join('') : `<div class="manager-side-empty">${ui.run.noArtifacts}</div>`;
-            const filesCardsHtml = changedFiles.length ? changedFiles.slice(0, 5).map((file: string) => `
-                <article class="manager-file-change-row">
-                    <span>${svgIconNoMargin('file')}${escapeHtml(file.split(/[\\/]/).pop() || file)}</span>
-                    <em>${ui.run.changed}</em>
-                </article>
-            `).join('') : `<div class="manager-side-empty">${ui.run.noFileChanges}</div>`;
             const usageStatsHtml = renderUsageStatsCard();
             const selectedEvent = events.find((evt: any) => evt.eventId === state.selectedRunEventId);
             const copyLabel = state.copiedEventAt && Date.now() - state.copiedEventAt < 2500 ? m.runs.copiedEvent : m.runs.copyEventJson;
@@ -1195,10 +1321,41 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 </section>
             ` : '';
 
+            const progress = state.orchestrator;
+            const agentsHtml = progress ? `
+                <section class="manager-activity-section manager-agents-section">
+                    <div class="manager-activity-section-title"><strong>${ui.activity.agents}</strong><span>${m.agents.done} ${progress.done}/${progress.total} · ${m.agents.running} ${progress.running} · ${m.agents.failed} ${progress.failed}</span></div>
+                    <div class="manager-agent-summary-line"><span>${m.agents.phase}: ${escapeHtml(progress.phase)}</span><em>${escapeHtml(progress.latestEvent || '')}</em></div>
+                    <div class="manager-agent-lanes">
+                        ${progress.lanes.map(lane => `
+                            <article class="manager-agent-lane manager-agent-${escapeHtml(lane.status)}">
+                                <span class="manager-agent-state" aria-hidden="true"></span>
+                                <span class="manager-agent-main"><strong>${escapeHtml(lane.role)}</strong><em>${escapeHtml(lane.statusText || lane.taskNodeId)}</em></span>
+                                <span class="manager-agent-metrics">${lane.stepCount} ${m.agents.steps} · ${compactNumber(lane.tokenUsed)} ${m.agents.tokens}</span>
+                            </article>
+                        `).join('')}
+                    </div>
+                </section>
+            ` : '';
+            const tasksHtml = `
+                <section class="manager-activity-section manager-tasks-section">
+                    <div class="manager-activity-section-title"><strong>${ui.activity.tasks}</strong><span>${state.todos.length}</span></div>
+                    <div class="manager-task-list">
+                        ${state.todos.length ? state.todos.map(todo => `
+                            <article class="manager-task-item manager-task-${escapeHtml(todo.status)}">
+                                <span class="manager-task-mark">${taskStatusMark(todo.status)}</span>
+                                <span>${escapeHtml(todo.content)}</span>
+                            </article>
+                        `).join('') : `<div class="manager-side-empty">${m.tasks.noTasks}</div>`}
+                    </div>
+                </section>
+            `;
+            const hasActivity = !!run || !!progress || state.todos.length > 0 || state.artifacts.length > 0 || events.length > 0;
+
             artifactListEl.innerHTML = `
-                <div class="manager-run-workbench">
-                    <section class="manager-run-main">
-                        <article class="artifact-item manager-run-summary">
+                <div class="manager-activity-page">
+                    ${run ? `
+                        <header class="manager-run-summary manager-activity-hero">
                             <div class="manager-run-head">
                                 <div>
                                     <div class="artifact-item-title">${ui.run.runPrefix} #${escapeHtml(run.runId)}</div>
@@ -1211,10 +1368,32 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                                 <em>${progressPercent}%</em>
                             </div>
                             <div class="run-metrics-grid">
-                                <div class="run-metric-cell">${m.runs.metrics.tokens}: <strong>${metrics.totalTokens}</strong> (${metrics.promptTokens} ${ui.metrics.in} / ${metrics.completionTokens} ${ui.metrics.out}${metrics.cachedTokens ? `, ${metrics.cachedTokens} ${ui.metrics.cached}` : ''})</div>
-                                <div class="run-metric-cell">${m.runs.metrics.cost}: <strong>¥${metrics.costCny?.toFixed(4) || '0.0000'}</strong></div>
+                                <div class="run-metric-cell">${m.runs.metrics.tokens}: <strong>${compactNumber(metrics.totalTokens)}</strong></div>
+                                <div class="run-metric-cell">${m.runs.metrics.cost}: <strong>¥${costLabel(metrics.costCny)}</strong></div>
                                 <div class="run-metric-cell">${m.runs.metrics.tools}: <strong>${metrics.toolCalls} ${m.runs.metrics.calls}</strong></div>
+                                <div class="run-metric-cell">${escapeHtml(formatDuration(finishedAt - startedAt))}</div>
                             </div>
+                        </header>
+                    ` : hasActivity ? `<header class="manager-activity-header"><strong>${ui.activity.title}</strong><span>${m.runs.noRun}</span></header>` : `<div class="manager-review-empty"><strong>${ui.activity.noActivity}</strong><span>${m.runs.noRun}</span></div>`}
+                    ${agentsHtml}
+                    ${tasksHtml}
+                    ${eventTimelineHtml ? `
+                        <section class="manager-activity-section run-events-container">
+                            <div class="manager-activity-section-title"><strong>${ui.activity.timeline}</strong><span>${events.length}</span></div>
+                            ${eventTimelineHtml}
+                        </section>
+                    ` : ''}
+                    ${selectedEventHtml}
+                    <section class="manager-activity-section">
+                        <div class="manager-activity-section-title"><strong>${ui.activity.artifacts}</strong><span>${state.artifacts.length}</span></div>
+                        <div class="manager-artifact-grid">${artifactCardsHtml}</div>
+                    </section>
+                    ${run ? `
+                        <details class="manager-activity-diagnostics">
+                            <summary>${ui.run.runDetails}</summary>
+                            <div class="manager-activity-diagnostics-body">
+                                ${contextHtml}
+                                ${usageStatsHtml}
                             <div class="run-action-row">
                                 <button type="button" class="run-action-btn" data-run-action="memory">${m.runs.openMemory}</button>
                                 <button type="button" class="run-action-btn" data-run-action="cleanup-results">${m.runs.cleanLargeResults}</button>
@@ -1229,56 +1408,15 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                                 </div>
                             ` : ''}
                             ${subAgentChangeHtml}
-                        </article>
-                        ${eventTimelineHtml ? `
-                            <div class="run-events-container">
-                                <div class="manager-card-title">${ui.run.eventTimeline} <span>${events.length}</span></div>
-                                ${eventTimelineHtml}
                             </div>
-                        ` : ''}
-                        ${selectedEventHtml}
-                        ${memoryHtml}
-                    </section>
-                    <aside class="manager-run-side">
-                        ${runOverviewCardsHtml}
-                        ${currentTopicHtml}
-                        ${contextHtml}
-                        ${usageStatsHtml}
-                        <section class="manager-side-card">
-                            <div class="manager-card-title">${ui.run.artifacts} <span>${state.artifacts.length}</span></div>
-                            ${artifactCardsHtml}
-                        </section>
-                        <section class="manager-side-card">
-                            <div class="manager-card-title">${ui.run.filesChanged} <span>${changedFiles.length}</span></div>
-                            ${filesCardsHtml}
-                        </section>
-                    </aside>
+                        </details>
+                    ` : ''}
+                    ${memoryHtml}
                 </div>
             `;
             markSelectedRunEvent();
             return;
         }
-
-        const progress = state.orchestrator;
-        if (!progress) {
-            artifactListEl.innerHTML = `<div class="artifact-empty">${m.agents.noLanes}</div>`;
-            return;
-        }
-
-        artifactListEl.innerHTML = `
-            <article class="artifact-item manager-agent-summary">
-                <div class="artifact-item-title">${m.agents.phase}: ${escapeHtml(progress.phase)}</div>
-                <div class="artifact-item-summary">${m.agents.done} ${progress.done}/${progress.total}, ${m.agents.running} ${progress.running}, ${m.agents.failed} ${progress.failed}</div>
-                <div class="artifact-meta">${escapeHtml(progress.latestEvent || '')}</div>
-            </article>
-            ${progress.lanes.map(lane => `
-                <article class="artifact-item manager-agent-lane manager-agent-${escapeHtml(lane.status)}">
-                    <div class="artifact-item-title">${escapeHtml(lane.role)} / ${escapeHtml(lane.status)}</div>
-                    <div class="artifact-item-summary">${m.agents.task} ${escapeHtml(lane.taskNodeId)} / ${m.agents.steps} ${lane.stepCount} / ${m.agents.tokens} ${lane.tokenUsed}</div>
-                    <div class="artifact-meta">${escapeHtml(lane.statusText || '')}</div>
-                </article>
-            `).join('')}
-        `;
     }
 
     function markSelectedRunEvent(): void {
@@ -1305,6 +1443,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         state.stats = snapshot.stats || state.stats;
         syncTopicScopedState(state.stats.currentTopicId);
         state.artifacts = snapshot.artifacts || [];
+        lastWorkspaceRenderSignature = '';
         state.mode = snapshot.mode || state.mode;
         state.workflowId = snapshot.workflowId || null;
         state.isGenerating = !!snapshot.isGenerating;
@@ -1312,6 +1451,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         state.messageCount = typeof snapshot.messageCount === 'number'
             ? snapshot.messageCount
             : snapshot.messages?.filter(message => !message.isHidden).length || 0;
+        syncSuggestedPrimaryTab();
         renderOverview();
         renderInspector();
     }
@@ -1324,7 +1464,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             state.settingsContent = content;
             state.settingsTitle = detail?.title || ui.settings.title;
             state.settingsSubtitle = detail?.subtitle || ui.settings.subtitle;
-            document.body.classList.add('artifact-drawer-open');
+            setManagerDrawerOpen(true);
             if (activeTab === 'settings') {
                 renderInspector();
             } else {
@@ -1362,12 +1502,12 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             state.workspaceTitle = nextEntry.title;
             state.workspaceSubtitle = nextEntry.subtitle;
         }
-        document.body.classList.add('artifact-drawer-open');
+        setManagerDrawerOpen(true);
         if (activeTab === 'settings') {
             renderOverview();
             renderInspector();
         } else {
-            setActiveTab('workspace');
+            setActiveTab('changes');
         }
     }
 
@@ -1379,14 +1519,16 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             case 'runSnapshot':
                 state.run = msg.snapshot;
                 state.runEvents = Array.isArray(msg.events) ? msg.events : [];
+                lastWorkspaceRenderSignature = '';
                 setRunCacheStats(msg.snapshot?.runId, msg.cacheStats);
+                syncSuggestedPrimaryTab();
                 renderOverview();
                 renderInspector();
                 break;
             case 'compactedMemoryResult':
                 state.compactedMemoryContent = msg.content || '';
-                if (activeTab !== 'runs') {
-                    setActiveTab('runs');
+                if (activeTab !== 'activity') {
+                    setActiveTab('activity');
                 } else {
                     renderInspector();
                 }
@@ -1443,6 +1585,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 break;
             case 'artifactList':
                 state.artifacts = msg.artifacts || [];
+                lastWorkspaceRenderSignature = '';
                 renderOverview();
                 renderInspector();
                 break;
@@ -1503,16 +1646,10 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         applyEmbeddedWorkbenchContent(pendingWorkbenchContent);
     }
 
-    // 监听 body 的 class 变化，若右侧抽屉被关掉，联动收起左侧 Event Detail 侧滑栏
     const drawerObserver = new MutationObserver(mutations => {
         for (const mutation of mutations) {
             if (mutation.attributeName === 'class') {
-                const hasDrawer = document.body.classList.contains('artifact-drawer-open');
-                if (!hasDrawer && state.inspectorPanelOpen) {
-                    state.inspectorPanelOpen = false;
-                    updateInspectorSliderVisibility();
-                    markSelectedRunEvent();
-                }
+                persistManagerUiState();
                 renderOverview();
             }
         }

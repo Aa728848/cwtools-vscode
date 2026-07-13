@@ -36,7 +36,7 @@ describe('agent manager cross-surface contracts', () => {
         expect(topics).to.include('pinned: t.pinned');
     });
 
-    it('manager runtime inherits chat behavior and adds inspector tabs', () => {
+    it('manager runtime inherits chat behavior and exposes the focused review workbench', () => {
         const manager = fs.readFileSync(path.join(root, 'client/webview/agentManager.ts'), 'utf8');
         const contracts = fs.readFileSync(path.join(root, 'client/webview/chat/messages.manager.ts'), 'utf8');
         const topicViews = fs.readFileSync(path.join(root, 'client/webview/chat/topicViews.ts'), 'utf8');
@@ -45,11 +45,13 @@ describe('agent manager cross-surface contracts', () => {
         expect(manager).to.include("import './chatPanel'");
         expect(manager).to.include("import type { ManagerSnapshotMessage");
         expect(manager).to.include("case 'orchestratorProgress'");
-        expect(manager).to.include('data-manager-tab="runs"');
-        expect(manager).to.include('data-manager-tab="artifacts"');
-        expect(manager).to.include('data-manager-tab="tasks"');
-        expect(manager).to.include('data-manager-tab="workspace"');
-        expect(manager).to.include('data-manager-tab="settings"');
+        expect(manager).to.include('data-manager-tab="changes"');
+        expect(manager).to.include('data-manager-tab="activity"');
+        expect(manager).to.include("tabs.setAttribute('role', 'tablist')");
+        expect(manager).to.include('manager-agent-lanes');
+        expect(manager).to.include('data-diff-expand-file');
+        expect(manager).to.include('data-diff-expand-context');
+        expect(manager).to.not.include('run-inspector-slider');
         expect(manager).to.not.include('function renderMessages');
         expect(topicViews).to.include("grouping?: 'date' | 'workspace'");
         expect(topicViews).to.include('groupTopicsByWorkspace');
@@ -60,6 +62,10 @@ describe('agent manager cross-surface contracts', () => {
         expect(contracts).to.include('export interface OrchestratorProgressMessage');
 
         expect(css).to.include('.manager-inspector-tabs');
+        expect(css).to.include('.manager-review-files');
+        expect(css).to.include('.manager-pane-resizer');
+        expect(css).to.include('.manager-diff-line-omitted');
+        expect(css).to.not.include('.run-inspector-slider');
         expect(css).to.include('body.agent-manager-shell.artifact-drawer-open');
         expect(css).to.not.include('workspace-toggle {\n    display: none !important;');
     });

@@ -33,6 +33,8 @@ type SolarPanelMessage =
     | { command: 'vscodeRedo' }
     | { command: 'saveDocument' };
 
+type SolarDocumentState = 'applying' | 'modified' | 'saved' | 'error';
+
 export class SolarSystemPanel {
     public static currentPanel: SolarSystemPanel | undefined;
     private static readonly viewType = 'cwtools-solar-system-preview';
@@ -72,6 +74,25 @@ export class SolarSystemPanel {
         }
     }
     private _messageQueue: Promise<void> = Promise.resolve();
+
+    private _postDocumentState(state: SolarDocumentState, message?: string): void {
+        void this._panel.webview.postMessage({
+            command: 'documentState',
+            state,
+            dirty: this._document?.isDirty ?? false,
+            message,
+        });
+    }
+
+    private _queueDocumentEdit(label: string, edit: () => Promise<void>): void {
+        this._postDocumentState('applying');
+        this._messageQueue = this._messageQueue
+            .then(edit)
+            .catch(error => {
+                SolarSystemPanel._getLog().appendLine(`ERR ${label}: ${error}`);
+                this._postDocumentState('error', String(error));
+            });
+    }
 
     public static async create(extensionPath: string, document: vscode.TextDocument) {
         const column = vscode.window.activeTextEditor?.viewColumn;
@@ -136,31 +157,31 @@ export class SolarSystemPanel {
                         break;
                     }
                     case 'updateProperty':
-                        this._messageQueue = this._messageQueue.then(() => this._handleUpdateProperty(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR updateProperty: ${e}`));
+                        this._queueDocumentEdit('updateProperty', () => this._handleUpdateProperty(msg));
                         break;
                     case 'updateOrbit':
-                        this._messageQueue = this._messageQueue.then(() => this._handleUpdateOrbits([msg])).catch(e => SolarSystemPanel._getLog().appendLine(`ERR updateOrbit: ${e}`));
+                        this._queueDocumentEdit('updateOrbit', () => this._handleUpdateOrbits([msg]));
                         break;
                     case 'movePlanetOrbit':
-                        this._messageQueue = this._messageQueue.then(() => this._handleMovePlanetOrbit(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR movePlanetOrbit: ${e}`));
+                        this._queueDocumentEdit('movePlanetOrbit', () => this._handleMovePlanetOrbit(msg));
                         break;
                     case 'addPlanet':
-                        this._messageQueue = this._messageQueue.then(() => this._handleAddPlanet(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR addPlanet: ${e}`));
+                        this._queueDocumentEdit('addPlanet', () => this._handleAddPlanet(msg));
                         break;
                     case 'addStar':
-                        this._messageQueue = this._messageQueue.then(() => this._handleAddStar(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR addStar: ${e}`));
+                        this._queueDocumentEdit('addStar', () => this._handleAddStar(msg));
                         break;
                     case 'addMoon':
-                        this._messageQueue = this._messageQueue.then(() => this._handleAddMoon(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR addMoon: ${e}`));
+                        this._queueDocumentEdit('addMoon', () => this._handleAddMoon(msg));
                         break;
                     case 'addRingWorld':
-                        this._messageQueue = this._messageQueue.then(() => this._handleAddRingWorld(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR addRingWorld: ${e}`));
+                        this._queueDocumentEdit('addRingWorld', () => this._handleAddRingWorld(msg));
                         break;
                     case 'addSibling':
-                        this._messageQueue = this._messageQueue.then(() => this._handleAddSibling(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR addSibling: ${e}`));
+                        this._queueDocumentEdit('addSibling', () => this._handleAddSibling(msg));
                         break;
                     case 'deletePlanet':
-                        this._messageQueue = this._messageQueue.then(() => this._handleDeletePlanet(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR deletePlanet: ${e}`));
+                        this._queueDocumentEdit('deletePlanet', () => this._handleDeletePlanet(msg));
                         break;
                     case 'vscodeUndo':
                         await this._handleVscodeUndo();
@@ -169,7 +190,10 @@ export class SolarSystemPanel {
                         await this._handleVscodeRedo();
                         break;
                     case 'saveDocument':
-                        if (this._document) await this._document.save();
+                        if (this._document) {
+                            const saved = await this._document.save();
+                            this._postDocumentState(saved ? 'saved' : 'error');
+                        }
                         break;
                 }
             }, null, this._disposables),
@@ -177,6 +201,11 @@ export class SolarSystemPanel {
 
         // Watch for document saves to auto-refresh preview
         this._disposables.push(
+            vscode.workspace.onDidChangeTextDocument(event => {
+                if (event.document.uri.fsPath === document.uri.fsPath) {
+                    this._postDocumentState(event.document.isDirty ? 'modified' : 'saved');
+                }
+            }),
             vscode.workspace.onDidSaveTextDocument(async savedDoc => {
                 if (savedDoc.uri.fsPath === document.uri.fsPath) {
                     if (this._skipNextReload) {
@@ -416,7 +445,7 @@ export class SolarSystemPanel {
         return portraits;
     }
 
-    private async _resolvePlanetIcons(searchRoots: string[], classes: Array<{ icon: string, iconLarge?: string }>) {
+    private async _resolvePlanetIcons(searchRoots: string[], classes: Array<{ name: string, icon: string, iconLarge?: string }>) {
         if (this._planetIconsCache) return this._planetIconsCache;
         const planetIcons: Record<string, { uri: string, frame?: number, noOfFrames?: number }> = {};
         
@@ -426,9 +455,23 @@ export class SolarSystemPanel {
         const spriteIndex = this._spriteIndexCache;
 
         const iconNames = new Set<string>();
+        const addIconCandidates = (icon: string | undefined) => {
+            if (!icon) return;
+            iconNames.add(icon);
+            if (!/(?:_big|_large)$/i.test(icon)) {
+                iconNames.add(`${icon}_big`);
+                iconNames.add(`${icon}_large`);
+            }
+            if (/_small$/i.test(icon)) {
+                iconNames.add(icon.replace(/_small$/i, '_big'));
+                iconNames.add(icon.replace(/_small$/i, '_large'));
+            }
+        };
         for (const cls of classes) {
-            if (cls.icon) iconNames.add(cls.icon);
-            if (cls.iconLarge) iconNames.add(cls.iconLarge);
+            addIconCandidates(cls.iconLarge);
+            addIconCandidates(cls.icon);
+            const classSuffix = cls.name.replace(/^pc_/i, '');
+            addIconCandidates(`GFX_planet_type_${classSuffix}`);
         }
 
         for (const icon of iconNames) {
@@ -518,7 +561,11 @@ export class SolarSystemPanel {
             dynamicClasses: celestialClasses,
             portraits,
             planetIcons,
-            locDict: neededLoc
+            locDict: neededLoc,
+            documentState: {
+                state: document.isDirty ? 'modified' : 'saved',
+                dirty: document.isDirty,
+            },
         });
     }
 
@@ -1508,63 +1555,90 @@ export class SolarSystemPanel {
     <title>${title}</title>
 </head>
 <body>
-    <div id="toolbar">
-        <span id="title">${title}</span>
-        <div id="controls">
+    <header id="app-header">
+        <div class="app-identity">
+            <span class="app-kicker">${panelText('SOLAR SYSTEM', '星系可视化')}</span>
+            <span id="title">${title}</span>
+        </div>
+        <label class="system-picker" for="system-select">
+            <span>${panelText('System', '星系')}</span>
             <select id="system-select" title="${panelText('Select system', '选择星系')}"></select>
-            <span class="separator">|</span>
-            <button id="btn-scale-mode" title="${panelText('Toggle readable / true scale', '切换可读比例 / 真实比例')}" aria-label="${panelText('Toggle scale mode', '切换比例模式')}">${panelText('Readable scale', '可读比例')}</button>
-            <span class="separator">|</span>
-            <button id="btn-zoom-in" title="${panelText('Zoom in', '放大')}">+</button>
-            <span id="zoom-level">100%</span>
-            <button id="btn-zoom-out" title="${panelText('Zoom out', '缩小')}">−</button>
-            <button id="btn-fit" title="${panelText('Fit to window', '适应窗口')}">⊡</button>
-            <button id="btn-reset" title="${panelText('Reset view', '重置视角')}">↻</button>
-            <span class="separator">|</span>
-            <span id="tilt-level">55°</span>
-            <span class="separator">|</span>
-            <button id="btn-edit" title="${panelText('Toggle edit mode (E)', '切换编辑模式 (E)')}" class="edit-toggle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button>
-            <button id="btn-labels" title="${panelText('Toggle labels', '切换标签')}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"></path><path d="M7 7h.01"></path></svg></button>
-            <button id="btn-orbits" title="${panelText('Toggle orbit lines', '切换轨道线')}">◎</button>
-            <span class="separator">|</span>
-            <button id="btn-undo" title="${panelText('Undo edit (Ctrl+Z)', '撤销编辑 (Ctrl+Z)')}" aria-label="${panelText('Undo', '撤销')}">↶</button>
-            <button id="btn-redo" title="${panelText('Redo edit', '重做编辑')}" aria-label="${panelText('Redo', '重做')}">↷</button>
-            <button id="btn-save" title="${panelText('Save current file', '保存当前文件')}" aria-label="${panelText('Save', '保存')}">${panelText('Save', '保存')}</button>
-            <span id="edit-status">${panelText('Synced', '已同步')}</span>
+        </label>
+        <div id="mode-switch" class="segmented-control" role="group" aria-label="${panelText('Workspace mode', '工作模式')}">
+            <button id="btn-preview" class="active" type="button" aria-pressed="true"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg><span>${panelText('Preview', '预览')}</span></button>
+            <button id="btn-edit" type="button" aria-pressed="false" title="${panelText('Edit mode (E)', '编辑模式 (E)')}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg><span>${panelText('Edit', '编辑')}</span></button>
         </div>
-    </div>
+        <div id="document-actions" role="toolbar" aria-label="${panelText('Document actions', '文档操作')}">
+            <button id="btn-add-body" class="button-primary edit-only" type="button" disabled><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg><span>${panelText('Add body', '添加天体')}</span></button>
+            <button id="btn-delete-body" class="icon-button edit-only danger-button" type="button" disabled title="${panelText('Delete selected body (Delete)', '删除所选天体 (Delete)')}" aria-label="${panelText('Delete selected body', '删除所选天体')}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v6M14 11v6"></path></svg></button>
+            <span class="action-divider edit-only" aria-hidden="true"></span>
+            <button id="btn-undo" class="icon-button edit-only" type="button" title="${panelText('Undo (Ctrl+Z)', '撤销 (Ctrl+Z)')}" aria-label="${panelText('Undo', '撤销')}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 7 4 12l5 5"></path><path d="M20 18a8 8 0 0 0-8-8H4"></path></svg></button>
+            <button id="btn-redo" class="icon-button edit-only" type="button" title="${panelText('Redo (Ctrl+Shift+Z)', '重做 (Ctrl+Shift+Z)')}" aria-label="${panelText('Redo', '重做')}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 7 5 5-5 5"></path><path d="M4 18a8 8 0 0 1 8-8h8"></path></svg></button>
+            <button id="btn-save" class="button-secondary edit-only" type="button" title="${panelText('Save current file (Ctrl+S)', '保存当前文件 (Ctrl+S)')}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 3h12l4 4v14H3V3h2Z"></path><path d="M7 3v6h10V3M7 21v-8h10v8"></path></svg><span>${panelText('Save', '保存')}</span></button>
+            <span id="edit-status" class="status-pill" data-state="saved" role="status" aria-live="polite">${panelText('Saved', '已保存')}</span>
+            <button id="btn-toggle-inspector" class="icon-button" type="button" aria-pressed="true" title="${panelText('Toggle inspector', '切换检视器')}" aria-label="${panelText('Toggle inspector', '切换检视器')}"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1"></rect><path d="M15 4v16"></path></svg></button>
+        </div>
+    </header>
     <div id="main-layout">
-        <div id="viewport">
-            <canvas id="solar-canvas"></canvas>
-        </div>
-        <div id="side-panel">
-            <div id="side-panel-tabs">
-                <button id="tab-info" class="tab active">${panelText('Info', '信息')}</button>
-                <button id="tab-properties" class="tab">${panelText('Properties', '属性')}</button>
+        <section id="viewport" tabindex="0" aria-label="${panelText('Interactive solar system canvas', '交互式星系画布')}">
+            <canvas id="solar-canvas" role="img" aria-label="${panelText('Solar system orbital visualization', '星系轨道可视化')}"></canvas>
+            <div id="view-toolbar" class="floating-card" role="toolbar" aria-label="${panelText('View controls', '视图控制')}">
+                <div class="toolbar-group zoom-group">
+                    <button id="btn-zoom-out" class="icon-button" type="button" title="${panelText('Zoom out', '缩小')}" aria-label="${panelText('Zoom out', '缩小')}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h14"></path></svg></button>
+                    <span id="zoom-level">100%</span>
+                    <button id="btn-zoom-in" class="icon-button" type="button" title="${panelText('Zoom in', '放大')}" aria-label="${panelText('Zoom in', '放大')}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg></button>
+                </div>
+                <span class="toolbar-divider" aria-hidden="true"></span>
+                <button id="btn-fit" class="text-button" type="button" title="${panelText('Fit celestial bodies', '适应天体范围')}">${panelText('Fit bodies', '适应天体')}</button>
+                <button id="btn-fit-all" class="text-button" type="button" title="${panelText('Fit bodies and asteroid belts', '适应天体和小行星带')}">${panelText('Full view', '完整视图')}</button>
+                <button id="btn-focus" class="text-button" type="button" disabled title="${panelText('Center selected body', '居中所选天体')}">${panelText('Focus', '聚焦')}</button>
+                <button id="btn-reset" class="icon-button" type="button" title="${panelText('Reset view', '重置视角')}" aria-label="${panelText('Reset view', '重置视角')}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66"></path><path d="M20 4v7h-7"></path></svg></button>
+                <span class="toolbar-divider" aria-hidden="true"></span>
+                <button id="btn-labels" class="toggle-button active" type="button" aria-pressed="true" title="${panelText('Toggle labels (L)', '切换标签 (L)')}">${panelText('Labels', '标签')}</button>
+                <button id="btn-orbits" class="toggle-button active" type="button" aria-pressed="true" title="${panelText('Toggle orbit lines (O)', '切换轨道线 (O)')}">${panelText('Orbits', '轨道')}</button>
+                <button id="btn-scale-mode" class="toggle-button active" type="button" aria-pressed="true" title="${panelText('Toggle readable / true scale', '切换可读比例 / 真实比例')}">${panelText('Readable scale', '可读比例')}</button>
             </div>
-            <div id="info-panel">
+            <div id="interaction-hint" class="floating-card" role="note">
+                <span>${panelText('Drag empty space to rotate', '拖动空白处旋转')}</span>
+                <span>${panelText('Alt/middle drag to pan', 'Alt/中键拖动平移')}</span>
+                <span>${panelText('Wheel to zoom', '滚轮缩放')}</span>
+                <span class="edit-hint edit-only">${panelText('Drag a body to edit its orbit', '拖动天体编辑轨道')}</span>
+            </div>
+            <div id="viewport-metrics" class="floating-card" aria-label="${panelText('View metrics', '视图参数')}"><span>${panelText('Tilt', '倾角')} <strong id="tilt-level">55°</strong></span></div>
+        </section>
+        <aside id="side-panel" aria-label="${panelText('Solar system inspector', '星系检视器')}">
+            <div id="inspector-resizer" role="separator" aria-orientation="vertical" aria-label="${panelText('Resize inspector', '调整检视器宽度')}" tabindex="0"></div>
+            <div id="inspector-header">
+                <div><span class="app-kicker">${panelText('INSPECTOR', '检视器')}</span><strong id="selection-title">${panelText('System overview', '星系概览')}</strong></div>
+                <button id="btn-close-inspector" class="icon-button" type="button" title="${panelText('Close inspector', '关闭检视器')}" aria-label="${panelText('Close inspector', '关闭检视器')}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>
+            </div>
+            <div id="side-panel-tabs" role="tablist" aria-label="${panelText('Inspector sections', '检视器分区')}">
+                <button id="tab-info" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="info-panel">${panelText('Overview', '概览')}</button>
+                <button id="tab-properties" class="tab" type="button" role="tab" aria-selected="false" aria-controls="properties-panel">${panelText('Properties', '属性')}</button>
+            </div>
+            <div id="info-panel" role="tabpanel" aria-labelledby="tab-info">
                 <div id="system-info">${panelText('Select a system to view details', '选择一个星系查看详情')}</div>
             </div>
-            <div id="properties-panel" class="hidden">
+            <div id="properties-panel" class="hidden" role="tabpanel" aria-labelledby="tab-properties">
                 <div id="props-content">${panelText('Select a body to edit properties', '选择一个天体以编辑属性')}</div>
             </div>
-        </div>
+        </aside>
     </div>
     <div id="tooltip" class="hidden"></div>
-    <div id="context-menu" class="hidden" style="max-height: 400px; overflow-y: auto; overflow-x: hidden;">
+    <div id="context-menu" class="hidden" role="menu" aria-label="${panelText('Add celestial body', '添加天体')}">
         <div id="ctx-planets">
             <div class="ctx-title">${panelText('Add body', '添加天体')}</div>
             <div class="ctx-content"></div>
         </div>
-        <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0" id="ctx-ring-sep"></div>
-        <div id="ctx-ringworld"><button data-action="add-ringworld"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="none" stroke="#ffd700" stroke-width="2"/></svg> ${panelText('Ringworld', '环形世界')}</button></div>
-        <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0;display:none" id="ctx-moon-sep"></div>
-        <div id="ctx-moons" style="display:none">
+        <div class="ctx-separator" id="ctx-ring-sep"></div>
+        <div id="ctx-ringworld"><button data-action="add-ringworld"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" stroke-width="2"/></svg> ${panelText('Ringworld', '环形世界')}</button></div>
+        <div class="ctx-separator" id="ctx-moon-sep" hidden></div>
+        <div id="ctx-moons" hidden>
             <div class="ctx-title" id="ctx-moon-title">${panelText('Add moon', '添加卫星')}</div>
             <div class="ctx-content"></div>
         </div>
-        <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0;display:none" id="ctx-sibling-sep"></div>
-        <div id="ctx-sibling" style="display:none">
+        <div class="ctx-separator" id="ctx-sibling-sep" hidden></div>
+        <div id="ctx-sibling" hidden>
             <div class="ctx-title" id="ctx-sibling-title">${panelText('Create on same orbit', '在同轨道创建')}</div>
             <div class="ctx-content"></div>
         </div>

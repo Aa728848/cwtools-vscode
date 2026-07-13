@@ -1,173 +1,324 @@
-/* Solar System Preview Webview Styles */
+/* Solar-system preview/editor chrome. The orbital scene keeps its own canvas palette;
+   all surrounding UI follows the active VS Code theme. */
 
 :root {
-    --bg-primary: #0a0e1a;
-    --bg-secondary: #111827;
-    --bg-panel: #1a1f2e;
-    --border-subtle: #2a3042;
-    --text-primary: #e0e4ec;
-    --text-secondary: #8891a5;
-    --text-muted: #5a6378;
-    --accent: #4a9eff;
-    --accent-dim: rgba(74, 158, 255, 0.12);
-    --star-yellow: #FFD800;
-    --star-orange: #FF9030;
-    --star-red: #FF4040;
-    --star-blue: #70B0FF;
-    --planet-green: #40C060;
-    --planet-blue: #3090D0;
-    --belt-color: rgba(160, 140, 100, 0.3);
-    --btn-hover: rgba(255, 255, 255, 0.08);
-    --selection: rgba(74, 158, 255, 0.25);
-    --danger: #ff4455;
+    color-scheme: light dark;
+    --bg-primary: var(--vscode-editor-background);
+    --bg-secondary: var(--vscode-titleBar-activeBackground, var(--vscode-editorGroupHeader-tabsBackground));
+    --bg-panel: var(--vscode-sideBar-background, var(--vscode-editorWidget-background));
+    --bg-elevated: var(--vscode-editorWidget-background, var(--vscode-dropdown-background));
+    --border-subtle: var(--vscode-widget-border, var(--vscode-panel-border));
+    --text-primary: var(--vscode-foreground);
+    --text-secondary: var(--vscode-descriptionForeground);
+    --text-muted: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+    --accent: var(--vscode-focusBorder);
+    --accent-bg: var(--vscode-list-activeSelectionBackground);
+    --accent-fg: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+    --hover-bg: var(--vscode-toolbar-hoverBackground);
+    --input-bg: var(--vscode-input-background);
+    --input-border: var(--vscode-input-border, var(--vscode-widget-border));
+    --input-fg: var(--vscode-input-foreground);
+    --button-bg: var(--vscode-button-background);
+    --button-fg: var(--vscode-button-foreground);
+    --button-hover: var(--vscode-button-hoverBackground);
+    --danger: var(--vscode-errorForeground);
+    --selection: var(--vscode-list-inactiveSelectionBackground);
+    --scene-star: color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
+    --shadow: var(--vscode-widget-shadow);
 }
 
 * {
-    margin: 0;
-    padding: 0;
     box-sizing: border-box;
 }
 
+html,
 body {
-    font-family: 'Segoe UI', 'SF Pro Display', -apple-system, sans-serif;
-    background: var(--bg-primary);
-    color: var(--text-primary);
+    height: 100%;
+    margin: 0;
     overflow: hidden;
-    height: 100vh;
-    width: 100vw;
 }
 
-/* ── Toolbar ─────────────────────────────────────────────────── */
+body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
+    font-size: var(--vscode-font-size, 13px);
+}
 
-#toolbar {
-    display: flex;
+button,
+select,
+input {
+    font: inherit;
+}
+
+button,
+select {
+    color: inherit;
+}
+
+button {
+    cursor: pointer;
+}
+
+button:disabled {
+    cursor: default;
+    opacity: 0.45;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+#viewport:focus-visible,
+#inspector-resizer:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+}
+
+svg {
+    fill: none;
+    height: 15px;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+    width: 15px;
+}
+
+.hidden,
+[hidden] {
+    display: none !important;
+}
+
+body:not(.is-edit-mode) .edit-only {
+    display: none !important;
+}
+
+/* ── Application header ─────────────────────────────────────── */
+
+#app-header {
     align-items: center;
-    justify-content: space-between;
-    padding: 6px 14px;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-subtle);
-    height: 40px;
+    display: grid;
     gap: 12px;
-    user-select: none;
+    grid-template-columns: minmax(170px, 1fr) minmax(190px, 260px) auto auto;
+    height: 52px;
+    padding: 7px 12px;
     position: relative;
+    user-select: none;
     z-index: 100;
 }
 
-#title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex-shrink: 1;
+.app-identity,
+.system-picker,
+#document-actions,
+.segmented-control,
+.toolbar-group,
+#view-toolbar,
+#viewport-metrics,
+#inspector-header {
+    align-items: center;
+    display: flex;
+}
+
+.app-identity {
+    align-items: flex-start;
+    flex-direction: column;
     min-width: 0;
 }
 
-#controls {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex-shrink: 0;
+.app-kicker {
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    line-height: 1.2;
 }
 
-#controls button {
-    background: transparent;
-    border: 1px solid var(--border-subtle);
+#title {
+    font-size: 12px;
+    font-weight: 600;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.system-picker {
+    gap: 7px;
+    min-width: 0;
+}
+
+.system-picker > span {
     color: var(--text-secondary);
-    min-width: 26px;
-    height: 24px;
-    padding: 0 8px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-    line-height: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.15s;
-}
-
-#controls button:hover {
-    background: var(--btn-hover);
-    color: var(--text-primary);
-    border-color: var(--accent);
-}
-
-#controls button.active {
-    background: var(--accent-dim);
-    color: var(--accent);
-    border-color: var(--accent);
-}
-
-#controls .separator {
-    color: var(--border-subtle);
-    margin: 0 2px;
-    font-size: 14px;
-}
-
-#btn-scale-mode,
-#btn-save {
-    min-width: 58px;
+    flex: 0 0 auto;
     font-size: 11px;
-}
-
-#edit-status {
-    min-width: 48px;
-    color: var(--text-muted);
-    font-size: 11px;
-    text-align: left;
-}
-
-#zoom-level, #tilt-level {
-    font-size: 11px;
-    color: var(--text-muted);
-    min-width: 30px;
-    text-align: center;
+    white-space: nowrap;
 }
 
 #system-select {
-    background: var(--bg-primary);
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 3px;
+    color: var(--input-fg);
+    flex: 1;
+    height: 30px;
+    min-width: 0;
+    padding: 3px 26px 3px 8px;
+    width: auto;
+}
+
+.segmented-control {
+    background: var(--input-bg);
     border: 1px solid var(--border-subtle);
+    border-radius: 5px;
+    padding: 2px;
+}
+
+.segmented-control button {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 3px;
+    color: var(--text-secondary);
+    display: inline-flex;
+    gap: 5px;
+    height: 26px;
+    padding: 0 9px;
+}
+
+.segmented-control button:hover {
+    background: var(--hover-bg);
     color: var(--text-primary);
-    padding: 3px 8px;
+}
+
+.segmented-control button.active {
+    background: var(--accent-bg);
+    color: var(--accent-fg);
+}
+
+#document-actions {
+    gap: 4px;
+    justify-content: flex-end;
+    min-width: 0;
+}
+
+.icon-button,
+.text-button,
+.toggle-button,
+.button-secondary,
+.button-primary {
+    align-items: center;
+    border: 1px solid transparent;
     border-radius: 4px;
-    font-size: 12px;
-    max-width: 200px;
-    cursor: pointer;
+    display: inline-flex;
+    gap: 6px;
+    height: 28px;
+    justify-content: center;
+    padding: 0 8px;
+    white-space: nowrap;
 }
 
-#system-select:focus {
-    outline: 1px solid var(--accent);
-    border-color: var(--accent);
+.icon-button,
+.text-button,
+.toggle-button,
+.button-secondary {
+    background: transparent;
+    color: var(--text-secondary);
 }
 
-/* ── Main Layout ─────────────────────────────────────────────── */
+.icon-button {
+    padding: 0;
+    width: 28px;
+}
+
+.icon-button:hover:not(:disabled),
+.text-button:hover:not(:disabled),
+.toggle-button:hover:not(:disabled),
+.button-secondary:hover:not(:disabled) {
+    background: var(--hover-bg);
+    border-color: var(--border-subtle);
+    color: var(--text-primary);
+}
+
+.button-primary {
+    background: var(--button-bg);
+    color: var(--button-fg);
+}
+
+.button-primary:hover:not(:disabled) {
+    background: var(--button-hover);
+}
+
+.danger-button:hover:not(:disabled) {
+    color: var(--danger);
+}
+
+.action-divider,
+.toolbar-divider {
+    align-self: center;
+    background: var(--border-subtle);
+    display: inline-block;
+    height: 18px;
+    margin: 0 3px;
+    width: 1px;
+}
+
+.status-pill {
+    align-items: center;
+    color: var(--text-muted);
+    display: inline-flex;
+    font-size: 11px;
+    gap: 5px;
+    margin: 0 4px;
+    min-width: 56px;
+    white-space: nowrap;
+}
+
+.status-pill::before {
+    background: currentColor;
+    border-radius: 50%;
+    content: "";
+    height: 6px;
+    width: 6px;
+}
+
+.status-pill[data-state="modified"] {
+    color: var(--vscode-gitDecoration-modifiedResourceForeground);
+}
+
+.status-pill[data-state="applying"] {
+    color: var(--vscode-progressBar-background);
+}
+
+.status-pill[data-state="error"] {
+    color: var(--danger);
+}
+
+/* ── Main scene ─────────────────────────────────────────────── */
 
 #main-layout {
     display: flex;
-    height: calc(100vh - 40px);
+    height: calc(100vh - 52px);
+    min-height: 0;
     overflow: hidden;
+    position: relative;
 }
 
 #viewport {
-    flex: 1;
-    position: relative;
-    overflow: hidden;
-    cursor: grab;
-    z-index: 1;
-    background: var(--bg-primary);
-    /* Starfield background */
+    background-color: var(--bg-primary);
     background-image:
-        radial-gradient(1px 1px at 10% 20%, rgba(255,255,255,0.15) 0%, transparent 100%),
-        radial-gradient(1px 1px at 30% 60%, rgba(255,255,255,0.1) 0%, transparent 100%),
-        radial-gradient(1px 1px at 50% 10%, rgba(255,255,255,0.12) 0%, transparent 100%),
-        radial-gradient(1px 1px at 70% 80%, rgba(255,255,255,0.08) 0%, transparent 100%),
-        radial-gradient(1px 1px at 90% 40%, rgba(255,255,255,0.1) 0%, transparent 100%),
-        radial-gradient(1px 1px at 15% 85%, rgba(255,255,255,0.07) 0%, transparent 100%),
-        radial-gradient(1px 1px at 45% 45%, rgba(255,255,255,0.09) 0%, transparent 100%),
-        radial-gradient(1px 1px at 65% 25%, rgba(255,255,255,0.06) 0%, transparent 100%),
-        radial-gradient(1px 1px at 85% 70%, rgba(255,255,255,0.11) 0%, transparent 100%);
+        radial-gradient(1px 1px at 10% 20%, var(--scene-star) 0%, transparent 100%),
+        radial-gradient(1px 1px at 30% 60%, var(--scene-star) 0%, transparent 100%),
+        radial-gradient(1px 1px at 50% 10%, var(--scene-star) 0%, transparent 100%),
+        radial-gradient(1px 1px at 70% 80%, var(--scene-star) 0%, transparent 100%),
+        radial-gradient(1px 1px at 90% 40%, var(--scene-star) 0%, transparent 100%),
+        radial-gradient(1px 1px at 15% 85%, var(--scene-star) 0%, transparent 100%);
+    cursor: grab;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    position: relative;
 }
 
 #viewport:active {
@@ -175,281 +326,401 @@ body {
 }
 
 #solar-canvas {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
     height: 100%;
+    inset: 0;
+    position: absolute;
+    width: 100%;
 }
 
-/* ── Side Panel ──────────────────────────────────────────────── */
+.floating-card {
+    backdrop-filter: blur(10px);
+    background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+    border: 1px solid var(--border-subtle);
+    border-radius: 7px;
+    box-shadow: 0 4px 18px var(--shadow);
+    position: absolute;
+    z-index: 20;
+}
+
+#view-toolbar {
+    gap: 3px;
+    left: 12px;
+    max-width: calc(100% - 24px);
+    overflow-x: auto;
+    padding: 5px;
+    top: 12px;
+}
+
+#view-toolbar button.active {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent-fg);
+}
+
+.zoom-group {
+    gap: 2px;
+}
+
+#zoom-level {
+    color: var(--text-secondary);
+    font-size: 11px;
+    min-width: 44px;
+    text-align: center;
+}
+
+#interaction-hint {
+    bottom: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    flex-wrap: wrap;
+    font-size: 11px;
+    gap: 6px 14px;
+    left: 12px;
+    max-width: calc(100% - 160px);
+    padding: 7px 10px;
+}
+
+#interaction-hint span:not(:last-child)::after {
+    color: var(--border-subtle);
+    content: "·";
+    margin-left: 14px;
+}
+
+#viewport-metrics {
+    bottom: 12px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    padding: 7px 10px;
+    right: 12px;
+}
+
+#viewport-metrics strong {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    margin-left: 4px;
+}
+
+/* ── Inspector ──────────────────────────────────────────────── */
 
 #side-panel {
-    width: 320px;
     background: var(--bg-panel);
     border-left: 1px solid var(--border-subtle);
     display: flex;
+    flex: 0 0 auto;
     flex-direction: column;
-    overflow: hidden;
-    transition: width 0.2s ease;
+    min-width: 290px;
+    overflow: visible;
     position: relative;
-    z-index: 10;
+    width: 360px;
+    z-index: 30;
 }
 
-#side-panel.hidden {
+body.inspector-collapsed #side-panel {
     display: none;
 }
 
-#side-panel-tabs {
-    display: flex;
+#inspector-resizer {
+    bottom: 0;
+    cursor: col-resize;
+    left: -4px;
+    position: absolute;
+    top: 0;
+    width: 8px;
+    z-index: 40;
+}
+
+#inspector-resizer:hover,
+#inspector-resizer:focus-visible {
+    background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+#inspector-header {
     border-bottom: 1px solid var(--border-subtle);
+    justify-content: space-between;
+    min-height: 52px;
+    padding: 8px 10px 8px 14px;
+}
+
+#inspector-header > div {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+#selection-title {
+    font-size: 13px;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#side-panel-tabs {
     background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
 }
 
 #side-panel-tabs .tab {
-    flex: 1;
-    padding: 8px 10px;
     background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.15s;
+    border: 0;
     border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    flex: 1;
+    height: 36px;
 }
 
 #side-panel-tabs .tab:hover {
-    color: var(--text-secondary);
-    background: var(--btn-hover);
+    background: var(--hover-bg);
+    color: var(--text-primary);
 }
 
 #side-panel-tabs .tab.active {
-    color: var(--accent);
     border-bottom-color: var(--accent);
+    color: var(--text-primary);
 }
 
-#info-panel, #properties-panel {
+#info-panel,
+#properties-panel {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 14px;
 }
 
-#info-panel.hidden, #properties-panel.hidden {
-    display: none;
-}
-
-#system-info, #props-content {
-    font-size: 12px;
-    line-height: 1.6;
+#system-info,
+#props-content {
     color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.55;
 }
 
-/* ── Property Editor ─────────────────────────────────────────── */
+/* ── Property editor ───────────────────────────────────────── */
+
+.mode-callout {
+    align-items: flex-start;
+    background: var(--vscode-textBlockQuote-background);
+    border-left: 2px solid var(--accent);
+    color: var(--text-secondary);
+    display: flex;
+    font-size: 11px;
+    gap: 7px;
+    margin-bottom: 14px;
+    padding: 8px 10px;
+}
 
 .prop-group {
-    margin-bottom: 14px;
+    margin-bottom: 18px;
 }
 
 .prop-group-title {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 6px;
-    padding-bottom: 4px;
     border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    margin-bottom: 7px;
+    padding-bottom: 5px;
+    text-transform: uppercase;
 }
 
 .prop-row {
-    display: flex;
     align-items: center;
+    display: flex;
+    gap: 10px;
     justify-content: space-between;
-    padding: 4px 0;
-    gap: 8px;
+    min-height: 32px;
 }
 
 .prop-label {
-    font-size: 11px;
     color: var(--text-secondary);
-    white-space: nowrap;
-    min-width: 80px;
+    flex: 0 0 94px;
+    font-size: 11px;
 }
 
 .prop-value {
-    font-size: 11px;
     color: var(--text-primary);
-    text-align: right;
     flex: 1;
+    font-size: 11px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-align: right;
+}
+
+.prop-input,
+.prop-select {
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 3px;
+    color: var(--input-fg);
+    min-height: 26px;
+    padding: 3px 7px;
 }
 
 .prop-input {
-    background: var(--bg-primary);
-    border: 1px solid var(--border-subtle);
-    color: var(--text-primary);
-    min-height: 24px;
-    padding: 3px 6px;
-    border-radius: 3px;
-    font-size: 11px;
-    width: 88px;
     text-align: right;
-}
-
-.prop-input:focus {
-    outline: none;
-    border-color: var(--accent);
+    width: 104px;
 }
 
 .prop-select {
-    background: var(--bg-primary);
-    border: 1px solid var(--border-subtle);
-    color: var(--text-primary);
-    min-height: 24px;
-    padding: 3px 4px;
-    border-radius: 3px;
-    font-size: 11px;
     flex: 1;
+    min-width: 0;
+}
+
+.prop-input:disabled,
+.prop-select:disabled {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-secondary);
+    opacity: 1;
 }
 
 .empty-state {
     color: var(--text-muted);
-    padding: 18px 0;
+    padding: 28px 10px;
     text-align: center;
 }
 
 .prop-badge {
+    background: var(--selection);
+    border-radius: 999px;
+    color: var(--text-primary);
     display: inline-block;
-    padding: 1px 6px;
-    border-radius: 3px;
     font-size: 10px;
-    font-weight: 500;
+    font-weight: 600;
+    padding: 2px 7px;
 }
 
-.prop-badge.star { background: rgba(255, 216, 0, 0.15); color: #FFD800; }
-.prop-badge.planet { background: rgba(74, 158, 255, 0.15); color: #4a9eff; }
-.prop-badge.moon { background: rgba(160, 160, 160, 0.15); color: #a0a0a0; }
-.prop-badge.home { background: rgba(64, 192, 96, 0.15); color: #40C060; }
+.prop-badge.star { color: var(--vscode-charts-yellow); }
+.prop-badge.planet { color: var(--vscode-charts-blue); }
+.prop-badge.moon { color: var(--text-secondary); }
+.prop-badge.home { color: var(--vscode-charts-green); }
 
-/* ── System info cards ───────────────────────────────────────── */
+/* ── Overview cards and hierarchy ───────────────────────────── */
 
 .sys-card {
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     border-radius: 6px;
-    padding: 10px;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
+    padding: 11px;
 }
 
 .sys-card-title {
-    font-size: 13px;
-    font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 6px;
+    font-size: 13px;
+    font-weight: 650;
+    margin-bottom: 7px;
 }
 
 .sys-card-row {
+    align-items: flex-start;
     display: flex;
-    justify-content: space-between;
     font-size: 11px;
+    gap: 12px;
+    justify-content: space-between;
     padding: 2px 0;
 }
 
 .sys-card-label {
     color: var(--text-muted);
+    flex: 0 0 auto;
 }
 
 .sys-card-value {
     color: var(--text-secondary);
+    overflow-wrap: anywhere;
+    text-align: right;
 }
-
-/* ── Body list in info panel ─────────────────────────────────── */
 
 .body-list-header {
     color: var(--text-muted);
-    font-size: 11px;
-    font-weight: 600;
-    margin: 14px 0 6px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    margin: 18px 0 7px;
+    text-transform: uppercase;
 }
 
 .body-list {
-    list-style: none;
-    margin-top: 8px;
     display: flex;
     flex-direction: column;
     gap: 3px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
 }
 
 .body-item {
-    display: flex;
     align-items: center;
-    position: relative;
-    min-height: 42px;
-    padding: 6px 8px;
     border: 1px solid transparent;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 11px;
-    gap: 6px;
-    transition: background 0.1s, border-color 0.1s;
+    display: flex;
+    gap: 7px;
+    min-height: 44px;
+    padding: 6px 8px;
+    position: relative;
 }
 
 .body-item:hover {
-    background: var(--btn-hover);
-    border-color: rgba(74, 158, 255, 0.2);
+    background: var(--hover-bg);
+    border-color: var(--border-subtle);
 }
 
 .body-item.selected {
     background: var(--selection);
-    border-color: rgba(74, 158, 255, 0.65);
+    border-color: var(--accent);
 }
 
-.body-item.selected::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 8px;
-    bottom: 8px;
-    width: 2px;
-    border-radius: 2px;
+.body-item.selected::before {
     background: var(--accent);
+    border-radius: 2px;
+    bottom: 7px;
+    content: "";
+    left: 0;
+    position: absolute;
+    top: 7px;
+    width: 2px;
 }
 
 .body-branch {
-    width: 12px;
-    flex-shrink: 0;
-    color: rgba(136, 145, 165, 0.5);
-    font-size: 12px;
+    color: var(--text-muted);
+    flex: 0 0 10px;
     text-align: center;
 }
 
 .body-dot {
-    width: 9px;
-    height: 9px;
+    background: var(--body-color);
     border-radius: 50%;
-    flex-shrink: 0;
-    box-shadow: 0 0 8px color-mix(in srgb, var(--body-color) 55%, transparent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--body-color) 50%, transparent);
+    flex: 0 0 9px;
+    height: 9px;
 }
 
 .body-main {
-    min-width: 0;
-    flex: 1;
     display: flex;
+    flex: 1;
     flex-direction: column;
-    gap: 1px;
+    min-width: 0;
 }
 
-.body-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--text-primary);
-    font-weight: 600;
-}
-
+.body-name,
 .body-meta {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.body-name {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.body-meta,
+.body-orbit {
     color: var(--text-muted);
     font-size: 10px;
 }
@@ -457,68 +728,56 @@ body {
 .body-side {
     align-items: flex-end;
     display: flex;
+    flex: 0 0 auto;
     flex-direction: column;
-    flex-shrink: 0;
     gap: 2px;
-    min-width: 42px;
 }
 
 .body-count {
-    background: rgba(74, 158, 255, 0.12);
-    border: 1px solid rgba(74, 158, 255, 0.3);
+    background: var(--selection);
     border-radius: 999px;
-    color: var(--accent);
-    font-size: 10px;
-    line-height: 1;
-    min-width: 18px;
-    padding: 2px 5px;
-    text-align: center;
+    color: var(--text-primary);
+    font-size: 9px;
+    padding: 1px 5px;
 }
 
-.body-orbit {
-    color: var(--text-muted);
-    font-size: 10px;
-    white-space: nowrap;
+.body-indent-1 { padding-left: 21px; }
+.body-indent-2 { padding-left: 39px; }
+.body-indent-3 { padding-left: 57px; }
+.body-indent-4 { padding-left: 75px; }
+
+/* ── Floating menus and tooltips ────────────────────────────── */
+
+#tooltip,
+#context-menu {
+    backdrop-filter: blur(12px);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    box-shadow: 0 8px 28px var(--shadow);
+    position: fixed;
 }
-
-.body-indent-1 { padding-left: 20px; }
-.body-indent-2 { padding-left: 38px; }
-.body-indent-3 { padding-left: 56px; }
-.body-indent-4 { padding-left: 74px; }
-
-/* ── Tooltip ─────────────────────────────────────────────────── */
 
 #tooltip {
-    position: fixed;
-    background: rgba(20, 24, 38, 0.95);
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
-    padding: 8px 12px;
-    font-size: 11px;
+    border-radius: 7px;
     color: var(--text-primary);
-    max-width: 260px;
-    z-index: 1000;
+    font-size: 11px;
+    max-width: 280px;
+    padding: 9px 11px;
     pointer-events: none;
-    backdrop-filter: blur(8px);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-}
-
-#tooltip.hidden {
-    display: none;
+    z-index: 1000;
 }
 
 #tooltip .tip-type {
     font-size: 10px;
     font-weight: 700;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 2px;
 }
 
 #tooltip .tip-name {
     font-size: 13px;
-    font-weight: 600;
-    margin-bottom: 4px;
+    font-weight: 650;
+    margin: 2px 0 5px;
 }
 
 #tooltip table {
@@ -528,94 +787,149 @@ body {
 
 #tooltip td {
     padding: 1px 4px;
-    font-size: 11px;
 }
 
-#tooltip td:first-child {
+#tooltip td:first-child,
+#tooltip .tip-line {
     color: var(--text-muted);
-    white-space: nowrap;
 }
 
 #tooltip .tip-line {
-    margin-top: 4px;
     font-size: 10px;
-    color: var(--text-muted);
+    margin-top: 5px;
 }
-
-/* ── Scrollbar ───────────────────────────────────────────────── */
-
-::-webkit-scrollbar {
-    width: 6px;
-}
-
-::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-    background: var(--border-subtle);
-    border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: var(--text-muted);
-}
-
-/* ── Context Menu ────────────────────────────────────────────── */
 
 #context-menu {
-    position: fixed;
-    background: rgba(20, 24, 38, 0.96);
-    border: 1px solid var(--border-subtle);
     border-radius: 8px;
-    padding: 4px;
-    min-width: 180px;
-    max-height: 80vh;
+    max-height: min(520px, 80vh);
+    min-width: 250px;
+    overflow-x: hidden;
     overflow-y: auto;
+    padding: 5px;
     z-index: 2000;
-    backdrop-filter: blur(12px);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-}
-
-#context-menu.hidden {
-    display: none;
 }
 
 #context-menu .ctx-title {
-    padding: 6px 12px 4px;
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
     border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
     margin-bottom: 2px;
-    grid-column: 1 / -1;
+    padding: 7px 10px 5px;
+    text-transform: uppercase;
 }
 
-/* Layout for button groups */
-#ctx-planets, #ctx-moons, #ctx-sibling {
-    display: block;
+.ctx-separator {
+    border-top: 1px solid var(--border-subtle);
+    margin: 4px 0;
 }
 
 #context-menu button {
-    display: block;
-    width: 100%;
-    text-align: left;
     background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    padding: 5px 10px;
-    font-size: 11px;
-    cursor: pointer;
+    border: 0;
     border-radius: 4px;
-    transition: all 0.1s;
-    white-space: nowrap;
+    color: var(--text-secondary);
+    display: block;
     overflow: hidden;
+    padding: 6px 9px;
+    text-align: left;
     text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
 }
 
 #context-menu button:hover {
-    background: var(--accent-dim);
+    background: var(--hover-bg);
     color: var(--text-primary);
 }
+
+::-webkit-scrollbar {
+    height: 7px;
+    width: 7px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-background);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+@media (max-width: 1120px) {
+    #app-header {
+        grid-template-columns: minmax(170px, 1fr) auto auto;
+    }
+
+    .app-identity {
+        display: none;
+    }
+
+    #side-panel {
+        width: 330px;
+    }
+}
+
+@media (max-width: 820px) {
+    #app-header {
+        gap: 7px;
+        grid-template-columns: minmax(140px, 1fr) auto auto;
+        padding-inline: 8px;
+    }
+
+    .system-picker > span,
+    #document-actions .button-secondary span,
+    #btn-add-body span,
+    .status-pill {
+        display: none;
+    }
+
+    #side-panel {
+        bottom: 0;
+        box-shadow: -8px 0 24px var(--shadow);
+        max-width: 92vw;
+        position: absolute;
+        right: 0;
+        top: 0;
+        width: 350px;
+    }
+
+    #inspector-resizer {
+        display: none;
+    }
+
+    #view-toolbar {
+        right: 10px;
+    }
+
+    #interaction-hint {
+        display: none;
+    }
+}
+
+@media (max-width: 610px) {
+    #app-header {
+        grid-template-columns: minmax(110px, 1fr) auto;
+    }
+
+    #mode-switch span,
+    #btn-toggle-inspector {
+        display: none !important;
+    }
+
+    #mode-switch button {
+        padding-inline: 7px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+    flex: 1;

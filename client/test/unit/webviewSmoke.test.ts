@@ -200,6 +200,37 @@ describe('webview smoke checks', () => {
         expect(css).to.include('#search-bar.hidden { display: none; }');
     });
 
+    it('solar-system preview exposes the redesigned editor shell and bounded rendering', () => {
+        const host = fs.readFileSync(path.join(root, 'client/extension/solarSystemPanel.ts'), 'utf8');
+        const script = fs.readFileSync(path.join(root, 'client/webview/solarSystemPreview.ts'), 'utf8');
+        const css = fs.readFileSync(path.join(root, 'client/webview/solarSystemPreview.css'), 'utf8');
+
+        for (const control of [
+            'id="btn-preview"',
+            'id="btn-edit"',
+            'id="btn-add-body"',
+            'id="btn-delete-body"',
+            'id="btn-fit-all"',
+            'id="btn-focus"',
+            'id="inspector-resizer"',
+        ]) {
+            expect(host).to.include(control);
+        }
+        expect(host).to.include("command: 'documentState'");
+        expect(host).to.include("iconNames.add(`${icon}_big`)");
+        expect(script).to.include('function scheduleRender(): void');
+        expect(script).not.to.include('requestAnimationFrame(render);');
+        expect(script).to.include('function collectBodyFitBounds(');
+        expect(script).to.include('addOrbitEnvelope(bounds, 0, 0, outerRadius);');
+        expect(script).not.to.include('parentRadius + orbitToRenderRadius(body.resolvedOrbitRadius)');
+        expect(script).to.include('function resolveBodyIcon');
+        expect(script).to.include('const severeUpscale =');
+        expect(script).to.include("setWorkspaceMode('preview')");
+        expect(css).to.include('var(--vscode-editor-background)');
+        expect(css).to.include('@media (prefers-reduced-motion: reduce)');
+        expect(css).to.include('body:not(.is-edit-mode) .edit-only');
+    });
+
     it('agent manager shell wiring exists', () => {
         const managerHtml = fs.readFileSync(path.join(root, 'client/extension/ai/agentManagerHtml.ts'), 'utf8');
         const managerCss = fs.readFileSync(path.join(root, 'client/webview/agentManager.css'), 'utf8');

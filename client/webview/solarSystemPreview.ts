@@ -11,6 +11,18 @@ function tr(en: string, zh: string): string {
     return isZh ? zh : en;
 }
 
+type WorkspaceMode = 'preview' | 'edit';
+
+interface PersistedViewState {
+    showLabels?: boolean;
+    showOrbits?: boolean;
+    scaleMode?: 'readable' | 'true';
+    inspectorCollapsed?: boolean;
+    inspectorWidth?: number;
+}
+
+const persistedViewState = (vscode.getState() as PersistedViewState | undefined) ?? {};
+
 // ─── Types (mirrors parser output) ──────────────────────────────────────────
 
 interface ValueOrRange {
@@ -203,10 +215,10 @@ let lastMX = 0, lastMY = 0;
 let canvasW = 0, canvasH = 0;
 
 // Display toggles
-let showLabels = true;
-let showOrbits = true;
+let showLabels = persistedViewState.showLabels ?? true;
+let showOrbits = persistedViewState.showOrbits ?? true;
 let editMode = false;
-let scaleMode: 'readable' | 'true' = 'readable';
+let scaleMode: 'readable' | 'true' = persistedViewState.scaleMode ?? 'readable';
 const BODY_DISPLAY_SIZE_SCALE = 0.6;
 const STAR_DISPLAY_SIZE_MULTIPLIER = 1.00;
 // Stellaris hard limit: no body may exist beyond this orbit distance from the system center
@@ -221,14 +233,31 @@ interface CelestialClass {
     icon: string;
     iconLarge?: string;
 }
+
+interface PlanetIconResource {
+    uri: string;
+    frame?: number;
+    noOfFrames?: number;
+}
 let allSystems: SolarSystem[] = [];
 let currentSystemIndex = 0;
 let selectedBody: CelestialBody | null = null;
 let hoveredBody: CelestialBody | null = null;
 let dynamicClasses: CelestialClass[] = [];
 let portraits: Record<string, string[]> = {};
-let planetIcons: Record<string, { uri: string, frame?: number, noOfFrames?: number }> = {};
+let planetIcons: Record<string, PlanetIconResource> = {};
 let locDict: Record<string, string> = {};
+
+function persistViewState(): void {
+    const sidePanel = document.getElementById('side-panel');
+    vscode.setState({
+        showLabels,
+        showOrbits,
+        scaleMode,
+        inspectorCollapsed: document.body.classList.contains('inspector-collapsed'),
+        inspectorWidth: sidePanel?.getBoundingClientRect().width,
+    } satisfies PersistedViewState);
+}
 
 function getLoc(key: string | undefined, fallback: string = ''): string {
     if (!key) return fallback;
@@ -292,9 +321,82 @@ function findParentBody(bodies: CelestialBody[], child: CelestialBody): Celestia
     return null;
 }
 
-function setEditStatus(text: string) {
+type DocumentState = 'applying' | 'modified' | 'saved' | 'error';
+
+let renderQueued = false;
+
+function scheduleRender(): void {
+    if (renderQueued) return;
+    renderQueued = true;
+    requestAnimationFrame(() => {
+        renderQueued = false;
+        render();
+    });
+}
+
+function setEditStatus(text: string, state: DocumentState = 'applying') {
     const el = document.getElementById('edit-status');
-    if (el) el.textContent = text;
+    if (!el) return;
+    el.textContent = text;
+    el.dataset.state = state;
+}
+
+function applyDocumentState(state: DocumentState, dirty = false, message?: string): void {
+    const labels: Record<DocumentState, string> = {
+        applying: tr('Applying...', '正在应用...'),
+        modified: tr('Modified', '未保存'),
+        saved: tr('Saved', '已保存'),
+        error: tr('Update failed', '更新失败'),
+    };
+    const normalizedState: DocumentState = dirty && state === 'saved' ? 'modified' : state;
+    setEditStatus(labels[normalizedState], normalizedState);
+    const status = document.getElementById('edit-status');
+    if (status) status.title = message || labels[normalizedState];
+}
+
+function updateCommandState(): void {
+    const hasSystem = !!allSystems[currentSystemIndex];
+    const canDelete = editMode && !!selectedBody && selectedBody.bodyType !== 'star';
+    const addButton = document.getElementById('btn-add-body') as HTMLButtonElement | null;
+    const deleteButton = document.getElementById('btn-delete-body') as HTMLButtonElement | null;
+    const focusButton = document.getElementById('btn-focus') as HTMLButtonElement | null;
+    if (addButton) addButton.disabled = !editMode || !hasSystem;
+    if (deleteButton) deleteButton.disabled = !canDelete;
+    if (focusButton) focusButton.disabled = !selectedBody;
+
+    const selectionTitle = document.getElementById('selection-title');
+    if (selectionTitle) {
+        selectionTitle.textContent = selectedBody
+            ? getBodyTitle(selectedBody)
+            : tr('System overview', '星系概览');
+    }
+}
+
+function setWorkspaceMode(mode: WorkspaceMode): void {
+    editMode = mode === 'edit';
+    document.body.classList.toggle('is-edit-mode', editMode);
+    const previewButton = document.getElementById('btn-preview');
+    const editButton = document.getElementById('btn-edit');
+    previewButton?.classList.toggle('active', !editMode);
+    editButton?.classList.toggle('active', editMode);
+    previewButton?.setAttribute('aria-pressed', String(!editMode));
+    editButton?.setAttribute('aria-pressed', String(editMode));
+
+    const canvas = document.getElementById('solar-canvas') as HTMLCanvasElement | null;
+    if (canvas) canvas.style.cursor = editMode ? 'crosshair' : 'grab';
+    updatePropertiesPanel();
+    updateCommandState();
+    scheduleRender();
+}
+
+function setInspectorCollapsed(collapsed: boolean): void {
+    document.body.classList.toggle('inspector-collapsed', collapsed);
+    const toggle = document.getElementById('btn-toggle-inspector');
+    toggle?.setAttribute('aria-pressed', String(!collapsed));
+    requestAnimationFrame(() => {
+        resizeCanvas();
+        persistViewState();
+    });
 }
 
 // Drag editing
@@ -323,8 +425,8 @@ let starPulse = 0;
 
 // ─── 3D Projection ─────────────────────────────────────────────────────────
 
-/** Convert 3D world coordinates to 2D screen coordinates with perspective */
-function project(worldX: number, worldY: number, worldZ: number): { x: number; y: number; scale: number } {
+/** Project a world point into view space before canvas scale and pan are applied. */
+function projectToView(worldX: number, worldY: number, worldZ: number): { x: number; y: number; scale: number } {
     // Apply view rotation: rotate around Z axis (horizontal orbit)
     const rotRad = (viewRotation * Math.PI) / 180;
     const cosR = Math.cos(rotRad);
@@ -343,10 +445,16 @@ function project(worldX: number, worldY: number, worldZ: number): { x: number; y
     const perspectiveDistance = 1200;
     const perspectiveScale = perspectiveDistance / (perspectiveDistance + rz);
 
-    const screenX = canvasW / 2 + (rx * perspectiveScale + panX) * scale;
-    const screenY = canvasH / 2 + (projY * perspectiveScale + panY) * scale;
+    return { x: rx * perspectiveScale, y: projY * perspectiveScale, scale: perspectiveScale };
+}
 
-    return { x: screenX, y: screenY, scale: perspectiveScale * scale };
+/** Convert 3D world coordinates to 2D screen coordinates with perspective */
+function project(worldX: number, worldY: number, worldZ: number): { x: number; y: number; scale: number } {
+    const view = projectToView(worldX, worldY, worldZ);
+    const screenX = canvasW / 2 + (view.x + panX) * scale;
+    const screenY = canvasH / 2 + (view.y + panY) * scale;
+
+    return { x: screenX, y: screenY, scale: view.scale * scale };
 }
 
 /** Convert orbital coordinates to world XY (orbit plane is XY, Z=0) */
@@ -407,6 +515,7 @@ function resizeCanvas() {
     canvas.style.height = `${rect.height}px`;
     canvasW = rect.width;
     canvasH = rect.height;
+    scheduleRender();
 }
 
 function render() {
@@ -456,7 +565,6 @@ function render() {
         }
     }
 
-    requestAnimationFrame(render);
 }
 
 // ─── Asteroid Belt Rendering ────────────────────────────────────────────────
@@ -716,6 +824,98 @@ function drawRingWorld(
     }
 }
 
+function iconNameCandidates(planetClass: string): string[] {
+    const dynamic = dynamicClasses.find(c => c.name === planetClass);
+    const names: Array<string | undefined> = [];
+    const addLargeVariants = (icon: string | undefined) => {
+        if (!icon) return;
+        if (/_small$/i.test(icon)) {
+            names.push(icon.replace(/_small$/i, '_big'), icon.replace(/_small$/i, '_large'));
+        }
+        if (!/(?:_big|_large)$/i.test(icon)) names.push(`${icon}_big`, `${icon}_large`);
+    };
+
+    names.push(dynamic?.iconLarge);
+    addLargeVariants(dynamic?.iconLarge);
+    addLargeVariants(dynamic?.icon);
+
+    const classSuffix = planetClass.replace(/^pc_/i, '');
+    const conventional = `GFX_planet_type_${classSuffix}`;
+    names.push(`${conventional}_big`, `${conventional}_large`);
+    names.push(dynamic?.icon, conventional);
+
+    if (planetClass === 'ideal_planet_class') {
+        names.unshift('GFX_planet_type_gaia_big', 'GFX_planet_type_gaia_large', 'GFX_planet_type_gaia');
+    }
+
+    return [...new Set(names.filter((name): name is string => !!name))];
+}
+
+function resolveBodyIcon(planetClass: string): PlanetIconResource | undefined {
+    for (const iconName of iconNameCandidates(planetClass)) {
+        const icon = planetIcons[iconName];
+        if (icon) return icon;
+    }
+    return undefined;
+}
+
+function drawBodyIcon(
+    ctx: CanvasRenderingContext2D,
+    img: HTMLImageElement,
+    iconInfo: PlanetIconResource,
+    x: number,
+    y: number,
+    drawSize: number,
+    color: string,
+): void {
+    const frameCount = Math.max(1, iconInfo.noOfFrames ?? 1);
+    const frame = Math.max(1, iconInfo.frame ?? 1);
+    const sourceWidth = img.naturalWidth / frameCount;
+    const sourceHeight = img.naturalHeight;
+    const sourceX = (frame - 1) * sourceWidth;
+    const dpr = window.devicePixelRatio || 1;
+    const severeUpscale = Math.min(sourceWidth, sourceHeight) < drawSize * dpr * 0.72;
+    const dx = Math.round((x - drawSize / 2) * dpr) / dpr;
+    const dy = Math.round((y - drawSize / 2) * dpr) / dpr;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, drawSize / 2, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.imageSmoothingEnabled = !severeUpscale;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, sourceX, 0, sourceWidth, sourceHeight, dx, dy, drawSize, drawSize);
+
+    if (severeUpscale) {
+        // Small Stellaris UI sprites cannot gain real detail when enlarged. Nearest-neighbour
+        // sampling keeps their edges crisp; a restrained light pass makes the pixel texture
+        // read as an intentional planet surface rather than a blurred thumbnail.
+        const surface = ctx.createRadialGradient(
+            x - drawSize * 0.18,
+            y - drawSize * 0.2,
+            0,
+            x,
+            y,
+            drawSize * 0.58,
+        );
+        surface.addColorStop(0, 'rgba(255,255,255,0.18)');
+        surface.addColorStop(0.55, 'rgba(255,255,255,0)');
+        surface.addColorStop(1, 'rgba(0,0,0,0.2)');
+        ctx.fillStyle = surface;
+        ctx.fillRect(dx, dy, drawSize, drawSize);
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = lightenColor(color, 34);
+    ctx.globalAlpha = 0.58;
+    ctx.lineWidth = 0.75;
+    ctx.beginPath();
+    ctx.arc(x, y, drawSize / 2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+}
+
 function drawBody(
     ctx: CanvasRenderingContext2D,
     body: CelestialBody,
@@ -869,37 +1069,16 @@ function drawBody(
         ctx.arc(p.x, p.y, screenRadius, 0, Math.PI * 2);
         ctx.stroke();
     } else {
-        const dynamic = dynamicClasses.find(c => c.name === body.planetClass);
-        let iconName = dynamic?.iconLarge;
-        if (!iconName || !planetIcons[iconName]) {
-            iconName = dynamic?.icon;
-        }
-        if (body.planetClass === 'ideal_planet_class') {
-            iconName = planetIcons['GFX_planet_type_gaia_big'] ? 'GFX_planet_type_gaia_big' : 'GFX_planet_type_gaia';
-        }
-        const iconInfo = iconName ? planetIcons[iconName] : undefined;
+        const iconInfo = resolveBodyIcon(body.planetClass);
 
         if (iconInfo && iconInfo.uri) {
             const img = getCachedIcon(iconInfo.uri);
             if (img.complete && img.naturalWidth > 0) {
-                // Scale the icon to exactly match the hit circle with a slight padding
                 const drawSize = screenRadius * 2;
-                
-                // Keep image smoothing enabled for these soft UI icons, but ensure high quality
-                ctx.imageSmoothingEnabled = true;
-                ctx.imageSmoothingQuality = "high";
-                
-                if (iconInfo.noOfFrames && iconInfo.frame) {
-                    const fw = img.naturalWidth / iconInfo.noOfFrames;
-                    const fh = img.naturalHeight;
-                    const sx = (iconInfo.frame - 1) * fw;
-                    ctx.drawImage(img, sx, 0, fw, fh, p.x - drawSize / 2, p.y - drawSize / 2, drawSize, drawSize);
-                } else {
-                    ctx.drawImage(img, p.x - drawSize / 2, p.y - drawSize / 2, drawSize, drawSize);
-                }
+                drawBodyIcon(ctx, img, iconInfo, p.x, p.y, drawSize, color);
             } else {
                 if (!img.onload) {
-                    img.onload = () => requestAnimationFrame(render);
+                    img.onload = scheduleRender;
                 }
                 // Fallback while loading
                 ctx.fillStyle = color;
@@ -1050,11 +1229,20 @@ function setupControls() {
         const id = target.id;
 
         switch (id) {
+            case 'btn-preview':
+                setWorkspaceMode('preview');
+                break;
+            case 'btn-edit':
+                setWorkspaceMode('edit');
+                setInspectorCollapsed(false);
+                break;
             case 'btn-scale-mode':
                 scaleMode = scaleMode === 'readable' ? 'true' : 'readable';
                 target.textContent = scaleMode === 'readable' ? tr('Readable scale', '可读比例') : tr('True scale', '真实比例');
                 target.classList.toggle('active', scaleMode === 'readable');
-                fitToView();
+                target.setAttribute('aria-pressed', String(scaleMode === 'readable'));
+                persistViewState();
+                fitToView(false);
                 break;
             case 'btn-zoom-in':
                 scale = Math.min(8, scale + 0.2);
@@ -1065,55 +1253,95 @@ function setupControls() {
                 updateZoomDisplay();
                 break;
             case 'btn-fit':
-                fitToView();
+                fitToView(false);
+                break;
+            case 'btn-fit-all':
+                fitToView(true);
+                break;
+            case 'btn-focus':
+                if (selectedBody) centerBodyInView(selectedBody, true);
                 break;
             case 'btn-reset':
                 scale = 1.2; viewRotation = 0; tiltAngle = 55; panX = 0; panY = 0;
                 updateZoomDisplay(); updateTiltDisplay();
                 break;
-            case 'btn-edit': {
-                editMode = !editMode;
-                target.classList.toggle('active', editMode);
-                const sp = document.getElementById('side-panel');
-                if (sp && editMode) sp.classList.remove('hidden');
-                canvas.style.cursor = editMode ? 'crosshair' : 'grab';
-                updatePropertiesPanel();
-                break;
-            }
             case 'btn-labels':
                 showLabels = !showLabels;
                 target.classList.toggle('active', showLabels);
+                target.setAttribute('aria-pressed', String(showLabels));
+                persistViewState();
+                scheduleRender();
                 break;
             case 'btn-orbits':
                 showOrbits = !showOrbits;
                 target.classList.toggle('active', showOrbits);
+                target.setAttribute('aria-pressed', String(showOrbits));
+                persistViewState();
+                scheduleRender();
                 break;
             case 'btn-undo':
+                applyDocumentState('applying');
                 vscode.postMessage({ command: 'vscodeUndo' });
-                setEditStatus(tr('Undone', '已撤销'));
                 break;
             case 'btn-redo':
+                applyDocumentState('applying');
                 vscode.postMessage({ command: 'vscodeRedo' });
-                setEditStatus(tr('Redone', '已重做'));
                 break;
             case 'btn-save':
+                applyDocumentState('applying');
                 vscode.postMessage({ command: 'saveDocument' });
-                setEditStatus(tr('Saved', '已保存'));
+                break;
+            case 'btn-delete-body':
+                deleteSelectedBody();
+                break;
+            case 'btn-add-body': {
+                const rect = target.getBoundingClientRect();
+                const canvasRect = canvas.getBoundingClientRect();
+                const defaultOrbitPoint = project(orbitToRenderRadius(30), 0, 0);
+                prepareContextMenu(selectedBody);
+                showCtxMenuAt(
+                    rect.left,
+                    rect.bottom + 6,
+                    canvasRect.left + defaultOrbitPoint.x,
+                    canvasRect.top + defaultOrbitPoint.y,
+                );
+                break;
+            }
+            case 'btn-toggle-inspector':
+                setInspectorCollapsed(!document.body.classList.contains('inspector-collapsed'));
+                break;
+            case 'btn-close-inspector':
+                setInspectorCollapsed(true);
                 break;
             case 'tab-info':
                 target.classList.add('active');
+                target.setAttribute('aria-selected', 'true');
                 document.getElementById('tab-properties')?.classList.remove('active');
+                document.getElementById('tab-properties')?.setAttribute('aria-selected', 'false');
                 document.getElementById('info-panel')?.classList.remove('hidden');
                 document.getElementById('properties-panel')?.classList.add('hidden');
                 break;
             case 'tab-properties':
                 target.classList.add('active');
+                target.setAttribute('aria-selected', 'true');
                 document.getElementById('tab-info')?.classList.remove('active');
+                document.getElementById('tab-info')?.setAttribute('aria-selected', 'false');
                 document.getElementById('properties-panel')?.classList.remove('hidden');
                 document.getElementById('info-panel')?.classList.add('hidden');
                 break;
         }
     });
+
+    function deleteSelectedBody(): void {
+        if (!editMode || !selectedBody || selectedBody.bodyType === 'star') return;
+        applyDocumentState('applying');
+        vscode.postMessage({ command: 'deletePlanet', line: selectedBody.line });
+        selectedBody = null;
+        updateInfoPanel();
+        updatePropertiesPanel();
+        updateCommandState();
+        scheduleRender();
+    }
 
     // ── System selector ────────────────────────────────────────────────────
     document.getElementById('system-select')?.addEventListener('change', (e: Event) => {
@@ -1121,25 +1349,25 @@ function setupControls() {
         selectedBody = null;
         updateInfoPanel();
         updatePropertiesPanel();
-        setEditStatus(tr('Synced', '已同步'));
-        fitToView();
+        updateCommandState();
+        fitToView(false);
     });
 
     // ── Context menu (right-click → add planet in edit mode) ──────────────
     const ctxMenu = document.getElementById('context-menu');
     let ctxClickX = 0, ctxClickY = 0;
 
-    function showCtxMenu(e: MouseEvent) {
+    function showCtxMenuAt(menuX: number, menuY: number, sceneX = menuX, sceneY = menuY) {
         if (!ctxMenu) return;
-        ctxClickX = e.clientX;
-        ctxClickY = e.clientY;
+        ctxClickX = sceneX;
+        ctxClickY = sceneY;
         ctxMenu.classList.remove('hidden');
-        ctxMenu.style.left = `${e.clientX}px`;
-        ctxMenu.style.top = `${e.clientY}px`;
+        ctxMenu.style.left = `${menuX}px`;
+        ctxMenu.style.top = `${menuY}px`;
         requestAnimationFrame(() => {
             const r = ctxMenu.getBoundingClientRect();
-            if (r.right > window.innerWidth) ctxMenu.style.left = `${e.clientX - r.width}px`;
-            if (r.bottom > window.innerHeight) ctxMenu.style.top = `${e.clientY - r.height}px`;
+            if (r.right > window.innerWidth) ctxMenu.style.left = `${Math.max(6, window.innerWidth - r.width - 6)}px`;
+            if (r.bottom > window.innerHeight) ctxMenu.style.top = `${Math.max(6, window.innerHeight - r.height - 6)}px`;
         });
     }
 
@@ -1149,16 +1377,10 @@ function setupControls() {
 
     let ctxTargetBody: CelestialBody | null = null;
 
-    canvas.addEventListener('contextmenu', (e: MouseEvent) => {
-        e.preventDefault();
-        if (!editMode) return;
-
+    function prepareContextMenu(targetBody: CelestialBody | null): boolean {
         const system = allSystems[currentSystemIndex];
-        if (!system) return;
-
-        // Hit detect: did user right-click on a body?
-        const hit = hitTest(e.clientX, e.clientY);
-        ctxTargetBody = hit?.body ?? null;
+        if (!system || !editMode) return false;
+        ctxTargetBody = targetBody;
 
         const planetsDiv = document.getElementById('ctx-planets');
         const moonsDiv = document.getElementById('ctx-moons');
@@ -1170,50 +1392,43 @@ function setupControls() {
         const siblingSep = document.getElementById('ctx-sibling-sep');
         const siblingTitle = document.getElementById('ctx-sibling-title');
 
-        // Hide all sections first
-        if (planetsDiv) planetsDiv.style.display = 'none';
-        if (moonsDiv) moonsDiv.style.display = 'none';
-        if (moonSep) moonSep.style.display = 'none';
-        if (ringDiv) ringDiv.style.display = 'none';
-        if (ringSep) ringSep.style.display = 'none';
-        if (siblingDiv) siblingDiv.style.display = 'none';
-        if (siblingSep) siblingSep.style.display = 'none';
-
-        // Check if target is a ring world segment
-        const isRingBody = ctxTargetBody?.planetClass?.includes('ringworld') ?? false;
-
-        // System-level ring world check
-        const hasRing = system.bodies.some(b => b.planetClass?.includes('ringworld'));
-
-        if (!ctxTargetBody || ctxTargetBody.bodyType === 'star') {
-            // Empty space or star: show planets + ring world (all system level)
-            if (planetsDiv) planetsDiv.style.display = '';
-            if (!hasRing) {
-                if (ringSep) ringSep.style.display = '';
-                if (ringDiv) ringDiv.style.display = '';
-            }
-        } else if ((ctxTargetBody.bodyType === 'planet' || ctxTargetBody.bodyType === 'moon') && !isRingBody) {
-            // Planet or moon (NOT ring world): show add-moon options + ring world (as moon)
-            if (moonsDiv) moonsDiv.style.display = '';
-            if (moonSep) moonSep.style.display = '';
-            if (moonTitle) {
-                moonTitle.textContent = tr(`Add moon -> ${ctxTargetBody.name || ctxTargetBody.planetClass}`, `添加卫星 → ${ctxTargetBody.name || ctxTargetBody.planetClass}`);
-            }
-            // Ring world as moon
-            const bodyHasRing = ctxTargetBody.moons.some(m => m.planetClass?.includes('ringworld'));
-            if (!bodyHasRing) {
-                if (ringSep) ringSep.style.display = '';
-                if (ringDiv) ringDiv.style.display = '';
-            }
-            // Same-orbit sibling creation (not for ring worlds)
-            if (siblingSep) siblingSep.style.display = '';
-            if (siblingDiv) siblingDiv.style.display = '';
-            if (siblingTitle) {
-                siblingTitle.textContent = tr(`Create on same orbit (${ctxTargetBody.name || ctxTargetBody.planetClass})`, `在同轨道创建 (${ctxTargetBody.name || ctxTargetBody.planetClass})`);
-            }
+        for (const el of [planetsDiv, moonsDiv, moonSep, ringDiv, ringSep, siblingDiv, siblingSep]) {
+            if (el) el.hidden = true;
         }
 
-        showCtxMenu(e);
+        const isRingBody = targetBody?.planetClass?.includes('ringworld') ?? false;
+        const hasRing = system.bodies.some(b => b.planetClass?.includes('ringworld'));
+        if (!targetBody || targetBody.bodyType === 'star') {
+            if (planetsDiv) planetsDiv.hidden = false;
+            if (!hasRing) {
+                if (ringSep) ringSep.hidden = false;
+                if (ringDiv) ringDiv.hidden = false;
+            }
+        } else if ((targetBody.bodyType === 'planet' || targetBody.bodyType === 'moon') && !isRingBody) {
+            if (moonsDiv) moonsDiv.hidden = false;
+            if (moonSep) moonSep.hidden = false;
+            if (moonTitle) {
+                moonTitle.textContent = tr(`Add moon -> ${targetBody.name || targetBody.planetClass}`, `添加卫星 → ${targetBody.name || targetBody.planetClass}`);
+            }
+            const bodyHasRing = targetBody.moons.some(m => m.planetClass?.includes('ringworld'));
+            if (!bodyHasRing) {
+                if (ringSep) ringSep.hidden = false;
+                if (ringDiv) ringDiv.hidden = false;
+            }
+            if (siblingSep) siblingSep.hidden = false;
+            if (siblingDiv) siblingDiv.hidden = false;
+            if (siblingTitle) {
+                siblingTitle.textContent = tr(`Create on same orbit (${targetBody.name || targetBody.planetClass})`, `在同轨道创建 (${targetBody.name || targetBody.planetClass})`);
+            }
+        }
+        return true;
+    }
+
+    canvas.addEventListener('contextmenu', (e: MouseEvent) => {
+        e.preventDefault();
+        if (!editMode) return;
+        const hit = hitTest(e.clientX, e.clientY);
+        if (prepareContextMenu(hit?.body ?? null)) showCtxMenuAt(e.clientX, e.clientY);
     });
 
     // Context menu button clicks (Event Delegation)
@@ -1252,10 +1467,9 @@ function setupControls() {
 
         // ── Planet/Star creation (system level) ──
         if (action === 'add') {
-            const dpr = window.devicePixelRatio || 1;
             const rect = canvas.getBoundingClientRect();
-            const clickScreenX = (ctxClickX - rect.left) * dpr;
-            const clickScreenY = (ctxClickY - rect.top) * dpr;
+            const clickScreenX = ctxClickX - rect.left;
+            const clickScreenY = ctxClickY - rect.top;
             const world = screenToWorld(clickScreenX, clickScreenY);
             const dist = Math.round(renderRadiusToOrbit(Math.sqrt(world.x * world.x + world.y * world.y)));
             const angle = Math.round(Math.atan2(world.y, world.x) * 180 / Math.PI);
@@ -1392,6 +1606,8 @@ function setupControls() {
             selectedBody = null;
             updateInfoPanel();
             updatePropertiesPanel();
+            updateCommandState();
+            scheduleRender();
             isDragging = true;
             lastMX = e.clientX;
             lastMY = e.clientY;
@@ -1408,6 +1624,7 @@ function setupControls() {
             panY += (e.clientY - lastMY) / scale;
             lastMX = e.clientX;
             lastMY = e.clientY;
+            scheduleRender();
             e.preventDefault();
             return;
         }
@@ -1504,6 +1721,7 @@ function setupControls() {
             lastMX = e.clientX;
             lastMY = e.clientY;
             e.preventDefault();
+            scheduleRender();
             return;
         }
 
@@ -1514,11 +1732,13 @@ function setupControls() {
                 hoveredBody = hit.body;
                 showTooltip(hit.body, e.clientX, e.clientY);
                 canvas.style.cursor = editMode ? 'move' : 'pointer';
+                scheduleRender();
             }
         } else if (hoveredBody) {
             hoveredBody = null;
             hideTooltip();
             canvas.style.cursor = editMode ? 'crosshair' : 'grab';
+            scheduleRender();
         }
     });
 
@@ -1542,7 +1762,7 @@ function setupControls() {
 
             // Only commit if mouse actually moved
             if (dragMoved) {
-                setEditStatus(tr('Applying...', '正在应用...'));
+                applyDocumentState('applying');
                 vscode.postMessage({
                     command: 'movePlanetOrbit',
                     bodyLine: body.line,
@@ -1592,64 +1812,123 @@ function setupControls() {
             case 'e':
             case 'E': {
                 e.preventDefault();
-                editMode = !editMode;
-                const editBtn = document.getElementById('btn-edit');
-                if (editBtn) editBtn.classList.toggle('active', editMode);
-                const sp = document.getElementById('side-panel');
-                if (sp && editMode) sp.classList.remove('hidden');
-                canvas.style.cursor = editMode ? 'crosshair' : 'grab';
-                updatePropertiesPanel();
+                setWorkspaceMode(editMode ? 'preview' : 'edit');
+                if (editMode) setInspectorCollapsed(false);
                 break;
             }
             case 'l':
             case 'L':
                 e.preventDefault();
                 showLabels = !showLabels;
+                document.getElementById('btn-labels')?.classList.toggle('active', showLabels);
+                document.getElementById('btn-labels')?.setAttribute('aria-pressed', String(showLabels));
+                persistViewState();
+                scheduleRender();
                 break;
             case 'o':
             case 'O':
                 e.preventDefault();
                 showOrbits = !showOrbits;
+                document.getElementById('btn-orbits')?.classList.toggle('active', showOrbits);
+                document.getElementById('btn-orbits')?.setAttribute('aria-pressed', String(showOrbits));
+                persistViewState();
+                scheduleRender();
                 break;
             case 'z':
                 if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
                     e.preventDefault();
+                    applyDocumentState('applying');
                     vscode.postMessage({ command: 'vscodeRedo' });
-                    setEditStatus(tr('Redone', '已重做'));
                 } else if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
+                    applyDocumentState('applying');
                     vscode.postMessage({ command: 'vscodeUndo' });
-                    setEditStatus(tr('Undone', '已撤销'));
                 }
                 break;
             case 'y':
             case 'Y':
                 if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
+                    applyDocumentState('applying');
                     vscode.postMessage({ command: 'vscodeRedo' });
-                    setEditStatus(tr('Redone', '已重做'));
                 }
                 break;
             case 's':
             case 'S':
                 if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
+                    applyDocumentState('applying');
                     vscode.postMessage({ command: 'saveDocument' });
-                    setEditStatus(tr('Saved', '已保存'));
                 }
                 break;
             case 'Delete':
-                if (editMode && selectedBody && selectedBody.bodyType !== 'star') {
-                    e.preventDefault();
-                    setEditStatus(tr('Deleting...', '正在删除...'));
-                    vscode.postMessage({ command: 'deletePlanet', line: selectedBody.line });
-                    selectedBody = null;
-                    updateInfoPanel();
-                    updatePropertiesPanel();
-                }
+                if (editMode && selectedBody && selectedBody.bodyType !== 'star') e.preventDefault();
+                deleteSelectedBody();
                 break;
         }
     });
+
+    // ── Resizable inspector ────────────────────────────────────────────────
+    const sidePanel = document.getElementById('side-panel');
+    const resizer = document.getElementById('inspector-resizer');
+    if (sidePanel && persistedViewState.inspectorWidth) {
+        sidePanel.style.width = `${Math.max(290, Math.min(620, persistedViewState.inspectorWidth))}px`;
+    }
+    if (persistedViewState.inspectorCollapsed) {
+        document.body.classList.add('inspector-collapsed');
+        document.getElementById('btn-toggle-inspector')?.setAttribute('aria-pressed', 'false');
+    }
+
+    if (sidePanel && resizer) {
+        let resizing = false;
+        let resizeStartX = 0;
+        let resizeStartWidth = 0;
+
+        resizer.addEventListener('pointerdown', (e: PointerEvent) => {
+            resizing = true;
+            resizeStartX = e.clientX;
+            resizeStartWidth = sidePanel.getBoundingClientRect().width;
+            resizer.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        });
+        resizer.addEventListener('pointermove', (e: PointerEvent) => {
+            if (!resizing) return;
+            const maxWidth = Math.min(620, window.innerWidth * 0.58);
+            const width = Math.max(290, Math.min(maxWidth, resizeStartWidth - (e.clientX - resizeStartX)));
+            sidePanel.style.width = `${Math.round(width)}px`;
+            resizeCanvas();
+        });
+        const finishResize = (e: PointerEvent) => {
+            if (!resizing) return;
+            resizing = false;
+            if (resizer.hasPointerCapture(e.pointerId)) resizer.releasePointerCapture(e.pointerId);
+            persistViewState();
+        };
+        resizer.addEventListener('pointerup', finishResize);
+        resizer.addEventListener('pointercancel', finishResize);
+        resizer.addEventListener('keydown', (e: KeyboardEvent) => {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            e.preventDefault();
+            const delta = e.key === 'ArrowLeft' ? 16 : -16;
+            const width = Math.max(290, Math.min(620, sidePanel.getBoundingClientRect().width + delta));
+            sidePanel.style.width = `${width}px`;
+            resizeCanvas();
+            persistViewState();
+        });
+    }
+
+    document.getElementById('btn-labels')?.classList.toggle('active', showLabels);
+    document.getElementById('btn-labels')?.setAttribute('aria-pressed', String(showLabels));
+    document.getElementById('btn-orbits')?.classList.toggle('active', showOrbits);
+    document.getElementById('btn-orbits')?.setAttribute('aria-pressed', String(showOrbits));
+    const scaleButton = document.getElementById('btn-scale-mode');
+    if (scaleButton) {
+        scaleButton.textContent = scaleMode === 'readable' ? tr('Readable scale', '可读比例') : tr('True scale', '真实比例');
+        scaleButton.classList.toggle('active', scaleMode === 'readable');
+        scaleButton.setAttribute('aria-pressed', String(scaleMode === 'readable'));
+    }
+    setWorkspaceMode('preview');
+    updateCommandState();
 
     // Ensure webview body can receive keyboard events
     document.body.setAttribute('tabindex', '0');
@@ -1677,12 +1956,15 @@ function hitTest(clientX: number, clientY: number): RenderedBody | null {
     return null;
 }
 
-function centerBodyInView(body: CelestialBody) {
+function centerBodyInView(body: CelestialBody, emphasize = false) {
     requestAnimationFrame(() => {
         const rb = renderedBodies.find(r => r.body === body || r.body.line === body.line);
         if (!rb) return;
         panX += (canvasW / 2 - rb.screenX) / scale;
         panY += (canvasH / 2 - rb.screenY) / scale;
+        if (emphasize) scale = Math.max(scale, 1.6);
+        updateZoomDisplay();
+        scheduleRender();
     });
 }
 
@@ -1694,9 +1976,9 @@ function selectBody(
     updateInfoPanel();
     updatePropertiesPanel();
 
-    document.getElementById('side-panel')!.classList.remove('hidden');
+    setInspectorCollapsed(false);
     if (options.openProperties !== false) {
-    document.getElementById('tab-properties')!.click();
+        document.getElementById('tab-properties')!.click();
     }
     if (options.center) {
         centerBodyInView(body);
@@ -1705,47 +1987,152 @@ function selectBody(
     document.querySelectorAll('.body-item').forEach(el => {
         el.classList.toggle('selected', el.getAttribute('data-line') === String(body.line));
     });
+    updateCommandState();
+    scheduleRender();
 }
 
-function fitToView() {
+interface FitBounds {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+}
+
+function createFitBounds(): FitBounds {
+    return { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+}
+
+function addProjectedFitPoint(bounds: FitBounds, worldX: number, worldY: number, padding = 0): void {
+    const point = projectToView(worldX, worldY, 0);
+    bounds.minX = Math.min(bounds.minX, point.x - padding);
+    bounds.minY = Math.min(bounds.minY, point.y - padding);
+    bounds.maxX = Math.max(bounds.maxX, point.x + padding);
+    bounds.maxY = Math.max(bounds.maxY, point.y + padding);
+}
+
+function addOrbitEnvelope(
+    bounds: FitBounds,
+    centerWorldX: number,
+    centerWorldY: number,
+    radius: number,
+    startAngle = 0,
+    endAngle = 360,
+): void {
+    if (radius <= 0) return;
+    const span = Math.max(1, Math.abs(endAngle - startAngle));
+    const steps = Math.max(8, Math.ceil(span / 6));
+    for (let i = 0; i <= steps; i++) {
+        const angle = (startAngle + (endAngle - startAngle) * i / steps) * Math.PI / 180;
+        addProjectedFitPoint(
+            bounds,
+            centerWorldX + Math.cos(angle) * radius,
+            centerWorldY + Math.sin(angle) * radius,
+        );
+    }
+}
+
+function collectBodyFitBounds(
+    bounds: FitBounds,
+    bodies: CelestialBody[],
+    parentWorldX: number,
+    parentWorldY: number,
+    includeOrbitGuides: boolean,
+): void {
+    for (const body of bodies) {
+        if (body.ringSegmentHidden) continue;
+
+        if (body.ringGroup) {
+            const ringRadius = orbitToRenderRadius(body.ringGroup.orbitRadius);
+            const outerRadius = ringRadius + Math.max(4, ringRadius * 0.08) / 2;
+            for (const segment of body.ringGroup.segments) {
+                addOrbitEnvelope(
+                    bounds,
+                    parentWorldX,
+                    parentWorldY,
+                    outerRadius,
+                    segment.startAngle,
+                    segment.endAngle,
+                );
+            }
+            if (includeOrbitGuides) {
+                addOrbitEnvelope(bounds, parentWorldX, parentWorldY, ringRadius);
+            }
+            continue;
+        }
+
+        const orbitRadius = orbitToRenderRadius(body.resolvedOrbitRadius);
+        const bodyWorld = orbitalToWorld(orbitRadius, body.resolvedOrbitAngle);
+        const worldX = parentWorldX + bodyWorld.x;
+        const worldY = parentWorldY + bodyWorld.y;
+        const bodyPadding = Math.max(8, getDisplaySize(body));
+        addProjectedFitPoint(bounds, worldX, worldY, bodyPadding);
+
+        if (includeOrbitGuides) {
+            addOrbitEnvelope(bounds, parentWorldX, parentWorldY, orbitRadius);
+        }
+
+        if (body.resolvedCount > 1 && body.orbitAngle.type !== 'fixed') {
+            for (let i = 1; i < Math.min(body.resolvedCount, 6); i++) {
+                const ghostWorld = orbitalToWorld(
+                    orbitRadius,
+                    body.resolvedOrbitAngle + (360 / body.resolvedCount) * i,
+                );
+                addProjectedFitPoint(
+                    bounds,
+                    parentWorldX + ghostWorld.x,
+                    parentWorldY + ghostWorld.y,
+                    bodyPadding * 0.8,
+                );
+            }
+        }
+
+        collectBodyFitBounds(bounds, body.moons, worldX, worldY, includeOrbitGuides);
+        collectBodyFitBounds(bounds, body.subPlanets, worldX, worldY, includeOrbitGuides);
+    }
+}
+
+function fitToView(includeBelts = false) {
     const system = allSystems[currentSystemIndex];
     if (!system) return;
 
-    // Find the maximum orbit radius
-    let maxR = 100;
-    for (const body of system.bodies) {
-        if (orbitToRenderRadius(body.resolvedOrbitRadius) > maxR) maxR = orbitToRenderRadius(body.resolvedOrbitRadius);
-        for (const moon of body.moons) {
-            const moonR = orbitToRenderRadius(body.resolvedOrbitRadius) + orbitToRenderRadius(moon.resolvedOrbitRadius);
-            if (moonR > maxR) maxR = moonR;
-        }
-        for (const sub of body.subPlanets) {
-            const subR = orbitToRenderRadius(body.resolvedOrbitRadius) + orbitToRenderRadius(sub.resolvedOrbitRadius);
-            if (subR > maxR) maxR = subR;
+    // Fit authored bodies from their actual projected positions. Summing nested orbit
+    // radii greatly overestimated compact systems and made their useful content tiny.
+    const bounds = createFitBounds();
+    collectBodyFitBounds(bounds, system.bodies, 0, 0, includeBelts);
+
+    if (includeBelts) {
+        for (const belt of system.asteroidBelts) {
+            const beltRadius = orbitToRenderRadius(belt.radius);
+            const outerRadius = beltRadius + Math.max(5, beltRadius * 0.045);
+            addOrbitEnvelope(bounds, 0, 0, outerRadius);
         }
     }
-    for (const belt of system.asteroidBelts) {
-        if (orbitToRenderRadius(belt.radius) > maxR) maxR = orbitToRenderRadius(belt.radius);
-    }
 
-    // Fit the view
-    const margin = 80;
-    const viewW = canvasW - margin * 2;
-    const viewH = canvasH - margin * 2;
-    const tiltRad = (tiltAngle * Math.PI) / 180;
-    const projectedH = maxR * 2 * Math.cos(tiltRad);
-    const projectedW = maxR * 2;
+    if (!Number.isFinite(bounds.minX)) return;
+    const margin = Math.min(104, Math.max(56, Math.min(canvasW, canvasH) * 0.09));
+    const viewW = Math.max(1, canvasW - margin * 2);
+    const viewH = Math.max(1, canvasH - margin * 2);
+    const contentW = Math.max(72, bounds.maxX - bounds.minX);
+    const contentH = Math.max(56, bounds.maxY - bounds.minY);
 
-    scale = Math.min(viewW / projectedW, viewH / projectedH, scaleMode === 'readable' ? 4.5 : 3);
+    scale = Math.max(0.1, Math.min(
+        viewW / contentW,
+        viewH / contentH,
+        scaleMode === 'readable' ? 4.5 : 3,
+    ));
+    panX = -(bounds.minX + bounds.maxX) / 2;
+    panY = -(bounds.minY + bounds.maxY) / 2;
     updateZoomDisplay();
 }
 
 function updateZoomDisplay() {
     document.getElementById('zoom-level')!.textContent = `${Math.round(scale * 100)}%`;
+    scheduleRender();
 }
 
 function updateTiltDisplay() {
     document.getElementById('tilt-level')!.textContent = `${tiltAngle}°`;
+    scheduleRender();
 }
 
 // ─── Tooltip ────────────────────────────────────────────────────────────────
@@ -1925,7 +2312,10 @@ function updatePropertiesPanel() {
     const pc = getPlanetColor(body.planetClass);
     const typeNames: Record<string, string> = { star: tr('Star', '恒星'), planet: tr('Planet', '行星'), moon: tr('Moon', '卫星') };
 
-    let html = '';
+    let html = `<div class="mode-callout">${editMode
+        ? tr('Edit mode is active. Drag the body to change its orbit or edit values below.', '编辑模式已启用。可拖动天体修改轨道，或编辑下方属性。')
+        : tr('Preview mode protects the document. Switch to Edit to change these values.', '预览模式不会修改文档。切换到“编辑”后可更改这些值。')
+    }</div>`;
 
     // Type badge
     html += `<div style="margin-bottom:12px">`;
@@ -1973,6 +2363,11 @@ function updatePropertiesPanel() {
     html += `</div>`;
 
     panel.innerHTML = html;
+
+    panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-prop]').forEach(control => {
+        control.disabled = !editMode;
+        control.setAttribute('aria-readonly', String(!editMode));
+    });
 
     // Bind events
     panel.querySelectorAll<HTMLInputElement>('.prop-input[data-prop]').forEach(input => {
@@ -2233,6 +2628,10 @@ function propRowVOR(label: string, prop: string, vor: ValueOrRange, line: number
 
 window.addEventListener('message', (event) => {
     const msg = event.data;
+    if (msg.command === 'documentState') {
+        applyDocumentState(msg.state, msg.dirty, msg.message);
+        return;
+    }
     if (msg.command === 'render') {
         const isFirstRender = allSystems.length === 0;
         allSystems = msg.data;
@@ -2243,7 +2642,7 @@ window.addEventListener('message', (event) => {
         if (msg.locDict) locDict = msg.locDict;
         buildContextMenu();
         
-        document.getElementById('title')!.textContent = tr(`Solar System Preview: ${msg.fileName}`, `星系预览: ${msg.fileName}`);
+        document.getElementById('title')!.textContent = msg.fileName;
 
         // Update system selector
         const select = document.getElementById('system-select') as HTMLSelectElement;
@@ -2272,20 +2671,19 @@ window.addEventListener('message', (event) => {
 
         updateInfoPanel();
         updatePropertiesPanel();
-        setEditStatus(tr('Synced', '已同步'));
+        updateCommandState();
+        if (msg.documentState) {
+            applyDocumentState(msg.documentState.state, msg.documentState.dirty);
+        }
 
         if (isFirstRender) {
-            // First render: full initialization
-            document.getElementById('btn-labels')!.classList.toggle('active', showLabels);
-            document.getElementById('btn-orbits')!.classList.toggle('active', showOrbits);
-            document.getElementById('btn-scale-mode')!.classList.toggle('active', scaleMode === 'readable');
             resizeCanvas();
             requestAnimationFrame(() => {
-                fitToView();
-                render();
+                fitToView(false);
             });
+        } else {
+            scheduleRender();
         }
-        // Subsequent renders: data is already updated, render loop will pick it up
     }
 });
 

@@ -3,6 +3,16 @@ import { TOOL_DEFINITIONS } from '../../extension/ai/tools/definitions';
 import { TOOL_REGISTRY } from '../../extension/ai/tools/registry';
 
 describe('tool definitions', () => {
+    it('exposes the unified web toolset with explicit network effects', () => {
+        const names = TOOL_DEFINITIONS.map(definition => definition.function.name);
+        expect(names).to.include.members(['web_search', 'web_open', 'web_find']);
+        expect(names).to.not.include.members(['web_fetch', 'search_web', 'codesearch']);
+        expect(TOOL_REGISTRY.get('web_search')?.effect).to.equal('network');
+        expect(TOOL_REGISTRY.get('web_open')?.effect).to.equal('network');
+        expect(TOOL_REGISTRY.get('web_find')?.effect).to.equal('workspace_read');
+        expect(TOOL_REGISTRY.get('web_find')?.riskLevel).to.equal(0);
+    });
+
     it('registers task-scoped process inspection and control with explicit effects', () => {
         for (const name of ['list_processes', 'read_process', 'write_process_stdin', 'terminate_process']) {
             expect(TOOL_DEFINITIONS.some(definition => definition.function.name === name), name).to.equal(true);

@@ -6616,11 +6616,28 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         updateQuickWriteModeSelector(deriveWriteTier(current));
         const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
         if (autoReviewEl) autoReviewEl.checked = current.approvals?.reviewer === 'auto_review';
-        // Brave Search API key — show masked placeholder if already set
-        const braveKeyEl = document.getElementById('braveSearchApiKey') as HTMLInputElement | null;
-        if (braveKeyEl) braveKeyEl.value = current.braveSearchApiKey || '';
-        const exaKeyEl = document.getElementById('exaApiKey') as HTMLInputElement | null;
-        if (exaKeyEl) exaKeyEl.value = current.exaApiKey || '';
+        const web = current.webAccess || {};
+        const setWebValue = (id: string, value: unknown) => {
+            const element = document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
+            if (element) element.value = String(value ?? '');
+        };
+        setWebValue('webAccessMode', web.mode || 'indexed');
+        setWebValue('webSearchProvider', web.provider || 'auto');
+        setWebValue('webContextSize', web.contextSize || 'medium');
+        setWebValue('webFallbackProviders', web.fallbackProviders || '');
+        setWebValue('webAllowedDomains', web.allowedDomains || '');
+        setWebValue('webBlockedDomains', web.blockedDomains || '');
+        setWebValue('webCountry', web.country || '');
+        setWebValue('webSearxngEndpoint', web.searxngEndpoint || '');
+        setWebValue('webOpenAIModel', web.openaiModel || '');
+        setWebValue('webCacheTtlMs', web.cacheTtlMs ?? 300000);
+        const syntheticProxyEl = document.getElementById('webAllowSyntheticProxy') as HTMLInputElement | null;
+        if (syntheticProxyEl) syntheticProxyEl.checked = web.allowSyntheticProxyAddresses === true;
+        for (const provider of ['brave', 'exa', 'tavily', 'serper', 'serpapi']) {
+            setWebValue(`webKey-${provider}`, web.keys?.[provider] || '');
+            const keyElement = document.getElementById(`webKey-${provider}`) as HTMLInputElement | null;
+            if (keyElement) keyElement.dataset.hadSecret = web.keys?.[provider] ? 'true' : 'false';
+        }
 
         // Render MCP Servers
         const mcpList = document.getElementById('mcpServersList');
@@ -7148,8 +7165,24 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     reviewer: ((document.getElementById('approvalsAutoReview') as HTMLInputElement | null)?.checked ? 'auto_review' : 'user'),
                 },
                 reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
-                braveSearchApiKey: ((document.getElementById('braveSearchApiKey') as HTMLInputElement | null)?.value || '').trim(),
-                exaApiKey: ((document.getElementById('exaApiKey') as HTMLInputElement | null)?.value || '').trim(),
+                webAccess: {
+                    mode: ((document.getElementById('webAccessMode') as HTMLSelectElement | null)?.value || 'indexed'),
+                    provider: ((document.getElementById('webSearchProvider') as HTMLSelectElement | null)?.value || 'auto'),
+                    contextSize: ((document.getElementById('webContextSize') as HTMLSelectElement | null)?.value || 'medium'),
+                    fallbackProviders: ((document.getElementById('webFallbackProviders') as HTMLInputElement | null)?.value || '').trim(),
+                    allowedDomains: ((document.getElementById('webAllowedDomains') as HTMLInputElement | null)?.value || '').trim(),
+                    blockedDomains: ((document.getElementById('webBlockedDomains') as HTMLInputElement | null)?.value || '').trim(),
+                    country: ((document.getElementById('webCountry') as HTMLInputElement | null)?.value || '').trim(),
+                    searxngEndpoint: ((document.getElementById('webSearxngEndpoint') as HTMLInputElement | null)?.value || '').trim(),
+                    openaiModel: ((document.getElementById('webOpenAIModel') as HTMLInputElement | null)?.value || '').trim(),
+                    cacheTtlMs: parseInt((document.getElementById('webCacheTtlMs') as HTMLInputElement | null)?.value || '300000') || 0,
+                    allowSyntheticProxyAddresses: (document.getElementById('webAllowSyntheticProxy') as HTMLInputElement | null)?.checked === true,
+                    keys: Object.fromEntries(['brave', 'exa', 'tavily', 'serper', 'serpapi'].map(provider => {
+                        const element = document.getElementById(`webKey-${provider}`) as HTMLInputElement | null;
+                        const value = (element?.value || '').trim();
+                        return [provider, !value && element?.dataset.hadSecret === 'true' ? '__DELETE__' : value];
+                    })),
+                },
                 inlineCompletion: {
                     enabled: (document.getElementById('inlineEnabled') as HTMLInputElement).checked,
                     provider: (document.getElementById('inlineProvider') as HTMLSelectElement).value,

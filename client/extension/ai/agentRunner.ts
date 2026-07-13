@@ -22,6 +22,7 @@ import type {
     AgentRunMetrics,
     AnalyzeDiagnosticErrorResult,
     GetDiagnosticsResult,
+    ToolDefinition,
 } from './types';
 import { contentToString } from './types';
 import * as vs from 'vscode';
@@ -273,8 +274,8 @@ const _PLAN_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'todo_write',
-    'read_file', 'list_directory', 'get_lsp_status', 'get_diagnostics', 'web_fetch', 'search_web',
-    'glob_files', 'codesearch',
+    'read_file', 'list_directory', 'get_lsp_status', 'get_diagnostics', 'web_open', 'web_search',
+    'glob_files', 'web_find',
     // Deep API tools for archetype study in Plan mode
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_definition', 'query_definition_by_name',
@@ -293,17 +294,27 @@ const _EXPLORE_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
-    'get_lsp_status', 'get_diagnostics', 'web_fetch', 'search_web', 'glob_files',
+    'get_lsp_status', 'get_diagnostics', 'web_open', 'web_search', 'glob_files',
     // CWTools Deep API tools (read-only, advertised in Explore mode prompt)
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
-    'query_definition', 'query_definition_by_name', 'codesearch',
+    'query_definition', 'query_definition_by_name', 'web_find',
     // Git operations for investigation
     'git_ops', 'save_workflow',
 ];
 
 /** General mode: legacy read-only Q&A mode. */
 const _GENERAL_EXCLUDED_TOOLS: AgentToolName[] = ['todo_write'];
+
+function filterWebToolsForConfiguredAccess(tools: ToolDefinition[]): ToolDefinition[] {
+    const mode = vs.workspace.getConfiguration('stellarisLanguageServices.ai.web')
+        .get<'disabled' | 'indexed' | 'live'>('mode', 'indexed');
+    if (mode === 'live') return tools;
+    const unavailable = mode === 'disabled'
+        ? new Set(['web_search', 'web_open', 'web_find'])
+        : new Set(['web_open', 'web_find']);
+    return tools.filter(tool => !unavailable.has(tool.function.name));
+}
 
 /** Utility mode: full ordinary coding tools for non-PDX helper scripts/tools. */
 const _UTILITY_EXCLUDED_TOOLS: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results'];
@@ -317,7 +328,7 @@ const _REVIEW_MODE_TOOLS: AgentToolName[] = [
     'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
-    'web_fetch', 'search_web', 'glob_files', 'codesearch',
+    'web_open', 'web_search', 'glob_files', 'web_find',
     // Git operations for investigation
     'git_ops',
 ];
@@ -351,7 +362,7 @@ const _ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
-    'get_lsp_status', 'get_diagnostics', 'web_fetch', 'search_web', 'glob_files', 'codesearch',
+    'get_lsp_status', 'get_diagnostics', 'web_open', 'web_search', 'glob_files', 'web_find',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
     'query_definition', 'query_definition_by_name',
@@ -932,9 +943,9 @@ export class AgentRunner {
         }, 0);
         // Tool schemas are part of every model request even though they are not
         // represented in ChatMessage[]. Reserve their full known size here.
-        const promptToolDefinitions = filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
+        const promptToolDefinitions = filterWebToolsForConfiguredAccess(filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
             useSlimPrompt: options?.useSlimPrompt,
-        });
+        }));
         const toolSchemaTokens = estimateTokenCount(JSON.stringify(promptToolDefinitions));
         const compactedHistory = await this.maybeCompactHistory(
             conversationHistory,
@@ -1451,11 +1462,11 @@ export class AgentRunner {
         const confirmedWrittenFiles = new Set<string>();
         const performanceConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
         const legacyFullToolset = performanceConfig.get<boolean>('legacyFullToolset') === true;
-        let availableTools = filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
+        let availableTools = filterWebToolsForConfiguredAccess(filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
             useSlimPrompt: options?.useSlimPrompt,
             excludeTools: options?.excludeTools,
             legacyFullToolset,
-        });
+        }));
 
         // 🌟 核心优化：若开启了扁平化并且工具注册了展平 schema，则展现给模型的 availableTools 使用扁平化版本
         availableTools = availableTools.map(t => {

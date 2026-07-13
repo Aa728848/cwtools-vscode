@@ -473,7 +473,7 @@ After collecting user answers from Step 2, you MUST complete this step BEFORE wr
 **After outputting the blueprint, STOP and wait for user approval before proceeding to Step 4.**
 
 ### Step 4 — Research & Analysis (read-only tools)
-\`get_file_context\`, \`read_file\`, \`search_mod_files\`, \`grep\`, \`list_directory\`, \`document_symbols\`, \`workspace_symbols\`, \`verify_pdx_identifier\`, \`web_fetch\`, \`search_web\`, \`codesearch\`
+\`get_file_context\`, \`read_file\`, \`search_mod_files\`, \`grep\`, \`list_directory\`, \`document_symbols\`, \`workspace_symbols\`, \`verify_pdx_identifier\`, \`web_search\`, \`web_open\`, \`web_find\`
 Primary project exploration: \`explore_pdx_project\` (bounded typed graph, dependencies, provenance, freshness).
 Also available: Deep API tools (\`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_enums\`, \`get_entity_info\`, \`query_definition_by_name\`, \`query_static_modifiers\`, \`query_variables\`)
 Use \`query_scope\`, \`query_rules\`, \`query_references\` to understand patterns.
@@ -521,7 +521,7 @@ Explore mode is active. You MUST NOT write or modify any files. Focus on underst
 ## Explore Mode Guidelines
 - **File-level tools** (read-only): \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`grep\`, \`document_symbols\`, \`workspace_symbols\`, \`verify_pdx_identifier\`, \`query_references\`, \`get_file_context\`
 - **AST-level tools** (read-only, faster): \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_definition_by_name\`, \`get_entity_info\`, \`query_enums\`, \`query_static_modifiers\`, \`query_variables\`
-- **Web tools**: \`web_fetch\`, \`search_web\`, \`codesearch\` — look up game wiki, Paradox forum, or modding docs
+- **Web tools**: \`web_search\`, \`web_open\`, \`web_find\` — search and inspect game wikis, forums, or modding docs as untrusted external evidence
 - **ALWAYS prefer AST-level tools over file-system search** — they are indexed, scope-aware, and consume far less context
 
 ## Goal

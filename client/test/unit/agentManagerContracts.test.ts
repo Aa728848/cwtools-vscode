@@ -64,11 +64,12 @@ describe('agent manager cross-surface contracts', () => {
         expect(css).to.not.include('workspace-toggle {\n    display: none !important;');
     });
 
-    it('manager settings stay local and preserve search tokens', () => {
+    it('manager settings stay local and preserve SecretStorage-backed search tokens', () => {
         const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
         const hostBridge = fs.readFileSync(path.join(root, 'client/extension/ai/chat/bridge.ts'), 'utf8');
         const settingsHost = fs.readFileSync(path.join(root, 'client/extension/ai/chatSettings.ts'), 'utf8');
         const webview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        const manifest = fs.readFileSync(path.join(root, 'release/package.json'), 'utf8');
 
         expect(hostTypes).to.include("targetSurface?: 'chat' | 'manager'");
         expect(hostBridge).to.include('provider.settingsManager.openSettingsPage(sourceSurface)');
@@ -77,8 +78,11 @@ describe('agent manager cross-surface contracts', () => {
         expect(webview).to.include('isCurrentSurface(msg.targetSurface)');
         expect(webview).to.include('if (shouldUseSideWorkspace())');
         expect(webview).to.include("title: chatI18n.locale === 'zh-cn' ? 'AI 设置' : 'AI Settings'");
-        expect(webview).to.include("document.getElementById('exaApiKey')");
-        expect(webview).to.include('exaApiKey: ((document.getElementById');
+        expect(webview).to.include('document.getElementById(`webKey-${provider}`)');
+        expect(webview).to.include('webAccess: {');
+        expect(settingsHost).to.include("getKeyManager().setKey(`web.${provider}`");
+        expect(manifest).to.not.include('stellarisLanguageServices.ai.braveSearchApiKey');
+        expect(manifest).to.not.include('stellarisLanguageServices.ai.exaApiKey');
     });
 
     it('manager layout and composer menus adapt to the active surface geometry', () => {

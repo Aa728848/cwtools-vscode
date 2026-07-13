@@ -291,7 +291,7 @@ export class Orchestrator {
                                 turnId: 'quality_gate_autofix',
                                 skipValidation: true, // Orchestrator already has an independent QualityGate, no need to repeat verification
                                 excludeTools: [ // Maintain consistent security constraints with normal subagents
-                                    'web_fetch', 'search_web', 'codesearch',
+                                    'web_search', 'web_open', 'web_find',
                                     'run_command', 'git_ops',
 
                                     'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
@@ -416,7 +416,7 @@ export class Orchestrator {
         const plannedFiles = Array.isArray(taskNode.plannedFiles) ? taskNode.plannedFiles : [];
         const onlyLocalisationYmlWrites = plannedFiles.length > 0 && plannedFiles.every(isLocalisationYmlPath);
         const excludedTools = [
-            'web_fetch', 'search_web', 'codesearch',
+            'web_search', 'web_open', 'web_find',
             'run_command', 'git_ops',
 
             'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',

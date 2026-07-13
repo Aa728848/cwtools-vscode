@@ -1392,7 +1392,7 @@ export async function activate(context: ExtensionContext) {
 		ErrorReporter.warn('AgentHistory', 'Failed to enforce Agent history retention', error)
 	);
 	// AgentToolExecutor gets a lazy getter so it can be registered before client starts
-	const toolExecutor = new AgentToolExecutor(() => defaultClient, workspaceRoot, indexService, context.globalStorageUri.fsPath, context.extensionPath);
+	const toolExecutor = new AgentToolExecutor(() => defaultClient, workspaceRoot, indexService, context.globalStorageUri.fsPath, context.extensionPath, aiService.getKeyManager());
 	const legacyMcpDirs = legacyPublisherStoragePaths(context)
 		.filter(legacyStorage => fs.existsSync(legacyStorage))
 		.map(legacyStorage => path.join(legacyStorage, 'mcp'));

@@ -91,7 +91,7 @@ const TOOL_ICON_LABELS: Record<string, string> = {
     get_file_context: '📄', get_diagnostics: '🩺', get_completion_at: '💡',
     document_symbols: '🔖', workspace_symbols: '🔖', query_scope: '🔭',
     query_types: '📏', query_rules: '📏', query_references: '🔗',
-    todo_write: '📋', run_command: '⚡', list_processes: '⚡', read_process: '⚡', write_process_stdin: '⚡', terminate_process: '⚡', search_web: '🌐', codesearch: '🔎',
+    todo_write: '📋', run_command: '⚡', list_processes: '⚡', read_process: '⚡', write_process_stdin: '⚡', terminate_process: '⚡', web_search: '🌐', web_open: '🌐', web_find: '🔎', search_web: '🌐', codesearch: '🔎',
     glob_files: '📁', delete_file: '🗑️', apply_patch: '🩹',
     web_fetch: '🌐',
     permission_request: '🔑',
@@ -273,10 +273,12 @@ export function summarizeToolArgs(toolName: string, args: Record<string, unknown
     }
 
     // Search tools
-    if ((toolName === 'search_web' || toolName === 'codesearch' || toolName === 'search_mod_files') && args.query) {
+    if ((toolName === 'web_search' || toolName === 'search_web' || toolName === 'codesearch' || toolName === 'search_mod_files') && args.query) {
         const q = String(args.query);
         return q.length > limit ? q.substring(0, limit) + '...' : q;
     }
+    if (toolName === 'web_open' && args.ref) return String(args.ref).slice(0, limit);
+    if (toolName === 'web_find' && args.pattern) return String(args.pattern).slice(0, limit);
 
     // Todo tools
     if (toolName === 'todo_write') {

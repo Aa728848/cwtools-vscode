@@ -394,18 +394,63 @@ ${stylesheetLinks}
                 </div>
                 <div class="settings-hint">${t('When enabled, a read-only reviewer model approves most commands first. Unclear, escalated, or destructive actions still ask you.', '开启后由只读评审模型先行审批大部分命令；拿不准、升级请求或破坏性操作仍会询问用户。')}</div>
                 <div class="settings-group">
-                    <label class="settings-label">${svgIcon('search')} Brave Search API Key <span style="opacity:0.5;font-weight:400">${t('(optional)', '(可选)')}</span></label>
-                    <div class="settings-key-row">
-                        <input class="settings-input" id="braveSearchApiKey" type="password" placeholder="${t('Leave empty to fall back to DuckDuckGo search', '留空则使用 DuckDuckGo 降级搜索')}" autocomplete="off" />
-                        <button class="key-toggle-btn" id="braveKeyToggleBtn" onclick="var k=document.getElementById('braveSearchApiKey');k.type=k.type==='password'?'text':'password';">${svgIconNoMargin('eye')}</button>
+                    <label class="settings-label">${svgIcon('search')} ${t('Web access mode', '网页访问模式')}</label>
+                    <select class="settings-select" id="webAccessMode">
+                        <option value="disabled">${t('Disabled', '禁用')}</option>
+                        <option value="indexed">${t('Indexed search only (recommended)', '仅搜索索引（推荐）')}</option>
+                        <option value="live">${t('Live search and page access', '实时搜索和网页访问')}</option>
+                    </select>
+                    <div class="settings-hint">${t('Web tools are separate from shell-command networking. Live mode opens only public HTTP(S) pages through SSRF and redirect checks.', '网页工具与 Shell 命令联网权限相互独立。实时模式仅通过 SSRF 与重定向检查访问公开 HTTP(S) 网页。')}</div>
+                    <div class="settings-toggle-row" style="margin-top:12px;">
+                        <span class="settings-toggle-label">${t('Allow controlled synthetic DNS proxy addresses', '允许受控的合成 DNS 代理地址')}</span>
+                        <label class="toggle-switch"><input type="checkbox" id="webAllowSyntheticProxy"><span class="toggle-track"></span></label>
                     </div>
-                    <div class="settings-hint">${t('When filled, web_search uses the Brave Search API for higher-quality results. Get a key at', '填写后 web_search 工具将使用 Brave Search API，结果质量更高。Key 请在')} <a href="https://api.search.brave.com/" target="_blank" rel="noopener">api.search.brave.com</a>${t('.', ' 获取。')}</div>
-                    <label class="settings-label">${svgIcon('search')} Exa API Key <span style="opacity:0.5;font-weight:400">${t('(optional)', '(可选)')}</span></label>
+                    <div class="settings-hint">${t('Enable only in a sandbox or enterprise network that maps public hostnames into 198.18.0.0/15. Direct IP access and every other private range remain blocked.', '仅在沙箱或企业网络把公开域名映射到 198.18.0.0/15 时启用。直接 IP 访问和其他所有私有地址段仍会被阻止。')}</div>
+                    <label class="settings-label">${t('Search provider', '搜索供应商')}</label>
+                    <select class="settings-select" id="webSearchProvider">
+                        <option value="auto">${t('Auto (configured providers, then DuckDuckGo)', '自动（已配置供应商，最后 DuckDuckGo）')}</option>
+                        <option value="openai">OpenAI Web Search</option>
+                        <option value="brave">Brave Search</option>
+                        <option value="exa">Exa</option>
+                        <option value="tavily">Tavily</option>
+                        <option value="serper">Serper</option>
+                        <option value="serpapi">SerpAPI</option>
+                        <option value="searxng">SearXNG</option>
+                        <option value="duckduckgo">DuckDuckGo</option>
+                    </select>
+                    <label class="settings-label">${t('Search context size', '搜索上下文规模')}</label>
+                    <select class="settings-select" id="webContextSize">
+                        <option value="low">${t('Low', '低')}</option><option value="medium">${t('Medium', '中')}</option><option value="high">${t('High', '高')}</option>
+                    </select>
+                    <label class="settings-label">${t('Fallback providers', '备用供应商')}</label>
+                    <input class="settings-input" id="webFallbackProviders" type="text" placeholder="brave, exa, tavily" />
+                    <div class="settings-hint">${t('Comma-separated provider IDs. OpenAI is never used automatically unless selected or listed here.', '以逗号分隔供应商 ID。除非明确选择或列在这里，否则不会自动使用 OpenAI。')}</div>
+                    <label class="settings-label">${t('Allowed domains', '允许的域名')}</label>
+                    <input class="settings-input" id="webAllowedDomains" type="text" placeholder="docs.example.com, github.com" />
+                    <label class="settings-label">${t('Blocked domains', '阻止的域名')}</label>
+                    <input class="settings-input" id="webBlockedDomains" type="text" placeholder="example.invalid" />
+                    <label class="settings-label">${t('Country code', '国家代码')} <span style="opacity:0.5;font-weight:400">${t('(optional)', '（可选）')}</span></label>
+                    <input class="settings-input" id="webCountry" type="text" maxlength="2" placeholder="US" />
+                    <label class="settings-label">SearXNG Endpoint <span style="opacity:0.5;font-weight:400">${t('(optional)', '（可选）')}</span></label>
+                    <input class="settings-input" id="webSearxngEndpoint" type="text" placeholder="https://search.example.com" />
+                    <label class="settings-label">OpenAI Web Search Model <span style="opacity:0.5;font-weight:400">${t('(optional)', '（可选）')}</span></label>
+                    <input class="settings-input" id="webOpenAIModel" type="text" placeholder="${t('Leave empty for the built-in default', '留空使用内置默认值')}" />
+                    <label class="settings-label">${t('Search cache TTL (ms)', '搜索缓存 TTL（毫秒）')}</label>
+                    <input class="settings-input" id="webCacheTtlMs" type="number" min="0" max="3600000" step="1000" placeholder="300000" />
+                    <div class="settings-hint">${t('Provider keys are saved in VS Code SecretStorage. The main OpenAI provider key is reused for OpenAI Web Search.', '供应商密钥保存在 VS Code SecretStorage 中；OpenAI 网页搜索复用主 OpenAI 供应商密钥。')}</div>
+                    ${(['brave', 'exa', 'tavily', 'serper', 'serpapi'] as const).map(provider => `
+                    <label class="settings-label">${provider === 'serpapi' ? 'SerpAPI' : provider.charAt(0).toUpperCase() + provider.slice(1)} API Key <span style="opacity:0.5;font-weight:400">${t('(optional)', '（可选）')}</span></label>
                     <div class="settings-key-row">
-                        <input class="settings-input" id="exaApiKey" type="password" placeholder="${t('Leave empty to fall back to Brave/DuckDuckGo search', '留空则使用 Brave/DuckDuckGo 降级搜索')}" autocomplete="off" />
-                        <button class="key-toggle-btn" id="exaKeyToggleBtn" onclick="var k=document.getElementById('exaApiKey');k.type=k.type==='password'?'text':'password';">${svgIconNoMargin('eye')}</button>
+                        <input class="settings-input" id="webKey-${provider}" type="password" autocomplete="off" />
+                        <button class="key-toggle-btn" onclick="var k=document.getElementById('webKey-${provider}');k.type=k.type==='password'?'text':'password';">${svgIconNoMargin('eye')}</button>
+                    </div>`).join('')}
+                    <div class="settings-hint">${t('Provider dashboards:', '供应商控制台：')}
+                        <a href="https://api.search.brave.com/" target="_blank" rel="noopener">Brave</a> ·
+                        <a href="https://dashboard.exa.ai/" target="_blank" rel="noopener">Exa</a> ·
+                        <a href="https://app.tavily.com/" target="_blank" rel="noopener">Tavily</a> ·
+                        <a href="https://serper.dev/" target="_blank" rel="noopener">Serper</a> ·
+                        <a href="https://serpapi.com/manage-api-key" target="_blank" rel="noopener">SerpAPI</a>
                     </div>
-                    <div class="settings-hint">${t('When filled, codesearch uses Exa semantic code search for higher-quality results. Get a key at', '填写后 codesearch 工具将使用 Exa 语义代码搜索，结果质量更高。Key 请在')} <a href="https://dashboard.exa.ai/" target="_blank" rel="noopener">dashboard.exa.ai</a>${t('.', ' 获取。')}</div>
                 </div>
                 <div class="settings-group" style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px; margin-top: 10px;">
                     <label class="settings-label">${svgIcon('plugin')} ${t('Agent Skills (experimental)', 'Agent Skills (实验性)')}</label>

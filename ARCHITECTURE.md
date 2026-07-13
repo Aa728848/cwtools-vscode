@@ -244,7 +244,8 @@ sequenceDiagram
 | `registry.ts` | Fact sheet mapping tools to mode gates, read/write flags, risks, and locks |
 | `permissions.ts` | Access checks and sandboxes |
 | `argRepair.ts` | Parameter repairs prior to execution |
-| `externalTools.ts` | Shell execution and process management handlers |
+| `externalTools.ts` | Shell/process handlers and the Agent-facing Web tool adapter |
+| `webAccess.ts` | Provider-neutral Web search/open/find, citations, bounded caches, and the SSRF/redirect boundary |
 | `fileTools.ts` | File reads, writes, and local edits |
 | `lspTools.ts` | Deep semantic lookups and language server actions |
 | `diagnosticMetadata.ts` | Categorization and hints for `analyze_diagnostic_error` |
@@ -284,6 +285,7 @@ The Runner restricts tools based on the active workflow and appends supplementar
 - Multi-agent systems use `dispatch_agents`, `query_blackboard`, and `merge_results`. Sub-agents are sandboxed in `orchestrator/subAgentSandbox.ts`.
 - VS Code Workspace Trust is the outer execution gate: Restricted Mode keeps read/LSP features but blocks mutations, shell, network, media, git, and MCP tools.
 - Captured commands use the fail-closed broker. A configured Windows helper must pass the protocol-v1 self-test and report enforced filesystem plus allow/deny networking before selection. Background captured commands retain piped output/stdin controls through `processRegistry.ts`; explicitly escalated interactive commands use a visible VS Code Terminal. Shell networking is enforced as broad allow/deny, while declared hostnames remain approval/audit metadata and are labelled that way in permission cards.
+- Agent Web access is separate from shell-command networking. `web_search` works in indexed mode; `web_open` and cached-page `web_find` are offered only in live mode. OpenAI, Brave, Exa, Tavily, Serper, SerpAPI, SearXNG, and DuckDuckGo normalize into source IDs and citations. Provider keys live in VS Code SecretStorage. Every provider request and page open uses the same public-address DNS check with connection-time address pinning, per-hop redirect validation, credential redirect guard, response-size cap, domain policy, and untrusted-content envelope. A disabled-by-default compatibility switch accepts only DNS-derived `198.18.0.0/15` addresses used by controlled synthetic-DNS proxies; literal addresses and every other private/reserved range remain blocked. The in-memory caches are bounded and the TTL cache is an efficiency cache, not a pre-indexed/cached-search claim.
 - Private runs, checkpoints, goals, and learned memory use extension storage; only user-shareable plans, workflows, blueprints, and project rules remain in `.cwtools-ai/`.
 
 ##### Orchestrator
@@ -644,7 +646,8 @@ sequenceDiagram
 | `registry.ts` | 模式门控、读写分类、effect/risk/concurrency 元数据 |
 | `permissions.ts` | 模式和子 Agent 访问控制 |
 | `argRepair.ts` | 执行前参数名和类型漂移修复 |
-| `externalTools.ts` | `run_command` 和外部进程工具处理器 |
+| `externalTools.ts` | `run_command`、外部进程工具与 Agent 网页工具适配器 |
+| `webAccess.ts` | 供应商无关的网页搜索/打开/查找、引用、有界缓存及 SSRF/重定向边界 |
 | `fileTools.ts` | 文件读写编辑工具处理器 |
 | `lspTools.ts` | LSP 查询、诊断、补全和深层 API 工具处理器 |
 | `diagnosticMetadata.ts` | 诊断分类（`DiagnosticAnalysisCategory`）与修复提示元数据，服务 `analyze_diagnostic_error` |
@@ -1003,6 +1006,8 @@ Webview 与 Extension Host 是完全隔离的运行环境。Webview 运行在受
 ##### 权限与命令安全
 
 所有模型可见工具在领域 handler 前先经过强制执行的 `runner/policyEngine.ts`。`run_command` 再由 `runner/commandPreflight.ts` 统一完成引号感知的 Shell 序列解析、action-sensitive Git/工具分类和 `allow` / `prompt` / `forbidden` 决策；配置项 `ai.shell.commandRules` 支持有序 token 前缀规则，但不能削弱内置破坏性保护，也不会接受 Shell、解释器或 Git 的宽泛 allow 前缀。普通工作区写入在 OS 沙箱内直接执行，复杂语法、Git 元数据变更和额外 cwd/network scope 进入审批，破坏性命令必须显式提权；明确配置的具体 Git allow 前缀只放开匹配命令所需的 `.git` 元数据写入，仍保留其余沙箱边界。普通升级只增加获批的 cwd/network scope 并保留操作系统沙箱，纯 Git 命令可在审批卡明确展示后获得单次 `.git` 元数据写入覆盖，只有独立的 `unsandboxed` 请求可以关闭整个沙箱。`runner/permissionPolicy.ts` 用 `path.relative` 做严格的 `cwdScope` 判定，低风险会话规则绑定精确命令前缀。审批与进程统一写入带稳定 Item ID 的 `item_started` / `item_updated` / `item_completed` 事件，进程查看与控制只允许所属任务 Thread。
+
+Agent 网页访问与 Shell 命令联网权限相互独立。`web_search` 可在 `indexed` 模式使用；`web_open` 与针对已缓存网页的 `web_find` 仅在 `live` 模式提供。OpenAI、Brave、Exa、Tavily、Serper、SerpAPI、SearXNG 和 DuckDuckGo 的结果统一为来源 ID 与引用，供应商密钥保存到 VS Code SecretStorage。所有供应商请求和网页打开都经过同一套公开地址 DNS 校验与连接时地址固定、逐跳重定向校验、跨域凭据保护、响应体上限、域名策略和“不可信外部内容”封装。默认关闭的兼容开关仅接受受控合成 DNS 代理解析出的 `198.18.0.0/15`，直接 IP 和其他所有私有/保留地址段仍会被阻止。内存缓存均有界，TTL 搜索缓存只用于效率优化，不宣称是预索引缓存搜索。
 
 ##### 子 Agent 沙盒
 

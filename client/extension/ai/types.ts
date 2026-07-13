@@ -1133,9 +1133,9 @@ export type AgentToolName =
     | 'list_directory'
     | 'glob_files'
     | 'lsp_operation'
-    | 'web_fetch'
-    | 'search_web'
-    | 'codesearch'
+    | 'web_search'
+    | 'web_open'
+    | 'web_find'
     | 'grep'
     | 'run_command'
     | 'list_processes'
@@ -1316,10 +1316,17 @@ export interface ListDirectoryResult {
     error?: string;
 }
 
-export interface CodesearchArgs {
+export interface WebSearchArgs {
     query: string;
+    purpose?: 'general' | 'code';
     maxResults?: number;
+    allowedDomains?: string[];
+    blockedDomains?: string[];
+    contextSize?: 'low' | 'medium' | 'high';
 }
+
+/** @deprecated Compatibility alias for persisted histories. */
+export type CodesearchArgs = WebSearchArgs;
 
 export interface AnalyzeDiagnosticErrorArgs {
     file?: string;
@@ -2143,9 +2150,20 @@ export interface PanelSettings {
     sandboxBackend?: { available: boolean; backend?: string; message: string };
     /** Reasoning effort / thinking depth (multi-provider) */
     reasoningEffort: 'low' | 'medium' | 'high' | 'max';
-    /** Brave Search API key for web_search tool (optional) */
-    braveSearchApiKey?: string;
-    exaApiKey?: string;
+    webAccess?: {
+        mode: 'disabled' | 'indexed' | 'live';
+        provider: 'auto' | 'openai' | 'brave' | 'exa' | 'tavily' | 'serper' | 'serpapi' | 'searxng' | 'duckduckgo';
+        contextSize: 'low' | 'medium' | 'high';
+        fallbackProviders: string;
+        allowedDomains: string;
+        blockedDomains: string;
+        country: string;
+        searxngEndpoint: string;
+        openaiModel: string;
+        cacheTtlMs: number;
+        allowSyntheticProxyAddresses: boolean;
+        keys: Partial<Record<'brave' | 'exa' | 'tavily' | 'serper' | 'serpapi', string>>;
+    };
     inlineCompletion: {
         enabled: boolean;
         provider: string;

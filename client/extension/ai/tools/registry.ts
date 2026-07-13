@@ -9,8 +9,8 @@ export type AgentToolName =
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
     | 'verify_pdx_identifier' | 'todo_write' | 'read_file' | 'write_file' | 'edit_file'
     | 'replace_lines' | 'list_directory' | 'get_lsp_status' | 'get_diagnostics' | 'analyze_diagnostic_error'
-    | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command' | 'list_processes' | 'read_process' | 'write_process_stdin' | 'terminate_process'
-    | 'search_web' | 'codesearch' | 'apply_patch' | 'multi_replace_file_content'
+    | 'glob_files' | 'lsp_operation' | 'web_search' | 'web_open' | 'web_find' | 'run_command' | 'list_processes' | 'read_process' | 'write_process_stdin' | 'terminate_process'
+    | 'apply_patch' | 'multi_replace_file_content'
     | 'query_definition' | 'query_definition_by_name' | 'query_scripted_effects'
     | 'query_scripted_triggers' | 'query_enums' | 'get_entity_info'
     | 'query_static_modifiers' | 'query_variables' | 'set_memory'
@@ -62,7 +62,7 @@ const BASE_READ: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_references',
     'query_project_profile', 'query_project_knowledge', 'run_skill', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory', 'glob_files',
-    'lsp_operation', 'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name',
+    'lsp_operation', 'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name', 'web_find',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables', 'get_pdx_block', 'get_ignored_diagnostics'
 ];
@@ -71,14 +71,14 @@ const EDIT: AgentToolName[] = [
     'edit_pdx_block', 'write_localisation', 'write_design_blueprint', 'save_workflow', 'remove_ignored_diagnostic'
 ];
 const MEMORY: AgentToolName[] = ['todo_write', 'set_memory', 'get_memory', 'search_memory', 'save_memory'];
-const NETWORK: AgentToolName[] = ['web_fetch', 'search_web', 'codesearch'];
+const NETWORK: AgentToolName[] = ['web_search', 'web_open'];
 const UTILITY: AgentToolName[] = ['run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process', 'git_ops', 'analyze_diagnostic_error'];
 const MEDIA: AgentToolName[] = ['convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
 const _MCP: AgentToolName[] = ['mcp_call'];
 const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results'];
 
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
-const SUB_AGENT_EXCLUDES_SET = new Set<string>(['web_fetch', 'search_web', 'codesearch', 'run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process', 'git_ops', 'save_workflow', ...MEDIA]);
+const SUB_AGENT_EXCLUDES_SET = new Set<string>(['web_search', 'web_open', 'web_find', 'run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process', 'git_ops', 'save_workflow', ...MEDIA]);
 const FILE_SCOPED_WRITE_TOOLS_SET = new Set<string>([
     'write_file',
     'edit_file',

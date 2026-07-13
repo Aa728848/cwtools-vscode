@@ -17,6 +17,13 @@ describe('ToolInvocation & Registry Single Source of Truth Tests', () => {
         expect(metaShell.effect).to.equal('shell');
         expect(metaShell.riskLevel).to.equal(2);
         expect(metaShell.concurrencyClass).to.equal('interactive');
+
+        const metaSearch = getToolMetadata('web_search');
+        expect(metaSearch.effect).to.equal('network');
+        expect(metaSearch.concurrencyClass).to.equal('network-limited');
+        const metaFind = getToolMetadata('web_find');
+        expect(metaFind.effect).to.equal('workspace_read');
+        expect(metaFind.riskLevel).to.equal(0);
     });
 
     it('falls back safely for unregistered, unknown tools', () => {

@@ -67,7 +67,7 @@ export function extractStepFile(step: Record<string, unknown>): string {
 
 /** Tool classification sets for run summary building. */
 export const WRITE_TOOL_NAMES = new Set(['edit_file', 'write_file', 'multiedit', 'apply_patch', 'delete_file']);
-export const READ_TOOL_NAMES = new Set(['read_file', 'list_directory', 'glob_files', 'codesearch', 'search_mod_files', 'get_file_context', 'document_symbols', 'workspace_symbols']);
+export const READ_TOOL_NAMES = new Set(['read_file', 'list_directory', 'glob_files', 'web_find', 'codesearch', 'search_mod_files', 'get_file_context', 'document_symbols', 'workspace_symbols']);
 export const VALIDATION_TOOL_NAMES = new Set(['validate_code', 'get_diagnostics']);
 export const ORCHESTRATOR_TOOL_NAMES = new Set(['dispatch_agents', 'query_blackboard', 'merge_results']);
 

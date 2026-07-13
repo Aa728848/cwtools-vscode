@@ -20,6 +20,13 @@ import {
     sanitizePathInput,
 } from '../workspaceSandbox';
 import { aiText } from '../messages';
+import {
+    WebAccessService,
+    type WebAccessConfig,
+    type WebAccessMode,
+    type WebSearchContextSize,
+    type WebSearchProvider,
+} from './webAccess';
 
 const COMMAND_SNAPSHOT_MAX_FILE_BYTES = 500_000;
 const COMMAND_SNAPSHOT_MAX_TOTAL_BYTES = 24_000_000;
@@ -116,6 +123,8 @@ export interface ExternalToolContext {
     parentTokenAccumulator?: import('../types').TokenUsage;
     /** C5: File write hook for sub-agent isolation (mirrors FileToolContext.onBeforeFileWrite) */
     onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
+    /** Resolve search-provider credentials from VS Code SecretStorage. */
+    getWebSearchApiKey?: (provider: Exclude<WebSearchProvider, 'auto' | 'duckduckgo' | 'searxng'>) => Promise<string | undefined>;
 }
 
 // ─── Handler class ───────────────────────────────────────────────────────────
@@ -123,8 +132,39 @@ export interface ExternalToolContext {
 export class ExternalToolHandler {
     private currentTodos: TodoItem[] = [];
     private ignoredCommandTempArtifacts = new Set<string>();
+    private readonly webAccess: WebAccessService;
 
-    constructor(private ctx: ExternalToolContext) {}
+    constructor(private ctx: ExternalToolContext) {
+        this.webAccess = new WebAccessService({
+            getConfig: () => this.getWebAccessConfig(),
+            getApiKey: provider => this.ctx.getWebSearchApiKey?.(provider) ?? Promise.resolve(undefined),
+        });
+    }
+
+    private getWebAccessConfig(): WebAccessConfig {
+        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai.web');
+        const providers = new Set<WebSearchProvider>(['auto', 'openai', 'brave', 'exa', 'tavily', 'serper', 'serpapi', 'searxng', 'duckduckgo']);
+        const modes = new Set<WebAccessMode>(['disabled', 'indexed', 'live']);
+        const contextSizes = new Set<WebSearchContextSize>(['low', 'medium', 'high']);
+        const provider = cfg.get<string>('provider', 'auto') as WebSearchProvider;
+        const mode = cfg.get<string>('mode', 'indexed') as WebAccessMode;
+        const contextSize = cfg.get<string>('contextSize', 'medium') as WebSearchContextSize;
+        const fallbackProviders = cfg.get<string[]>('fallbackProviders', [])
+            .filter((value): value is WebSearchProvider => providers.has(value as WebSearchProvider));
+        return {
+            mode: modes.has(mode) ? mode : 'indexed',
+            provider: providers.has(provider) ? provider : 'auto',
+            fallbackProviders,
+            contextSize: contextSizes.has(contextSize) ? contextSize : 'medium',
+            allowedDomains: cfg.get<string[]>('allowedDomains', []),
+            blockedDomains: cfg.get<string[]>('blockedDomains', []),
+            country: cfg.get<string>('country', '').trim() || undefined,
+            searxngEndpoint: cfg.get<string>('searxngEndpoint', '').trim() || undefined,
+            openaiModel: cfg.get<string>('openaiModel', '').trim() || undefined,
+            cacheTtlMs: cfg.get<number>('cacheTtlMs', 300_000),
+            allowSyntheticProxyAddresses: cfg.get<boolean>('allowSyntheticProxyAddresses', false),
+        };
+    }
 
     private terminateProcessTree(proc: import('child_process').ChildProcess, spawnFn: typeof import('child_process').spawn): void {
         const pid = proc.pid;
@@ -868,103 +908,31 @@ export class ExternalToolHandler {
 
     // ─── webFetch ────────────────────────────────────────────────────────────
 
-    async webFetch(args: { url: string; maxChars?: number }, context?: import('../types').AgentToolContext): Promise<{ content: string; url: string; truncated: boolean }> {
-        const maxChars = Math.min(args.maxChars ?? 8000, 16000);
-
-        if (!args.url.startsWith('http://') && !args.url.startsWith('https://')) {
-            return { content: 'Error: only http/https URLs are supported', url: args.url, truncated: false };
-        }
-
-        try {
-            const urlObj = new URL(args.url);
-            const host = urlObj.hostname;
-            
-            const dns = await import('dns');
-            const { address } = await dns.promises.lookup(host);
-
-            const isLocalIPv4 = /^(127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+)$/.test(address);
-            const isLocalIPv6 = /^(::1|fd[0-9a-f]{2}:.+|fe80::.+)$/i.test(address);
-            
-            if (host === 'localhost' || isLocalIPv4 || isLocalIPv6 || host.endsWith('.local')) {
-                return { content: 'Error: Access to local/internal network addresses via SSRF is prohibited for security reasons.', url: args.url, truncated: false };
-            }
-        } catch (e) {
-            return { content: `Error: DNS resolution failed or Invalid URL format. ${e instanceof Error ? e.message : String(e)}`, url: args.url, truncated: false };
-        }
-
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000);
-            
-            const abortSignal = context?.runnerOptions?.abortSignal;
-            const onParentAbort = () => controller.abort(abortSignal?.reason);
-            if (abortSignal) {
-                if (abortSignal.aborted) throw new Error('Aborted by user');
-                abortSignal.addEventListener('abort', onParentAbort);
-            }
-
-            let response: Response;
-            try {
-                response = await fetch(args.url, {
-                    headers: { 'User-Agent': 'CWTools-AI/1.0 (Stellaris Mod Assistant)' },
-                    signal: controller.signal as any
-                });
-            } finally {
-                clearTimeout(timeoutId);
-                if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
-            }
-            if (!response.ok) {
-                return { content: `HTTP ${response.status}: ${response.statusText}`, url: args.url, truncated: false };
-            }
-
-            const contentType = response.headers.get('content-type') ?? '';
-            let text = await response.text();
-
-            // 🔒 Prevent event loop blocking: limit the original response body size
-            // response.text() itself is asynchronous and will not block, but subsequent synchronous regular processing
-            // Oversized text will exclusively occupy the JS main thread, causing the Extension Host to completely freeze.
-            // Even AbortController and Promise.race timeouts cannot be triggered.
-            const MAX_RAW_BODY = 512_000; // 512KB — Any meaningful web content falls within this range
-            if (text.length > MAX_RAW_BODY) {
-                text = text.substring(0, MAX_RAW_BODY);
-            }
-
-            if (contentType.includes('html')) {
-                // 🔒 HTML regular safety upper limit: 6 full .replace() takes about 1-3ms on 100KB,
-                // But on 5MB it may take 30s+, completely freezing the event loop.
-                const SAFE_REGEX_LIMIT = 100_000;
-                if (text.length > SAFE_REGEX_LIMIT) {
-                    text = text.substring(0, SAFE_REGEX_LIMIT);
-                }
-                text = text
-                    .replace(/<script[\s\S]*?<\/script>/gi, '')
-                    .replace(/<style[\s\S]*?<\/style>/gi, '')
-                    .replace(/<[^>]+>/g, ' ')
-                    .replace(/&nbsp;/g, ' ')
-                    .replace(/&amp;/g, '&')
-                    .replace(/&lt;/g, '<')
-                    .replace(/&gt;/g, '>')
-                    .replace(/&quot;/g, '"')
-                    .replace(/\s{3,}/g, '\n\n')
-                    .trim();
-            }
-
-            const truncated = text.length > maxChars;
-            return {
-                content: truncated ? text.substring(0, maxChars) + '\n... [truncated]' : text,
-                url: args.url,
-                truncated,
-            };
-        } catch (e) {
-            return {
-                content: `Fetch error: ${e instanceof Error ? e.message : String(e)}`,
-                url: args.url,
-                truncated: false,
-            };
-        }
+    async webOpen(args: import('./webAccess').WebOpenArgs, context?: import('../types').AgentToolContext): Promise<Record<string, unknown>> {
+        return this.webAccess.open(args, context?.runnerOptions?.abortSignal);
     }
 
-    // ─── runCommand ──────────────────────────────────────────────────────────
+    async webSearch(args: import('./webAccess').WebSearchArgs, context?: import('../types').AgentToolContext): Promise<import('./webAccess').WebSearchResult> {
+        return this.webAccess.search(args, context?.runnerOptions?.abortSignal);
+    }
+
+    webFind(args: import('./webAccess').WebFindArgs): Record<string, unknown> {
+        return this.webAccess.find(args);
+    }
+
+    resolveWebReference(ref: string): string {
+        return this.webAccess.resolveReference(ref);
+    }
+
+    /** @deprecated Model-visible calls are normalized to web_open. */
+    async webFetch(args: { url: string; maxChars?: number }, context?: import('../types').AgentToolContext): Promise<{ content: string; url: string; truncated: boolean }> {
+        const result = await this.webOpen({ ref: args.url, maxChars: args.maxChars }, context);
+        return {
+            content: typeof result.content === 'string' ? result.content : String(result.error ?? ''),
+            url: typeof result.url === 'string' ? result.url : args.url,
+            truncated: result.truncated === true,
+        };
+    }
 
     async runCommand(args: { command: string; cwd?: string; timeoutMs?: number; background?: boolean; requestEscalation?: boolean; unsandboxed?: boolean; executionMode?: 'captured' | 'terminal'; networkAccess?: boolean; networkHosts?: string[] }, context?: import('../types').AgentToolContext): Promise<{
         stdout: string;
@@ -1549,184 +1517,32 @@ export class ExternalToolHandler {
 
     // ─── searchWeb ───────────────────────────────────────────────────────────
 
+    /** @deprecated Model-visible calls are normalized to web_search. */
     async searchWeb(args: { query: string; maxResults?: number }, context?: import('../types').AgentToolContext): Promise<{
         results: Array<{ title: string; url: string; description: string }>;
         source: 'brave' | 'duckduckgo';
         query: string;
     }> {
-        const maxResults = Math.min(args.maxResults ?? 5, 10);
-        const query = args.query.trim();
-
-        // Try Brave Search API first
-        const braveKey = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('braveSearchApiKey') ?? '';
-        if (braveKey) {
-            try {
-                const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-                const abortSignal = context?.runnerOptions?.abortSignal;
-                const onParentAbort = () => controller.abort(abortSignal?.reason);
-                if (abortSignal) {
-                    if (abortSignal.aborted) throw new Error('Aborted by user');
-                    abortSignal.addEventListener('abort', onParentAbort);
-                }
-
-                let resp: Response;
-                try {
-                    resp = await fetch(url, {
-                        headers: {
-                            'Accept': 'application/json',
-                            'Accept-Encoding': 'gzip',
-                            'X-Subscription-Token': braveKey,
-                        },
-                        signal: controller.signal as any
-                    });
-                } finally {
-                    clearTimeout(timeoutId);
-                    if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
-                }
-                if (resp.ok) {
-                    const data = await resp.json() as {
-                        web?: { results?: Array<{ title: string; url: string; description?: string }> }
-                    };
-                    const results = (data.web?.results ?? []).slice(0, maxResults).map(r => ({
-                        title: r.title,
-                        url: r.url,
-                        description: r.description ?? '',
-                    }));
-                    return { results, source: 'brave', query };
-                }
-            } catch { /* fall through to DuckDuckGo */ }
-        }
-
-        // Fallback: DuckDuckGo HTML scraping
-        try {
-            const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-            const abortSignal = context?.runnerOptions?.abortSignal;
-            const onParentAbort = () => controller.abort(abortSignal?.reason);
-            if (abortSignal) {
-                if (abortSignal.aborted) throw new Error('Aborted by user');
-                abortSignal.addEventListener('abort', onParentAbort);
-            }
-
-            let resp: Response;
-            try {
-                resp = await fetch(ddgUrl, {
-                    headers: { 'User-Agent': 'CWTools-AI/1.0 (Stellaris Mod Assistant)' },
-                    signal: controller.signal as any
-                });
-            } finally {
-                clearTimeout(timeoutId);
-                if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
-            }
-            let html = await resp.text();
-            // 🔒 Prevent event loop blocking: limit DuckDuckGo response body size
-            // Normal search results page < 100KB, but abnormal pages (verification codes/errors) may be larger
-            if (html.length > 200_000) {
-                html = html.substring(0, 200_000);
-            }
-
-            const results: Array<{ title: string; url: string; description: string }> = [];
-            const linkRe = /<a class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/gi;
-            const snippetRe = /<a class="result__snippet"[^>]*>([^<]+)<\/a>/gi;
-            const links: Array<{ url: string; title: string }> = [];
-            const snippets: string[] = [];
-            let m: RegExpExecArray | null;
-            while ((m = linkRe.exec(html)) !== null && links.length < maxResults) {
-                 
-                let url = m[1]!;
-                if (url.startsWith('/l/?uddg=')) {
-                    try { url = decodeURIComponent(url.replace('/l/?uddg=', '')); } catch { /* keep */ }
-                }
-                 
-                links.push({ url, title: m[2]!.trim() });
-            }
-            while ((m = snippetRe.exec(html)) !== null && snippets.length < maxResults) {
-                 
-                snippets.push(m[1]!.trim());
-            }
-            for (let i = 0; i < links.length; i++) {
-                results.push({
-                     
-                    title: links[i]!.title,
-                     
-                    url: links[i]!.url,
-                     
-                    description: snippets[i]! ?? '',
-                });
-            }
-            return { results, source: 'duckduckgo', query };
-        } catch {
-            return { results: [], source: 'duckduckgo', query };
-        }
+        const result = await this.webSearch(args, context);
+        return {
+            results: result.results.map(item => ({ title: item.title, url: item.url, description: item.snippet })),
+            source: result.provider === 'brave' ? 'brave' : 'duckduckgo',
+            query: result.query,
+        };
     }
 
-    // ─── searchCode ────────────────────────────────────────────────────────────
-
+    /** @deprecated Model-visible calls are normalized to web_search with purpose=code. */
     async searchCode(args: { query: string; maxResults?: number }, context?: import('../types').AgentToolContext): Promise<{
         results: Array<{ title: string; url: string; description: string }>;
         source: 'exa' | 'brave';
         query: string;
     }> {
-        const maxResults = Math.min(args.maxResults ?? 5, 10);
-        const query = args.query.trim();
-
-        // Try Exa semantic code search first
-        const exaKey = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('exaApiKey') ?? '';
-        if (exaKey) {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-                const abortSignal = context?.runnerOptions?.abortSignal;
-                const onParentAbort = () => controller.abort(abortSignal?.reason);
-                if (abortSignal) {
-                    if (abortSignal.aborted) throw new Error('Aborted by user');
-                    abortSignal.addEventListener('abort', onParentAbort);
-                }
-
-                let resp: Response;
-                try {
-                    resp = await fetch('https://api.exa.ai/search', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-api-key': exaKey,
-                        },
-                        body: JSON.stringify({
-                            query,
-                            numResults: maxResults,
-                            type: 'auto',
-                            contents: { text: { maxCharacters: 300 } },
-                        }),
-                        signal: controller.signal as any
-                    });
-                } finally {
-                    clearTimeout(timeoutId);
-                    if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
-                }
-                if (resp.ok) {
-                    const data = await resp.json() as {
-                        results?: Array<{ title?: string; url?: string; text?: string }>;
-                    };
-                    const results = (data.results ?? []).slice(0, maxResults).map(r => ({
-                        title: r.title ?? '',
-                        url: r.url ?? '',
-                        description: r.text ?? '',
-                    }));
-                    return { results, source: 'exa', query };
-                }
-            } catch { /* fall through to Brave fallback */ }
-        }
-
-        // Fallback: use Brave Search (or DuckDuckGo) with code-oriented query modifiers
-        const codeQuery = `site:github.com OR site:stackoverflow.com OR site:stellaris.paradoxwikis.com ${query}`;
-        const webResult = await this.searchWeb({ query: codeQuery, maxResults }, context);
-        return { ...webResult, source: 'brave' as const, query };
+        const result = await this.webSearch({ ...args, purpose: 'code' }, context);
+        return {
+            results: result.results.map(item => ({ title: item.title, url: item.url, description: item.snippet })),
+            source: result.provider === 'exa' ? 'exa' : 'brave',
+            query: result.query,
+        };
     }
 
     /** Ensure the topic-scoped media output directory exists and return its path. */

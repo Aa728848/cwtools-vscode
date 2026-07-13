@@ -33,6 +33,7 @@ const TOOL_PHRASES: Record<string, ToolPhraseEntry> = {
     list_directory:            { category: 'read',        icon: '📖', en: 'List directory', zh: '列出目录' },
     glob_files:                { category: 'read',        icon: '📖', en: 'Search files', zh: '搜索文件' },
     search_mod_files:          { category: 'read',        icon: '📖', en: 'Search mod files', zh: '搜索 Mod 文件' },
+    web_find:                 { category: 'read',        icon: '📖', en: 'Find in web page', zh: '在网页中查找' },
     codesearch:                { category: 'read',        icon: '📖', en: 'Code search', zh: '代码搜索' },
 
     edit_file:                 { category: 'write',       icon: '✏️', en: 'Edit file', zh: '编辑文件' },
@@ -54,6 +55,8 @@ const TOOL_PHRASES: Record<string, ToolPhraseEntry> = {
     query_rules:               { category: 'query',       icon: '🔍', en: 'Query rules', zh: '查询规则' },
     query_references:          { category: 'query',       icon: '🔍', en: 'Query references', zh: '查询引用' },
     query_blackboard:          { category: 'query',       icon: '🔍', en: 'Query blackboard', zh: '查询黑板' },
+    web_search:                { category: 'query',       icon: '🔍', en: 'Search web', zh: '搜索网页' },
+    web_open:                  { category: 'query',       icon: '🔍', en: 'Open web page', zh: '打开网页' },
     search_web:                { category: 'query',       icon: '🔍', en: 'Search web', zh: '搜索网页' },
     web_fetch:                 { category: 'query',       icon: '🔍', en: 'Fetch web page', zh: '抓取网页' },
     get_completion_at:         { category: 'query',       icon: '🔍', en: 'Get completion', zh: '获取补全' },
@@ -181,6 +184,7 @@ export function getToolDynamicPhrase(
             }
             return dualPhrase(meta.phrase, locale);
         }
+        case 'web_find':
         case 'codesearch': {
             const query = args.Query ?? args.query ?? args.pattern;
             if (typeof query === 'string') {
@@ -189,6 +193,7 @@ export function getToolDynamicPhrase(
             }
             return dualPhrase(meta.phrase, locale);
         }
+        case 'web_search':
         case 'search_web': {
             const query = args.query ?? args.Query;
             if (typeof query === 'string') {
@@ -197,8 +202,9 @@ export function getToolDynamicPhrase(
             }
             return dualPhrase(meta.phrase, locale);
         }
+        case 'web_open':
         case 'web_fetch': {
-            const url = args.url ?? args.Url;
+            const url = args.ref ?? args.url ?? args.Url;
             if (typeof url === 'string') {
                 const short = truncateStr(url, 60);
                 return zh ? dualPhrase(`抓取 ${short}`, locale) : dualPhrase(`Fetch ${short}`, locale, `Fetching ${short}...`);

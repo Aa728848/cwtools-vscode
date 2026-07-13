@@ -276,7 +276,7 @@ registerWorkflow({
 			'query_definition', 'query_definition_by_name',
 			'get_entity_info', 'query_static_modifiers', 'query_variables',
 			// Web research
-			'web_fetch', 'search_web', 'codesearch',
+			'web_search', 'web_open', 'web_find',
 			// Design output
 			'write_design_blueprint',
 			// Memory
@@ -358,7 +358,7 @@ registerWorkflow({
 			'query_definition', 'query_definition_by_name',
 			'get_entity_info', 'query_static_modifiers', 'query_variables',
 			'find_sprite_candidates', 'find_sound_candidates',
-			'web_fetch', 'search_web', 'codesearch',
+			'web_search', 'web_open', 'web_find',
 			'git_ops',
 		],
 	},

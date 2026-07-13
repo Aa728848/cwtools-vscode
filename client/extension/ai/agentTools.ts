@@ -44,6 +44,8 @@ import { getAgentToolTargetFiles } from './runner/toolScheduler';
 import { buildProfile, resolvePolicy, subjectForEffect, type PolicyPresetId, type PolicyRule } from './runner/policyEngine';
 import { preflightCommand, type ConfiguredCommandPolicyRule } from './runner/commandPreflight';
 import { sessionFileWriteMode, sessionPolicyPreset } from './runner/sessionPermissions';
+import type { ApiKeyManager } from './aiService';
+import { normalizeLegacyWebToolCall, type WebSearchProvider } from './tools/webAccess';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
 const TOOL_TIMEOUTS: Record<string, number> = {
@@ -89,9 +91,9 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     list_directory: 30_000,
     glob_files: 30_000,
     grep: 30_000,
-    web_fetch: 20_000,
-    search_web: 20_000,
-    codesearch: 20_000,
+    web_search: 30_000,
+    web_open: 20_000,
+    web_find: 5_000,
     run_command: 0,
     convert_image_to_dds: 60_000,
     convert_audio: 60_000,
@@ -257,18 +259,21 @@ export class AgentToolExecutor {
     public readonly globalStoragePath?: string;
     public readonly extensionPath?: string;
     public readonly indexService?: IndexService;
+    private readonly apiKeyManager?: ApiKeyManager;
 
     constructor(
         clientOrGetter: LanguageClient | (() => LanguageClient),
         workspaceRoot: string,
         indexService?: IndexService,
         globalStoragePath?: string,
-        extensionPath?: string
+        extensionPath?: string,
+        apiKeyManager?: ApiKeyManager,
     ) {
         this.workspaceRoot = workspaceRoot;
         this.globalStoragePath = globalStoragePath;
         this.extensionPath = extensionPath;
         this.indexService = indexService;
+        this.apiKeyManager = apiKeyManager;
         this.clientGetter = typeof clientOrGetter === 'function'
             ? clientOrGetter
             : () => clientOrGetter;
@@ -312,6 +317,22 @@ export class AgentToolExecutor {
 
     get client(): LanguageClient {
         return this.clientGetter();
+    }
+
+    async getWebSearchApiKey(provider: Exclude<WebSearchProvider, 'auto' | 'duckduckgo' | 'searxng'>): Promise<string | undefined> {
+        const secretId = provider === 'openai' ? 'openai' : `web.${provider}`;
+        const stored = await this.apiKeyManager?.getKey(secretId);
+        const legacyName = provider === 'brave' ? 'braveSearchApiKey' : provider === 'exa' ? 'exaApiKey' : undefined;
+        if (!legacyName) return stored;
+        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
+        const legacy = cfg.get<string>(legacyName, '').trim();
+        if (legacy) {
+            if (!stored) await this.apiKeyManager?.setKey(secretId, legacy);
+            for (const target of [vs.ConfigurationTarget.Global, vs.ConfigurationTarget.Workspace, vs.ConfigurationTarget.WorkspaceFolder]) {
+                try { await cfg.update(legacyName, undefined, target); } catch { /* scope may not exist */ }
+            }
+        }
+        return stored || legacy || undefined;
     }
 
     private queryLocalisationIndex(args: import('./types').QueryLocalisationIndexArgs): import('./types').QueryLocalisationIndexResult {
@@ -422,7 +443,7 @@ export class AgentToolExecutor {
         return this.externalHandler;
     }
 
-    private extractNetworkHosts(args: Record<string, unknown>): string[] {
+    private async extractNetworkHosts(toolName: string, args: Record<string, unknown>): Promise<string[]> {
         const values: string[] = [];
         for (const [key, value] of Object.entries(args)) {
             if (typeof value !== 'string') continue;
@@ -432,6 +453,40 @@ export class AgentToolExecutor {
         for (const value of values) {
             for (const match of value.matchAll(/https?:\/\/([^\s/'"`<>]+)/gi)) {
                 try { hosts.add(new URL(`https://${match[1]}`).hostname.toLowerCase()); } catch { /* malformed URL stays unscoped */ }
+            }
+        }
+        if (toolName === 'web_open' && typeof args.ref === 'string') {
+            try { hosts.add(new URL(this.externalHandler.resolveWebReference(args.ref)).hostname.toLowerCase()); } catch { /* source may no longer be cached */ }
+        }
+        if (toolName === 'web_search') {
+            const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai.web');
+            const selected = cfg.get<WebSearchProvider>('provider', 'auto');
+            const fallback = cfg.get<WebSearchProvider[]>('fallbackProviders', []);
+            const candidates = selected === 'auto'
+                ? [...fallback, 'brave', 'exa', 'tavily', 'serper', 'serpapi', 'searxng', 'duckduckgo'] as const
+                : [selected, ...fallback];
+            const providerHosts: Partial<Record<WebSearchProvider, string>> = {
+                openai: 'api.openai.com',
+                brave: 'api.search.brave.com',
+                exa: 'api.exa.ai',
+                tavily: 'api.tavily.com',
+                serper: 'google.serper.dev',
+                serpapi: 'serpapi.com',
+                duckduckgo: 'html.duckduckgo.com',
+            };
+            for (const provider of Array.from(new Set(candidates))) {
+                if (provider === 'auto') continue;
+                if (provider === 'searxng') {
+                    const endpoint = cfg.get<string>('searxngEndpoint', '').trim();
+                    if (endpoint) try { hosts.add(new URL(endpoint).hostname.toLowerCase()); } catch { /* validated by the web client */ }
+                    continue;
+                }
+                if (selected === 'auto' && provider !== 'duckduckgo') {
+                    const key = await this.getWebSearchApiKey(provider);
+                    if (!key) continue;
+                }
+                const host = providerHosts[provider];
+                if (host) hosts.add(host);
             }
         }
         return [...hosts];
@@ -473,7 +528,7 @@ export class AgentToolExecutor {
             : (gitAction === 'status' || gitAction === 'diff' ? 0 : gitAction === 'checkout' ? 3 : entry.riskLevel);
         const mcpServer = typeof args.server === 'string' ? args.server : undefined;
         const mcpTool = typeof args.tool === 'string' ? args.tool : undefined;
-        const networkHosts = this.extractNetworkHosts(args);
+        const networkHosts = await this.extractNetworkHosts(toolName, args);
         const decision = resolvePolicy({
             toolName,
             subject,
@@ -533,6 +588,21 @@ export class AgentToolExecutor {
     }
 
     async execute(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
+        // Persisted histories may still contain the pre-unification tool names.
+        ({ toolName, args } = normalizeLegacyWebToolCall(toolName, args));
+        if (toolName === 'web_search' || toolName === 'web_open' || toolName === 'web_find') {
+            const webMode = vs.workspace.getConfiguration('stellarisLanguageServices.ai.web')
+                .get<'disabled' | 'indexed' | 'live'>('mode', 'indexed');
+            if (webMode === 'disabled' || (webMode === 'indexed' && toolName !== 'web_search')) {
+                return {
+                    success: false,
+                    error: aiText(
+                        webMode === 'disabled' ? 'Web access is disabled in Agent settings.' : `${toolName} requires live Web access mode.`,
+                        webMode === 'disabled' ? 'Agent 设置中已禁用网页访问。' : `${toolName} 需要“实时”网页访问模式。`,
+                    ),
+                };
+            }
+        }
         // Redirect retired edit tools to the consolidated edit toolset instead of failing
         if (toolName === 'apply_patch' || toolName === 'multi_replace_file_content' || toolName === 'ast_mutate') {
             return {
@@ -878,8 +948,8 @@ export class AgentToolExecutor {
                 result = await this.fileHandler.gitOps(args as any); break; // git ops uses workspace wide state mostly
 
             // - External / agent tools -
-            case 'web_fetch':
-                result = await this.externalHandler.webFetch(args as any, context); break;
+            case 'web_open':
+                result = await this.externalHandler.webOpen(args as any, context); break;
             case 'run_command':
                 result = await this.externalHandler.runCommand(args as any, context); break;
             case 'list_processes':
@@ -890,10 +960,10 @@ export class AgentToolExecutor {
                 result = this.externalHandler.writeProcessStdin(args as any, context); break;
             case 'terminate_process':
                 result = this.externalHandler.terminateProcess(args as any, context); break;
-            case 'search_web':
-                result = await this.externalHandler.searchWeb(args as any, context); break;
-            case 'codesearch':
-                result = await this.externalHandler.searchCode(args as any, context); break;
+            case 'web_search':
+                result = await this.externalHandler.webSearch(args as any, context); break;
+            case 'web_find':
+                result = this.externalHandler.webFind(args as any); break;
             case 'todo_write':
                 result = await this.externalHandler.todoWrite(args as any, context); break;
             // ignore_validation_error - REMOVED: AI must fix errors, not suppress them

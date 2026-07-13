@@ -275,6 +275,13 @@ export class ChatSettingsManager {
             hasKeyMap[p.id] = !!(await this.aiService.getKeyForProvider(p.id));
         }
 
+        await this.migrateLegacyWebSearchKeys();
+        const webConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.web');
+        const webKeys: Partial<Record<'brave' | 'exa' | 'tavily' | 'serper' | 'serpapi', string>> = {};
+        for (const provider of ['brave', 'exa', 'tavily', 'serper', 'serpapi'] as const) {
+            webKeys[provider] = await this.aiService.getKeyManager().getKey(`web.${provider}`) ? '••••••••' : '';
+        }
+
         const current: PanelSettings = {
             provider: config.provider,
             model: config.model,
@@ -296,14 +303,20 @@ export class ChatSettingsManager {
                     ? aiText('No enforced Windows command backend is ready. Install bubblewrap in WSL2, use a Dev Container, configure a verified native helper, or explicitly approve a terminal run.', 'Windows 强制命令后端尚未就绪。请在 WSL2 中安装 bubblewrap、使用开发容器、配置已验证的原生 helper，或明确批准终端运行。')
                     : aiText('No supported OS command sandbox backend is available. Captured commands fail closed.', '没有可用的操作系统命令沙箱后端。捕获命令将安全拒绝。') },
             reasoningEffort: config.reasoningEffort,
-            braveSearchApiKey: (() => {
-                const k = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('braveSearchApiKey') ?? '';
-                return k ? '••••••••' : '';
-            })(),
-            exaApiKey: (() => {
-                const k = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('exaApiKey') ?? '';
-                return k ? '••••••••' : '';
-            })(),
+            webAccess: {
+                mode: webConfig.get<'disabled' | 'indexed' | 'live'>('mode', 'indexed'),
+                provider: webConfig.get<NonNullable<PanelSettings['webAccess']>['provider']>('provider', 'auto'),
+                contextSize: webConfig.get<'low' | 'medium' | 'high'>('contextSize', 'medium'),
+                fallbackProviders: webConfig.get<string[]>('fallbackProviders', []).join(', '),
+                allowedDomains: webConfig.get<string[]>('allowedDomains', []).join(', '),
+                blockedDomains: webConfig.get<string[]>('blockedDomains', []).join(', '),
+                country: webConfig.get<string>('country', ''),
+                searxngEndpoint: webConfig.get<string>('searxngEndpoint', ''),
+                openaiModel: webConfig.get<string>('openaiModel', ''),
+                cacheTtlMs: webConfig.get<number>('cacheTtlMs', 300_000),
+                allowSyntheticProxyAddresses: webConfig.get<boolean>('allowSyntheticProxyAddresses', false),
+                keys: webKeys,
+            },
             inlineCompletion: {
                 enabled: config.inlineCompletion.enabled,
                 provider: config.inlineCompletion.provider,
@@ -429,13 +442,25 @@ export class ChatSettingsManager {
                 await this.clearLegacyApiKeySettings();
             }
         }
-        if (settings.braveSearchApiKey && settings.braveSearchApiKey.trim().length > 0
-            && !settings.braveSearchApiKey.startsWith('•')) {
-            await cfg.update('braveSearchApiKey', settings.braveSearchApiKey.trim(), vs.ConfigurationTarget.Global);
-        }
-        if (settings.exaApiKey && settings.exaApiKey.trim().length > 0
-            && !settings.exaApiKey.startsWith('•')) {
-            await cfg.update('exaApiKey', settings.exaApiKey.trim(), vs.ConfigurationTarget.Global);
+        if (settings.webAccess) {
+            const webCfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai.web');
+            const splitList = (value: string) => Array.from(new Set(value.split(/[\s,;]+/).map(item => item.trim()).filter(Boolean)));
+            await webCfg.update('mode', settings.webAccess.mode, vs.ConfigurationTarget.Global);
+            await webCfg.update('provider', settings.webAccess.provider, vs.ConfigurationTarget.Global);
+            await webCfg.update('contextSize', settings.webAccess.contextSize, vs.ConfigurationTarget.Global);
+            await webCfg.update('fallbackProviders', splitList(settings.webAccess.fallbackProviders), vs.ConfigurationTarget.Global);
+            await webCfg.update('allowedDomains', splitList(settings.webAccess.allowedDomains), vs.ConfigurationTarget.Global);
+            await webCfg.update('blockedDomains', splitList(settings.webAccess.blockedDomains), vs.ConfigurationTarget.Global);
+            await webCfg.update('country', settings.webAccess.country.trim(), vs.ConfigurationTarget.Global);
+            await webCfg.update('searxngEndpoint', settings.webAccess.searxngEndpoint.trim(), vs.ConfigurationTarget.Global);
+            await webCfg.update('openaiModel', settings.webAccess.openaiModel.trim(), vs.ConfigurationTarget.Global);
+            await webCfg.update('cacheTtlMs', Math.max(0, settings.webAccess.cacheTtlMs || 0), vs.ConfigurationTarget.Global);
+            await webCfg.update('allowSyntheticProxyAddresses', settings.webAccess.allowSyntheticProxyAddresses === true, vs.ConfigurationTarget.Global);
+            for (const provider of ['brave', 'exa', 'tavily', 'serper', 'serpapi'] as const) {
+                const key = settings.webAccess.keys?.[provider]?.trim() ?? '';
+                if (key === '__DELETE__') await this.aiService.getKeyManager().deleteKey(`web.${provider}`);
+                else if (key && !key.startsWith('•')) await this.aiService.getKeyManager().setKey(`web.${provider}`, key);
+            }
         }
         // Endpoints are stored per-provider so switching providers cannot leak an
         // endpoint into another provider. The legacy global `endpoint` is retired.
@@ -514,6 +539,35 @@ export class ChatSettingsManager {
 
         vs.window.showInformationMessage(aiText(`${provider.name} API key removed.`, `${provider.name} API Key 已移除。`));
         await this.openSettingsPage(targetSurface);
+    }
+
+    private async migrateLegacyWebSearchKeys(): Promise<void> {
+        const mappings = [
+            { setting: 'braveSearchApiKey', secret: 'web.brave' },
+            { setting: 'exaApiKey', secret: 'web.exa' },
+        ] as const;
+        const keyManager = this.aiService.getKeyManager();
+        const configs: Array<{ config: vs.WorkspaceConfiguration; target: vs.ConfigurationTarget }> = [
+            { config: vs.workspace.getConfiguration('stellarisLanguageServices.ai'), target: vs.ConfigurationTarget.Global },
+            { config: vs.workspace.getConfiguration('stellarisLanguageServices.ai'), target: vs.ConfigurationTarget.Workspace },
+            ...(vs.workspace.workspaceFolders ?? []).map(folder => ({
+                config: vs.workspace.getConfiguration('stellarisLanguageServices.ai', folder.uri),
+                target: vs.ConfigurationTarget.WorkspaceFolder,
+            })),
+        ];
+        for (const mapping of mappings) {
+            let stored = await keyManager.getKey(mapping.secret);
+            for (const { config } of configs) {
+                const legacy = config.get<string>(mapping.setting, '').trim();
+                if (legacy && !stored) {
+                    await keyManager.setKey(mapping.secret, legacy);
+                    stored = legacy;
+                }
+            }
+            await Promise.all(configs.map(async ({ config, target }) => {
+                try { await config.update(mapping.setting, undefined, target); } catch { /* scope may not exist */ }
+            }));
+        }
     }
 
     private async clearLegacyApiKeySettings(): Promise<void> {

@@ -38,9 +38,10 @@ export function getToolMetadata(toolName: string): {
     }
 
     // 2. Network tools
-    if (name === 'web_fetch' || name === 'search_web' || name === 'codesearch') {
+    if (name === 'web_search' || name === 'web_open' || name === 'web_fetch' || name === 'search_web' || name === 'codesearch') {
         return { effect: 'network', riskLevel: 1, concurrencyClass: 'network-limited' };
     }
+    if (name === 'web_find') return { effect: 'workspace_read', riskLevel: 0, concurrencyClass: 'parallel' };
 
     // 3. Command execution (shell)
     if (name === 'run_command' || name === 'dispatch_agents' || name === 'merge_results') {

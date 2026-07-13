@@ -1405,17 +1405,84 @@
                     "default": true,
                     "description": "%configuration.stellarisLanguageServices.ai.enhancedDiagnostics.description%"
                 },
-                "stellarisLanguageServices.ai.braveSearchApiKey": {
+                "stellarisLanguageServices.ai.web.mode": {
                     "scope": "window",
                     "type": "string",
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.braveSearchApiKey.description%"
+                    "enum": ["disabled", "indexed", "live"],
+                    "enumDescriptions": [
+                        "%configuration.stellarisLanguageServices.ai.web.mode.disabled%",
+                        "%configuration.stellarisLanguageServices.ai.web.mode.indexed%",
+                        "%configuration.stellarisLanguageServices.ai.web.mode.live%"
+                    ],
+                    "default": "indexed",
+                    "description": "%configuration.stellarisLanguageServices.ai.web.mode.description%"
                 },
-                "stellarisLanguageServices.ai.exaApiKey": {
+                "stellarisLanguageServices.ai.web.provider": {
+                    "scope": "window",
+                    "type": "string",
+                    "enum": ["auto", "openai", "brave", "exa", "tavily", "serper", "serpapi", "searxng", "duckduckgo"],
+                    "default": "auto",
+                    "description": "%configuration.stellarisLanguageServices.ai.web.provider.description%"
+                },
+                "stellarisLanguageServices.ai.web.fallbackProviders": {
+                    "scope": "window",
+                    "type": "array",
+                    "items": { "type": "string", "enum": ["openai", "brave", "exa", "tavily", "serper", "serpapi", "searxng", "duckduckgo"] },
+                    "default": [],
+                    "description": "%configuration.stellarisLanguageServices.ai.web.fallbackProviders.description%"
+                },
+                "stellarisLanguageServices.ai.web.contextSize": {
+                    "scope": "window",
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                    "default": "medium",
+                    "description": "%configuration.stellarisLanguageServices.ai.web.contextSize.description%"
+                },
+                "stellarisLanguageServices.ai.web.allowedDomains": {
+                    "scope": "window",
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "default": [],
+                    "description": "%configuration.stellarisLanguageServices.ai.web.allowedDomains.description%"
+                },
+                "stellarisLanguageServices.ai.web.blockedDomains": {
+                    "scope": "window",
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "default": [],
+                    "description": "%configuration.stellarisLanguageServices.ai.web.blockedDomains.description%"
+                },
+                "stellarisLanguageServices.ai.web.country": {
                     "scope": "window",
                     "type": "string",
                     "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.exaApiKey.description%"
+                    "description": "%configuration.stellarisLanguageServices.ai.web.country.description%"
+                },
+                "stellarisLanguageServices.ai.web.searxngEndpoint": {
+                    "scope": "window",
+                    "type": "string",
+                    "default": "",
+                    "description": "%configuration.stellarisLanguageServices.ai.web.searxngEndpoint.description%"
+                },
+                "stellarisLanguageServices.ai.web.openaiModel": {
+                    "scope": "window",
+                    "type": "string",
+                    "default": "",
+                    "description": "%configuration.stellarisLanguageServices.ai.web.openaiModel.description%"
+                },
+                "stellarisLanguageServices.ai.web.cacheTtlMs": {
+                    "scope": "window",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 3600000,
+                    "default": 300000,
+                    "description": "%configuration.stellarisLanguageServices.ai.web.cacheTtlMs.description%"
+                },
+                "stellarisLanguageServices.ai.web.allowSyntheticProxyAddresses": {
+                    "scope": "window",
+                    "type": "boolean",
+                    "default": false,
+                    "description": "%configuration.stellarisLanguageServices.ai.web.allowSyntheticProxyAddresses.description%"
                 },
                 "stellarisLanguageServices.ai.imageMagickPath": {
                     "scope": "window",

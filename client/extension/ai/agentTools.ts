@@ -42,7 +42,7 @@ import { TOOL_REGISTRY } from './tools/registry';
 import { runAgentHooks } from './runner/hookRunner';
 import { getAgentToolTargetFiles } from './runner/toolScheduler';
 import { buildProfile, resolvePolicy, subjectForEffect, type PolicyPresetId, type PolicyRule } from './runner/policyEngine';
-import { preflightCommand } from './runner/commandPreflight';
+import { preflightCommand, type ConfiguredCommandPolicyRule } from './runner/commandPreflight';
 import { sessionFileWriteMode, sessionPolicyPreset } from './runner/sessionPermissions';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
@@ -465,10 +465,12 @@ export class AgentToolExecutor {
         const profile = buildProfile(preset, this.workspaceRoot, profileRules);
         const targets = getAgentToolTargetFiles(toolName, args, this.workspaceRoot, context?.runnerOptions?.topicId);
         const command = typeof args.command === 'string' ? args.command : undefined;
-        const commandPreflight = command ? preflightCommand(command) : undefined;
+        const commandRules = cfg.get<ConfiguredCommandPolicyRule[]>('shell.commandRules', []);
+        const commandPreflight = command ? preflightCommand(command, commandRules) : undefined;
         const gitAction = toolName === 'git_ops' && typeof args.action === 'string' ? args.action : undefined;
-        const riskLevel = commandPreflight?.riskLevel
-            ?? (gitAction === 'status' || gitAction === 'diff' ? 0 : gitAction === 'checkout' ? 3 : entry.riskLevel);
+        const riskLevel = commandPreflight
+            ? (commandPreflight.decision === 'allow' ? 0 : commandPreflight.riskLevel)
+            : (gitAction === 'status' || gitAction === 'diff' ? 0 : gitAction === 'checkout' ? 3 : entry.riskLevel);
         const mcpServer = typeof args.server === 'string' ? args.server : undefined;
         const mcpTool = typeof args.tool === 'string' ? args.tool : undefined;
         const networkHosts = this.extractNetworkHosts(args);

@@ -1240,6 +1240,8 @@ describe('agent tool topic artifacts', () => {
 
     afterEach(() => {
         externalTools.useDirectSandboxRunnerForTests(false);
+        stubConfigOverrides = {};
+        PermissionPolicyStore.getInstance().clear();
         cleanupWorkspace(workspaceRoot);
     });
 
@@ -1311,6 +1313,68 @@ describe('agent tool topic artifacts', () => {
         expect(result.exitCode).to.equal(0);
         expect(preflight.networkHosts).to.deep.equal(['example.com']);
         expect(preflight.networkEnforcement).to.equal('declared-only');
+    });
+
+    it('runs ordinary workspace mutations inside the sandbox without an approval prompt', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        let permissionRequests = 0;
+        const result = await handler.runCommand({
+            command: 'node -e "require(\'fs\').writeFileSync(\'sandboxed.txt\', \'ok\')"',
+            timeoutMs: 10_000,
+        }, {
+            ...makeContext('sandboxed-command'),
+            onPermissionRequest: async () => {
+                permissionRequests++;
+                return true;
+            },
+        } as any);
+
+        expect(result.exitCode).to.equal(0);
+        expect(permissionRequests).to.equal(0);
+        expect(fs.readFileSync(path.join(workspaceRoot, 'sandboxed.txt'), 'utf8')).to.equal('ok');
+    });
+
+    it('honors a specific configured allow rule for Git metadata without broad Git approval', async () => {
+        stubConfigOverrides['shell.commandRules'] = [{ prefix: ['git', 'init'], decision: 'allow' }];
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        let permissionRequests = 0;
+        const result = await handler.runCommand({ command: 'git init', timeoutMs: 10_000 }, {
+            ...makeContext('configured-git-rule'),
+            onPermissionRequest: async () => {
+                permissionRequests++;
+                return false;
+            },
+        } as any);
+
+        expect(result.exitCode).to.equal(0);
+        expect(permissionRequests).to.equal(0);
+        expect(fs.existsSync(path.join(workspaceRoot, '.git'))).to.equal(true);
+    });
+
+    it('does not let learned approvals bypass a configured prompt rule', async () => {
+        stubConfigOverrides['shell.commandRules'] = [{ prefix: ['node', '--version'], decision: 'prompt' }];
+        PermissionPolicyStore.getInstance().addRule({
+            tool: 'run_command', commandPrefix: ['node', '--version'], cwdScope: workspaceRoot, riskMax: 3, sessionOnly: true,
+        });
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        let permissionRequested = false;
+        const result = await handler.runCommand({ command: 'node --version' }, {
+            ...makeContext('configured-prompt-rule'),
+            onPermissionRequest: async () => {
+                permissionRequested = true;
+                return false;
+            },
+        } as any);
+
+        expect(permissionRequested).to.equal(true);
+        expect(result.exitCode).to.equal(1);
+    });
+
+    it('rejects destructive commands until an explicit escalation is requested', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const result = await handler.runCommand({ command: 'rm -rf build' }, makeContext('destructive-command'));
+        expect(result.exitCode).to.equal(1);
+        expect(result.stderr).to.include('Prohibited destructive shell operation');
     });
 
     it('rejects run_command working directories outside the workspace boundary', async () => {
@@ -1567,7 +1631,7 @@ describe('agent tool topic artifacts', () => {
         expect(result.stderr).to.not.include('no permission handler configured');
     });
 
-    it('does not let a low-risk permission rule bypass higher-risk command preflight', async () => {
+    it('does not let a low-risk permission rule bypass higher-risk complex-shell preflight', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         const policy = PermissionPolicyStore.getInstance();
         policy.clear();
@@ -1581,7 +1645,7 @@ describe('agent tool topic artifacts', () => {
 
         let permissionRequested = false;
         const result = await handler.runCommand({
-            command: 'node -e "console.log(\'should not auto approve\')"',
+            command: 'node -e "console.log($(pwd))"',
             timeoutMs: 10000,
         }, {
             runnerOptions: {

@@ -5,6 +5,7 @@ describe('CommandPreflight Unit Tests', () => {
         const { preflightCommand } = loadCommandPreflightModule();
         const result = preflightCommand('npm run compile');
         expect(result.riskLevel).to.be.at.most(1);
+        expect(result.decision).to.equal('allow');
         expect(result.requiresEscalation).to.be.false;
     });
 
@@ -42,7 +43,8 @@ describe('CommandPreflight Unit Tests', () => {
         const { preflightCommand } = loadCommandPreflightModule();
         const r = preflightCommand('sed -i s/a/b/ file.txt');
         expect(r.segments[0]!.classification).to.equal('write');
-        expect(r.requiresPermission).to.be.true;
+        expect(r.decision).to.equal('allow');
+        expect(r.requiresPermission).to.be.false;
     });
 
     it('escalates find -delete and find -exec to destructive', () => {
@@ -65,11 +67,21 @@ describe('CommandPreflight Unit Tests', () => {
         }
     });
 
-    it('treats plain rm of a single file as write (permission) but not hard-escalation', () => {
+    it('confines plain rm to the sandbox without escalation', () => {
         const { preflightCommand } = loadCommandPreflightModule();
         const r = preflightCommand('rm stale.txt');
-        expect(r.requiresPermission).to.be.true;
+        expect(r.decision).to.equal('allow');
+        expect(r.requiresPermission).to.be.false;
         expect(r.requiresEscalation).to.be.false;
+    });
+
+    it('treats rm force forms as forbidden even without recursive flags', () => {
+        const { preflightCommand } = loadCommandPreflightModule();
+        for (const command of ['rm -f stale.txt', 'sudo rm -f stale.txt', 'env TEST=1 rm -rf stale']) {
+            const result = preflightCommand(command);
+            expect(result.decision, command).to.equal('forbidden');
+            expect(result.requiresEscalation, command).to.equal(true);
+        }
     });
 
     it('does not classify mutating Git subcommands as read-only', () => {
@@ -112,9 +124,60 @@ describe('CommandPreflight Unit Tests', () => {
             'Get-Content `"$(Write-Output path)`"',
         ]) {
             const result = preflightCommand(command);
+            expect(result.decision, command).to.equal('prompt');
             expect(result.requiresPermission, command).to.equal(true);
             expect(result.segments.some(segment => segment.classification === 'interpreter'), command).to.equal(true);
         }
+    });
+
+    it('parses quoted operators without splitting them into commands', () => {
+        const { parseShellCommandLine } = loadCommandPreflightModule();
+        const parsed = parseShellCommandLine('rg "a|b && c" src | wc -l');
+        expect(parsed.structured).to.equal(true);
+        expect(parsed.segments).to.have.length(2);
+        expect(parsed.segments[0]!.words).to.deep.equal(['rg', 'a|b && c', 'src']);
+    });
+
+    it('allows structured read-only pipelines but prompts for redirection and substitution', () => {
+        const { preflightCommand } = loadCommandPreflightModule();
+        expect(preflightCommand('rg TODO client | wc -l').decision).to.equal('allow');
+        expect(preflightCommand('rg TODO client > results.txt').decision).to.equal('prompt');
+        expect(preflightCommand('echo $(pwd)').decision).to.equal('prompt');
+    });
+
+    it('recursively checks nested shell command bodies', () => {
+        const { preflightCommand } = loadCommandPreflightModule();
+        expect(preflightCommand('bash -lc "ls | wc -l"').decision).to.equal('allow');
+        expect(preflightCommand('bash -lc "rm -rf build"').decision).to.equal('forbidden');
+        expect(preflightCommand('cmd /c "del /f generated.txt"').decision).to.equal('forbidden');
+        expect(preflightCommand('powershell -EncodedCommand SQBFAFgA').decision).to.equal('prompt');
+    });
+
+    it('checks read-only tools for options that execute helpers', () => {
+        const { preflightCommand } = loadCommandPreflightModule();
+        for (const command of ['rg --pre processor TODO .', 'rg --search-zip TODO .']) {
+            const result = preflightCommand(command);
+            expect(result.decision, command).to.equal('prompt');
+            expect(result.segments[0]!.classification, command).to.equal('interpreter');
+        }
+    });
+
+    it('applies configurable token-prefix rules without weakening destructive protections', () => {
+        const { preflightCommand } = loadCommandPreflightModule();
+        const forbidden = preflightCommand('npm publish', [{
+            prefix: ['npm', 'publish'], decision: 'forbidden', justification: 'Publishing is disabled',
+        }]);
+        expect(forbidden.decision).to.equal('forbidden');
+        expect(forbidden.riskLevel).to.equal(3);
+        expect(forbidden.segments[0]!.reason).to.equal('Publishing is disabled');
+
+        const broadInterpreterAllow = preflightCommand('python -c "print(1)"', [{ prefix: ['python'], decision: 'allow' }]);
+        expect(broadInterpreterAllow.segments[0]!.matchedRule).to.equal(undefined);
+        const absoluteBroadAllow = preflightCommand('/usr/bin/python -c "print(1)"', [{ prefix: ['/usr/bin/python'], decision: 'allow' }]);
+        expect(absoluteBroadAllow.segments[0]!.matchedRule).to.equal(undefined);
+
+        const destructive = preflightCommand('rm -rf build', [{ prefix: ['rm', '-rf'], decision: 'allow' }]);
+        expect(destructive.decision).to.equal('forbidden');
     });
 });
 

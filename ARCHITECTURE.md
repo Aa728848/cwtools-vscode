@@ -222,7 +222,7 @@ sequenceDiagram
 | `stepEmitter.ts` | Broadcasts streaming tokens and agent status updates |
 | `toolScheduler.ts` | Concurrency scheduling and target-file lock acquisitions |
 | `toolInvocation.ts` | Normalizes raw LLM actions to validated `ToolInvocation` envelopes with risk metadata |
-| `commandPreflight.ts` | Command string tokenization and risk level auditing for terminal actions |
+| `commandPreflight.ts` | Quote-aware shell sequence parsing plus unified `allow` / `prompt` / `forbidden` command policy decisions |
 | `permissionPolicy.ts` | Resolves low-risk automatic grants and scopes via `cwdScope` |
 | `policyEngine.ts` | Enforced hierarchical permission profiles, protected-path rules, and actionable denials |
 | `autoReviewer.ts` | Optional read-only LLM reviewer with exact-action caching and denial circuit breaking |
@@ -369,7 +369,7 @@ Webviews are completely sandboxed. **Node.js (fs, path) and vscode APIs cannot b
 `PartitionedWriteQueue` serializes edits per file. Multi-file actions acquire locks in dictionary path order to prevent deadlocks.
 
 ##### Command and Permission Boundary
-Every model-visible tool passes the enforced `policyEngine.ts` boundary before its domain handler. `run_command` uses action-sensitive Git and shell preflight classification; approving additional cwd or network scope keeps the OS sandbox enabled, while disabling the sandbox requires a separate explicit `unsandboxed` request. Approved Git-only commands can receive a visible one-shot `.git` metadata override without dropping the rest of the sandbox. Writable workspace binds otherwise re-protect `.git`, `.agents`, `.codex`, and legacy private run-state subdirectories under `.cwtools-ai` while leaving shareable topic artifacts writable. Permission and process work is persisted as `item_started` / `item_updated` / `item_completed` events with stable item ids, and process inspection/control is limited to the owning task thread.
+Every model-visible tool passes the enforced `policyEngine.ts` boundary before its domain handler. `run_command` has one command-policy source of truth: a quote-aware parser accepts plain command sequences, action-sensitive Git/tool classifiers derive `allow` / `prompt` / `forbidden`, and optional ordered-token prefix rules can only refine non-destructive results. Ordinary mutations run inside the OS workspace sandbox without an approval prompt; complex syntax, Git metadata changes, extra cwd/network scope, and explicit policy prompts require approval, while destructive commands require escalation. A specifically configured Git `allow` prefix opens only the matching command's `.git` metadata writes and preserves every other sandbox boundary; broad Git/shell/interpreter allow prefixes are ignored. Approving additional cwd or network scope keeps the OS sandbox enabled, while disabling the sandbox requires a separate explicit `unsandboxed` request. Approved Git-only commands can receive a visible one-shot `.git` metadata override without dropping the rest of the sandbox. Writable workspace binds otherwise re-protect `.git`, `.agents`, `.codex`, and legacy private run-state subdirectories under `.cwtools-ai` while leaving shareable topic artifacts writable. Permission and process work is persisted as `item_started` / `item_updated` / `item_completed` events with stable item ids, and process inspection/control is limited to the owning task thread.
 
 ##### Context Metrics
 `agentRunner.ts` extracts cache hits (`usage.cached_tokens`, etc.) and pricing calculations. The frontend displays these inside a 3-bar sparkline.
@@ -622,7 +622,7 @@ sequenceDiagram
 | `stepEmitter.ts` | 细粒度步骤与 token 增量流式广播 |
 | `toolScheduler.ts` | 按 `concurrencyClass` 调度并发和互斥 |
 | `toolInvocation.ts` | 把模型 tool call 包装为带风险元数据和稳定 ID 的 `ToolInvocation` |
-| `commandPreflight.ts` | `run_command` 命令分词与风险分级 |
+| `commandPreflight.ts` | 引号感知的 Shell 序列解析，以及统一的 `allow` / `prompt` / `forbidden` 命令策略决策 |
 | `permissionPolicy.ts` | 低风险预批准规则和 `cwdScope` 校验 |
 | `policyEngine.ts` | 强制执行的分层权限 profile、受保护路径规则和可操作拒绝 |
 | `autoReviewer.ts` | 可选只读 LLM 审批 reviewer：精确 action 缓存、拒绝熔断、失败回退到用户 |
@@ -692,7 +692,7 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 - `tools/argRepair.ts` 在 Runner 执行工具前修复常见参数名和类型漂移。
 - `runner/toolInvocation.ts` 在执行前归一化 tool call，派生风险元数据，提取目标文件并生成稳定 `invocationId`。
 - `runner/toolScheduler.ts` 根据 `concurrencyClass` 实施并发上限和 per-file-write 互斥；对存在在途写入的文件，读操作经 `writeCoordinator.afterCurrentWrites` 排在其后。`getAgentToolTargetFiles` 同时为 `read_file`/`get_pdx_block`/`get_file_context`/`edit_file` 提取目标路径。
-- `runner/commandPreflight.ts` 对 `run_command` 做风险分级；destructive 或 escalated 命令必须经由用户授权。
+- `runner/commandPreflight.ts` 是 `run_command` 唯一命令判定源：结构化解析普通命令序列，按参数识别 Git/工具行为，输出 `allow` / `prompt` / `forbidden`；破坏性命令必须显式提权，复杂语法和策略 `prompt` 必须审批，普通工作区突变交由 OS 沙箱约束。
 - `planModeGuard.ts` 的 `validateGitOpsForMode` 在 plan/explore/review/script_reviewer/orchestrator/script 等非写入模式下只放行 `status`/`diff` 的 `git_ops`，由 `agentRunner`/`agentTools` 在执行前拦截变更性 action。
 - `runner/permissionPolicy.ts` 的 `cwdScope` 判断使用 `path.relative`，避免前缀绕过。
 - 写工具经由 `PartitionedWriteQueue` 管理；`.yml` 本地化写入必须使用 `write_localisation`。
@@ -1002,7 +1002,7 @@ Webview 与 Extension Host 是完全隔离的运行环境。Webview 运行在受
 
 ##### 权限与命令安全
 
-所有模型可见工具在领域 handler 前先经过强制执行的 `runner/policyEngine.ts`。`run_command` 再由 `runner/commandPreflight.ts` 做 action-sensitive Git/Shell 分类；普通升级只增加获批的 cwd/network scope 并保留操作系统沙箱，纯 Git 命令可在审批卡明确展示后获得单次 `.git` 元数据写入覆盖，只有独立的 `unsandboxed` 请求可以关闭整个沙箱。`runner/permissionPolicy.ts` 用 `path.relative` 做严格的 `cwdScope` 判定，低风险会话规则绑定精确命令前缀。审批与进程统一写入带稳定 Item ID 的 `item_started` / `item_updated` / `item_completed` 事件，进程查看与控制只允许所属任务 Thread。
+所有模型可见工具在领域 handler 前先经过强制执行的 `runner/policyEngine.ts`。`run_command` 再由 `runner/commandPreflight.ts` 统一完成引号感知的 Shell 序列解析、action-sensitive Git/工具分类和 `allow` / `prompt` / `forbidden` 决策；配置项 `ai.shell.commandRules` 支持有序 token 前缀规则，但不能削弱内置破坏性保护，也不会接受 Shell、解释器或 Git 的宽泛 allow 前缀。普通工作区写入在 OS 沙箱内直接执行，复杂语法、Git 元数据变更和额外 cwd/network scope 进入审批，破坏性命令必须显式提权；明确配置的具体 Git allow 前缀只放开匹配命令所需的 `.git` 元数据写入，仍保留其余沙箱边界。普通升级只增加获批的 cwd/network scope 并保留操作系统沙箱，纯 Git 命令可在审批卡明确展示后获得单次 `.git` 元数据写入覆盖，只有独立的 `unsandboxed` 请求可以关闭整个沙箱。`runner/permissionPolicy.ts` 用 `path.relative` 做严格的 `cwdScope` 判定，低风险会话规则绑定精确命令前缀。审批与进程统一写入带稳定 Item ID 的 `item_started` / `item_updated` / `item_completed` 事件，进程查看与控制只允许所属任务 Thread。
 
 ##### 子 Agent 沙盒
 

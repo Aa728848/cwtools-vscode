@@ -43,6 +43,7 @@
             "description": "%capabilities.untrustedWorkspaces.description%",
             "restrictedConfigurations": [
                 "stellarisLanguageServices.ai.developer.disableSecuritySandbox",
+                "stellarisLanguageServices.ai.shell.commandRules",
                 "stellarisLanguageServices.ai.shell.envAllowlistAdditions",
                 "stellarisLanguageServices.ai.hooks.enabled"
             ]
@@ -1108,6 +1109,44 @@
                     ],
                     "default": "workspace-auto",
                     "description": "%configuration.stellarisLanguageServices.ai.policy.preset.description%"
+                },
+                "stellarisLanguageServices.ai.shell.commandRules": {
+                    "scope": "window",
+                    "type": "array",
+                    "default": [],
+                    "description": "%configuration.stellarisLanguageServices.ai.shell.commandRules.description%",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                            "prefix",
+                            "decision"
+                        ],
+                        "properties": {
+                            "prefix": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "description": "%configuration.stellarisLanguageServices.ai.shell.commandRules.prefix.description%"
+                            },
+                            "decision": {
+                                "type": "string",
+                                "enum": [
+                                    "allow",
+                                    "prompt",
+                                    "forbidden"
+                                ],
+                                "description": "%configuration.stellarisLanguageServices.ai.shell.commandRules.decision.description%"
+                            },
+                            "justification": {
+                                "type": "string",
+                                "description": "%configuration.stellarisLanguageServices.ai.shell.commandRules.justification.description%"
+                            }
+                        }
+                    }
                 },
                 "stellarisLanguageServices.ai.maxRetries": {
                     "scope": "window",

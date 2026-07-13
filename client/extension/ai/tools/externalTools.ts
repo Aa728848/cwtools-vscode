@@ -7,7 +7,7 @@ import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { TodoItem, TodoWriteResult } from '../types';
-import { preflightCommand } from '../runner/commandPreflight';
+import { preflightCommand, type ConfiguredCommandPolicyRule } from '../runner/commandPreflight';
 import { PermissionPolicyStore } from '../runner/permissionPolicy';
 import { processRegistry } from '../runner/processRegistry';
 import { BrokeredSandboxRunner, DirectSandboxRunner, detectSandboxBackendAsync, type SandboxRunner } from '../runner/sandboxRunner';
@@ -985,69 +985,11 @@ export class ExternalToolHandler {
         const aliasNormalized = this.normalizeWorkspaceFolderAliasCommand(args.command);
         args.command = aliasNormalized.command;
         const crossWorkspacePathAccess = aliasNormalized.crossWorkspacePathAccess;
-        const DESTRUCTIVE_BLOCKED = [
-            /\brm\s+-[a-z]*r[a-z]*f/i,                          // rm -rf, -Rf, -rdf…
-            /\brm\s+-[a-z]*f[a-z]*r/i,                          // rm -fr, -fdr…
-            /\brm\b(?=[^|]*\s-r\b)(?=[^|]*\s-f\b)/i,            // rm -r … -f (any order)
-            /\brm\b(?=[^|]*--recursive\b)(?=[^|]*--force\b)/i,  // rm --recursive --force
-            /\bdel\s+\/[fqs]/i, /\bformat\b/i,
-            /\brmdir\b.*\/s/i, /\bshutdown\b/i, /\breboot\b/i,
-            /\bmkfs\b/i, /\bshred\b/i, /\bfind\b[^|]*\s-delete\b/i,
-            /\bcurl\b.*\|\s*bash/i, /\bwget\b.*\|\s*sh/i,
-        ];
-        // Inline interpreter commands: not destructive, but should never be auto-approved.
-        // In confirm mode → normal permission prompt; in auto mode → still requires explicit confirmation.
-        const INTERPRETER_INLINE = [/\bnode\b\s+-e/i, /\bpython\b\s+-c/i];
-        const isInterpreterInline = INTERPRETER_INLINE.some(pat => pat.test(args.command));
-        const MODE_BLOCKED: RegExp[] = [];
-        const ALWAYS_BLOCKED = [...DESTRUCTIVE_BLOCKED, ...MODE_BLOCKED];
-        const PIPE_REDIRECT_BLOCKED = [
-            /\|/,               // pipe operator
-            /&&/,               // command chaining
-            /;\s*\S/,           // semicolon followed by next command (allow trailing ;)
-            /\d*>{1,2}\s*\S/,   // output redirect (> file, >> file, 2> err)
-            /</,                // input redirect
-        ];
-        // P2-11: Commands that are inherently read-only skip pipe/redirect checks
-        // (complex safe commands still go through the user permission prompt)
-        const SAFE_COMMAND_PREFIXES = [
-            'git log', 'git status', 'git diff', 'git show',
-            'git stash list', 'git rev-parse',
-            'dotnet --version', 'dotnet --info', 'node --version',
-            'npm list', 'npm ls', 'npm --version', 'npx --version',
-            'cat', 'type', 'echo', 'dir', 'ls', 'grep', 'rg',
-            'wc', 'head', 'tail', 'which', 'where', 'mmx --version',
-            'stat', 'file', 'basename', 'dirname', 'realpath', 'readlink',
-            'printenv', 'cut', 'tr', 'comm', 'column', 'nl', 'tree',
-        ];
-        const cmdLower = args.command.trim().toLowerCase();
-        const startsWithCommandPrefix = (prefix: string) =>
-            cmdLower === prefix || cmdLower.startsWith(`${prefix} `);
-        const isSafePrefix = SAFE_COMMAND_PREFIXES.some(startsWithCommandPrefix);
+        const commandRules = vs.workspace.getConfiguration('stellarisLanguageServices.ai')
+            .get<ConfiguredCommandPolicyRule[]>('shell.commandRules', []);
+        const preflight = preflightCommand(args.command, commandRules);
         const isReadOnlyCommand = this.isReadOnlyRunCommand(args.command);
-        const AUTO_APPROVE_CONTROL_BLOCKED = [
-            /&&/,
-            /;\s*\S/,
-            /\d*>{1,2}\s*\S/,
-            /</,
-            /(^|[^&])&(?!&)/, // single-ampersand shell chaining
-        ];
-        const hasShellControlOperator = AUTO_APPROVE_CONTROL_BLOCKED.some(pat => pat.test(args.command));
-        const SAFE_AUTO_APPROVE_PATTERNS = [
-            /^git\s+(?:log|status|diff|show|rev-parse)(?:\s|$)/i,
-            /^git\s+stash\s+list(?:\s|$)/i,
-            /^git\s+branch(?:\s+(?:--show-current|--list|-a|-r|-v|-vv|--verbose))?(?:\s|$)/i,
-            /^git\s+tag(?:\s+(?:--list|-l))?(?:\s|$)/i,
-            /^git\s+remote(?:\s+(?:-v|show))?(?:\s|$)/i,
-            /^dotnet\s+(?:--version|--info)$/i,
-            /^node\s+--version$/i,
-            /^npm\s+(?:list|ls|--version)(?:\s|$)/i,
-            /^npx\s+--version$/i,
-            /^(?:cat|type|echo|dir|ls|grep|rg|wc|head|tail|which|where|stat|file|basename|dirname|realpath|readlink|printenv|cut|tr|comm|column|nl|tree)(?:\s|$)/i,
-            /^mmx\s+--version$/i,
-        ];
-        const isSingleSafeCommand = !args.command.includes('|') && SAFE_AUTO_APPROVE_PATTERNS.some(pat => pat.test(cmdLower));
-        const isAutoApproveSafeCommand = isReadOnlyCommand || isSingleSafeCommand;
+        const isAutoApproveSafeCommand = preflight.decision === 'allow';
 
         const bypassSandbox = isSecuritySandboxDisabled();
         const directExecution = bypassSandbox || args.unsandboxed === true;
@@ -1086,26 +1028,6 @@ export class ExternalToolHandler {
             };
         }
 
-        if (!bypassSandbox) {
-            let triggeredBlock: RegExp | null = null;
-            for (const pat of ALWAYS_BLOCKED) {
-                if (pat.test(args.command)) { triggeredBlock = pat; break; }
-            }
-            if (!triggeredBlock && !isSafePrefix && !isReadOnlyCommand) {
-                for (const pat of PIPE_REDIRECT_BLOCKED) {
-                    if (pat.test(args.command)) { triggeredBlock = pat; break; }
-                }
-            }
-            
-            if (triggeredBlock) {
-                if (args.requestEscalation) {
-                    escalationReason = aiText(`Sandbox rule matched: ${triggeredBlock.source}`, `触发沙盒规则: ${triggeredBlock.source}`);
-                } else {
-                    return { stdout: '', stderr: `Blocked: Command execution prohibited due to matching safety pattern (${triggeredBlock.source}). If you are ABSOLUTELY sure this is required, you can retry with "requestEscalation": true to ask the user for a one-time privilege override.`, exitCode: 1 };
-                }
-            }
-        }
-
         let cwd: string;
         try {
             const requestedCwd = typeof args.cwd === 'string' && args.cwd.trim()
@@ -1116,7 +1038,7 @@ export class ExternalToolHandler {
 
             if (!cwdResolution.isTrusted && !bypassSandbox) {
                 if (cwdResolution.isWithinAnyWorkspace) {
-                    if (!isAutoApproveSafeCommand) {
+                    if (!isReadOnlyCommand) {
                         escalationReason = escalationReason || aiText('cross-workspace working directory access', '跨工作区工作目录访问');
                     }
                 } else if (args.requestEscalation) {
@@ -1131,15 +1053,16 @@ export class ExternalToolHandler {
 
         args.command = this.relativizeCommandPathsForCwd(args.command, cwd);
 
-        if (crossWorkspacePathAccess && !isAutoApproveSafeCommand && !bypassSandbox) {
+        if (crossWorkspacePathAccess && !isReadOnlyCommand && !bypassSandbox) {
             escalationReason = escalationReason || aiText('cross-workspace path access', '跨工作区路径访问');
         }
 
-        // Preflight shell command segment risk analysis
-        const preflight = preflightCommand(args.command);
         const gitMetadataMutation = preflight.segments.length > 0
-            && preflight.segments.every(segment => /^git(?:\.exe)?\s/i.test(segment.raw))
+            && preflight.segments.every(segment => segment.command === 'git')
             && preflight.segments.some(segment => segment.classification !== 'readonly');
+        const gitMetadataAllowedByRule = gitMetadataMutation
+            && preflight.segments.every(segment => segment.classification === 'readonly'
+                || (!!segment.matchedRule && segment.decision === 'allow'));
         const mutatesProtectedPath = preflight.segments.some(segment => segment.classification !== 'readonly'
             && /(?:^|[\s"'\\/])\.(?:git|agents|codex)(?:$|[\s"'\\/])/i.test(segment.raw));
         if (mutatesProtectedPath && !args.unsandboxed && !bypassSandbox) {
@@ -1167,11 +1090,13 @@ export class ExternalToolHandler {
             { CommandLine: args.command, Cwd: cwd },
             preflight.riskLevel
         );
-        const safeAutoApprove = isAutoApproveSafeCommand && !hasShellControlOperator && !args.requestEscalation && !currentEscalationReason;
+        const safeAutoApprove = isAutoApproveSafeCommand && !args.requestEscalation && !currentEscalationReason;
+        const configuredRuleRequiresPrompt = preflight.segments.some(segment =>
+            !!segment.matchedRule && segment.decision !== 'allow');
         // Command auto-runs only when the tool classifies it as safe or it matches pre-approved session policy.
         // All agent modes share this gate; mode-specific privileges were removed so the
         // approval boundary (learned rules -> auto-review -> user) is the single decision point.
-        let requiresPermission = (isInterpreterInline || !safeAutoApprove) && !approvedByPolicy;
+        let requiresPermission = configuredRuleRequiresPrompt || (!safeAutoApprove && !approvedByPolicy);
         
         // Escalation overrides MUST always prompt user regardless of policy/auto configurations
         if (preflight.requiresEscalation || currentEscalationReason) {
@@ -1182,9 +1107,6 @@ export class ExternalToolHandler {
         // the approval boundary as advertised. One-shot `unsandboxed` calls do
         // not set bypassSandbox and still require their own approval.
         if (bypassSandbox) requiresPermission = false;
-        // Interpreter inline commands (python -c, node -e) always require explicit user permission,
-        // even in auto mode, to prevent silent arbitrary code execution.
-        // let requiresPermission resolved by preflight store above
         const onPermissionRequest = context?.onPermissionRequest;
         let grantedPermissionId: string | undefined;
 
@@ -1346,7 +1268,7 @@ export class ExternalToolHandler {
         // explicit unsandboxed flag (or the persistent full-access setting).
         const workspaceRoots = [...new Set([this.ctx.workspaceRoot, ...(vs.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath)].filter(Boolean))];
         const writableRoots = requestedWritableRoots;
-        const protectedNames = gitMetadataMutation && !!grantedPermissionId
+        const protectedNames = gitMetadataMutation && (!!grantedPermissionId || gitMetadataAllowedByRule)
             ? ['.agents', '.codex']
             : ['.git', '.agents', '.codex'];
         const rootsToProtect = [...new Set([...workspaceRoots, cwd])];
@@ -1377,7 +1299,7 @@ export class ExternalToolHandler {
                 : undefined,
         };
         let commandChangeBaseline: Map<string, CommandFileState> | undefined;
-        const shouldTrackCommandChanges = !(isAutoApproveSafeCommand && !hasShellControlOperator);
+        const shouldTrackCommandChanges = !isReadOnlyCommand;
         if (shouldTrackCommandChanges) {
             try {
                 commandChangeBaseline = await this.collectCommandFileState(!!this.getCommandSnapshotCallback(context));

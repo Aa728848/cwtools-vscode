@@ -1115,19 +1115,16 @@ describe('Orchestrator quality propagation', () => {
         const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
         let fixCalls = 0;
         let reviewCalls = 0;
-        const runner = {
-            toolExecutor: { workspaceRoot: process.cwd() },
-            run: async () => {
-                fixCalls++;
-                return { isValid: true, steps: [], explanation: 'fixed', validationErrors: [], retryCount: 0 };
-            },
-        };
+        const runner = { toolExecutor: { workspaceRoot: process.cwd() } };
         const orchestrator = new Orchestrator(runner as any);
         (orchestrator as any).executor.executeGraph = async () => executionResult();
-        (orchestrator as any).executeSubAgent = async () => ({
-            nodeId: 'loc_sweep', success: true, output: '', writtenFiles: [],
-            tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 }, stepCount: 0,
-        });
+        (orchestrator as any).executeSubAgent = async (node: any) => {
+            if (node.id !== 'loc_sweep') fixCalls++;
+            return {
+                nodeId: node.id, success: true, output: '', writtenFiles: [],
+                tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 }, stepCount: 0,
+            };
+        };
         (orchestrator as any).qualityGate.reviewOutput = async () => gateResult(++reviewCalls >= passOnReview);
         (orchestrator as any).qualityGate.getConfig = () => ({ autoFix: true, maxFixCycles });
         (orchestrator as any).qualityGate.buildFixPrompt = () => 'fix';
@@ -1161,6 +1158,24 @@ describe('Orchestrator quality propagation', () => {
         expect(result.failedNodes).to.include('quality_gate');
         expect(result.qualityGate?.passed).to.equal(false);
         expect(counts()).to.deep.equal({ reviewCalls: 3, fixCalls: 2 });
+    });
+
+    it('does not auto-fix when the reviewer itself failed to complete', async () => {
+        const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
+        const { orchestrator, counts } = makeOrchestrator(3, Number.POSITIVE_INFINITY);
+        (orchestrator as any).qualityGate.reviewOutput = async () => ({
+            ...gateResult(false),
+            operationalFailure: true,
+        });
+        const graph = TaskGraphEngine.createGraph('quality reviewer failure');
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        builder.status = 'done';
+
+        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+
+        expect(result.success).to.equal(false);
+        expect(result.qualityGate?.operationalFailure).to.equal(true);
+        expect(counts()).to.deep.equal({ reviewCalls: 0, fixCalls: 0 });
     });
 });
 
@@ -1250,29 +1265,71 @@ describe('QualityGate', () => {
                 type: 'custom',
             }],
         });
+        let reviewerOptions: any;
+        const reviewSteps: any[] = [];
         const runner = {
             toolExecutor: {
                 workspaceRoot: process.cwd(),
                 execute: async () => ({ totalDiagnosticCount: 0 }),
             },
-            run: async () => ({
-                explanation: '```json\n{"logicIssuesCount":0,"logicIssues":[],"fixSuggestions":[],"acceptanceEvidence":[],"acceptanceFailures":[]}\n```',
-                isValid: true,
-                validationErrors: [],
-                retryCount: 0,
-                steps: [],
-            }),
+            run: async (_prompt: string, _context: any, _history: any[], options: any) => {
+                reviewerOptions = options;
+                return {
+                    explanation: '```json\n{"logicIssuesCount":0,"logicIssues":[],"fixSuggestions":[],"acceptanceEvidence":[],"acceptanceFailures":[]}\n```',
+                    isValid: true,
+                    validationErrors: [],
+                    retryCount: 0,
+                    steps: [],
+                };
+            },
         };
 
         const result = await new QualityGate().reviewOutput(
             runner as any,
             ['package.json'],
-            {},
+            { onStep: step => reviewSteps.push(step) },
             { taskGraph: graph, workspaceRoot: process.cwd() },
         );
 
         expect(result.passed).to.equal(false);
         expect(result.acceptanceFailures[0]).to.include('functional_chain');
+        expect(reviewerOptions.mode).to.equal('script_reviewer');
+        expect(reviewerOptions.useSlimPrompt).to.equal(true);
+        expect(reviewerOptions.maxIterations).to.equal(15);
+        expect(reviewerOptions.skipValidation).to.equal(true);
+        expect(reviewerOptions.abortSignal).to.be.instanceOf(AbortSignal);
+        expect(reviewSteps.map(step => step.type)).to.deep.equal(['subtask_start', 'subtask_complete']);
+        expect(reviewSteps.every(step => step.agentId === 'quality_gate_review')).to.equal(true);
+    });
+
+    it('reviewOutput stops promptly when the parent run is cancelled', async () => {
+        const controller = new AbortController();
+        const runner = {
+            toolExecutor: {
+                workspaceRoot: process.cwd(),
+                execute: async () => ({ totalDiagnosticCount: 0 }),
+            },
+            run: async () => new Promise(() => {}),
+        };
+        const pending = new QualityGate().reviewOutput(
+            runner as any,
+            ['package.json'],
+            { abortSignal: controller.signal },
+        );
+        controller.abort(new Error('parent cancelled'));
+
+        let failure: unknown;
+        try {
+            await Promise.race([
+                pending,
+                new Promise((_, reject) => setTimeout(() => reject(new Error('review cancellation timed out')), 250)),
+            ]);
+        } catch (error) {
+            failure = error;
+        }
+
+        expect(failure).to.be.instanceOf(Error);
+        expect((failure as Error).message).to.equal('parent cancelled');
     });
 
     it('parseReviewResult: 识别失败结果', () => {

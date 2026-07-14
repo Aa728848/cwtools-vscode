@@ -273,45 +273,37 @@ export class Orchestrator {
                     emitStep({ type: 'error', content: ORCHESTRATOR_MSG.QG_FAIL(reviewResult.logicIssues), timestamp: Date.now() });
                     const config = this.qualityGate.getConfig();
                     
-                    if (config.autoFix) {
+                    if (config.autoFix && !reviewResult.operationalFailure) {
                         for (let fixCycle = 0; fixCycle < config.maxFixCycles && !reviewResult.passed; fixCycle++) {
                         emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.AUTOFIX_START, timestamp: Date.now() });
                         
                         const fixPrompt = this.qualityGate.buildFixPrompt(reviewResult.reviewReport, allWrittenFiles);
-                        const fixResult = await this.agentRunner.run(
-                            fixPrompt,
-                            {}, // context
-                            [], // conversationHistory
-                            {
-                                ...options,
-                                mode: 'build', // Force use of build mode for repair
-                                parentRunId: options.parentRunId,
-                                agentId: 'quality_gate_autofix',
-                                threadId: `${options.parentRunId ?? options.topicId ?? 'orchestrator'}/quality_gate_autofix`,
-                                turnId: 'quality_gate_autofix',
-                                skipValidation: true, // Orchestrator already has an independent QualityGate, no need to repeat verification
-                                excludeTools: [ // Maintain consistent security constraints with normal subagents
-                                    'web_search', 'web_open', 'web_find',
-                                    'run_command', 'git_ops',
-
-                                    'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
-                                ],
-                            }
+                        const fixNode: TaskNode = {
+                            id: `quality_gate_autofix_${fixCycle + 1}`,
+                            agentType: 'build',
+                            prompt: fixPrompt,
+                            plannedFiles: [...new Set(allWrittenFiles)],
+                            dependencies: [],
+                            priority: 'critical',
+                            status: 'pending',
+                            retryCount: 0,
+                            maxRetries: 0,
+                            // A targeted repair must not inherit the top-level 10,000-iteration allowance.
+                            maxIterations: 30,
+                        };
+                        const fixResult = await this.executeSubAgent(
+                            fixNode,
+                            this.blackboard,
+                            { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                            options.abortSignal ?? new AbortController().signal,
+                            emitStep,
+                            options,
                         );
-                        for (const step of fixResult.steps ?? []) {
-                            if (!step.toolName || !WRITE_TOOLS.has(step.toolName as AgentToolName) || !step.toolArgs) continue;
-                            const targets = getAgentToolTargetFiles(
-                                step.toolName,
-                                step.toolArgs as Record<string, unknown>,
-                                this.agentRunner.toolExecutor.workspaceRoot,
-                                options.topicId,
-                            );
-                            for (const target of targets) {
-                                if (!allWrittenFiles.includes(target)) allWrittenFiles.push(target);
-                            }
+                        for (const target of fixResult.writtenFiles) {
+                            if (!allWrittenFiles.includes(target)) allWrittenFiles.push(target);
                         }
 
-                        if (fixResult.isValid) {
+                        if (fixResult.success) {
                             emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.AUTOFIX_DONE, timestamp: Date.now() });
                             // Here you can recurse or trigger the review again, but in a simple implementation only execute autoFix once
                         } else {

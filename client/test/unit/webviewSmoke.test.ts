@@ -117,9 +117,12 @@ describe('webview smoke checks', () => {
         expect(css).to.include('.md-mermaid-output svg text');
         expect(css).to.include('.md-mermaid-output svg .node rect');
         expect(css).to.include('.md-mermaid-output svg .flowchart-link');
+        expect(css).to.include('.ap-section-text .md-mermaid-toolbar { pointer-events: auto; }');
         expect(mermaidRenderer).to.include('htmlLabels: false');
         expect(mermaidRenderer).to.include('nodeTextColor');
         expect(mermaidRenderer).to.include('edgeLabelBackground');
+        const annotations = fs.readFileSync(path.join(root, 'client/webview/chat/annotations.ts'), 'utf8');
+        expect(annotations).to.include("target?.closest('button, textarea, input, select, a')");
     });
 
     it('chat sidebar reserves composer height for bottom confirmation cards', () => {

@@ -271,6 +271,8 @@ export interface OrchestratorOptions {
 /** Quality gate test results */
 export interface QualityGateResult {
     passed: boolean;
+    /** Reviewer execution failed or timed out before producing a trustworthy verdict. */
+    operationalFailure?: boolean;
     diagnosticErrors: number;
     logicIssues: number;
     semanticIssues: number;

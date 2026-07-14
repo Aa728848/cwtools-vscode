@@ -6,6 +6,7 @@
 */
 
 import type { QualityGateResult, SubAgentResult, TaskGraph } from './types';
+import type { AgentStep, GenerationResult } from '../types';
 import { aiText } from '../messages';
 import type { RunEventSink } from '../runner/runContext';
 import { SemanticVerifier } from './semanticVerifier';
@@ -23,6 +24,10 @@ const DEFAULT_CONFIG: QualityGateConfig = {
     maxFixCycles: 3,
     autoFix: true,
 };
+
+const QUALITY_GATE_REVIEW_AGENT_ID = 'quality_gate_review';
+const QUALITY_GATE_REVIEW_TIMEOUT_MS = 5 * 60 * 1000;
+const QUALITY_GATE_REVIEW_MAX_ITERATIONS = 15;
 
 export interface QualityGateReviewContext {
     taskGraph?: TaskGraph;
@@ -226,16 +231,142 @@ export class QualityGate {
 
         const prompt = this.buildCombinedReviewPrompt(writtenFiles, preFetchedDiagnostics, reviewContext, semantic.report);
         
-        //Execute Reviewer Agent
-        const reviewResult = await agentRunner.run(
-            prompt,
-            {}, // context
-            [], // conversationHistory
-            {
-                ...options,
-                mode: 'review', // Force censorship mode
+        // Run the hidden post-dispatch reviewer as a real bounded child agent.
+        // Previously it inherited the top-level 10,000-iteration allowance, so
+        // Script Mode could appear stuck after every visible task had completed.
+        const parentAbortSignal = options.abortSignal;
+        const reviewController = new AbortController();
+        const forwardParentAbort = () => reviewController.abort(parentAbortSignal?.reason);
+        if (parentAbortSignal?.aborted) {
+            forwardParentAbort();
+        } else {
+            parentAbortSignal?.addEventListener('abort', forwardParentAbort, { once: true });
+        }
+
+        const reviewTimeout = setTimeout(() => {
+            const error = new Error(aiText(
+                'Quality gate reviewer timed out after 5 minutes.',
+                '质量门审查超过 5 分钟，已终止。',
+            ));
+            error.name = 'TimeoutError';
+            reviewController.abort(error);
+        }, QUALITY_GATE_REVIEW_TIMEOUT_MS);
+
+        const forwardStep = (step: AgentStep) => {
+            options.onStep?.({ ...step, agentId: QUALITY_GATE_REVIEW_AGENT_ID });
+        };
+        let abortListener: (() => void) | undefined;
+        const abortPromise = new Promise<never>((_, reject) => {
+            abortListener = () => {
+                const reason = reviewController.signal.reason;
+                if (reason instanceof Error) {
+                    reject(reason);
+                    return;
+                }
+                const error = new Error(reason ? String(reason) : aiText(
+                    'Quality gate reviewer aborted.',
+                    '质量门审查已中止。',
+                ));
+                error.name = 'AbortError';
+                reject(error);
+            };
+            if (reviewController.signal.aborted) {
+                abortListener();
+            } else {
+                reviewController.signal.addEventListener('abort', abortListener, { once: true });
             }
-        );
+        });
+
+        let reviewResult: GenerationResult;
+        try {
+            forwardStep({
+                type: 'subtask_start',
+                content: aiText('Starting bounded quality gate review', '启动有界质量门审查'),
+                subagentType: 'script_reviewer',
+                timestamp: Date.now(),
+            });
+            const runPromise = agentRunner.run(
+                prompt,
+                {}, // context
+                [], // conversationHistory
+                {
+                    ...options,
+                    mode: 'script_reviewer',
+                    useSlimPrompt: true,
+                    maxIterations: QUALITY_GATE_REVIEW_MAX_ITERATIONS,
+                    skipValidation: true,
+                    agentId: QUALITY_GATE_REVIEW_AGENT_ID,
+                    threadId: `${options.parentRunId ?? options.topicId ?? 'orchestrator'}/${QUALITY_GATE_REVIEW_AGENT_ID}`,
+                    turnId: `${QUALITY_GATE_REVIEW_AGENT_ID}_${Date.now()}`,
+                    abortSignal: reviewController.signal,
+                    onStep: forwardStep,
+                },
+            );
+            reviewResult = await Promise.race([runPromise, abortPromise]);
+            if (parentAbortSignal?.aborted) {
+                throw parentAbortSignal.reason instanceof Error
+                    ? parentAbortSignal.reason
+                    : new Error(parentAbortSignal.reason ? String(parentAbortSignal.reason) : aiText(
+                        'Quality gate review cancelled.',
+                        '质量门审查已取消。',
+                    ));
+            }
+            if (reviewController.signal.aborted || !reviewResult.isValid) {
+                const reason = reviewController.signal.reason;
+                throw reason instanceof Error
+                    ? reason
+                    : new Error(reviewResult.explanation || aiText(
+                        'Quality gate reviewer did not complete successfully.',
+                        '质量门审查未能成功完成。',
+                    ));
+            }
+            forwardStep({
+                type: 'subtask_complete',
+                content: aiText('Review complete', '审查完成'),
+                timestamp: Date.now(),
+            });
+        } catch (error) {
+            if (parentAbortSignal?.aborted) throw error;
+            const message = error instanceof Error ? error.message : String(error);
+            forwardStep({
+                type: 'subtask_complete',
+                content: aiText('Review stopped after timeout or error', '审查因超时或异常终止'),
+                timestamp: Date.now(),
+            });
+            const acceptanceFailures = [...new Set([
+                ...semantic.acceptanceFailures,
+                aiText(
+                    `Quality gate reviewer unavailable: ${message}`,
+                    `质量门审查不可用：${message}`,
+                ),
+            ])];
+            this.eventSink?.appendSoon('quality_gate_decision', {
+                passed: false,
+                operationalFailure: true,
+                diagnosticErrors: diagnosticErrorCount,
+                logicIssues: 0,
+                semanticIssues: semantic.issues.length,
+                acceptanceFailures,
+                filesChecked: writtenFiles,
+                fixSuggestions: [],
+            });
+            return {
+                passed: false,
+                operationalFailure: true,
+                diagnosticErrors: diagnosticErrorCount,
+                logicIssues: 0,
+                semanticIssues: semantic.issues.length,
+                acceptanceFailures,
+                filesChecked: writtenFiles,
+                reviewReport: [semantic.report, message].filter(Boolean).join('\n\n'),
+                semanticReport: semantic.report,
+                fixSuggestions: semantic.issues.map(issue => issue.message),
+            };
+        } finally {
+            clearTimeout(reviewTimeout);
+            parentAbortSignal?.removeEventListener('abort', forwardParentAbort);
+            if (abortListener) reviewController.signal.removeEventListener('abort', abortListener);
+        }
 
         const parsed = this.parseReviewResult(reviewResult.explanation);
         const totalLogicIssues = parsed.logicIssuesCount || 0;

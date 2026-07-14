@@ -238,7 +238,9 @@ function createAnnotationRow(options: {
         event.stopPropagation();
         openInput();
     });
-    row.addEventListener('click', () => {
+    row.addEventListener('click', event => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest('button, textarea, input, select, a')) return;
         if (inputBox.style.display === 'none') openInput();
     });
     inputBox.querySelector('.ap-confirm-btn')!.addEventListener('click', confirmAnnotation);

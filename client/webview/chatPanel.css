@@ -1257,7 +1257,8 @@ body.chat-empty .composer-menu, body.chat-empty .model-menu { top: calc(100% + 6
 .ap-row:hover, .ap-row-active { background: rgba(100,149,237,0.06); }
 .ap-row-annotated { background: rgba(255,200,50,0.05); }
 .ap-section-text { font-size: 12px; line-height: 1.55; color: var(--fg); opacity: 0.9; pointer-events: none; }
-.ap-section-text .md-table-wrap { pointer-events: auto; }
+.ap-section-text .md-table-wrap,
+.ap-section-text .md-mermaid-toolbar { pointer-events: auto; }
 .ap-heading { display: block; margin-bottom: 2px; }
 .ap-h1 { font-size: 13px; color: var(--fg); }
 .ap-h2 { font-size: 12px; opacity: 0.9; }

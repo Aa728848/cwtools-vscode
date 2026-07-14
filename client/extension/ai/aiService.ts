@@ -180,6 +180,8 @@ export class AIService {
     private activeControllers = new Set<AbortController>();
     /** In-memory model override — avoids writing to workspace config (which triggers LS restart) */
     private modelOverride: string | null = null;
+    /** In-memory reasoning override for the active extension session. */
+    private reasoningEffortOverride: AIUserConfig['reasoningEffort'] | null = null;
 
 
     constructor(private context: vs.ExtensionContext) {
@@ -197,6 +199,14 @@ export class AIService {
 
     getModelOverride(): string | null {
         return this.modelOverride;
+    }
+
+    setReasoningEffortOverride(effort: AIUserConfig['reasoningEffort']): void {
+        this.reasoningEffortOverride = effort;
+    }
+
+    getReasoningEffortOverride(): AIUserConfig['reasoningEffort'] | null {
+        return this.reasoningEffortOverride;
     }
 
     private resolveCustomApiFormat(providerId: string, format?: unknown): CustomApiFormat {
@@ -225,7 +235,8 @@ export class AIService {
             requestTimeoutMs: normalizeChatCompletionTimeoutMs(cfg.get<number>('requestTimeoutMs')),
             maxContextTokens: cfg.get<number>('maxContextTokens', 0),
             agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'auto'),
-            reasoningEffort: cfg.get<'low' | 'medium' | 'high' | 'max'>('reasoningEffort', 'high'),
+            reasoningEffort: this.reasoningEffortOverride
+                ?? cfg.get<'low' | 'medium' | 'high' | 'max'>('reasoningEffort', 'high'),
             inlineCompletion: {
                 enabled: cfg.get<boolean>('inlineCompletion.enabled') || false,
                 debounceMs: cfg.get<number>('inlineCompletion.debounceMs', 200),

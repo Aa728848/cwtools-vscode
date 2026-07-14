@@ -19,24 +19,19 @@ export async function routeWebviewMessage(
 ): Promise<void> {
     switch (msg.type) {
         case 'sendMessage':
-            await provider.handleUserMessage(msg.text, msg.images, msg.attachedFiles);
+            await provider.handleComposerSubmission(msg.text, {
+                images: msg.images,
+                attachedFiles: msg.attachedFiles,
+            });
             break;
         case 'steerGeneration':
-            await provider.submitSteerMessage(msg.text, msg.images);
+            await provider.handleComposerSubmission(msg.text, { images: msg.images });
             break;
         case 'sendMessageWithReference': {
-            const referencePrompt = await provider.contextReferences.buildReferencePrompt(msg.contexts);
-            const displayText = msg.text.trim();
-            const agentText = [
-                referencePrompt,
-                msg.text || 'Please use the referenced context above.',
-            ].filter(Boolean).join('\n\n');
-
-            if (provider.isGenerating) {
-                await provider.submitSteerMessage(agentText, msg.images, displayText, msg.contexts);
-            } else {
-                await provider.handleUserMessage(agentText, msg.images, undefined, false, false, false, displayText, msg.contexts);
-            }
+            await provider.handleComposerSubmission(msg.text, {
+                images: msg.images,
+                contexts: msg.contexts,
+            });
             break;
         }
         case 'editAndResendMessage':
@@ -148,11 +143,14 @@ export async function routeWebviewMessage(
         case 'quickChangeModel':
             await provider.settingsManager.quickChangeModel(msg.model);
             break;
+        case 'quickChangeReasoningEffort':
+            await provider.settingsManager.quickChangeReasoningEffort(msg.effort);
+            break;
         case 'quickChangeWriteMode':
             await provider.settingsManager.quickChangeWriteMode(msg.mode);
             break;
         case 'slashCommand':
-            await provider.handleSlashCommand(msg.command);
+            await provider.handleComposerSubmission(msg.command);
             break;
         case 'permissionResponse':
             provider.postMessage({ type: 'floatingCardResolved', card: 'permission', id: msg.permissionId });

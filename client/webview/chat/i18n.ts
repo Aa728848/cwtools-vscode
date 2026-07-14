@@ -9,7 +9,6 @@ export interface ChatI18nText {
     locale: ChatLocale;
     promptExamples: string[];
     modeLabels: Record<string, ChatModeMeta>;
-    slashDescriptions: Record<string, string>;
     artifact: {
         emptyTitle: string;
         emptySubtitle: string;
@@ -236,26 +235,6 @@ const EN: ChatI18nText = {
         orchestrator: { label: 'Multi-Agent Execution - DAG dispatch and parallel collaboration', bodyClass: 'orchestrator-mode' },
         script: { label: 'Script Mode - dynamic PDXScript workflow pipeline', bodyClass: 'script-mode' },
     },
-    slashDescriptions: {
-        '/init': 'Build the project + vanilla semantic knowledge pack and CWTOOLS.md',
-        '/clear': 'Clear the current conversation and start a new topic',
-        '/compact': 'Summarize the active Agent context while keeping the topic transcript',
-        '/goal:': 'Set a durable objective; optionally use /goal:<token-budget>:<objective>',
-        '/goal:complete': 'Mark the current durable goal complete',
-        '/goal:blocked': 'Mark the current durable goal blocked',
-        '/fork': 'Fork the conversation from the current point',
-        '/archive': 'Archive the current topic',
-        '/workflow:list': 'List available AI workflows',
-        '/workflow:save': 'Save the current process as a reusable AI workflow',
-        '/workflow:off': 'Turn off the active AI workflow',
-        '/mode:build': 'Switch to Build mode',
-        '/mode:plan': 'Switch to Plan mode',
-        '/mode:explore': 'Switch to Explore mode',
-        '/mode:utility': 'Switch to Utility mode',
-        '/mode:review': 'Switch to Review mode',
-        '/mode:orchestrator': 'Switch to multi-agent Orchestrator mode',
-        '/mode:script': 'Switch to Script Mode',
-    },
     artifact: {
         emptyTitle: 'No Artifacts',
         emptySubtitle: 'Plans, blueprints, diagnostics, diffs, and walkthroughs will appear here.',
@@ -288,7 +267,7 @@ const EN: ChatI18nText = {
         inlineOff: 'Inline: off',
         writeAuto: 'Auto write',
         writeConfirm: 'Confirm writes',
-        writeAutoReview: 'Auto approve',
+        writeAutoReview: 'Auto review',
         writeFull: 'Full access',
         contextPrefix: 'context',
         mcpUnit: 'MCP',
@@ -523,26 +502,6 @@ const ZH_CN: ChatI18nText = {
         orchestrator: { label: '多 Agent 执行 - DAG 分派与并行协作', bodyClass: 'orchestrator-mode' },
         script: { label: '脚本模式 - 动态流水线并行处理 PDXScript', bodyClass: 'script-mode' },
     },
-    slashDescriptions: {
-        '/init': '构建当前项目与原版游戏的语义知识包，并生成 CWTOOLS.md',
-        '/clear': '清空当前对话，开始新话题',
-        '/compact': '压缩 Agent 活动上下文，同时保留话题聊天记录',
-        '/goal:': '设置持久目标；可用 /goal:<token预算>:<目标>',
-        '/goal:complete': '将当前持久目标标记为完成',
-        '/goal:blocked': '将当前持久目标标记为受阻',
-        '/fork': '从当前位置分叉对话',
-        '/archive': '归档当前话题',
-        '/workflow:list': '列出可用 AI 工作流',
-        '/workflow:save': '保存当前过程为可复用 AI 工作流',
-        '/workflow:off': '关闭当前 AI 工作流',
-        '/mode:build': '切换到构建模式',
-        '/mode:plan': '切换到计划模式',
-        '/mode:explore': '切换到分析模式',
-        '/mode:utility': '切换到泛用模式',
-        '/mode:review': '切换到审查模式',
-        '/mode:orchestrator': '切换到多 Agent 执行模式',
-        '/mode:script': '切换到脚本模式',
-    },
     artifact: {
         emptyTitle: '暂无 Artifacts',
         emptySubtitle: '计划、蓝图、诊断、Diff 和 Walkthrough 会在这里集中出现。',
@@ -575,7 +534,7 @@ const ZH_CN: ChatI18nText = {
         inlineOff: '补全: 关闭',
         writeAuto: '写入自动',
         writeConfirm: '写入确认',
-        writeAutoReview: '自动审批',
+        writeAutoReview: '自动审核',
         writeFull: '完全放行',
         contextPrefix: '上下文',
         mcpUnit: 'MCP',

@@ -147,11 +147,17 @@ ${stylesheetLinks}
 </div>
 
 <div id="floatingCardArea" class="floating-card-area codex-floating-layer"></div>
-<div id="slashPopup" class="slash-popup"></div>
+<div id="slashPopup" class="slash-popup" role="listbox" aria-label="${t('Slash commands', 'Slash 命令')}" aria-hidden="true"></div>
 
 <div class="input-wrapper">
     <div id="composerMenu" class="composer-menu" aria-hidden="true">
+        <button class="composer-menu-item" data-composer-action="media">${svgIconNoMargin('upload')}<span>Media</span></button>
+        <button class="composer-menu-item" data-composer-action="mentions">${svgIconNoMargin('tag')}<span>Mentions</span></button>
+        <button class="composer-menu-item" data-composer-action="workflows">${svgIconNoMargin('sparkles')}<span>Workflows</span></button>
+    </div>
+    <div id="modeMenu" class="composer-menu mode-menu" aria-hidden="true">
         <div class="composer-menu-section">
+            <button class="composer-menu-item" data-mode="build">${svgIconNoMargin('code')}<span>Build</span></button>
             <button class="composer-menu-item" data-mode="plan">${svgIconNoMargin('clipboard')}<span>Plan</span></button>
             <button class="composer-menu-item" data-mode="explore">${svgIconNoMargin('telescope')}<span>Explore</span></button>
             <button class="composer-menu-item" data-mode="utility">${svgIconNoMargin('zap')}<span>Utility</span></button>
@@ -159,24 +165,20 @@ ${stylesheetLinks}
             <button class="composer-menu-item" data-mode="orchestrator">${svgIconNoMargin('gitBranch')}<span>Orchestrator</span></button>
             <button class="composer-menu-item" data-mode="script">${svgIconNoMargin('code')}<span>Script</span></button>
         </div>
-        <div class="composer-menu-divider"></div>
-        <button class="composer-menu-item" data-composer-action="media">${svgIconNoMargin('upload')}<span>Media</span></button>
-        <button class="composer-menu-item" data-composer-action="mentions">${svgIconNoMargin('tag')}<span>Mentions</span></button>
-        <button class="composer-menu-item" data-composer-action="workflows">${svgIconNoMargin('sparkles')}<span>Workflows</span></button>
     </div>
     <div id="modelMenu" class="model-menu" aria-hidden="true">
         <div class="model-menu-title">Model</div>
         <div id="modelMenuList" class="model-menu-list"></div>
     </div>
     <div id="writeModeMenu" class="model-menu write-mode-menu" aria-hidden="true">
-        <div class="model-menu-title" id="writeModeMenuTitle">${t('Write mode', '写入模式')}</div>
+        <div class="model-menu-title" id="writeModeMenuTitle">${t('Permission profile', '权限配置')}</div>
         <div id="writeModeMenuList" class="model-menu-list"></div>
     </div>
     <div class="input-container">
         <div class="file-badge-area" id="fileBadgeArea"></div>
         <div class="image-preview-area" id="imagePreviewArea"></div>
         <div class="input-row">
-            <div id="input" class="composer-input" contenteditable="true" data-placeholder="${t('Describe what you need... (/ for commands)', '描述你的需求... (/ 输入命令)')}" role="textbox" aria-multiline="true" aria-label="${t('Send a message to AI', '向 AI 发送消息')}"></div>
+            <div id="input" class="composer-input" contenteditable="true" data-placeholder="${t('Describe what you need... (/ for commands)', '描述你的需求... (/ 输入命令)')}" role="textbox" aria-multiline="true" aria-label="${t('Send a message to AI', '向 AI 发送消息')}" aria-controls="slashPopup" aria-expanded="false"></div>
         </div>
         <div id="tokenUsageBar" class="composer-token-usage" style="display:none">
             <div class="token-usage-bar"><div class="token-usage-fill" id="tokenUsageFill" style="width:0%"></div></div>
@@ -184,9 +186,20 @@ ${stylesheetLinks}
         </div>
         <div class="input-controls">
             <div class="composer-toolbar">
-                <button class="composer-add-btn" id="composerAddBtn" title="Add context or mode" aria-label="Add context or mode">${svgIconNoMargin('plus')}</button>
-                <button class="composer-model-trigger" id="quickModelTrigger" title="Select model" aria-haspopup="listbox" aria-expanded="false">
-                    <span id="quickModelLabel">Model</span>
+                <button class="composer-add-btn" id="composerAddBtn" title="${t('Add context', '添加上下文')}" aria-label="${t('Add context', '添加上下文')}">${svgIconNoMargin('plus')}</button>
+                <select class="hidden-composer-select" id="quickWriteModeSelect" title="${t('Permission profile', '权限配置')}" aria-hidden="true" tabindex="-1">
+                    <option value="confirm">${t('Confirm writes', '确认写入')}</option>
+                    <option value="auto" selected>${t('Auto writes', '自动写入')}</option>
+                    <option value="auto_review">${t('Auto review', '自动审核')}</option>
+                    <option value="full">${t('Full access', '完全放行')}</option>
+                </select>
+                <button class="composer-model-trigger composer-write-mode-trigger" id="quickWriteModeTrigger" title="${t('Permission profile', '权限配置')}" aria-haspopup="listbox" aria-expanded="false">
+                    <span class="composer-trigger-icon" aria-hidden="true">${svgIconNoMargin('shield')}</span>
+                    <span id="quickWriteModeLabel">${t('Auto write', '自动写入')}</span>
+                    <span class="composer-chevron" aria-hidden="true">v</span>
+                </button>
+                <button class="composer-model-trigger composer-mode-trigger" id="quickModeTrigger" title="${t('Switch mode', '切换模式')}" aria-haspopup="listbox" aria-expanded="false">
+                    <span id="quickModeLabel">${t('Build', '构建')}</span>
                     <span class="composer-chevron" aria-hidden="true">v</span>
                 </button>
                 <div class="composer-chip-row" id="composerChipRow"></div>
@@ -202,17 +215,19 @@ ${stylesheetLinks}
                 <select class="hidden-composer-select" id="quickModelSelect" title="${t('Current model', '当前模型')}" aria-hidden="true" tabindex="-1"></select>
                 <button class="hidden-composer-action" id="imgPickBtn" title="${t('Upload image', '上传图片')}" aria-hidden="true" tabindex="-1"></button>
             </div>
-            <select class="hidden-composer-select" id="quickWriteModeSelect" title="${t('Permission profile', '权限配置')}" aria-hidden="true" tabindex="-1">
-                <option value="confirm">${t('Confirm writes', '确认写入')}</option>
-                <option value="auto" selected>${t('Auto writes', '自动写入')}</option>
-                <option value="auto_review">${t('Auto approve', '自动审批')}</option>
-                <option value="full">${t('Full access', '完全放行')}</option>
-            </select>
-            <button class="composer-model-trigger composer-write-mode-trigger" id="quickWriteModeTrigger" title="${t('Permission profile', '权限配置')}" aria-haspopup="listbox" aria-expanded="false">
-                <span id="quickWriteModeLabel">${t('Auto write', '自动写入')}</span>
-                <span class="composer-chevron" aria-hidden="true">v</span>
-            </button>
-            <button class="send-btn" id="sendBtn" title="${t('Send (Enter)', '发送 (Enter)')}" aria-label="${t('Send message', '发送消息')}">↑</button>
+            <div class="composer-submit-controls">
+                <button class="composer-model-trigger" id="quickModelTrigger" title="${t('Select model', '选择模型')}" aria-haspopup="listbox" aria-expanded="false">
+                    <span id="quickModelLabel">Model</span>
+                    <span class="composer-chevron" aria-hidden="true">v</span>
+                </button>
+                <select class="composer-reasoning-select" id="quickReasoningEffort" title="${t('Reasoning effort', '推理强度')}" aria-label="${t('Reasoning effort', '推理强度')}">
+                    <option value="low">${t('Low', '低')}</option>
+                    <option value="medium">${t('Medium', '中')}</option>
+                    <option value="high">${t('High', '高')}</option>
+                    <option value="max">${t('Max', '极高')}</option>
+                </select>
+                <button class="send-btn" id="sendBtn" title="${t('Send (Enter)', '发送 (Enter)')}" aria-label="${t('Send message', '发送消息')}" disabled>↑</button>
+            </div>
         </div>
     </div>
 </div>
@@ -389,7 +404,7 @@ ${stylesheetLinks}
                     </select>
                 </div>
                 <div class="settings-row" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                    <span class="settings-toggle-label">${t('Auto-review approvals', '自动审批评审 (Auto-review)')}</span>
+                    <span class="settings-toggle-label">${t('Auto-review approval requests', '自动审核审批请求 (Auto-review)')}</span>
                     <label class="toggle-switch"><input type="checkbox" id="approvalsAutoReview"><span class="toggle-track"></span></label>
                 </div>
                 <div class="settings-hint">${t('When enabled, a read-only reviewer model approves most commands first. Unclear, escalated, or destructive actions still ask you.', '开启后由只读评审模型先行审批大部分命令；拿不准、升级请求或破坏性操作仍会询问用户。')}</div>

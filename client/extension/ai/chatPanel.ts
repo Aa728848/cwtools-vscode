@@ -44,7 +44,7 @@ import { AgentSessionCoordinator } from './agentSessionCoordinator';
 import { runLedger, type AgentRunEvent } from './runner/runLedger';
 import { AgentRuntime } from './runner/agentRuntime';
 import { PermissionPolicyStore, deriveCommandPrefix, hasInlineEvalPayload } from './runner/permissionPolicy';
-import { sessionApprovalsReviewer } from './runner/sessionPermissions';
+import { getSessionPermissionMode, sessionApprovalsReviewer } from './runner/sessionPermissions';
 import type { RuntimeItem } from './runner/runtimeItems';
 import { isSecuritySandboxDisabled } from './workspaceSandbox';
 import { AutoReviewer } from './runner/autoReviewer';
@@ -56,6 +56,12 @@ import { getWorkflowUiLabels } from './workflowI18n';
 import { buildModeRoutingPrompt, inferBuildModeRoute, parseModelRouteResponse } from './modeRouting';
 import { computeLineDiff } from './diffEngine';
 import { budgetToolResult } from './contextBudget';
+import {
+    getSlashCommandDescriptors,
+    resolveSlashCommand,
+    suggestSlashCommands,
+    type ResolvedSlashCommand,
+} from './slashCommands';
 import {
     getAiStorageRoot,
     getProjectWorkspaceRoot,
@@ -144,6 +150,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private _managerDisposables: vs.Disposable[] = [];
     private readonly pendingRunSnapshotTimers = new Map<string, ReturnType<typeof setTimeout>>();
     private readonly lastRunSnapshotSentAt = new Map<string, number>();
+    private readonly queuedSlashCommands: string[] = [];
+    private flushingSlashCommands = false;
     public topicManager!: ChatTopicManager;
     public settingsManager!: ChatSettingsManager;
     public contextReferences: ContextReferenceManager;
@@ -245,6 +253,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         this.pendingRunSnapshotTimers.clear();
         this.lastRunSnapshotSentAt.clear();
+        this.queuedSlashCommands.length = 0;
     }
 
     resolveWebviewView(
@@ -291,6 +300,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         // 2. Restore current mode
         send({ type: 'setMode', mode: this.currentMode });
+        send({ type: 'slashCommandList', commands: getSlashCommandDescriptors(vs.env.language) });
         // 3. If a generation was running when the panel was hidden, replay steps
         //    so the user can see what the AI has done so far and cancel if needed
         if (replayLiveSteps && this._isGenerating && this._liveSteps.length > 0) {
@@ -488,6 +498,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }
         };
         send({ type: 'setMode', mode: this.currentMode });
+        send({ type: 'slashCommandList', commands: getSlashCommandDescriptors(vs.env.language) });
         if (this.artifactStore.size > 0) {
             send({ type: 'artifactList', artifacts: this.artifactStore.list() });
         }
@@ -798,16 +809,74 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return true;
     }
 
-    public async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], _skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[]): Promise<void> {
-        if (!text.trim() && (!images || images.length === 0)) return;
-
-        if (this._isGenerating) {
-            await this.submitSteerMessage(text, images, displayText, contexts);
+    public async handleComposerSubmission(
+        text: string,
+        payload: { images?: string[]; attachedFiles?: string[]; contexts?: ContextItem[] } = {},
+    ): Promise<void> {
+        const trimmed = text.trim();
+        if (trimmed.startsWith('/')) {
+            const attachmentCount = (payload.images?.length ?? 0)
+                + (payload.attachedFiles?.length ?? 0)
+                + (payload.contexts?.length ?? 0);
+            if (attachmentCount > 0) {
+                this.emitSlashCommandResult(
+                    trimmed,
+                    'error',
+                    aiText(
+                        'Slash commands cannot run with images, files, or context references attached. Remove the attachments and try again.',
+                        'Slash 命令不能携带图片、文件或上下文引用。请移除附件后重试。',
+                    ),
+                );
+                return;
+            }
+            await this.handleSlashCommand(trimmed);
             return;
         }
 
+        if (payload.contexts && payload.contexts.length > 0) {
+            const referencePrompt = await this.contextReferences.buildReferencePrompt(payload.contexts);
+            const displayText = trimmed;
+            const agentText = [
+                referencePrompt,
+                text || 'Please use the referenced context above.',
+            ].filter(Boolean).join('\n\n');
+            await this.handleUserMessage(
+                agentText,
+                payload.images,
+                payload.attachedFiles,
+                false,
+                false,
+                false,
+                displayText,
+                payload.contexts,
+            );
+            return;
+        }
+
+        await this.handleUserMessage(text, payload.images, payload.attachedFiles);
+    }
+
+    public async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], _skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[]): Promise<void> {
+        if (!text.trim() && (!images || images.length === 0)) return;
+
         if (text.trim().startsWith('/')) {
+            if ((images?.length ?? 0) > 0 || (_attachedFiles?.length ?? 0) > 0 || (contexts?.length ?? 0) > 0) {
+                this.emitSlashCommandResult(
+                    text.trim(),
+                    'error',
+                    aiText(
+                        'Slash commands cannot run with images, files, or context references attached. Remove the attachments and try again.',
+                        'Slash 命令不能携带图片、文件或上下文引用。请移除附件后重试。',
+                    ),
+                );
+                return;
+            }
             await this.handleSlashCommand(text.trim());
+            return;
+        }
+
+        if (this._isGenerating) {
+            await this.submitSteerMessage(text, images, displayText, contexts);
             return;
         }
 
@@ -1087,22 +1156,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.currentRunId = undefined;
             this._isGenerating = false;
             this._liveSteps = [];
+            void this.flushQueuedSlashCommands();
         }
     }
 
     private async sendUserMessagePayload(text: string, images?: string[], contexts?: ContextItem[]): Promise<void> {
-        if (contexts && contexts.length > 0) {
-            const referencePrompt = await this.contextReferences.buildReferencePrompt(contexts);
-            const displayText = text.trim();
-            const agentText = [
-                referencePrompt,
-                text || 'Please use the referenced context above.',
-            ].filter(Boolean).join('\n\n');
-            await this.handleUserMessage(agentText, images, undefined, false, false, false, displayText, contexts);
-            return;
-        }
-
-        await this.handleUserMessage(text, images);
+        await this.handleComposerSubmission(text, { images, contexts });
     }
 
     public async editAndResendMessage(messageIndex: number, text: string, images?: string[], contexts?: ContextItem[]): Promise<void> {
@@ -2198,73 +2257,281 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.pendingDiffTempFiles.clear();
     }
 
-    /**
-     * Handle slash commands from the WebView e.g. /clear, /fork, /mode:build, /init.
-     */
+    private emitSlashCommandResult(
+        command: string,
+        status: 'success' | 'error' | 'queued' | 'needsInput',
+        message: string,
+        uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu',
+    ): void {
+        this.postMessage({ type: 'slashCommandResult', command, status, message, uiAction });
+    }
+
+    /** Parse and dispatch every slash-command entry path through the same Host boundary. */
     public async handleSlashCommand(command: string): Promise<void> {
-        const cmd = command.trim().toLowerCase();
-        if (cmd === 'clear' || cmd === '/clear') {
-            this.startNewTopic();
-        } else if (cmd === 'compact' || cmd === '/compact') {
-            const result = await this.agentRunner.compactActiveHistory(this.conversationMessages, {
-                mode: this.currentMode,
-                model: this.aiService.getConfig().model || undefined,
-            }, step => {
-                if (step.compactionInfo) this.postMessage({ type: 'contextCompactionStatus', step });
-            });
-            if (result.compacted && this.topicManager.currentTopic?.id) {
-                const topicId = this.topicManager.currentTopic.id;
-                const latestRun = this.currentRunId
-                    ? undefined
-                    : await runLedger.loadLatestRunForTopic(topicId).catch(() => undefined);
-                void this.agentRuntime.compactThread(topicId, topicId, this.currentRunId ?? latestRun?.runId).catch(() => undefined);
-            }
-            vs.window.showInformationMessage(result.compacted ? UI.CONTEXT_COMPACTED : UI.CONTEXT_COMPACT_EMPTY);
-        } else if (cmd.startsWith('goal:') || cmd.startsWith('/goal:')) {
-            const topicId = this.topicManager.currentTopic?.id;
-            if (!topicId) {
-                void vs.window.showInformationMessage(aiText('Start a topic before setting a durable goal.', '请先开始一个话题，再设置持久目标。'));
+        const resolved = resolveSlashCommand(command);
+        if (!resolved) {
+            const suggestions = suggestSlashCommands(command, vs.env.language);
+            const suffix = suggestions.length > 0
+                ? aiText(
+                    ` Did you mean ${suggestions.map(item => item.command).join(', ')}?`,
+                    ` 你是否想输入 ${suggestions.map(item => item.command).join('、')}？`,
+                )
+                : '';
+            this.emitSlashCommandResult(
+                command,
+                'error',
+                aiText(`Unknown slash command: ${command}.${suffix}`, `未知 Slash 命令：${command}。${suffix}`),
+            );
+            return;
+        }
+
+        if (resolved.definition.argumentMode === 'required' && !resolved.argument) {
+            const hint = getSlashCommandDescriptors(vs.env.language)
+                .find(item => item.command === resolved.definition.command)?.argumentHint;
+            this.emitSlashCommandResult(
+                resolved.raw,
+                'needsInput',
+                aiText(
+                    `This command needs an argument. Usage: ${resolved.definition.command}${hint ? ` ${hint}` : ''}`,
+                    `此命令需要参数。用法：${resolved.definition.command}${hint ? ` ${hint}` : ''}`,
+                ),
+            );
+            return;
+        }
+
+        if (this._isGenerating) {
+            if (resolved.definition.duringRun === 'deny') {
+                this.emitSlashCommandResult(
+                    resolved.raw,
+                    'error',
+                    aiText(
+                        `${resolved.definition.command} cannot run while the Agent is working. Wait for completion or cancel the run first.`,
+                        `Agent 正在运行时不能执行 ${resolved.definition.command}。请等待完成或先取消当前运行。`,
+                    ),
+                );
                 return;
             }
-            const value = command.trim().replace(/^\//, '').slice('goal:'.length).trim();
-            if (value.toLowerCase() === 'complete' || value.toLowerCase() === 'blocked') {
-                const status = value.toLowerCase() === 'complete' ? 'completed' : 'blocked';
-                const updated = await this.agentRuntime.updateGoal(topicId, topicId, status);
-                void vs.window.showInformationMessage(updated
-                    ? aiText(`Durable goal marked ${updated.status}.`, `持久目标已标记为${updated.status === 'completed' ? '完成' : '受阻'}。`)
-                    : aiText('No durable goal exists for this topic.', '当前话题没有持久目标。'));
-            } else if (value) {
+            if (resolved.definition.duringRun === 'queue') {
+                this.queuedSlashCommands.push(resolved.raw);
+                this.emitSlashCommandResult(
+                    resolved.raw,
+                    'queued',
+                    aiText(
+                        `${resolved.definition.command} was queued and will run after the current Agent turn.`,
+                        `${resolved.definition.command} 已排队，将在当前 Agent 轮次结束后执行。`,
+                    ),
+                );
+                return;
+            }
+        }
+
+        await this.executeSlashCommandSafely(resolved);
+    }
+
+    private async executeSlashCommandSafely(resolved: ResolvedSlashCommand): Promise<void> {
+        try {
+            await this.executeSlashCommand(resolved);
+        } catch (error) {
+            ErrorReporter.warn(SOURCE.CHAT_PANEL, `Failed to execute slash command '${resolved.raw}'.`, error);
+            this.emitSlashCommandResult(
+                resolved.raw,
+                'error',
+                aiText(
+                    `Failed to execute ${resolved.definition.command}. Check the extension log for details.`,
+                    `${resolved.definition.command} 执行失败，请查看扩展日志了解详情。`,
+                ),
+            );
+        }
+    }
+
+    private async flushQueuedSlashCommands(): Promise<void> {
+        if (this.flushingSlashCommands || this._isGenerating || this.queuedSlashCommands.length === 0) return;
+        this.flushingSlashCommands = true;
+        try {
+            while (!this._isGenerating && this.queuedSlashCommands.length > 0) {
+                const raw = this.queuedSlashCommands.shift()!;
+                const resolved = resolveSlashCommand(raw);
+                if (!resolved) continue;
+                await this.executeSlashCommandSafely(resolved);
+            }
+        } finally {
+            this.flushingSlashCommands = false;
+        }
+    }
+
+    private async executeSlashCommand(resolved: ResolvedSlashCommand): Promise<void> {
+        const { definition, raw, argument } = resolved;
+        const modeByCommand: Partial<Record<typeof definition.id, AgentMode>> = {
+            modeBuild: 'build',
+            modePlan: 'plan',
+            modeExplore: 'explore',
+            modeUtility: 'utility',
+            modeReview: 'review',
+            modeOrchestrator: 'orchestrator',
+            modeScript: 'script',
+        };
+        const targetMode = modeByCommand[definition.id];
+        if (targetMode) {
+            this.switchMode(targetMode);
+            this.emitSlashCommandResult(
+                raw,
+                'success',
+                aiText(`Mode switched to ${targetMode}.`, `已切换到 ${targetMode} 模式。`),
+            );
+            return;
+        }
+
+        switch (definition.id) {
+            case 'clear':
+                this.startNewTopic();
+                this.emitSlashCommandResult(raw, 'success', aiText('Started a new topic.', '已开始新话题。'));
+                return;
+            case 'compact': {
+                const result = await this.agentRunner.compactActiveHistory(this.conversationMessages, {
+                    mode: this.currentMode,
+                    model: this.aiService.getConfig().model || undefined,
+                }, step => {
+                    if (step.compactionInfo) this.postMessage({ type: 'contextCompactionStatus', step });
+                });
+                if (result.compacted && this.topicManager.currentTopic?.id) {
+                    const topicId = this.topicManager.currentTopic.id;
+                    const latestRun = this.currentRunId
+                        ? undefined
+                        : await runLedger.loadLatestRunForTopic(topicId).catch(() => undefined);
+                    void this.agentRuntime.compactThread(topicId, topicId, this.currentRunId ?? latestRun?.runId).catch(() => undefined);
+                }
+                this.emitSlashCommandResult(raw, 'success', result.compacted ? UI.CONTEXT_COMPACTED : UI.CONTEXT_COMPACT_EMPTY);
+                return;
+            }
+            case 'goal':
+            case 'goalComplete':
+            case 'goalBlocked': {
+                const topicId = this.topicManager.currentTopic?.id;
+                if (!topicId) {
+                    this.emitSlashCommandResult(raw, 'error', aiText('Start a topic before setting a durable goal.', '请先开始一个话题，再设置持久目标。'));
+                    return;
+                }
+                const value = definition.id === 'goalComplete'
+                    ? 'complete'
+                    : definition.id === 'goalBlocked'
+                        ? 'blocked'
+                        : argument.trim();
+                const normalized = value.toLowerCase();
+                if (normalized === 'show' || normalized === 'status') {
+                    const goal = await this.agentRuntime.getGoal(topicId, topicId);
+                    this.emitSlashCommandResult(
+                        raw,
+                        goal ? 'success' : 'error',
+                        goal
+                            ? aiText(
+                                `Goal: ${goal.objective} · ${goal.status}${goal.tokenBudget ? ` · budget ${goal.tokenBudget}` : ''}`,
+                                `目标：${goal.objective} · ${goal.status}${goal.tokenBudget ? ` · 预算 ${goal.tokenBudget}` : ''}`,
+                            )
+                            : aiText('No durable goal exists for this topic.', '当前话题没有持久目标。'),
+                    );
+                    return;
+                }
+                if (normalized === 'complete' || normalized === 'blocked') {
+                    const status = normalized === 'complete' ? 'completed' : 'blocked';
+                    const updated = await this.agentRuntime.updateGoal(topicId, topicId, status);
+                    this.emitSlashCommandResult(
+                        raw,
+                        updated ? 'success' : 'error',
+                        updated
+                            ? aiText(`Durable goal marked ${updated.status}.`, `持久目标已标记为${updated.status === 'completed' ? '完成' : '受阻'}。`)
+                            : aiText('No durable goal exists for this topic.', '当前话题没有持久目标。'),
+                    );
+                    return;
+                }
                 const budgetMatch = value.match(/^(\d+)\s*:\s*(.+)$/s);
                 const objective = budgetMatch?.[2]?.trim() || value;
                 const tokenBudget = budgetMatch?.[1] ? Number(budgetMatch[1]) : undefined;
                 await this.agentRuntime.setGoal(topicId, topicId, objective, tokenBudget);
-                void vs.window.showInformationMessage(aiText('Durable goal saved for this topic.', '已为当前话题保存持久目标。'));
+                this.emitSlashCommandResult(raw, 'success', aiText('Durable goal saved for this topic.', '已为当前话题保存持久目标。'));
+                return;
             }
-        } else if (cmd.startsWith('mode:') || cmd.startsWith('/mode:')) {
-            const mode = cmd.split(':')[1] as AgentMode;
-            if (mode === 'general') {
-                this.switchMode('utility');
-            } else if (['build', 'plan', 'explore', 'utility', 'review', 'orchestrator', 'script'].includes(mode)) {
-                this.switchMode(mode);
+            case 'workflowOff':
+                this.switchWorkflow(null);
+                this.emitSlashCommandResult(raw, 'success', aiText('AI workflow turned off.', '已关闭 AI 工作流。'));
+                return;
+            case 'workflowList':
+                this.sendWorkflowState();
+                this.emitSlashCommandResult(raw, 'success', aiText('Workflow list refreshed.', '工作流列表已刷新。'));
+                return;
+            case 'workflowSave':
+                await this.saveWorkflowFromSlash(argument ? `/workflow:save:${argument}` : '/workflow:save');
+                this.emitSlashCommandResult(raw, 'success', aiText('Workflow save request completed.', '工作流保存请求已完成。'));
+                return;
+            case 'workflowSelect': {
+                const workflow = getWorkflow(argument);
+                if (!workflow) {
+                    this.emitSlashCommandResult(raw, 'error', aiText(`Unknown AI workflow: ${argument}`, `未知 AI 工作流：${argument}`));
+                    return;
+                }
+                this.switchWorkflow(workflow.id);
+                this.emitSlashCommandResult(raw, 'success', aiText(`Workflow selected: ${workflow.title}`, `已选择工作流：${workflow.title}`));
+                return;
             }
-        } else if (cmd === 'workflow:none' || cmd === '/workflow:none' || cmd === 'workflow:off' || cmd === '/workflow:off') {
-            this.switchWorkflow(null);
-        } else if (cmd === 'workflow:list' || cmd === '/workflow:list') {
-            this.sendWorkflowState();
-        } else if (cmd === 'workflow:save' || cmd === '/workflow:save' || cmd.startsWith('workflow:save:') || cmd.startsWith('/workflow:save:')) {
-            await this.saveWorkflowFromSlash(command);
-        } else if (cmd.startsWith('workflow:') || cmd.startsWith('/workflow:')) {
-            this.switchWorkflow(cmd.split(':')[1]);
-        } else if (cmd === 'fork' || cmd === '/fork') {
-            if (this.topicManager.currentTopic && this.topicManager.currentTopic.messages.length > 0) {
-                this.forkTopic(this.topicManager.currentTopic.id, this.topicManager.currentTopic.messages.length - 1);
+            case 'fork': {
+                const topic = this.topicManager.currentTopic;
+                if (!topic || topic.messages.length === 0) {
+                    this.emitSlashCommandResult(raw, 'error', aiText('There is no conversation to fork.', '当前没有可分叉的对话。'));
+                    return;
+                }
+                this.forkTopic(topic.id, topic.messages.length - 1);
+                this.emitSlashCommandResult(raw, 'success', aiText('Conversation forked.', '对话已分叉。'));
+                return;
             }
-        } else if (cmd === 'archive' || cmd === '/archive') {
-            if (this.topicManager.currentTopic) {
-                this.archiveTopic(this.topicManager.currentTopic.id);
+            case 'archive': {
+                const topic = this.topicManager.currentTopic;
+                if (!topic) {
+                    this.emitSlashCommandResult(raw, 'error', aiText('There is no topic to archive.', '当前没有可归档的话题。'));
+                    return;
+                }
+                this.archiveTopic(topic.id);
+                this.emitSlashCommandResult(raw, 'success', aiText('Topic archived.', '话题已归档。'));
+                return;
             }
-        } else if (cmd === 'init' || cmd === '/init') {
-            await this.generateInitFile();
+            case 'init': {
+                const success = await this.generateInitFile();
+                this.emitSlashCommandResult(
+                    raw,
+                    success ? 'success' : 'error',
+                    success
+                        ? aiText('CWTOOLS.md and the project knowledge pack were generated.', '已生成 CWTOOLS.md 与项目知识包。')
+                        : aiText('Project initialization did not complete.', '项目初始化未完成。'),
+                );
+                return;
+            }
+            case 'status': {
+                const config = this.aiService.getConfig();
+                const configuredReviewer = vs.workspace.getConfiguration('stellarisLanguageServices.ai')
+                    .get<'user' | 'auto_review'>('approvals.reviewer', 'user');
+                const permission = getSessionPermissionMode(getProjectWorkspaceRoot())
+                    ?? (isSecuritySandboxDisabled()
+                        ? 'full'
+                        : config.agentFileWriteMode === 'confirm'
+                            ? 'confirm'
+                            : configuredReviewer === 'auto_review' ? 'auto_review' : 'auto');
+                this.emitSlashCommandResult(
+                    raw,
+                    'success',
+                    aiText(
+                        `Model ${config.model || '(not set)'} · reasoning ${config.reasoningEffort} · mode ${this.currentMode} · workflow ${this.currentWorkflowId || 'off'} · permissions ${permission}`,
+                        `模型 ${config.model || '（未设置）'} · 推理 ${config.reasoningEffort} · 模式 ${this.currentMode} · 工作流 ${this.currentWorkflowId || '关闭'} · 权限 ${permission}`,
+                    ),
+                );
+                return;
+            }
+            case 'model':
+                this.emitSlashCommandResult(raw, 'success', aiText('Choose a model.', '请选择模型。'), 'openModelMenu');
+                return;
+            case 'reasoning':
+                this.emitSlashCommandResult(raw, 'success', aiText('Choose a reasoning effort.', '请选择推理强度。'), 'openReasoningMenu');
+                return;
+            case 'permissions':
+                this.emitSlashCommandResult(raw, 'success', aiText('Choose a permission profile.', '请选择权限配置。'), 'openPermissionsMenu');
+                return;
         }
     }
 
@@ -2293,7 +2560,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         await this.handleUserMessage(prompt, undefined, undefined, true, false, false, visibleCommand);
     }
 
-    private async generateInitFile(): Promise<void> {
+    private async generateInitFile(): Promise<boolean> {
         const result = await generateInitFile(
             (msg) => this.postMessage(msg),
             (filePath) => this._recordFileSnapshot(filePath),
@@ -2302,6 +2569,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (result.success) {
             this.agentRunner.clearPromptCache();
         }
+        return result.success;
     }
 
 

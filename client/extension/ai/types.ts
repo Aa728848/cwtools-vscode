@@ -2,6 +2,8 @@
  * CWTools AI Module — Core Type Definitions
  */
 
+import type { SlashCommandDescriptor } from './slashCommands';
+
 // ─── Agent Modes ─────────────────────────────────────────────────────────────
 
 /**
@@ -1983,6 +1985,7 @@ export type WebViewMessage =
     | { type: 'confirmWriteFile'; messageId: string }
     | { type: 'cancelWriteFile'; messageId: string }
     | { type: 'quickChangeModel'; model: string }
+    | { type: 'quickChangeReasoningEffort'; effort: 'low' | 'medium' | 'high' | 'max' }
     | { type: 'quickChangeWriteMode'; mode: 'confirm' | 'auto' | 'auto_review' | 'full' }
     | { type: 'slashCommand'; command: string }
     | { type: 'permissionResponse'; permissionId: string; decision?: PermissionDecision; allowed?: boolean; alwaysAllow?: boolean }
@@ -2038,6 +2041,8 @@ export type HostMessage =
     | { type: 'modeChanged'; mode: AgentMode; label?: string }
     | { type: 'workflowList'; workflows: Array<{ id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }>; currentWorkflowId?: string | null; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
     | { type: 'workflowChanged'; workflowId?: string | null; workflow?: { id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
+    | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
+    | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
     | { type: 'todoUpdate'; todos: TodoItem[] }
     | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[] }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }

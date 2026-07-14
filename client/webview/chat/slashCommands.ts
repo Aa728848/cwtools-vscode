@@ -2,50 +2,68 @@ import { escapeHtml } from './formatters';
 import { getWorkflowSlashCommand, type WorkflowView } from './workflows';
 
 export interface SlashCommandView {
-    cmd: string;
-    desc: string;
+    command: string;
+    description: string;
+    argumentHint?: string;
+    argumentMode: 'none' | 'optional' | 'required';
+    completion: 'execute' | 'insert';
+    duringRun: 'immediate' | 'queue' | 'deny';
+    risk: 'safe' | 'stateful' | 'destructive';
+    category: 'session' | 'goal' | 'mode' | 'workflow' | 'configuration';
 }
 
-const BASE_SLASH_COMMANDS = [
-    '/init',
-    '/clear',
-    '/compact',
-    '/goal:',
-    '/goal:complete',
-    '/goal:blocked',
-    '/fork',
-    '/archive',
-    '/workflow:list',
-    '/workflow:save',
-    '/workflow:off',
-    '/mode:build',
-    '/mode:plan',
-    '/mode:explore',
-    '/mode:utility',
-    '/mode:review',
-    '/mode:orchestrator',
-    '/mode:script',
-];
-
 export function buildSlashCommands(
-    descriptions: Record<string, string>,
-    workflows: WorkflowView[]
+    hostCommands: SlashCommandView[],
+    workflows: WorkflowView[],
 ): SlashCommandView[] {
-    const base = BASE_SLASH_COMMANDS.map(cmd => ({ cmd, desc: descriptions[cmd] ?? cmd }));
     const workflowCommands = workflows.map(workflow => ({
-        cmd: getWorkflowSlashCommand(workflow.id),
-        desc: workflow.description || workflow.title,
+        command: getWorkflowSlashCommand(workflow.id),
+        description: workflow.description || workflow.title,
+        argumentMode: 'none' as const,
+        completion: 'execute' as const,
+        duringRun: 'immediate' as const,
+        risk: 'safe' as const,
+        category: 'workflow' as const,
     }));
-    return [...base, ...workflowCommands];
+    const unique = new Map<string, SlashCommandView>();
+    for (const command of [...hostCommands, ...workflowCommands]) {
+        unique.set(command.command.toLowerCase(), command);
+    }
+    return [...unique.values()];
+}
+
+/** Return the command-token filter, or null once the user has started entering arguments. */
+export function getSlashCommandFilter(input: string): string | null {
+    const trimmedStart = input.trimStart();
+    if (!trimmedStart.startsWith('/')) return null;
+    const firstLine = trimmedStart.split(/\r?\n/, 1)[0] ?? '';
+    if (/\s/.test(firstLine)) return null;
+    return firstLine;
 }
 
 export function filterSlashCommands(commands: SlashCommandView[], filter: string): SlashCommandView[] {
     const query = filter.toLowerCase();
-    return commands.filter(command => command.cmd.toLowerCase().includes(query));
+    return commands
+        .map((command, originalIndex) => {
+            const candidate = command.command.toLowerCase();
+            const score = candidate === query
+                ? 0
+                : candidate.startsWith(query)
+                    ? 10 + candidate.length - query.length
+                    : candidate.includes(query)
+                        ? 100 + candidate.indexOf(query)
+                        : Number.POSITIVE_INFINITY;
+            return { command, originalIndex, score };
+        })
+        .filter(item => Number.isFinite(item.score))
+        .sort((a, b) => a.score - b.score || a.originalIndex - b.originalIndex)
+        .map(item => item.command);
 }
 
-export function renderSlashCommandItems(commands: SlashCommandView[]): string {
-    return commands.map(command =>
-        `<div class="slash-popup-item" data-cmd="${escapeHtml(command.cmd)}"><span class="slash-popup-cmd">${escapeHtml(command.cmd)}</span><span class="slash-popup-desc">${escapeHtml(command.desc)}</span></div>`
-    ).join('');
+export function renderSlashCommandItems(commands: SlashCommandView[], selectedIndex = 0): string {
+    return commands.map((command, index) => {
+        const meta = command.argumentHint || (command.duringRun === 'queue' ? 'queue' : '');
+        const selected = index === selectedIndex;
+        return `<button type="button" id="slash-option-${index}" class="slash-popup-item${selected ? ' selected' : ''}" role="option" aria-selected="${selected ? 'true' : 'false'}" data-index="${index}" data-command="${escapeHtml(command.command)}"><span class="slash-popup-cmd">${escapeHtml(command.command)}</span><span class="slash-popup-desc">${escapeHtml(command.description)}</span>${meta ? `<span class="slash-popup-meta">${escapeHtml(meta)}</span>` : ''}</button>`;
+    }).join('');
 }

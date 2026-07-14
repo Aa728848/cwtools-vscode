@@ -44,7 +44,13 @@ import {
 } from './chat/topicViews';
 import { getChatI18n } from './chat/i18n';
 import { applyModeUi } from './chat/modes';
-import { buildSlashCommands, filterSlashCommands, renderSlashCommandItems } from './chat/slashCommands';
+import {
+    buildSlashCommands,
+    filterSlashCommands,
+    getSlashCommandFilter,
+    renderSlashCommandItems,
+    type SlashCommandView,
+} from './chat/slashCommands';
 import { type WorkflowView } from './chat/workflows';
 import { createMarkdownRenderer } from './chat/markdown';
 import { startMermaidRendering } from './chat/mermaidRenderer';
@@ -319,9 +325,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let artifacts: ArtifactRecord[] = [];
     let artifactFilter: ArtifactFilter = 'all';
     let workflows: WorkflowView[] = [];
+    let slashCommandCatalog: SlashCommandView[] = [];
     let activeWorkflowId: string | null = null;
     let quickModelOptions: string[] = [];
     let quickModelCurrent = '';
+    let quickReasoningEffort: 'low' | 'medium' | 'high' | 'max' = 'high';
     let quickWriteMode: 'confirm' | 'auto' | 'auto_review' | 'full' = 'auto';
     let fullAccessArmedUntil = 0;
     /** Last known host-side cwtools.ai.developer.disableSecuritySandbox value (the 'full' tier). */
@@ -1202,6 +1210,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         caret.collapse(true);
         setInputRange(caret);
         autoResizeInput();
+        updateSendButtonState();
     }
 
     function normalizePastedText(text: string): string {
@@ -1212,6 +1221,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         input.textContent = text;
         placeCaretAtEnd(input);
         autoResizeInput();
+        updateSendButtonState();
     }
 
     function appendInputText(text: string, separator = '') {
@@ -1225,6 +1235,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         activeContexts = [];
         savedInputRange = null;
         autoResizeInput();
+        updateSendButtonState();
     }
 
     // ── Side-Workspace Tab system ─────────────────────────────────────────────
@@ -1404,7 +1415,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         messageIndexMap.get(session.messageIndex)?.classList.remove('editing');
         inlineEditSession = null;
         closeAtPopup();
-        slashPopup?.classList.remove('show');
+        setSlashPopupOpen(false);
         if (focusBubble) session.bubble.focus();
     }
 
@@ -1540,7 +1551,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             });
             activeComposerEl = input;
             closeAtPopup();
-            slashPopup?.classList.remove('show');
+            setSlashPopupOpen(false);
         };
 
         textEditor.addEventListener('keydown', e => {
@@ -1562,7 +1573,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         textEditor.addEventListener('input', () => {
             const v = getInputText();
             if (v.startsWith('/') && v.length > 0) showSlashPopup(v);
-            else slashPopup?.classList.remove('show');
+            else setSlashPopupOpen(false);
             const mentionFilter = getMentionFilterBeforeCaret();
             if (mentionFilter !== null) showAtPopup(mentionFilter);
             else closeAtPopup();
@@ -1993,6 +2004,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
     });
     input.addEventListener('keydown', e => {
+        if (handleSlashPopupKeydown(e)) return;
         if (_atPopupVisible && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === 'Tab' || e.key === 'Escape')) {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -2089,7 +2101,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             const mode = item.dataset.mode;
             if (!mode) return;
             const label = getModeChipLabel(mode);
-            const text = item.querySelector('span');
+            const text = item.querySelector('span:last-child');
             if (text) text.textContent = label;
             item.title = label;
         });
@@ -2098,22 +2110,30 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         modeSelector?.querySelectorAll<HTMLOptionElement>('option').forEach(option => {
             option.textContent = getModeChipLabel(option.value);
         });
+        const quickModeLabel = document.getElementById('quickModeLabel');
+        if (quickModeLabel) quickModeLabel.textContent = getModeChipLabel(currentMode);
     }
 
     function closeComposerMenus() {
         const composerMenu = document.getElementById('composerMenu');
+        const modeMenu = document.getElementById('modeMenu');
         const modelMenu = document.getElementById('modelMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
+        const quickModeTrigger = document.getElementById('quickModeTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
         composerMenu?.classList.remove('show');
         composerMenu?.setAttribute('aria-hidden', 'true');
+        modeMenu?.classList.remove('show');
+        modeMenu?.setAttribute('aria-hidden', 'true');
         modelMenu?.classList.remove('show');
         modelMenu?.setAttribute('aria-hidden', 'true');
         writeModeMenu?.classList.remove('show');
         writeModeMenu?.setAttribute('aria-hidden', 'true');
         composerAddBtn?.classList.remove('active');
+        quickModeTrigger?.classList.remove('active');
+        quickModeTrigger?.setAttribute('aria-expanded', 'false');
         quickModelTrigger?.classList.remove('active');
         quickModelTrigger?.setAttribute('aria-expanded', 'false');
         quickWriteModeTrigger?.classList.remove('active');
@@ -2122,9 +2142,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function setComposerMenuOpen(open: boolean) {
         const composerMenu = document.getElementById('composerMenu');
+        const modeMenu = document.getElementById('modeMenu');
         const modelMenu = document.getElementById('modelMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
+        const quickModeTrigger = document.getElementById('quickModeTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
         composerMenu?.classList.toggle('show', open);
@@ -2132,22 +2154,40 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         composerAddBtn?.classList.toggle('active', open);
         if (open) positionComposerMenus();
         if (open) {
+            modeMenu?.classList.remove('show');
+            modeMenu?.setAttribute('aria-hidden', 'true');
             modelMenu?.classList.remove('show');
             modelMenu?.setAttribute('aria-hidden', 'true');
             writeModeMenu?.classList.remove('show');
             writeModeMenu?.setAttribute('aria-hidden', 'true');
             quickModelTrigger?.classList.remove('active');
             quickModelTrigger?.setAttribute('aria-expanded', 'false');
+            quickModeTrigger?.classList.remove('active');
+            quickModeTrigger?.setAttribute('aria-expanded', 'false');
             quickWriteModeTrigger?.classList.remove('active');
             quickWriteModeTrigger?.setAttribute('aria-expanded', 'false');
         }
     }
 
+    function setModeMenuOpen(open: boolean) {
+        const modeMenu = document.getElementById('modeMenu');
+        const quickModeTrigger = document.getElementById('quickModeTrigger');
+        if (!modeMenu || !quickModeTrigger) return;
+        closeComposerMenus();
+        modeMenu.classList.toggle('show', open);
+        modeMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        quickModeTrigger.classList.toggle('active', open);
+        quickModeTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) positionComposerMenus();
+    }
+
     function setModelMenuOpen(open: boolean) {
         const composerMenu = document.getElementById('composerMenu');
+        const modeMenu = document.getElementById('modeMenu');
         const modelMenu = document.getElementById('modelMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
+        const quickModeTrigger = document.getElementById('quickModeTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
         modelMenu?.classList.toggle('show', open);
@@ -2158,9 +2198,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (open) {
             composerMenu?.classList.remove('show');
             composerMenu?.setAttribute('aria-hidden', 'true');
+            modeMenu?.classList.remove('show');
+            modeMenu?.setAttribute('aria-hidden', 'true');
             writeModeMenu?.classList.remove('show');
             writeModeMenu?.setAttribute('aria-hidden', 'true');
             composerAddBtn?.classList.remove('active');
+            quickModeTrigger?.classList.remove('active');
+            quickModeTrigger?.setAttribute('aria-expanded', 'false');
             quickWriteModeTrigger?.classList.remove('active');
             quickWriteModeTrigger?.setAttribute('aria-expanded', 'false');
         }
@@ -2168,9 +2212,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function setWriteModeMenuOpen(open: boolean) {
         const composerMenu = document.getElementById('composerMenu');
+        const modeMenu = document.getElementById('modeMenu');
         const modelMenu = document.getElementById('modelMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
+        const quickModeTrigger = document.getElementById('quickModeTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
         writeModeMenu?.classList.toggle('show', open);
@@ -2181,9 +2227,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (open) {
             composerMenu?.classList.remove('show');
             composerMenu?.setAttribute('aria-hidden', 'true');
+            modeMenu?.classList.remove('show');
+            modeMenu?.setAttribute('aria-hidden', 'true');
             modelMenu?.classList.remove('show');
             modelMenu?.setAttribute('aria-hidden', 'true');
             composerAddBtn?.classList.remove('active');
+            quickModeTrigger?.classList.remove('active');
+            quickModeTrigger?.setAttribute('aria-expanded', 'false');
             quickModelTrigger?.classList.remove('active');
             quickModelTrigger?.setAttribute('aria-expanded', 'false');
         }
@@ -2193,9 +2243,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (!inputWrapper) return;
         const wrapperRect = inputWrapper.getBoundingClientRect();
         const composerMenu = document.getElementById('composerMenu') as HTMLElement | null;
+        const modeMenu = document.getElementById('modeMenu') as HTMLElement | null;
         const modelMenu = document.getElementById('modelMenu') as HTMLElement | null;
         const writeModeMenu = document.getElementById('writeModeMenu') as HTMLElement | null;
         const composerAddBtn = document.getElementById('composerAddBtn') as HTMLElement | null;
+        const quickModeTrigger = document.getElementById('quickModeTrigger') as HTMLElement | null;
         const quickModelTrigger = document.getElementById('quickModelTrigger') as HTMLElement | null;
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger') as HTMLElement | null;
 
@@ -2209,6 +2261,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         };
 
         positionMenu(composerMenu, composerAddBtn);
+        positionMenu(modeMenu, quickModeTrigger);
         positionMenu(modelMenu, quickModelTrigger);
         positionMenu(writeModeMenu, quickWriteModeTrigger);
     }
@@ -2217,24 +2270,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const chipRow = document.getElementById('composerChipRow');
         if (!chipRow) return;
         chipRow.innerHTML = '';
-
-        if (currentMode !== 'build') {
-            const modeChip = document.createElement('button');
-            modeChip.className = 'composer-chip';
-            modeChip.type = 'button';
-            modeChip.title = 'Clear mode';
-            const modeIcon = document.createElement('span');
-            modeIcon.className = 'composer-chip-icon';
-            modeIcon.innerHTML = Icons.x;
-            const modeText = document.createElement('span');
-            modeText.textContent = getModeChipLabel(currentMode);
-            modeChip.append(modeIcon, modeText);
-            modeChip.addEventListener('click', e => {
-                e.stopPropagation();
-                switchMode('build', true);
-            });
-            chipRow.appendChild(modeChip);
-        }
+        const quickModeLabel = document.getElementById('quickModeLabel');
+        if (quickModeLabel) quickModeLabel.textContent = getModeChipLabel(currentMode);
 
         if (activeWorkflowId) {
             const activeWorkflow = workflows.find(workflow => workflow.id === activeWorkflowId);
@@ -2326,21 +2363,21 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function getQuickWriteModeLabel(mode: 'confirm' | 'auto' | 'auto_review' | 'full'): string {
         if (chatI18n.locale === 'zh-cn') {
             if (mode === 'full') return '完全放行';
-            return mode === 'auto_review' ? '自动审批' : mode === 'auto' ? '自动写入' : '确认写入';
+            return mode === 'auto_review' ? '自动审核' : mode === 'auto' ? '自动写入' : '确认写入';
         }
         if (mode === 'full') return 'Full access';
-        return mode === 'auto_review' ? 'Auto approve' : mode === 'auto' ? 'Auto write' : 'Confirm write';
+        return mode === 'auto_review' ? 'Auto review' : mode === 'auto' ? 'Auto write' : 'Confirm write';
     }
 
     function getQuickWriteModeDesc(mode: 'confirm' | 'auto' | 'auto_review' | 'full'): string {
         if (chatI18n.locale === 'zh-cn') {
             if (mode === 'full') return '仅当前工作区会话解除沙箱与审批边界（高危，关闭 VS Code 后失效）';
-            if (mode === 'auto_review') return '自动写入 + 评审模型审批大部分命令；拿不准或高危才询问';
+            if (mode === 'auto_review') return '自动审核原本需要审批的操作；可能批准或拒绝，并会增加模型调用';
             if (mode === 'auto') return '文件直接写入；风险操作仍询问';
             return '写入前出 diff 确认';
         }
         if (mode === 'full') return 'Removes sandbox and approval boundaries for this workspace session only (dangerous)';
-        if (mode === 'auto_review') return 'Auto write + reviewer screens most calls; only uncertain or destructive ones ask';
+        if (mode === 'auto_review') return 'Automatically reviews actions that require approval; it may allow or deny them and uses extra model calls';
         if (mode === 'auto') return 'Files write directly; risky calls still ask';
         return 'Diff confirmation before writes';
     }
@@ -2402,6 +2439,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         });
     }
 
+    const quickReasoningSel = document.getElementById('quickReasoningEffort') as HTMLSelectElement | null;
+    quickReasoningSel?.addEventListener('change', () => {
+        const effort = quickReasoningSel.value;
+        if (effort !== 'low' && effort !== 'medium' && effort !== 'high' && effort !== 'max') return;
+        quickReasoningEffort = effort;
+        vscode.postMessage({ type: 'quickChangeReasoningEffort', effort });
+    });
+
     const quickWriteModeSel = document.getElementById('quickWriteModeSelect') as HTMLSelectElement | null;
     if (quickWriteModeSel) {
         quickWriteModeSel.addEventListener('change', () => {
@@ -2427,15 +2472,16 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const fullOption = quickWriteModeSel.querySelector<HTMLOptionElement>('option[value="full"]');
         if (confirmOption) confirmOption.textContent = 'Confirm';
         if (autoOption) autoOption.textContent = 'Auto';
-        if (autoReviewOption) autoReviewOption.textContent = 'Auto approve';
+        if (autoReviewOption) autoReviewOption.textContent = 'Auto review';
         if (fullOption) fullOption.textContent = 'Full access';
-        quickWriteModeSel.title = 'Write mode';
-        quickWriteModeSel.setAttribute('aria-label', 'Write mode');
+        quickWriteModeSel.title = 'Permission profile';
+        quickWriteModeSel.setAttribute('aria-label', 'Permission profile');
     }
 
     applyComposerModeLabels();
 
     const composerAddBtn = document.getElementById('composerAddBtn');
+    const quickModeTrigger = document.getElementById('quickModeTrigger');
     const quickModelTrigger = document.getElementById('quickModelTrigger');
     composerAddBtn?.addEventListener('click', e => {
         e.stopPropagation();
@@ -2447,11 +2493,16 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const modelMenu = document.getElementById('modelMenu');
         setModelMenuOpen(!modelMenu?.classList.contains('show'));
     });
+    quickModeTrigger?.addEventListener('click', e => {
+        e.stopPropagation();
+        const modeMenu = document.getElementById('modeMenu');
+        setModeMenuOpen(!modeMenu?.classList.contains('show'));
+    });
     document.querySelectorAll<HTMLElement>('.composer-menu-item[data-mode]').forEach(item => {
         item.addEventListener('click', () => {
             const mode = item.dataset.mode;
             if (mode) switchMode(mode, true);
-            setComposerMenuOpen(false);
+            setModeMenuOpen(false);
         });
     });
     document.querySelectorAll<HTMLElement>('.composer-menu-item[data-composer-action]').forEach(item => {
@@ -2471,7 +2522,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     });
     document.addEventListener('click', e => {
         const target = e.target as Element | null;
-        if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger') && !target?.closest('#writeModeMenu') && !target?.closest('#quickWriteModeTrigger')) {
+        if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#modeMenu') && !target?.closest('#quickModeTrigger') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger') && !target?.closest('#writeModeMenu') && !target?.closest('#quickWriteModeTrigger')) {
             closeComposerMenus();
         }
     });
@@ -2629,31 +2680,93 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     // ── Slash command popup ────────────────────────────────────────────────────
     const slashPopup = document.getElementById('slashPopup');
+    let slashMatches: SlashCommandView[] = [];
+    let slashSelectedIndex = 0;
+
+    function setSlashPopupOpen(open: boolean): void {
+        slashPopup?.classList.toggle('show', open);
+        slashPopup?.setAttribute('aria-hidden', open ? 'false' : 'true');
+        input.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (!open) input.removeAttribute('aria-activedescendant');
+    }
+
+    function renderSlashPopup(): void {
+        if (!slashPopup) return;
+        slashPopup.innerHTML = renderSlashCommandItems(slashMatches, slashSelectedIndex);
+        if (slashMatches.length > 0) {
+            input.setAttribute('aria-activedescendant', `slash-option-${slashSelectedIndex}`);
+        }
+    }
 
     function showSlashPopup(filter: string) {
         if (!slashPopup) return;
-        const matches = filterSlashCommands(
-            buildSlashCommands(chatI18n.slashDescriptions, workflows),
-            filter
+        slashMatches = filterSlashCommands(
+            buildSlashCommands(slashCommandCatalog, workflows),
+            filter,
         );
-        if (!matches.length) { slashPopup.classList.remove('show'); return; }
-        slashPopup.innerHTML = renderSlashCommandItems(matches);
-        slashPopup.querySelectorAll('.slash-popup-item').forEach(el => {
-            el.addEventListener('click', () => {
-                const cmd = (el as HTMLElement).dataset.cmd;
-                slashPopup.classList.remove('show');
-                vscode.postMessage({ type: 'slashCommand', command: cmd });
-                clearInput();
-            });
-        });
-        slashPopup.classList.add('show');
+        slashSelectedIndex = 0;
+        if (!slashMatches.length) {
+            setSlashPopupOpen(false);
+            return;
+        }
+        renderSlashPopup();
+        setSlashPopupOpen(true);
     }
+
+    function setSlashSelectedIndex(index: number): void {
+        if (slashMatches.length === 0) return;
+        slashSelectedIndex = (index + slashMatches.length) % slashMatches.length;
+        renderSlashPopup();
+        slashPopup?.querySelector(`#slash-option-${slashSelectedIndex}`)?.scrollIntoView({ block: 'nearest' });
+    }
+
+    function acceptSlashCommand(index = slashSelectedIndex): boolean {
+        const command = slashMatches[index];
+        if (!command) return false;
+        setSlashPopupOpen(false);
+        setInputText(command.completion === 'insert' ? `${command.command} ` : command.command);
+        if (command.completion === 'execute') sendMessage();
+        return true;
+    }
+
+    function handleSlashPopupKeydown(event: KeyboardEvent): boolean {
+        if (!slashPopup?.classList.contains('show')) return false;
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            setSlashSelectedIndex(slashSelectedIndex + 1);
+            return true;
+        }
+        if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            setSlashSelectedIndex(slashSelectedIndex - 1);
+            return true;
+        }
+        if (event.key === 'Enter' || event.key === 'Tab') {
+            event.preventDefault();
+            return acceptSlashCommand();
+        }
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            setSlashPopupOpen(false);
+            return true;
+        }
+        return false;
+    }
+
+    slashPopup?.addEventListener('click', event => {
+        const item = (event.target as HTMLElement | null)?.closest<HTMLElement>('.slash-popup-item');
+        if (!item) return;
+        const index = Number(item.dataset.index);
+        if (Number.isInteger(index)) acceptSlashCommand(index);
+    });
 
     input.addEventListener('input', () => {
         autoResizeInput();
         const v = getInputText();
-        if (v.startsWith('/') && v.length > 0) showSlashPopup(v);
-        else slashPopup?.classList.remove('show');
+        const slashFilter = getSlashCommandFilter(v);
+        if (slashFilter !== null) showSlashPopup(slashFilter);
+        else setSlashPopupOpen(false);
         const mentionFilter = getMentionFilterBeforeCaret();
         if (mentionFilter !== null) {
             showAtPopup(mentionFilter);
@@ -2661,14 +2774,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             closeAtPopup();
         }
     });
-    document.addEventListener('click', e => { if (slashPopup && !slashPopup.contains(e.target as Node) && e.target !== input && e.target !== activeComposerEl) slashPopup.classList.remove('show'); });
+    document.addEventListener('click', e => { if (slashPopup && !slashPopup.contains(e.target as Node) && e.target !== input && e.target !== activeComposerEl) setSlashPopupOpen(false); });
     document.addEventListener('click', e => { const t = e.target as HTMLElement; if (t && !t.closest('#atPopup') && t !== input && t !== activeComposerEl) closeAtPopup(); });
-    input.addEventListener('keydown', e => {
-        if (e.key === 'Escape' && slashPopup && slashPopup.classList.contains('show')) {
-            e.stopPropagation();
-            slashPopup.classList.remove('show');
-        }
-    });
 
     // ── @ file mention popup ───────────────────────────────────────────────────
     const atPopup = (() => {
@@ -3060,11 +3167,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function sendMessage() {
         syncContextsFromComposer();
         const text = getInputText().trim();
-        if (!text && pendingImages.length === 0 && activeContexts.length === 0) return;
+        if (!text && pendingImages.length === 0 && pendingFiles.length === 0 && activeContexts.length === 0) return;
         setChatEmptyState(false);
 
         const imagesToSend = pendingImages.length > 0 ? [...pendingImages] : undefined;
         const contextsToSend = activeContexts.length > 0 ? activeContexts.map(ctx => ({ ...ctx })) : undefined;
+        const isSlashSubmission = text.startsWith('/');
+        const slashHasAttachments = isSlashSubmission
+            && ((imagesToSend?.length ?? 0) > 0 || pendingFiles.length > 0 || (contextsToSend?.length ?? 0) > 0);
 
         if (activeContexts.length > 0) {
             vscode.postMessage({
@@ -3073,7 +3183,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 contexts: contextsToSend || [],
                 images: imagesToSend,
             });
-            activeContexts = [];
+            if (!slashHasAttachments) activeContexts = [];
         } else {
             vscode.postMessage({
                 type: isGenerating ? 'steerGeneration' : 'sendMessage',
@@ -3081,6 +3191,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 images: imagesToSend,
                 attachedFiles: pendingFiles.length > 0 ? [...pendingFiles] : undefined,
             });
+        }
+
+        // The Host rejects slash commands with attachments. Keep the complete
+        // composer payload intact so the user can remove attachments and retry.
+        if (slashHasAttachments) {
+            updateSendButtonState();
+            return;
         }
         
         clearInput();
@@ -3116,6 +3233,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function updateSendButtonState() {
         if (isGenerating && !hasComposerPayload()) {
+            sendBtn.disabled = false;
             sendBtn.innerHTML = '<span class="stop-icon"></span>';
             sendBtn.title = chatI18n.buttons.cancelGeneration;
             sendBtn.className = 'send-btn cancel-mode';
@@ -3126,6 +3244,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             ? tr('Queue input for current run', '排队到当前任务')
             : `${chatI18n.buttons.send} (Enter)`;
         sendBtn.className = isGenerating ? 'send-btn steer-mode' : 'send-btn';
+        sendBtn.disabled = !hasComposerPayload();
     }
 
     function setGenerating(val: boolean) {
@@ -5676,6 +5795,34 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 renderComposerChips();
                 break;
 
+            case 'slashCommandList':
+                slashCommandCatalog = Array.isArray(msg.commands) ? msg.commands as SlashCommandView[] : [];
+                if (slashPopup?.classList.contains('show')) {
+                    const filter = getSlashCommandFilter(getInputText());
+                    if (filter !== null) showSlashPopup(filter);
+                }
+                break;
+
+            case 'slashCommandResult': {
+                const resultNode = buildAssistantMessage(`${msg.command} — ${msg.message}`, [], Date.now());
+                resultNode.classList.add('slash-command-result', `slash-command-${msg.status}`);
+                chatArea.appendChild(resultNode);
+                setChatEmptyState(false);
+                scrollBottom(true);
+                if (msg.uiAction === 'openModelMenu') {
+                    setModelMenuOpen(true);
+                } else if (msg.uiAction === 'openPermissionsMenu') {
+                    setWriteModeMenuOpen(true);
+                } else if (msg.uiAction === 'openReasoningMenu') {
+                    const reasoning = document.getElementById('quickReasoningEffort') as HTMLSelectElement | null;
+                    reasoning?.focus();
+                    if (reasoning && typeof (reasoning as HTMLSelectElement & { showPicker?: () => void }).showPicker === 'function') {
+                        (reasoning as HTMLSelectElement & { showPicker: () => void }).showPicker();
+                    }
+                }
+                break;
+            }
+
             case 'replaySteps': {
                 removeReplayBanners();
                 const replayedSteps = Array.isArray(msg.steps) ? msg.steps : [];
@@ -5763,6 +5910,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (msg.modelContextTokens) settingsModelContextTokens = msg.modelContextTokens;
                 if (msg.thinkingModelPrefixes) settingsThinkingPrefixes = msg.thinkingModelPrefixes;
                 updateQuickModelSelector(msg.providers, msg.current, msg.ollamaModels);
+                updateQuickReasoningSelector(msg.current);
                 updateQuickWriteModeSelector(deriveWriteTier(msg.current));
                 {
                     const trigger = document.getElementById('quickWriteModeTrigger');
@@ -6501,6 +6649,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             for (const m of models) { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; opt.selected = m === current.model; qms.appendChild(opt); }
         } else { const opt = document.createElement('option'); opt.value = current.model || ''; opt.textContent = current.model || tr('(not set)', '(未设置)'); qms.appendChild(opt); }
         renderQuickModelMenu();
+    }
+
+    function updateQuickReasoningSelector(current: any): void {
+        const effort = current?.reasoningEffort;
+        quickReasoningEffort = effort === 'low' || effort === 'medium' || effort === 'max' ? effort : 'high';
+        const select = document.getElementById('quickReasoningEffort') as HTMLSelectElement | null;
+        if (!select) return;
+        select.value = quickReasoningEffort;
+        select.title = chatI18n.locale === 'zh-cn'
+            ? `推理强度：${select.selectedOptions[0]?.textContent || quickReasoningEffort}`
+            : `Reasoning effort: ${select.selectedOptions[0]?.textContent || quickReasoningEffort}`;
     }
 
     function refreshSettingsOverview() {

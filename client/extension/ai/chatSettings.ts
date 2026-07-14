@@ -383,6 +383,12 @@ export class ChatSettingsManager {
         await this.buildAndSendSettingsData();
     }
 
+    /** Quickly switch reasoning effort for the active extension session. */
+    async quickChangeReasoningEffort(effort: 'low' | 'medium' | 'high' | 'max'): Promise<void> {
+        this.aiService.setReasoningEffortOverride(effort);
+        await this.buildAndSendSettingsData();
+    }
+
     /**
      * Quick ladder from the chat composer: confirm < auto < auto_review < full.
      * auto_review = auto write + read-only LLM reviewer at the approval boundary.

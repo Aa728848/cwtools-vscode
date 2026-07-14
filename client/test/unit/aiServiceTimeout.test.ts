@@ -15,6 +15,20 @@ describe('AIService request timeout policy', () => {
     });
 });
 
+describe('AIService session overrides', () => {
+    it('applies model and reasoning overrides without persisting configuration', () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any);
+        service.setModelOverride('session-model');
+        service.setReasoningEffortOverride('medium');
+
+        expect(service.getModelOverride()).to.equal('session-model');
+        expect(service.getReasoningEffortOverride()).to.equal('medium');
+        expect(service.getConfig().model).to.equal('session-model');
+        expect(service.getConfig().reasoningEffort).to.equal('medium');
+    });
+});
+
 describe('AIService OpenAI Responses payload', () => {
     it('enables the isolated Responses fast path with streaming, parallel tools, summaries, and a hashed cache key', () => {
         const { AIService } = loadAIService();

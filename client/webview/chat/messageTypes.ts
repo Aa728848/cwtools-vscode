@@ -24,6 +24,8 @@ export interface OpenSettingsMessage { type: 'openSettings' }
 export interface SwitchModeMessage { type: 'switchMode'; mode: string }
 export interface SwitchWorkflowMessage { type: 'switchWorkflow'; workflowId?: string | null }
 export interface QuickChangeModelMessage { type: 'quickChangeModel'; model: string }
+export interface QuickChangeReasoningEffortMessage { type: 'quickChangeReasoningEffort'; effort: 'low' | 'medium' | 'high' | 'max' }
+export interface QuickChangeWriteModeMessage { type: 'quickChangeWriteMode'; mode: 'confirm' | 'auto' | 'auto_review' | 'full' }
 export interface RetractMessagePayload { type: 'retractMessage'; messageIndex: number }
 export interface SearchTopicsMessage { type: 'searchTopics'; query: string }
 export interface ExportTopicMessage { type: 'exportTopic'; topicId?: string }
@@ -60,6 +62,8 @@ export type WebviewToHostMessage =
     | SwitchModeMessage
     | SwitchWorkflowMessage
     | QuickChangeModelMessage
+    | QuickChangeReasoningEffortMessage
+    | QuickChangeWriteModeMessage
     | RetractMessagePayload
     | SearchTopicsMessage
     | ExportTopicMessage
@@ -92,6 +96,8 @@ export interface UpdateHistoryMessage { type: 'updateHistory'; messages: unknown
 export interface SetModeMessage { type: 'setMode'; mode: string }
 export interface WorkflowListMessage { type: 'workflowList'; workflows: unknown[]; currentWorkflowId?: string | null; labels?: unknown }
 export interface WorkflowChangedMessage { type: 'workflowChanged'; workflowId?: string | null; workflow?: unknown; labels?: unknown }
+export interface SlashCommandListMessage { type: 'slashCommandList'; commands: unknown[] }
+export interface SlashCommandResultMessage { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
 export interface SetModelMessage { type: 'setModel'; model: string }
 export interface ShowPermissionMessage { type: 'showPermission'; permissionId: string; tool: string; description: string; command?: string }
 export interface ShowWriteConfirmMessage { type: 'showWriteConfirm'; messageId: string; filePath: string; diff: string }
@@ -114,6 +120,8 @@ export type HostToWebviewMessage =
     | SetModeMessage
     | WorkflowListMessage
     | WorkflowChangedMessage
+    | SlashCommandListMessage
+    | SlashCommandResultMessage
     | SetModelMessage
     | ShowPermissionMessage
     | ShowWriteConfirmMessage

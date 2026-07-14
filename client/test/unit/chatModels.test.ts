@@ -24,7 +24,8 @@ import { getChatI18n } from '../../webview/chat/i18n';
 import { applyModeUi } from '../../webview/chat/modes';
 import { renderMarkdown } from '../../webview/chat/markdown';
 import { mentionResultToActiveContext, stripConsumedMentionText, type ActiveContext } from '../../webview/chat/contextMentions';
-import { buildSlashCommands, filterSlashCommands, renderSlashCommandItems } from '../../webview/chat/slashCommands';
+import { buildSlashCommands, filterSlashCommands, getSlashCommandFilter, renderSlashCommandItems } from '../../webview/chat/slashCommands';
+import { getSlashCommandDescriptors, resolveSlashCommand, suggestSlashCommands } from '../../extension/ai/slashCommands';
 import { buildWorkflowSummary, getWorkflowSlashCommand, normalizeWorkflowLabels, type WorkflowView } from '../../webview/chat/workflows';
 import { buildExploreModeSystemPrompt, buildPlanModeSystemPrompt } from '../../extension/ai/prompt/sections/modePrompts';
 
@@ -159,8 +160,8 @@ describe('chat workflow model helpers', () => {
 
 describe('chat i18n and command helpers', () => {
     it('returns localized chat text', () => {
-        expect(getChatI18n('zh-cn').slashDescriptions['/workflow:off']).to.equal('关闭当前 AI 工作流');
         expect(getChatI18n('en').buttons.send).to.equal('Send');
+        expect(getSlashCommandDescriptors('zh-cn').find(command => command.command === '/workflow:off')?.description).to.equal('关闭当前 AI 工作流');
     });
 
     it('builds slash commands with localized workflow descriptions', () => {
@@ -172,13 +173,46 @@ describe('chat i18n and command helpers', () => {
             phases: [],
             verification: [],
         };
-        const commands = buildSlashCommands(getChatI18n('zh-cn').slashDescriptions, [workflow]);
+        const commands = buildSlashCommands(getSlashCommandDescriptors('zh-cn'), [workflow]);
 
-        expect(commands.find(command => command.cmd === '/workflow:off')!.desc).to.equal('关闭当前 AI 工作流');
-        expect(commands.find(command => command.cmd === '/compact')!.desc).to.equal('压缩 Agent 活动上下文，同时保留话题聊天记录');
-        expect(commands.find(command => command.cmd === '/workflow:diagnostic-fix')!.desc).to.equal('自动修复诊断');
+        expect(commands.find(command => command.command === '/workflow:off')!.description).to.equal('关闭当前 AI 工作流');
+        expect(commands.find(command => command.command === '/compact')!.description).to.equal('压缩 Agent 活动上下文，同时保留话题记录');
+        expect(commands.find(command => command.command === '/workflow:diagnostic-fix')!.description).to.equal('自动修复诊断');
         expect(filterSlashCommands(commands, '/workflow')).to.have.length.greaterThan(1);
         expect(renderSlashCommandItems(commands)).to.include('/workflow:diagnostic-fix');
+        expect(renderSlashCommandItems(commands)).to.include('role="option"');
+    });
+
+    it('ranks exact and prefix slash matches and stops completion at arguments', () => {
+        const commands = buildSlashCommands(getSlashCommandDescriptors('en'), []);
+        expect(filterSlashCommands(commands, '/co')[0]?.command).to.equal('/compact');
+        expect(filterSlashCommands(commands, '/goal')[0]?.command).to.equal('/goal');
+        expect(getSlashCommandFilter('/goal')).to.equal('/goal');
+        expect(getSlashCommandFilter('/goal write tests')).to.equal(null);
+        expect(getSlashCommandFilter('explain /goal')).to.equal(null);
+    });
+
+    it('parses canonical, legacy colon, alias, and dynamic workflow commands', () => {
+        expect(resolveSlashCommand('/goal write tests')?.definition.id).to.equal('goal');
+        expect(resolveSlashCommand('/goal:1200:write tests')?.argument).to.equal('1200:write tests');
+        expect(resolveSlashCommand('/goal:complete')?.definition.id).to.equal('goalComplete');
+        expect(resolveSlashCommand('/plan')?.definition.id).to.equal('modePlan');
+        expect(resolveSlashCommand('/workflow:diagnostic-fix')?.definition.id).to.equal('workflowSelect');
+        expect(resolveSlashCommand('/workflow:diagnostic-fix')?.argument).to.equal('diagnostic-fix');
+        expect(resolveSlashCommand('/does-not-exist')).to.equal(undefined);
+        expect(suggestSlashCommands('/compcat')[0]?.command).to.equal('/compact');
+    });
+
+    it('publishes explicit completion and running policies from the Host catalog', () => {
+        const commands = getSlashCommandDescriptors('en');
+        expect(commands.find(command => command.command === '/goal')).to.include({
+            argumentMode: 'required',
+            completion: 'insert',
+            duringRun: 'queue',
+        });
+        expect(commands.find(command => command.command === '/clear')?.duringRun).to.equal('deny');
+        expect(commands.find(command => command.command === '/mode:plan')?.duringRun).to.equal('immediate');
+        expect(commands.find(command => command.command === '/permissions')?.category).to.equal('configuration');
     });
 
     it('applies mode UI state without reimplementing it in chatPanel', () => {

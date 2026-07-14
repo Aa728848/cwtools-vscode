@@ -151,7 +151,7 @@
   "commands.stellarisLanguageServices.visualizeEventChain.title": "可视化事件链",
   "commands.stellarisLanguageServices.visualizeTechTree.title": "可视化科技树",
   "commands.stellarisLanguageServices.ai.selectModel.title": "从提供商选择 AI 模型...",
-  "commands.stellarisLanguageServices.ai.previewSelectionTranslation.title": "AI: 预览选区翻译",
+  "commands.stellarisLanguageServices.ai.previewSelectionTranslation.title": "AI: 切换注释翻译",
   "commands.stellarisLanguageServices.localisation.translateSelection.title": "AI: 翻译选中的本地化",
   "commands.stellarisLanguageServices.localisation.polishSelection.title": "AI: 润色选中的本地化",
   "commands.stellarisLanguageServices.ai.reviewFile.title": "AI: 审查当前文件",

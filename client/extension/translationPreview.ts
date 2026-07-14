@@ -3,15 +3,23 @@ import type { AIService } from './ai/aiService';
 import { getEffectiveEndpoint, getEffectiveModel } from './ai/providers';
 import type { AIUserConfig, ChatMessage } from './ai/types';
 
-const MAX_SELECTION_CHARS = 12_000;
+const MAX_TRANSLATION_BATCH_CHARS = 12_000;
+const MAX_DOCUMENT_COMMENT_CHARS = 60_000;
 const DEFAULT_TARGET_LANGUAGE = 'Simplified Chinese';
 const CACHE_LIMIT = 200;
 
-interface SelectionTranslationSnippet {
+interface CommentTranslationSnippet {
 	relativePath: string;
 	startLine: number;
 	endLine: number;
 	languageId: string;
+	text: string;
+}
+
+export interface ExtractedCommentLine {
+	line: number;
+	startCharacter: number;
+	endCharacter: number;
 	text: string;
 }
 
@@ -44,6 +52,18 @@ interface TranslationPreviewSettings {
 	endpoint: string;
 }
 
+interface TranslatedCommentLine {
+	comment: ExtractedCommentLine;
+	translation: string;
+	provider: string;
+	model: string;
+}
+
+interface StoredTranslationPreview {
+	version: number;
+	decorations: vs.DecorationOptions[];
+}
+
 const translationCache = new Map<string, TranslationCacheEntry>();
 
 function isChineseLocale(): boolean {
@@ -52,15 +72,6 @@ function isChineseLocale(): boolean {
 
 function localize(en: string, zh: string): string {
 	return isChineseLocale() ? zh : en;
-}
-
-function escapeHtml(value: string): string {
-	return value
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#39;');
 }
 
 function hashString(value: string): string {
@@ -90,26 +101,6 @@ function readCache(key: string): TranslationCacheEntry | undefined {
 	translationCache.delete(key);
 	translationCache.set(key, entry);
 	return entry;
-}
-
-function selectedSnippet(editor: vs.TextEditor): SelectionTranslationSnippet | undefined {
-	const selections = editor.selections
-		.filter(selection => !selection.isEmpty)
-		.sort((a, b) => a.start.line - b.start.line || a.start.character - b.start.character);
-	if (selections.length === 0) return undefined;
-
-	const text = selections
-		.map(selection => editor.document.getText(selection))
-		.join('\n\n');
-	if (!text.trim()) return undefined;
-
-	return {
-		relativePath: vs.workspace.asRelativePath(editor.document.uri),
-		startLine: selections[0]!.start.line + 1,
-		endLine: selections[selections.length - 1]!.end.line + 1,
-		languageId: editor.document.languageId,
-		text,
-	};
 }
 
 function protectPattern(input: string, pattern: RegExp, tokens: ProtectedToken[]): string {
@@ -180,19 +171,52 @@ function findCommentStart(line: string): number {
 	return -1;
 }
 
-export function extractSelectedComments(text: string): string {
-	const comments: string[] = [];
-	for (const line of text.split(/\r\n|\r|\n/)) {
+export function extractCommentLines(text: string): ExtractedCommentLine[] {
+	const comments: ExtractedCommentLine[] = [];
+	const lines = text.split(/\r\n|\r|\n/);
+	for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+		const line = lines[lineNumber]!;
 		const start = findCommentStart(line);
 		if (start < 0) continue;
-		const comment = line.slice(start).trimEnd();
+		const end = line.trimEnd().length;
+		const comment = line.slice(start, end);
 		if (comment.slice(1).trim().length === 0) continue;
-		comments.push(comment);
+		comments.push({
+			line: lineNumber,
+			startCharacter: start,
+			endCharacter: end,
+			text: comment,
+		});
 	}
-	return comments.join('\n');
+	return comments;
 }
 
-export function buildTranslationMessages(snippet: SelectionTranslationSnippet, protectedText: string, targetLanguage: string): ChatMessage[] {
+function commentLineMarker(index: number): string {
+	return `__CWTL_${index}__`;
+}
+
+export function buildMarkedCommentBatch(comments: readonly string[]): string {
+	return comments.map((comment, index) => `${commentLineMarker(index)} ${comment}`).join('\n');
+}
+
+export function parseMarkedCommentTranslations(text: string, expectedCount: number): string[] | undefined {
+	const translations: Array<string | undefined> = new Array(expectedCount);
+	for (const line of text.split(/\r\n|\r|\n/)) {
+		if (!line.trim()) continue;
+		const match = line.match(/^__CWTL_(\d+)__\s*(.*)$/);
+		if (!match) return undefined;
+		const index = Number(match[1]);
+		const translation = match[2]?.trim();
+		if (!Number.isInteger(index) || index < 0 || index >= expectedCount || !translation || translations[index] !== undefined) {
+			return undefined;
+		}
+		translations[index] = translation;
+	}
+	if (translations.filter(translation => translation !== undefined).length !== expectedCount) return undefined;
+	return translations.map(translation => translation!);
+}
+
+export function buildTranslationMessages(snippet: CommentTranslationSnippet, protectedText: string, targetLanguage: string): ChatMessage[] {
 	return [
 		{
 			role: 'system',
@@ -200,10 +224,11 @@ export function buildTranslationMessages(snippet: SelectionTranslationSnippet, p
 				'You are a precise translation engine for Paradox/CWTools modding text.',
 				`Target language: ${targetLanguage}. The translated prose must be written in ${targetLanguage}.`,
 				'Return only the translated text. Do not add explanations, headings, notes, or Markdown fences.',
-				'The input contains only # comments extracted from a source selection.',
+				'The input contains only # comments extracted from the active document.',
 				'Translate only human-readable prose inside comments.',
 				'For Simplified Chinese, use Simplified Chinese characters and Chinese wording for English prose.',
-				'Preserve line breaks, leading # comment markers, whitespace, quoting style, and protected placeholders.',
+				'Each input line starts with a marker like __CWTL_0__. Preserve every line marker exactly and return exactly one output line for each marker.',
+				'Preserve leading # comment markers, whitespace, quoting style, and protected placeholders.',
 				'Preserve placeholders like __CWTP_0__ exactly. Never translate or rewrite them.',
 				'Do not reconstruct, copy, or add the code that originally surrounded these comments.',
 				'Preserve code identifiers only when they are standalone technical references, not ordinary prose.',
@@ -216,7 +241,7 @@ export function buildTranslationMessages(snippet: SelectionTranslationSnippet, p
 			content: [
 				`File: ${snippet.relativePath}:${snippet.startLine}-${snippet.endLine}`,
 				`Language ID: ${snippet.languageId}`,
-				'Selected comments:',
+				'Comments to translate:',
 				protectedText,
 			].join('\n'),
 		},
@@ -291,7 +316,7 @@ async function ensureAiEnabled(aiService: AIService): Promise<boolean> {
 	return false;
 }
 
-async function translateSelection(snippet: SelectionTranslationSnippet, settings: TranslationPreviewSettings, targetLanguage: string, aiService: AIService): Promise<TranslationCacheEntry> {
+async function translateComments(snippet: CommentTranslationSnippet, settings: TranslationPreviewSettings, targetLanguage: string, aiService: AIService): Promise<TranslationCacheEntry> {
 	const protectedInput = protectPdxTokens(snippet.text);
 	const cacheKey = [
 		targetLanguage,
@@ -338,166 +363,274 @@ async function translateSelection(snippet: SelectionTranslationSnippet, settings
 	return entry;
 }
 
-function previewHtml(snippet: SelectionTranslationSnippet, translation: TranslationCacheEntry, targetLanguage: string): string {
-	const title = localize('AI Translation Preview', 'AI 翻译预览');
-	const source = localize('Source Comments', '原文注释');
-	const translated = localize('Translated Preview', '译文预览');
-	const note = localize(
-		'Preview only. The source file was not modified.',
-		'仅预览。源文件未被修改。'
-	);
-	const meta = `${snippet.relativePath}:${snippet.startLine}-${snippet.endLine} | ${targetLanguage} | ${translation.provider}${translation.model ? ` / ${translation.model}` : ''}`;
-	return `<!DOCTYPE html>
-<html lang="${isChineseLocale() ? 'zh-CN' : 'en'}">
-<head>
-<meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${escapeHtml(title)}</title>
-<style>
-	body {
-		margin: 0;
-		padding: 18px;
-		color: var(--vscode-editor-foreground);
-		background: var(--vscode-editor-background);
-		font-family: var(--vscode-font-family);
-		font-size: var(--vscode-font-size);
+function createCommentBatches(comments: readonly ExtractedCommentLine[]): ExtractedCommentLine[][] {
+	const batches: ExtractedCommentLine[][] = [];
+	let current: ExtractedCommentLine[] = [];
+	let currentLength = 0;
+
+	for (const comment of comments) {
+		let addition = commentLineMarker(current.length).length + 1 + comment.text.length;
+		if (current.length > 0 && currentLength + 1 + addition > MAX_TRANSLATION_BATCH_CHARS) {
+			batches.push(current);
+			current = [];
+			currentLength = 0;
+			addition = commentLineMarker(0).length + 1 + comment.text.length;
+		}
+		if (addition > MAX_TRANSLATION_BATCH_CHARS) {
+			throw new Error(localize(
+				`A single comment is too long to translate (${comment.text.length}/${MAX_TRANSLATION_BATCH_CHARS} characters).`,
+				`单条注释过长，无法翻译（${comment.text.length}/${MAX_TRANSLATION_BATCH_CHARS} 字符）。`
+			));
+		}
+		current.push(comment);
+		currentLength += (currentLength > 0 ? 1 : 0) + addition;
 	}
-	header {
-		margin-bottom: 14px;
-		border-bottom: 1px solid var(--vscode-panel-border);
-		padding-bottom: 12px;
+	if (current.length > 0) batches.push(current);
+	return batches;
+}
+
+async function translateDocumentComments(
+	document: vs.TextDocument,
+	comments: readonly ExtractedCommentLine[],
+	settings: TranslationPreviewSettings,
+	targetLanguage: string,
+	aiService: AIService,
+	reportProgress: (completed: number, total: number) => void
+): Promise<TranslatedCommentLine[]> {
+	const batches = createCommentBatches(comments);
+	const translated: TranslatedCommentLine[] = [];
+
+	for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+		const batch = batches[batchIndex]!;
+		const snippet: CommentTranslationSnippet = {
+			relativePath: vs.workspace.asRelativePath(document.uri),
+			startLine: batch[0]!.line + 1,
+			endLine: batch[batch.length - 1]!.line + 1,
+			languageId: document.languageId,
+			text: buildMarkedCommentBatch(batch.map(comment => comment.text)),
+		};
+		const entry = await translateComments(snippet, settings, targetLanguage, aiService);
+		const translations = parseMarkedCommentTranslations(entry.translation, batch.length);
+		if (!translations) {
+			throw new Error(localize(
+				'The AI provider changed the comment line markers, so the inline preview could not be mapped safely.',
+				'AI 提供商改动了注释行标记，无法安全映射内联预览。'
+			));
+		}
+		for (let index = 0; index < batch.length; index++) {
+			translated.push({
+				comment: batch[index]!,
+				translation: translations[index]!,
+				provider: entry.provider,
+				model: entry.model,
+			});
+		}
+		reportProgress(batchIndex + 1, batches.length);
 	}
-	h1 {
-		margin: 0 0 6px;
-		font-size: 18px;
-		font-weight: 600;
+	return translated;
+}
+
+function translatedCommentText(translation: string): string {
+	const commentStart = findCommentStart(translation);
+	const text = (commentStart >= 0 ? translation.slice(commentStart + 1) : translation).trim();
+	return text || translation.trim();
+}
+
+function createPreviewDecoration(
+	item: TranslatedCommentLine,
+	targetLanguage: string
+): vs.DecorationOptions {
+	const displayText = translatedCommentText(item.translation).replace(/\s+/g, ' ');
+	const hover = new vs.MarkdownString();
+	hover.appendMarkdown(`**${localize('Translated comment', '注释译文')}**\n\n`);
+	hover.appendText(displayText);
+	hover.appendMarkdown('\n\n---\n\n');
+	hover.appendText(`${targetLanguage} · ${item.provider}${item.model ? ` / ${item.model}` : ''}`);
+	return {
+		range: new vs.Range(
+			item.comment.line,
+			item.comment.startCharacter,
+			item.comment.line,
+			item.comment.endCharacter
+		),
+		hoverMessage: hover,
+		renderOptions: {
+			after: {
+				contentText: `  → ${displayText}`,
+			},
+		},
+	};
+}
+
+class CommentTranslationPreviewController implements vs.Disposable {
+	private readonly decorationType: vs.TextEditorDecorationType;
+	private readonly previews = new Map<string, StoredTranslationPreview>();
+	private readonly inFlightDocuments = new Set<string>();
+	private readonly disposables: vs.Disposable[] = [];
+
+	constructor(private readonly aiService: AIService) {
+		this.decorationType = vs.window.createTextEditorDecorationType({
+			rangeBehavior: vs.DecorationRangeBehavior.ClosedClosed,
+			after: {
+				color: new vs.ThemeColor('editorCodeLens.foreground'),
+				fontStyle: 'italic',
+				margin: '0 0 0 1.5em',
+			},
+		});
+		this.disposables.push(
+			this.decorationType,
+			vs.workspace.onDidChangeTextDocument(event => {
+				if (event.contentChanges.length > 0) this.clearDocument(event.document.uri);
+			}),
+			vs.workspace.onDidCloseTextDocument(document => {
+				this.previews.delete(this.documentKey(document.uri));
+			}),
+			vs.window.onDidChangeVisibleTextEditors(editors => {
+				for (const editor of editors) this.applyPreview(editor);
+			})
+		);
 	}
-	.meta, .note {
-		color: var(--vscode-descriptionForeground);
+
+	dispose(): void {
+		for (const editor of vs.window.visibleTextEditors) {
+			editor.setDecorations(this.decorationType, []);
+		}
+		this.previews.clear();
+		this.inFlightDocuments.clear();
+		for (const disposable of this.disposables) disposable.dispose();
 	}
-	.grid {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-		gap: 14px;
-	}
-	section {
-		min-width: 0;
-	}
-	h2 {
-		margin: 0 0 8px;
-		font-size: 13px;
-		font-weight: 600;
-		color: var(--vscode-sideBarTitle-foreground);
-	}
-	pre {
-		box-sizing: border-box;
-		min-height: 220px;
-		margin: 0;
-		padding: 12px;
-		overflow: auto;
-		white-space: pre-wrap;
-		word-break: break-word;
-		border: 1px solid var(--vscode-panel-border);
-		border-radius: 4px;
-		background: var(--vscode-textCodeBlock-background);
-		font-family: var(--vscode-editor-font-family);
-		font-size: var(--vscode-editor-font-size);
-		line-height: 1.5;
-	}
-	@media (max-width: 760px) {
-		.grid {
-			grid-template-columns: 1fr;
+
+	async toggle(): Promise<void> {
+		const editor = vs.window.activeTextEditor;
+		if (!editor) {
+			vs.window.showWarningMessage(localize(
+				'Open a Paradox script file to translate its comments.',
+				'请先打开要翻译注释的 Paradox 脚本文件。'
+			));
+			return;
+		}
+
+		const document = editor.document;
+		const key = this.documentKey(document.uri);
+		if (this.previews.has(key)) {
+			this.clearDocument(document.uri);
+			return;
+		}
+		if (this.inFlightDocuments.has(key)) {
+			vs.window.showInformationMessage(localize(
+				'Comment translation is already running for this file.',
+				'当前文件的注释翻译正在进行中。'
+			));
+			return;
+		}
+
+		const sourceVersion = document.version;
+		const comments = extractCommentLines(document.getText());
+		if (comments.length === 0) {
+			vs.window.showWarningMessage(localize(
+				'No non-empty # comments were found in the current file.',
+				'当前文件中没有找到非空的 # 注释。'
+			));
+			return;
+		}
+		const totalCharacters = comments.reduce((total, comment) => total + comment.text.length, 0);
+		if (totalCharacters > MAX_DOCUMENT_COMMENT_CHARS) {
+			vs.window.showWarningMessage(localize(
+				`The comments in this file are too long to translate safely (${totalCharacters}/${MAX_DOCUMENT_COMMENT_CHARS} characters).`,
+				`当前文件的注释过长，无法安全翻译（${totalCharacters}/${MAX_DOCUMENT_COMMENT_CHARS} 字符）。`
+			));
+			return;
+		}
+		if (!(await ensureAiEnabled(this.aiService))) return;
+
+		const targetLanguage = await pickTargetLanguage();
+		if (!targetLanguage) return;
+		if (document.isClosed || document.version !== sourceVersion) {
+			vs.window.showWarningMessage(localize(
+				'The file changed before translation started. Run comment translation again.',
+				'文件在翻译开始前已发生变化，请重新启动注释翻译。'
+			));
+			return;
+		}
+
+		const settings = resolveTranslationPreviewSettings(this.aiService, this.aiService.getConfig());
+		this.inFlightDocuments.add(key);
+		try {
+			const translated = await vs.window.withProgress(
+				{
+					location: vs.ProgressLocation.Notification,
+					title: localize(
+						`Translating ${comments.length} comments with AI...`,
+						`正在使用 AI 翻译 ${comments.length} 条注释...`
+					),
+					cancellable: false,
+				},
+				progress => translateDocumentComments(
+					document,
+					comments,
+					settings,
+					targetLanguage,
+					this.aiService,
+					(completed, total) => progress.report({
+						increment: 100 / total,
+						message: `${completed}/${total}`,
+					})
+				)
+			);
+			if (document.isClosed || document.version !== sourceVersion) {
+				vs.window.showWarningMessage(localize(
+					'The file changed during translation, so the inline preview was discarded.',
+					'文件在翻译期间发生变化，因此已丢弃内联预览。'
+				));
+				return;
+			}
+
+			this.previews.set(key, {
+				version: sourceVersion,
+				decorations: translated.map(item => createPreviewDecoration(item, targetLanguage)),
+			});
+			for (const visibleEditor of vs.window.visibleTextEditors) {
+				if (this.documentKey(visibleEditor.document.uri) === key) this.applyPreview(visibleEditor);
+			}
+		} catch (error) {
+			vs.window.showErrorMessage(localize(
+				`Comment translation failed: ${(error as Error)?.message ?? String(error)}`,
+				`注释翻译失败：${(error as Error)?.message ?? String(error)}`
+			));
+		} finally {
+			this.inFlightDocuments.delete(key);
 		}
 	}
-</style>
-</head>
-<body>
-	<header>
-		<h1>${escapeHtml(title)}</h1>
-		<div class="meta">${escapeHtml(meta)}</div>
-		<div class="note">${escapeHtml(note)}</div>
-	</header>
-	<main class="grid">
-		<section>
-			<h2>${escapeHtml(source)}</h2>
-			<pre>${escapeHtml(snippet.text)}</pre>
-		</section>
-		<section>
-			<h2>${escapeHtml(translated)}</h2>
-			<pre>${escapeHtml(translation.translation)}</pre>
-		</section>
-	</main>
-</body>
-</html>`;
-}
 
-function showPreview(context: vs.ExtensionContext, snippet: SelectionTranslationSnippet, translation: TranslationCacheEntry, targetLanguage: string): void {
-	const panel = vs.window.createWebviewPanel(
-		'cwtools.translationPreview',
-		localize('AI Translation Preview', 'AI 翻译预览'),
-		vs.ViewColumn.Beside,
-		{ enableScripts: false, localResourceRoots: [context.extensionUri] }
-	);
-	panel.webview.html = previewHtml(snippet, translation, targetLanguage);
-}
+	private documentKey(uri: vs.Uri): string {
+		return uri.toString();
+	}
 
-async function previewSelectionTranslation(context: vs.ExtensionContext, aiService: AIService): Promise<void> {
-	const editor = vs.window.activeTextEditor;
-	if (!editor) {
-		vs.window.showWarningMessage(localize('Open a file and select text to translate first.', '请先打开文件并选中要翻译的文本。'));
-		return;
+	private clearDocument(uri: vs.Uri): void {
+		const key = this.documentKey(uri);
+		if (!this.previews.delete(key)) return;
+		for (const editor of vs.window.visibleTextEditors) {
+			if (this.documentKey(editor.document.uri) === key) {
+				editor.setDecorations(this.decorationType, []);
+			}
+		}
 	}
-	const snippet = selectedSnippet(editor);
-	if (!snippet) {
-		vs.window.showWarningMessage(localize('Select text to translate first.', '请先选中要翻译的文本。'));
-		return;
-	}
-	const comments = extractSelectedComments(snippet.text);
-	if (!comments.trim()) {
-		vs.window.showWarningMessage(localize(
-			'No # comments were found in the selection to translate.',
-			'选区中没有找到可翻译的 # 注释。'
-		));
-		return;
-	}
-	const commentSnippet: SelectionTranslationSnippet = { ...snippet, text: comments };
-	if (commentSnippet.text.length > MAX_SELECTION_CHARS) {
-		vs.window.showWarningMessage(localize(
-			`The selected comments are too long for preview translation (${commentSnippet.text.length}/${MAX_SELECTION_CHARS} characters).`,
-			`选中注释过长，无法预览翻译（${commentSnippet.text.length}/${MAX_SELECTION_CHARS} 字符）。`
-		));
-		return;
-	}
-	if (!(await ensureAiEnabled(aiService))) return;
 
-	const targetLanguage = await pickTargetLanguage();
-	if (!targetLanguage) return;
-	const settings = resolveTranslationPreviewSettings(aiService, aiService.getConfig());
-
-	try {
-		const translation = await vs.window.withProgress(
-			{
-				location: vs.ProgressLocation.Notification,
-				title: localize('Translating selected comments with AI...', '正在使用 AI 翻译选中注释...'),
-				cancellable: false,
-			},
-			() => translateSelection(commentSnippet, settings, targetLanguage, aiService)
-		);
-		showPreview(context, commentSnippet, translation, targetLanguage);
-	} catch (error) {
-		vs.window.showErrorMessage(
-			localize(
-				`Translation preview failed: ${(error as Error)?.message ?? String(error)}`,
-				`翻译预览失败：${(error as Error)?.message ?? String(error)}`
-			)
-		);
+	private applyPreview(editor: vs.TextEditor): void {
+		const preview = this.previews.get(this.documentKey(editor.document.uri));
+		if (!preview || preview.version !== editor.document.version) {
+			editor.setDecorations(this.decorationType, []);
+			return;
+		}
+		editor.setDecorations(this.decorationType, preview.decorations);
 	}
 }
 
 export function registerTranslationPreviewCommands(context: vs.ExtensionContext, aiService: AIService): void {
+	const controller = new CommentTranslationPreviewController(aiService);
 	context.subscriptions.push(
-		vs.commands.registerCommand('cwtools.ai.previewSelectionTranslation', () => previewSelectionTranslation(context, aiService)),
+		controller,
+		vs.commands.registerCommand('cwtools.ai.previewSelectionTranslation', () => controller.toggle()),
 		vs.commands.registerCommand('cwtools.ai.clearTranslationPreviewCache', () => {
 			const count = translationCache.size;
 			translationCache.clear();

@@ -68,6 +68,7 @@ describe('translation preview helpers', () => {
 		expect(system).to.contain('Target language: Simplified Chinese');
 		expect(system).to.contain('must be written in Simplified Chinese');
 		expect(system).to.contain('Return only the translated text');
+		expect(system).to.contain('Each input line starts with a marker like __CWTL_0__');
 		expect(system).to.contain('Preserve placeholders like __CWTP_0__ exactly');
 		expect(system).to.contain('Do not reconstruct, copy, or add the code');
 		expect(system).to.contain('Do not leave English prose unchanged just because it touches #');
@@ -76,12 +77,12 @@ describe('translation preview helpers', () => {
 		expect(system).to.not.contain('Apply the change');
 		expect(system).to.not.contain('write back');
 		expect(user).to.contain('events/test.txt:3-5');
-		expect(user).to.contain('Selected comments:');
+		expect(user).to.contain('Comments to translate:');
 		expect(user).to.contain('# __CWTP_0__ changed ownership.');
 	});
 
-	it('extracts only comments from selected code', () => {
-		const { extractSelectedComments } = loadTranslationPreview();
+	it('extracts only comments from code', () => {
+		const { extractCommentLines } = loadTranslationPreview();
 		const source = [
 			'@foo_time = 30       # 进入星系后要求离开的时间。',
 			'@bar_delay = 180    # 天灾前兆每次警告通知的间隔。',
@@ -90,7 +91,7 @@ describe('translation preview helpers', () => {
 			'# Full line comment',
 		].join('\n');
 
-		expect(extractSelectedComments(source)).to.equal([
+		expect(extractCommentLines(source).map(comment => comment.text).join('\n')).to.equal([
 			'# 进入星系后要求离开的时间。',
 			'# 天灾前兆每次警告通知的间隔。',
 			'# 这才是注释',
@@ -99,9 +100,32 @@ describe('translation preview helpers', () => {
 		].join('\n'));
 	});
 
-	it('ignores selections without # comments', () => {
-		const { extractSelectedComments } = loadTranslationPreview();
-		expect(extractSelectedComments('name = "not # comment"\nvalue = 42')).to.equal('');
+	it('ignores code without # comments', () => {
+		const { extractCommentLines } = loadTranslationPreview();
+		expect(extractCommentLines('name = "not # comment"\nvalue = 42')).to.deep.equal([]);
+	});
+
+	it('extracts comment locations for inline editor decorations', () => {
+		const { extractCommentLines } = loadTranslationPreview();
+		const source = 'value = 1  # First comment  \n# Second';
+
+		expect(extractCommentLines(source)).to.deep.equal([
+			{ line: 0, startCharacter: 11, endCharacter: 26, text: '# First comment' },
+			{ line: 1, startCharacter: 0, endCharacter: 8, text: '# Second' },
+		]);
+	});
+
+	it('maps marked AI output back to source comment order', () => {
+		const { buildMarkedCommentBatch, parseMarkedCommentTranslations } = loadTranslationPreview();
+		expect(buildMarkedCommentBatch(['# First', '# Second'])).to.equal([
+			'__CWTL_0__ # First',
+			'__CWTL_1__ # Second',
+		].join('\n'));
+		expect(parseMarkedCommentTranslations([
+			'__CWTL_1__ # translated second',
+			'__CWTL_0__ # translated first',
+		].join('\n'), 2)).to.deep.equal(['# translated first', '# translated second']);
+		expect(parseMarkedCommentTranslations('__CWTL_0__ # only one', 2)).to.equal(undefined);
 	});
 
 	it('strips a simple markdown code fence from AI output', () => {

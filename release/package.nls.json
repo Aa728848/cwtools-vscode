@@ -151,7 +151,7 @@
   "commands.stellarisLanguageServices.visualizeEventChain.title": "Visualize Event Chain",
   "commands.stellarisLanguageServices.visualizeTechTree.title": "Visualize Tech Tree",
   "commands.stellarisLanguageServices.ai.selectModel.title": "Select AI Model from Provider...",
-  "commands.stellarisLanguageServices.ai.previewSelectionTranslation.title": "AI: Preview Selection Translation",
+  "commands.stellarisLanguageServices.ai.previewSelectionTranslation.title": "AI: Toggle Comment Translation",
   "commands.stellarisLanguageServices.localisation.translateSelection.title": "AI: Translate Localisation Selection",
   "commands.stellarisLanguageServices.localisation.polishSelection.title": "AI: Polish Localisation Selection",
   "commands.stellarisLanguageServices.ai.reviewFile.title": "AI: Review Current File",

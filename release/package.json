@@ -134,6 +134,11 @@
                     "when": "true"
                 },
                 {
+                    "command": "cwtools.ai.previewSelectionTranslation",
+                    "group": "navigation@2",
+                    "when": "editorLangId == stellaris || editorLangId == hoi4 || editorLangId == eu4 || editorLangId == ck2 || editorLangId == imperator || editorLangId == vic2 || editorLangId == ck3 || editorLangId == vic3 || editorLangId == eu5 || editorLangId == paradox"
+                },
+                {
                     "command": "cwtools.toggleInlineTextOn",
                     "when": "!config.stellarisLanguageServices.showInlineText",
                     "group": "navigation"
@@ -239,11 +244,6 @@
                     "command": "cwtools.ai.sendSelectionToChat",
                     "when": "editorHasSelection",
                     "group": "stellaris@0"
-                },
-                {
-                    "command": "cwtools.ai.previewSelectionTranslation",
-                    "when": "editorHasSelection",
-                    "group": "stellaris@0.1"
                 },
                 {
                     "command": "cwtools.localisation.translateSelection",

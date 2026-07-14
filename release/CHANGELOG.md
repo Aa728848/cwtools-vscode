@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.8.18] - 2026-07-14
+
+### 功能与优化 / Features & Optimizations
+- **[AI] 接入 OpenAI Responses 极速流式集成**：实现了 OpenAI Responses 的流式输出、Token 规格化和工具调用管理。
+  English: [AI] Implemented OpenAI Responses fast-path integration with streaming, token normalization, and tool call management.
+- **[AI] 优化编排器逻辑与对话面板样式**：重构了多 Agent 编排器核心逻辑，并美化了聊天面板的 Webview 样式。
+  English: [AI] Implemented orchestrator logic and webview styling for chat panel.
+- **[功能] 新增科技树可视化预览与解析器**：新增科技树预览面板与解析逻辑，支持查看依赖关系。
+  English: Implemented Technology Tree visualizer webview and parser support.
+- **[本地化] 重构本地化解析与富文本分词**：将本地化解析与富文本分词提取到独立的、可测试的工具模块中。
+  English: Extracted localisation parsing and rich text tokenization into a pure, testable utility module.
+- **[功能] 新增 GUI 预览面板与实时编辑**：实现了 GUI 文件的实时可视化预览与编辑支持。
+  English: Implemented GUI preview panel for real-time visualization and editing of GUI files.
+- **[功能] 新增星系预览与 Webview 编辑**：新增星系可视化预览面板，并支持在 Webview 中编辑天体。
+  English: Added solar system visualization panel and webview editing support.
+- **[AI] 新增 Agent 管理器 Webview**：实现了 Agent 管理器页面与相关的单元测试。
+  English: Implemented agent manager webview and associated unit tests.
+- **[AI] 完善 AI 助手集成**：整合了 AI 助手与对话面板、工具注册表和工作流管理。
+  English: Implemented AI Assistant integration with chat panel, tool registry, and workflow management.
+- **[AI] 实现外部工具处理器与指令预检**：支持外部工具调用、命令预检验证以及更完善的本地化支持。
+  English: Implemented external tool handler, command preflight validation, and localization support.
+- **[AI] 实现 Agent 运行器与断点恢复**：实现带检查点和 Token 预估的 Agent 运行器。
+  English: Implemented agent runner module with checkpointing and token estimation.
+- **[AI] 实现 AI 自动审查机制**：引入自动安全策略审查，防止 Agent 越权或执行高风险命令。
+  English: Implemented AI auto-reviewer for safe, policy-driven authorization of agent tool actions.
+- **[功能] 支持游戏 data 序列化与配置**：实现了游戏数据序列化工具，并初始化项目配置。
+  English: Implemented game data serialization utilities and initialize project configuration.
+- **[AI] 补充 AI 对话基础架构与 PDX 语法**：增加了 AI 聊天 UI 组件、设置管理与 Paradox 语法高亮支持。
+  English: Added AI chat infrastructure including UI components, settings management, and Paradox grammar support.
+- **[AI] 实现事件驱动的运行状态追踪**：引入事件驱动的 Agent 运行 reducers，支持细粒度追踪运行状态、工具调用和子 Agent 拓扑关系。
+  English: Implemented event-driven agent run reducers and infrastructure for tracking state, tools, and sub-agent topologies.
+
+### 依赖与配置 / Dependencies & Configuration
+- **[配置] 更新子模块配置**：更新了 `cwtools-stellaris-config` 子模块至最新版本。
+  English: Updated `cwtools-stellaris-config` submodule.
+
 ## [2.8.17] - 2026-07-12
 
 ### 功能与优化 / Features & Optimizations

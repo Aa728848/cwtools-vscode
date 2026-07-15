@@ -28,7 +28,7 @@ on_planet_surveyed = {
 `, 'on_actions/00_on_actions.txt', 'on_actions', aliases);
 
         expect(contracts).to.have.length(1);
-        expect(contracts[0]!.scope).to.deep.equal({ root: 'planet', from: ['country', 'fleet'] });
+        expect(contracts[0]!.scope).to.deep.equal({ this: 'planet', root: 'planet', from: ['country', 'fleet'] });
         expect(contracts[0]!.confidence).to.equal('high');
     });
 
@@ -49,6 +49,16 @@ can_trade = { }
 `, 'game_rules/00_rules.txt', 'game_rules', aliases);
 
         expect(contract!.scope).to.deep.equal({ this: 'country', root: 'country', from: [] });
+    });
+
+    it('defaults an omitted THIS to ROOT for game rules', () => {
+        const [contract] = extractScopeContractsFromText(`
+# Root = fleet, potential attacker
+# From = planet, potential target
+can_orbital_bombard = { }
+`, 'game_rules/00_rules.txt', 'game_rules', aliases);
+
+        expect(contract!.scope).to.deep.equal({ this: 'fleet', root: 'fleet', from: ['planet'] });
     });
 
     it('maps a supported planet-or-fleet description to its union scope', () => {
@@ -105,7 +115,7 @@ can_modify = { }
 on_ethics_tick = { }
 `, 'on_actions/00_on_actions.txt', 'on_actions', new Map([...aliases, ['popgroup', 'pop_group']]));
 
-        expect(contract!.scope).to.deep.equal({ this: 'pop_group', from: ['country'] });
+        expect(contract!.scope).to.deep.equal({ this: 'pop_group', root: 'pop_group', from: ['country'] });
     });
 
     it('does not collapse an explicit object-or-owner alternative to country', () => {
@@ -124,7 +134,7 @@ on_target_selected = { }
 on_fleet_changed = { }
 `, 'on_actions/00_on_actions.txt', 'on_actions', aliases);
 
-        expect(contract!.scope).to.deep.equal({ this: 'country', from: ['fleet'] });
+        expect(contract!.scope).to.deep.equal({ this: 'country', root: 'country', from: ['fleet'] });
     });
 
     it('extracts assignments embedded after prose and strips sentence punctuation', () => {
@@ -133,7 +143,7 @@ on_fleet_changed = { }
 on_lure_spawned = { }
 `, 'on_actions/00_on_actions.txt', 'on_actions', aliases);
 
-        expect(contract!.scope).to.deep.equal({ this: 'system', from: ['fleet'] });
+        expect(contract!.scope).to.deep.equal({ this: 'system', root: 'system', from: ['fleet'] });
         expect(contract!.unresolved).to.deep.equal([]);
     });
 
@@ -144,7 +154,7 @@ on_lure_spawned = { }
 on_deep_scope = { }
 `, 'on_actions/00_on_actions.txt', 'on_actions', aliases);
 
-        expect(contract!.scope).to.deep.equal({ this: 'country', from: ['any', 'fleet'] });
+        expect(contract!.scope).to.deep.equal({ this: 'country', root: 'country', from: ['any', 'fleet'] });
         expect(contract!.confidence).to.equal('high');
     });
 
@@ -155,7 +165,7 @@ on_deep_scope = { }
 on_controller_changed = { }
 `, 'on_actions/00_on_actions.txt', 'on_actions', aliases);
 
-        expect(contract!.scope).to.deep.equal({ this: 'system', from: ['country'] });
+        expect(contract!.scope).to.deep.equal({ this: 'system', root: 'system', from: ['country'] });
     });
 
     it('ignores an empty heading assignment when later comments define the contract', () => {
@@ -177,7 +187,7 @@ on_destroyed = { }
 on_relation_changed = { }
 `, 'on_actions/00_on_actions.txt', 'on_actions', aliases);
 
-        expect(contract!.scope).to.deep.equal({ this: 'country', from: ['colony'] });
+        expect(contract!.scope).to.deep.equal({ this: 'country', root: 'country', from: ['colony'] });
         expect(contract!.confidence).to.equal('high');
     });
 
@@ -250,6 +260,6 @@ subtype[can_build] = { }
 `, 'game_rules', [contract!], { replaceConflicts: true });
 
         expect(result.added).to.deep.equal(['can_build']);
-        expect(result.content).to.contain('## replace_scope = { this = country }');
+        expect(result.content).to.contain('## replace_scope = { this = country root = country }');
     });
 });

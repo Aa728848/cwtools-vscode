@@ -515,6 +515,14 @@ function contractFromComments(
         scope.from.push(froms.get(index) ?? 'any');
     }
 
+    // game_rule and on_action entry contexts use the same object for THIS and
+    // ROOT unless the documentation explicitly assigns both fields. Many
+    // vanilla comments only spell out one of them (for example
+    // can_orbital_bombard documents ROOT = fleet), so mirror the known entry
+    // field instead of leaving an incorrect pre-existing THIS/ROOT unchecked.
+    if (scope.this && !scope.root) scope.root = scope.this;
+    else if (scope.root && !scope.this) scope.this = scope.root;
+
     const hasResolvedScope = !!scope.this || !!scope.root || scope.from.length > 0;
     if (!hasResolvedScope && !unresolved.length) return undefined;
     const contentHash = crypto.createHash('sha256').update(`${name}\n${evidence.join('\n')}`).digest('hex');

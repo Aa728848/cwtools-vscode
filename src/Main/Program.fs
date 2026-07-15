@@ -7047,6 +7047,19 @@ type Server(client: ILanguageClient) =
                                             |> Array.ofList
                                         let fromChain =
                                             scopes.From |> List.map string |> Array.ofList
+                                        let scopeInference =
+                                            match g with
+                                            | :? IScopeInferenceProvider as provider ->
+                                                provider.ScopeInferenceAtPos position filePath fileContent scopes
+                                                |> Option.map (fun inference ->
+                                                    JsonValue.Record
+                                                        [| "kind", JsonValue.String inference.kind
+                                                           "candidates", JsonValue.Array(inference.candidates |> List.map JsonValue.String |> List.toArray)
+                                                           "resolvedScope", JsonValue.String inference.resolvedScope
+                                                           "certainty", JsonValue.String inference.certainty
+                                                           "evidence", JsonValue.Array(inference.evidence |> List.map JsonValue.String |> List.toArray) |])
+                                                |> Option.defaultValue JsonValue.Null
+                                            | _ -> JsonValue.Null
                                         JsonValue.Record
                                             [| "thisScope",  JsonValue.String thisScopeStr
                                                "root",       JsonValue.String (scopes.Root.ToString())
@@ -7054,6 +7067,7 @@ type Server(client: ILanguageClient) =
                                                "prevChain",  JsonValue.Array(prevChain |> Array.map JsonValue.String)
                                                "fromChain",  JsonValue.Array(fromChain |> Array.map JsonValue.String)
                                                "eventTarget", eventTarget
+                                               "scopeInference", scopeInference
                                                "ok",         JsonValue.Boolean true |]
                                     | None ->
                                         JsonValue.Record
@@ -7063,6 +7077,7 @@ type Server(client: ILanguageClient) =
                                                "prevChain", JsonValue.Array [||]
                                                "fromChain", JsonValue.Array [||]
                                                "eventTarget", eventTarget
+                                               "scopeInference", JsonValue.Null
                                                "ok",        JsonValue.Boolean false |]
                                 | None ->
                                     JsonValue.Record

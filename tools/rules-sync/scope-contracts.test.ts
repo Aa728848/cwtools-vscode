@@ -63,6 +63,17 @@ on_ship_destroyed = { }
         expect(contract!.unresolved).to.deep.equal([]);
     });
 
+    it('maps a planet-or-ship description to the Carrier union scope', () => {
+        const [contract] = extractScopeContractsFromText(`
+# This/Root = planet or ship
+on_colony_host_changed = { }
+`, 'on_actions/00_on_actions.txt', 'on_actions', aliases);
+
+        expect(contract!.confidence).to.equal('high');
+        expect(contract!.scope).to.deep.equal({ this: 'carrier', root: 'carrier', from: [] });
+        expect(contract!.unresolved).to.deep.equal([]);
+    });
+
     it('maps a supported leading polymorphic description to its union scope', () => {
         const [contract] = extractScopeContractsFromText(`
 # This = starbase, megastructure or planet

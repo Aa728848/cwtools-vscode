@@ -356,6 +356,18 @@ export class LspToolHandler {
         };
     }
 
+    private normalizeScopeInference(raw: any): QueryScopeResult['scopeInference'] {
+        if (!raw || typeof raw !== 'object' || typeof raw.kind !== 'string') return undefined;
+        const certainty = raw.certainty === 'exact' || raw.certainty === 'union' ? raw.certainty : 'unresolved';
+        return {
+            kind: raw.kind,
+            candidates: Array.isArray(raw.candidates) ? raw.candidates.map(String) : [],
+            resolvedScope: typeof raw.resolvedScope === 'string' ? raw.resolvedScope : 'unknown',
+            certainty,
+            evidence: Array.isArray(raw.evidence) ? raw.evidence.map(String) : [],
+        };
+    }
+
     async queryScope(args: { file: string; line: number; column: number }): Promise<QueryScopeResult> {
         const unknown: QueryScopeResult = {
             currentScope: 'unknown',
@@ -380,6 +392,7 @@ export class LspToolHandler {
                         thisScope: structResult.thisScope ?? 'unknown',
                         prevChain: Array.isArray(structResult.prevChain) ? structResult.prevChain : [],
                         fromChain: Array.isArray(structResult.fromChain) ? structResult.fromChain : [],
+                        scopeInference: this.normalizeScopeInference(structResult.scopeInference),
                         eventTarget: this.normalizeEventTarget(structResult.eventTarget),
                     };
                 }
@@ -395,6 +408,7 @@ export class LspToolHandler {
                         thisScope: raw.thisScope ?? 'unknown',
                         prevChain: Array.isArray(raw.prevChain) ? raw.prevChain : [],
                         fromChain: Array.isArray(raw.fromChain) ? raw.fromChain : [],
+                        scopeInference: this.normalizeScopeInference(raw.scopeInference),
                         eventTarget: this.normalizeEventTarget(raw.eventTarget),
                     };
                 }
@@ -450,6 +464,7 @@ export class LspToolHandler {
             thisScope: raw.thisScope ?? 'unknown',
             prevChain: Array.isArray(raw.prevChain) ? raw.prevChain : [],
             fromChain: Array.isArray(raw.fromChain) ? raw.fromChain : [],
+            scopeInference: this.normalizeScopeInference(raw.scopeInference),
             eventTarget: this.normalizeEventTarget(raw.eventTarget),
         };
     }

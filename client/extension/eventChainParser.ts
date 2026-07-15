@@ -15,10 +15,10 @@
 
 /** 
 * Flag information: including scope type and flag name 
-* scope is used for strict matching (set_country_flag only matches has_country_flag) 
+* scope is used for strict matching (set_country_flag only matches has_country_flag)
 */
 export interface FlagRef {
-    scope: string;  // 'country' | 'global' | 'planet' | 'star' | 'fleet' | 'ship' | 'pop' | 'species' | 'leader'
+    scope: string;  // 'country' | 'global' | 'planet' | 'carrier' | 'star' | 'fleet' | 'ship' | 'pop' | 'species' | 'leader'
     name: string;   // flag name
 }
 
@@ -78,7 +78,7 @@ export interface EventGraph {
 // ─── Event types in Paradox scripting ────────────────────────────────────────
 
 const EVENT_TYPES = [
-    'country_event', 'planet_event', 'fleet_event', 'ship_event',
+    'country_event', 'planet_event', 'colony_event', 'carrier_event', 'fleet_event', 'ship_event',
     'pop_event', 'pop_faction_event', 'observer_event', 'event',
     'situation_event', 'first_contact_event', 'espionage_operation_event',
     'astral_rift_event',
@@ -88,7 +88,7 @@ const EVENT_TYPE_SET = new Set<string>(EVENT_TYPES);
 
 // Patterns that trigger another event
 const EVENT_FIRE_PATTERNS = [
-    'country_event', 'planet_event', 'fleet_event', 'ship_event',
+    'country_event', 'planet_event', 'colony_event', 'carrier_event', 'fleet_event', 'ship_event',
     'pop_event', 'pop_faction_event', 'observer_event',
     'situation_event', 'first_contact_event', 'espionage_operation_event',
     'astral_rift_event',
@@ -728,7 +728,7 @@ function extractFlagsFromLine(line: string, techName: string, map: TechFlagMap) 
 // ─── Implicit connection data extraction ────────────────────────────────────────────────────
 
 //All supported flag scope types
-const FLAG_SCOPES = ['country', 'global', 'planet', 'star', 'fleet', 'ship', 'pop', 'species', 'leader'] as const;
+const FLAG_SCOPES = ['country', 'global', 'planet', 'carrier', 'star', 'fleet', 'ship', 'pop', 'species', 'leader'] as const;
 
 //Construct set/has flag regular (with scope capture)
 const SET_FLAG_RE = new RegExp(

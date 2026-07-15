@@ -301,6 +301,13 @@ export interface QueryScopeResult {
     thisScope: string;
     prevChain: string[];
     fromChain: string[];
+    scopeInference?: {
+        kind: 'carrier_host' | string;
+        candidates: string[];
+        resolvedScope: string;
+        certainty: 'exact' | 'union' | 'unresolved';
+        evidence: string[];
+    };
     eventTarget?: {
         name: string;
         scope: string;

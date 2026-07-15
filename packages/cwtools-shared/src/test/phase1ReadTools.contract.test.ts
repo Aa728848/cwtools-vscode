@@ -126,7 +126,7 @@ describe('phase 1 read tool contracts', () => {
     expect(result.data!.candidates[0]!.reasons).to.include("pushes scope to 'ship'");
   });
 
-  it('explains scope aliases and subscope hints from scopes.cwt', async () => {
+  it('explains Carrier without treating its host union as subscope inheritance', async () => {
     const result = await explainScopeWithHost(createFsHost(repoRoot), {
       scope: 'carrier',
     });
@@ -135,7 +135,7 @@ describe('phase 1 read tool contracts', () => {
     expect(result.data!.status).to.equal('ready');
     expect(result.data!.canonicalName).to.equal('Carrier');
     expect(result.data!.aliases).to.include('carrier');
-    expect(result.data!.isSubscopeOf).to.include.members(['planet', 'ship', 'colony']);
+    expect(result.data!.isSubscopeOf).to.deep.equal([]);
     expect(result.data!.semanticHints?.[0]?.source).to.equal('scopes.cwt');
   });
 

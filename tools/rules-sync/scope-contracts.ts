@@ -124,6 +124,7 @@ const ROLE_SCOPE_SYNONYMS = new Map<string, string>([
 ]);
 
 const POLYMORPHIC_SCOPE_COMBINATIONS = new Map<string, string>([
+    ['planet|ship', 'carrier'],
     ['astral_rift|planet', 'planet_astral_rift'],
     ['megastructure|planet|starbase', 'repairable_orbital'],
     ['astral_rift|megastructure|planet|starbase', 'orbital_location'],

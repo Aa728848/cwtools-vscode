@@ -228,7 +228,7 @@ export const GENERATED_MCP_TOOLS = [
   {
     "tool": {
       "name": "query_scope",
-      "description": "Query the scope context at a specific position in a file. Returns the current scope (Country, Planet, etc.), ROOT, THIS, PREV chain, and FROM chain. Use this to understand which triggers/effects are valid at a position.",
+      "description": "Query the scope context at a specific position in a file. Returns the current scope (Country, Planet, etc.), ROOT, THIS, PREV chain, FROM chain, event_target provenance, and Carrier host inference evidence when applicable. Use this to understand which triggers/effects are valid at a position.",
       "inputSchema": {
         "type": "object",
         "properties": {

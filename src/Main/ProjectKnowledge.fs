@@ -480,7 +480,7 @@ let private topologyJson (topology: TopologyFacts) =
 let private regexOptions = RegexOptions.Compiled ||| RegexOptions.IgnoreCase ||| RegexOptions.Multiline
 
 let private eventCallRegex =
-    Regex(@"\b(country_event|planet_event|fleet_event|ship_event|pop_event|pop_faction_event|observer_event|situation_event|first_contact_event|espionage_operation_event|astral_rift_event|event)\s*=\s*(?:\{\s*id\s*=\s*)?([A-Za-z0-9_.-]+)", regexOptions)
+    Regex(@"\b(country_event|planet_event|colony_event|carrier_event|fleet_event|ship_event|pop_event|pop_faction_event|observer_event|situation_event|first_contact_event|espionage_operation_event|astral_rift_event|event)\s*=\s*(?:\{\s*id\s*=\s*)?([A-Za-z0-9_.-]+)", regexOptions)
 
 let private eventTitleRegex = Regex(@"\btitle\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
 let private triggeredOnlyRegex = Regex(@"\bis_triggered_only\s*=\s*yes\b", regexOptions)
@@ -496,10 +496,10 @@ let private eventPhaseRegexes =
       "after", Regex(@"\bafter\s*=\s*\{", regexOptions) ]
 
 let private eventLogicRegexes =
-    [ "flag_set", "auto", Regex(@"\bset_(country|planet|fleet|ship|pop|leader|global)_flag\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
-      "flag_set", "auto", Regex(@"\bset_timed_(country|planet|fleet|ship|pop|leader|global)_flag\s*=\s*\{[^{}]*?\bflag\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
-      "flag_check", "trigger", Regex(@"\bhas_(country|planet|fleet|ship|pop|leader|global)_flag\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
-      "flag_remove", "auto", Regex(@"\bremove_(country|planet|fleet|ship|pop|leader|global)_flag\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
+    [ "flag_set", "auto", Regex(@"\bset_(country|planet|carrier|fleet|ship|pop|leader|global)_flag\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
+      "flag_set", "auto", Regex(@"\bset_timed_(country|planet|carrier|fleet|ship|pop|leader|global)_flag\s*=\s*\{[^{}]*?\bflag\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
+      "flag_check", "trigger", Regex(@"\bhas_(country|planet|carrier|fleet|ship|pop|leader|global)_flag\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
+      "flag_remove", "auto", Regex(@"\bremove_(country|planet|carrier|fleet|ship|pop|leader|global)_flag\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
       "technology_grant", "auto", Regex(@"\b(?:give_technology|add_research_option)\s*=\s*(?:\{[^{}]*?\btech\s*=\s*)?""?([A-Za-z0-9_.-]+)""?", regexOptions)
       "technology_require", "trigger", Regex(@"\bhas_technology\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
       "variable_write", "auto", Regex(@"\b(?:set_variable|change_variable|subtract_variable|multiply_variable|divide_variable)\s*=\s*\{[^{}]*?\bwhich\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
@@ -610,7 +610,7 @@ let private collectEventGraph (definitions: DefinitionFact list) (topology: Topo
                           sourceId = definition.id
                           targetEventId = target
                           edgeType = eventPhaseAt text matched.Index
-                          label = None
+                          label = Some matched.Groups.[1].Value
                           sourceFile = normalizePath definition.file
                           line = lineAtOffset definition.line text matched.Index
                           confidence = "parsed" }

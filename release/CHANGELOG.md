@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.8.19] - 2026-07-16
+
+### 功能与优化 / Features & Optimizations
+- **[功能] 实现了事件链解析器与 Paradox 脚本项目知识分析工具**：为 Paradox 脚本文件引入了事件链解析以及项目知识库的抽取和分析支持，提升了 AI 对项目结构的全局理解能力。
+  English: Implemented Event Chain Parser and Project Knowledge extraction/analysis tools for Paradox script files, improving AI's global understanding of project structure.
+- **[功能] 增强作用域解析能力并新增 `event_target` 等解析支持**：强化了对脚本中作用域的整体解析能力，并特别增加了对 `event_target` 等动态作用域的解析支持。
+  English: Enhanced scope resolution capabilities and added parsing support for dynamic scopes such as `event_target`.
+- **[功能] 实现 Stellaris 规则同步的作用域契约提取和验证工具**：支持在 Stellaris 规则同步流程中进行作用域契约（Scope Contracts）的自动提取和校验。
+  English: Implemented scope contract extraction and validation utilities for Stellaris rules sync pipeline.
+- **[重构] 清理废弃和未使用的服务接口与文件**：删除了子模块和主项目中已废弃及未使用的服务接口、实现文件，简化了核心后端系统结构。
+  English: Removed deprecated and unused service interfaces and implementation files to clean up backend architecture.
+
+### 依赖与配置 / Dependencies & Configuration
+- **[配置] 更新 Stellaris 规则包与子模块**：更新了 `cwtools` 和 `cwtools-stellaris-config` 子模块，并同步更新了内置的 `stellaris-rules.zip` 规则压缩包和对应的版本元数据。
+  English: Updated `cwtools` and `cwtools-stellaris-config` submodules, and generated the latest `stellaris-rules.zip` rules bundle alongside version metadata.
+
 ## [2.8.18] - 2026-07-14
 
 ### 功能与优化 / Features & Optimizations

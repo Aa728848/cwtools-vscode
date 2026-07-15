@@ -579,13 +579,23 @@ export class ContextReferenceManager {
                 zeroColumn,
             );
             if (result && result.ok === true) {
-                return [
+                const lines = [
                     `Scope at ${this.workspaceLabel(targetPath)}:${zeroLine + 1}:${zeroColumn + 1}`,
                     `currentScope: ${result.thisScope ?? 'unknown'}`,
                     `root: ${result.root ?? 'unknown'}`,
                     `prevChain: ${Array.isArray(result.prevChain) ? result.prevChain.join(' -> ') : 'unknown'}`,
                     `fromChain: ${Array.isArray(result.fromChain) ? result.fromChain.join(' -> ') : 'unknown'}`,
-                ].join('\n');
+                ];
+                if (result.eventTarget && typeof result.eventTarget === 'object') {
+                    const alternatives = Array.isArray(result.eventTarget.alternatives)
+                        ? result.eventTarget.alternatives.join(' | ')
+                        : '';
+                    lines.push(
+                        `eventTarget: ${result.eventTarget.name ?? 'unknown'} -> ${result.eventTarget.scope ?? 'unknown'} (${result.eventTarget.certainty ?? 'unresolved'})`,
+                    );
+                    if (alternatives) lines.push(`eventTargetAlternatives: ${alternatives}`);
+                }
+                return lines.join('\n');
             }
         } catch (e) {
             ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Scope reference lookup failed', e);

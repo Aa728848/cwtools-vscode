@@ -190,6 +190,56 @@ module LanguageServerFeatures =
 
                         header + root + prevs + froms
 
+                let eventTargetHover =
+                    if unescapedWord.StartsWith("event_target:", StringComparison.OrdinalIgnoreCase) then
+                        let rawName = unescapedWord.Substring("event_target:".Length).TrimEnd('?')
+                        let dotIndex = rawName.IndexOf('.')
+                        let name = if dotIndex >= 0 then rawName.Substring(0, dotIndex) else rawName
+
+                        let saved =
+                            game.References().SavedScopes
+                            |> Seq.filter (fun (savedName, _, _) ->
+                                String.Equals(savedName, name, StringComparison.OrdinalIgnoreCase))
+                            |> Seq.toArray
+
+                        let alternatives =
+                            saved
+                            |> Array.map (fun (_, _, scope) -> scope.ToString())
+                            |> Array.distinct
+                            |> Array.sort
+
+                        let scopeText =
+                            match alternatives with
+                            | [||] -> "`unknown` — unresolved / 未解析"
+                            | [| exact |] -> sprintf "`%s` — project-unique / 项目内唯一" exact
+                            | many ->
+                                many
+                                |> Array.map (sprintf "`%s`")
+                                |> String.concat ", "
+                                |> sprintf "%s — ambiguous / 存在歧义"
+
+                        let definitions =
+                            saved
+                            |> Array.truncate 5
+                            |> Array.map (fun (_, targetRange, scope) ->
+                                sprintf
+                                    "- `%s` — `%s:%d:%d`"
+                                    (scope.ToString())
+                                    (targetRange.FileName.Replace('\\', '/'))
+                                    (targetRange.StartLine + 1)
+                                    (int targetRange.StartColumn + 1))
+                            |> String.concat "\n"
+
+                        Some(
+                            sprintf
+                                "**Event target / 事件目标**: `%s`\n\n**Scope / 作用域**: %s%s"
+                                name
+                                scopeText
+                                (if definitions = "" then "" else "\n\n**Saved at / 保存于**\n" + definitions)
+                        )
+                    else
+                        None
+
                 let effect =
                     hovered
                     |> Option.map (fun e ->
@@ -232,6 +282,7 @@ module LanguageServerFeatures =
                        (inlineScriptPreview |> Option.orElse docStringOrEffect)
                        lochover
                        nonEmptyString scopesExtra
+                       eventTargetHover
                        variableHover |]
                     |> Array.choose id
                     |> (fun a -> String.Join("\n\n***\n\n", a))

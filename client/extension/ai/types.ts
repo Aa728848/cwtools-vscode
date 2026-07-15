@@ -301,6 +301,14 @@ export interface QueryScopeResult {
     thisScope: string;
     prevChain: string[];
     fromChain: string[];
+    eventTarget?: {
+        name: string;
+        scope: string;
+        alternatives: string[];
+        certainty: 'project_unique' | 'ambiguous' | 'unresolved';
+        definitions: Array<{ scope: string; file: string; line: number; col: number }>;
+        warnings: string[];
+    };
 }
 
 export interface QueryTypesArgs {

@@ -331,6 +331,31 @@ export class LspToolHandler {
 
     // - queryScope -
 
+    private normalizeEventTarget(raw: any): QueryScopeResult['eventTarget'] {
+        if (!raw || typeof raw !== 'object' || typeof raw.name !== 'string') return undefined;
+        const certainty = raw.certainty === 'project_unique' || raw.certainty === 'ambiguous'
+            ? raw.certainty
+            : 'unresolved';
+        return {
+            name: raw.name,
+            scope: typeof raw.scope === 'string' ? raw.scope : 'unknown',
+            alternatives: Array.isArray(raw.alternatives) ? raw.alternatives.map(String) : [],
+            certainty,
+            definitions: Array.isArray(raw.definitions)
+                ? raw.definitions.flatMap((definition: any) =>
+                    definition && typeof definition.file === 'string'
+                        ? [{
+                            scope: typeof definition.scope === 'string' ? definition.scope : 'unknown',
+                            file: definition.file,
+                            line: Number.isFinite(definition.line) ? Number(definition.line) : 0,
+                            col: Number.isFinite(definition.col) ? Number(definition.col) : 0,
+                        }]
+                        : [])
+                : [],
+            warnings: Array.isArray(raw.warnings) ? raw.warnings.map(String) : [],
+        };
+    }
+
     async queryScope(args: { file: string; line: number; column: number }): Promise<QueryScopeResult> {
         const unknown: QueryScopeResult = {
             currentScope: 'unknown',
@@ -355,6 +380,7 @@ export class LspToolHandler {
                         thisScope: structResult.thisScope ?? 'unknown',
                         prevChain: Array.isArray(structResult.prevChain) ? structResult.prevChain : [],
                         fromChain: Array.isArray(structResult.fromChain) ? structResult.fromChain : [],
+                        eventTarget: this.normalizeEventTarget(structResult.eventTarget),
                     };
                 }
             } catch { /* fall through */ }
@@ -369,6 +395,7 @@ export class LspToolHandler {
                         thisScope: raw.thisScope ?? 'unknown',
                         prevChain: Array.isArray(raw.prevChain) ? raw.prevChain : [],
                         fromChain: Array.isArray(raw.fromChain) ? raw.fromChain : [],
+                        eventTarget: this.normalizeEventTarget(raw.eventTarget),
                     };
                 }
             } catch { /* fall through */ }
@@ -423,6 +450,7 @@ export class LspToolHandler {
             thisScope: raw.thisScope ?? 'unknown',
             prevChain: Array.isArray(raw.prevChain) ? raw.prevChain : [],
             fromChain: Array.isArray(raw.fromChain) ? raw.fromChain : [],
+            eventTarget: this.normalizeEventTarget(raw.eventTarget),
         };
     }
 

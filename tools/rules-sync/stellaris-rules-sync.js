@@ -9,7 +9,7 @@ let tsNodeBin = '';
 
 function usage() {
     console.log(`Usage:
-  node tools/rules-sync/stellaris-rules-sync.js [scan|check|update] [options]
+  node tools/rules-sync/stellaris-rules-sync.js [scan|check|update|report|contracts] [options]
 
 Modes:
   scan    Generate rules.generated.json and generated CWT candidates.
@@ -17,6 +17,8 @@ Modes:
   update  Generate append-only CWT candidates under the output directory for review.
   report  Compare fresh game docs + vanilla common against the config baseline and
           write a self-contained visual HTML report (opens in browser).
+  contracts  Extract Scope/ROOT/FROM contracts from vanilla comments and emit
+             reviewable CWT candidates. Read-only unless --apply is passed.
 
 Options:
   --docs <path>              Stellaris script_documentation directory.
@@ -30,6 +32,8 @@ Options:
   --no-config-common         Do not inventory config/common CWT definitions.
   --no-cwt                   Do not emit generated CWT candidate files during scan.
   --no-open                  Do not open the HTML report in the browser (report mode).
+  --apply                    Apply missing high-confidence scope contracts to CWT.
+  --apply-conflicts          Replace conflicting CWT contracts with reviewed vanilla evidence.
   --ci                       Preserve check exit code 2 when drift is found.
 `);
 }
@@ -39,8 +43,8 @@ function parseArgs(argv) {
     let mode = 'check';
     if (args[0] && !args[0].startsWith('-')) mode = args.shift();
     if (mode === 'help' || mode === '--help' || mode === '-h') return { help: true };
-    if (!['scan', 'check', 'update', 'report'].includes(mode)) {
-        throw new Error(`Unknown mode "${mode}". Expected scan, check, update, or report.`);
+    if (!['scan', 'check', 'update', 'report', 'contracts'].includes(mode)) {
+        throw new Error(`Unknown mode "${mode}". Expected scan, check, update, report, or contracts.`);
     }
 
     const opts = {
@@ -55,6 +59,8 @@ function parseArgs(argv) {
         includeConfigCommon: true,
         emitCwt: true,
         openReport: true,
+        apply: false,
+        applyConflicts: false,
         ci: false,
     };
 
@@ -94,6 +100,12 @@ function parseArgs(argv) {
                 break;
             case '--no-open':
                 opts.openReport = false;
+                break;
+            case '--apply':
+                opts.apply = true;
+                break;
+            case '--apply-conflicts':
+                opts.applyConflicts = true;
                 break;
             case '--ci':
                 opts.ci = true;
@@ -224,9 +236,26 @@ function main() {
         return;
     }
 
-    assertDir('Script documentation', opts.docs);
     assertDir('Config', opts.config);
     fs.mkdirSync(opts.out, { recursive: true });
+
+    if (opts.mode === 'contracts') {
+        const vanillaCommon = opts.vanillaCommon || defaultVanillaCommonDir();
+        assertDir('Vanilla common', vanillaCommon);
+        const contractsScript = path.join(repoRoot, 'tools', 'rules-sync', 'scope-contracts-cli.ts');
+        const contractsOut = path.join(opts.out, 'scope-contracts');
+        const contractsArgs = ['--vanilla-common', vanillaCommon, '--config', opts.config, '--output', contractsOut];
+        if (opts.apply) contractsArgs.push('--apply');
+        if (opts.applyConflicts) contractsArgs.push('--apply-conflicts');
+        console.log(`[rules-sync] mode=contracts${opts.apply ? ' apply' : ''}${opts.applyConflicts ? ' apply-conflicts' : ''}`);
+        console.log(`[rules-sync] vanillaCommon=${vanillaCommon}`);
+        console.log(`[rules-sync] config=${opts.config}`);
+        console.log(`[rules-sync] out=${contractsOut}`);
+        runTsNode(contractsScript, contractsArgs, false, opts.ci);
+        return;
+    }
+
+    assertDir('Script documentation', opts.docs);
 
     if (opts.mode === 'report') {
         const reportScript = path.join(repoRoot, 'tools', 'rules-sync', 'report.ts');

@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { scanScopeContracts, type ScopeContractReport } from './scope-contracts';
 
 // Visual comparison report: fresh game script_documentation + vanilla common
 // versus the rules config baseline (config/logs/* + CWT files).
@@ -82,6 +83,7 @@ interface ReportData {
     vanillaCommonDir: string;
     diffs: KindDiff[];
     folders: FolderFieldReport[];
+    scopeContracts: ScopeContractReport;
 }
 
 const IDENT = '[A-Za-z_][A-Za-z0-9_\\.\\-]*';
@@ -1014,6 +1016,7 @@ for (const diff of DATA.diffs) {
   tabs.push({ id: diff.kind, label: KIND_LABELS[diff.kind] || diff.kind, count: diff.added.length + diff.removed.length + diff.changed.length, render: () => renderDiff(diff) });
 }
 tabs.push({ id: 'fields', label: 'Common 字段级参数', count: DATA.folders.reduce((n, f) => n + f.newFields.length + (f.missingSubtypes || []).length + (f.staleSubtypes || []).length + (f.covered ? 0 : 1), 0), render: renderFolders });
+tabs.push({ id: 'scope-contracts', label: 'Scope 契约', count: DATA.scopeContracts.findings.length, render: renderScopeContracts });
 
 function cards() {
   const host = document.getElementById('cards');
@@ -1031,6 +1034,10 @@ function cards() {
   if (fieldCount) items.push({ tab: 'fields', cls: 'add', num: fieldCount, lbl: '新字段候选' });
   if (subtypeCount) items.push({ tab: 'fields', cls: 'chg', num: subtypeCount, lbl: '缺少 subtype 补全' });
   if (staleCount) items.push({ tab: 'fields', cls: 'del', num: staleCount, lbl: '陈旧 subtype' });
+  const scopeSummary = DATA.scopeContracts.summary;
+  if (scopeSummary.missing) items.push({ tab: 'scope-contracts', cls: 'add', num: scopeSummary.missing, lbl: 'Scope 元数据缺失' });
+  if (scopeSummary.mismatch) items.push({ tab: 'scope-contracts', cls: 'chg', num: scopeSummary.mismatch, lbl: 'Scope 契约冲突' });
+  if (scopeSummary.unresolved) items.push({ tab: 'scope-contracts', cls: 'del', num: scopeSummary.unresolved, lbl: 'Scope 注释待复核' });
   host.innerHTML = items.map(i => '<div class="card" data-tab="' + i.tab + '"><div class="num ' + i.cls + '">' + i.num + '</div><div class="lbl">' + esc(i.lbl) + '</div></div>').join('')
     || '<div class="card"><div class="num add">0</div><div class="lbl">无差异，规则与游戏文档一致</div></div>';
   host.querySelectorAll('.card[data-tab]').forEach(el => el.addEventListener('click', () => activate(el.dataset.tab)));
@@ -1178,6 +1185,58 @@ function renderFolders() {
   paint();
 }
 
+function scopeEnvironment(env) {
+  if (!env) return '';
+  const fields = [];
+  if (env.this) fields.push('THIS=' + env.this);
+  if (env.root) fields.push('ROOT=' + env.root);
+  (env.from || []).forEach((scope, index) => fields.push('FROM'.repeat(index + 1) + '=' + scope));
+  return fields.map(field => '<span class="tag">' + esc(field) + '</span>').join('');
+}
+
+function renderScopeContracts() {
+  const main = document.getElementById('main');
+  const wrap = document.createElement('div');
+  const summary = DATA.scopeContracts.summary;
+  wrap.innerHTML = '<div class="toolbar"><input type="search" placeholder="搜索定义 / scope / 来源…">'
+    + '<label><input type="checkbox" data-s="missing" checked> 缺失 (' + summary.missing + ')</label>'
+    + '<label><input type="checkbox" data-s="mismatch" checked> 冲突 (' + summary.mismatch + ')</label>'
+    + '<label><input type="checkbox" data-s="unresolved" checked> 待复核 (' + summary.unresolved + ')</label></div>'
+    + '<div class="desc" style="margin-bottom:10px">已提取 ' + summary.extracted + ' 条注释契约，其中高置信度 ' + summary.highConfidence
+    + ' 条。只有高置信度且无现有 CWT 契约的条目可自动补全；描述性或冲突注释保留为人工复核。</div><div class="list"></div>';
+  main.appendChild(wrap);
+  const listHost = wrap.querySelector('.list');
+  const input = wrap.querySelector('input[type=search]');
+
+  function paint() {
+    const q = input.value.trim().toLowerCase();
+    const enabled = new Set(Array.from(wrap.querySelectorAll('[data-s]:checked')).map(el => el.dataset.s));
+    const findings = DATA.scopeContracts.findings.filter(finding => {
+      if (!enabled.has(finding.status)) return false;
+      const haystack = [finding.name, finding.folder, finding.source, ...(finding.evidence || []), ...(finding.differences || [])].join(' ').toLowerCase();
+      return !q || haystack.includes(q);
+    });
+    if (!findings.length) {
+      listHost.innerHTML = '<div class="empty">没有匹配的 Scope 契约项</div>';
+      return;
+    }
+    const labels = { missing: ['add', '缺失'], mismatch: ['chg', '冲突'], unresolved: ['del', '待复核'] };
+    listHost.innerHTML = '<table><thead><tr><th style="width:24%">定义</th><th style="width:28%">期望 / 当前</th><th>证据 / 差异</th><th>来源</th></tr></thead><tbody>'
+      + findings.map(finding => {
+        const badge = labels[finding.status];
+        const expected = scopeEnvironment(finding.expected);
+        const actual = finding.actual ? '<div class="desc">CWT: ' + scopeEnvironment(finding.actual) + '</div>' : '';
+        const details = [...(finding.differences || []), ...(finding.evidence || [])].map(line => '<div class="desc">' + esc(line) + '</div>').join('');
+        return '<tr><td class="name">' + esc(finding.name) + '<span class="badge ' + badge[0] + '">' + badge[1] + '</span><div class="desc">common/' + esc(finding.folder) + '</div></td>'
+          + '<td>' + expected + actual + '</td><td>' + details + '</td><td class="src">' + esc(finding.source) + ':' + finding.sourceLine + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  input.addEventListener('input', paint);
+  wrap.querySelectorAll('[data-s]').forEach(el => el.addEventListener('change', paint));
+  paint();
+}
+
 meta();
 cards();
 nav();
@@ -1258,6 +1317,9 @@ function main() {
         vanillaCommonDir: args.vanillaCommon,
         diffs,
         folders,
+        scopeContracts: args.vanillaCommon && fs.existsSync(args.vanillaCommon)
+            ? scanScopeContracts(args.vanillaCommon, args.config)
+            : { gameVersion: '', contracts: [], findings: [], summary: { extracted: 0, highConfidence: 0, missing: 0, mismatch: 0, unresolved: 0 } },
     };
 
     fs.mkdirSync(args.outDir, { recursive: true });
@@ -1270,6 +1332,7 @@ function main() {
         console.log(`[report] ${diff.kind}: +${diff.added.length} -${diff.removed.length} ~${diff.changed.length}`);
     }
     console.log(`[report] folders with findings: ${folders.length}`);
+    console.log(`[report] scope contracts: extracted=${data.scopeContracts.summary.extracted} high=${data.scopeContracts.summary.highConfidence} missing=${data.scopeContracts.summary.missing} mismatch=${data.scopeContracts.summary.mismatch} unresolved=${data.scopeContracts.summary.unresolved}`);
     console.log(`Report: ${htmlPath}`);
 }
 

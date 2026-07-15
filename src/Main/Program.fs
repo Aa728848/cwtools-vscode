@@ -6962,9 +6962,80 @@ type Server(client: ILanguageClient) =
                                 match docs.GetText(FileInfo(filePath)) with
                                 | Some t -> t
                                 | None -> try File.ReadAllText filePath with _ -> ""
+                            let eventTargetNameAtPosition =
+                                let lines = fileContent.Replace("\r\n", "\n").Split('\n')
+
+                                if line < 0 || line >= lines.Length then
+                                    None
+                                else
+                                    let matches =
+                                        System.Text.RegularExpressions.Regex.Matches(
+                                            lines.[line],
+                                            @"event_target:([A-Za-z_][A-Za-z0-9_.-]*)\??"
+                                        )
+                                        |> Seq.cast<System.Text.RegularExpressions.Match>
+                                        |> Seq.toArray
+
+                                    matches
+                                    |> Array.tryFind (fun m -> col >= m.Index && col <= m.Index + m.Length)
+                                    |> Option.orElseWith (fun () -> if matches.Length = 1 then Some matches.[0] else None)
+                                    |> Option.map (fun m -> m.Groups.[1].Value)
                             let scopeResult =
                                 match gameObj with
                                 | Some g ->
+                                    let eventTarget =
+                                        eventTargetNameAtPosition
+                                        |> Option.map (fun name ->
+                                            let saved =
+                                                match activeGame, stlGameObj with
+                                                | STL, Some stellaris ->
+                                                    stellaris.References().SavedScopes
+                                                    |> Seq.filter (fun (savedName, _, _) ->
+                                                        String.Equals(savedName, name, StringComparison.OrdinalIgnoreCase))
+                                                    |> Seq.toArray
+                                                | _ -> [||]
+
+                                            let alternatives =
+                                                saved
+                                                |> Array.map (fun (_, _, scope) -> scope.ToString())
+                                                |> Array.distinct
+                                                |> Array.sort
+
+                                            let certainty, resolvedScope, warnings =
+                                                match alternatives with
+                                                | [||] ->
+                                                    "unresolved",
+                                                    "unknown",
+                                                    [| JsonValue.String "No saved scope was found for this event target." |]
+                                                | [| exact |] -> "project_unique", exact, [||]
+                                                | many ->
+                                                    "ambiguous",
+                                                    "unknown",
+                                                    [| JsonValue.String(
+                                                           sprintf
+                                                               "This event target is saved with multiple scopes: %s"
+                                                               (String.concat ", " many)
+                                                       ) |]
+
+                                            let definitions =
+                                                saved
+                                                |> Array.truncate 32
+                                                |> Array.map (fun (_, targetRange, scope) ->
+                                                    JsonValue.Record
+                                                        [| "scope", JsonValue.String(scope.ToString())
+                                                           "file", JsonValue.String(targetRange.FileName.Replace('\\', '/'))
+                                                           "line", JsonValue.Number(decimal targetRange.StartLine)
+                                                           "col", JsonValue.Number(decimal (int targetRange.StartColumn)) |])
+
+                                            JsonValue.Record
+                                                [| "name", JsonValue.String name
+                                                   "scope", JsonValue.String resolvedScope
+                                                   "alternatives", JsonValue.Array(alternatives |> Array.map JsonValue.String)
+                                                   "certainty", JsonValue.String certainty
+                                                   "definitions", JsonValue.Array definitions
+                                                   "warnings", JsonValue.Array warnings |])
+                                        |> Option.defaultValue JsonValue.Null
+
                                     match g.ScopesAtPos position filePath fileContent with
                                     | Some scopes ->
                                         let thisScopeStr =
@@ -6982,6 +7053,7 @@ type Server(client: ILanguageClient) =
                                                "currentScope", JsonValue.String thisScopeStr
                                                "prevChain",  JsonValue.Array(prevChain |> Array.map JsonValue.String)
                                                "fromChain",  JsonValue.Array(fromChain |> Array.map JsonValue.String)
+                                               "eventTarget", eventTarget
                                                "ok",         JsonValue.Boolean true |]
                                     | None ->
                                         JsonValue.Record
@@ -6990,6 +7062,7 @@ type Server(client: ILanguageClient) =
                                                "currentScope", JsonValue.String "unknown"
                                                "prevChain", JsonValue.Array [||]
                                                "fromChain", JsonValue.Array [||]
+                                               "eventTarget", eventTarget
                                                "ok",        JsonValue.Boolean false |]
                                 | None ->
                                     JsonValue.Record

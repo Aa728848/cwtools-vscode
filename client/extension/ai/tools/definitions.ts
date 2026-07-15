@@ -10,7 +10,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_scope',
-            description: 'Query the scope context at a specific position in a file. Returns the current scope (Country, Planet, etc.), ROOT, THIS, PREV chain, and FROM chain. Use this to understand which triggers/effects are valid at a position.',
+            description: 'Query the scope context at a specific position in a file. Returns the current scope (Country, Planet, etc.), ROOT, THIS, PREV chain, FROM chain, and event_target scope provenance when the cursor is on an event target. Use this to understand which triggers/effects are valid at a position.',
             parameters: {
                 type: 'object',
                 properties: {

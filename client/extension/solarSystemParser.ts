@@ -256,27 +256,21 @@ function parseValueOrRange(nodes: PdxNode[], key: string, defaultValue = 0): Val
     return { type: 'fixed', value: defaultValue };
 }
 
-/** Resolve a ValueOrRange to a single number for rendering */
-function resolveValue(v: ValueOrRange, seed?: number): number {
+/** Resolve a ValueOrRange to a stable preview value. Ranges use their midpoint. */
+function resolveValue(v: ValueOrRange, randomFallback = 0): number {
     switch (v.type) {
         case 'fixed': return v.value;
-        case 'range': {
-            if (seed !== undefined) {
-                const x = Math.sin(seed * 9999) * 10000;
-                const r = Math.abs(x - Math.floor(x));
-                return v.min + (v.max - v.min) * r;
-            }
-            return (v.min + v.max) / 2;
-        }
-        case 'random': {
-            if (seed !== undefined) {
-                const x = Math.sin(seed * 9999) * 10000;
-                const r = Math.abs(x - Math.floor(x));
-                return r * 360;
-            }
-            return Math.random() * 360;
-        }
+        case 'range': return (v.min + v.max) / 2;
+        case 'random': return randomFallback;
     }
+}
+
+/** Resolve orbit_angle=random to a deterministic angle while ranges use their midpoint. */
+function resolveOrbitAngle(v: ValueOrRange, seed: number): number {
+    if (v.type !== 'random') return resolveValue(v);
+    const x = Math.sin(seed * 9999) * 10000;
+    const fraction = Math.abs(x - Math.floor(x));
+    return fraction * 360;
 }
 
 /** Resolve count specifically (default 1) */
@@ -385,10 +379,10 @@ function resolveMoonsRecursive(parent: CelestialBody): void {
             - (mi > 0 ? (parent.moonChangeOrbitOffsets[mi - 1] ?? 0) : 0);
         moonCumulativeOrbit += parentOffset;
         const moonDist = resolveValue(moon.orbitDistance);
-        moonCumulativeAngle += resolveValue(moon.orbitAngle, moon.line);
+        moonCumulativeAngle += resolveOrbitAngle(moon.orbitAngle, moon.line);
         moon.resolvedOrbitRadius = moonCumulativeOrbit + moonDist;
         moon.resolvedOrbitAngle = moonCumulativeAngle;
-        moon.resolvedSize = resolveValue(moon.size);
+        moon.resolvedSize = resolveValue(moon.size, 15);
         moon.resolvedCount = resolveCount(moon.count);
         moonCumulativeOrbit = moon.resolvedOrbitRadius;
 
@@ -476,9 +470,9 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
 
             // Accumulate orbit
             body.resolvedOrbitRadius = cumulativeOrbit + thisOrbitDist;
-            cumulativeAngle += resolveValue(body.orbitAngle, body.line);
+            cumulativeAngle += resolveOrbitAngle(body.orbitAngle, body.line);
             body.resolvedOrbitAngle = cumulativeAngle;
-            body.resolvedSize = resolveValue(body.size);
+            body.resolvedSize = resolveValue(body.size, 15);
             body.resolvedCount = resolveCount(body.count);
 
             // Update cumulative orbit for next sibling
@@ -492,10 +486,10 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
             let subCumulativeAngle = 0;
             for (const sub of body.subPlanets) {
                 const subDist = resolveValue(sub.orbitDistance);
-                subCumulativeAngle += resolveValue(sub.orbitAngle, sub.line);
+                subCumulativeAngle += resolveOrbitAngle(sub.orbitAngle, sub.line);
                 sub.resolvedOrbitRadius = subCumulativeOrbit + subDist;
                 sub.resolvedOrbitAngle = subCumulativeAngle;
-                sub.resolvedSize = resolveValue(sub.size);
+                sub.resolvedSize = resolveValue(sub.size, 15);
                 sub.resolvedCount = resolveCount(sub.count);
                 subCumulativeOrbit = sub.resolvedOrbitRadius;
 
@@ -584,7 +578,7 @@ function groupRingWorlds(bodies: CelestialBody[], bodyChangeOrbitMap: { line: nu
         for (let j = groupStart; j < groupEnd; j++) {
              
             const body = bodies[j]!;
-            const segAngle = resolveValue(body.orbitAngle, body.line);
+            const segAngle = resolveOrbitAngle(body.orbitAngle, body.line);
             if (j > groupStart) {
                 runningAngle += segAngle;
             }
@@ -603,7 +597,9 @@ function groupRingWorlds(bodies: CelestialBody[], bodyChangeOrbitMap: { line: nu
 
         // Total arc covered
          
-        const totalAngle = runningAngle - (bodies[groupStart]!.resolvedOrbitAngle - resolveValue(bodies[groupStart]!.orbitAngle));
+        const totalAngle = runningAngle
+            - (bodies[groupStart]!.resolvedOrbitAngle
+                - resolveOrbitAngle(bodies[groupStart]!.orbitAngle, bodies[groupStart]!.line));
 
         // Get the change_orbit line that precedes this ring group
         const changeOrbitInfo = bodyChangeOrbitMap[groupStart];

@@ -61,4 +61,42 @@ ring_angle_test = {
             .to.deep.equal([[30, 60], [60, 90]]);
         expect(ringAnchor.ringGroup?.totalAngle).to.equal(60);
     });
+
+    it('uses stable field-specific preview values for random and range inputs', () => {
+        const source = `
+random_preview_test = {
+    class = sc_g
+    planet = {
+        class = pc_g_star
+        orbit_distance = random
+        orbit_angle = random
+        size = random
+        count = random
+    }
+    planet = {
+        class = pc_continental
+        orbit_distance = { min = 10 max = 30 }
+        orbit_angle = { min = 40 max = 80 }
+        size = { min = 10 max = 20 }
+        count = { min = 2 max = 4 }
+    }
+}
+`;
+
+        const first = parseSolarSystemFile(source)[0]!;
+        const second = parseSolarSystemFile(source)[0]!;
+        const randomBody = first.bodies[0]!;
+        const rangedBody = first.bodies[1]!;
+
+        expect(randomBody.resolvedOrbitRadius).to.equal(0);
+        expect(randomBody.resolvedSize).to.equal(15);
+        expect(randomBody.resolvedCount).to.equal(1);
+        expect(randomBody.resolvedOrbitAngle).to.be.at.least(0).and.lessThan(360);
+        expect(second.bodies[0]!.resolvedOrbitAngle).to.equal(randomBody.resolvedOrbitAngle);
+
+        expect(rangedBody.resolvedOrbitRadius).to.equal(20);
+        expect(rangedBody.resolvedOrbitAngle).to.equal(randomBody.resolvedOrbitAngle + 60);
+        expect(rangedBody.resolvedSize).to.equal(15);
+        expect(rangedBody.resolvedCount).to.equal(3);
+    });
 });

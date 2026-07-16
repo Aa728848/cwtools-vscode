@@ -62,7 +62,7 @@ export interface CelestialBody {
     moonChangeOrbitLines: number[];
     // Resolved values for rendering
     resolvedOrbitRadius: number;   // cumulative distance from parent center
-    resolvedOrbitAngle: number;    // degrees
+    resolvedOrbitAngle: number;    // cumulative degrees within the sibling level
     resolvedSize: number;
     resolvedCount: number;
     // Ring world grouping
@@ -288,6 +288,12 @@ function resolveCount(v: ValueOrRange): number {
     }
 }
 
+/** Convert an absolute rendered angle back to Stellaris' sibling-relative orbit_angle value. */
+function toRelativeOrbitAngle(resolvedAngle: number, previousSiblingResolvedAngle = 0): number {
+    const delta = resolvedAngle - previousSiblingResolvedAngle;
+    return ((delta % 360) + 360) % 360;
+}
+
 /** Extract flags from a `flags = { flag1 flag2 }` block */
 function parseFlags(nodes: PdxNode[]): string[] {
     const flagsNode = nodes.find(n => n.key === 'flags' && n.children);
@@ -370,6 +376,7 @@ function buildBody(
  */
 function resolveMoonsRecursive(parent: CelestialBody): void {
     let moonCumulativeOrbit = 0;
+    let moonCumulativeAngle = 0;
     for (let mi = 0; mi < parent.moons.length; mi++) {
          
         const moon = parent.moons[mi]!;
@@ -378,8 +385,9 @@ function resolveMoonsRecursive(parent: CelestialBody): void {
             - (mi > 0 ? (parent.moonChangeOrbitOffsets[mi - 1] ?? 0) : 0);
         moonCumulativeOrbit += parentOffset;
         const moonDist = resolveValue(moon.orbitDistance);
+        moonCumulativeAngle += resolveValue(moon.orbitAngle, moon.line);
         moon.resolvedOrbitRadius = moonCumulativeOrbit + moonDist;
-        moon.resolvedOrbitAngle = resolveValue(moon.orbitAngle, moon.line);
+        moon.resolvedOrbitAngle = moonCumulativeAngle;
         moon.resolvedSize = resolveValue(moon.size);
         moon.resolvedCount = resolveCount(moon.count);
         moonCumulativeOrbit = moon.resolvedOrbitRadius;
@@ -444,6 +452,7 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
     // Collect top-level planet blocks and change_orbit commands in order
     const bodies: CelestialBody[] = [];
     let cumulativeOrbit = 0;
+    let cumulativeAngle = 0;
     let lastChangeOrbitLine = -1;
     let lastChangeOrbitValue = 0;
     // Map: body index → the change_orbit line that precedes it
@@ -467,7 +476,8 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
 
             // Accumulate orbit
             body.resolvedOrbitRadius = cumulativeOrbit + thisOrbitDist;
-            body.resolvedOrbitAngle = resolveValue(body.orbitAngle, body.line);
+            cumulativeAngle += resolveValue(body.orbitAngle, body.line);
+            body.resolvedOrbitAngle = cumulativeAngle;
             body.resolvedSize = resolveValue(body.size);
             body.resolvedCount = resolveCount(body.count);
 
@@ -479,10 +489,12 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
 
             // Resolve sub-planets (binary star companions)
             let subCumulativeOrbit = 0;
+            let subCumulativeAngle = 0;
             for (const sub of body.subPlanets) {
                 const subDist = resolveValue(sub.orbitDistance);
+                subCumulativeAngle += resolveValue(sub.orbitAngle, sub.line);
                 sub.resolvedOrbitRadius = subCumulativeOrbit + subDist;
-                sub.resolvedOrbitAngle = resolveValue(sub.orbitAngle, sub.line);
+                sub.resolvedOrbitAngle = subCumulativeAngle;
                 sub.resolvedSize = resolveValue(sub.size);
                 sub.resolvedCount = resolveCount(sub.count);
                 subCumulativeOrbit = sub.resolvedOrbitRadius;
@@ -648,4 +660,4 @@ export function parseSolarSystemFile(content: string, ringWorlds?: Set<string>):
 }
 
 // Expose for property editing
-export { resolveValue, resolveCount };
+export { resolveValue, resolveCount, toRelativeOrbitAngle };

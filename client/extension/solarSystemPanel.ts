@@ -4,7 +4,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { parseSolarSystemFile, resolveValue, type SolarSystem, type CelestialBody } from './solarSystemParser';
+import { parseSolarSystemFile, resolveValue, toRelativeOrbitAngle, type SolarSystem, type CelestialBody } from './solarSystemParser';
 import { decodeDds, decodeTga } from './ddsDecoder';
 import { buildSpriteIndex, type SpriteInfo } from './guiParser';
 import { matchesExt, matchesAnyExt } from './fileExtensions';
@@ -824,7 +824,15 @@ export class SolarSystemPanel {
         const indent = closingLine.text.match(/^(\s*)/)?.[1] ?? '';
         const planetIndent = indent + '\t';
 
-        const planetCode = `${planetIndent}planet = { class = ${msg.planetClass} orbit_distance = ${clampOrbitDistance(msg.orbitDistance)} orbit_angle = ${msg.orbitAngle} size = ${msg.size} }\n`;
+        const targetSystem = parseSolarSystemFile(doc.getText())
+            .find(system => system.endLine === msg.systemEndLine);
+        const previousBody = targetSystem?.bodies[targetSystem.bodies.length - 1];
+        const relativeOrbitAngle = toRelativeOrbitAngle(
+            msg.orbitAngle,
+            previousBody?.resolvedOrbitAngle ?? 0,
+        );
+
+        const planetCode = `${planetIndent}planet = { class = ${msg.planetClass} orbit_distance = ${clampOrbitDistance(msg.orbitDistance)} orbit_angle = ${relativeOrbitAngle} size = ${msg.size} }\n`;
 
         const edit = new vscode.WorkspaceEdit();
         edit.insert(doc.uri, new vscode.Position(insertLineIdx, 0), planetCode);
@@ -1124,47 +1132,6 @@ export class SolarSystemPanel {
     }
 
     /**
-     * Update only the orbit_angle of a body (used for orbit_distance=0 same-orbit siblings).
-     */
-    private async _handleUpdateOrbitAngleOnly(msg: {
-        line: number;
-        orbitAngle: number;
-    }) {
-        if (!this._document) return;
-        const doc = this._document;
-
-        const angleStr = this._formatValue('orbit_angle', msg.orbitAngle, 'fixed');
-        const edit = new vscode.WorkspaceEdit();
-        let found = false;
-
-        for (let i = msg.line - 1; i < Math.min(msg.line + 30, doc.lineCount); i++) {
-            const lineText = doc.lineAt(i).text;
-            if (!found) {
-                const anglePattern = /(orbit_angle\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/;
-                const m = anglePattern.exec(lineText);
-                if (m) {
-                     
-                    const startCol = m.index + m[1]!.length;
-                     
-                    edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2]!.length), angleStr);
-                    found = true;
-                }
-            }
-            if (found) break;
-            if (lineText.trim() === '}' && i > msg.line - 1) break;
-        }
-
-        if (found) {
-            this._skipNextReload = true;
-            await vscode.workspace.applyEdit(edit);
-        }
-        await this._loadAndRender(doc);
-        if (found) {
-            await doc.save();
-        }
-    }
-
-    /**
      * Handle deleting a planet/body from the system.
      */
     private async _handleDeletePlanet(msg: { line: number }) {
@@ -1241,16 +1208,6 @@ export class SolarSystemPanel {
 
         this._saveSnapshot(doc);
         this._lastSnapshotTime = Date.now();
-
-        // ── Locked orbit (orbit_distance=0): only update angle ──────────────
-        if (msg.isLockedOrbit) {
-            log.appendLine(`  LOCKED ORBIT: only updating angle to ${msg.targetOrbitAngle}`);
-            await this._handleUpdateOrbitAngleOnly({
-                line: msg.bodyLine,
-                orbitAngle: Math.round(msg.targetOrbitAngle),
-            });
-            return;
-        }
 
         // ── Ring world move: modify the change_orbit before the ring ─────────
         if (msg.isRingWorld && msg.ringChangeOrbitLine && msg.ringChangeOrbitLine > 0) {
@@ -1396,9 +1353,18 @@ export class SolarSystemPanel {
         let system: SolarSystem | undefined;
         let movedBody: CelestialBody | undefined;
         let isMoon = false;
+        let siblingBodies: CelestialBody[] | undefined;
+        let siblingIndex = -1;
         const searchBody = (bodies: CelestialBody[], asMoon: boolean) => {
-            for (const b of bodies) {
-                if (b.line === msg.bodyLine) { movedBody = b; isMoon = asMoon; return; }
+            for (let index = 0; index < bodies.length; index++) {
+                const b = bodies[index]!;
+                if (b.line === msg.bodyLine) {
+                    movedBody = b;
+                    isMoon = asMoon;
+                    siblingBodies = bodies;
+                    siblingIndex = index;
+                    return;
+                }
                 searchBody(b.moons, true);
                 if (movedBody) return;
                 searchBody(b.subPlanets, asMoon);
@@ -1427,17 +1393,38 @@ export class SolarSystemPanel {
             return;
         }
 
+        const previousSiblingAngle = siblingIndex > 0
+            ? siblingBodies?.[siblingIndex - 1]?.resolvedOrbitAngle ?? 0
+            : 0;
+        const targetRelativeAngle = toRelativeOrbitAngle(msg.targetOrbitAngle, previousSiblingAngle);
+        const angleUpdates: Array<{ line: number; orbitDistance?: number; orbitAngle?: number }> = [{
+            line: msg.bodyLine,
+            orbitAngle: Math.round(targetRelativeAngle),
+        }];
+        const nextSibling = siblingBodies?.[siblingIndex + 1];
+        if (nextSibling?.orbitAngle.type === 'fixed') {
+            angleUpdates.push({
+                line: nextSibling.line,
+                orbitAngle: Math.round(toRelativeOrbitAngle(nextSibling.resolvedOrbitAngle, msg.targetOrbitAngle)),
+            });
+        }
+
+        // orbit_distance=0 bodies stay on their current orbit; only their relative
+        // angle (and the following sibling's compensating delta) is written.
+        if (msg.isLockedOrbit) {
+            log.appendLine(`  LOCKED ORBIT: targetResolvedAngle=${msg.targetOrbitAngle} relativeAngle=${targetRelativeAngle}`);
+            await this._handleUpdateOrbits(angleUpdates);
+            return;
+        }
+
         // For moons: compute correct cumulative and update in-place
         if (isMoon) {
             const rawDist = resolveValue(movedBody.orbitDistance);
             const cumAtPos = movedBody.resolvedOrbitRadius - rawDist;
             const newDist = Math.max(0, Math.round(msg.targetResolvedOrbit - cumAtPos));
             log.appendLine(`  MOON: rawDist=${rawDist} cum=${cumAtPos} newDist=${newDist}`);
-            await this._handleUpdateOrbits([{
-                line: msg.bodyLine,
-                orbitDistance: newDist,
-                orbitAngle: Math.round(msg.targetOrbitAngle),
-            }]);
+            angleUpdates[0]!.orbitDistance = newDist;
+            await this._handleUpdateOrbits(angleUpdates);
             return;
         }
 
@@ -1454,13 +1441,8 @@ export class SolarSystemPanel {
         log.appendLine(`  PLANET: idx=${currentIdx} resolved=${movedBody.resolvedOrbitRadius} rawDist=${rawDist} cum=${cumAtCurrentPos}`);
         log.appendLine(`  inPlaceNewDist=${inPlaceNewDist} target=${msg.targetResolvedOrbit}`);
 
-        const updates: Array<{ line: number; orbitDistance?: number; orbitAngle?: number }> = [
-            {
-                line: msg.bodyLine,
-                orbitDistance: inPlaceNewDist,
-                orbitAngle: Math.round(msg.targetOrbitAngle),
-            }
-        ];
+        const updates = angleUpdates;
+        updates[0]!.orbitDistance = inPlaceNewDist;
 
         // To prevent subsequent planets from shifting their absolute orbits,
         // we adjust the immediate next sibling planet's orbit_distance in the opposite direction.

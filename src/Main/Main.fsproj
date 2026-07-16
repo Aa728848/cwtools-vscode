@@ -38,6 +38,7 @@
     <Compile Include="SemanticGraph.fs" />
     <Compile Include="ProjectKnowledge.fs" />
     <Compile Include="DiagnosticMerge.fs" />
+    <Compile Include="LocalisationPreview.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

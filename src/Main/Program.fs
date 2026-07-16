@@ -95,42 +95,6 @@ let private paradoxColorPattern =
         @"§[RGBYWHETLMSP!]",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
 
-let private localisationStyleCodePattern =
-    System.Text.RegularExpressions.Regex(
-        @"(?:\u00C2?\u00A7|\u6402)[A-Za-z!]",
-        System.Text.RegularExpressions.RegexOptions.Compiled)
-
-let private localisationReferencePattern =
-    System.Text.RegularExpressions.Regex(
-        @"\$(@?[A-Za-z0-9_.:-]+)(?:\|[A-Za-z0-9_.:-]+)?\$",
-        System.Text.RegularExpressions.RegexOptions.Compiled)
-
-let private localisationConceptPattern =
-    System.Text.RegularExpressions.Regex(
-        @"\['([A-Za-z0-9_.:-]+)'(?:\s*,\s*'?([^'\]]*)'?)?\]",
-        System.Text.RegularExpressions.RegexOptions.Compiled)
-
-let private localisationIconPattern =
-    System.Text.RegularExpressions.Regex(
-        @"\u00C2?\u00A3[^\s\u00A3]+\u00C2?\u00A3",
-        System.Text.RegularExpressions.RegexOptions.Compiled)
-
-let private localisationWhitespaceMarkerPattern =
-    System.Text.RegularExpressions.Regex(
-        @"\$(?:t|tt|TABBED_NEW_LINE|NEW_LINE)\$",
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
-
-let private localisationCollapsedWhitespacePattern =
-    System.Text.RegularExpressions.Regex(
-        @"\s+",
-        System.Text.RegularExpressions.RegexOptions.Compiled)
-
-// Name-list sequence/roman-numeral spec e.g. (100?:(| C CC ...); 10?:(...); 1?:(...)) — handles one nesting level
-let private localisationSequenceFormatPattern =
-    System.Text.RegularExpressions.Regex(
-        @"\(\s*\d+\?:(?:[^()]|\([^()]*\))*\)",
-        System.Text.RegularExpressions.RegexOptions.Compiled)
-
 let private scriptedParamRegex =
     System.Text.RegularExpressions.Regex(
         @"\$([A-Za-z_][A-Za-z0-9_]*)\$",
@@ -5623,61 +5587,9 @@ type Server(client: ILanguageClient) =
                                         m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() ]
                                 let varMap = (localVars @ globalVars) |> Map.ofList
                                 
-                                let stripLocQuotes (value: string) =
-                                    let trimmed = value.Trim()
-                                    if trimmed.Length >= 2 && trimmed.StartsWith("\"") && trimmed.EndsWith("\"") then
-                                        trimmed.Substring(1, trimmed.Length - 2)
-                                    else trimmed
-
-                                let rec resolveLocRefs (text: string) (depth: int) =
-                                    if depth > 3 || String.IsNullOrEmpty text then text
-                                    else
-                                        let mutable changed = false
-                                        let withReferences =
-                                            localisationReferencePattern.Replace(
-                                                text,
-                                                System.Text.RegularExpressions.MatchEvaluator(fun m ->
-                                                    let key = m.Groups.[1].Value
-                                                    match Map.tryFind key locMap with
-                                                    | Some tr ->
-                                                        changed <- true
-                                                        stripLocQuotes tr.desc
-                                                    | None ->
-                                                        match Map.tryFind key varMap with
-                                                        | Some value ->
-                                                            changed <- true
-                                                            value
-                                                        | None -> m.Value))
-                                        let withConcepts =
-                                            localisationConceptPattern.Replace(
-                                                withReferences,
-                                                System.Text.RegularExpressions.MatchEvaluator(fun m ->
-                                                    let explicitLabel = m.Groups.[2]
-                                                    if explicitLabel.Success && not (String.IsNullOrWhiteSpace explicitLabel.Value) then
-                                                        changed <- true
-                                                        explicitLabel.Value
-                                                    else
-                                                        let key = m.Groups.[1].Value
-                                                        match Map.tryFind key locMap with
-                                                        | Some tr ->
-                                                            changed <- true
-                                                            stripLocQuotes tr.desc
-                                                        | None -> m.Value))
-                                        if changed then resolveLocRefs withConcepts (depth + 1) else withConcepts
-
-                                let formatHintLabel (desc: string) =
-                                    let clean = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\\n", " ").Trim()
-                                    let clean = stripLocQuotes clean
-                                    let clean = resolveLocRefs clean 0
-                                    let clean = localisationSequenceFormatPattern.Replace(clean, "")
-                                    let clean = localisationIconPattern.Replace(clean, "")
-                                    let clean = localisationWhitespaceMarkerPattern.Replace(clean, " ")
-                                    let clean = localisationStyleCodePattern.Replace(clean, "")
-                                    let clean = localisationCollapsedWhitespacePattern.Replace(clean, " ").Trim()
-                                    if String.IsNullOrWhiteSpace clean then None
-                                    else
-                                        let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
-                                        Some truncated
+                                let tryFindLocText key =
+                                    Map.tryFind key locMap |> Option.map (fun entry -> entry.desc)
+                                let tryFindVarText key = Map.tryFind key varMap
 
                                 let trimLocKey (value: string) =
                                     value.Trim().Trim('"')
@@ -5788,7 +5700,7 @@ type Server(client: ILanguageClient) =
                                     |> List.tryPick (fun locKey ->
                                         Map.tryFind locKey locMap
                                         |> Option.bind (fun tr ->
-                                            formatHintLabel tr.desc
+                                            Main.LocalisationPreview.formatHintLabel tryFindLocText tryFindVarText tr.desc
                                             |> Option.map (fun label -> locKey, label)))
                                     |> Option.iter (fun (_, label) ->
                                         hints.Add {

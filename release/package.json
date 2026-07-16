@@ -661,56 +661,16 @@
         ],
         "keybindings": [
             {
-                "command": "-acceptRenameInput",
-                "key": "enter",
-                "when": "renameInputVisible && editorTextFocus && !isComposing"
-            },
-            {
-                "command": "acceptRenameInputWithPreview",
-                "key": "enter",
-                "when": "renameInputVisible && editorTextFocus && !isComposing && config.editor.rename.enablePreview"
-            },
-            {
-                "command": "-acceptRenameInputWithPreview",
-                "key": "ctrl+enter",
-                "mac": "cmd+enter",
-                "when": "renameInputVisible && editorTextFocus && !isComposing && config.editor.rename.enablePreview"
-            },
-            {
-                "command": "acceptRenameInput",
-                "key": "ctrl+enter",
-                "mac": "cmd+enter",
-                "when": "renameInputVisible && editorTextFocus && !isComposing"
-            },
-            {
-                "command": "cwtools.ai.reviewFile",
-                "key": "ctrl+shift+r",
-                "mac": "cmd+shift+r",
-                "when": "editorTextFocus"
-            },
-            {
-                "command": "cwtools.ai.explainSelection",
-                "key": "ctrl+shift+e",
-                "mac": "cmd+shift+e",
-                "when": "editorHasSelection"
-            },
-            {
-                "command": "cwtools.ai.fixDiagnostics",
-                "key": "ctrl+shift+f",
-                "mac": "cmd+shift+f",
-                "when": "editorTextFocus"
-            },
-            {
                 "command": "cwtools.ai.manageIgnoredDiagnostics",
                 "key": "ctrl+shift+i",
                 "mac": "cmd+shift+i",
-                "when": "editorTextFocus"
+                "when": "editorTextFocus && config.stellarisLanguageServices.ai.enabled"
             },
             {
                 "command": "cwtools.ai.sendSelectionToChat",
                 "key": "ctrl+l",
                 "mac": "cmd+l",
-                "when": "editorHasSelection"
+                "when": "editorTextFocus && editorHasSelection && config.stellarisLanguageServices.ai.enabled"
             }
         ],
         "configuration": {

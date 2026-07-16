@@ -242,6 +242,59 @@ check('Release manifest (release/package.json) is valid JSON', () => {
     }
 });
 
+check('Release manifest avoids protected VS Code keybindings', () => {
+    const manifestPath = path.join(RELEASE, 'package.json');
+    if (!fs.existsSync(manifestPath)) return 'warn';
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    const keybindings = Array.isArray(manifest.contributes?.keybindings)
+        ? manifest.contributes.keybindings
+        : [];
+    const protectedKeys = new Set([
+        'ctrl+shift+e', 'cmd+shift+e',
+        'ctrl+shift+f', 'cmd+shift+f',
+        'ctrl+shift+r', 'cmd+shift+r',
+    ]);
+    const renameCommands = new Set([
+        '-acceptRenameInput',
+        'acceptRenameInput',
+        '-acceptRenameInputWithPreview',
+        'acceptRenameInputWithPreview',
+    ]);
+    const violations = [];
+
+    for (const binding of keybindings) {
+        const command = String(binding?.command ?? '');
+        const keys = [binding?.key, binding?.mac, binding?.win, binding?.linux]
+            .filter(value => typeof value === 'string')
+            .map(value => value.toLowerCase().replace(/\s+/g, ''));
+        if (renameCommands.has(command) || keys.some(key => protectedKeys.has(key))) {
+            violations.push(`${command}: ${keys.join(' / ') || '(no key)'}`);
+            continue;
+        }
+        if (keys.some(key => key === 'ctrl+shift+i' || key === 'cmd+shift+i')) {
+            const when = String(binding?.when ?? '');
+            const safelyScoped = command === 'cwtools.ai.manageIgnoredDiagnostics'
+                && when.includes('editorTextFocus')
+                && when.includes('config.stellarisLanguageServices.ai.enabled');
+            if (!safelyScoped) violations.push(`${command}: ${keys.join(' / ')}`);
+        }
+        if (keys.some(key => key === 'ctrl+l' || key === 'cmd+l')) {
+            const when = String(binding?.when ?? '');
+            const safelyScoped = command === 'cwtools.ai.sendSelectionToChat'
+                && when.includes('editorTextFocus')
+                && when.includes('editorHasSelection')
+                && when.includes('config.stellarisLanguageServices.ai.enabled');
+            if (!safelyScoped) violations.push(`${command}: ${keys.join(' / ')}`);
+        }
+    }
+
+    if (violations.length > 0) {
+        console.log(`    Conflicting keybindings: ${violations.join(', ')}`);
+        return false;
+    }
+    return true;
+});
+
 // ── 8. NLS Key Completeness ─────────────────────────────────────────────────
 
 check('NLS locale: Simplified Chinese manifest exists', () => {

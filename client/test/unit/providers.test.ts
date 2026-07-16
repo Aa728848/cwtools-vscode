@@ -81,6 +81,7 @@ describe('isModelVisionCapable', () => {
         expect(isModelVisionCapable('qwen3.7-max-2026-06-08')).to.equal(true);
         expect(isModelVisionCapable('qwen3.7-plus')).to.equal(true);
         expect(isModelVisionCapable('kimi-k2.7-code-highspeed')).to.equal(true);
+        expect(isModelVisionCapable('kimi-k3')).to.equal(true);
     });
 });
 
@@ -149,6 +150,7 @@ describe('getModelContextTokens', () => {
         expect(getModelContextTokens('glm-5.2', 'glm')).to.equal(1000000);
         expect(getModelContextTokens('glm-5v-turbo', 'glm')).to.equal(200000);
         expect(getModelContextTokens('kimi-k2.7-code', 'kimi')).to.equal(262144);
+        expect(getModelContextTokens('kimi-k3', 'kimi')).to.equal(1048576);
     });
 
     it('uses OpenCode-specific limits', () => {
@@ -193,6 +195,10 @@ describe('getModelOutputTokens', () => {
 
     it('returns the supported Kimi K2.7 output budget', () => {
         expect(getModelOutputTokens('kimi-k2.7-code', 'kimi')).to.equal(32768);
+    });
+
+    it('returns the supported Kimi K3 output budget', () => {
+        expect(getModelOutputTokens('kimi-k3', 'kimi')).to.equal(131072);
     });
 
     it('uses OpenCode-specific output limits', () => {
@@ -339,6 +345,11 @@ describe('getEffectiveTemperature', () => {
     it('enforces Kimi K2.7 Code fixed sampling temperature', () => {
         expect(getEffectiveTemperature('kimi-k2.7-code', 0.2)).to.equal(1.0);
         expect(getEffectiveTemperature('moonshotai/kimi-k2.7-code-highspeed')).to.equal(1.0);
+    });
+
+    it('enforces Kimi K3 fixed sampling temperature', () => {
+        expect(getEffectiveTemperature('kimi-k3', 0.2)).to.equal(1.0);
+        expect(getEffectiveTemperature('kimi-for-coding', 0.2)).to.equal(1.0);
     });
 
     it('preserves normal model overrides and defaults', () => {
@@ -718,9 +729,22 @@ describe('BUILTIN_PROVIDERS', () => {
             'gemini-2.5-flash',
             'gemini-2.5-flash-lite',
         ]);
-        expect(BUILTIN_PROVIDERS['kimi']!.defaultModel).to.equal('kimi-k2.7-code');
+        expect(BUILTIN_PROVIDERS['kimi']!.defaultModel).to.equal('kimi-k3');
         expect(BUILTIN_PROVIDERS['kimi']!.endpoint).to.equal('https://api.moonshot.cn/v1');
         expect(ALWAYS_THINKING_PREFIXES).to.include('kimi-k2.7-code');
+        expect(ALWAYS_THINKING_PREFIXES).to.include('kimi-k3');
+    });
+
+    it('registers the Kimi Code Plan subscription provider', () => {
+        const plan = BUILTIN_PROVIDERS['kimi-code-plan']!;
+        expect(plan.endpoint).to.equal('https://api.kimi.com/coding/v1');
+        expect(plan.defaultModel).to.equal('kimi-for-coding');
+        expect(plan.models).to.deep.equal(['kimi-for-coding']);
+        expect(plan.isOpenAICompatible).to.equal(true);
+        expect(ALWAYS_THINKING_PREFIXES).to.include('kimi-for-coding');
+        expect(isModelVisionCapable('kimi-for-coding')).to.equal(true);
+        expect(getModelContextTokens('kimi-for-coding', 'kimi-code-plan')).to.equal(1048576);
+        expect(getModelOutputTokens('kimi-for-coding', 'kimi-code-plan')).to.equal(131072);
     });
 
     it('uses the current GitHub Models inference endpoint and catalog IDs', () => {

@@ -91,6 +91,8 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'mimo-v2.5-pro': false,
     'mimo-v2.5-free': true,
     'mimo-v2.5': true,
+    'kimi-k3': true,
+    'kimi-for-coding': true,
     'kimi-k2.7-code': true,
     'kimi-k2.6': true,
     'kimi-k2.5': true,
@@ -154,6 +156,8 @@ export const ALWAYS_THINKING_PREFIXES: string[] = [
     'gemini-2.5-pro', 'gemini-3.1-pro',
     'QwQ', 'qwq',
     'Thinking', 'thinking',
+    'kimi-k3',
+    'kimi-for-coding',
     'kimi-k2.7-code',
     'phi-4-reasoning',
 ];
@@ -358,6 +362,8 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'GLM-Z1': 128000,
     'GLM-4': 128000,
     'glm': 128000,
+    'kimi-for-coding': 1048576,
+    'kimi-k3': 1048576,
     'kimi-k2.7-code-highspeed': 262144,
     'kimi-k2.7-code': 262144,
     'kimi-k2.6': 262144,
@@ -502,6 +508,7 @@ export function getModelOutputTokens(model: string, providerId?: string): number
         return 131072;
     }
     if (providerId === 'kimi' || lower.includes('kimi') || lower.includes('moonshot')) {
+        if (lower.includes('kimi-k3') || lower.includes('kimi-for-coding')) return 131072;
         return 32768;
     }
 

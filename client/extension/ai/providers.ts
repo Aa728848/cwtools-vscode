@@ -218,7 +218,8 @@ export function getEffectiveModel(providerId: string, userModel?: string): strin
 
 /** Apply provider-enforced sampling constraints while preserving normal user overrides. */
 export function getEffectiveTemperature(model: string, requested?: number): number {
-    if (model.toLowerCase().includes('kimi-k2.7-code')) return 1.0;
+    const lower = model.toLowerCase();
+    if (lower.includes('kimi-k2.7-code') || lower.includes('kimi-k3') || lower.includes('kimi-for-coding')) return 1.0;
     return requested ?? 0.3;
 }
 

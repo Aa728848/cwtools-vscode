@@ -92,6 +92,7 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
     // Zhipu GLM
     if (lower.includes('glm')) return 0.19;
     // Moonshot Kimi
+    if (lower.includes('kimi-k3') || lower.includes('kimi-for-coding')) return 0.1;
     if (lower.includes('kimi-k2.7')) return 0.2;
     if (lower.includes('kimi-k2.5')) return 0.18;
     if (lower.includes('kimi')) return 0.17;

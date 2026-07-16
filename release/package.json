@@ -912,7 +912,8 @@
                         "mimo-token-plan",
                         "opencode",
                         "opencode-go",
-                        "kimi"
+                        "kimi",
+                        "kimi-code-plan"
                     ],
                     "enumDescriptions": [
                         "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
@@ -934,7 +935,8 @@
                         "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
                         "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%",
                         "%configuration.stellarisLanguageServices.ai.provider.enum.opencode-go%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.kimi%"
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.kimi%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.kimi-code-plan%"
                     ],
                     "default": "openai",
                     "markdownDescription": "%configuration.stellarisLanguageServices.ai.provider.description%"
@@ -1306,7 +1308,8 @@
                         "mimo-token-plan",
                         "opencode",
                         "opencode-go",
-                        "kimi"
+                        "kimi",
+                        "kimi-code-plan"
                     ],
                     "enumDescriptions": [
                         "%configuration.stellarisLanguageServices.ai.translationPreview.provider.enum.inherit%",
@@ -1329,7 +1332,8 @@
                         "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
                         "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%",
                         "%configuration.stellarisLanguageServices.ai.provider.enum.opencode-go%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.kimi%"
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.kimi%",
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.kimi-code-plan%"
                     ],
                     "default": "",
                     "description": "%configuration.stellarisLanguageServices.ai.translationPreview.provider.description%"

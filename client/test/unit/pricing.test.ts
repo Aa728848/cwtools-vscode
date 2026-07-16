@@ -28,6 +28,7 @@ describe('getModelPricing', () => {
         expect(getModelPricing('gemini-3.5-flash')).to.deep.equal([10.23, 61.38]);
         expect(getModelPricing('mimo-v2.5-pro')).to.deep.equal([3.00, 6.00]);
         expect(getModelPricing('kimi-k2.7-code')).to.deep.equal([6.50, 27.00]);
+        expect(getModelPricing('kimi-k3')).to.deep.equal([20.00, 100.00]);
     });
 
     it('prefix match: dated model tag', () => {
@@ -50,6 +51,10 @@ describe('getModelPricing', () => {
 
     it('unknown model returns [0, 0]', () => {
         expect(getModelPricing('nonexistent-model-v99')).to.deep.equal([0, 0]);
+    });
+
+    it('subscription plan models are not billed per token', () => {
+        expect(getModelPricing('kimi-for-coding')).to.deep.equal([0, 0]);
     });
 
     it('free models return [0, 0]', () => {
@@ -96,6 +101,8 @@ describe('getCacheDiscountFactor', () => {
     it('returns correct factors for other providers', () => {
         expect(getCacheDiscountFactor('glm-5.2')).to.equal(0.19);
         expect(getCacheDiscountFactor('kimi-k2.7-code')).to.equal(0.2);
+        expect(getCacheDiscountFactor('kimi-k3')).to.equal(0.1);
+        expect(getCacheDiscountFactor('kimi-for-coding')).to.equal(0.1);
         expect(getCacheDiscountFactor('kimi-k2.6')).to.equal(0.17);
         expect(getCacheDiscountFactor('minimax-m2.7')).to.equal(0.2);
         expect(getCacheDiscountFactor('mimo-v2.5-pro')).to.equal(0.0083);

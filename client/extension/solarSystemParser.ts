@@ -265,6 +265,11 @@ function resolveValue(v: ValueOrRange, randomFallback = 0): number {
     }
 }
 
+/** Keep random orbit distances visible while preserving sibling-relative accumulation. */
+function resolveOrbitDistance(v: ValueOrRange): number {
+    return resolveValue(v, 10);
+}
+
 /** Resolve orbit_angle=random to a deterministic angle while ranges use their midpoint. */
 function resolveOrbitAngle(v: ValueOrRange, seed: number): number {
     if (v.type !== 'random') return resolveValue(v);
@@ -378,7 +383,7 @@ function resolveMoonsRecursive(parent: CelestialBody): void {
         const parentOffset = (parent.moonChangeOrbitOffsets[mi] ?? 0)
             - (mi > 0 ? (parent.moonChangeOrbitOffsets[mi - 1] ?? 0) : 0);
         moonCumulativeOrbit += parentOffset;
-        const moonDist = resolveValue(moon.orbitDistance);
+        const moonDist = resolveOrbitDistance(moon.orbitDistance);
         moonCumulativeAngle += resolveOrbitAngle(moon.orbitAngle, moon.line);
         moon.resolvedOrbitRadius = moonCumulativeOrbit + moonDist;
         moon.resolvedOrbitAngle = moonCumulativeAngle;
@@ -463,7 +468,7 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
             const body = buildBody('planet', n.children, n.line, n.endLine ?? n.line);
 
             // First planet with orbit_distance = 0 is the star
-            const thisOrbitDist = resolveValue(body.orbitDistance);
+            const thisOrbitDist = resolveOrbitDistance(body.orbitDistance);
             if (bodies.length === 0 && thisOrbitDist === 0) {
                 body.bodyType = 'star';
             }
@@ -485,7 +490,7 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
             let subCumulativeOrbit = 0;
             let subCumulativeAngle = 0;
             for (const sub of body.subPlanets) {
-                const subDist = resolveValue(sub.orbitDistance);
+                const subDist = resolveOrbitDistance(sub.orbitDistance);
                 subCumulativeAngle += resolveOrbitAngle(sub.orbitAngle, sub.line);
                 sub.resolvedOrbitRadius = subCumulativeOrbit + subDist;
                 sub.resolvedOrbitAngle = subCumulativeAngle;

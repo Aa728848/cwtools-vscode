@@ -68,10 +68,18 @@ random_preview_test = {
     class = sc_g
     planet = {
         class = pc_g_star
+        orbit_distance = 0
+        planet = { class = pc_a_star orbit_distance = random }
+        planet = { class = pc_b_star orbit_distance = random }
+    }
+    planet = {
+        class = pc_barren
         orbit_distance = random
         orbit_angle = random
         size = random
         count = random
+        moon = { class = pc_barren_cold orbit_distance = random }
+        moon = { class = pc_barren_cold orbit_distance = random }
     }
     planet = {
         class = pc_continental
@@ -85,16 +93,19 @@ random_preview_test = {
 
         const first = parseSolarSystemFile(source)[0]!;
         const second = parseSolarSystemFile(source)[0]!;
-        const randomBody = first.bodies[0]!;
-        const rangedBody = first.bodies[1]!;
+        const star = first.bodies[0]!;
+        const randomBody = first.bodies[1]!;
+        const rangedBody = first.bodies[2]!;
 
-        expect(randomBody.resolvedOrbitRadius).to.equal(0);
+        expect(star.subPlanets.map(body => body.resolvedOrbitRadius)).to.deep.equal([10, 20]);
+        expect(randomBody.resolvedOrbitRadius).to.equal(10);
+        expect(randomBody.moons.map(moon => moon.resolvedOrbitRadius)).to.deep.equal([10, 20]);
         expect(randomBody.resolvedSize).to.equal(15);
         expect(randomBody.resolvedCount).to.equal(1);
         expect(randomBody.resolvedOrbitAngle).to.be.at.least(0).and.lessThan(360);
-        expect(second.bodies[0]!.resolvedOrbitAngle).to.equal(randomBody.resolvedOrbitAngle);
+        expect(second.bodies[1]!.resolvedOrbitAngle).to.equal(randomBody.resolvedOrbitAngle);
 
-        expect(rangedBody.resolvedOrbitRadius).to.equal(20);
+        expect(rangedBody.resolvedOrbitRadius).to.equal(30);
         expect(rangedBody.resolvedOrbitAngle).to.equal(randomBody.resolvedOrbitAngle + 60);
         expect(rangedBody.resolvedSize).to.equal(15);
         expect(rangedBody.resolvedCount).to.equal(3);

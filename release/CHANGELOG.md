@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.20] - 2026-07-16
+
+### 功能与优化 / Features & Optimizations
+- **[优化] 优化域解析**：优化了针对脚本文件的域解析机制。
+  English: [Optimization] Optimize domain/scope resolution.
+
 ## [2.8.19] - 2026-07-16
 
 ### 功能与优化 / Features & Optimizations

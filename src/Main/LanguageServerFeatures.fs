@@ -190,6 +190,37 @@ module LanguageServerFeatures =
 
                         header + root + prevs + froms
 
+                let carrierHostHover =
+                    if not (unescapedWord.Equals("carrier_event", StringComparison.OrdinalIgnoreCase)) then
+                        None
+                    else
+                        match scopeContext, game with
+                        | Some scopes, (:? IScopeInferenceProvider as provider) ->
+                            provider.ScopeInferenceAtPos position path fileContent scopes
+                            |> Option.filter (fun inference -> inference.kind = "carrier_host")
+                            |> Option.map (fun inference ->
+                                let candidates =
+                                    inference.candidates
+                                    |> List.distinct
+                                    |> List.map (sprintf "`%s`")
+                                    |> String.concat " / "
+
+                                match inference.certainty.ToLowerInvariant() with
+                                | "exact" ->
+                                    sprintf
+                                        "**Carrier host / Carrier 宿主**: `%s` — exact / 已确定"
+                                        inference.resolvedScope
+                                | "union" ->
+                                    sprintf
+                                        "**Carrier host / Carrier 宿主**: `%s` (%s) — union / 尚未唯一确定"
+                                        inference.resolvedScope
+                                        candidates
+                                | _ ->
+                                    sprintf
+                                        "**Carrier host / Carrier 宿主**: `unknown` (%s) — unresolved / 未解析"
+                                        candidates)
+                        | _ -> None
+
                 let eventTargetHover =
                     if unescapedWord.StartsWith("event_target:", StringComparison.OrdinalIgnoreCase) then
                         let rawName = unescapedWord.Substring("event_target:".Length).TrimEnd('?')
@@ -282,6 +313,7 @@ module LanguageServerFeatures =
                        (inlineScriptPreview |> Option.orElse docStringOrEffect)
                        lochover
                        nonEmptyString scopesExtra
+                       carrierHostHover
                        eventTargetHover
                        variableHover |]
                     |> Array.choose id

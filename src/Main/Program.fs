@@ -5042,6 +5042,7 @@ type Server(client: ILanguageClient) =
                         p.textDocument.uri
                         p.position
                         locMapForHover
+                        uiText
                 sw.Stop()
                 let allocAfter = GC.GetTotalAllocatedBytes(false)
                 let allocDelta = allocAfter - allocBefore

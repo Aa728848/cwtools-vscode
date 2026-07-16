@@ -74,7 +74,7 @@ module LanguageServerFeatures =
             localisation
             |> List.tryPick (fun (k, v) -> if k = word then Some v.desc else None)
 
-    let docstringFromInfo (infoOption: SymbolInformation option) =
+    let docstringFromInfo (uiText: string -> string -> string) (infoOption: SymbolInformation option) =
         match infoOption with
         | Some info ->
             let ruleDesc = info.ruleDescription
@@ -82,7 +82,7 @@ module LanguageServerFeatures =
             let scopes =
                 match info.ruleRequiredScopes with
                 | [] -> None
-                | _ -> Some("Supports scopes: " + String.Join(", ", info.ruleRequiredScopes))
+                | _ -> Some(uiText "Supports scopes: " "支持的作用域：" + String.Join(", ", info.ruleRequiredScopes))
 
             Some(String.Join("\n***\n", [| ruleDesc; scopes |] |> Array.choose id))
         | None -> None
@@ -94,6 +94,7 @@ module LanguageServerFeatures =
         (doc: Uri)
         (pos: Position)
         (locMap: (string * Entry) list)
+        (uiText: string -> string -> string)
         =
         async {
             let unescapedWord = docs.GetTextAtPosition(doc, pos)
@@ -146,7 +147,7 @@ module LanguageServerFeatures =
                         let definedParameters = [ for m in params_found -> m.Groups.[1].Value ] |> List.distinct
                         if definedParameters.Length > 0 then
                             let paramsStr = definedParameters |> List.map (fun p -> sprintf "`$%s$`" p) |> String.concat ", "
-                            sprintf "`%s` = `%s`\n\nParameters: %s" displayName value paramsStr
+                            sprintf "`%s` = `%s`\n\n%s: %s" displayName value (uiText "Parameters" "参数") paramsStr
                         else
                             sprintf "`%s` = `%s`" displayName value)
 
@@ -163,13 +164,19 @@ module LanguageServerFeatures =
                         if strategy = "" then
                             None
                         else
-                            Some(sprintf "**Path override mode**: `%s`\n\nMatched path: `%s`" strategy priority.path))
+                            Some(
+                                sprintf
+                                    "**%s**: `%s`\n\n%s: `%s`"
+                                    (uiText "Path override mode" "路径覆盖模式")
+                                    strategy
+                                    (uiText "Matched path" "匹配路径")
+                                    priority.path))
 
                 let scopesExtra =
                     match scopeContext with
                     | None -> ""
                     | Some scopes ->
-                        let header = "| Context | Scope |\n| ----- | -----|\n"
+                        let header = sprintf "| %s | %s |\n| ----- | -----|\n" (uiText "Context" "上下文") (uiText "Scope" "作用域")
                         let root = $"| ROOT | %s{scopes.Root.ToString()} |\n"
 
                         let prevs =
@@ -185,7 +192,11 @@ module LanguageServerFeatures =
                         let froms =
                             scopes.From
                             |> List.mapi (fun i s ->
-                                "| " + (String.replicate (i + 1) "FROM") + " | " + s.ToString() + " |\n")
+                                "| "
+                                + (String.replicate (i + 1) "FROM")
+                                + " | "
+                                + s.ToString()
+                                + " |\n")
                             |> String.concat ""
 
                         header + root + prevs + froms
@@ -205,20 +216,29 @@ module LanguageServerFeatures =
                                     |> List.map (sprintf "`%s`")
                                     |> String.concat " / "
 
+                                let resolvedScope = inference.resolvedScope
+
                                 match inference.certainty.ToLowerInvariant() with
                                 | "exact" ->
                                     sprintf
-                                        "**Carrier host / Carrier 宿主**: `%s` — exact / 已确定"
-                                        inference.resolvedScope
+                                        "**%s**: `%s` — %s"
+                                        (uiText "Carrier host" "载体宿主")
+                                        resolvedScope
+                                        (uiText "exact" "已确定")
                                 | "union" ->
                                     sprintf
-                                        "**Carrier host / Carrier 宿主**: `%s` (%s) — union / 尚未唯一确定"
-                                        inference.resolvedScope
+                                        "**%s**: `%s` (%s) — %s"
+                                        (uiText "Carrier host" "载体宿主")
+                                        resolvedScope
                                         candidates
+                                        (uiText "union" "尚未唯一确定")
                                 | _ ->
                                     sprintf
-                                        "**Carrier host / Carrier 宿主**: `unknown` (%s) — unresolved / 未解析"
-                                        candidates)
+                                        "**%s**: `%s` (%s) — %s"
+                                        (uiText "Carrier host" "载体宿主")
+                                        (uiText "unknown" "未知")
+                                        candidates
+                                        (uiText "unresolved" "未解析"))
                         | _ -> None
 
                 let eventTargetHover =
@@ -241,13 +261,13 @@ module LanguageServerFeatures =
 
                         let scopeText =
                             match alternatives with
-                            | [||] -> "`unknown` — unresolved / 未解析"
-                            | [| exact |] -> sprintf "`%s` — project-unique / 项目内唯一" exact
+                            | [||] -> sprintf "`%s` — %s" (uiText "unknown" "未知") (uiText "unresolved" "未解析")
+                            | [| exact |] -> sprintf "`%s` — %s" exact (uiText "project-unique" "项目内唯一")
                             | many ->
                                 many
                                 |> Array.map (sprintf "`%s`")
                                 |> String.concat ", "
-                                |> sprintf "%s — ambiguous / 存在歧义"
+                                |> fun scopes -> sprintf "%s — %s" scopes (uiText "ambiguous" "存在歧义")
 
                         let definitions =
                             saved
@@ -263,10 +283,12 @@ module LanguageServerFeatures =
 
                         Some(
                             sprintf
-                                "**Event target / 事件目标**: `%s`\n\n**Scope / 作用域**: %s%s"
+                                "**%s**: `%s`\n\n**%s**: %s%s"
+                                (uiText "Event target" "事件目标")
                                 name
+                                (uiText "Scope" "作用域")
                                 scopeText
-                                (if definitions = "" then "" else "\n\n**Saved at / 保存于**\n" + definitions)
+                                (if definitions = "" then "" else "\n\n**" + uiText "Saved at" "保存于" + "**\n" + definitions)
                         )
                     else
                         None
@@ -276,19 +298,25 @@ module LanguageServerFeatures =
                     |> Option.map (fun e ->
                         match e with
                         | :? CWTools.Common.DocEffect as de ->
-                            let scopes = String.Join(", ", de.Scopes |> List.map (fun f -> f.ToString()))
+                            let scopes =
+                                de.Scopes
+                                |> List.map (fun scope -> scope.ToString())
+                                |> String.concat ", "
 
                             let desc =
                                 de.Desc.Replace("_", "\\_").Trim()
                                 |> (fun s -> if s = "" then "" else "_" + s + "_")
 
-                            String.Join("\n***\n", [ desc; "Supports scopes: " + scopes ])
+                            String.Join("\n***\n", [ desc; uiText "Supports scopes: " "支持的作用域：" + scopes ])
                         | e ->
-                            let scopes = String.Join(", ", e.Scopes |> List.map (fun f -> f.ToString()))
+                            let scopes =
+                                e.Scopes
+                                |> List.map (fun scope -> scope.ToString())
+                                |> String.concat ", "
                             let name = e.Name.GetString().Replace("_", "\\_").Trim()
-                            String.Join("\n***\n", [ "_" + name + "_"; "Supports scopes: " + scopes ]))
+                            String.Join("\n***\n", [ "_" + name + "_"; uiText "Supports scopes: " "支持的作用域：" + scopes ]))
 
-                let docStringOrEffect = Option.orElse (docstringFromInfo symbolInfo) effect
+                let docStringOrEffect = Option.orElse (docstringFromInfo uiText symbolInfo) effect
 
                 let inlineScriptPreview =
                     symbolInfo
@@ -304,7 +332,7 @@ module LanguageServerFeatures =
                                 |> List.tryFind (fun l -> l.key = "preview" && l.value <> "")
                                 |> Option.map (fun l -> sprintf "```\n%s\n```" l.value)
                                 |> Option.defaultValue ""
-                            let header = sprintf "**Inline Script**: `%s`" pathInfo
+                            let header = sprintf "**%s**: `%s`" (uiText "Inline Script" "内联脚本") pathInfo
                             Some (if preview <> "" then header + "\n\n" + preview else header)
                         else None)
 

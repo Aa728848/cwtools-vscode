@@ -1088,6 +1088,7 @@ type LoadingRuntimeState =
       lastValidationErrorCount: int
       lastLocalisationErrorCount: int
       lastRulesStatus: string
+      lastRulesSource: string
       lastCacheStatus: string
       lastPrecacheFileCount: int
       lastError: string option }
@@ -1172,6 +1173,7 @@ type Server(client: ILanguageClient) =
           lastValidationErrorCount = 0
           lastLocalisationErrorCount = 0
           lastRulesStatus = "not_started"
+          lastRulesSource = "not_started"
           lastCacheStatus = "not_started"
           lastPrecacheFileCount = 0
           lastError = None }
@@ -1365,6 +1367,7 @@ type Server(client: ILanguageClient) =
                "lastValidationErrorCount", JsonValue.Number(decimal state.lastValidationErrorCount)
                "lastLocalisationErrorCount", JsonValue.Number(decimal state.lastLocalisationErrorCount)
                "lastRulesStatus", JsonValue.String state.lastRulesStatus
+               "lastRulesSource", JsonValue.String state.lastRulesSource
                "lastCacheStatus", JsonValue.String state.lastCacheStatus
                "lastPrecacheFileCount", JsonValue.Number(decimal state.lastPrecacheFileCount)
                "lastError",
@@ -3663,6 +3666,7 @@ type Server(client: ILanguageClient) =
         preferBundledRules <- false
         let finishRules status error =
             sw.Stop()
+            let source = getConfigSource cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
             updateLoadingRuntime (fun state ->
                 { state with
                     inProgress = false
@@ -3670,6 +3674,7 @@ type Server(client: ILanguageClient) =
                     lastCompletedAtUnixMs = nowUnixMs ()
                     lastElapsedMs = int64 (sw.Elapsed.TotalMilliseconds)
                     lastRulesStatus = status
+                    lastRulesSource = source
                     lastError = error })
         updateLoadingRuntime (fun state ->
             { state with
@@ -3678,6 +3683,7 @@ type Server(client: ILanguageClient) =
                 lastStartedAtUnixMs = nowUnixMs ()
                 lastGame = activeGame.ToString()
                 lastRulesStatus = "checking"
+                lastRulesSource = "checking"
                 lastError = None })
         match cachePath, remoteRepoPath, useManualRules with
         | Some cp, Some rp, false ->

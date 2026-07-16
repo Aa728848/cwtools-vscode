@@ -879,8 +879,7 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 .composer-model-trigger.active .composer-chevron { transform: rotate(180deg); }
 .composer-write-mode-trigger { max-width: 132px; flex: 0 1 auto; }
 .composer-mode-trigger { max-width: 116px; flex: 0 1 auto; }
-.composer-reasoning-select { height: 32px; max-width: 84px; border: 1px solid transparent; border-radius: 10px; padding: 0 24px 0 9px; background: rgba(255,255,255,0.065); color: var(--fg); font: 12px inherit; cursor: pointer; outline: none; }
-.composer-reasoning-select:hover, .composer-reasoning-select:focus { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.15); }
+.composer-reasoning-trigger { width: 84px; max-width: 84px; flex: 0 0 84px; justify-content: space-between; }
 .composer-write-mode-trigger.write-mode-elevated { border-color: var(--accent); color: var(--accent); background: rgba(255,255,255,0.08); }
 .composer-write-mode-trigger.write-mode-danger { border-color: rgba(244,67,54,0.55); color: var(--error); background: rgba(244,67,54,0.12); }
 .write-mode-menu .model-menu-item-stacked { flex-direction: column; align-items: flex-start; gap: 2px; white-space: normal; }
@@ -904,6 +903,7 @@ body.chat-empty .composer-menu, body.chat-empty .model-menu { top: calc(100% + 6
 .composer-menu-item.active, .model-menu-item.active { border-color: var(--accent); }
 .composer-menu-item svg { flex-shrink: 0; opacity: 0.82; }
 .model-menu { left: max(64px, calc(50% - var(--chat-column-half-width) + 52px)); min-width: 260px; max-width: min(430px, calc(100vw - 92px)); padding: 10px 0; }
+.reasoning-menu { min-width: 164px; max-width: min(220px, calc(100vw - 44px)); }
 .write-mode-menu { min-width: 200px; max-width: 280px; }
 .model-menu-title { padding: 0 12px 7px; color: var(--fg); opacity: 0.64; font-size: 12px; }
 .model-menu-list { max-height: 290px; overflow-y: auto; padding: 0 1px; }
@@ -1398,15 +1398,15 @@ body.chat-empty .slash-popup { top: var(--composer-popup-top); bottom: auto; max
     .slash-popup { left: 14px; right: 14px; width: calc(100vw - 28px); }
     .slash-popup-item { grid-template-columns: minmax(0, 1fr); gap: 2px; align-items: start; }
     .slash-popup-meta { justify-self: start; }
-    .input-controls { flex-wrap: wrap; }
-    .composer-toolbar { flex: 1 1 100%; }
-    .composer-submit-controls { flex: 1 1 100%; }
-    .composer-model-trigger { max-width: 42vw; }
+    .input-controls, .composer-toolbar, .composer-submit-controls { gap: 4px; }
+    .composer-model-trigger { max-width: 42vw; gap: 6px; padding-left: 10px; padding-right: 8px; }
     .composer-write-mode-trigger, .composer-mode-trigger { max-width: 34vw; }
-    .composer-submit-controls .composer-model-trigger { margin-left: auto; max-width: 46vw; }
+    #quickModelTrigger { max-width: 32vw; }
+    .composer-reasoning-trigger { width: 76px; max-width: 76px; flex-basis: 76px; }
     .composer-chip { max-width: 120px; }
     .workflow-chip { max-width: 140px; }
     .model-menu { left: 52px; min-width: 220px; max-width: calc(100vw - 76px); }
+    .reasoning-menu { min-width: 164px; max-width: min(200px, calc(100vw - 76px)); }
     .topics-panel-summary,
     .settings-overview { flex-direction: column; align-items: stretch; }
     .topics-panel-summary-chips,

@@ -2004,6 +2004,10 @@ export async function activate(context: ExtensionContext) {
 			bundledRulesPath,
 			defaultRemoteRulesUrl: defaultRepoPath,
 			remoteRulesUrl: getConfiguredRulesRemoteUrl(language),
+			refreshRules: async () => {
+				if (!defaultClient) return;
+				await defaultClient.restart();
+			},
 		}));
 		registerSpecialPathCommands(context, () => ({
 			languageId: language,

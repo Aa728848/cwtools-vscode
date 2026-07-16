@@ -145,4 +145,58 @@ describe('rules config groups', () => {
 		expect(groups.find(group => group.id === 'remote')!.active).to.equal(false);
 		expect(groups.find(group => group.id === 'fallback')!.active).to.equal(false);
 	});
+
+	it('uses the language-server effective source when bundled fallback is active', () => {
+		configValues = {
+			rules_version: 'latest',
+			rules_folder: '',
+		};
+		const { getRuleGroups } = loadRulesConfigGroups();
+		const groups = getRuleGroups({
+			languageId: 'stellaris',
+			cacheDir,
+			bundledRulesPath,
+			defaultRemoteRulesUrl: 'https://example.test/default-rules',
+			remoteRulesUrl: 'https://example.test/default-rules',
+		}, { source: 'bundled', updateStatus: 'fallback' });
+
+		expect(groups.find(group => group.id === 'fallback')!.active).to.equal(true);
+		expect(groups.find(group => group.id === 'remote')!.active).to.equal(false);
+	});
+
+	it('reports bundled archives as rule packages instead of CWT files', () => {
+		const archivePath = path.join(tempDir, 'bundled-rules.zip');
+		fs.writeFileSync(archivePath, 'not-a-real-zip');
+		const { getRuleGroups } = loadRulesConfigGroups();
+		const groups = getRuleGroups({
+			languageId: 'stellaris',
+			cacheDir,
+			bundledRulesPath: archivePath,
+			defaultRemoteRulesUrl: 'https://example.test/default-rules',
+			remoteRulesUrl: 'https://example.test/default-rules',
+		});
+
+		const fallback = groups.find(group => group.id === 'fallback')!;
+		expect(fallback.fileCount).to.equal(1);
+		expect(fallback.unit).to.equal('package');
+	});
+
+	it('parses effective rule source and update metadata from validation status', () => {
+		const { parseRulesRuntimeStatus } = loadRulesConfigGroups();
+		const status = parseRulesRuntimeStatus({
+			loading: {
+				lastRulesSource: 'remote',
+				lastRulesStatus: 'up_to_date',
+				lastCompletedAtUnixMs: 1234,
+				lastError: null,
+			},
+		});
+
+		expect(status).to.deep.equal({
+			source: 'remote',
+			updateStatus: 'up_to_date',
+			lastCompletedAt: 1234,
+			error: undefined,
+		});
+	});
 });

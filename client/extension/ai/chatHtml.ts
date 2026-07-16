@@ -170,6 +170,15 @@ ${stylesheetLinks}
         <div class="model-menu-title">Model</div>
         <div id="modelMenuList" class="model-menu-list"></div>
     </div>
+    <div id="reasoningMenu" class="model-menu reasoning-menu" aria-hidden="true">
+        <div class="model-menu-title">${t('Reasoning effort', '推理强度')}</div>
+        <div id="reasoningMenuList" class="model-menu-list" role="listbox" aria-label="${t('Reasoning effort', '推理强度')}">
+            <button class="model-menu-item" type="button" role="option" data-reasoning-effort="low">${t('Low', '低')}</button>
+            <button class="model-menu-item" type="button" role="option" data-reasoning-effort="medium">${t('Medium', '中')}</button>
+            <button class="model-menu-item" type="button" role="option" data-reasoning-effort="high">${t('High', '高')}</button>
+            <button class="model-menu-item" type="button" role="option" data-reasoning-effort="max">${t('Max', '极高')}</button>
+        </div>
+    </div>
     <div id="writeModeMenu" class="model-menu write-mode-menu" aria-hidden="true">
         <div class="model-menu-title" id="writeModeMenuTitle">${t('Permission profile', '权限配置')}</div>
         <div id="writeModeMenuList" class="model-menu-list"></div>
@@ -220,12 +229,16 @@ ${stylesheetLinks}
                     <span id="quickModelLabel">Model</span>
                     <span class="composer-chevron" aria-hidden="true">v</span>
                 </button>
-                <select class="composer-reasoning-select" id="quickReasoningEffort" title="${t('Reasoning effort', '推理强度')}" aria-label="${t('Reasoning effort', '推理强度')}">
+                <select class="hidden-composer-select" id="quickReasoningEffort" title="${t('Reasoning effort', '推理强度')}" aria-label="${t('Reasoning effort', '推理强度')}" aria-hidden="true" tabindex="-1">
                     <option value="low">${t('Low', '低')}</option>
                     <option value="medium">${t('Medium', '中')}</option>
-                    <option value="high">${t('High', '高')}</option>
+                    <option value="high" selected>${t('High', '高')}</option>
                     <option value="max">${t('Max', '极高')}</option>
                 </select>
+                <button class="composer-model-trigger composer-reasoning-trigger" id="quickReasoningTrigger" title="${t('Reasoning effort', '推理强度')}" aria-haspopup="listbox" aria-controls="reasoningMenuList" aria-expanded="false">
+                    <span id="quickReasoningLabel">${t('High', '高')}</span>
+                    <span class="composer-chevron" aria-hidden="true">v</span>
+                </button>
                 <button class="send-btn" id="sendBtn" title="${t('Send (Enter)', '发送 (Enter)')}" aria-label="${t('Send message', '发送消息')}" disabled>↑</button>
             </div>
         </div>

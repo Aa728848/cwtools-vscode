@@ -37,6 +37,9 @@ describe('webview smoke checks', () => {
         expect(html).to.include('id="quickModeTrigger"');
         expect(html).to.include('id="quickModelTrigger"');
         expect(html).to.include('id="quickReasoningEffort"');
+        expect(html).to.include('id="quickReasoningTrigger"');
+        expect(html).to.include('id="reasoningMenu"');
+        expect(html).to.include('data-reasoning-effort="max"');
         expect(html).to.include('id="quickWriteModeTrigger"');
         expect(html).to.include('role="listbox"');
         expect(html).to.include('id="btnWorkspace"');
@@ -49,6 +52,8 @@ describe('webview smoke checks', () => {
         expect(script).to.include('handleSlashPopupKeydown');
         expect(script).to.include('slashHasAttachments');
         expect(script).to.include('renderComposerChips');
+        expect(script).to.include('setReasoningMenuOpen');
+        expect(script).to.include('renderQuickReasoningMenu');
         expect(script).to.include('renderArtifactPanel');
         expect(script).to.include('renderTopics');
         expect(script).to.include('renderArtifactDrawer');
@@ -90,6 +95,7 @@ describe('webview smoke checks', () => {
             '.input-wrapper',
             '.composer-menu',
             '.model-menu',
+            '.reasoning-menu',
             '.slash-popup',
             '.artifact-drawer',
             '.workspace-toggle',

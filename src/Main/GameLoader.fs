@@ -131,7 +131,7 @@ let private shouldPreferBundledRules (cachePath: string option) (bundledRulesFol
         | _ -> false
     | _ -> false
 
-let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder preferBundledRules =
+let private resolveConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder preferBundledRules =
     let manualConfigFiles =
         match useManualRules, manualRulesFolder with
         | true, Some rf when Directory.Exists rf -> getRuleFilesFromFolder rf
@@ -156,14 +156,19 @@ let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder
         && bundledConfigFiles.Length > 0
         && shouldPreferBundledRules cachePath bundledRulesFolder
 
-    let configFiles =
-        if manualConfigFiles.Length > 0 then readConfigFiles manualConfigFiles
-        elif useManualRules then []
-        elif useNewerBundledRules then bundledConfigFiles
-        elif cachedConfigFiles.Length > 0 then readConfigFiles cachedConfigFiles
-        else []
+    if manualConfigFiles.Length > 0 then readConfigFiles manualConfigFiles, "manual"
+    elif useManualRules then [], "missing"
+    elif useNewerBundledRules then bundledConfigFiles, "bundled"
+    elif cachedConfigFiles.Length > 0 then readConfigFiles cachedConfigFiles, "remote"
+    else [], "missing"
 
-    configFiles
+let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder preferBundledRules =
+    resolveConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder preferBundledRules
+    |> fst
+
+let getConfigSource cachePath useManualRules manualRulesFolder bundledRulesFolder preferBundledRules =
+    resolveConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder preferBundledRules
+    |> snd
 
 let getFolderList (filename: string, filetext: string) =
     if Path.GetFileName filename = "folders.cwt" then

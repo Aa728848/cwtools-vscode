@@ -2118,10 +2118,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const composerMenu = document.getElementById('composerMenu');
         const modeMenu = document.getElementById('modeMenu');
         const modelMenu = document.getElementById('modelMenu');
+        const reasoningMenu = document.getElementById('reasoningMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
         const quickModeTrigger = document.getElementById('quickModeTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
+        const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
         composerMenu?.classList.remove('show');
         composerMenu?.setAttribute('aria-hidden', 'true');
@@ -2129,6 +2131,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         modeMenu?.setAttribute('aria-hidden', 'true');
         modelMenu?.classList.remove('show');
         modelMenu?.setAttribute('aria-hidden', 'true');
+        reasoningMenu?.classList.remove('show');
+        reasoningMenu?.setAttribute('aria-hidden', 'true');
         writeModeMenu?.classList.remove('show');
         writeModeMenu?.setAttribute('aria-hidden', 'true');
         composerAddBtn?.classList.remove('active');
@@ -2136,6 +2140,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         quickModeTrigger?.setAttribute('aria-expanded', 'false');
         quickModelTrigger?.classList.remove('active');
         quickModelTrigger?.setAttribute('aria-expanded', 'false');
+        quickReasoningTrigger?.classList.remove('active');
+        quickReasoningTrigger?.setAttribute('aria-expanded', 'false');
         quickWriteModeTrigger?.classList.remove('active');
         quickWriteModeTrigger?.setAttribute('aria-expanded', 'false');
     }
@@ -2144,10 +2150,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const composerMenu = document.getElementById('composerMenu');
         const modeMenu = document.getElementById('modeMenu');
         const modelMenu = document.getElementById('modelMenu');
+        const reasoningMenu = document.getElementById('reasoningMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
         const quickModeTrigger = document.getElementById('quickModeTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
+        const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
         composerMenu?.classList.toggle('show', open);
         composerMenu?.setAttribute('aria-hidden', open ? 'false' : 'true');
@@ -2158,10 +2166,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             modeMenu?.setAttribute('aria-hidden', 'true');
             modelMenu?.classList.remove('show');
             modelMenu?.setAttribute('aria-hidden', 'true');
+            reasoningMenu?.classList.remove('show');
+            reasoningMenu?.setAttribute('aria-hidden', 'true');
             writeModeMenu?.classList.remove('show');
             writeModeMenu?.setAttribute('aria-hidden', 'true');
             quickModelTrigger?.classList.remove('active');
             quickModelTrigger?.setAttribute('aria-expanded', 'false');
+            quickReasoningTrigger?.classList.remove('active');
+            quickReasoningTrigger?.setAttribute('aria-expanded', 'false');
             quickModeTrigger?.classList.remove('active');
             quickModeTrigger?.setAttribute('aria-expanded', 'false');
             quickWriteModeTrigger?.classList.remove('active');
@@ -2185,10 +2197,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const composerMenu = document.getElementById('composerMenu');
         const modeMenu = document.getElementById('modeMenu');
         const modelMenu = document.getElementById('modelMenu');
+        const reasoningMenu = document.getElementById('reasoningMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
         const quickModeTrigger = document.getElementById('quickModeTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
+        const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
         modelMenu?.classList.toggle('show', open);
         modelMenu?.setAttribute('aria-hidden', open ? 'false' : 'true');
@@ -2200,24 +2214,42 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             composerMenu?.setAttribute('aria-hidden', 'true');
             modeMenu?.classList.remove('show');
             modeMenu?.setAttribute('aria-hidden', 'true');
+            reasoningMenu?.classList.remove('show');
+            reasoningMenu?.setAttribute('aria-hidden', 'true');
             writeModeMenu?.classList.remove('show');
             writeModeMenu?.setAttribute('aria-hidden', 'true');
             composerAddBtn?.classList.remove('active');
             quickModeTrigger?.classList.remove('active');
             quickModeTrigger?.setAttribute('aria-expanded', 'false');
+            quickReasoningTrigger?.classList.remove('active');
+            quickReasoningTrigger?.setAttribute('aria-expanded', 'false');
             quickWriteModeTrigger?.classList.remove('active');
             quickWriteModeTrigger?.setAttribute('aria-expanded', 'false');
         }
+    }
+
+    function setReasoningMenuOpen(open: boolean) {
+        const reasoningMenu = document.getElementById('reasoningMenu');
+        const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
+        if (!reasoningMenu || !quickReasoningTrigger) return;
+        closeComposerMenus();
+        reasoningMenu.classList.toggle('show', open);
+        reasoningMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        quickReasoningTrigger.classList.toggle('active', open);
+        quickReasoningTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) positionComposerMenus();
     }
 
     function setWriteModeMenuOpen(open: boolean) {
         const composerMenu = document.getElementById('composerMenu');
         const modeMenu = document.getElementById('modeMenu');
         const modelMenu = document.getElementById('modelMenu');
+        const reasoningMenu = document.getElementById('reasoningMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
         const quickModeTrigger = document.getElementById('quickModeTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
+        const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
         writeModeMenu?.classList.toggle('show', open);
         writeModeMenu?.setAttribute('aria-hidden', open ? 'false' : 'true');
@@ -2231,11 +2263,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             modeMenu?.setAttribute('aria-hidden', 'true');
             modelMenu?.classList.remove('show');
             modelMenu?.setAttribute('aria-hidden', 'true');
+            reasoningMenu?.classList.remove('show');
+            reasoningMenu?.setAttribute('aria-hidden', 'true');
             composerAddBtn?.classList.remove('active');
             quickModeTrigger?.classList.remove('active');
             quickModeTrigger?.setAttribute('aria-expanded', 'false');
             quickModelTrigger?.classList.remove('active');
             quickModelTrigger?.setAttribute('aria-expanded', 'false');
+            quickReasoningTrigger?.classList.remove('active');
+            quickReasoningTrigger?.setAttribute('aria-expanded', 'false');
         }
     }
 
@@ -2245,10 +2281,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const composerMenu = document.getElementById('composerMenu') as HTMLElement | null;
         const modeMenu = document.getElementById('modeMenu') as HTMLElement | null;
         const modelMenu = document.getElementById('modelMenu') as HTMLElement | null;
+        const reasoningMenu = document.getElementById('reasoningMenu') as HTMLElement | null;
         const writeModeMenu = document.getElementById('writeModeMenu') as HTMLElement | null;
         const composerAddBtn = document.getElementById('composerAddBtn') as HTMLElement | null;
         const quickModeTrigger = document.getElementById('quickModeTrigger') as HTMLElement | null;
         const quickModelTrigger = document.getElementById('quickModelTrigger') as HTMLElement | null;
+        const quickReasoningTrigger = document.getElementById('quickReasoningTrigger') as HTMLElement | null;
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger') as HTMLElement | null;
 
         const positionMenu = (menu: HTMLElement | null, anchor: HTMLElement | null) => {
@@ -2263,6 +2301,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         positionMenu(composerMenu, composerAddBtn);
         positionMenu(modeMenu, quickModeTrigger);
         positionMenu(modelMenu, quickModelTrigger);
+        positionMenu(reasoningMenu, quickReasoningTrigger);
         positionMenu(writeModeMenu, quickWriteModeTrigger);
     }
 
@@ -2331,6 +2370,25 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             });
             list.appendChild(btn);
         }
+    }
+
+    function renderQuickReasoningMenu(): void {
+        const select = document.getElementById('quickReasoningEffort') as HTMLSelectElement | null;
+        const label = document.getElementById('quickReasoningLabel');
+        const trigger = document.getElementById('quickReasoningTrigger');
+        if (select) select.value = quickReasoningEffort;
+        const selectedLabel = select?.selectedOptions[0]?.textContent || quickReasoningEffort;
+        if (label) label.textContent = selectedLabel;
+        if (trigger) {
+            trigger.title = chatI18n.locale === 'zh-cn'
+                ? `推理强度：${selectedLabel}`
+                : `Reasoning effort: ${selectedLabel}`;
+        }
+        document.querySelectorAll<HTMLElement>('[data-reasoning-effort]').forEach(item => {
+            const active = item.dataset.reasoningEffort === quickReasoningEffort;
+            item.classList.toggle('active', active);
+            item.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
     }
 
     /** Map host settings to the quick ladder tier: confirm < auto < auto_review < full. */
@@ -2444,7 +2502,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const effort = quickReasoningSel.value;
         if (effort !== 'low' && effort !== 'medium' && effort !== 'high' && effort !== 'max') return;
         quickReasoningEffort = effort;
+        renderQuickReasoningMenu();
         vscode.postMessage({ type: 'quickChangeReasoningEffort', effort });
+    });
+    document.querySelectorAll<HTMLElement>('[data-reasoning-effort]').forEach(item => {
+        item.addEventListener('click', () => {
+            const effort = item.dataset.reasoningEffort;
+            if (!quickReasoningSel || (effort !== 'low' && effort !== 'medium' && effort !== 'high' && effort !== 'max')) return;
+            quickReasoningSel.value = effort;
+            quickReasoningSel.dispatchEvent(new Event('change', { bubbles: true }));
+            setReasoningMenuOpen(false);
+        });
     });
 
     const quickWriteModeSel = document.getElementById('quickWriteModeSelect') as HTMLSelectElement | null;
@@ -2479,10 +2547,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     applyComposerModeLabels();
+    renderQuickReasoningMenu();
 
     const composerAddBtn = document.getElementById('composerAddBtn');
     const quickModeTrigger = document.getElementById('quickModeTrigger');
     const quickModelTrigger = document.getElementById('quickModelTrigger');
+    const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
     composerAddBtn?.addEventListener('click', e => {
         e.stopPropagation();
         const composerMenu = document.getElementById('composerMenu');
@@ -2492,6 +2562,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         e.stopPropagation();
         const modelMenu = document.getElementById('modelMenu');
         setModelMenuOpen(!modelMenu?.classList.contains('show'));
+    });
+    quickReasoningTrigger?.addEventListener('click', e => {
+        e.stopPropagation();
+        const reasoningMenu = document.getElementById('reasoningMenu');
+        setReasoningMenuOpen(!reasoningMenu?.classList.contains('show'));
     });
     quickModeTrigger?.addEventListener('click', e => {
         e.stopPropagation();
@@ -2522,7 +2597,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     });
     document.addEventListener('click', e => {
         const target = e.target as Element | null;
-        if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#modeMenu') && !target?.closest('#quickModeTrigger') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger') && !target?.closest('#writeModeMenu') && !target?.closest('#quickWriteModeTrigger')) {
+        if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#modeMenu') && !target?.closest('#quickModeTrigger') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger') && !target?.closest('#reasoningMenu') && !target?.closest('#quickReasoningTrigger') && !target?.closest('#writeModeMenu') && !target?.closest('#quickWriteModeTrigger')) {
             closeComposerMenus();
         }
     });
@@ -5814,11 +5889,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 } else if (msg.uiAction === 'openPermissionsMenu') {
                     setWriteModeMenuOpen(true);
                 } else if (msg.uiAction === 'openReasoningMenu') {
-                    const reasoning = document.getElementById('quickReasoningEffort') as HTMLSelectElement | null;
-                    reasoning?.focus();
-                    if (reasoning && typeof (reasoning as HTMLSelectElement & { showPicker?: () => void }).showPicker === 'function') {
-                        (reasoning as HTMLSelectElement & { showPicker: () => void }).showPicker();
-                    }
+                    setReasoningMenuOpen(true);
                 }
                 break;
             }
@@ -6657,9 +6728,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const select = document.getElementById('quickReasoningEffort') as HTMLSelectElement | null;
         if (!select) return;
         select.value = quickReasoningEffort;
-        select.title = chatI18n.locale === 'zh-cn'
-            ? `推理强度：${select.selectedOptions[0]?.textContent || quickReasoningEffort}`
-            : `Reasoning effort: ${select.selectedOptions[0]?.textContent || quickReasoningEffort}`;
+        renderQuickReasoningMenu();
     }
 
     function refreshSettingsOverview() {

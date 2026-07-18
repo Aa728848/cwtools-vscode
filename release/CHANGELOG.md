@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.25] - 2026-07-18
+
+### 修复 / Fixes
+- **[修复] inline_script 全局事件目标作用域关联**：展开模板时复用具体保存点已经计算出的作用域，避免模板坐标被重新解析为调用事件的 Country 作用域。
+  English: Fixed inline-script global event-target scope association by reusing the concrete save site's computed scope instead of reinterpreting duplicated template coordinates as the caller event's Country scope.
+
 ## [2.8.22] - 2026-07-16
 
 ### 功能与优化 / Features & Optimizations

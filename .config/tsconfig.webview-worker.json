@@ -1,0 +1,15 @@
+{
+    "compilerOptions": {
+        "module": "ES2020"
+    },
+    "extends": "../tsconfig.json",
+    "include": [
+        "../client/webview/skyboxEnvWorker.ts",
+        "../client/webview/bcDecode.ts",
+        "../client/webview/environmentTypes.ts"
+    ],
+    "exclude": [
+        "../client/extension/**",
+        "../client/test/**"
+    ]
+}

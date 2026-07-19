@@ -92,6 +92,47 @@ body {
     margin: 0 4px;
 }
 
+.env-ui {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+    margin-left: 4px;
+}
+
+.env-ui-label {
+    color: var(--ep-fg-dim, var(--vscode-descriptionForeground));
+}
+
+.env-ui select {
+    background: var(--ep-input-bg);
+    color: var(--ep-input-fg);
+    border: 1px solid var(--ep-input-border);
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+    max-width: 170px;
+}
+
+.env-ui select:focus {
+    border-color: var(--ep-accent);
+}
+
+.env-lut-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.env-lut-label input[type="checkbox"] {
+    accent-color: var(--ep-accent);
+}
+
 .toolbar-btn {
     background: var(--ep-button-bg);
     color: var(--ep-button-fg);

@@ -9,6 +9,7 @@ import { buildEntityGraph, type EntityDefinition, type EntityGraph } from './ent
 import { matchesExt } from './fileExtensions';
 import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { isPathInsideOrEqual } from './pathScope';
+import { loadEnvironmentPresets } from './worldgfxPresets';
 
 function panelText(en: string, zh: string): string {
     return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
@@ -26,6 +27,7 @@ type EntityPanelMessage =
     | { command: 'deleteLocators'; locatorNames: string[] }
     | { command: 'updateAttach'; locatorName: string; entityName: string; targetEntity?: string }
     | { command: 'requestEntityNames' }
+    | { command: 'requestEnvironments' }
     | { command: 'undo' }
     | { command: 'redo' }
     | { command: 'screenshot'; data: string }
@@ -135,6 +137,10 @@ export class EntityPanel {
                     }
                     case 'requestEntityNames': {
                         await this._handleRequestEntityNames();
+                        break;
+                    }
+                    case 'requestEnvironments': {
+                        await this._sendEnvironments();
                         break;
                     }
                     case 'undo': {
@@ -873,6 +879,22 @@ export class EntityPanel {
         return null;
     }
 
+    /** Parse worldgfx configs and send skybox/environment presets to the webview. */
+    private async _sendEnvironments() {
+        try {
+            const presets = loadEnvironmentPresets(
+                this._searchRoots,
+                p => this._panel.webview.asWebviewUri(vscode.Uri.file(p)).toString(),
+            );
+            const workerUri = this._panel.webview.asWebviewUri(
+                vscode.Uri.file(path.join(this._webviewRootPath, 'skyboxEnvWorker.js')),
+            ).toString();
+            await this._panel.webview.postMessage({ command: 'environments', presets, workerUri });
+        } catch (error) {
+            console.warn('[EntityPanel] Failed to load environment presets', error);
+        }
+    }
+
     private _findModRoot(dir: string): string | null {
         let current = dir;
         for (let i = 0; i < 5; i++) {
@@ -1528,7 +1550,7 @@ export class EntityPanel {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src ${webview.cspSource};">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src ${webview.cspSource}; worker-src blob:;">
     <link rel="stylesheet" href="${cssUri}">
     <title>Entity Preview</title>
 </head>

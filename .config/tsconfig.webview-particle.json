@@ -10,6 +10,9 @@
         "../client/webview/curveEditor.ts",
         "../client/webview/inspector.ts",
         "../client/webview/particleTypes.ts",
+        "../client/webview/environmentTypes.ts",
+        "../client/webview/environmentUi.ts",
+        "../client/webview/skyboxEnvironment.ts",
         "../client/webview/vscode.d.ts"
     ],
     "exclude": [

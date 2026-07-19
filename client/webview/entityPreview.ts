@@ -21,6 +21,10 @@ import {
     type LocatorTransformDelta,
     type LocatorVector3,
 } from './locatorDuplicate';
+import { decompressBC1, decompressBC3, rgb565 } from './bcDecode';
+import { SkyboxEnvironment } from './skyboxEnvironment';
+import { EnvironmentUi, DEFAULT_ENV_STATE, type EnvironmentUiState } from './environmentUi';
+import type { EnvironmentsMessage } from './environmentTypes';
 
 // ── VS Code API ──────────────────────────────────────────────────────────────
 
@@ -233,6 +237,21 @@ interface SmartDuplicateState {
     attachEntity?: string;
 }
 let smartDuplicateState: SmartDuplicateState | null = null;
+
+// ── Skybox environment system ────────────────────────────────────────────────
+let envController: SkyboxEnvironment | null = null;
+let envUi: EnvironmentUi | null = null;
+const defaultLights: THREE.Light[] = [];
+const DEFAULT_SCENE_BG = '#1e1e1e';
+
+function currentEnvMapIntensity(): number {
+    return envController?.envMapIntensity ?? 0.4;
+}
+
+function persistEnvState(state: EnvironmentUiState): void {
+    const prev = (vscode.getState() ?? {}) as Record<string, unknown>;
+    vscode.setState({ ...prev, env: state });
+}
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 const lastPointerNdc = new THREE.Vector2();
@@ -268,7 +287,7 @@ function initThree() {
     // Scene
     scene = new THREE.Scene();
     scene.background = new THREE.Color().setStyle(
-        getComputedStyle(document.body).getPropertyValue('--ep-bg').trim() || '#1e1e1e'
+        getComputedStyle(document.body).getPropertyValue('--ep-bg').trim() || DEFAULT_SCENE_BG
     );
 
     // Camera
@@ -305,7 +324,7 @@ function initThree() {
         );
     }, true);
 
-    // Lighting — bright PBR setup for dark-textured models
+    // Lighting — bright PBR setup for dark-textured models (fallback when no environment preset)
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
 
@@ -324,6 +343,26 @@ function initThree() {
     const rimLight = new THREE.DirectionalLight(0x8899aa, 0.3);
     rimLight.position.set(0, -5, 3);
     scene.add(rimLight);
+
+    defaultLights.push(ambientLight, hemiLight, dirLight, fillLight, rimLight);
+
+    // Skybox environment controller (worldgfx presets)
+    envController = new SkyboxEnvironment(renderer, scene, camera, {
+        hideDefaults: () => { for (const l of defaultLights) l.visible = false; },
+        restoreDefaults: () => {
+            for (const l of defaultLights) l.visible = true;
+            scene.background = new THREE.Color().setStyle(
+                getComputedStyle(document.body).getPropertyValue('--ep-bg').trim() || DEFAULT_SCENE_BG
+            );
+        },
+        onLog: (text, level) => vscode.postMessage({ command: 'log', text: `[Env] ${text}`, level }),
+    });
+    envUi = new EnvironmentUi(isChinese, state => {
+        persistEnvState(state);
+        void envController?.applyPreset(state.presetId, state.backgroundIndex);
+    });
+    toolbar.appendChild(envUi.root);
+    vscode.postMessage({ command: 'requestEnvironments' });
 
     // Grid helper (subtle)
     const grid = new THREE.GridHelper(20, 20, 0x333333, 0x222222);
@@ -518,7 +557,9 @@ function animate() {
         ba.group.scale.setScalar(boneUniformScale * ba.entityScale);
     }
 
-    renderer.render(scene, camera);
+    if (!envController?.renderFrame()) {
+        renderer.render(scene, camera);
+    }
     updateLocatorLabels();
 }
 
@@ -547,6 +588,7 @@ function handleResize() {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h, false);
+    envController?.setSize(w, h);
 }
 
 // ── Locator Labels (2D overlay) ──────────────────────────────────────────────
@@ -1803,146 +1845,8 @@ function decodeDDSToRGBA(buffer: ArrayBuffer, width: number, height: number): TH
     return configureDataTexture(new THREE.DataTexture(rgbaData, width, height, THREE.RGBAFormat));
 }
 
-// ── BC1/BC3 Software Decompression ──────────────────────────────────────────
+// ── BC1/BC3 software decompression lives in bcDecode.ts (shared with the skybox worker) ──
 
-/** Expand a 16-bit RGB565 color to [R, G, B] (0-255) */
-function rgb565(c: number): [number, number, number] {
-    return [
-        ((c >> 11) & 0x1f) * 255 / 31 | 0,
-        ((c >> 5) & 0x3f) * 255 / 63 | 0,
-        (c & 0x1f) * 255 / 31 | 0,
-    ];
-}
-
-/** Decompress BC1 (DXT1) compressed data → RGBA Uint8Array */
-function decompressBC1(src: Uint8Array, width: number, height: number): Uint8Array {
-    const out = new Uint8Array(width * height * 4);
-    const bw = Math.max(1, (width + 3) >> 2);
-    const bh = Math.max(1, (height + 3) >> 2);
-
-    for (let by = 0; by < bh; by++) {
-        for (let bx = 0; bx < bw; bx++) {
-            const blockIdx = (by * bw + bx) * 8;
-            const c0raw = src[blockIdx]! | (src[blockIdx + 1]! << 8);
-            const c1raw = src[blockIdx + 2]! | (src[blockIdx + 3]! << 8);
-            const c0 = rgb565(c0raw);
-            const c1 = rgb565(c1raw);
-
-            // Build 4-color palette
-            const palette: [number, number, number, number][] = [
-                [c0[0], c0[1], c0[2], 255],
-                [c1[0], c1[1], c1[2], 255],
-                [0, 0, 0, 255],
-                [0, 0, 0, 255],
-            ];
-
-            if (c0raw > c1raw) {
-                palette[2] = [(2 * c0[0] + c1[0] + 1) / 3 | 0, (2 * c0[1] + c1[1] + 1) / 3 | 0, (2 * c0[2] + c1[2] + 1) / 3 | 0, 255];
-                palette[3] = [(c0[0] + 2 * c1[0] + 1) / 3 | 0, (c0[1] + 2 * c1[1] + 1) / 3 | 0, (c0[2] + 2 * c1[2] + 1) / 3 | 0, 255];
-            } else {
-                palette[2] = [(c0[0] + c1[0] + 1) / 2 | 0, (c0[1] + c1[1] + 1) / 2 | 0, (c0[2] + c1[2] + 1) / 2 | 0, 255];
-                palette[3] = [0, 0, 0, 0]; // transparent
-            }
-
-            // 4 bytes of 2-bit indices
-            const bits = src[blockIdx + 4]! | (src[blockIdx + 5]! << 8) |
-                (src[blockIdx + 6]! << 16) | (src[blockIdx + 7]! << 24);
-
-            for (let py = 0; py < 4; py++) {
-                for (let px = 0; px < 4; px++) {
-                    const x = bx * 4 + px;
-                    const y = by * 4 + py;
-                    if (x >= width || y >= height) continue;
-                    const idx = (py * 4 + px) * 2;
-                    const ci = (bits >>> idx) & 3;
-                    const p = palette[ci]!;
-                    const oi = (y * width + x) * 4;
-                    out[oi] = p[0]; out[oi + 1] = p[1]; out[oi + 2] = p[2]; out[oi + 3] = p[3];
-                }
-            }
-        }
-    }
-    return out;
-}
-
-/** Decompress BC3 (DXT5) compressed data → RGBA Uint8Array */
-function decompressBC3(src: Uint8Array, width: number, height: number): Uint8Array {
-    const out = new Uint8Array(width * height * 4);
-    const bw = Math.max(1, (width + 3) >> 2);
-    const bh = Math.max(1, (height + 3) >> 2);
-
-    for (let by = 0; by < bh; by++) {
-        for (let bx = 0; bx < bw; bx++) {
-            const blockIdx = (by * bw + bx) * 16;
-
-            // -- Alpha block (8 bytes) --
-            const a0 = src[blockIdx]!;
-            const a1 = src[blockIdx + 1]!;
-
-            // Build 8-value alpha palette
-            const alphas = new Uint8Array(8);
-            alphas[0] = a0;
-            alphas[1] = a1;
-            if (a0 > a1) {
-                for (let i = 1; i <= 6; i++) {
-                    alphas[1 + i] = ((7 - i) * a0 + i * a1 + 3) / 7 | 0;
-                }
-            } else {
-                for (let i = 1; i <= 4; i++) {
-                    alphas[1 + i] = ((5 - i) * a0 + i * a1 + 2) / 5 | 0;
-                }
-                alphas[6] = 0;
-                alphas[7] = 255;
-            }
-
-            // 6 bytes of 3-bit alpha indices (48 bits for 16 pixels)
-            // Read as a 48-bit value
-            let alphaBits = 0n;
-            for (let i = 0; i < 6; i++) {
-                alphaBits |= BigInt(src[blockIdx + 2 + i]!) << BigInt(i * 8);
-            }
-
-            // -- Color block (8 bytes, same as BC1) --
-            const colorOff = blockIdx + 8;
-            const c0raw = src[colorOff]! | (src[colorOff + 1]! << 8);
-            const c1raw = src[colorOff + 2]! | (src[colorOff + 3]! << 8);
-            const c0 = rgb565(c0raw);
-            const c1 = rgb565(c1raw);
-
-            const palette: [number, number, number][] = [
-                c0,
-                c1,
-                [(2 * c0[0] + c1[0] + 1) / 3 | 0, (2 * c0[1] + c1[1] + 1) / 3 | 0, (2 * c0[2] + c1[2] + 1) / 3 | 0],
-                [(c0[0] + 2 * c1[0] + 1) / 3 | 0, (c0[1] + 2 * c1[1] + 1) / 3 | 0, (c0[2] + 2 * c1[2] + 1) / 3 | 0],
-            ];
-
-            const colorBits = src[colorOff + 4]! | (src[colorOff + 5]! << 8) |
-                (src[colorOff + 6]! << 16) | (src[colorOff + 7]! << 24);
-
-            for (let py = 0; py < 4; py++) {
-                for (let px = 0; px < 4; px++) {
-                    const x = bx * 4 + px;
-                    const y = by * 4 + py;
-                    if (x >= width || y >= height) continue;
-
-                    const pixelIdx = py * 4 + px;
-
-                    // Color index (2 bits)
-                    const ci = (colorBits >>> (pixelIdx * 2)) & 3;
-                    const p = palette[ci]!;
-
-                    // Alpha index (3 bits)
-                    const ai = Number((alphaBits >> BigInt(pixelIdx * 3)) & 7n);
-
-                    const oi = (y * width + x) * 4;
-                    out[oi] = p[0]; out[oi + 1] = p[1]; out[oi + 2] = p[2];
-                    out[oi + 3] = alphas[ai]!;
-                }
-            }
-        }
-    }
-    return out;
-}
 //Texture cache: key = URI, value = { promise, lastUsed }
 const textureCache = new Map<string, { promise: Promise<THREE.Texture | null>; lastUsed: number }>();
 const TEXTURE_CACHE_MAX = 128;
@@ -2154,7 +2058,7 @@ async function upgradeSubmeshMaterial(mesh: THREE.Mesh | THREE.SkinnedMesh, text
             metalness: textures.specular ? 1.0 : 0.15,
             roughness: textures.specular ? 1.0 : 0.65,
             side: THREE.DoubleSide,
-            envMapIntensity: 0.4,
+            envMapIntensity: currentEnvMapIntensity(),
             emissive: 0x000000,
             emissiveIntensity: 0.0,
         });
@@ -2962,8 +2866,10 @@ function showError(msg: string) {
 /** Capture current viewport as PNG and send to extension for saving */
 function takeScreenshot() {
     if (!renderer) return;
-    // Force a render so the buffer is fresh
-    renderer.render(scene, camera);
+    // Force a render so the buffer is fresh (composer path when LUT grading is active)
+    if (!envController?.renderFrame()) {
+        renderer.render(scene, camera);
+    }
     const dataUrl = renderer.domElement.toDataURL('image/png');
     // Strip the data:image/png;base64, prefix
     const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
@@ -3868,6 +3774,8 @@ function disposeAll() {
     if (isDisposed) return;
     isDisposed = true;
 
+    envController?.dispose();
+    envController = null;
     // Remove event listeners
     window.removeEventListener('resize', handleResize);
     window.removeEventListener('keydown', handleWindowKeydown);
@@ -4293,6 +4201,19 @@ async function handleWindowMessage(event: MessageEvent) {
     if (!msg?.command) return;
 
     switch (msg.command) {
+        case 'environments': {
+            const env = msg as EnvironmentsMessage;
+            envController?.setPresets(env.presets ?? [], env.workerUri);
+            envUi?.setPresets(env.presets ?? []);
+            // Restore persisted selection once presets are known
+            const saved = ((vscode.getState() ?? {}) as Record<string, unknown>)['env'] as Partial<EnvironmentUiState> | undefined;
+            if (saved?.presetId && env.presets?.some(p => p.id === saved.presetId)) {
+                envUi?.setState({ ...DEFAULT_ENV_STATE, ...saved });
+                const st = envUi?.getState();
+                if (st) void envController?.applyPreset(st.presetId, st.backgroundIndex);
+            }
+            break;
+        }
         case 'entityList': {
             updateEntitySelector(msg.entities ?? [], msg.selectedIndex ?? 0);
             break;

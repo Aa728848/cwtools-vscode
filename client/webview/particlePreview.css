@@ -266,13 +266,43 @@ input[type="number"] {
 
 #playbar {
     display: grid;
-    grid-template-columns: auto auto 1fr auto auto;
+    grid-template-columns: auto auto 1fr auto auto auto;
     gap: 8px;
     align-items: center;
     min-height: 38px;
     padding: 7px 10px;
     border-top: 1px solid var(--particle-border);
     background: var(--vscode-panel-background);
+}
+
+.env-ui {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.env-ui-label {
+    color: var(--particle-muted, var(--vscode-descriptionForeground));
+}
+
+.env-ui select {
+    background: var(--vscode-dropdown-background, var(--particle-input-bg, transparent));
+    color: var(--vscode-dropdown-foreground, inherit);
+    border: 1px solid var(--vscode-dropdown-border, var(--particle-border, transparent));
+    border-radius: 3px;
+    padding: 2px 4px;
+    font-size: 12px;
+    max-width: 180px;
+}
+
+.env-lut-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    user-select: none;
 }
 
 #time-scrub {

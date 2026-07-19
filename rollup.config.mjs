@@ -185,4 +185,23 @@ export default [
             copyFile('client/webview/particlePreview.css', 'release/bin/client/webview/particlePreview.css'),
         ],
     },
+    // Skybox environment decode worker (fetched as text, instantiated as Blob worker)
+    {
+        input: './client/webview/skyboxEnvWorker.ts',
+        output: {
+            file: './release/bin/client/webview/skyboxEnvWorker.js',
+            format: "iife",
+            name: "cwtoolsskyboxenvworker",
+            indent: false,
+        },
+        plugins: [
+            typescript({
+                tsconfig: ".config/tsconfig.webview-worker.json",
+                clean: false,
+                tsconfigOverride: {
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                }
+            }),
+        ],
+    },
 ];

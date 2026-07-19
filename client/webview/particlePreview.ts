@@ -10,6 +10,9 @@ import { ParticleEffectSimulation } from './particleSimulation';
 import { ParticleRenderer } from './particleRenderer';
 import { CurveEditor } from './curveEditor';
 import { createDefaultCurve, createDefaultForce, createDefaultSubsystem, ParticleInspector } from './inspector';
+import { SkyboxEnvironment } from './skyboxEnvironment';
+import { EnvironmentUi, DEFAULT_ENV_STATE, type EnvironmentUiState } from './environmentUi';
+import type { EnvironmentsMessage } from './environmentTypes';
 
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void; getState(): unknown; setState(s: unknown): void };
 const vscode = acquireVsCodeApi();
@@ -105,6 +108,13 @@ let hideOtherSubsystems = false;
 let curveEditor: CurveEditor | null = null;
 let curveHistoryTimer = 0;
 let curveHistoryOpen = false;
+let envController: SkyboxEnvironment | null = null;
+let envUi: EnvironmentUi | null = null;
+
+function persistEnvState(state: EnvironmentUiState): void {
+    const prev = (vscode.getState() ?? {}) as Record<string, unknown>;
+    vscode.setState({ ...prev, env: state });
+}
 
 const inspector = new ParticleInspector(inspectorRoot);
 const forceInspector = new ParticleInspector(forceInspectorRoot);
@@ -143,7 +153,8 @@ function initThree(): void {
         material.transparent = true;
     }
     scene.add(grid);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    const defaultAmbient = new THREE.AmbientLight(0xffffff, 0.8);
+    scene.add(defaultAmbient);
     const light = new THREE.DirectionalLight(0xffffff, 0.5);
     light.position.set(3, 5, 4);
     scene.add(light);
@@ -156,6 +167,23 @@ function initThree(): void {
     composer.addPass(bloomPass);
     outputPass = new OutputPass();
     composer.addPass(outputPass);
+
+    envController = new SkyboxEnvironment(glRenderer, scene, camera, {
+        hideDefaults: () => { defaultAmbient.visible = false; light.visible = false; },
+        restoreDefaults: () => {
+            defaultAmbient.visible = true;
+            light.visible = true;
+            scene.background = new THREE.Color(0x000000);
+        },
+        onLog: (text, level) => vscode.postMessage({ command: 'log', text: `[Env] ${text}`, level }),
+    }, composer);
+    envUi = new EnvironmentUi(isChinese, state => {
+        persistEnvState(state);
+        envController?.setLutEnabled(state.lutEnabled);
+        void envController?.applyPreset(state.presetId, state.backgroundIndex);
+    });
+    document.getElementById('playbar')?.appendChild(envUi.root);
+    vscode.postMessage({ command: 'requestEnvironments' });
 
     particleRenderer = new ParticleRenderer(scene);
     handleResize();
@@ -801,6 +829,21 @@ function handleMessage(event: MessageEvent): void {
     const message = event.data;
     if (!message?.command) return;
     switch (message.command) {
+        case 'environments': {
+            const env = message as EnvironmentsMessage;
+            envController?.setPresets(env.presets ?? [], env.workerUri);
+            envUi?.setPresets(env.presets ?? []);
+            const saved = ((vscode.getState() ?? {}) as Record<string, unknown>)['env'] as Partial<EnvironmentUiState> | undefined;
+            if (saved?.presetId && env.presets?.some(p => p.id === saved.presetId)) {
+                envUi?.setState({ ...DEFAULT_ENV_STATE, ...saved });
+                const st = envUi?.getState();
+                if (st) {
+                    envController?.setLutEnabled(st.lutEnabled);
+                    void envController?.applyPreset(st.presetId, st.backgroundIndex);
+                }
+            }
+            break;
+        }
         case 'render': {
             const previousSubsystem = currentSubsystemIndex;
             const previousCurve = currentCurveIndex;
@@ -938,6 +981,8 @@ function disposeAll(): void {
     window.clearTimeout(curveHistoryTimer);
     curveEditor?.dispose();
     curveEditor = null;
+    envController?.dispose();
+    envController = null;
     particleRenderer?.dispose();
     disposeEmitterVisuals();
     controls?.dispose();

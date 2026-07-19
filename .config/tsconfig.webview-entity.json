@@ -6,6 +6,10 @@
     "include": [
         "../client/webview/entityPreview.ts",
         "../client/webview/pdxMeshParser.ts",
+        "../client/webview/bcDecode.ts",
+        "../client/webview/environmentTypes.ts",
+        "../client/webview/environmentUi.ts",
+        "../client/webview/skyboxEnvironment.ts",
         "../client/webview/vscode.d.ts"
     ],
     "exclude": [

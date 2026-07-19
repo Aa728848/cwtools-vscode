@@ -7,6 +7,7 @@ import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { isPathInsideOrEqual } from './pathScope';
 import { parseParticleFile } from './particleAssetParser';
 import { serializeEffect } from './particleAssetSerializer';
+import { loadEnvironmentPresets } from './worldgfxPresets';
 import type {
     ParticleEffect,
     ParticleRenderPayload,
@@ -29,6 +30,7 @@ type ParticlePanelMessage =
     | { command: 'saveEffects'; selectedEffectIndex: number; effects: ParticleEffect[]; dirtyEffectIndices: number[] }
     | { command: 'openFile' }
     | { command: 'close' }
+    | { command: 'requestEnvironments' }
     | { command: 'screenshot'; data: string }
     | { command: 'log'; text: string; level?: 'info' | 'warn' | 'error' };
 
@@ -117,6 +119,9 @@ export class ParticlePanel {
                     break;
                 case 'close':
                     this.dispose();
+                    break;
+                case 'requestEnvironments':
+                    await this._sendEnvironments();
                     break;
                 case 'screenshot':
                     await this._handleScreenshot(msg.data);
@@ -479,6 +484,22 @@ export class ParticlePanel {
         return configPath && fs.existsSync(configPath) ? configPath : null;
     }
 
+    /** Parse worldgfx configs and send skybox/environment presets to the webview. */
+    private async _sendEnvironments(): Promise<void> {
+        try {
+            const presets = loadEnvironmentPresets(
+                this._searchRoots,
+                p => this._panel.webview.asWebviewUri(vscode.Uri.file(p)).toString(),
+            );
+            const workerUri = this._panel.webview.asWebviewUri(
+                vscode.Uri.file(path.join(this._webviewRootPath, 'skyboxEnvWorker.js')),
+            ).toString();
+            await this._panel.webview.postMessage({ command: 'environments', presets, workerUri });
+        } catch (error) {
+            ErrorReporter.warn('ParticlePanel', 'Failed to load environment presets', error);
+        }
+    }
+
     private _findModRoot(dir: string): string | null {
         let current = dir;
         for (let i = 0; i < 6; i++) {
@@ -523,7 +544,7 @@ export class ParticlePanel {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src ${webview.cspSource};">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src ${webview.cspSource}; worker-src blob:;">
     <link rel="stylesheet" href="${cssUri}">
     <title>Particle Editor</title>
 </head>

@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.27] - 2026-07-19
+
+### 修复 / Fixes
+- **[修复] 修复Openai等协议的支持**
+  English: Fixed support for OpenAI and other protocols.
+
 ## [2.8.26] - 2026-07-19
 
 ### 功能与优化 / Features & Optimizations

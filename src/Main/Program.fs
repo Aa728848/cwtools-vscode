@@ -1533,6 +1533,12 @@ type Server(client: ILanguageClient) =
         System.Collections.Concurrent.ConcurrentDictionary<string, int * CompletionList>()
     let staleCompletionKindFallbackCache =
         System.Collections.Concurrent.ConcurrentDictionary<string, int * CompletionList>()
+    /// Latest completion position that received a stale lock-timeout response per file.
+    /// Once the writer releases the game-state lock, the client can safely retry if the
+    /// user is still at that exact position.
+    let pendingCompletionRefreshMaxEntries = 128
+    let pendingCompletionRefresh =
+        System.Collections.Concurrent.ConcurrentDictionary<string, CompletionParams * int>()
 
     let normaliseCachePath (filePath: string) =
         try FileInfo(filePath).FullName.Replace('\\', '/').ToLowerInvariant()
@@ -1547,6 +1553,45 @@ type Server(client: ILanguageClient) =
         elif normalised.Contains("/common/") || normalised.Contains("\\common\\") then Some "common"
         elif normalised.Contains("/events/") || normalised.Contains("\\events\\") then Some "events"
         else None
+
+    let queueCompletionRefresh (p: CompletionParams) =
+        let filePath = getPathFromDoc p.textDocument.uri
+        let key = normaliseCachePath filePath
+        if pendingCompletionRefresh.Count >= pendingCompletionRefreshMaxEntries
+           && not (pendingCompletionRefresh.ContainsKey key) then
+            pendingCompletionRefresh.Clear()
+        let version = docs.GetVersion(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue -1
+        pendingCompletionRefresh.[key] <- (p, version)
+
+    let clearMatchingCompletionRefresh (p: CompletionParams) =
+        let filePath = getPathFromDoc p.textDocument.uri
+        let key = normaliseCachePath filePath
+        match pendingCompletionRefresh.TryGetValue key with
+        | true, (pending, _) when
+            pending.position.line = p.position.line
+            && pending.position.character = p.position.character ->
+            pendingCompletionRefresh.TryRemove key |> ignore
+        | _ -> ()
+
+    let flushCompletionRefresh (key: string) =
+        let mutable removed = Unchecked.defaultof<CompletionParams * int>
+        if pendingCompletionRefresh.TryRemove(key, &removed) then
+            let pending, version = removed
+            client.CustomNotification(
+                "completionRefresh",
+                JsonValue.Record
+                    [| "uri", JsonValue.String(pending.textDocument.uri.ToString())
+                       "line", JsonValue.Number(decimal pending.position.line)
+                       "character", JsonValue.Number(decimal pending.position.character)
+                       "version", JsonValue.Number(decimal version) |]
+            )
+
+    let flushCompletionRefreshForFile filePath =
+        flushCompletionRefresh (normaliseCachePath filePath)
+
+    let flushAllCompletionRefreshes () =
+        for key in pendingCompletionRefresh.Keys |> Seq.toArray do
+            flushCompletionRefresh key
 
     let isCompletionFallbackHeavyPath filePath =
         completionFallbackKind filePath |> Option.isSome
@@ -1836,6 +1881,7 @@ type Server(client: ILanguageClient) =
                    && (isCompletionHeavyTypingWindow () || isCompletionActive ()) then
                     match tryBuildStaleCompletionFallback p false with
                     | Some(result, prefix) ->
+                        queueCompletionRefresh p
                         let prefixText = prefix |> Option.defaultValue ""
                         monitorLog Completion
                             $"Completion immediate fallback file={filePath} line={p.position.line} char={p.position.character} prefix={prefixText} staleItems={result.items.Length}"
@@ -1847,6 +1893,7 @@ type Server(client: ILanguageClient) =
         LSP.LanguageServer.completionTimeoutFallback <-
             Some(fun (p: CompletionParams) ->
                 let filePath = getPathFromDoc p.textDocument.uri
+                queueCompletionRefresh p
                 updateCompletionRuntime (fun state ->
                     { state with
                         totalRequests = state.totalRequests + 1
@@ -2856,7 +2903,14 @@ type Server(client: ILanguageClient) =
                                 else
                                     []
 
-                            let errs = game.UpdateFile (shallowAnalyze || deferDeepValidation) name filetext
+                            let useInteractiveUpdate =
+                                isEditAction && shallowAnalyze && not fastDefinitionIndex
+
+                            let errs =
+                                if useInteractiveUpdate then
+                                    game.UpdateFileInteractive name filetext
+                                else
+                                    game.UpdateFile (shallowAnalyze || deferDeepValidation) name filetext
                             errs, prior, skip, (match gameObj with Some g -> g | None -> game)
                         finally
                             gameStateLock.ExitWriteLock()
@@ -2999,7 +3053,10 @@ type Server(client: ILanguageClient) =
                         |> List.map (fun e ->
                             (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
                     let allocAfterUpdate = GC.GetTotalAllocatedBytes(false)
-                    monitorLog Lint $"UpdateFile file={name} shallow={shallowAnalyze} allocDeltaMB={(allocAfterUpdate - allocBeforeUpdate) / 1048576L}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
+                    let updateMode =
+                        if isEditAction && shallowAnalyze && not fastDefinitionIndex then "interactive"
+                        else "full"
+                    monitorLog Lint $"UpdateFile file={name} mode={updateMode} shallow={shallowAnalyze} allocDeltaMB={(allocAfterUpdate - allocBeforeUpdate) / 1048576L}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                     
                     if name.EndsWith(".yml") then
                         // We still need to call game.UpdateFile so the VFS gets the new text,
@@ -3055,6 +3112,8 @@ type Server(client: ILanguageClient) =
                         setFileDiagnosticStateWithEpoch filePath newEpoch freshness pendingKinds (entries |> List.map snd))
             perfLintCount <- perfLintCount + 1
             maybePerfReport "lint"
+            if shallowAnalyze then
+                flushCompletionRefreshForFile name
         }
 
     let revalidateDeferredDynamicFiles (files: string list) =
@@ -3358,6 +3417,9 @@ type Server(client: ILanguageClient) =
             finally
                 gameStateLock.ExitWriteLock()
 
+            if not doRefresh then
+                flushAllCompletionRefreshes ()
+
             let time = Stopwatch.GetElapsedTime(timestamp)
             updateValidationRuntime (fun state ->
                 { state with
@@ -3404,7 +3466,7 @@ type Server(client: ILanguageClient) =
             let sm = CWTools.Utilities.StringResource.stringManager
             monitorLog Memory $"AnalyzePass cycleAllocMB={(allocTotal - allocBefore) / 1048576L} strings={sm.StringCount} ints={sm.IntCount} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
             maybePerfReport "delayedAnalyze"
-            didGlobalWork
+            didGlobalWork, doRefresh
         | None ->
             updateValidationRuntime (fun state ->
                 { state with
@@ -3412,7 +3474,7 @@ type Server(client: ILanguageClient) =
                     lastAnalyzeCompletedAtUnixMs = nowUnixMs ()
                     lastAnalyzeDidGlobalWork = false
                     lastRefreshStatus = "no_game" })
-            false
+            false, false
 
 
     let lintAgent =
@@ -3420,8 +3482,9 @@ type Server(client: ILanguageClient) =
             let mutable nextAnalyseTime = DateTime.Now
             let mutable needsDeepAnalyse = false
 
-            let analyzeTask (uri: Uri) (options: LintRequestOptions) (isEditAction: bool) =
+            let analyzeTask (file: VersionedTextDocumentIdentifier) (options: LintRequestOptions) (isEditAction: bool) =
                 async {
+                    let uri = file.uri
                     let mutable nextTime = nextAnalyseTime
                     let cycleSw = Stopwatch.StartNew()
                     let mutable errorMessage: string option = None
@@ -3436,8 +3499,15 @@ type Server(client: ILanguageClient) =
                                 && (match fileDiagnosticStates.TryGetValue(lintPath) with
                                     | true, state -> state.freshness = Fresh
                                     | _ -> false)
+                            let supersededEdit =
+                                isEditAction
+                                && file.version > 0
+                                && (docs.GetVersion(FileInfo(uri.LocalPath))
+                                    |> Option.exists (fun currentVersion -> currentVersion > file.version))
                             if alreadyFresh then
                                 logDiag $"Skip open/focus lint (already fresh): {lintPath}"
+                            elif supersededEdit then
+                                logDiag $"Skip superseded edit lint: {lintPath} requested={file.version}"
                             else
                                 let shallowAnalyse = DateTime.Now < nextTime
                                 let useShallowAnalyze =
@@ -3467,9 +3537,9 @@ type Server(client: ILanguageClient) =
                                     refreshDynamicCallSitesForDefinition lintPath priorDiagnostics isEditAction
 
                                 if not useShallowAnalyze then
-                                    let didGlobalWork = delayedAnalyze options.forceGlobalRefresh
+                                    let _, requiresFileRelint = delayedAnalyze options.forceGlobalRefresh
                                     logDiag "lint after delayed"
-                                    if didGlobalWork then
+                                    if requiresFileRelint then
                                         do! lint uri true false false false false
                                     nextTime <- DateTime.Now.Add(delayTime)
                                     needsDeepAnalyse <- needsTypeRefresh || delayedLocUpdate || delayedScriptLocUpdate
@@ -3492,7 +3562,7 @@ type Server(client: ILanguageClient) =
 
             let analyze (file: VersionedTextDocumentIdentifier) options isEditAction =
                 //eprintfn "Analyze %s" (file.uri.ToString())
-                analyzeTask file.uri options isEditAction |> ignore
+                analyzeTask file options isEditAction |> ignore
 
             let shouldYieldLintStart (file: VersionedTextDocumentIdentifier) isEditAction =
                 isEditAction
@@ -3584,11 +3654,11 @@ type Server(client: ILanguageClient) =
                             return! loop inprogress newstate
                     | None, false ->
                         logDiag "Idle timeout: triggering background delayedAnalyze"
-                        let didGlobalWork = delayedAnalyze false
+                        let _, requiresFileRelint = delayedAnalyze false
                         needsDeepAnalyse <- needsTypeRefresh || delayedLocUpdate || delayedScriptLocUpdate
                         nextAnalyseTime <- DateTime.Now.Add(delayTime)
 
-                        if didGlobalWork then
+                        if requiresFileRelint then
                             for doc in docs.OpenFiles() do
                                 let uri = filePathToUri(doc.FullName)
                                 do! lint uri true false false false false  // idle re-lint is never an edit
@@ -3626,11 +3696,13 @@ type Server(client: ILanguageClient) =
                         return! loop (pending |> Map.remove ur.uri.LocalPath) 0
                     | Some (UpdateRequest(ur, options)) ->
                         // New edit arrived reset the debounce timer
-                        let merged =
+                        let newest, merged =
                             match Map.tryFind ur.uri.LocalPath pending with
-                            | Some (_, existingOptions) -> mergeLintRequestOptions options existingOptions
-                            | None -> options
-                        return! loop (pending |> Map.add ur.uri.LocalPath (ur, merged)) 0
+                            | Some (existing, existingOptions) ->
+                                let newest = if existing.version > ur.version then existing else ur
+                                newest, mergeLintRequestOptions options existingOptions
+                            | None -> ur, options
+                        return! loop (pending |> Map.add ur.uri.LocalPath (newest, merged)) 0
                     | Some (OpenRequest ur) ->
                         // Open requests bypass debounce - forward immediately
                         lintAgent.Post(OpenRequest ur)
@@ -4850,6 +4922,8 @@ type Server(client: ILanguageClient) =
             forgetFileCaches fullPath
             staleCompletionFallbackCache.TryRemove(normaliseCachePath localPath) |> ignore
             staleCompletionFallbackCache.TryRemove(normaliseCachePath fullPath) |> ignore
+            pendingCompletionRefresh.TryRemove(normaliseCachePath localPath) |> ignore
+            pendingCompletionRefresh.TryRemove(normaliseCachePath fullPath) |> ignore
             (locCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore
             clearRangeCache ()
         }
@@ -4958,6 +5032,7 @@ type Server(client: ILanguageClient) =
                 let sw = Stopwatch.StartNew()
                 let allocBefore = GC.GetTotalAllocatedBytes(false)
                 let filePath = getPathFromDoc p.textDocument.uri
+                clearMatchingCompletionRefresh p
                 updateCompletionRuntime (fun state ->
                     { state with
                         lastStartedAtUnixMs = nowUnixMs ()

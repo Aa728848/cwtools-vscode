@@ -2118,6 +2118,8 @@ export async function activate(context: ExtensionContext) {
 		const updateFileList = new NotificationType<UpdateFileList>('updateFileList');
 		interface MonitorLogParams { category?: string; message: string; timestamp?: string }
 		const monitorLogNotification = new NotificationType<MonitorLogParams>('monitorLog');
+		interface CompletionRefreshParams { uri: string; line: number; character: number; version: number }
+		const completionRefreshNotification = new NotificationType<CompletionRefreshParams>('completionRefresh');
 
 		async function didChangeActiveTextEditor(editor: vs.TextEditor | undefined): Promise<void> {
 			if (editor) {
@@ -2248,6 +2250,22 @@ export async function activate(context: ExtensionContext) {
 			const category = param.category ? `[${param.category}] ` : '';
 			monitorLogChannel.appendLine(`[${timestamp}] ${category}${param.message}`);
 		})
+		client.onNotification(completionRefreshNotification, (param: CompletionRefreshParams) => {
+			setTimeout(() => {
+				const editor = window.activeTextEditor;
+				if (!editor) return;
+				const currentPath = path.resolve(editor.document.uri.fsPath);
+				const refreshPath = path.resolve(vs.Uri.parse(param.uri).fsPath);
+				const sameDocument = process.platform === 'win32'
+					? currentPath.toLowerCase() === refreshPath.toLowerCase()
+					: currentPath === refreshPath;
+				if (!sameDocument) return;
+				if (param.version >= 0 && editor.document.version !== param.version) return;
+				const cursor = editor.selection.active;
+				if (cursor.line !== param.line || cursor.character !== param.character) return;
+				void commands.executeCommand('editor.action.triggerSuggest');
+			}, 25);
+		});
 
 		let clientStarted = false;
 		const healthOptions = (): InstallHealthOptions => ({

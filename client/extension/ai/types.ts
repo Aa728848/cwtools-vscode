@@ -217,12 +217,18 @@ export interface ChatMessage {
      * using DeepSeek's thinking mode, otherwise API returns 400.
      */
     reasoning_content?: string | null;
+    /** Raw Responses output items, replayed unchanged to preserve reasoning and item phases. */
+    responses_output_items?: Array<Record<string, unknown>>;
+    /** Signed Anthropic thinking blocks required when continuing a tool-use turn. */
+    anthropic_thinking_blocks?: Array<Record<string, unknown>>;
 }
 
 export interface ToolCall {
     id: string;
     /** Responses API item id (usually fc_...), distinct from the call_id used for tool outputs. */
     responseItemId?: string;
+    /** Gemini 3 thought signature that must accompany a replayed functionCall part. */
+    thoughtSignature?: string;
     type: 'function';
     function: {
         name: string;

@@ -239,6 +239,44 @@ export function getOpenCodeGoApiFormat(model: string): CustomApiFormat {
     return 'openai-chat-completions';
 }
 
+/**
+ * Resolve the wire protocol for every built-in provider from one source of truth.
+ * Custom channels keep the protocol selected by the user, while gateway providers
+ * may choose a protocol per model family.
+ */
+export function getProviderApiFormat(
+    providerId: string,
+    model: string,
+    customApiFormat: CustomApiFormat = 'openai-chat-completions'
+): CustomApiFormat {
+    switch (providerId.toLowerCase()) {
+        case 'openai':
+            return 'openai-responses';
+        case 'claude':
+        case 'minimax-token-plan':
+            return 'anthropic-messages';
+        case 'opencode':
+            return getOpenCodeApiFormat(model);
+        case 'opencode-go':
+            return getOpenCodeGoApiFormat(model);
+        case 'custom':
+            return customApiFormat;
+        default:
+            return 'openai-chat-completions';
+    }
+}
+
+/** Keep protocol-specific reasoning values inside the model's accepted enum. */
+export function getEffectiveReasoningEffort(
+    model: string,
+    requested: ChatCompletionRequest['reasoning_effort'],
+    apiFormat: CustomApiFormat
+): ChatCompletionRequest['reasoning_effort'] {
+    if (apiFormat !== 'openai-responses' || requested !== 'max') return requested;
+    const modelId = model.toLowerCase().split('/').pop() ?? '';
+    return /^gpt-5\.6(?:-|$)/.test(modelId) ? 'max' : 'high';
+}
+
 // ─── Disable-Thinking Capability Descriptors ─────────────────────────────────
 
 /**
@@ -342,6 +380,34 @@ export function getEnableThinkingParams(model: string, providerId?: string): Ena
 
 // ─── Claude API Adapter ──────────────────────────────────────────────────────
 
+function toClaudeContentBlocks(content: ContentPart[]): Array<Record<string, unknown>> {
+    const blocks: Array<Record<string, unknown>> = [];
+    for (const part of content) {
+        if (part.type === 'text') {
+            if (part.text) blocks.push({ type: 'text', text: part.text });
+            continue;
+        }
+        const url = part.image_url.url;
+        const mediaMatch = url.match(/^data:(image\/[a-zA-Z+.-]+);base64,([A-Za-z0-9+/=]+)/);
+        if (mediaMatch) {
+            blocks.push({
+                type: 'image',
+                source: {
+                    type: 'base64',
+                    media_type: mediaMatch[1],
+                    data: mediaMatch[2],
+                },
+            });
+        } else if (/^https?:\/\//i.test(url)) {
+            blocks.push({
+                type: 'image',
+                source: { type: 'url', url },
+            });
+        }
+    }
+    return blocks;
+}
+
 /**
  * Converts an OpenAI-format request to Claude Messages API format.
  * Claude uses a different structure for system prompts, tools, and responses.
@@ -360,17 +426,33 @@ export function toClaudeRequest(
     for (const msg of request.messages) {
         if (msg.role === 'system') continue;
 
-        if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
-            // Assistant message with tool calls
+        if (msg.role === 'assistant' && (
+            (msg.tool_calls && msg.tool_calls.length > 0)
+            || (msg.anthropic_thinking_blocks && msg.anthropic_thinking_blocks.length > 0)
+        )) {
+            // Thinking blocks must be replayed byte-for-byte before tool_use blocks.
+            // Anthropic rejects the tool continuation when their signatures are lost.
             const content: Array<Record<string, unknown>> = [];
-            if (msg.content) {
+            for (const block of msg.anthropic_thinking_blocks ?? []) {
+                if (block.type === 'thinking' || block.type === 'redacted_thinking') {
+                    content.push(JSON.parse(JSON.stringify(block)) as Record<string, unknown>);
+                }
+            }
+            if (Array.isArray(msg.content)) {
+                content.push(...toClaudeContentBlocks(msg.content));
+            } else if (msg.content) {
                 content.push({ type: 'text', text: msg.content });
             }
-            for (const tc of msg.tool_calls) {
-                // Guard against malformed/truncated arguments from streaming
-                let toolInput: unknown = {};
-                try { toolInput = JSON.parse(tc.function.arguments); }
-                catch { toolInput = {}; /* Degraded: empty args better than a crash */ }
+            for (const tc of msg.tool_calls ?? []) {
+                let toolInput: unknown;
+                try {
+                    toolInput = JSON.parse(tc.function.arguments || '{}');
+                } catch {
+                    throw new Error(`Cannot replay Anthropic tool call '${tc.function.name}' (${tc.id}): arguments are not valid JSON.`);
+                }
+                if (!toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput)) {
+                    throw new Error(`Cannot replay Anthropic tool call '${tc.function.name}' (${tc.id}): arguments must be a JSON object.`);
+                }
                 content.push({
                     type: 'tool_use',
                     id: tc.id,
@@ -380,47 +462,24 @@ export function toClaudeRequest(
             }
             claudeMessages.push({ role: 'assistant', content });
         } else if (msg.role === 'tool') {
-            // Tool result message
-            claudeMessages.push({
-                role: 'user',
-                content: [{
-                    type: 'tool_result',
-                    tool_use_id: msg.tool_call_id,
-                    content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-                }],
-            });
+            // Anthropic expects parallel tool results in one user turn.
+            const toolResult = {
+                type: 'tool_result',
+                tool_use_id: msg.tool_call_id,
+                content: contentToString(msg.content),
+            };
+            const previous = claudeMessages[claudeMessages.length - 1];
+            const canAppend = previous?.role === 'user'
+                && Array.isArray(previous.content)
+                && previous.content.every((part: any) => part?.type === 'tool_result');
+            if (canAppend) previous.content.push(toolResult);
+            else claudeMessages.push({ role: 'user', content: [toolResult] });
         } else {
             // Text or multimodal user/assistant message
             const role = msg.role === 'user' ? 'user' : 'assistant';
             if (Array.isArray(msg.content)) {
                 // Convert OpenAI ContentPart[] → Claude content blocks
-                const claudeContent: Array<Record<string, unknown>> = [];
-                for (const part of msg.content as ContentPart[]) {
-                    if (part.type === 'text') {
-                        claudeContent.push({ type: 'text', text: part.text });
-                    } else if (part.type === 'image_url') {
-                        // Convert data URL to Claude's base64 source format.
-                        const url = part.image_url.url;
-                        const mediaMatch = url.match(/^data:(image\/[a-zA-Z+.-]+);base64,([A-Za-z0-9+/=]+)/);
-                        if (mediaMatch) {
-                            claudeContent.push({
-                                type: 'image',
-                                source: {
-                                    type: 'base64',
-                                    media_type: mediaMatch[1],
-                                    data: mediaMatch[2],
-                                },
-                            });
-                        }
-                        // If URL is an HTTPS URL (not data:), pass as url type instead
-                        else if (url.startsWith('http')) {
-                            claudeContent.push({
-                                type: 'image',
-                                source: { type: 'url', url },
-                            });
-                        }
-                    }
-                }
+                const claudeContent = toClaudeContentBlocks(msg.content as ContentPart[]);
                 claudeMessages.push({ role, content: claudeContent });
             } else {
                 claudeMessages.push({ role, content: msg.content ?? '' });

@@ -154,6 +154,21 @@ export function estimateTokenCount(text: string): number {
     return estimateTokensPrecise(text);
 }
 
+/** Include provider-native continuation state in context-window estimates. */
+export function estimateChatMessageTokens(message: ChatMessage): number {
+    if (message.responses_output_items?.length) {
+        return estimateTokenCount(JSON.stringify(message.responses_output_items)) + 4;
+    }
+    const parts = [contentToString(message.content)];
+    if (message.tool_calls?.length) parts.push(JSON.stringify(message.tool_calls));
+    if (message.anthropic_thinking_blocks?.length) {
+        parts.push(JSON.stringify(message.anthropic_thinking_blocks));
+    } else if (message.reasoning_content) {
+        parts.push(message.reasoning_content);
+    }
+    return estimateTokenCount(parts.join('\n')) + 4;
+}
+
 
 
 
@@ -1031,7 +1046,7 @@ export class AgentRunner {
             // Phase 1: Agent reasoning loop (with tool calls)
             updateRunStatus('running');
             const finalMessage = await this.reasoningLoop(messages, emitStep, mode, options, tokenAccumulator, options?.onBeforeFileWrite, runMetrics);
-            runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
+            runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0);
 
             // Auto-mark remaining in-progress todos as done on successful completion
             this.autoCompleteTodos();
@@ -1115,7 +1130,7 @@ export class AgentRunner {
             if (context.topicId) {
                 await this.saveResumeState(context.topicId, messages, mode, runId);
             }
-            runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
+            runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0);
 
             return {
                 runId,
@@ -1445,7 +1460,7 @@ export class AgentRunner {
                         return inner;
                     }, 0);
                 }
-                return s + estimateTokenCount(contentToString(m.content));
+                return s + estimateChatMessageTokens(m);
             }, 0);
         };
 
@@ -1629,7 +1644,7 @@ export class AgentRunner {
             // and compact if approaching the context window limit.
             if (iteration > 1 && (iteration - 1) % MID_LOOP_COMPACTION_INTERVAL === 0) {
                 const activeToolSchemaTokens = estimateTokenCount(JSON.stringify(availableTools));
-                const loopTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
+                const loopTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
                     + activeToolSchemaTokens;
                 if (loopTokens > midLoopThreshold) {
                     emitStep({
@@ -1651,7 +1666,7 @@ export class AgentRunner {
                     );
                     this.compactMessagesInPlace(messages, toolResultBudget, compactionOptions);
                     refreshLiveVsCodeContext(messages);
-                    let afterTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
+                    let afterTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
                         + activeToolSchemaTokens;
                     if (afterTokens > midLoopThreshold && afterTokens >= loopTokens * 0.90) {
                         messages = await this.maybeCompactHistory(
@@ -1662,7 +1677,7 @@ export class AgentRunner {
                             { reservedTokens: activeToolSchemaTokens, force: true },
                         );
                         refreshLiveVsCodeContext(messages);
-                        afterTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
+                        afterTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
                             + activeToolSchemaTokens;
                     }
                     if (afterTokens > midLoopThreshold && afterTokens >= loopTokens * 0.95) {
@@ -2012,7 +2027,7 @@ export class AgentRunner {
 
                 // Fallback to estimation if API did not return usage stats (e.g. streaming without stream_options)
                 if (promptTokens === undefined || completionTokens === undefined) {
-                    promptTokens = promptTokens ?? messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
+                    promptTokens = promptTokens ?? messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0);
                     const assistantContentStr = response.choices[0]?.message ? contentToString(response.choices[0].message.content) : '';
                     completionTokens = completionTokens ?? estimateTokenCount(assistantContentStr);
                 }
@@ -2803,7 +2818,7 @@ export class AgentRunner {
             // creates an invalid orphaned tool_result sequence.
             if (!forceStop) {
                 const activeToolSchemaTokens = estimateTokenCount(JSON.stringify(availableTools));
-                const emergencyTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
+                const emergencyTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
                     + activeToolSchemaTokens;
                 if (emergencyTokens > contextLimit * 0.92) {
                     emitStep({
@@ -2825,7 +2840,7 @@ export class AgentRunner {
                     );
                     this.compactMessagesInPlace(messages, toolResultBudget, compactionOptions);
                     refreshLiveVsCodeContext(messages);
-                    let afterEmergencyTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
+                    let afterEmergencyTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
                         + activeToolSchemaTokens;
                     if (afterEmergencyTokens > contextLimit * MID_LOOP_COMPACTION_RATIO) {
                         messages = await this.maybeCompactHistory(
@@ -2836,7 +2851,7 @@ export class AgentRunner {
                             { reservedTokens: activeToolSchemaTokens, force: true },
                         );
                         refreshLiveVsCodeContext(messages);
-                        afterEmergencyTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0)
+                        afterEmergencyTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
                             + activeToolSchemaTokens;
                     }
                     await runLedger.appendEvent(

@@ -31,6 +31,12 @@ export function cloneChatMessage(message: ChatMessage): ChatMessage {
             ...call,
             function: { ...call.function },
         })),
+        responses_output_items: message.responses_output_items
+            ? JSON.parse(JSON.stringify(message.responses_output_items)) as Array<Record<string, unknown>>
+            : undefined,
+        anthropic_thinking_blocks: message.anthropic_thinking_blocks
+            ? JSON.parse(JSON.stringify(message.anthropic_thinking_blocks)) as Array<Record<string, unknown>>
+            : undefined,
     };
 }
 

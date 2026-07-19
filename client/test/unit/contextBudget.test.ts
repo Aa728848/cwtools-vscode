@@ -237,6 +237,29 @@ describe('compactMessagesInPlace', () => {
         }
     });
 
+    it('drops compacted Responses items but keeps signed Anthropic tool continuation blocks', () => {
+        const messages: ChatMessage[] = [{ role: 'system', content: 'sys' }, {
+            role: 'assistant',
+            content: 'short answer',
+            responses_output_items: [{ type: 'reasoning', encrypted_content: 'x'.repeat(2000) }],
+        }, {
+            role: 'assistant',
+            content: null,
+            anthropic_thinking_blocks: [{ type: 'thinking', thinking: 'x'.repeat(2000), signature: 'signed' }],
+            tool_calls: [{
+                id: 'toolu_1',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{}' },
+            }],
+        }, { role: 'tool', content: 'ok', tool_call_id: 'toolu_1' }];
+        for (let i = 0; i < 20; i++) messages.push({ role: 'user', content: `filler ${i}` });
+
+        compactMessagesInPlace(messages, 500);
+
+        expect(messages[1]!.responses_output_items).to.equal(undefined);
+        expect(messages[2]!.anthropic_thinking_blocks![0]!.signature).to.equal('signed');
+    });
+
     it('aggressively compacts very old tool results to metadata', () => {
         const messages: ChatMessage[] = [];
         messages.push({ role: 'system', content: 'sys' });

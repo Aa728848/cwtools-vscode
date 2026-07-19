@@ -23,6 +23,7 @@ import {
     setSessionPermissionMode,
 } from './runner/sessionPermissions';
 import { detectSandboxBackendAsync } from './runner/sandboxRunner';
+import { getProviderApiFormat } from './providers';
 
 const execAsync = promisify(cp.exec);
 
@@ -80,13 +81,14 @@ function buildVersionedModelEndpointBases(endpoint: string, versionPath = 'v1'):
         : [`${cleanEndpoint}/${versionPath}`, cleanEndpoint];
 }
 
-function buildModelsRequests(
+export function buildModelsRequests(
     providerId: string,
     endpoint: string,
     apiKey: string,
     customApiFormat: CustomApiFormat
 ): ModelsRequestCandidate[] {
     const cleanEndpoint = normalizeModelEndpointBase(endpoint);
+    const apiFormat = getProviderApiFormat(providerId, '', customApiFormat);
     if (providerId === 'opencode' || providerId === 'opencode-go') {
         return uniqueModelRequests([
             {
@@ -112,11 +114,19 @@ function buildModelsRequests(
             label: 'GitHub Models catalog',
         }];
     }
-    if (providerId === 'custom' && customApiFormat === 'gemini-generate-content') {
-        const url = `${cleanEndpoint.endsWith('/models') ? cleanEndpoint : `${cleanEndpoint}/models`}${apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''}`;
-        return [{ url, headers: apiKey ? { 'x-goog-api-key': apiKey } : {}, label: 'Gemini /models' }];
+    if (apiFormat === 'gemini-generate-content') {
+        const nativeBase = cleanEndpoint.replace(/\/openai$/i, '');
+        const url = nativeBase.endsWith('/models') ? nativeBase : `${nativeBase}/models`;
+        const googleNative = /generativelanguage\.googleapis\.com/i.test(url);
+        return [{
+            url,
+            headers: apiKey
+                ? (googleNative ? { 'x-goog-api-key': apiKey } : { Authorization: `Bearer ${apiKey}` })
+                : {},
+            label: 'Gemini /models',
+        }];
     }
-    if (providerId === 'custom' && customApiFormat === 'anthropic-messages') {
+    if (apiFormat === 'anthropic-messages') {
         const authCandidates = (url: string, route: string): ModelsRequestCandidate[] => {
             if (!apiKey) return [{ url, headers: {}, label: `${route} without auth` }];
             return [
@@ -146,7 +156,7 @@ function buildModelsRequests(
     }];
 }
 
-function normalizeModelList(data: any, customApiFormat: CustomApiFormat, providerFilter?: string): any[] {
+export function normalizeModelList(data: any, customApiFormat: CustomApiFormat, providerFilter?: string): any[] {
     if (providerFilter && data && typeof data === 'object' && data[providerFilter]) {
         return normalizeModelList(data[providerFilter], customApiFormat);
     }
@@ -619,6 +629,7 @@ export class ChatSettingsManager {
         const provider = getProvider(providerId);
         const endpoint = endpointOverride || getEffectiveEndpoint(providerId, this.aiService.getEndpointForProvider(providerId));
         const customApiFormat = normalizeCustomApiFormatSetting(customApiFormatOverride ?? saved.customApiFormat);
+        const effectiveApiFormat = getProviderApiFormat(providerId, '', customApiFormat);
 
         let apiKey = apiKeyOverride;
         if (!apiKey) apiKey = await this.aiService.getKeyForProvider(providerId) || '';
@@ -697,7 +708,7 @@ export class ChatSettingsManager {
                     errors.push(`${candidate.label}: non-JSON response`);
                     continue;
                 }
-                let modelList: any[] = normalizeModelList(data, customApiFormat, candidate.providerFilter);
+                let modelList: any[] = normalizeModelList(data, effectiveApiFormat, candidate.providerFilter);
                 if (candidate.filterDeprecated) {
                     for (const model of modelList) {
                         if (model?.status === 'deprecated' && model.id) deprecatedModelIds.add(model.id);
@@ -777,8 +788,24 @@ export class ChatSettingsManager {
 
         try {
             await this.aiService.chatCompletion(
-                [{ role: 'user', content: 'Hi' }],
-                { maxTokens: 5, providerId, model, apiKey, endpoint, customApiFormat }
+                [{ role: 'user', content: 'Reply with OK. Do not call the diagnostic tool.' }],
+                {
+                    maxTokens: 128,
+                    providerId,
+                    model,
+                    apiKey,
+                    endpoint,
+                    customApiFormat,
+                    disableThinking: true,
+                    tools: provider.supportsToolUse ? [{
+                        type: 'function',
+                        function: {
+                            name: 'connection_diagnostic',
+                            description: 'Schema-only tool used to verify that this protocol accepts function tools.',
+                            parameters: { type: 'object', properties: {}, additionalProperties: false },
+                        },
+                    }] : undefined,
+                }
             );
             this.postMessage({ type: 'testConnectionResult', ok: true, message: aiText('Connection successful', '连接成功 ✓') });
         } catch (e: unknown) {

@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import type { ChatMessage } from '../../extension/ai/types';
 import {
+    cloneChatMessage,
     inspectTranscriptIntegrity,
     normalizeTranscriptForPersistence,
     selectProviderSafeTail,
@@ -8,6 +9,28 @@ import {
 } from '../../extension/ai/runner/contextTranscript';
 
 describe('canonical context transcript', () => {
+    it('deep-clones provider-native continuation metadata', () => {
+        const source: ChatMessage = {
+            role: 'assistant',
+            content: null,
+            responses_output_items: [{ type: 'message', content: [{ type: 'output_text', text: 'one' }] }],
+            anthropic_thinking_blocks: [{ type: 'thinking', thinking: 'one', signature: 'sig' }],
+            tool_calls: [{
+                id: 'call_1',
+                thoughtSignature: 'gemini-sig',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{}' },
+            }],
+        };
+        const cloned = cloneChatMessage(source);
+        ((cloned.responses_output_items![0]!.content as any[])[0] as any).text = 'changed';
+        cloned.anthropic_thinking_blocks![0]!.thinking = 'changed';
+
+        expect((((source.responses_output_items![0]!.content as any[])[0]) as any).text).to.equal('one');
+        expect(source.anthropic_thinking_blocks![0]!.thinking).to.equal('one');
+        expect(cloned.tool_calls![0]!.thoughtSignature).to.equal('gemini-sig');
+    });
+
     it('removes orphan and duplicate tool messages and closes unfinished calls', () => {
         const messages: ChatMessage[] = [
             { role: 'tool', tool_call_id: 'orphan', content: 'orphan' },

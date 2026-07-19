@@ -28,8 +28,8 @@ import {
     getReducedThinkingParams,
     getEnableThinkingParams,
     getEffectiveTemperature,
-    getOpenCodeApiFormat,
-    getOpenCodeGoApiFormat,
+    getProviderApiFormat,
+    getEffectiveReasoningEffort,
 } from './providers';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
@@ -38,6 +38,16 @@ import { SOURCE, aiText } from './messages';
 
 /** Providers that reject the `detail` sub-field inside `image_url` objects. */
 const STRIP_IMAGE_DETAIL_PROVIDERS = new Set(['minimax', 'glm', 'qwen']);
+const STREAM_USAGE_PROVIDERS = new Set(['openai', 'deepseek', 'glm', 'qwen']);
+const OPTIONAL_CHAT_REQUEST_FIELDS = [
+    'stream_options',
+    'reasoning_effort',
+    'temperature',
+    'parallel_tool_calls',
+    'enable_thinking',
+    'thinking',
+    'thinking_config',
+] as const;
 const DEFAULT_CHAT_COMPLETION_TIMEOUT_MS = 20 * 60 * 1000;
 const MIN_CHAT_COMPLETION_TIMEOUT_MS = 60 * 1000;
 const MAX_CHAT_COMPLETION_TIMEOUT_MS = 60 * 60 * 1000;
@@ -45,6 +55,47 @@ const DEFAULT_CUSTOM_API_FORMAT: CustomApiFormat = 'openai-chat-completions';
 
 function isResponsesFunctionCallItemId(value: unknown): value is string {
     return typeof value === 'string' && value.startsWith('fc_');
+}
+
+function normalizeOpenAIActionUrl(endpoint: string, action: 'chat/completions' | 'responses'): string {
+    const trimmed = endpoint.trim();
+    const queryIndex = trimmed.indexOf('?');
+    const query = queryIndex >= 0 ? trimmed.slice(queryIndex) : '';
+    const base = (queryIndex >= 0 ? trimmed.slice(0, queryIndex) : trimmed)
+        .replace(/\/+$/, '')
+        .replace(/\/(?:chat\/completions|responses)\/?$/i, '');
+    return `${base}/${action}${query}`;
+}
+
+function removeUnsupportedOptionalChatFields(
+    payload: Record<string, unknown>,
+    errorText: string
+): string[] {
+    if (!/(?:unsupported|not supported|does not support|unknown|unrecognized|unexpected|not permitted|not allowed|invalid parameter)/i.test(errorText)) {
+        return [];
+    }
+    const removed: string[] = [];
+    for (const field of OPTIONAL_CHAT_REQUEST_FIELDS) {
+        if (!(field in payload) || !new RegExp(`\\b${field}\\b`, 'i').test(errorText)) continue;
+        delete payload[field];
+        removed.push(field);
+    }
+    const google = payload.google as Record<string, unknown> | undefined;
+    if (google?.thinking_config && /\bthinking_config\b/i.test(errorText)) {
+        delete google.thinking_config;
+        if (Object.keys(google).length === 0) delete payload.google;
+        if (!removed.includes('thinking_config')) removed.push('thinking_config');
+    }
+    if (/\breasoning_content\b/i.test(errorText) && Array.isArray(payload.messages)) {
+        let changed = false;
+        for (const message of payload.messages as Array<Record<string, unknown>>) {
+            if (message.reasoning_content === undefined) continue;
+            delete message.reasoning_content;
+            changed = true;
+        }
+        if (changed) removed.push('message.reasoning_content');
+    }
+    return removed;
 }
 
 function finiteNumber(value: unknown): number | undefined {
@@ -207,10 +258,6 @@ export class AIService {
 
     getReasoningEffortOverride(): AIUserConfig['reasoningEffort'] | null {
         return this.reasoningEffortOverride;
-    }
-
-    private resolveCustomApiFormat(providerId: string, format?: unknown): CustomApiFormat {
-        return providerId === 'custom' ? normalizeCustomApiFormat(format) : DEFAULT_CUSTOM_API_FORMAT;
     }
 
     /**
@@ -386,7 +433,7 @@ export class AIService {
         const config = this.getConfig();
         const providerId = options?.providerId ?? config.provider;
         const provider = getProvider(providerId);
-        const customApiFormat = this.resolveCustomApiFormat(providerId, options?.customApiFormat ?? config.customApiFormat);
+        const selectedCustomApiFormat = normalizeCustomApiFormat(options?.customApiFormat ?? config.customApiFormat);
 
         // Some providers (for example Ollama) do not require an API key.
         let apiKey = '';
@@ -417,9 +464,7 @@ export class AIService {
         // Strip the UI '(免费)' suffix from the model ID before sending to the API
         const model = rawModel.replace(/\s*\(免费\)$/i, '');
         const lowerModel = model.toLowerCase();
-        const effectiveApiFormat = providerId === 'opencode'
-            ? getOpenCodeApiFormat(model)
-            : (providerId === 'opencode-go' ? getOpenCodeGoApiFormat(model) : customApiFormat);
+        const effectiveApiFormat = getProviderApiFormat(providerId, model, selectedCustomApiFormat);
 
         // ── Disable thinking: per-provider API parameters ──
         // Each provider has a different mechanism to disable thinking/reasoning.
@@ -435,7 +480,12 @@ export class AIService {
             // Data-driven lookup keeps provider-specific thinking controls out of this flow.
             if (reducedThinkingParams) {
                 if (reducedThinkingParams.extraBody) {
-                    extraBody = reducedThinkingParams.extraBody as Record<string, any>;
+                    const reducedBody = reducedThinkingParams.extraBody as Record<string, any>;
+                    extraBody = providerId === 'google'
+                        && effectiveApiFormat === 'openai-chat-completions'
+                        && reducedBody.thinking_config
+                        ? { google: { thinking_config: reducedBody.thinking_config } }
+                        : reducedBody;
                 }
                 if (reducedThinkingParams.injectPrompt) {
                     // Qwen-style: append /no_think to system prompt as fallback
@@ -474,7 +524,11 @@ export class AIService {
                 request.reasoning_effort = reducedThinkingParams.reasoningEffort;
             }
         } else {
-            const rEffort = config.reasoningEffort || 'high';
+            const rEffort = getEffectiveReasoningEffort(
+                model,
+                config.reasoningEffort || 'high',
+                effectiveApiFormat
+            );
             if (providerId === 'deepseek' || providerId === 'openai' || effectiveApiFormat === 'openai-responses') {
                 request.reasoning_effort = rEffort;
             } else if (providerId === 'claude' || effectiveApiFormat === 'anthropic-messages') {
@@ -483,10 +537,13 @@ export class AIService {
                 request.reasoning_effort = rEffort;
             } else if (providerId === 'qwen' && (lowerModel.includes('qwen3') || lowerModel.includes('qwen-max'))) {
                 request.enable_thinking = true;
-            } else if (providerId === 'gemini' && lowerModel.startsWith('gemini-3')) {
-                // Map max to high for Gemini
+            } else if ((providerId === 'google' || effectiveApiFormat === 'gemini-generate-content') && lowerModel.startsWith('gemini-3')) {
                 const mappedLevel = rEffort === 'max' ? 'high' : rEffort;
-                request.thinking_config = { thinking_level: mappedLevel };
+                if (effectiveApiFormat === 'gemini-generate-content') {
+                    request.thinking_config = { thinking_level: mappedLevel };
+                } else {
+                    request.google = { thinking_config: { thinking_level: mappedLevel } };
+                }
             }
         }
 
@@ -512,8 +569,6 @@ export class AIService {
         }, requestTimeoutMs);
 
         try {
-            // MiniMax Token Plan uses Anthropic Messages API format
-            const isAnthropicCompat = providerId === 'claude' || providerId === 'minimax-token-plan' || effectiveApiFormat === 'anthropic-messages';
             if (effectiveApiFormat === 'openai-responses') {
                 return await this.callOpenAIResponses(endpoint, apiKey, request, providerId, controller, {
                     onThinking: options?.onThinking,
@@ -524,15 +579,14 @@ export class AIService {
                 });
             }
             if (effectiveApiFormat === 'gemini-generate-content') {
-                return await this.callGeminiGenerateContent(endpoint, apiKey, request, providerId, controller, options?.onTextDelta, options?.onToolCallDelta);
+                return await this.callGeminiGenerateContent(endpoint, apiKey, request, providerId, controller, options?.onTextDelta, options?.onToolCallDelta, options?.onThinking);
             }
-            // Use streaming for OpenAI-compat providers when they support it.
-            if (provider.supportsStreaming && provider.isOpenAICompatible && !isAnthropicCompat) {
-                return await this.callOpenAICompatibleStreaming(endpoint, apiKey, { ...request, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta, options?.onToolCallDelta);
-            } else if (isAnthropicCompat) {
-                // L4 Fix: fully migrate callClaude to SSE — enables real-time thinking tokens
-                // and eliminates the previous blocking response.json() approach.
+            if (effectiveApiFormat === 'anthropic-messages') {
                 return await this.callClaude(endpoint, apiKey, request, controller, options?.onThinking, options?.onTextDelta, options?.onToolCallDelta, providerId);
+            }
+            // OpenAI Chat Completions is the remaining protocol after explicit routing above.
+            if (provider.supportsStreaming) {
+                return await this.callOpenAICompatibleStreaming(endpoint, apiKey, { ...request, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta, options?.onToolCallDelta);
             } else {
                 return await this.callOpenAICompatible(endpoint, apiKey, request, providerId, controller);
             }
@@ -750,6 +804,27 @@ export class AIService {
      *   - Fully support both `url` and `detail` — pass through unchanged
      */
     private sanitizeRequest(providerId: string, request: ChatCompletionRequest): ChatCompletionRequest {
+        // Provider-native continuation metadata is internal state, not part of
+        // the Chat Completions message/tool schema. Strip it when protocols are
+        // switched or a fallback provider receives the same transcript.
+        const chatRequest: ChatCompletionRequest = {
+            ...request,
+            messages: request.messages.map(message => ({
+                role: message.role,
+                content: message.content,
+                ...(message.tool_calls ? {
+                    tool_calls: message.tool_calls.map(call => ({
+                        id: call.id,
+                        type: call.type,
+                        function: { ...call.function },
+                    })),
+                } : {}),
+                ...(message.tool_call_id !== undefined ? { tool_call_id: message.tool_call_id } : {}),
+                ...(message.name !== undefined ? { name: message.name } : {}),
+                ...(message.reasoning_content !== undefined ? { reasoning_content: message.reasoning_content } : {}),
+            })),
+        };
+
         // ── Providers that reject image_url.detail ────────────────────────────
 
         // ── MiniMax pay-as-you-go: strict message requirements ──────────────
@@ -757,7 +832,7 @@ export class AIService {
         // Note: minimax-token-plan uses Anthropic adapter (isOpenAICompatible=false) and doesn't need this
         if (providerId === 'minimax') {
              
-            const { tool_choice, parallel_tool_calls, ...rest } = request as unknown as Record<string, unknown>;
+            const { tool_choice, parallel_tool_calls, ...rest } = chatRequest as unknown as Record<string, unknown>;
             void tool_choice; void parallel_tool_calls;
             const sanitized = rest as unknown as ChatCompletionRequest;
             
@@ -788,12 +863,12 @@ export class AIService {
         // ── GLM / Qwen: strip image_url.detail only ───────────────────────────
         if (STRIP_IMAGE_DETAIL_PROVIDERS.has(providerId)) {
             return {
-                ...request,
-                messages: this.stripImageDetail(request.messages),
+                ...chatRequest,
+                messages: this.stripImageDetail(chatRequest.messages),
             };
         }
 
-        return request;
+        return chatRequest;
     }
 
     // ─── Fetch with Exponential Backoff ──────────────────────────────────────
@@ -955,22 +1030,33 @@ export class AIService {
         providerId: string,
         controller: AbortController
     ): Promise<ChatCompletionResponse> {
-        const url = `${endpoint}/chat/completions`;
+        const url = normalizeOpenAIActionUrl(endpoint, 'chat/completions');
 
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
             ...this.buildAuthHeaders(providerId, apiKey),
         };
 
-        const response = await this.fetchWithRetry(url, {
+        const requestPayload = this.sanitizeRequest(providerId, request) as ChatCompletionRequest & Record<string, unknown>;
+        const send = () => this.fetchWithRetry(url, {
             method: 'POST',
             headers,
-            body: JSON.stringify(this.sanitizeRequest(providerId, request)),
+            body: JSON.stringify(requestPayload),
             signal: controller.signal,   // C1 Fix: use local per-call controller
         }, providerId);
 
+        let response = await send();
         if (!response.ok) {
-            const errorText = await response.text();
+            let errorText = await response.text();
+            const removed = response.status === 400 || response.status === 422
+                ? removeUnsupportedOptionalChatFields(requestPayload, errorText)
+                : [];
+            if (removed.length > 0) {
+                ErrorReporter.debug(SOURCE.AI_SERVICE, `${getProvider(providerId).name}: retrying Chat Completions without unsupported ${removed.join(', ')}.`);
+                response = await send();
+                if (!response.ok) errorText = await response.text();
+            }
+            if (response.ok) return await response.json() as ChatCompletionResponse;
             throw new Error(`${getProvider(providerId).name} API error (${response.status}): ${errorText}`);
         }
 
@@ -992,30 +1078,55 @@ export class AIService {
         onTextDelta?: (text: string) => void,
         onToolCallDelta?: (toolName: string, argsBuf: string) => void
     ): Promise<ChatCompletionResponse> {
-        const url = `${endpoint}/chat/completions`;
+        const url = normalizeOpenAIActionUrl(endpoint, 'chat/completions');
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
             ...this.buildAuthHeaders(providerId, apiKey),
         };
 
-        const requestPayload = this.sanitizeRequest(providerId, { ...request, stream: true });
+        const requestPayload = this.sanitizeRequest(providerId, { ...request, stream: true }) as ChatCompletionRequest & Record<string, unknown>;
         
         // Inject stream_options for providers that need it to return usage in streams.
         // OpenAI, DeepSeek, GLM, Qwen require it. We omit it for minimax (strict schema).
-        if (providerId !== 'minimax') {
-            (requestPayload as any).stream_options = { include_usage: true };
+        if (STREAM_USAGE_PROVIDERS.has(providerId)) {
+            requestPayload.stream_options = { include_usage: true };
         }
 
-        const response = await this.fetchWithRetry(url, {
+        const send = () => this.fetchWithRetry(url, {
             method: 'POST',
             headers,
             body: JSON.stringify(requestPayload),
             signal: controller.signal,
         }, providerId);
 
+        let response = await send();
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`${getProvider(providerId).name} API error (${response.status}): ${errorText}`);
+            let errorText = await response.text();
+            const removed = response.status === 400 || response.status === 422
+                ? removeUnsupportedOptionalChatFields(requestPayload, errorText)
+                : [];
+            if (removed.length > 0) {
+                ErrorReporter.debug(SOURCE.AI_SERVICE, `${getProvider(providerId).name}: retrying streamed Chat Completions without unsupported ${removed.join(', ')}.`);
+                response = await send();
+                if (!response.ok) errorText = await response.text();
+            }
+            if (!response.ok) {
+                throw new Error(`${getProvider(providerId).name} API error (${response.status}): ${errorText}`);
+            }
+        }
+
+        if (/application\/json/i.test(response.headers?.get?.('content-type') ?? '')) {
+            const data = await response.json() as ChatCompletionResponse & { error?: { message?: string } | string };
+            if (data.error) {
+                throw new Error(`${getProvider(providerId).name} API error: ${typeof data.error === 'string' ? data.error : data.error.message ?? 'Unknown error'}`);
+            }
+            const message = data.choices?.[0]?.message;
+            if (typeof message?.content === 'string' && message.content) onTextDelta?.(message.content);
+            if (message?.reasoning_content) onThinking?.(message.reasoning_content);
+            for (const call of message?.tool_calls ?? []) {
+                onToolCallDelta?.(call.function.name, call.function.arguments);
+            }
+            return data;
         }
 
         const reader = response.body?.getReader();
@@ -1029,8 +1140,12 @@ export class AIService {
         let finishReason: string | null = null;
         let usageBuf: { prompt_tokens: number; completion_tokens: number; total_tokens: number; cached_tokens?: number; cache_creation_tokens?: number } | undefined;
         let modelBuf = '';
+        let responseIdBuf = '';
+        let createdBuf = Math.floor(Date.now() / 1000);
         // tool_calls reassembly: index → { id, type, function.name, function.arguments(buf) }
         const toolCallMap: Record<number, { id: string; type: string; function: { name: string; arguments: string } }> = {};
+        const toolCallIdToIndex = new Map<string, number>();
+        let lastToolCallIndex = 0;
 
         while (true) {
             const { done, value } = await this.readWithTimeout(reader, controller, 600000); // 600s idle timeout (to prevent large models from being disconnected and suspended)
@@ -1042,12 +1157,18 @@ export class AIService {
             for (const line of lines) {
                 const trimmed = line.trim();
                 if (!trimmed || trimmed === 'data: [DONE]') continue;
-                if (!trimmed.startsWith('data: ')) continue;
+                if (!trimmed.startsWith('data:')) continue;
                 let chunk: Record<string, unknown>;
-                try { chunk = JSON.parse(trimmed.slice(6)); } catch { continue; }
+                try { chunk = JSON.parse(trimmed.slice(5).trimStart()); } catch { continue; }
+                if (chunk.error) {
+                    const error = chunk.error as Record<string, unknown>;
+                    throw new Error(`${getProvider(providerId).name} stream error: ${error.message ?? chunk.error}`);
+                }
                 const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
                 // Capture model name and usage from any chunk
                 if (typeof chunk.model === 'string' && chunk.model) modelBuf = chunk.model;
+                if (typeof chunk.id === 'string' && chunk.id) responseIdBuf = chunk.id;
+                if (typeof chunk.created === 'number') createdBuf = chunk.created;
                 if (chunk.usage) { const u = chunk.usage as Record<string, any>; const promptTk = u.prompt_tokens ?? u.input_tokens ?? 0; const cached = extractUsageCachedTokens(u); const cacheCreation = extractUsageCacheCreationTokens(u, promptTk, cached); usageBuf = { prompt_tokens: promptTk, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? (promptTk + (u.completion_tokens ?? 0)), cached_tokens: cached, cache_creation_tokens: cacheCreation }; }
                 if (!choices || choices.length === 0) continue;
                 const delta = choices[0]!.delta as Record<string, unknown> | undefined;  
@@ -1068,16 +1189,25 @@ export class AIService {
                 // Reassemble tool_calls from deltas
                 const tcDeltas = delta.tool_calls as Array<Record<string, unknown>> | undefined;
                 if (tcDeltas) {
-                    for (const tc of tcDeltas) {
-                        // M1 Fix: don't blindly cast index to number — if missing,
-                        // use the next available slot to avoid overwriting parallel tool_calls.
+                    for (let position = 0; position < tcDeltas.length; position++) {
+                        const tc = tcDeltas[position]!;
+                        const id = typeof tc.id === 'string' ? tc.id : '';
+                        const knownIdIndex = id ? toolCallIdToIndex.get(id) : undefined;
+                        const existingIndexes = Object.keys(toolCallMap).map(Number).sort((a, b) => a - b);
                         const idx = typeof tc.index === 'number'
                             ? tc.index
-                            : Object.keys(toolCallMap).length;
+                            : knownIdIndex
+                                ?? (tcDeltas.length > 1 ? position : undefined)
+                                ?? (existingIndexes.length === 1 ? existingIndexes[0] : undefined)
+                                ?? lastToolCallIndex;
+                        lastToolCallIndex = idx;
                         if (!toolCallMap[idx]) {
                             toolCallMap[idx] = { id: '', type: 'function', function: { name: '', arguments: '' } };
                         }
-                        if (tc.id) toolCallMap[idx].id = tc.id as string;
+                        if (id) {
+                            toolCallMap[idx].id = id;
+                            toolCallIdToIndex.set(id, idx);
+                        }
                         if (tc.type) toolCallMap[idx].type = tc.type as string;
                         const fn = tc.function as Record<string, string> | undefined;
                         if (fn) {
@@ -1098,12 +1228,19 @@ export class AIService {
         const toolCalls = Object.keys(toolCallMap).length > 0
             ? Object.entries(toolCallMap)
                 .sort(([a], [b]) => Number(a) - Number(b))
-                .map(([, tc]) => tc)
+                .map(([index, tc]) => ({
+                    ...tc,
+                    id: tc.id || `${responseIdBuf || `chatcmpl_${createdBuf}`}_call_${index}`,
+                }))
             : undefined;
 
         return {
+            id: responseIdBuf || `chatcmpl_${createdBuf}`,
+            object: 'chat.completion',
+            created: createdBuf,
             model: modelBuf || undefined,
             choices: [{
+                index: 0,
                 message: {
                     role: 'assistant',
                     content: contentBuf || null,
@@ -1135,7 +1272,8 @@ export class AIService {
         const payload: Record<string, unknown> = {
             model: request.model,
             input: this.toResponsesInput(request.messages),
-            temperature: request.temperature,
+            // GPT reasoning models reject sampling controls while reasoning is enabled.
+            temperature: request.reasoning_effort ? undefined : request.temperature,
             max_output_tokens: request.max_tokens,
             ...(options?.fastPath ? { stream: true } : {}),
         };
@@ -1177,7 +1315,12 @@ export class AIService {
                 continue;
             }
 
-            const content = this.toResponsesContent(msg.content);
+            if (msg.role === 'assistant' && msg.responses_output_items?.length) {
+                input.push(...JSON.parse(JSON.stringify(msg.responses_output_items)) as Array<Record<string, unknown>>);
+                continue;
+            }
+
+            const content = this.toResponsesContent(msg.content, msg.role);
             if (content.length > 0) {
                 input.push({
                     role: msg.role,
@@ -1203,12 +1346,16 @@ export class AIService {
         return input;
     }
 
-    private toResponsesContent(content: ChatMessage['content']): Array<Record<string, unknown>> {
+    private toResponsesContent(
+        content: ChatMessage['content'],
+        role: Exclude<ChatMessage['role'], 'tool'>,
+    ): Array<Record<string, unknown>> {
         if (!content) return [];
-        if (typeof content === 'string') return [{ type: 'input_text', text: content }];
+        const textType = role === 'assistant' ? 'output_text' : 'input_text';
+        if (typeof content === 'string') return [{ type: textType, text: content }];
         return content.map(part => {
             if (part.type === 'text') {
-                return { type: 'input_text', text: part.text };
+                return { type: textType, text: part.text };
             }
             return {
                 type: 'input_image',
@@ -1232,31 +1379,71 @@ export class AIService {
             reasoningSummary?: 'auto' | 'concise' | 'detailed';
         }
     ): Promise<ChatCompletionResponse> {
-        const cleanEndpoint = endpoint.replace(/\/+$/, '');
-        const url = cleanEndpoint.endsWith('/responses') ? cleanEndpoint : `${cleanEndpoint}/responses`;
+        const url = normalizeOpenAIActionUrl(endpoint, 'responses');
         const useOpenAIFastPath = providerId === 'openai';
-        const response = await this.fetchWithRetry(url, {
+        const send = (
+            reasoningSummary: 'auto' | 'concise' | 'detailed' | undefined,
+            includeReasoning = true,
+        ) => this.fetchWithRetry(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 ...this.buildAuthHeaders(providerId, apiKey),
             },
-            body: JSON.stringify(this.buildOpenAIResponsesPayload(request, useOpenAIFastPath ? {
+            body: JSON.stringify(this.buildOpenAIResponsesPayload(
+                includeReasoning ? request : { ...request, reasoning_effort: undefined },
+                useOpenAIFastPath ? {
                 fastPath: true,
                 promptCacheKey: callbacks?.promptCacheKey,
-                reasoningSummary: callbacks?.reasoningSummary,
-            } : undefined)),
+                reasoningSummary,
+                } : undefined,
+            )),
             signal: controller.signal,
         }, providerId);
 
+        let response = await send(callbacks?.reasoningSummary);
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`${getProvider(providerId).name} Responses API error (${response.status}): ${errorText}`);
+            let errorText = await response.text();
+            if (
+                response.status === 400
+                && useOpenAIFastPath
+                && callbacks?.reasoningSummary
+                && /(?:reasoning[^\n]*summary|summary[^\n]*(?:verification|verified|organization|unsupported|not supported))/i.test(errorText)
+            ) {
+                response = await send(undefined);
+                if (response.ok) {
+                    ErrorReporter.debug(SOURCE.AI_SERVICE, `${getProvider(providerId).name}: retried Responses without reasoning summaries.`);
+                } else {
+                    errorText = await response.text();
+                }
+            }
+            if (
+                !response.ok
+                && (response.status === 400 || response.status === 422)
+                && request.reasoning_effort
+                && /\breasoning(?:_effort)?\b/i.test(errorText)
+                && /unsupported|not supported|unknown|unrecognized|unexpected|not permitted|not allowed/i.test(errorText)
+            ) {
+                response = await send(undefined, false);
+                if (response.ok) {
+                    ErrorReporter.debug(SOURCE.AI_SERVICE, `${getProvider(providerId).name}: retried Responses without unsupported reasoning options.`);
+                } else {
+                    errorText = await response.text();
+                }
+            }
+            if (response.ok) {
+                // Continue through the normal JSON/SSE response handling below.
+            } else {
+                throw new Error(`${getProvider(providerId).name} Responses API error (${response.status}): ${errorText}`);
+            }
         }
 
         const contentType = response.headers?.get?.('content-type') ?? '';
         if (!useOpenAIFastPath || !response.body || /application\/json/i.test(contentType)) {
             const data = await response.json() as any;
+            if (data?.error) {
+                throw new Error(`${getProvider(providerId).name} Responses API error: ${data.error.message ?? data.error}`);
+            }
             const result = this.buildOpenAIResponsesCompletion(data, request);
             const text = result.choices[0]?.message?.content;
             if (typeof text === 'string' && text) callbacks?.onTextDelta?.(text);
@@ -1276,6 +1463,7 @@ export class AIService {
             arguments: string;
         }>();
         const itemIndex = new Map<string, number>();
+        const streamedOutputItems = new Map<number, Record<string, unknown>>();
 
         const ensureToolCall = (event: any, item?: any) => {
             const itemId = String(item?.id ?? event?.item_id ?? '');
@@ -1308,15 +1496,27 @@ export class AIService {
                 callbacks?.onTextDelta?.(event.delta);
                 return;
             }
+            if (type === 'response.refusal.delta' && typeof event.delta === 'string') {
+                streamedText += event.delta;
+                callbacks?.onTextDelta?.(event.delta);
+                return;
+            }
             if (type === 'response.reasoning_summary_text.delta' && typeof event.delta === 'string') {
                 callbacks?.onThinking?.(event.delta);
                 return;
             }
-            if ((type === 'response.output_item.added' || type === 'response.output_item.done')
-                && event.item?.type === 'function_call') {
-                const call = ensureToolCall(event, event.item);
-                if (typeof event.item.arguments === 'string' && event.item.arguments) {
-                    call.arguments = event.item.arguments;
+            if (type === 'response.output_item.added' || type === 'response.output_item.done') {
+                if (event.item && typeof event.item === 'object') {
+                    const index = typeof event.output_index === 'number'
+                        ? event.output_index
+                        : streamedOutputItems.size;
+                    streamedOutputItems.set(index, event.item as Record<string, unknown>);
+                }
+                if (event.item?.type === 'function_call') {
+                    const call = ensureToolCall(event, event.item);
+                    if (typeof event.item.arguments === 'string' && event.item.arguments) {
+                        call.arguments = event.item.arguments;
+                    }
                 }
                 return;
             }
@@ -1379,8 +1579,25 @@ export class AIService {
                 type: 'function' as const,
                 function: { name: call.name, arguments: call.arguments },
             }));
+        const completionData = { ...(finalResponse ?? responseMeta) };
+        if (!Array.isArray(completionData.output) && streamedOutputItems.size > 0) {
+            completionData.output = [...streamedOutputItems.entries()]
+                .sort(([a], [b]) => a - b)
+                .map(([index, item]) => {
+                    const call = toolCallMap.get(index);
+                    return item.type === 'function_call' && call
+                        ? {
+                            ...item,
+                            ...(call.responseItemId ? { id: call.responseItemId } : {}),
+                            call_id: call.id,
+                            name: call.name,
+                            arguments: call.arguments,
+                        }
+                        : item;
+                });
+        }
         return this.buildOpenAIResponsesCompletion(
-            finalResponse ?? responseMeta,
+            completionData,
             request,
             streamedText || undefined,
             streamedToolCalls.length > 0 ? streamedToolCalls : undefined,
@@ -1408,6 +1625,8 @@ export class AIService {
                     const text = part?.text ?? part?.content?.[0]?.text;
                     if ((part?.type === 'output_text' || part?.type === 'text') && typeof text === 'string') {
                         contentParts.push(text);
+                    } else if (part?.type === 'refusal' && typeof part.refusal === 'string') {
+                        contentParts.push(part.refusal);
                     }
                 }
             } else if (item?.type === 'function_call') {
@@ -1424,6 +1643,8 @@ export class AIService {
         }
 
         const text = textOverride ?? contentParts.join('');
+        if (!text && typeof data.refusal === 'string') contentParts.push(data.refusal);
+        const finalText = text || contentParts.join('');
         const effectiveToolCalls = toolCallsOverride ?? toolCalls;
         const usage = data.usage ?? {};
         const promptTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
@@ -1438,8 +1659,11 @@ export class AIService {
                 index: 0,
                 message: {
                     role: 'assistant',
-                    content: text || null,
+                    content: finalText || null,
                     ...(effectiveToolCalls.length > 0 ? { tool_calls: effectiveToolCalls } : {}),
+                    ...(outputItems.length > 0
+                        ? { responses_output_items: JSON.parse(JSON.stringify(outputItems)) as Array<Record<string, unknown>> }
+                        : {}),
                 },
                 finish_reason: effectiveToolCalls.length > 0 ? 'tool_calls' : (data.status === 'incomplete' ? 'length' : 'stop'),
             }],
@@ -1453,25 +1677,37 @@ export class AIService {
         } as ChatCompletionResponse;
     }
 
-    private buildGeminiUrl(endpoint: string, model: string): string {
-        const cleanEndpoint = endpoint.replace(/\/+$/, '');
-        if (cleanEndpoint.includes(':generateContent')) return cleanEndpoint;
+    private buildGeminiUrl(endpoint: string, model: string, stream = false): string {
+        const trimmed = endpoint.trim();
+        const queryIndex = trimmed.indexOf('?');
+        const existingQuery = queryIndex >= 0 ? trimmed.slice(queryIndex + 1) : '';
+        const cleanEndpoint = (queryIndex >= 0 ? trimmed.slice(0, queryIndex) : trimmed)
+            .replace(/\/+$/, '')
+            .replace(/\/openai$/i, '');
+        const action = stream ? 'streamGenerateContent' : 'generateContent';
         const encodedModel = encodeURIComponent(model.replace(/^models\//, ''));
-        if (cleanEndpoint.endsWith('/models')) {
-            return `${cleanEndpoint}/${encodedModel}:generateContent`;
-        }
-        return `${cleanEndpoint}/models/${encodedModel}:generateContent`;
-    }
-
-    private withGeminiKey(url: string, apiKey: string): string {
-        if (!apiKey.trim() || /[?&]key=/.test(url)) return url;
-        return `${url}${url.includes('?') ? '&' : '?'}key=${encodeURIComponent(apiKey)}`;
+        let url = /\/models\/[^/]+:(?:streamGenerateContent|generateContent)$/i.test(cleanEndpoint)
+            ? cleanEndpoint.replace(/:(?:streamGenerateContent|generateContent)$/i, `:${action}`)
+            : cleanEndpoint.endsWith('/models')
+                ? `${cleanEndpoint}/${encodedModel}:${action}`
+                : `${cleanEndpoint}/models/${encodedModel}:${action}`;
+        const query = new URLSearchParams(existingQuery);
+        if (stream) query.set('alt', 'sse');
+        const serialized = query.toString();
+        if (serialized) url += `?${serialized}`;
+        return url;
     }
 
     private buildGeminiPayload(request: ChatCompletionRequest): Record<string, unknown> {
         const systemParts: Array<Record<string, unknown>> = [];
         const contents: Array<Record<string, unknown>> = [];
         const toolCallNames = new Map<string, string>();
+        const appendContent = (role: 'user' | 'model', parts: Array<Record<string, unknown>>) => {
+            if (parts.length === 0) return;
+            const previous = contents[contents.length - 1] as { role?: string; parts?: Array<Record<string, unknown>> } | undefined;
+            if (previous?.role === role && Array.isArray(previous.parts)) previous.parts.push(...parts);
+            else contents.push({ role, parts });
+        };
 
         for (const msg of request.messages) {
             if (msg.role === 'system') {
@@ -1482,15 +1718,12 @@ export class AIService {
 
             if (msg.role === 'tool') {
                 const name = toolCallNames.get(msg.tool_call_id ?? '') ?? msg.name ?? msg.tool_call_id ?? 'tool_result';
-                contents.push({
-                    role: 'user',
-                    parts: [{
-                        function_response: {
+                appendContent('user', [{
+                        functionResponse: {
                             name,
                             response: { result: this.messageContentToText(msg.content) },
                         },
-                    }],
-                });
+                    }]);
                 continue;
             }
 
@@ -1499,42 +1732,52 @@ export class AIService {
                 for (const tc of msg.tool_calls) {
                     toolCallNames.set(tc.id, tc.function.name);
                     parts.push({
-                        function_call: {
+                        functionCall: {
                             name: tc.function.name,
-                            args: this.parseJsonObject(tc.function.arguments),
+                            args: this.parseJsonObject(tc.function.arguments, tc.function.name),
                         },
+                        ...(tc.thoughtSignature ? { thoughtSignature: tc.thoughtSignature } : {}),
                     });
                 }
             }
             if (parts.length > 0) {
-                contents.push({
-                    role: msg.role === 'assistant' ? 'model' : 'user',
-                    parts,
-                });
+                appendContent(msg.role === 'assistant' ? 'model' : 'user', parts);
             }
         }
 
         const payload: Record<string, unknown> = {
             contents,
-            generation_config: {
+            generationConfig: {
                 temperature: request.temperature,
-                max_output_tokens: request.max_tokens,
-                ...(request.thinking_config ? { thinking_config: request.thinking_config } : {}),
+                maxOutputTokens: request.max_tokens,
+                ...(request.thinking_config ? {
+                    thinkingConfig: {
+                        ...(request.thinking_config.thinking_budget !== undefined
+                            ? { thinkingBudget: request.thinking_config.thinking_budget }
+                            : {}),
+                        ...(request.thinking_config.thinking_level !== undefined
+                            ? { thinkingLevel: request.thinking_config.thinking_level }
+                            : {}),
+                        ...(request.thinking_config.include_thoughts !== undefined
+                            ? { includeThoughts: request.thinking_config.include_thoughts }
+                            : {}),
+                    },
+                } : {}),
             },
         };
         if (systemParts.length > 0) {
-            payload.system_instruction = { parts: systemParts };
+            payload.systemInstruction = { parts: systemParts };
         }
         if (request.tools && request.tools.length > 0) {
             payload.tools = [{
-                function_declarations: request.tools.map(t => ({
+                functionDeclarations: request.tools.map(t => ({
                     name: t.function.name,
                     description: t.function.description,
                     parameters: t.function.parameters,
                 })),
             }];
-            payload.tool_config = {
-                function_calling_config: { mode: 'AUTO' },
+            payload.toolConfig = {
+                functionCallingConfig: { mode: 'AUTO' },
             };
         }
         return payload;
@@ -1554,16 +1797,15 @@ export class AIService {
         const dataMatch = /^data:([^;,]+);base64,(.+)$/i.exec(url);
         if (dataMatch) {
             return {
-                inline_data: {
-                    mime_type: dataMatch[1],
+                inlineData: {
+                    mimeType: dataMatch[1],
                     data: dataMatch[2],
                 },
             };
         }
         return {
-            file_data: {
-                file_uri: url,
-                mime_type: 'image/*',
+            fileData: {
+                fileUri: url,
             },
         };
     }
@@ -1575,34 +1817,132 @@ export class AIService {
         providerId: string,
         controller: AbortController,
         onTextDelta?: (text: string) => void,
-        onToolCallDelta?: (toolName: string, argsBuf: string) => void
+        onToolCallDelta?: (toolName: string, argsBuf: string) => void,
+        onThinking?: (text: string) => void
     ): Promise<ChatCompletionResponse> {
-        const url = this.withGeminiKey(this.buildGeminiUrl(endpoint, request.model), apiKey);
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-            ...this.buildAuthHeaders(providerId, apiKey),
+        const wantsStream = !!(onTextDelta || onToolCallDelta || onThinking);
+        const send = (stream: boolean) => {
+            const url = this.buildGeminiUrl(endpoint, request.model, stream);
+            const isGoogleNativeEndpoint = providerId === 'google' || /generativelanguage\.googleapis\.com/i.test(url);
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json',
+                ...(isGoogleNativeEndpoint
+                    ? (apiKey && !/[?&]key=/i.test(url) ? { 'x-goog-api-key': apiKey } : {})
+                    : this.buildAuthHeaders(providerId, apiKey)),
+            };
+            return {
+                url,
+                response: this.fetchWithRetry(url, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(this.buildGeminiPayload(request)),
+                    signal: controller.signal,
+                }, providerId),
+            };
         };
-        if (apiKey) headers['x-goog-api-key'] = apiKey;
-        const response = await this.fetchWithRetry(url, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(this.buildGeminiPayload(request)),
-            signal: controller.signal,
-        }, providerId);
 
+        let streamed = wantsStream;
+        let pending = send(streamed);
+        let response = await pending.response;
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`${getProvider(providerId).name} Gemini API error (${response.status}): ${errorText}`);
+            let errorText = await response.text();
+            if (streamed && (
+                response.status === 404
+                || response.status === 405
+                || /streamGenerateContent|alt=sse|streaming (?:is )?not supported/i.test(errorText)
+            )) {
+                streamed = false;
+                pending = send(false);
+                response = await pending.response;
+                if (!response.ok) errorText = await response.text();
+            }
+            if (!response.ok) {
+                throw new Error(`${getProvider(providerId).name} Gemini API error (${response.status}): ${errorText}`);
+            }
         }
 
-        const data = await response.json() as any;
+        let callbacksEmitted = false;
+        let data: any;
+        if (streamed && response.body && !/application\/json/i.test(response.headers?.get?.('content-type') ?? '')) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            const aggregateParts: any[] = [];
+            let finishReason = '';
+            let usageMetadata: Record<string, unknown> = {};
+            let promptFeedback: Record<string, unknown> | undefined;
+
+            const processRecord = (record: string) => {
+                const raw = record.split(/\r?\n/)
+                    .filter(line => line.startsWith('data:'))
+                    .map(line => line.slice(5).trimStart())
+                    .join('\n')
+                    .trim();
+                if (!raw || raw === '[DONE]') return;
+                let chunk: any;
+                try { chunk = JSON.parse(raw); } catch { return; }
+                promptFeedback = chunk.promptFeedback ?? chunk.prompt_feedback ?? promptFeedback;
+                usageMetadata = chunk.usageMetadata ?? chunk.usage_metadata ?? usageMetadata;
+                const chunkCandidate = Array.isArray(chunk.candidates) ? chunk.candidates[0] : undefined;
+                if (!chunkCandidate) return;
+                finishReason = chunkCandidate.finishReason ?? chunkCandidate.finish_reason ?? finishReason;
+                const chunkParts = Array.isArray(chunkCandidate.content?.parts) ? chunkCandidate.content.parts : [];
+                for (const part of chunkParts) {
+                    aggregateParts.push(part);
+                    if (typeof part?.text === 'string') {
+                        if (part.thought === true) onThinking?.(part.text);
+                        else onTextDelta?.(part.text);
+                    } else {
+                        const fn = part?.functionCall ?? part?.function_call;
+                        if (fn) {
+                            const args = typeof fn.args === 'string' ? fn.args : JSON.stringify(fn.args ?? {});
+                            onToolCallDelta?.(fn.name ?? '', args);
+                        }
+                    }
+                }
+            };
+
+            while (true) {
+                const { done, value } = await this.readWithTimeout(reader, controller, 600000);
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const records = buffer.split(/\r?\n\r?\n/);
+                buffer = records.pop() ?? '';
+                for (const record of records) processRecord(record);
+            }
+            buffer += decoder.decode();
+            if (buffer.trim()) processRecord(buffer);
+            data = {
+                candidates: aggregateParts.length > 0 || finishReason
+                    ? [{ content: { parts: aggregateParts }, finishReason }]
+                    : [],
+                usageMetadata,
+                ...(promptFeedback ? { promptFeedback } : {}),
+            };
+            callbacksEmitted = true;
+        } else {
+            data = await response.json() as any;
+        }
         const candidate = Array.isArray(data.candidates) ? data.candidates[0] : undefined;
+        if (data?.error) {
+            throw new Error(`${getProvider(providerId).name} Gemini API error: ${data.error.message ?? data.error}`);
+        }
+        if (!candidate) {
+            const blockReason = data.promptFeedback?.blockReason ?? data.prompt_feedback?.block_reason;
+            throw new Error(`${getProvider(providerId).name} Gemini API returned no candidate${blockReason ? ` (blocked: ${blockReason})` : ''}.`);
+        }
         const parts: any[] = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
         const textParts: string[] = [];
+        const reasoningParts: string[] = [];
         const toolCalls: NonNullable<ChatMessage['tool_calls']> = [];
 
         for (const part of parts) {
             if (typeof part?.text === 'string') {
+                if (part.thought === true) {
+                    reasoningParts.push(part.text);
+                    if (!callbacksEmitted) onThinking?.(part.text);
+                    continue;
+                }
                 textParts.push(part.text);
                 continue;
             }
@@ -1612,17 +1952,27 @@ export class AIService {
                 const id = `gemini_call_${toolCalls.length}`;
                 toolCalls.push({
                     id,
+                    ...((part?.thoughtSignature ?? part?.thought_signature)
+                        ? { thoughtSignature: String(part.thoughtSignature ?? part.thought_signature) }
+                        : {}),
                     type: 'function',
                     function: { name: fn.name ?? '', arguments: args },
                 });
-                onToolCallDelta?.(fn.name ?? '', args);
+                if (!callbacksEmitted) onToolCallDelta?.(fn.name ?? '', args);
             }
         }
 
         const text = textParts.join('');
-        if (text) onTextDelta?.(text);
-        const usage = data.usageMetadata ?? {};
-        const finish = String(candidate?.finishReason ?? '').toUpperCase();
+        if (text && !callbacksEmitted) onTextDelta?.(text);
+        const usage = data.usageMetadata ?? data.usage_metadata ?? {};
+        const finish = String(candidate?.finishReason ?? candidate?.finish_reason ?? '').toUpperCase();
+        const blockedFinishReasons = new Set(['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII']);
+        if (parts.length === 0 && blockedFinishReasons.has(finish)) {
+            throw new Error(`${getProvider(providerId).name} Gemini response was blocked (${finish}).`);
+        }
+        if (parts.length === 0) {
+            throw new Error(`${getProvider(providerId).name} Gemini API returned an empty candidate${finish ? ` (${finish})` : ''}.`);
+        }
         return {
             id: `gemini-${Date.now()}`,
             object: 'chat.completion',
@@ -1633,14 +1983,20 @@ export class AIService {
                 message: {
                     role: 'assistant',
                     content: text || null,
+                    reasoning_content: reasoningParts.join('') || null,
                     ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
                 },
-                finish_reason: toolCalls.length > 0 ? 'tool_calls' : (finish === 'MAX_TOKENS' ? 'length' : 'stop'),
+                finish_reason: toolCalls.length > 0
+                    ? 'tool_calls'
+                    : finish === 'MAX_TOKENS'
+                        ? 'length'
+                        : blockedFinishReasons.has(finish) ? 'content_filter' : 'stop',
             }],
             usage: {
-                prompt_tokens: usage.promptTokenCount ?? 0,
-                completion_tokens: usage.candidatesTokenCount ?? 0,
-                total_tokens: usage.totalTokenCount ?? ((usage.promptTokenCount ?? 0) + (usage.candidatesTokenCount ?? 0)),
+                prompt_tokens: usage.promptTokenCount ?? usage.prompt_token_count ?? 0,
+                completion_tokens: usage.candidatesTokenCount ?? usage.candidates_token_count ?? 0,
+                total_tokens: usage.totalTokenCount ?? usage.total_token_count
+                    ?? ((usage.promptTokenCount ?? usage.prompt_token_count ?? 0) + (usage.candidatesTokenCount ?? usage.candidates_token_count ?? 0)),
             },
         } as ChatCompletionResponse;
     }
@@ -1651,13 +2007,14 @@ export class AIService {
         return content.map(part => part.type === 'text' ? part.text : `[image] ${part.image_url.url}`).join('\n');
     }
 
-    private parseJsonObject(value: string): Record<string, unknown> {
+    private parseJsonObject(value: string, toolName: string): Record<string, unknown> {
         try {
             const parsed = JSON.parse(value);
-            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
         } catch {
-            return {};
+            // Throw below with a provider-neutral diagnostic.
         }
+        throw new Error(`Cannot replay Gemini tool call '${toolName}': arguments are not a valid JSON object.`);
     }
 
     /**
@@ -1688,7 +2045,7 @@ export class AIService {
         // but reject Anthropic cache_control blocks, so keep that shape plain there.
         const claudeRequest = toClaudeRequest(
             { ...request, stream: true },
-            { cacheControl: providerId !== 'custom' }
+            { cacheControl: providerId === 'claude' }
         );
         // Claude Code-style relays often expose models that reject temperature entirely.
         if (providerId === 'custom') {
@@ -1712,31 +2069,61 @@ export class AIService {
             signal: controller.signal,
         }, providerId);
 
-        let response = await sendClaudeRequest();
+        let authMode: 'x-api-key' | 'bearer' = 'x-api-key';
+        let response = await sendClaudeRequest(authMode);
         if (providerId === 'custom' && apiKey && (response.status === 401 || response.status === 403)) {
             const authStatus = response.status;
-            response = await sendClaudeRequest('bearer');
+            authMode = 'bearer';
+            response = await sendClaudeRequest(authMode);
             if (response.ok) {
                 ErrorReporter.debug(SOURCE.AI_SERVICE, `${getProvider(providerId).name}: retried Claude request with Bearer authorization after HTTP ${authStatus}.`);
             }
         }
         if (!response.ok) {
-            const errorText = await response.text();
-            if (
-                response.status === 400
-                && claudeRequest.temperature !== undefined
-                && /temperature/i.test(errorText)
-                && /deprecated|not supported|unsupported/i.test(errorText)
-            ) {
-                delete claudeRequest.temperature;
-                response = await sendClaudeRequest();
-                if (response.ok) {
-                    ErrorReporter.debug(SOURCE.AI_SERVICE, `${getProvider(providerId).name}: retried Claude request without deprecated temperature parameter.`);
-                } else {
-                    const retryErrorText = await response.text();
-                    throw new Error(`${getProvider(providerId).name} API error (${response.status}): ${retryErrorText}`);
+            let errorText = await response.text();
+            const removed: string[] = [];
+            if (response.status === 400 && /deprecated|not supported|unsupported|unknown|unexpected|not permitted/i.test(errorText)) {
+                if (claudeRequest.temperature !== undefined && /temperature/i.test(errorText)) {
+                    delete claudeRequest.temperature;
+                    removed.push('temperature');
                 }
-            } else {
+                if (claudeRequest.output_config !== undefined && /output_config|effort/i.test(errorText)) {
+                    delete claudeRequest.output_config;
+                    removed.push('output_config');
+                }
+                const thinking = claudeRequest.thinking as Record<string, unknown> | undefined;
+                if (thinking?.display !== undefined && /display/i.test(errorText)) {
+                    delete thinking.display;
+                    removed.push('thinking.display');
+                } else if (/\bthinking\b/i.test(errorText)) {
+                    if (claudeRequest.thinking !== undefined) {
+                        delete claudeRequest.thinking;
+                        removed.push('thinking');
+                    }
+                    if (providerId !== 'claude') {
+                        const messages = claudeRequest.messages as Array<{ content?: unknown }> | undefined;
+                        let removedBlocks = false;
+                        for (const message of messages ?? []) {
+                            if (!Array.isArray(message.content)) continue;
+                            const filtered = message.content.filter((block: any) => block?.type !== 'thinking' && block?.type !== 'redacted_thinking');
+                            if (filtered.length !== message.content.length) {
+                                message.content = filtered;
+                                removedBlocks = true;
+                            }
+                        }
+                        if (removedBlocks) removed.push('signed thinking blocks');
+                    }
+                }
+            }
+            if (removed.length > 0) {
+                response = await sendClaudeRequest(authMode);
+                if (response.ok) {
+                    ErrorReporter.debug(SOURCE.AI_SERVICE, `${getProvider(providerId).name}: retried Messages without unsupported ${removed.join(', ')}.`);
+                } else {
+                    errorText = await response.text();
+                }
+            }
+            if (!response.ok) {
                 throw new Error(`${getProvider(providerId).name} API error (${response.status}): ${errorText}`);
             }
         }
@@ -1744,6 +2131,68 @@ export class AIService {
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`${getProvider(providerId).name} API error (${response.status}): ${errorText}`);
+        }
+
+        if (/application\/json/i.test(response.headers?.get?.('content-type') ?? '')) {
+            const data = await response.json() as any;
+            if (data?.error) {
+                throw new Error(`${getProvider(providerId).name} API error: ${data.error.message ?? data.error}`);
+            }
+            const blocks: any[] = Array.isArray(data?.content) ? data.content : [];
+            const textParts: string[] = [];
+            const reasoningParts: string[] = [];
+            const thinkingBlocks: Array<Record<string, unknown>> = [];
+            const toolCalls: NonNullable<ChatMessage['tool_calls']> = [];
+            for (const block of blocks) {
+                if (block?.type === 'text' && typeof block.text === 'string') {
+                    textParts.push(block.text);
+                    onTextDelta?.(block.text);
+                } else if (block?.type === 'thinking' || block?.type === 'redacted_thinking') {
+                    thinkingBlocks.push(JSON.parse(JSON.stringify(block)) as Record<string, unknown>);
+                    if (typeof block.thinking === 'string') {
+                        reasoningParts.push(block.thinking);
+                        onThinking?.(block.thinking);
+                    }
+                } else if (block?.type === 'tool_use') {
+                    const args = typeof block.input === 'string' ? block.input : JSON.stringify(block.input ?? {});
+                    toolCalls.push({
+                        id: String(block.id ?? `toolu_${toolCalls.length}`),
+                        type: 'function',
+                        function: { name: String(block.name ?? ''), arguments: args },
+                    });
+                    onToolCallDelta?.(String(block.name ?? ''), args);
+                }
+            }
+            const usage = data.usage ?? {};
+            const inputTokens = usage.input_tokens ?? 0;
+            const cachedTokens = usage.cache_read_input_tokens ?? 0;
+            const cacheCreationTokens = usage.cache_creation_input_tokens ?? 0;
+            const promptTokens = inputTokens + cachedTokens + cacheCreationTokens;
+            const stopReason = String(data.stop_reason ?? '');
+            return {
+                id: data.id,
+                model: data.model ?? request.model,
+                choices: [{
+                    index: 0,
+                    message: {
+                        role: 'assistant',
+                        content: textParts.join('') || null,
+                        reasoning_content: reasoningParts.join('') || null,
+                        ...(thinkingBlocks.length > 0 ? { anthropic_thinking_blocks: thinkingBlocks } : {}),
+                        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+                    },
+                    finish_reason: toolCalls.length > 0 || stopReason === 'tool_use'
+                        ? 'tool_calls'
+                        : stopReason === 'max_tokens' ? 'length' : 'stop',
+                }],
+                usage: {
+                    prompt_tokens: promptTokens,
+                    completion_tokens: usage.output_tokens ?? 0,
+                    total_tokens: promptTokens + (usage.output_tokens ?? 0),
+                    cached_tokens: cachedTokens,
+                    cache_creation_tokens: cacheCreationTokens,
+                },
+            } as ChatCompletionResponse;
         }
 
         const reader = response.body?.getReader();
@@ -1755,6 +2204,7 @@ export class AIService {
         let textBuf = '';
         let reasoningBuf = '';
         let modelBuf = '';
+        let messageIdBuf = '';
         let stopReason: string | null = null;
         let inputTokens = 0;
         let outputTokens = 0;
@@ -1763,8 +2213,10 @@ export class AIService {
 
         // Tool-use blocks: index → { id, name, argsBuf, startInput }
         const toolBlocks: Record<number, { id: string; name: string; argsBuf: string; startInput?: unknown }> = {};
+        const blockTypes: Record<number, string> = {};
+        const thinkingBlocks: Record<number, Record<string, unknown>> = {};
         let currentBlockIdx = -1;
-        let currentBlockType = '';
+        let pendingEventType = '';
 
         while (true) {
             const { done, value } = await this.readWithTimeout(reader, controller, 600000); // 600s idle timeout (to prevent large models from being disconnected and suspended)
@@ -1773,21 +2225,23 @@ export class AIService {
             const lines = buffer.split('\n');
             buffer = lines.pop() ?? '';
 
-            let eventType = '';
             for (const line of lines) {
                 const trimmed = line.trim();
                 if (trimmed.startsWith('event: ')) {
-                    eventType = trimmed.slice(7).trim();
+                    pendingEventType = trimmed.slice(7).trim();
                     continue;
                 }
-                if (!trimmed.startsWith('data: ')) continue;
+                if (!trimmed.startsWith('data:')) continue;
                 let evt: Record<string, unknown>;
-                try { evt = JSON.parse(trimmed.slice(6)); } catch { continue; }
+                try { evt = JSON.parse(trimmed.slice(5).trimStart()); } catch { continue; }
+                const eventType = pendingEventType || String(evt.type ?? '');
+                pendingEventType = '';
 
                 switch (eventType) {
                     case 'message_start': {
                         const msg = evt.message as Record<string, unknown> | undefined;
                         if (msg?.model) modelBuf = msg.model as string;
+                        if (msg?.id) messageIdBuf = String(msg.id);
                         const u = msg?.usage as Record<string, number> | undefined;
                         if (u) {
                             inputTokens = u.input_tokens ?? 0;
@@ -1799,8 +2253,12 @@ export class AIService {
                     case 'content_block_start': {
                         currentBlockIdx = (evt.index as number) ?? 0;
                         const block = evt.content_block as Record<string, unknown> | undefined;
-                        currentBlockType = (block?.type as string) ?? '';
-                        if (currentBlockType === 'tool_use') {
+                        const blockType = (block?.type as string) ?? '';
+                        blockTypes[currentBlockIdx] = blockType;
+                        if (blockType === 'thinking' || blockType === 'redacted_thinking') {
+                            thinkingBlocks[currentBlockIdx] = JSON.parse(JSON.stringify(block ?? { type: blockType })) as Record<string, unknown>;
+                        }
+                        if (blockType === 'tool_use') {
                             toolBlocks[currentBlockIdx] = {
                                 id: (block?.id as string) ?? '',
                                 name: (block?.name as string) ?? '',
@@ -1815,12 +2273,14 @@ export class AIService {
                     case 'content_block_delta': {
                         const delta = evt.delta as Record<string, unknown> | undefined;
                         const deltaType = delta?.type as string;
+                        const idx = (evt.index as number) ?? currentBlockIdx;
+                        const blockType = blockTypes[idx] ?? '';
                         if (deltaType === 'text_delta') {
                             const chunk = (delta?.text as string) ?? '';
                             // Route thinking vs text based on content block type:
                             // Claude 'thinking' blocks → onThinking (reasoning UI)
                             // Claude 'text' blocks → onTextDelta (response UI)
-                            if (currentBlockType === 'thinking') {
+                            if (blockType === 'thinking') {
                                 reasoningBuf += chunk;
                                 if (chunk && onThinking) onThinking(chunk);
                             } else {
@@ -1832,9 +2292,16 @@ export class AIService {
                             // not text_delta — without this branch reasoning text is dropped.
                             const chunk = (delta?.thinking as string) ?? '';
                             reasoningBuf += chunk;
+                            const thinkingBlock = thinkingBlocks[idx];
+                            if (thinkingBlock) thinkingBlock.thinking = String(thinkingBlock.thinking ?? '') + chunk;
                             if (chunk && onThinking) onThinking(chunk);
+                        } else if (deltaType === 'signature_delta') {
+                            const signature = (delta?.signature as string) ?? '';
+                            const thinkingBlock = thinkingBlocks[idx];
+                            if (thinkingBlock && signature) {
+                                thinkingBlock.signature = String(thinkingBlock.signature ?? '') + signature;
+                            }
                         } else if (deltaType === 'input_json_delta') {
-                            const idx = (evt.index as number) ?? currentBlockIdx;
                             if (toolBlocks[idx]) {
                                 toolBlocks[idx].argsBuf += (delta?.partial_json as string) ?? '';
                                 onToolCallDelta?.(toolBlocks[idx].name, toolBlocks[idx].argsBuf);
@@ -1849,7 +2316,11 @@ export class AIService {
                         if (u) outputTokens = u.output_tokens ?? 0;
                         break;
                     }
-                    // 'message_stop', 'ping', 'error' — handled implicitly
+                    case 'error': {
+                        const error = evt.error as Record<string, unknown> | undefined;
+                        throw new Error(`${getProvider(providerId).name} stream error: ${error?.message ?? evt.message ?? 'Unknown error'}`);
+                    }
+                    // 'message_stop', 'ping' — no aggregation needed
                 }
             }
         }
@@ -1866,7 +2337,7 @@ export class AIService {
         const toolCalls = Object.keys(toolBlocks).length > 0
             ? Object.entries(toolBlocks)
                 .sort(([a], [b]) => Number(a) - Number(b))
-                .map(([, tb]) => {
+                .map(([index, tb]) => {
                     let args = tb.argsBuf.trim();
                     if (!args) {
                         const si = tb.startInput;
@@ -1875,7 +2346,7 @@ export class AIService {
                             : '{}';
                     }
                     return {
-                        id: tb.id,
+                        id: tb.id || `${messageIdBuf || `msg_${Date.now()}`}_tool_${index}`,
                         type: 'function' as const,
                         function: { name: tb.name, arguments: args },
                     };
@@ -1887,6 +2358,13 @@ export class AIService {
             content: textBuf || null,
             // Include thinking tokens in the response (matches OpenAI path's reasoning_content)
             reasoning_content: reasoningBuf || null,
+            ...(Object.keys(thinkingBlocks).length > 0
+                ? {
+                    anthropic_thinking_blocks: Object.entries(thinkingBlocks)
+                        .sort(([a], [b]) => Number(a) - Number(b))
+                        .map(([, block]) => block),
+                }
+                : {}),
         };
         if (toolCalls && toolCalls.length > 0) message.tool_calls = toolCalls;
 
@@ -1898,6 +2376,7 @@ export class AIService {
         // the returned usage — appending it here too double-counted cache dashboards.
 
         return {
+            id: messageIdBuf || undefined,
             model: modelBuf || undefined,
             choices: [{
                 message: message as ChatMessage,

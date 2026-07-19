@@ -10,6 +10,8 @@ import {
     getEffectiveTemperature,
     getOpenCodeApiFormat,
     getOpenCodeGoApiFormat,
+    getProviderApiFormat,
+    getEffectiveReasoningEffort,
     getDisableThinkingParams,
     getEnableThinkingParams,
     toClaudeRequest,
@@ -381,6 +383,63 @@ describe('getOpenCodeGoApiFormat', () => {
     });
 });
 
+describe('getProviderApiFormat', () => {
+    it('covers every built-in provider with its effective default-model protocol', () => {
+        const expected = {
+            openai: 'openai-responses',
+            claude: 'anthropic-messages',
+            deepseek: 'openai-chat-completions',
+            minimax: 'openai-chat-completions',
+            'minimax-token-plan': 'anthropic-messages',
+            glm: 'openai-chat-completions',
+            qwen: 'openai-chat-completions',
+            mimo: 'openai-chat-completions',
+            'mimo-token-plan': 'openai-chat-completions',
+            google: 'openai-chat-completions',
+            ollama: 'openai-chat-completions',
+            custom: 'openai-chat-completions',
+            siliconflow: 'openai-chat-completions',
+            openrouter: 'openai-chat-completions',
+            github: 'openai-chat-completions',
+            together: 'openai-chat-completions',
+            deepinfra: 'openai-chat-completions',
+            opencode: 'openai-chat-completions',
+            'opencode-go': 'openai-chat-completions',
+            kimi: 'openai-chat-completions',
+            'kimi-code-plan': 'openai-chat-completions',
+        } as const;
+
+        expect(Object.keys(expected).sort()).to.deep.equal(Object.keys(BUILTIN_PROVIDERS).sort());
+        for (const [providerId, apiFormat] of Object.entries(expected)) {
+            expect(getProviderApiFormat(providerId, BUILTIN_PROVIDERS[providerId]!.defaultModel)).to.equal(apiFormat);
+        }
+    });
+
+    it('keeps all four user-selected custom protocols', () => {
+        for (const format of [
+            'openai-chat-completions',
+            'openai-responses',
+            'anthropic-messages',
+            'gemini-generate-content',
+        ] as const) {
+            expect(getProviderApiFormat('custom', 'relay-model', format)).to.equal(format);
+        }
+    });
+});
+
+describe('getEffectiveReasoningEffort', () => {
+    it('keeps max only for GPT-5.6 Responses models', () => {
+        expect(getEffectiveReasoningEffort('gpt-5.6', 'max', 'openai-responses')).to.equal('max');
+        expect(getEffectiveReasoningEffort('gpt-5.6-sol', 'max', 'openai-responses')).to.equal('max');
+        expect(getEffectiveReasoningEffort('gpt-5.5', 'max', 'openai-responses')).to.equal('high');
+    });
+
+    it('does not alter other protocols or supported values', () => {
+        expect(getEffectiveReasoningEffort('claude-opus-4-8', 'max', 'anthropic-messages')).to.equal('max');
+        expect(getEffectiveReasoningEffort('gpt-5.5', 'medium', 'openai-responses')).to.equal('medium');
+    });
+});
+
 // ─── getDisableThinkingParams ────────────────────────────────────────────────
 
 describe('getDisableThinkingParams', () => {
@@ -611,6 +670,56 @@ describe('toClaudeRequest', () => {
         const result = toClaudeRequest(req, { cacheControl: false });
         expect(result.system).to.equal('System prompt');
         expect(JSON.stringify(result)).to.not.include('cache_control');
+    });
+
+    it('preserves signed thinking blocks and multimodal assistant content before tool_use', () => {
+        const result = toClaudeRequest({
+            model: 'claude-opus-4-8',
+            messages: [{
+                role: 'assistant',
+                content: [{ type: 'text', text: 'I will inspect it.' }],
+                reasoning_content: 'Inspecting.',
+                anthropic_thinking_blocks: [{ type: 'thinking', thinking: 'Inspecting.', signature: 'signed-value' }],
+                tool_calls: [{
+                    id: 'toolu_1',
+                    type: 'function',
+                    function: { name: 'read_file', arguments: '{"path":"a.txt"}' },
+                }],
+            }],
+        });
+
+        const content = (result.messages as any[])[0]!.content;
+        expect(content.map((block: any) => block.type)).to.deep.equal(['thinking', 'text', 'tool_use']);
+        expect(content[0].signature).to.equal('signed-value');
+        expect(content[1].text).to.equal('I will inspect it.');
+    });
+
+    it('groups parallel tool results into one Anthropic user turn', () => {
+        const result = toClaudeRequest({
+            model: 'claude-opus-4-8',
+            messages: [{ role: 'tool', content: 'one', tool_call_id: 'toolu_1' },
+                { role: 'tool', content: [{ type: 'text', text: 'two' }], tool_call_id: 'toolu_2' }],
+        });
+
+        const messages = result.messages as any[];
+        expect(messages).to.have.length(1);
+        expect(messages[0].content.map((block: any) => block.tool_use_id)).to.deep.equal(['toolu_1', 'toolu_2']);
+        expect(messages[0].content[1].content).to.equal('two');
+    });
+
+    it('fails clearly instead of replaying malformed tool arguments as an empty object', () => {
+        expect(() => toClaudeRequest({
+            model: 'claude-opus-4-8',
+            messages: [{
+                role: 'assistant',
+                content: null,
+                tool_calls: [{
+                    id: 'toolu_bad',
+                    type: 'function',
+                    function: { name: 'read_file', arguments: '{broken' },
+                }],
+            }],
+        })).to.throw("Cannot replay Anthropic tool call 'read_file'");
     });
 });
 

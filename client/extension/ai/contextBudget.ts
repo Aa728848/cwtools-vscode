@@ -256,10 +256,12 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
     for (let i = keepHead; i < messages.length - keepTail; i++) {
         const m = messages[i]!;
         const content = contentToString(m.content);
+        const providerStateSize = JSON.stringify(m.responses_output_items ?? []).length
+            + JSON.stringify(m.anthropic_thinking_blocks ?? []).length;
         const preserveReasoningContent = options?.preserveReasoningContentForToolCalls === true
             && m.role === 'assistant'
             && !!m.tool_calls?.length;
-        if (content.length <= 500) continue;
+        if (content.length + providerStateSize <= 500) continue;
 
         if (m.role === 'tool' || (m.role === 'user' && content.startsWith('[Tool Result'))) {
             if (i < aggressiveThreshold) {
@@ -305,6 +307,12 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
             if (newM.reasoning_content) {
                 delete newM.reasoning_content;
             }
+            // Responses items can be reconstructed from the canonical text/tool-call fields
+            // once an old turn is compacted. Keeping them would silently replay the original,
+            // un-compacted prompt instead. Signed Anthropic thinking blocks remain mandatory
+            // on tool-use turns and therefore may only be removed from non-tool messages.
+            delete newM.responses_output_items;
+            if (!newM.tool_calls?.length) delete newM.anthropic_thinking_blocks;
             messages[i] = newM;
         }
         // Strip reasoning_content from ALL compacted messages (not just aggressive zone).
@@ -314,8 +322,10 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
         // DeepSeek cache-optimization: the keep-tail zone (i >= messages.length - keepTail)
         // is already excluded by the loop upper bound, so its reasoning_content is never touched.
         if (m.role === 'assistant' && m.reasoning_content !== undefined && !preserveReasoningContent) {
-            const stripped: ChatMessage = { ...m };
+            const stripped: ChatMessage = { ...messages[i]! };
             delete stripped.reasoning_content;
+            delete stripped.responses_output_items;
+            if (!stripped.tool_calls?.length) delete stripped.anthropic_thinking_blocks;
             messages[i] = stripped;
         }
     }

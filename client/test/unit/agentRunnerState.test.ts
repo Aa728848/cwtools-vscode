@@ -60,6 +60,17 @@ describe('AgentRunner 状态机与工具调度测试 (阶段 0 基线)', () => {
             const estimated = estimateTokenCount(longText);
             expect(estimated).to.be.closeTo(250, 50);
         });
+
+        it('counts provider-native continuation state in context estimates', () => {
+            const { estimateChatMessageTokens } = loadAgentRunner();
+            const plain = estimateChatMessageTokens({ role: 'assistant', content: 'ok' });
+            const withResponsesState = estimateChatMessageTokens({
+                role: 'assistant',
+                content: 'ok',
+                responses_output_items: [{ type: 'reasoning', encrypted_content: 'x'.repeat(4000) }],
+            });
+            expect(withResponsesState).to.be.greaterThan(plain + 500);
+        });
     });
 
     describe('API 错误回退 (Fallback) 判定', () => {

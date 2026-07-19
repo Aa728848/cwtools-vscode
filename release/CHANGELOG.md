@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.26] - 2026-07-19
+
+### 功能与优化 / Features & Optimizations
+- **[优化] 优化验证系统的更新速度**
+  English: [Optimization] Optimize the update speed of the validation system.
+
 ## [2.8.25] - 2026-07-18
 
 ### 修复 / Fixes

@@ -1047,6 +1047,12 @@ type DiagnosticFreshness =
     | Pending    // Single file verification completed, global verification (types/localisation) is still queued
     | Stale      // No verification has been run on this version yet
 
+type ValidationModelEpoch =
+    { game: int64
+      rules: int64
+      types: int64
+      localisation: int64 }
+
 type FileDiagnosticState =
     { version: int option             // Document version (from DidChange)
       validatedVersion: int option    // Document version that produced these diagnostics
@@ -1054,6 +1060,7 @@ type FileDiagnosticState =
       updatedAtUnixMs: int64           //Unix millisecond timestamp
       freshness: DiagnosticFreshness   // current status
       pendingGlobalKinds: string list  // For example ["localisation"; "types"]
+      modelEpoch: ValidationModelEpoch // Shared model snapshot used by this validation
       errorCount: int                  //Lightweight counting, does not store the complete Diagnostic list
       diagnostics: Diagnostic list
       warningCount: int }
@@ -1130,6 +1137,33 @@ type Server(client: ILanguageClient) =
     //-Diagnostic freshness status table-
     /// Global diagnostic epoch: incremented each time lint is completed, used by the client to determine whether the diagnosis has been updated
     let diagnosticEpoch = ref 0L
+    let mutable gameModelEpoch = 0L
+    let mutable rulesModelEpoch = 0L
+    let mutable typesModelEpoch = 0L
+    let mutable localisationModelEpoch = 0L
+
+    let modelEpochSnapshot () =
+        { game = System.Threading.Interlocked.Read(&gameModelEpoch)
+          rules = System.Threading.Interlocked.Read(&rulesModelEpoch)
+          types = System.Threading.Interlocked.Read(&typesModelEpoch)
+          localisation = System.Threading.Interlocked.Read(&localisationModelEpoch) }
+
+    let bumpGameModelEpoch () = System.Threading.Interlocked.Increment(&gameModelEpoch) |> ignore
+    let bumpRulesModelEpoch () = System.Threading.Interlocked.Increment(&rulesModelEpoch) |> ignore
+    let bumpTypesModelEpoch () = System.Threading.Interlocked.Increment(&typesModelEpoch) |> ignore
+    let bumpLocalisationModelEpoch () =
+        System.Threading.Interlocked.Increment(&localisationModelEpoch) |> ignore
+
+    let sameModelEpoch a b =
+        a.game = b.game
+        && a.rules = b.rules
+        && a.types = b.types
+        && a.localisation = b.localisation
+
+    let sameIndexModelEpoch a b =
+        a.game = b.game
+        && a.rules = b.rules
+        && a.types = b.types
     /// Per-file diagnostic metadata (freshness/epoch/counts), maintained by lint and delayedAnalyze
     let fileDiagnosticStates =
         System.Collections.Concurrent.ConcurrentDictionary<string, FileDiagnosticState>()
@@ -2269,6 +2303,43 @@ type Server(client: ILanguageClient) =
             | Some rs -> rs |> List.exists (fun (r: CWRelatedError) -> r.message = "Related source")
             | None -> false)
 
+    let uncertainGlobalNegativeCodes =
+        set
+            [ "CW100"; "CW101"; "CW102"; "CW103"; "CW111"; "CW112"
+              "CW113"; "CW114"; "CW117"; "CW118"; "CW222"; "CW225"
+              "CW226"; "CW227"; "CW228"; "CW229"; "CW232"; "CW233"
+              "CW239"; "CW246"; "CW250"; "CW261"; "CW266"; "CW273"
+              "CW274"; "CW274D" ]
+
+    let localisationDiagnosticCodes =
+        set
+            [ "CW100"; "CW225"; "CW226"; "CW234"; "CW254"; "CW255"
+              "CW256"; "CW257"; "CW258"; "CW259"; "CW260"; "CW266"
+              "CW268"; "CW275" ]
+
+    let isLocalisationDiagnostic (diagnostic: Diagnostic) =
+        diagnostic.code
+        |> Option.exists localisationDiagnosticCodes.Contains
+
+    /// Diagnostics whose truth depends on a complete global lookup/index. While
+    /// editing a type-defining file these are deferred until the staged index is
+    /// committed or a save/deep validation runs. Local parser/shape/CWT errors
+    /// continue to be published immediately.
+    let isUncertainGlobalNegativeError (error: CWError) =
+
+        let message = error.message
+        let referenceShapedMessage =
+            message.Contains("not found", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("does not exist", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("not defined", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("never defined", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("unknown", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Expected value of type", StringComparison.OrdinalIgnoreCase)
+
+        uncertainGlobalNegativeCodes.Contains(error.code)
+        || (error.code = "CW240" && referenceShapedMessage)
+        || isDynamicParameterError error.code error.message error.relatedErrors
+
     /// Documentation page for CW error codes; anchors are the lowercase code (e.g. #cw102).
     let diagnosticDocsUrl =
         "https://github.com/Aa728848/cwtools-vscode/blob/main/docs/diagnostic-codes.md"
@@ -2346,9 +2417,16 @@ type Server(client: ILanguageClient) =
             |> List.length
         errCount, warnCount
 
-    let setFileDiagnosticStateWithEpoch filePath epoch freshness pendingKinds diagnostics =
+    let setFileDiagnosticStateWithSnapshot
+        filePath
+        epoch
+        validatedVersion
+        modelEpoch
+        freshness
+        pendingKinds
+        diagnostics
+        =
         let errCount, warnCount = diagnosticCounts diagnostics
-        let validatedVersion = docs.GetVersionByPath(filePath)
         let state =
             { version = validatedVersion
               validatedVersion = validatedVersion
@@ -2356,10 +2434,21 @@ type Server(client: ILanguageClient) =
               updatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
               freshness = freshness
               pendingGlobalKinds = pendingKinds
+              modelEpoch = modelEpoch
               errorCount = errCount
               diagnostics = diagnostics
               warningCount = warnCount }
         fileDiagnosticStates.[filePath] <- state
+
+    let setFileDiagnosticStateWithEpoch filePath epoch freshness pendingKinds diagnostics =
+        setFileDiagnosticStateWithSnapshot
+            filePath
+            epoch
+            (docs.GetVersionByPath(filePath))
+            (modelEpochSnapshot ())
+            freshness
+            pendingKinds
+            diagnostics
 
     let nextDiagnosticEpoch () =
         System.Threading.Interlocked.Increment(diagnosticEpoch)
@@ -2545,6 +2634,26 @@ type Server(client: ILanguageClient) =
             | _ -> refreshDomainsForPath filePath
         setFileDiagnosticState filePath Stale pendingKinds []
 
+    let markFilePendingGlobalRevalidation filePath =
+        let retainedDiagnostics =
+            existingDiagnosticsForFile filePath
+            |> List.filter DiagnosticMerge.isParserDiagnostic
+        let pendingKinds =
+            refreshDomainsForPath filePath @ [ "types"; "rules" ]
+            |> List.distinct
+        let version = docs.GetVersionByPath(filePath)
+        client.PublishDiagnostics
+            { uri = diagnosticUri filePath
+              diagnostics = retainedDiagnostics }
+        setFileDiagnosticStateWithSnapshot
+            filePath
+            (nextDiagnosticEpoch ())
+            version
+            (modelEpochSnapshot ())
+            Pending
+            pendingKinds
+            retainedDiagnostics
+
     let typeDefinitionsForFiles (game: IGame) (files: string list) =
         let targetFiles = files |> List.map normaliseCachePath |> Set.ofList
 
@@ -2661,7 +2770,7 @@ type Server(client: ILanguageClient) =
             logDiag $"Deferred stale mark capped files={files.Length} cap={dynamicDeferMaxFiles}"
         for path in queued do
             clearFileCaches path
-            markFileStale path "types"
+            markFilePendingGlobalRevalidation path
 
     let mutable postDeferredRevalidationImpl: string -> unit = fun _ -> ()
 
@@ -2777,10 +2886,16 @@ type Server(client: ILanguageClient) =
                     clearLocalisationCaches ()
                 if isEditAction then markFileStale name "localisation"
 
+            let useInteractiveUpdate =
+                isEditAction && shallowAnalyze && not fastDefinitionIndex
+
             let canTryIncrementalTypeRefresh =
                 isEditAction
-                && (not shallowAnalyze || fastDefinitionIndex)
-                && incrementalTypeRefreshEnabled ()
+                && (not shallowAnalyze
+                    || fastDefinitionIndex
+                    || (useInteractiveUpdate && isScriptedDefinitionPath name))
+                && (incrementalTypeRefreshEnabled ()
+                    || (useInteractiveUpdate && isScriptedDefinitionPath name))
                 && isTypeDefiningPath name
                 && not (isInlineScriptDefinitionPath name)
             let shouldRevalidateReferencedCallSites =
@@ -2798,14 +2913,26 @@ type Server(client: ILanguageClient) =
             elif isEditAction && shallowAnalyze && not (name.EndsWith(".yml")) && isTypeDefiningPath name then
                 delayedScriptLocUpdate <- true
 
-            // Optimization: only obtain the file text once to avoid repeated GetText calls
-            let filetext =
+            // Capture text and document version atomically. Diagnostic publication
+            // later verifies this exact version is still current.
+            let documentSnapshot =
                 if forceDisk then None
                 else
-                    match docs.GetText(FileInfo(doc.LocalPath)) with
-                    | Some t -> Some t
-                    | None ->
-                        try Some(File.ReadAllText doc.LocalPath) with _ -> None
+                    docs.Get(FileInfo(doc.LocalPath))
+
+            let filetext, validatedDocumentVersion =
+                match documentSnapshot with
+                | Some(text, version) -> Some text, Some version
+                | None when forceDisk -> None, None
+                | None ->
+                    match (try Some(File.ReadAllText doc.LocalPath) with _ -> None) with
+                    | Some text -> Some text, None
+                    | None -> None, None
+
+            let documentVersionStillCurrent () =
+                match validatedDocumentVersion with
+                | Some version -> docs.GetVersionByPath(name) = Some version
+                | None -> true
 
             let getRange (start: Position) (endp: Position) =
                 mkRange
@@ -2840,14 +2967,22 @@ type Server(client: ILanguageClient) =
                     (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
             // logDiag (sprintf "lint le %A" (locCache.TryFind (doc.LocalPath) |> Option.defaultValue []))
             
+            let mutable lintDeferredGlobalKinds: string list = []
+            let mutable lintUpdateSuperseded = false
+            let mutable validationModelEpochAtComputation: ValidationModelEpoch option = None
+            let applicableCachedLocErrors = if isEditAction then [] else locErrors
+
             let errors =
                 match gameObj with
-                | None -> parserErrors @ locErrors
+                | None -> parserErrors @ applicableCachedLocErrors
                 | Some game when validateCachedOnly ->
                     let allocBeforeValidate = GC.GetTotalAllocatedBytes(false)
                     let updateErrors =
                         gameStateLock.EnterReadLock()
-                        try game.ValidateFile shallowAnalyze name
+                        try
+                            let result = game.ValidateFile shallowAnalyze name
+                            validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
+                            result
                         finally gameStateLock.ExitReadLock()
                     let astErrors =
                         updateErrors
@@ -2855,8 +2990,8 @@ type Server(client: ILanguageClient) =
                             (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
                     let allocAfterValidate = GC.GetTotalAllocatedBytes(false)
                     monitorLog Lint $"ValidateFile file={name} shallow={shallowAnalyze} allocDeltaMB={(allocAfterValidate - allocBeforeValidate) / 1048576L}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
-                    if name.EndsWith(".yml") then parserErrors @ locErrors
-                    else parserErrors @ locErrors @ astErrors
+                    if name.EndsWith(".yml") then parserErrors @ applicableCachedLocErrors
+                    else parserErrors @ applicableCachedLocErrors @ astErrors
                 | Some game ->
                     let allocBeforeUpdate = GC.GetTotalAllocatedBytes(false)
 
@@ -2864,7 +2999,22 @@ type Server(client: ILanguageClient) =
                     // post-commit under the READ lock, so the write-locked first pass only
                     // needs the shallow update — this keeps save-time write locks short.
                     let deferDeepValidation =
-                        canTryIncrementalTypeRefresh && not fastDefinitionIndex
+                        canTryIncrementalTypeRefresh && not fastDefinitionIndex && not useInteractiveUpdate
+
+                    let stagedInteractiveUpdate =
+                        if useInteractiveUpdate && documentVersionStillCurrent () then
+                            let prepareSw = Stopwatch.StartNew()
+                            try
+                                let staged = game.PrepareUpdateFileInteractive name filetext
+                                prepareSw.Stop()
+                                monitorLog Lint
+                                    $"PrepareUpdateFileInteractive file={name} elapsed={prepareSw.ElapsedMilliseconds}ms"
+                                Some staged
+                            with e ->
+                                logDiag $"PrepareUpdateFileInteractive failed for {name}: {e.Message}"
+                                None
+                        else
+                            None
 
                     // Body-only edits keep the definition set identical; the type index and
                     // the service rebuild behind it only matter when a definition is added,
@@ -2875,51 +3025,92 @@ type Server(client: ILanguageClient) =
                         else
                             None
 
+                    let priorDefsSnapshot, priorIndexEpoch =
+                        if canTryIncrementalTypeRefresh then
+                            gameStateLock.EnterReadLock()
+                            try
+                                typeDefinitionsForFiles game [ name ], modelEpochSnapshot ()
+                            finally
+                                gameStateLock.ExitReadLock()
+                        else
+                            [], modelEpochSnapshot ()
+
+                    let updateWriteWaitSw = Stopwatch.StartNew()
                     gameStateLock.EnterWriteLock()
-                    let updateErrors, priorDefsForRevalidation, skipIncrementalRefresh, gameRefAtUpdate =
+                    updateWriteWaitSw.Stop()
+                    let updateWriteHoldSw = Stopwatch.StartNew()
+                    let (updateErrors,
+                         priorDefsForRevalidation,
+                         skipIncrementalRefresh,
+                         gameRefAtUpdate,
+                         interactiveCommitted,
+                         updateSuperseded) =
                         try
-                            let priorDefs =
-                                if canTryIncrementalTypeRefresh then
-                                    typeDefinitionsForFiles game [ name ]
-                                else
-                                    []
-
-                            let skip =
-                                match newDefinitionSignature with
-                                | Some newSignature ->
-                                    let priorSignature =
-                                        priorDefs
-                                        |> List.filter (fun (typeName, _) ->
-                                            scriptedTypeKeys |> List.contains typeName)
-                                        |> List.map (fun (_, id) -> id.ToLowerInvariant())
-                                        |> List.sort
-
-                                    newSignature = priorSignature
+                            let gameStillCurrent =
+                                match gameObj with
+                                | Some current -> System.Object.ReferenceEquals(current, game)
                                 | None -> false
+                            let indexSnapshotStillCurrent =
+                                not canTryIncrementalTypeRefresh
+                                || sameIndexModelEpoch priorIndexEpoch (modelEpochSnapshot ())
 
-                            let prior =
-                                if canTryIncrementalTypeRefresh && shouldRevalidateReferencedCallSites && not skip then
-                                    priorDefs
-                                else
-                                    []
+                            if not gameStillCurrent
+                               || not indexSnapshotStillCurrent
+                               || not (documentVersionStillCurrent ()) then
+                                [], [], true, game, false, true
+                            else
+                                let priorDefs = priorDefsSnapshot
 
-                            let useInteractiveUpdate =
-                                isEditAction && shallowAnalyze && not fastDefinitionIndex
+                                let skip =
+                                    match newDefinitionSignature with
+                                    | Some newSignature ->
+                                        let priorSignature =
+                                            priorDefs
+                                            |> List.filter (fun (typeName, _) ->
+                                                scriptedTypeKeys |> List.contains typeName)
+                                            |> List.map (fun (_, id) -> id.ToLowerInvariant())
+                                            |> List.sort
 
-                            let errs =
+                                        newSignature = priorSignature
+                                    | None -> false
+
+                                let prior =
+                                    if canTryIncrementalTypeRefresh
+                                       && shouldRevalidateReferencedCallSites
+                                       && (not skip || useInteractiveUpdate) then
+                                        priorDefs
+                                    else
+                                        []
+
                                 if useInteractiveUpdate then
-                                    game.UpdateFileInteractive name filetext
+                                    match stagedInteractiveUpdate with
+                                    | Some staged when game.CommitUpdateFileInteractive staged ->
+                                        if staged.kind = LocalisationFile then bumpLocalisationModelEpoch ()
+                                        [], prior, skip, game, true, false
+                                    | _ ->
+                                        [], prior, skip, game, false, true
                                 else
-                                    game.UpdateFile (shallowAnalyze || deferDeepValidation) name filetext
-                            errs, prior, skip, (match gameObj with Some g -> g | None -> game)
+                                    let errs = game.UpdateFile (shallowAnalyze || deferDeepValidation) name filetext
+                                    if name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) then
+                                        bumpLocalisationModelEpoch ()
+                                    validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
+                                    errs, prior, skip, game, false, false
                         finally
+                            updateWriteHoldSw.Stop()
                             gameStateLock.ExitWriteLock()
 
-                    if skipIncrementalRefresh then
+                    if useInteractiveUpdate then
+                        monitorLog Lint
+                            $"CommitUpdateFileInteractive file={name} wait={updateWriteWaitSw.ElapsedMilliseconds}ms hold={updateWriteHoldSw.ElapsedMilliseconds}ms committed={interactiveCommitted}"
+
+                    if updateSuperseded then
+                        lintUpdateSuperseded <- true
+                        logDiag $"Skip superseded prepared lint: {name} version={validatedDocumentVersion}"
+                    elif skipIncrementalRefresh then
                         monitorLog Refresh $"RefreshIncrementalTypes skipped (definitions unchanged) file={name}"
 
                     let priorCallFiles =
-                        if priorDefsForRevalidation.IsEmpty then
+                        if updateSuperseded || priorDefsForRevalidation.IsEmpty then
                             []
                         else
                             gameStateLock.EnterReadLock()
@@ -2928,8 +3119,13 @@ type Server(client: ILanguageClient) =
                             finally
                                 gameStateLock.ExitReadLock()
 
+                    if useInteractiveUpdate
+                       && skipIncrementalRefresh
+                       && not priorCallFiles.IsEmpty then
+                        scheduleDeferredDynamicRevalidation priorCallFiles
+
                     let staged =
-                        if canTryIncrementalTypeRefresh && not skipIncrementalRefresh then
+                        if not updateSuperseded && canTryIncrementalTypeRefresh && not skipIncrementalRefresh then
                             gameStateLock.EnterReadLock()
                             try
                                 try
@@ -2952,7 +3148,7 @@ type Server(client: ILanguageClient) =
                             None
 
                     let mutable incrementalCommitSucceeded = false
-                    if canTryIncrementalTypeRefresh && not skipIncrementalRefresh then
+                    if not updateSuperseded && canTryIncrementalTypeRefresh && not skipIncrementalRefresh then
                         gameStateLock.EnterWriteLock()
                         try
                             let gameStillCurrent =
@@ -2960,7 +3156,7 @@ type Server(client: ILanguageClient) =
                                 | Some g -> System.Object.ReferenceEquals(g, gameRefAtUpdate)
                                 | None -> false
                             let committed =
-                                if not gameStillCurrent then false
+                                if not gameStillCurrent || not (documentVersionStillCurrent ()) then false
                                 else
                                     match staged with
                                     | Some (ScriptedServices s) ->
@@ -2977,6 +3173,7 @@ type Server(client: ILanguageClient) =
 
                             if committed then
                                 incrementalCommitSucceeded <- true
+                                bumpTypesModelEpoch ()
                                 incrementalScriptedPatchCount <- incrementalScriptedPatchCount + 1
                                 clearTypeCaches ()
                                 markFileStale name "types"
@@ -2999,6 +3196,13 @@ type Server(client: ILanguageClient) =
                                 incrementalScriptedPatchCount <- 0
                         finally
                             gameStateLock.ExitWriteLock()
+
+                    if useInteractiveUpdate
+                       && not skipIncrementalRefresh
+                       && not incrementalCommitSucceeded then
+                        fileDiagnosticStates.Keys
+                        |> Seq.toArray
+                        |> Array.iter markFilePendingGlobalRevalidation
 
                     if incrementalCommitSucceeded then
                         // Loc-error recompute and call-site collection only read game state;
@@ -3028,6 +3232,19 @@ type Server(client: ILanguageClient) =
                                     |> List.distinctBy normaliseCachePath
                                 else
                                     revalidateFiles
+                            if isDynamicDefinitionPath name then
+                                let affectedFiles =
+                                    name :: revalidateFiles
+                                    |> List.map normaliseCachePath
+                                    |> Set.ofList
+                                let committedEpoch = modelEpochSnapshot ()
+                                for kvp in fileDiagnosticStates do
+                                    if not (affectedFiles.Contains(normaliseCachePath kvp.Key)) then
+                                        fileDiagnosticStates.[kvp.Key] <-
+                                            { kvp.Value with
+                                                modelEpoch =
+                                                    { kvp.Value.modelEpoch with
+                                                        types = committedEpoch.types } }
                             if not revalidateFiles.IsEmpty then
                                 if isEventDefinitionPath name then
                                     markDeferredRevalidationStale revalidateFiles
@@ -3038,15 +3255,57 @@ type Server(client: ILanguageClient) =
                             gameStateLock.ExitReadLock()
 
                     let updateErrors =
-                        if deferDeepValidation && (incrementalCommitSucceeded || not shallowAnalyze) then
+                        if interactiveCommitted then
+                            match stagedInteractiveUpdate with
+                            | Some staged ->
+                                gameStateLock.EnterReadLock()
+                                try
+                                    let result = game.ValidateFileInteractive staged
+                                    validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
+                                    result
+                                finally gameStateLock.ExitReadLock()
+                            | None -> []
+                        elif deferDeepValidation && (incrementalCommitSucceeded || not shallowAnalyze) then
                             // The VFS already holds the new text from the earlier UpdateFile, so
                             // the deep (re-)validation only reads; the shared read lock lets
                             // completion requests run alongside it.
                             gameStateLock.EnterReadLock()
-                            try game.ValidateFile false name
+                            try
+                                let result = game.ValidateFile false name
+                                validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
+                                result
                             finally gameStateLock.ExitReadLock()
                         else
                             updateErrors
+
+                    let deferGlobalNegativeDiagnostics =
+                        (useInteractiveUpdate
+                         && isTypeDefiningPath name
+                         && (not canTryIncrementalTypeRefresh
+                             || (not skipIncrementalRefresh && not incrementalCommitSucceeded)))
+                        || (canTryIncrementalTypeRefresh
+                            && not skipIncrementalRefresh
+                            && not incrementalCommitSucceeded)
+
+                    if useInteractiveUpdate
+                       && isTypeDefiningPath name
+                       && not (name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)) then
+                        lintDeferredGlobalKinds <- [ "localisation" ]
+
+                    if deferGlobalNegativeDiagnostics then
+                        lintDeferredGlobalKinds <-
+                            lintDeferredGlobalKinds @ [ "types"; "rules" ]
+                            |> List.distinct
+
+                    let deferredGlobalErrors, updateErrors =
+                        if deferGlobalNegativeDiagnostics then
+                            updateErrors |> List.partition isUncertainGlobalNegativeError
+                        else
+                            [], updateErrors
+
+                    if not deferredGlobalErrors.IsEmpty then
+                        logDiag
+                            $"Deferred {deferredGlobalErrors.Length} global negative diagnostic(s) for interactive file {name}"
 
                     let astErrors =
                         updateErrors
@@ -3061,9 +3320,13 @@ type Server(client: ILanguageClient) =
                     if name.EndsWith(".yml") then
                         // We still need to call game.UpdateFile so the VFS gets the new text,
                         // but we rely on locCache/RefreshLocalisationCaches for the actual validation errors.
-                        parserErrors @ locErrors
+                        if isEditAction then
+                            lintDeferredGlobalKinds <- [ "localisation" ]
+                            parserErrors
+                        else
+                            parserErrors @ applicableCachedLocErrors
                     else
-                        parserErrors @ locErrors @ astErrors
+                        parserErrors @ applicableCachedLocErrors @ astErrors
 
             //-Publish diagnosis and update freshness status-
             let diagnosticsList =
@@ -3071,6 +3334,8 @@ type Server(client: ILanguageClient) =
                 | [] -> []
                 | x -> x |> List.map parserErrorToDiagnostics
             let visibleDiagnosticsList = diagnosticsList |> List.filter diagnosticFilter
+            let validatedModelEpoch =
+                validationModelEpochAtComputation |> Option.defaultWith modelEpochSnapshot
 
             // Publish to VS Code Problems panel. A lint of a dynamic definition
             // validates only the raw template, so it must not clear diagnostics
@@ -3079,37 +3344,59 @@ type Server(client: ILanguageClient) =
             // validation results after a slow Ctrl+S refresh.
             let refreshedCurrentDiagnostics = diagnosticsForFile name visibleDiagnosticsList
             let publishedCurrentDiagnostics =
-                if isDynamicDefinitionPath name then
+                if isDynamicDefinitionPath name && not useInteractiveUpdate then
                     DiagnosticMerge.mergeImmediateDefinitionDiagnostics
                         (existingDiagnosticsForFile name)
                         refreshedCurrentDiagnostics
                 else
                     refreshedCurrentDiagnostics
 
-            if not (isTypeIndexOnlyRefreshPath name) then
-                visibleDiagnosticsList
-                |> List.filter (fun (filePath, _) -> normaliseCachePath filePath <> normaliseCachePath name)
-                |> function
-                    | [] -> ()
-                    | otherDiagnostics -> sendDiagnostics otherDiagnostics
+            gameStateLock.EnterReadLock()
+            try
+                let currentModelEpoch = modelEpochSnapshot ()
+                let canPublish =
+                    not lintUpdateSuperseded
+                    && documentVersionStillCurrent ()
+                    && sameModelEpoch validatedModelEpoch currentModelEpoch
 
-            // Always publish the current file, including an empty complete result
-            // for ordinary files, so fixed diagnostics are cleared.
-            client.PublishDiagnostics { uri = doc; diagnostics = publishedCurrentDiagnostics }
+                if canPublish then
+                    if not (isTypeIndexOnlyRefreshPath name) then
+                        visibleDiagnosticsList
+                        |> List.filter (fun (filePath, _) -> normaliseCachePath filePath <> normaliseCachePath name)
+                        |> function
+                            | [] -> ()
+                            | otherDiagnostics -> sendDiagnostics otherDiagnostics
 
-            //Update diagnostic freshness status table
-            let newEpoch = System.Threading.Interlocked.Increment(diagnosticEpoch)
-            let pendingKinds = pendingRefreshDomainList ()
-            let freshness =
-                if pendingKinds.IsEmpty then Fresh else Pending
-            setFileDiagnosticStateWithEpoch name newEpoch freshness pendingKinds publishedCurrentDiagnostics
+                    // Always publish the current file, including an empty complete result,
+                    // so diagnostics removed by this exact document/model version are cleared.
+                    client.PublishDiagnostics { uri = doc; diagnostics = publishedCurrentDiagnostics }
 
-            if not (isTypeIndexOnlyRefreshPath name) then
-                visibleDiagnosticsList
-                |> List.groupBy fst
-                |> List.iter (fun (filePath, entries) ->
-                    if normaliseCachePath filePath <> normaliseCachePath name then
-                        setFileDiagnosticStateWithEpoch filePath newEpoch freshness pendingKinds (entries |> List.map snd))
+                    let newEpoch = System.Threading.Interlocked.Increment(diagnosticEpoch)
+                    let pendingKinds =
+                        pendingRefreshDomainList () @ lintDeferredGlobalKinds
+                        |> List.distinct
+                    let freshness =
+                        if pendingKinds.IsEmpty then Fresh else Pending
+                    setFileDiagnosticStateWithSnapshot
+                        name
+                        newEpoch
+                        validatedDocumentVersion
+                        validatedModelEpoch
+                        freshness
+                        pendingKinds
+                        publishedCurrentDiagnostics
+
+                    if not (isTypeIndexOnlyRefreshPath name) then
+                        visibleDiagnosticsList
+                        |> List.groupBy fst
+                        |> List.iter (fun (filePath, entries) ->
+                            if normaliseCachePath filePath <> normaliseCachePath name then
+                                setFileDiagnosticStateWithEpoch filePath newEpoch freshness pendingKinds (entries |> List.map snd))
+                else
+                    logDiag
+                        $"Skip stale diagnostic publish file={name} version={validatedDocumentVersion} currentVersion={docs.GetVersionByPath(name)} modelMatch={sameModelEpoch validatedModelEpoch currentModelEpoch}"
+            finally
+                gameStateLock.ExitReadLock()
             perfLintCount <- perfLintCount + 1
             maybePerfReport "lint"
             if shallowAnalyze then
@@ -3166,7 +3453,7 @@ type Server(client: ILanguageClient) =
                 logDiag $"Deferred dynamic revalidation capped files={files.Length} cap={dynamicDeferMaxFiles}"
             for path in queued do
                 clearFileCaches path
-                markFileStale path "types"
+                markFilePendingGlobalRevalidation path
             let shouldStart =
                 lock deferredRevalidationLock (fun () ->
                     pendingDeferredRevalidationFiles <-
@@ -3303,6 +3590,7 @@ type Server(client: ILanguageClient) =
                         gameStateLock.ExitReadLock()
                 else
                     None
+            let mutable didLocRefresh = false
             gameStateLock.EnterWriteLock()
             try
                 if doRefresh then
@@ -3318,6 +3606,9 @@ type Server(client: ILanguageClient) =
 
                     if not stagedCommitted then
                         game.RefreshCaches()
+                    bumpGameModelEpoch ()
+                    bumpRulesModelEpoch ()
+                    bumpTypesModelEpoch ()
                     let allocAfterRefresh = GC.GetTotalAllocatedBytes(false)
                     refreshStatus <-
                         if stagedCommitted then "refresh_caches_staged"
@@ -3347,10 +3638,10 @@ type Server(client: ILanguageClient) =
                     monitorLog Refresh $"RefreshCaches skipped pending=false{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
 
                 let allocBeforeLoc = GC.GetTotalAllocatedBytes(false)
-                let mutable didLocRefresh = false
                 if delayedLocUpdate then
                     logDiag "delayedLocUpdate true"
                     game.RefreshLocalisationCaches()
+                    bumpLocalisationModelEpoch ()
                     cachedLocMap <- None  // invalidate cached loc entries
                     cachedLocMapCount <- 0
                     delayedLocUpdate <- false
@@ -3368,6 +3659,7 @@ type Server(client: ILanguageClient) =
                     locCache.Clear()
                     for fileName, errors in game.LocalisationErrors(true, false) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
+                    bumpLocalisationModelEpoch ()
                     didLocRefresh <- true
                     if pendingDomainsBeforeAnalyze |> List.contains "localisation" then
                         completeRefreshDomains [ "localisation" ] "refresh_localisation_after_global"
@@ -3378,6 +3670,7 @@ type Server(client: ILanguageClient) =
                         locCache.[fileName] <- errors
                     delayedScriptLocUpdate <- false
                     lastScriptLocUpdateAt <- now
+                    bumpLocalisationModelEpoch ()
                     didLocRefresh <- true
                     didGlobalWork <- true
                 else
@@ -3416,6 +3709,91 @@ type Server(client: ILanguageClient) =
                                     pendingGlobalKinds = remainingPendingDomains }
             finally
                 gameStateLock.ExitWriteLock()
+
+            if doRefresh then
+                fileDiagnosticStates
+                |> Seq.map (fun kvp -> kvp.Key)
+                |> Seq.toArray
+                |> Array.iter markFilePendingGlobalRevalidation
+
+            // Localisation-only refreshes update just that diagnostic domain;
+            // avoid another whole-file lint while still replacing stale loc
+            // diagnostics with results from the new localisation epoch.
+            if didLocRefresh && not doRefresh then
+                let locPublishEpoch = nextDiagnosticEpoch ()
+                let locModelEpoch = modelEpochSnapshot ()
+                let filesWithOldLocDiagnostics =
+                    fileDiagnosticStates
+                    |> Seq.choose (fun kvp ->
+                        if (kvp.Value.diagnostics |> List.exists isLocalisationDiagnostic)
+                           || (kvp.Value.pendingGlobalKinds |> List.contains "localisation") then
+                            Some kvp.Key
+                        else
+                            None)
+                    |> Seq.toList
+                let locFiles =
+                    (locCache.Keys |> Seq.toList) @ filesWithOldLocDiagnostics
+                    |> List.distinctBy normaliseCachePath
+                let locErrorsByPath =
+                    locCache
+                    |> Seq.map (fun kvp -> normaliseCachePath kvp.Key, kvp.Value)
+                    |> Map.ofSeq
+                let processedLocFiles =
+                    locFiles |> List.map normaliseCachePath |> Set.ofList
+
+                for filePath in locFiles do
+                    let refreshedLocDiagnostics =
+                        match locErrorsByPath |> Map.tryFind (normaliseCachePath filePath) with
+                        | Some errors ->
+                            errors
+                            |> List.map (fun e ->
+                                (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                            |> List.map parserErrorToDiagnostics
+                            |> List.filter diagnosticFilter
+                            |> diagnosticsForFile filePath
+                        | None -> []
+
+                    let existing = existingDiagnosticsForFile filePath
+                    let merged =
+                        DiagnosticMerge.replaceDomain
+                            isLocalisationDiagnostic
+                            existing
+                            refreshedLocDiagnostics
+                    client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = merged }
+
+                    let priorState =
+                        match fileDiagnosticStates.TryGetValue(filePath) with
+                        | true, state -> Some state
+                        | false, _ -> None
+                    let validatedVersion = priorState |> Option.bind _.validatedVersion
+                    let pendingKinds =
+                        priorState
+                        |> Option.map _.pendingGlobalKinds
+                        |> Option.defaultValue [ "validation" ]
+                        |> List.filter (fun kind -> kind <> "localisation")
+                    let freshness =
+                        if validatedVersion <> docs.GetVersionByPath(filePath) then Stale
+                        elif pendingKinds.IsEmpty then Fresh
+                        else Pending
+                    setFileDiagnosticStateWithSnapshot
+                        filePath
+                        locPublishEpoch
+                        validatedVersion
+                        locModelEpoch
+                        freshness
+                        pendingKinds
+                        merged
+
+                // The refresh also proves that files outside locFiles still have
+                // no localisation diagnostics, so their non-localisation results
+                // can advance to the new localisation epoch unchanged.
+                for kvp in fileDiagnosticStates do
+                    if not (processedLocFiles.Contains(normaliseCachePath kvp.Key)) then
+                        fileDiagnosticStates.[kvp.Key] <-
+                            { kvp.Value with
+                                modelEpoch =
+                                    { kvp.Value.modelEpoch with
+                                        localisation = locModelEpoch.localisation } }
 
             if not doRefresh then
                 flushAllCompletionRefreshes ()
@@ -4793,6 +5171,10 @@ type Server(client: ILanguageClient) =
                             try
                                 setupRulesCaches ()
                                 checkOrSetGameCache false
+                                bumpGameModelEpoch ()
+                                bumpRulesModelEpoch ()
+                                bumpTypesModelEpoch ()
+                                bumpLocalisationModelEpoch ()
                                 processWorkspace rootUri
                             finally
                                 gameStateLock.ExitWriteLock()
@@ -4873,6 +5255,9 @@ type Server(client: ILanguageClient) =
                 | Some game -> game.InvalidateFileCache path
                 | None -> ()
                 markFileStale path "edit"
+                // Diagnostics from the previous document version are not safe to
+                // retain while the new version is waiting in the debounce queue.
+                client.PublishDiagnostics { uri = p.textDocument.uri; diagnostics = [] }
 
                 // Use debounce agent instead of immediate lint.
                 // Lint will fire after 1.5s of typing inactivity.
@@ -4979,6 +5364,7 @@ type Server(client: ILanguageClient) =
                                     gameStateLock.ExitWriteLock()
 
                                 if handled then
+                                    bumpTypesModelEpoch ()
                                     let callFiles =
                                         if definitionsForRevalidation.IsEmpty then
                                             []
@@ -6774,6 +7160,11 @@ type Server(client: ILanguageClient) =
                             arguments = _ } ->
                             let configs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
                             game.ReplaceConfigRules configs
+                            bumpGameModelEpoch ()
+                            bumpRulesModelEpoch ()
+                            fileDiagnosticStates.Keys
+                            |> Seq.toArray
+                            |> Array.iter markFilePendingGlobalRevalidation
                             None
                         | { command = "cacheVanilla"
                             arguments = _ } ->
@@ -7919,8 +8310,15 @@ type Server(client: ILanguageClient) =
                                 match fileDiagnosticStates.TryGetValue(filePath) with
                                 | true, state ->
                                     let currentVersion = docs.GetVersionByPath(filePath)
+                                    let currentModelEpoch = modelEpochSnapshot ()
+                                    let effectiveFreshness =
+                                        if state.validatedVersion <> currentVersion
+                                           || not (sameModelEpoch state.modelEpoch currentModelEpoch) then
+                                            Stale
+                                        else
+                                            state.freshness
                                     let freshnessStr =
-                                        match state.freshness with
+                                        match effectiveFreshness with
                                         | Fresh -> "fresh" | Pending -> "pending" | Stale -> "stale"
                                     let diagnosticsJson =
                                         state.diagnostics
@@ -7965,6 +8363,12 @@ type Server(client: ILanguageClient) =
                                            "version",           JsonValue.Number(decimal (state.version |> Option.defaultValue -1))
                                            "currentVersion",    JsonValue.Number(decimal (currentVersion |> Option.defaultValue -1))
                                            "validatedVersion",  JsonValue.Number(decimal (state.validatedVersion |> Option.defaultValue -1))
+                                           "modelEpoch",
+                                               JsonValue.Record
+                                                   [| "game", JsonValue.Number(decimal state.modelEpoch.game)
+                                                      "rules", JsonValue.Number(decimal state.modelEpoch.rules)
+                                                      "types", JsonValue.Number(decimal state.modelEpoch.types)
+                                                      "localisation", JsonValue.Number(decimal state.modelEpoch.localisation) |]
                                            "updatedAtUnixMs",   JsonValue.Number(decimal state.updatedAtUnixMs)
                                            "freshness",         JsonValue.String freshnessStr
                                            "pendingGlobalKinds",JsonValue.Array(state.pendingGlobalKinds |> List.map JsonValue.String |> Array.ofList)
@@ -8050,10 +8454,13 @@ type Server(client: ILanguageClient) =
                         // Return global verification status summary: current epoch, number of pending files, total number of files
                         | { command = "cwtools.ai.getValidationStatus" } ->
                             let currentEpoch = diagnosticEpoch.Value
+                            let currentModelEpoch = modelEpochSnapshot ()
                             let totalFiles = fileDiagnosticStates.Count
                             let pendingFiles =
                                 fileDiagnosticStates.Values
-                                |> Seq.filter (fun s -> s.freshness <> Fresh)
+                                |> Seq.filter (fun s ->
+                                    s.freshness <> Fresh
+                                    || not (sameModelEpoch s.modelEpoch currentModelEpoch))
                                 |> Seq.length
                             let allPendingKinds =
                                 fileDiagnosticStates.Values
@@ -8069,6 +8476,12 @@ type Server(client: ILanguageClient) =
                                 JsonValue.Record
                                     [| "ok",                 JsonValue.Boolean true
                                        "epoch",             JsonValue.Number(decimal currentEpoch)
+                                       "modelEpoch",
+                                           JsonValue.Record
+                                               [| "game", JsonValue.Number(decimal currentModelEpoch.game)
+                                                  "rules", JsonValue.Number(decimal currentModelEpoch.rules)
+                                                  "types", JsonValue.Number(decimal currentModelEpoch.types)
+                                                  "localisation", JsonValue.Number(decimal currentModelEpoch.localisation) |]
                                        "freshness",         JsonValue.String freshness
                                        "totalFiles",        JsonValue.Number(decimal totalFiles)
                                        "pendingFiles",      JsonValue.Number(decimal pendingFiles)

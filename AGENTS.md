@@ -1,276 +1,159 @@
 # AGENTS.md
 
-Canonical operating guide for AI coding assistants in this repository. Keep this
-file short, concrete, and focused on actions an agent needs before editing code.
-
-Use the other root docs for deeper context:
-
-- `README.md`: product overview and user-facing feature guide.
-- `CONTRIBUTING.md`: human setup, debug, PR, verification, and packaging workflow.
-- `ARCHITECTURE.md`: system background, module boundaries, and data flow.
-- `CLAUDE.md`: thin Claude Code compatibility entry that points back here.
+Canonical operating guide for AI coding assistants in this repository. Keep
+changes scoped, preserve user work, and load detailed documentation only when
+the task needs it.
 
 ## Start Here
 
-Before editing, inspect the current tree. This fork changes quickly.
+Before editing:
 
-```bash
-git status --short
-rg --files
-```
+1. Run `git status --short` and preserve unrelated working-tree changes.
+2. If `.codegraph/` exists, use `codegraph explore "<question>"` before raw
+   searches when locating or understanding code.
+3. Use targeted `rg` searches; do not dump the entire repository tree unless
+   it is genuinely needed.
 
-Prefer `rg` / `rg --files` for searching. If you change docs or release-facing
-content, remember the docs are single-source bilingual documents now:
+Read supporting documents by task:
 
-- `README.md`
-- `CONTRIBUTING.md`
-- `ARCHITECTURE.md`
+- `README.md`: product behavior and user-facing features.
+- `CONTRIBUTING.md`: setup, debugging, verification, PRs, and packaging.
+- `ARCHITECTURE.md`: module boundaries and data flow; read before broad runner
+  or backend changes.
+- `docs/cwt-rule-config.md`: CWT rules work.
 
-Do not reintroduce `README_EN.md`, `README_ZH.md`, `CONTRIBUTING_EN.md`,
-`ARCHITECTURE_EN.md`, or `ARCHITECTURE_ZH.md`.
+## Core Rules
 
-## Common Verification
-
-Run the narrowest useful checks for your change:
-
-```bash
-npm run compile
-npm run lint
-npm run test:unit
-npm run test
-npm run check:release
-npm run verify
-npm run build:docs
-npm run build:shared
-npm run build:mcp
-npm run generate:mcp-schema
-npm run test:contracts
-dotnet build src/LSP/
-dotnet build src/Main/
-```
-
-`npm run verify` is the broad local gate: lint, compile, unit tests, and release
-checks. `npm run build:docs` validates the bilingual root docs and regenerates
-`release/README.md` from `README.md`.
-
-## Repository Map
-
-Main runtime layers:
-
-- `client/extension/`: VS Code extension host code.
-- `client/extension/ai/`: integrated AI assistant, tools, runner, workflows,
-  memory, prompt construction, and orchestrator.
-- `client/webview/`: browser-sandboxed Webview UIs bundled by Rollup.
-- `src/LSP/` and `src/Main/`: .NET 10 / F# language server and `CWTools Server`.
-- `packages/cwtools-shared/` and `packages/cwtools-mcp/`: read-only MCP server
-  shipped inside the extension.
-- `submodules/cwtools/`: upstream CWTools F# library.
-- `submodules/cwtools-stellaris-config/`: Stellaris CWT rule configuration
-  data used as the development/fallback rule source.
-
-Shared platform helpers to reuse instead of duplicating logic:
-
-- `client/extension/gameProfiles.ts`: game metadata, paths, cache keys,
-  language IDs, capability switches.
-- `client/extension/indexing/`: shared localisation and workspace-symbol index.
-- `client/extension/pathScope.ts`: neutral path containment helpers.
-- `client/extension/fileExtensions.ts`: case-insensitive extension matching.
-
-For full module inventory, read `ARCHITECTURE.md`.
-
-## Submodule Boundaries
-
-There are two important submodules, with different ownership rules:
-
-- `submodules/cwtools/` is the upstream F# CWTools library. It contains parser,
-  validation, game model, shader, and scripted-type semantics used by the
-  language server. Changes here are separate git commits inside the submodule,
-  followed by a root commit updating the submodule pointer.
-- `submodules/cwtools-stellaris-config/` is the Stellaris CWT rule/config data.
-  Treat it as rules content, not extension code. Rules sync/report workflows
-  compare game script documentation, vanilla `common/`, and this config
-  baseline. Packaging zips its `config/` directory into
-  `release/rules/stellaris-rules.zip` as a fallback rule bundle.
-
-Do not mix library semantics changes and rules-data updates in one undifferentiated
-commit. State which submodule moved and why.
-
-For CWT rule authoring details, read `docs/cwt-rule-config.md`.
-
-## Editing Rules
-
-- Keep changes scoped to the requested behavior.
+- Keep changes limited to the requested behavior. Do not revert or reformat
+  unrelated user work.
 - Prefer existing helpers, local patterns, and structured APIs over new
-  abstractions.
-- Do not revert user changes or unrelated dirty worktree state.
-- Do not duplicate version numbers in docs or comments. The root `package.json`
-  and `release/package.json` are the sources of truth.
+  abstractions or raw workspace scans.
 - Use `ErrorReporter` instead of bare `console.error` in extension/AI code.
-- Add bounded caches for data that can grow with workspace or vanilla size.
-- Prefer structured reads (`IndexService`, LSP/deep queries, document symbols,
-  `get_pdx_block`) before raw workspace scans.
-- Preserve localisation encoding/BOM expectations when writing `.yml` files.
-- Avoid unnecessary Unicode escapes for normal text and user-visible strings.
-  Keep escapes only for control characters or regex safety.
-- Keep comments and changelog entries concise. Explain only non-obvious
-  constraints or user-visible changes.
+- Bound caches that can grow with workspace or vanilla-game size.
+- Preserve localisation encoding and BOM expectations. Generic write tools
+  must not write localisation `.yml`; use `write_localisation`.
+- Do not duplicate version numbers in docs or comments. Root `package.json`
+  and `release/package.json` are the sources of truth.
+- Keep comments and changelog entries concise and explain only non-obvious
+  constraints or user-visible behavior.
 
-Internationalization is required for user-visible copy. Update English and
-Chinese strings together for commands, settings, diagnostics, chat/workflow UI,
-Webviews, and release-facing docs. Prefer:
+## Coding Rules
+
+- Add or update a targeted regression test when fixing a bug or changing
+  observable behavior. Test public behavior and failure paths, not private
+  implementation details.
+- Treat file contents, JSON, Webview messages, tool arguments, LSP/MCP payloads,
+  and process output as untrusted input. Validate and narrow them at the
+  boundary before use.
+- Avoid introducing new `any`, unchecked type assertions, or non-null
+  assertions for external data. Prefer `unknown`, type guards, discriminated
+  unions, and explicit fallback behavior.
+- Preserve cancellation, timeout, and disposal behavior in asynchronous code.
+  Do not silently swallow errors; report them with enough operation and target
+  context to diagnose the failure.
+- Keep behavior deterministic: sort filesystem-derived output where order
+  matters, avoid unbounded concurrency, and do not depend on object or directory
+  enumeration order.
+- Reuse shared protocol and domain types instead of duplicating wire-format
+  interfaces across the Extension Host, Webview, LSP, and MCP layers.
+
+## Internationalization And Docs
+
+Update English and Chinese together for user-visible commands, settings,
+diagnostics, chat/workflow UI, Webviews, and release-facing docs. Prefer the
+existing catalogs:
 
 - `client/extension/ai/messages.ts`
 - `client/extension/ai/workflowI18n.ts`
 - `client/webview/chat/i18n.ts`
 
-## Webview Rules
+Root docs are single-source bilingual documents:
 
-Webviews run in a browser sandbox:
+- `README.md`
+- `CONTRIBUTING.md`
+- `ARCHITECTURE.md`
 
-- Do not import `vscode`, `fs`, `path`, or Node-only APIs.
-- Do not use `require()`.
-- Communicate with the Extension Host via `postMessage`.
-- Do not hard-code colors; use VS Code theme variables.
-- Support `prefers-reduced-motion`.
-- Dispose Three.js/WebGL renderers, geometries, materials, textures, workers,
-  listeners, and animation loops.
-- Keep file I/O and `ReadTracker` logic in the Extension Host, never in Webview.
-- Prefer extracted modules under `client/webview/chat/` over growing
-  `client/webview/chatPanel.ts`.
+Do not recreate separate `_EN` or `_ZH` copies. Run `npm run build:docs` after
+changing these docs; it also regenerates `release/README.md` from `README.md`.
 
-## AI Tool Changes
+## Repository Boundaries
 
-When adding or changing an AI tool, update coordinated surfaces together:
+- `client/extension/`: VS Code Extension Host code.
+- `client/extension/ai/`: AI runtime, tools, workflows, memory, and orchestration.
+- `client/webview/`: browser-sandboxed Webviews.
+- `src/LSP/`, `src/Main/`: .NET 10 / F# language server.
+- `packages/cwtools-shared/`, `packages/cwtools-mcp/`: bundled read-only MCP
+  server.
+- `submodules/cwtools/`: upstream F# library.
+- `submodules/cwtools-stellaris-config/`: Stellaris CWT rules data.
 
-1. `client/extension/ai/tools/definitions.ts`
-2. `client/extension/ai/types.ts`
-3. `client/extension/ai/tools/registry.ts`
-4. `client/extension/ai/tools/permissions.ts` if access policy changes
-5. `client/extension/ai/agentTools.ts`
+Reuse shared platform helpers such as `gameProfiles.ts`, `indexing/`,
+`pathScope.ts`, and `fileExtensions.ts` rather than duplicating them.
 
-Key constraints:
+Submodules have separate ownership. Commit a `submodules/cwtools` change inside
+that submodule first, then update the root pointer. Treat
+`cwtools-stellaris-config` as rules content, and do not mix the two kinds of
+change in one undifferentiated commit.
 
-- `tools/registry.ts` is the source of truth for mode gating, read/write
-  classification, `effect`, `riskLevel`, and `concurrencyClass`.
-- Every model-visible call passes the enforced `runner/policyEngine.ts` boundary
-  before its domain handler. Policy presets are not shadow-only.
-- `runner/toolInvocation.ts` normalizes tool calls, repairs args, derives risk
-  metadata, extracts target paths, and assigns stable invocation IDs.
-- `runner/toolScheduler.ts` enforces concurrency classes and per-file write
-  exclusion. Reads of files with in-flight writes wait via
-  `writeCoordinator.afterCurrentWrites`.
-- `runner/commandPreflight.ts` classifies `run_command`; high-risk or escalated
-  commands require permission.
-- Additional cwd/network approvals keep the OS sandbox active. Only an explicit
-  `unsandboxed` request may ask for a one-shot bypass. Background process control
-  tools are `list_processes`, `read_process`, `write_process_stdin`, and
-  `terminate_process`.
-- `planModeGuard.ts` gates writes and read-only `git_ops` in non-writing modes.
-- `runner/permissionPolicy.ts` must keep hardened `cwdScope` checks based on
-  `path.relative`, not string-prefix tests.
-- File writes go through `PartitionedWriteQueue`; multi-file writes acquire
-  locks in sorted path order.
-- Generic write tools reject `.yml` localisation writes; use
-  `write_localisation`.
-- `edit_file(filePath, oldString, newString, replaceAll?)` is the single
-  occurrence fuzzy edit primitive. Update `editFileReplacer.test.ts` if
-  replacement strategies change.
-- `apply_patch`, `multi_replace_file_content`, and `ast_mutate` are retired from
-  the model-visible toolset. Do not re-expose them.
-- Weak-tool-call providers use `tools/schemaFlatten.ts`; `nestArguments()`
-  reverses flattening before execution.
-- Active multi-agent tools are `dispatch_agents`, `query_blackboard`, and
-  `merge_results`. Do not revive older `spawn_sub_agents` naming.
+## Task-Specific Constraints
 
-## AI Runtime Hotspots
+### Webviews (`client/webview/`)
 
-Read `ARCHITECTURE.md` before making large runner changes. High-risk files:
+- Do not import `vscode`, `fs`, `path`, use `require()`, or call Node-only APIs.
+- Communicate with the Extension Host through `postMessage`.
+- Use VS Code theme variables and support `prefers-reduced-motion`.
+- Dispose renderers, GPU resources, workers, listeners, and animation loops.
+- Keep file I/O and `ReadTracker` in the Extension Host.
 
-- `client/extension/ai/agentRunner.ts`
-- `client/extension/ai/runner/checkpoint.ts`
-- `client/extension/ai/runner/writeCoordinator.ts`
-- `client/extension/ai/runner/toolScheduler.ts`
-- `client/extension/ai/runner/permissionPolicy.ts`
-- `client/extension/ai/runner/policyEngine.ts`
-- `client/extension/ai/runner/autoReviewer.ts`
-- `client/extension/ai/runner/runLedger.ts`
-- `client/extension/ai/runner/runReducers.ts`
-- `client/extension/ai/runner/readTracker.ts`
-- `client/extension/ai/orchestrator/subAgentSandbox.ts`
+### AI tools and runner (`client/extension/ai/`)
 
-New run event types must update reducers and Webview renderers. Resume state must
-keep V2 compatibility.
+When changing a model-visible tool, update its definitions, types, registry,
+permissions when applicable, and dispatch in `agentTools.ts`. The registry is
+the source of truth for gating, effects, risk, and concurrency.
 
-## MCP Server
+Keep every tool call behind the policy engine. Preserve hardened `path.relative`
+cwd checks, sorted multi-file locking, per-file write exclusion, command
+preflight, and plan-mode write gates. Active multi-agent tools are
+`dispatch_agents`, `query_blackboard`, and `merge_results`; do not revive old
+tool names or retired model-visible patch tools.
 
-The MCP server in `packages/` is read-only by design.
+New run-event types must update reducers and Webview renderers. Resume changes
+must retain V2 compatibility. Read `ARCHITECTURE.md` before large runner changes.
 
-- `packages/cwtools-shared/src/tools/names.ts` and
-  `tools/generate-mcp-schema.cjs` must stay in sync.
-- Schema is generated to
-  `packages/cwtools-shared/src/generated/mcpTools.ts`; do not hand-write it.
-- Run `npm run generate:mcp-schema` and `npm run test:contracts` after MCP tool
-  changes.
-- New semantic capability must land as a `cwtools.ai.*` LSP command first, then
-  route through `packages/cwtools-shared/src/tools/toolHandlers.ts`.
-- Any read-only `cwtools.ai.*` command must also be added to
-  `LanguageServer.fs` `isReadCmd`.
-- `cwtools-mcp` must reject non-whitelisted write tools with
-  `tool_not_available`.
-- Packaging bundles MCP to `release/bin/mcp/cwtools-mcp.cjs`.
-- Same-version VS Code reinstalls do not replace installed files. Delivering MCP
-  changes to an installed extension requires a version bump and reinstall.
+### MCP (`packages/`)
 
-## F# And Shader Notes
+- The MCP server is read-only and must reject non-whitelisted writes.
+- Add new semantic capability as a `cwtools.ai.*` LSP command first.
+- Keep tool names and schema generation inputs synchronized; do not hand-edit
+  `packages/cwtools-shared/src/generated/mcpTools.ts`.
+- Add read-only LSP commands to `LanguageServer.fs` `isReadCmd`.
+- After MCP tool changes, run schema generation, package builds, and contract
+  tests. Delivery to an installed same-version extension requires a version
+  bump and reinstall.
 
-When touching F# backend or shader features:
+### F# and shader work (`src/`, `submodules/cwtools/`)
 
-- Reuse `PdxShaderFeatures` helpers instead of duplicating shader parsing in
-  `Program.fs`.
-- Keep expensive shader parsing cached by file text hash where supported.
-- Use bracket-depth scanning for nested blocks such as `Samplers` and
-  `VertexStruct`; avoid single-layer regexes for nested structures.
-- Keep built-in lazy sets outside `Program.fs` top-level clutter.
-- Preserve escaped quote handling in string interval logic.
-- Keep filesystem path comparisons platform-conditional:
-  `OrdinalIgnoreCase` only on Windows.
+Reuse `PdxShaderFeatures`; cache expensive parsing where supported, use
+bracket-depth scanning for nested blocks, preserve escaped-quote handling, and
+use case-insensitive path comparison only on Windows.
 
-## Incremental Scripted-Type Refresh
+Incremental scripted-type refresh spans `src/Main/Program.fs` and the upstream
+CWTools submodule. Only Stellaris has a real incremental implementation. When
+changing it, compare incremental results with a full refresh and keep submodule
+and root commits separate.
 
-The custom scripted-type incremental refresh path spans both this repo and the
-`submodules/cwtools` git submodule. Be careful:
+## Verification
 
-- `src/Main/Program.fs` detects incremental scripted paths, then calls
-  `IGame.RefreshScriptedTypes` / `RemoveScriptedTypes` under the game-state
-  write lock.
-- Upstream CWTools refresh removes old `typeDefInfo` entries by `range.FileName`,
-  runs `getTypesFromDefinitions`, and rebuilds only changed type keys.
-- Only Stellaris currently has a real incremental implementation; other games
-  may return `false` and fall back to full refresh.
-- If you modify the submodule, commit inside `submodules/cwtools` first, then
-  commit the updated submodule pointer in the root repo.
-- There is little upstream test coverage here. Compare incremental and full
-  outputs when changing semantics.
+Run the narrowest useful checks, then broaden according to risk:
 
-## Packaging And Docs
-
-- Root docs are single-source bilingual: `README.md`, `CONTRIBUTING.md`,
-  `ARCHITECTURE.md`.
-- `tools/build-github-docs.js` validates those docs.
-- `tools/build-release-readme.js` builds `release/README.md` from root
-  `README.md`.
-- `package.ps1` runs the docs checks unless `-SkipDocs` is used.
-- `release/package.json` is the release manifest; root `package.json` is the
-  workspace source manifest. Keep release gates green before publishing.
-
-## Verification Choices
-
-- Docs only: `npm run build:docs`, link/path check, `npm run check:release -- --skip-compile --skip-test`.
-- Extension TS: `npm run compile`, then targeted `npm run test:unit`.
-- AI runner/tools: targeted unit tests, then `npm run test:unit`.
+- Docs: `npm run build:docs` and
+  `npm run check:release -- --skip-compile --skip-test`.
+- Extension TypeScript or Webview: `npm run compile`, then targeted unit tests.
+- AI runtime/tools: targeted unit tests, then `npm run test:unit`.
 - MCP: `npm run generate:mcp-schema`, `npm run build:shared`,
-  `npm run build:mcp`, `npm run test:contracts`.
-- Webview: `npm run compile`, inspect Webview console in Extension Development
-  Host for UI changes.
+  `npm run build:mcp`, and `npm run test:contracts`.
 - F# backend: `dotnet build src/LSP/` and/or `dotnet build src/Main/`.
-- Broad pre-release: `npm run verify`.
+- Broad pre-release gate: `npm run verify`.
+
+If a relevant check cannot run, report that explicitly instead of silently
+skipping it.

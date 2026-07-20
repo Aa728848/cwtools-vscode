@@ -141,6 +141,40 @@ This extension bundles a **read-only** Model Context Protocol (MCP) server, offe
 
 If you intend to contribute code or perform development using AI assistants, please follow these guidelines:
 
+##### Fresh Clone Setup
+
+Install these tools before building or packaging:
+
+| Tool | Required version / notes |
+| --- | --- |
+| Git | A current version with submodule support |
+| Node.js / npm | Node.js 20.x or newer and npm 10.x or newer |
+| .NET SDK | .NET 10 SDK; `global.json` currently selects `10.0.301` and allows the latest minor roll-forward |
+| PowerShell | Windows PowerShell 5.1 or newer for the root `npm run pack*` scripts |
+| VS Code | 1.90 or newer; the `code` CLI is additionally required only by `npm run pack:install` / `pack:quick` |
+
+Clone the two required submodules and install all npm workspace dependencies:
+
+```bash
+git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
+cd cwtools-vscode
+npm install
+```
+
+If the repository was cloned without `--recurse-submodules`, repair it before
+building; a missing `submodules/cwtools` breaks the F# build and a missing
+`submodules/cwtools-stellaris-config/config` breaks packaging:
+
+```bash
+git submodule update --init --recursive
+```
+
+Before the first full package, verify that `node --version`, `npm --version`,
+`dotnet --version`, and `git --version` work from the same terminal, and check
+`$PSVersionTable.PSVersion` in PowerShell. Then run `npm run compile` once to
+catch dependency or frontend setup problems before the slower three-platform
+server publish.
+
 ##### Common Commands
 Run the following at the workspace root:
 ```bash
@@ -183,12 +217,21 @@ This repository uses two submodules with different roles:
   rules bundle.
 
 ##### 📦 Extension Packaging
-To package the extension into a cross-platform VSIX file, prefer the root scripts:
+The generated VSIX contains self-contained `win-x64`, `linux-x64`, and
+`osx-x64` servers. The root npm packaging commands invoke `package.ps1`, so run
+them from Windows PowerShell at the repository root after completing the fresh
+clone setup above:
+
 ```bash
 npm run pack         # full package
 npm run pack:install # package and install locally
 npm run pack:quick   # skip server rebuild, package and install locally
 ```
+
+`pack:quick` reuses existing server binaries; it is not suitable for the first
+package unless a complete `release/bin/server/` already exists. `pack:install`
+and `pack:quick` also require the VS Code `code` command on `PATH`. A successful
+package is written to `release/eddy-stellaris-cwt-<version>.vsix`.
 
 `npm run build:docs` validates the single-source bilingual docs and builds
 `release/README.md` from this README. For the full packaging workflow, see
@@ -350,6 +393,38 @@ claude mcp add cwtools --scope user -- node "<host-globalStorage>/foreverskywalk
 
 如果您有志于为本项目贡献代码，或者需要使用 AI 助手进行二次开发，请务必遵循以下工作流：
 
+##### 首次克隆与环境准备
+
+构建或打包前请先安装以下工具：
+
+| 工具 | 必要版本 / 说明 |
+| --- | --- |
+| Git | 支持 submodule 的当前版本 |
+| Node.js / npm | Node.js 20.x 或更高、npm 10.x 或更高 |
+| .NET SDK | .NET 10 SDK；`global.json` 当前选择 `10.0.301`，并允许滚动到最新 minor 版本 |
+| PowerShell | 根目录 `npm run pack*` 脚本需要 Windows PowerShell 5.1 或更高版本 |
+| VS Code | 1.90 或更高；只有 `npm run pack:install` / `pack:quick` 还要求 `code` CLI 可用 |
+
+克隆两个必需的子模块，并安装根项目及 npm workspaces 的全部依赖：
+
+```bash
+git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
+cd cwtools-vscode
+npm install
+```
+
+如果克隆时没有使用 `--recurse-submodules`，请在构建前补全子模块；缺少
+`submodules/cwtools` 会导致 F# 构建失败，缺少
+`submodules/cwtools-stellaris-config/config` 会导致打包失败：
+
+```bash
+git submodule update --init --recursive
+```
+
+首次完整打包前，请在同一个终端确认 `node --version`、`npm --version`、
+`dotnet --version` 和 `git --version` 均能正常运行，并在 PowerShell 中检查
+`$PSVersionTable.PSVersion`。建议先执行一次 `npm run compile`，尽早发现依赖或前端环境问题，再进行耗时更长的三平台服务端发布。
+
 ##### 常用构建与验证命令
 在项目根目录下，您可以使用以下命令验证项目的完整性：
 
@@ -388,12 +463,20 @@ CWT 规则编写说明见 [CWT 规则配置开发指南](docs/cwt-rule-config.md
 - `submodules/cwtools-stellaris-config/`：Stellaris CWT 规则配置数据。规则同步工具会把它与游戏 `script_documentation` 日志和原版 `common/` 对比；打包时使用其中的 `config/` 目录作为 fallback 规则包来源。
 
 ##### 📦 插件打包
-如需将插件打包为跨平台的通用发布版本，优先在根目录使用脚本：
+生成的 VSIX 会包含自包含的 `win-x64`、`linux-x64` 和 `osx-x64` 服务端。
+根目录 npm 打包命令会调用 `package.ps1`，因此请先完成上述首次克隆准备，
+然后在仓库根目录使用 Windows PowerShell 执行：
+
 ```bash
 npm run pack         # 完整打包
 npm run pack:install # 打包并安装到本机 VS Code
 npm run pack:quick   # 跳过服务端重编译，快速打包并安装
 ```
+
+`pack:quick` 会复用现有服务端二进制；如果 `release/bin/server/` 尚无完整产物，
+它不适合首次打包。`pack:install` 和 `pack:quick` 还要求 VS Code 的 `code`
+命令已加入 `PATH`。打包成功后，产物位于
+`release/eddy-stellaris-cwt-<version>.vsix`。
 
 `npm run build:docs` 会校验单一双语主文档，并从本 README 生成
 `release/README.md`。完整打包流程见

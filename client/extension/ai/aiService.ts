@@ -33,6 +33,7 @@ import {
 } from './providers';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
+import { ChatGptOAuthService } from './codex/oauthService';
 
 // ─── Module-level constants ──────────────────────────────────────────────────
 
@@ -223,6 +224,7 @@ export class ApiKeyManager {
 
 export class AIService {
     private keyManager: ApiKeyManager;
+    private readonly chatGptOAuth: ChatGptOAuthService;
     /**
      * C1 Fix: Use a Set instead of a single instance so that concurrent
      * chatCompletion calls (e.g. compaction + main loop running in parallel)
@@ -237,10 +239,20 @@ export class AIService {
 
     constructor(private context: vs.ExtensionContext) {
         this.keyManager = new ApiKeyManager(context.secrets);
+        this.chatGptOAuth = new ChatGptOAuthService(
+            context.secrets,
+            fetch,
+            String(context.extension?.packageJSON?.version ?? 'unknown'),
+        );
+        context.subscriptions?.push(this.chatGptOAuth);
     }
 
     getKeyManager(): ApiKeyManager {
         return this.keyManager;
+    }
+
+    getChatGptOAuthService(): ChatGptOAuthService {
+        return this.chatGptOAuth;
     }
 
     /** Set model without persisting to workspace config (no LS restart side-effect) */
@@ -399,6 +411,7 @@ export class AIService {
             maxTokens?: number;
             providerId?: string;   // Override provider
             model?: string;        // Override model
+            reasoningEffort?: AIUserConfig['reasoningEffort']; // Override reasoning level for this run
             apiKey?: string;       // Override API key (for test-without-save)
             endpoint?: string;     // Override endpoint
             customApiFormat?: CustomApiFormat; // Override custom provider wire protocol
@@ -456,7 +469,11 @@ export class AIService {
             }
         }
 
-        const endpoint = options?.endpoint || getEffectiveEndpoint(providerId, config.endpoint);
+        // OAuth bearer tokens must only ever be sent to the fixed ChatGPT Codex
+        // backend. Ignore endpoint overrides for this provider.
+        const endpoint = providerId === 'codex-chatgpt'
+            ? provider.endpoint
+            : options?.endpoint || getEffectiveEndpoint(providerId, config.endpoint);
         if (!endpoint) {
             throw new Error(`${provider.name} endpoint is not configured. Please set an API endpoint in the AI Settings panel.`);
         }
@@ -526,7 +543,7 @@ export class AIService {
         } else {
             const rEffort = getEffectiveReasoningEffort(
                 model,
-                config.reasoningEffort || 'high',
+                options?.reasoningEffort ?? config.reasoningEffort ?? 'high',
                 effectiveApiFormat
             );
             if (providerId === 'deepseek' || providerId === 'openai' || effectiveApiFormat === 'openai-responses') {
@@ -620,6 +637,9 @@ export class AIService {
         const config = this.getConfig();
         const providerId = options?.providerId || config.inlineCompletion.provider || config.provider;
         const provider = getProvider(providerId);
+        if (providerId === 'codex-chatgpt') {
+            throw new Error(`${provider.name} does not support inline completion. Select a FIM-capable provider for inline completion.`);
+        }
 
         let apiKey = '';
         if (provider.requiresApiKey) {
@@ -1267,15 +1287,28 @@ export class AIService {
             fastPath?: boolean;
             promptCacheKey?: string;
             reasoningSummary?: 'auto' | 'concise' | 'detailed';
+            codexCompatibility?: boolean;
         }
     ): Record<string, unknown> {
+        const systemInstructions = options?.codexCompatibility
+            ? request.messages
+                .filter(message => message.role === 'system')
+                .map(message => this.messageContentToText(message.content))
+                .filter(Boolean)
+                .join('\n\n')
+            : undefined;
         const payload: Record<string, unknown> = {
             model: request.model,
-            input: this.toResponsesInput(request.messages),
+            ...(systemInstructions ? { instructions: systemInstructions } : {}),
+            input: this.toResponsesInput(request.messages, options?.codexCompatibility === true),
             // GPT reasoning models reject sampling controls while reasoning is enabled.
             temperature: request.reasoning_effort ? undefined : request.temperature,
-            max_output_tokens: request.max_tokens,
+            max_output_tokens: options?.codexCompatibility ? undefined : request.max_tokens,
             ...(options?.fastPath ? { stream: true } : {}),
+            ...(options?.codexCompatibility ? {
+                store: false,
+                include: ['reasoning.encrypted_content'],
+            } : {}),
         };
         if (request.tools && request.tools.length > 0) {
             payload.tools = request.tools.map(t => ({
@@ -1303,9 +1336,10 @@ export class AIService {
         return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
     }
 
-    private toResponsesInput(messages: ChatMessage[]): Array<Record<string, unknown>> {
+    private toResponsesInput(messages: ChatMessage[], omitSystem = false): Array<Record<string, unknown>> {
         const input: Array<Record<string, unknown>> = [];
         for (const msg of messages) {
+            if (omitSystem && msg.role === 'system') continue;
             if (msg.role === 'tool') {
                 input.push({
                     type: 'function_call_output',
@@ -1380,28 +1414,44 @@ export class AIService {
         }
     ): Promise<ChatCompletionResponse> {
         const url = normalizeOpenAIActionUrl(endpoint, 'responses');
-        const useOpenAIFastPath = providerId === 'openai';
-        const send = (
+        const useOpenAIFastPath = providerId === 'openai' || providerId === 'codex-chatgpt';
+        const codexCompatibility = providerId === 'codex-chatgpt';
+        const sessionId = callbacks?.promptCacheKey
+            ? crypto.createHash('sha256').update(callbacks.promptCacheKey).digest('hex').slice(0, 32)
+            : crypto.randomUUID();
+        const send = async (
             reasoningSummary: 'auto' | 'concise' | 'detailed' | undefined,
             includeReasoning = true,
-        ) => this.fetchWithRetry(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...this.buildAuthHeaders(providerId, apiKey),
-            },
-            body: JSON.stringify(this.buildOpenAIResponsesPayload(
-                includeReasoning ? request : { ...request, reasoning_effort: undefined },
-                useOpenAIFastPath ? {
-                fastPath: true,
-                promptCacheKey: callbacks?.promptCacheKey,
-                reasoningSummary,
-                } : undefined,
-            )),
-            signal: controller.signal,
-        }, providerId);
+            forceOAuthRefresh = false,
+        ) => {
+            const authHeaders = codexCompatibility
+                ? await this.chatGptOAuth.getRequestHeaders(forceOAuthRefresh)
+                : this.buildAuthHeaders(providerId, apiKey);
+            return this.fetchWithRetry(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...authHeaders,
+                    ...(codexCompatibility ? { 'session-id': sessionId } : {}),
+                },
+                body: JSON.stringify(this.buildOpenAIResponsesPayload(
+                    includeReasoning ? request : { ...request, reasoning_effort: undefined },
+                    useOpenAIFastPath ? {
+                        fastPath: true,
+                        promptCacheKey: callbacks?.promptCacheKey,
+                        reasoningSummary,
+                        codexCompatibility,
+                    } : undefined,
+                )),
+                signal: controller.signal,
+            }, providerId);
+        };
 
         let response = await send(callbacks?.reasoningSummary);
+        if (codexCompatibility && response.status === 401) {
+            await response.body?.cancel().catch(() => undefined);
+            response = await send(callbacks?.reasoningSummary, true, true);
+        }
         if (!response.ok) {
             let errorText = await response.text();
             if (

@@ -180,6 +180,11 @@ check('No hardcoded localhost URLs or API keys in extension source', () => {
                 // Whitelist: provider configuration with localhost defaults
                 const rel = path.relative(ROOT, file);
                 if (rel.includes('aiService') || rel.includes('providers')) continue;
+                // Browser OAuth requires a registered loopback redirect. Keep the
+                // exception exact so unrelated extension code cannot hide localhost URLs.
+                if (rel.replace(/\\/g, '/') === 'client/extension/ai/codex/oauthService.ts'
+                    && content.includes('OAUTH_CALLBACK_PATH')
+                    && content.includes('OAUTH_REDIRECT_URI')) continue;
                 console.log(`    Found: ${pattern.source} in ${rel}`);
                 return false;
             }

@@ -250,6 +250,8 @@ export interface OrchestratorOptions {
     providerId?: string;
     /** User configured model (inherited from settings panel) */
     model?: string;
+    /** User configured reasoning level (inherited from the parent Agent run) */
+    reasoningEffort?: 'low' | 'medium' | 'high' | 'max';
     /** Abort signal */
     abortSignal?: AbortSignal;
     /** Topic ID (used for checkpoints and working directories) */

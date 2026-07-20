@@ -2017,6 +2017,7 @@ export class AgentToolExecutor {
             const options: import('./orchestrator/types').OrchestratorOptions = {
                 providerId: runnerOpts?.providerId,
                 model: runnerOpts?.model,
+                reasoningEffort: runnerOpts?.reasoningEffort,
                 abortSignal: localAbort.signal,
                 topicId: runnerOpts?.topicId,
                 parentRunId: parentRun?.runId ?? parentRunSink?.runId,

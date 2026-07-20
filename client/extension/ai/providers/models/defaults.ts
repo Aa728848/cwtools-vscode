@@ -3,8 +3,27 @@
  */
 
 import type { AIProviderConfig } from '../../types';
+import { CODEX_CHATGPT_API_BASE, CODEX_CHATGPT_MODELS } from '../../codex/oauthService';
 
 export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
+    'codex-chatgpt': {
+        id: 'codex-chatgpt',
+        name: 'Codex (ChatGPT Subscription)',
+        endpoint: CODEX_CHATGPT_API_BASE,
+        defaultModel: CODEX_CHATGPT_MODELS[0],
+        models: [...CODEX_CHATGPT_MODELS],
+        supportsToolUse: true,
+        requiresApiKey: false,
+        supportsStreaming: true,
+        maxContextTokens: 400000,
+        isOpenAICompatible: true,
+        toolCallStyle: 'openai',
+        supportsFIM: false,
+        supportsVision: true,
+        runtimeKind: 'http',
+        authKind: 'chatgpt-oauth',
+        supportsUtilityCalls: false,
+    },
     openai: {
         id: 'openai',
         registerUrl: 'https://platform.openai.com/api-keys',

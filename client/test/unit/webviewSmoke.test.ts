@@ -60,6 +60,9 @@ describe('webview smoke checks', () => {
         expect(script).to.include('showResponsiveWorkspacePanel');
         expect(script).to.include('renderTopicsView');
         expect(script).to.include('buildSettingsOverviewModel');
+        expect(script).to.include('cachedSettingsData');
+        expect(script).to.include("input.dataset.apDropdownBound === 'true'");
+        expect(script).to.include('provSel.onchange =');
     });
 
     it('chat webview modules expose split UI contracts', () => {

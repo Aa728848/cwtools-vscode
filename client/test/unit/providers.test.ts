@@ -386,6 +386,7 @@ describe('getOpenCodeGoApiFormat', () => {
 describe('getProviderApiFormat', () => {
     it('covers every built-in provider with its effective default-model protocol', () => {
         const expected = {
+            'codex-chatgpt': 'openai-responses',
             openai: 'openai-responses',
             claude: 'anthropic-messages',
             deepseek: 'openai-chat-completions',
@@ -409,7 +410,8 @@ describe('getProviderApiFormat', () => {
             'kimi-code-plan': 'openai-chat-completions',
         } as const;
 
-        expect(Object.keys(expected).sort()).to.deep.equal(Object.keys(BUILTIN_PROVIDERS).sort());
+        const httpProviderIds = Object.values(BUILTIN_PROVIDERS).map(provider => provider.id).sort();
+        expect(Object.keys(expected).sort()).to.deep.equal(httpProviderIds);
         for (const [providerId, apiFormat] of Object.entries(expected)) {
             expect(getProviderApiFormat(providerId, BUILTIN_PROVIDERS[providerId]!.defaultModel)).to.equal(apiFormat);
         }
@@ -781,17 +783,29 @@ describe('BUILTIN_PROVIDERS', () => {
         for (const [key, p] of Object.entries(BUILTIN_PROVIDERS)) {
             expect(p.id, `${key}.id`).to.be.a('string').with.length.greaterThan(0);
             expect(p.name, `${key}.name`).to.be.a('string').with.length.greaterThan(0);
-            // custom intentionally starts blank; users provide the endpoint/model in settings.
+            // Custom endpoints are entered by the user.
             if (key !== 'custom') {
                 expect(p.endpoint, `${key}.endpoint`).to.be.a('string').with.length.greaterThan(0);
             }
-            expect(p.maxContextTokens, `${key}.maxContextTokens`).to.be.a('number').and.greaterThan(0);
+            expect(p.maxContextTokens, `${key}.maxContextTokens`).to.be.a('number');
+            expect(p.maxContextTokens, `${key}.maxContextTokens`).to.be.greaterThan(0);
             // ollama is auto-detected; custom is user-entered.
             if (key !== 'ollama' && key !== 'custom') {
                 expect(p.defaultModel, `${key}.defaultModel`).to.be.a('string').with.length.greaterThan(0);
                 expect(p.models, `${key}.models`).to.be.an('array').with.length.greaterThan(0);
             }
         }
+    });
+
+    it('routes the ChatGPT subscription provider through OAuth Responses', () => {
+        const codex = BUILTIN_PROVIDERS['codex-chatgpt']!;
+        expect(codex.runtimeKind).to.equal('http');
+        expect(codex.authKind).to.equal('chatgpt-oauth');
+        expect(codex.endpoint).to.equal('https://chatgpt.com/backend-api/codex');
+        expect(codex.requiresApiKey).to.equal(false);
+        expect(codex.supportsFIM).to.equal(false);
+        expect(codex.supportsUtilityCalls).to.equal(false);
+        expect(getProviderApiFormat(codex.id, codex.defaultModel)).to.equal('openai-responses');
     });
 
     it('openai provider exists and is OpenAI compatible', () => {

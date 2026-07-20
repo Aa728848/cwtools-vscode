@@ -251,6 +251,7 @@ export function getProviderApiFormat(
 ): CustomApiFormat {
     switch (providerId.toLowerCase()) {
         case 'openai':
+        case 'codex-chatgpt':
             return 'openai-responses';
         case 'claude':
         case 'minimax-token-plan':

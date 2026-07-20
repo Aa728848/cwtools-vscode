@@ -891,7 +891,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         if (!_skipAutoModeSwitch && text.trim() && this.currentMode === 'build' && !this.currentWorkflowId) {
-            const routedMode = await this.inferBuildModeRouteWithModel(text);
+            const routedMode = config.provider === 'codex-chatgpt'
+                ? inferBuildModeRoute(text)
+                : await this.inferBuildModeRouteWithModel(text);
             if (routedMode && routedMode !== this.currentMode) {
                 this.switchMode(routedMode);
             }
@@ -976,7 +978,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 conversationHistory: this.conversationMessages,
                 options: {
                     mode: this.currentMode,
+                    providerId: config.provider,
                     model: this.aiService.getConfig().model || undefined,
+                    reasoningEffort: config.reasoningEffort,
                     streaming: true,  // Enable typewriter text effect
                     topicId: this.topicManager.currentTopic?.id,
                     onStep: (step) => {
@@ -989,6 +993,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                         }
                         this.postMessage({ type: 'agentStep', step });
                     },
+                    onRunStarted: runId => { this.currentRunId = runId; },
                     abortSignal: this.abortController!.signal,
                     // Permission callback for run_command tool (OpenCode strategy)
                     onPermissionRequest: (id: string, tool: string, description: string, command?: string, ctx?: any) =>
@@ -1103,7 +1108,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // Matches OpenCode's title-agent pattern: fire-and-forget, no blocking
             const isFirstExchange = this.topicManager.currentTopic &&
                 this.topicManager.currentTopic.messages.filter(m => m.role === 'user').length === 1;
-            if (isFirstExchange && this.topicManager.currentTopic) {
+            if (config.provider !== 'codex-chatgpt' && isFirstExchange && this.topicManager.currentTopic) {
                 const topicId = this.topicManager.currentTopic.id;
                 const replyText = result.explanation || (result.code ? result.code.substring(0, 400) : '');
                 // Non-blocking: run in background, update UI when done

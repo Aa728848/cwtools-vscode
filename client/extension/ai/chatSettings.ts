@@ -30,6 +30,10 @@ const execAsync = promisify(cp.exec);
 type PostMessageFn = (msg: HostMessage) => void;
 const DEFAULT_CUSTOM_API_FORMAT: CustomApiFormat = 'openai-chat-completions';
 
+function settingsErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
 function normalizeCustomApiFormatSetting(value: unknown): CustomApiFormat {
     switch (value) {
         case 'openai-chat-completions':
@@ -253,7 +257,7 @@ export class ChatSettingsManager {
     constructor(
         private aiService: AIService,
         private postMessage: PostMessageFn,
-        private globalStoragePath?: string
+        private globalStoragePath?: string,
     ) {}
 
     /** Build the settingsData payload and send it to the WebView */
@@ -263,26 +267,37 @@ export class ChatSettingsManager {
         await this.aiService.migrateLegacyEndpoint();
         const config = this.aiService.getConfig();
         const detectedSandbox = await detectSandboxBackendAsync();
+        const codexAccount = showPanel || config.provider === 'codex-chatgpt'
+            ? await this.aiService.getChatGptOAuthService().getAccountStatus()
+            : undefined;
 
         const providers = Object.values(BUILTIN_PROVIDERS).map(p => {
             const customNonFim = p.id === 'custom' && config.customApiFormat !== 'openai-chat-completions';
+            const codexModels = p.id === 'codex-chatgpt' ? (codexAccount?.models ?? []) : undefined;
             return {
                 id: p.id,
-                name: p.name,
-                models: p.models,
-                defaultModel: p.defaultModel,
+                name: p.id === 'codex-chatgpt'
+                    ? aiText('Codex (ChatGPT Subscription)', 'Codex（ChatGPT 订阅）')
+                    : p.name,
+                models: codexModels ?? p.models,
+                defaultModel: codexModels?.[0] ?? p.defaultModel,
                 requiresApiKey: p.requiresApiKey,
                 defaultEndpoint: p.endpoint,
                 userEndpoint: this.aiService.getEndpointForProvider(p.id),
                 maxContextTokens: p.maxContextTokens,
                 supportsFIM: customNonFim ? false : p.supportsFIM,
                 registerUrl: p.registerUrl,
+                runtimeKind: p.runtimeKind,
+                authKind: p.authKind,
+                supportsUtilityCalls: p.supportsUtilityCalls ?? true,
             };
         });
 
         const hasKeyMap: Record<string, boolean> = {};
         for (const p of providers) {
-            hasKeyMap[p.id] = !!(await this.aiService.getKeyForProvider(p.id));
+            hasKeyMap[p.id] = p.authKind === 'chatgpt-oauth'
+                ? false
+                : !!(await this.aiService.getKeyForProvider(p.id));
         }
 
         await this.migrateLegacyWebSearchKeys();
@@ -292,9 +307,12 @@ export class ChatSettingsManager {
             webKeys[provider] = await this.aiService.getKeyManager().getKey(`web.${provider}`) ? '••••••••' : '';
         }
 
+        const selectedModel = config.provider === 'codex-chatgpt' && codexAccount?.models.length
+            ? (codexAccount.models.includes(config.model) ? config.model : codexAccount.models[0] || config.model)
+            : config.model;
         const current: PanelSettings = {
             provider: config.provider,
-            model: config.model,
+            model: selectedModel,
             apiKey: '',
             endpoint: config.endpoint || '',
             customApiFormat: config.customApiFormat,
@@ -379,6 +397,7 @@ export class ChatSettingsManager {
             targetSurface,
             modelContextTokens: { ...MODEL_CONTEXT_TOKENS, ...dynamicContexts },
             thinkingModelPrefixes: ALWAYS_THINKING_PREFIXES,
+            codexAccount,
         });
     }
 
@@ -777,6 +796,19 @@ export class ChatSettingsManager {
             this.postMessage({ type: 'testConnectionResult', ok: false, message: aiText('Select a provider first', '请先选择 Provider') });
             return;
         }
+        if (provider.authKind === 'chatgpt-oauth') {
+            const status = await this.aiService.getChatGptOAuthService().getAccountStatus(true);
+            const identity = [status.email, status.planType].filter(Boolean).join(' · ');
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: status.available && status.signedIn,
+                message: status.available && status.signedIn
+                    ? aiText(`ChatGPT OAuth is ready${identity ? ` (${identity})` : ''}.`, `ChatGPT OAuth 已就绪${identity ? `（${identity}）` : ''}。`)
+                    : (status.error || aiText('Not signed in with ChatGPT.', '尚未使用 ChatGPT 登录。')),
+            });
+            await this.buildAndSendSettingsData(false);
+            return;
+        }
         if (!endpoint) {
             this.postMessage({ type: 'testConnectionResult', ok: false, message: aiText('Enter an endpoint', '请填写 Endpoint') });
             return;
@@ -823,6 +855,62 @@ export class ChatSettingsManager {
                 friendly = aiText('Endpoint not found (404) - check the URL', 'Endpoint 地址不存在 (404) — 请检查 URL');
             }
             this.postMessage({ type: 'testConnectionResult', ok: false, message: aiText('Connection failed: ', '连接失败: ') + friendly });
+        }
+    }
+
+    async loginCodex(): Promise<void> {
+        const service = this.aiService.getChatGptOAuthService();
+        try {
+            const login = await service.startLogin();
+            const loginCompletion = login.completion
+                .then(() => ({ ok: true as const }))
+                .catch(error => ({ ok: false as const, error }));
+            const opened = await vs.env.openExternal(vs.Uri.parse(login.authUrl));
+            if (!opened) {
+                login.cancel();
+                this.postMessage({ type: 'testConnectionResult', ok: false, message: aiText('Could not open the ChatGPT sign-in page.', '无法打开 ChatGPT 登录页面。') });
+                return;
+            }
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: true,
+                message: aiText('Continue signing in in your browser. Tokens will be saved securely by VS Code after the OAuth callback.', '请在浏览器中继续登录；OAuth 回调完成后，Token 将由 VS Code 安全保存。'),
+            });
+            void loginCompletion.then(async outcome => {
+                if (!outcome.ok) {
+                    this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(outcome.error) });
+                    return;
+                }
+                await this.buildAndSendSettingsData(true);
+                this.postMessage({ type: 'testConnectionResult', ok: true, message: aiText('ChatGPT sign-in completed.', 'ChatGPT 登录完成。') });
+            });
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    async refreshCodexAccount(): Promise<void> {
+        await this.aiService.getChatGptOAuthService().getAccountStatus(true);
+        await this.buildAndSendSettingsData(true);
+    }
+
+    async logoutCodex(): Promise<void> {
+        const signOutLabel = aiText('Sign out', '退出账号');
+        const confirmed = await vs.window.showWarningMessage(
+            aiText(
+                'Sign out of ChatGPT in this extension? This removes the OAuth tokens stored by VS Code and does not affect Codex CLI or the Codex desktop app.',
+                '确定在本插件中退出 ChatGPT 吗？这会删除 VS Code 保存的 OAuth Token，但不会影响 Codex CLI 或 Codex 桌面端。',
+            ),
+            { modal: true },
+            signOutLabel,
+        );
+        if (confirmed !== signOutLabel) return;
+        try {
+            await this.aiService.getChatGptOAuthService().logout();
+            await this.buildAndSendSettingsData(true);
+            this.postMessage({ type: 'testConnectionResult', ok: true, message: aiText('Signed out of ChatGPT in this extension.', '已在本插件中退出 ChatGPT。') });
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
         }
     }
 

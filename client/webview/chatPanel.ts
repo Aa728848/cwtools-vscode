@@ -267,19 +267,27 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const userMessagePayloadMap = new Map<number, UserMessageInputPayload>();
     let settingsProviders: any[] = [];
     let settingsOllamaModels: any[] = [];
+    let settingsCodexAccount: any = undefined;
+    let cachedSettingsData: { providers: any[]; current: any; ollamaModels: any[] } | undefined;
     // Per-provider endpoint overrides shown in the settings UI, keyed by provider id.
     // Lets us swap the endpoint field when switching providers without leaking values.
     let settingsProviderEndpoints: Record<string, string> = {};
 
     // Custom absolute positioned dropdown logic
+    const apDropdownBindings = new WeakMap<HTMLInputElement, { getOptions: () => string[]; onSelect?: (val: string) => void }>();
+
     function setupApDropdown(inputId: string, dropdownId: string, getOptions: () => string[], onSelect?: (val: string) => void) {
         const input = document.getElementById(inputId) as HTMLInputElement | null;
         const dropdown = document.getElementById(dropdownId) as HTMLDivElement | null;
         if (!input || !dropdown) return;
+        apDropdownBindings.set(input, { getOptions, onSelect });
+        if (input.dataset.apDropdownBound === 'true') return;
+        input.dataset.apDropdownBound = 'true';
 
         function render(filter: string) {
             const term = (filter || '').toLowerCase();
-            const opts = getOptions() || [];
+            const binding = apDropdownBindings.get(input!);
+            const opts = binding?.getOptions() || [];
             const html = opts.filter((m: string) => m.toLowerCase().includes(term))
                 .map((m: string) => '<div class="ap-dropdown-item">' + escapeHtml(m) + '</div>').join('');
             dropdown!.innerHTML = html;
@@ -288,7 +296,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     e.preventDefault();
                     input!.value = el.textContent || '';
                     dropdown!.style.display = 'none';
-                    if (onSelect) onSelect(input!.value);
+                    binding?.onSelect?.(input!.value);
                 };
             });
         }
@@ -2660,6 +2668,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         } else {
             document.body.classList.add('artifact-drawer-open');
         }
+        if (cachedSettingsData) {
+            showSettingsPage(cachedSettingsData.providers, cachedSettingsData.current, cachedSettingsData.ollamaModels);
+        }
         vscode.postMessage({ type: 'openSettings' });
         topicsPanel.classList.remove('show');
     });
@@ -2670,6 +2681,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     bindBtn('keyToggleBtn', () => { const k = document.getElementById('settingsApiKey') as HTMLInputElement | null; if (k) k.type = k.type === 'password' ? 'text' : 'password'; });
     bindBtn('fetchApiModelsBtn', () => { fetchApiModels(); });
     bindBtn('deleteApiKeyBtn', () => { deleteApiKey(); });
+    bindBtn('codexLoginBtn', () => {
+        vscode.postMessage({ type: 'codexLogin' });
+    });
+    bindBtn('codexRefreshBtn', () => {
+        vscode.postMessage({ type: 'codexRefreshAccount' });
+    });
+    bindBtn('codexLogoutBtn', () => {
+        vscode.postMessage({ type: 'codexLogout' });
+    });
     bindBtn('detectBtn', detectOllamaModels);
     
     bindBtn('installSkillBtn', () => {
@@ -5976,6 +5996,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             case 'settingsData':
+                settingsCodexAccount = msg.codexAccount;
+                cachedSettingsData = {
+                    providers: msg.providers,
+                    current: msg.current,
+                    ollamaModels: msg.ollamaModels || [],
+                };
                 if (msg.current && msg.current.maxContextTokens > 0) contextLimit = msg.current.maxContextTokens;
                 // Cache model context token map for use in updateModelUI
                 if (msg.modelContextTokens) settingsModelContextTokens = msg.modelContextTokens;
@@ -6796,17 +6822,20 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 defaultEndpoint: p.defaultEndpoint,
                 maxContextTokens: p.maxContextTokens,
             })),
+            codexAccount: settingsCodexAccount,
             current,
             customApiFormat: current.customApiFormat,
             ollamaModels: (ollamaModels || []).map((m: any) => ({ name: m.name, size: m.size, parameterSize: m.parameterSize })),
         });
-        if (isManagerShell() && settingsPage.classList.contains('active') && settingsPageSignature === lastSettingsPageSignature) {
-            settingsInSideWorkspace = true;
-            openSideWorkspace({
-                title: chatI18n.locale === 'zh-cn' ? 'AI 设置' : 'AI Settings',
-                subtitle: chatI18n.locale === 'zh-cn' ? '模型、上下文、API 和工具' : 'Models, context, API, and tools',
-                content: settingsPage,
-            });
+        if (settingsPage.classList.contains('active') && settingsPageSignature === lastSettingsPageSignature) {
+            if (isManagerShell()) {
+                settingsInSideWorkspace = true;
+                openSideWorkspace({
+                    title: chatI18n.locale === 'zh-cn' ? 'AI 设置' : 'AI Settings',
+                    subtitle: chatI18n.locale === 'zh-cn' ? '模型、上下文、API 和工具' : 'Models, context, API, and tools',
+                    content: settingsPage,
+                });
+            }
             return;
         }
         lastSettingsPageSignature = settingsPageSignature;
@@ -6816,7 +6845,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         inlineSel.innerHTML = `<option value="">${tr('- Same as chat -', '- 与对话相同 -')}</option>` + providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.inlineCompletion?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         const translationProviderSel = document.getElementById('translationPreviewProvider') as HTMLSelectElement;
         if (translationProviderSel) {
-            translationProviderSel.innerHTML = `<option value="">${tr('- Same as chat -', '- 与对话相同 -')}</option>` + providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.translationPreview?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+            const utilityProviders = providers.filter((p: any) => p.supportsUtilityCalls !== false);
+            const chatSupportsUtilityCalls = providers.find((p: any) => p.id === current.provider)?.supportsUtilityCalls !== false;
+            translationProviderSel.innerHTML = (chatSupportsUtilityCalls ? `<option value="">${tr('- Same as chat -', '- 与对话相同 -')}</option>` : '')
+                + utilityProviders.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.translationPreview?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+            const configuredTranslationProvider = current.translationPreview?.provider || '';
+            if ((!configuredTranslationProvider && !chatSupportsUtilityCalls)
+                || (configuredTranslationProvider && !utilityProviders.some((p: any) => p.id === configuredTranslationProvider))) {
+                translationProviderSel.value = utilityProviders[0]?.id || '';
+            }
         }
         (document.getElementById('settingsApiKey') as HTMLInputElement).value = '';
         (document.getElementById('settingsEndpoint') as HTMLInputElement).value = current.endpoint || '';
@@ -6885,7 +6922,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             // Populate the supplier dropdown
             provSel.innerHTML = `<option value="__inherit__">${tr('Inherit main settings', '继承主设置')}</option>`
-                + providers.map((p: any) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+                + providers.filter((p: any) => p.supportsUtilityCalls !== false).map((p: any) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
 
             const saved = savedAgentModels[role];
             if (saved?.provider && saved.provider !== '__inherit__') {
@@ -6910,13 +6947,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             // Linked update model drop-down when supplier changes
-            provSel.addEventListener('change', () => {
+            provSel.onchange = () => {
                 if (provSel.value === '__inherit__') {
                     modSel.innerHTML = `<option value="__inherit__">${tr('Inherit main settings', '继承主设置')}</option>`;
                 } else {
                     fillModels(provSel.value);
                 }
-            });
+            };
         });
 
         function updateTranslationModelSelect(pid: string, selectedModel: string, ollamaModels: any[]) {
@@ -6997,7 +7034,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const inlineProviderSel = document.getElementById('inlineProvider') as HTMLSelectElement;
         const translationPreviewProviderSel = document.getElementById('translationPreviewProvider') as HTMLSelectElement | null;
 
-        updateTranslationModelSelect(current.translationPreview?.provider, current.translationPreview?.model, ollamaModels);
+        updateTranslationModelSelect(translationProviderSel?.value || '', current.translationPreview?.model, ollamaModels);
         if (translationPreviewProviderSel) {
             translationPreviewProviderSel.onchange = () => updateTranslationModelSelect(translationPreviewProviderSel.value, '', ollamaModels);
         }
@@ -7070,8 +7107,60 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const p = (providers || settingsProviders).find((x: any) => x.id === providerId);
         const status = document.getElementById('apiKeyStatus')!;
         const group = document.getElementById('apiKeyGroup')!;
+        const codexGroup = document.getElementById('codexAccountGroup') as HTMLElement | null;
+        const endpointGroup = document.getElementById('endpointGroup') as HTMLElement | null;
         const providerHint = document.getElementById('providerHint')!;
         const deleteBtn = document.getElementById('deleteApiKeyBtn') as HTMLButtonElement | null;
+        const isCodex = p?.authKind === 'chatgpt-oauth';
+        if (codexGroup) codexGroup.style.display = isCodex ? '' : 'none';
+        if (endpointGroup) endpointGroup.style.display = isCodex ? 'none' : '';
+        if (isCodex) {
+            group.style.display = 'none';
+            providerHint.innerHTML = '';
+            if (deleteBtn) deleteBtn.disabled = true;
+            const accountStatus = document.getElementById('codexAccountStatus');
+            const quotaStatus = document.getElementById('codexQuotaStatus');
+            const loginBtn = document.getElementById('codexLoginBtn') as HTMLButtonElement | null;
+            const logoutBtn = document.getElementById('codexLogoutBtn') as HTMLButtonElement | null;
+            const account = settingsCodexAccount;
+            const hasCodexAccount = Boolean(account?.accountType);
+            if (accountStatus) {
+                if (account?.signedIn) {
+                    const identity = [account.email, account.planType].filter(Boolean).join(' · ');
+                    accountStatus.innerHTML = svgIcon('check') + escapeHtml(tr(`Signed in${identity ? ` · ${identity}` : ''}`, `已登录${identity ? ` · ${identity}` : ''}`));
+                    accountStatus.style.color = '#4caf50';
+                } else {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(account?.error || tr('Not signed in with ChatGPT', '尚未使用 ChatGPT 登录'));
+                    accountStatus.style.color = '#ff9800';
+                }
+            }
+            if (loginBtn) {
+                loginBtn.disabled = account?.signedIn === true;
+                loginBtn.style.display = account?.signedIn ? 'none' : '';
+            }
+            if (logoutBtn) {
+                logoutBtn.disabled = !hasCodexAccount;
+                logoutBtn.style.display = hasCodexAccount ? '' : 'none';
+            }
+            if (quotaStatus) {
+                const buckets = Array.isArray(account?.rateLimits) ? account.rateLimits : [];
+                quotaStatus.innerHTML = buckets.length
+                    ? buckets.map((bucket: any) => {
+                        const label = bucket.limitName || bucket.limitId || 'Codex';
+                        const windows = [bucket.primary, bucket.secondary].filter(Boolean);
+                        return windows.map((window: any, index: number) => {
+                            const suffix = windows.length > 1 ? ` ${index + 1}` : '';
+                            const reset = window?.resetsAt
+                                ? new Date(window.resetsAt * 1000).toLocaleString()
+                                : tr('unknown reset time', '重置时间未知');
+                            return `<div>${escapeHtml(label + suffix)}: ${Number(window?.usedPercent || 0).toFixed(0)}% ${tr('used', '已用')} · ${tr('resets', '重置')} ${escapeHtml(reset)}</div>`;
+                        }).join('');
+                    }).join('')
+                    : tr('Quota details are unavailable for this account.', '当前账户暂未返回额度详情。');
+            }
+            refreshSettingsOverview();
+            return;
+        }
         if (p && p.requiresApiKey === false) {
             group.style.display = 'none';
             providerHint.innerHTML = '';
@@ -7130,6 +7219,30 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (provider && provider.maxContextTokens > 0) {
             (document.getElementById('settingsCtx') as HTMLInputElement).value = provider.maxContextTokens;
         }
+        const inlineSel = document.getElementById('inlineProvider') as HTMLSelectElement | null;
+        if (inlineSel) {
+            const selected = inlineSel.value;
+            const fimProviders = settingsProviders.filter((candidate: any) => candidate.supportsFIM);
+            const chatSupportsFim = provider?.supportsFIM === true;
+            inlineSel.innerHTML = (chatSupportsFim ? `<option value="">${tr('- Same as chat -', '- 与对话相同 -')}</option>` : '')
+                + fimProviders.map((candidate: any) => `<option value="${candidate.id}">${escapeHtml(candidate.name)}</option>`).join('');
+            inlineSel.value = (selected && fimProviders.some((candidate: any) => candidate.id === selected))
+                ? selected
+                : (chatSupportsFim ? '' : (fimProviders[0]?.id || ''));
+            inlineSel.dispatchEvent(new Event('change'));
+        }
+        const translationSel = document.getElementById('translationPreviewProvider') as HTMLSelectElement | null;
+        if (translationSel) {
+            const selected = translationSel.value;
+            const utilityProviders = settingsProviders.filter((candidate: any) => candidate.supportsUtilityCalls !== false);
+            const chatSupportsUtility = provider?.supportsUtilityCalls !== false;
+            translationSel.innerHTML = (chatSupportsUtility ? `<option value="">${tr('- Same as chat -', '- 与对话相同 -')}</option>` : '')
+                + utilityProviders.map((candidate: any) => `<option value="${candidate.id}">${escapeHtml(candidate.name)}</option>`).join('');
+            translationSel.value = (selected && utilityProviders.some((candidate: any) => candidate.id === selected))
+                ? selected
+                : (chatSupportsUtility ? '' : (utilityProviders[0]?.id || ''));
+            translationSel.dispatchEvent(new Event('change'));
+        }
         refreshSettingsOverview();
     }
 
@@ -7169,7 +7282,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         setupApDropdown('settingsModelInput', 'settingsModelDatalist', () => currentDropdownOpts, onModelSelected);
 
         // Restore value
-        modelInput.value = currentModel || '';
+        modelInput.value = currentModel || provider?.defaultModel || currentDropdownOpts[0] || '';
 
         // Bind auto-fill to model input changes
         let _modelInputTimer: ReturnType<typeof setTimeout> | undefined;

@@ -61,6 +61,35 @@ describe('AIService provider protocol routing', () => {
         expect(response.choices[0].message.content).to.equal('ok');
     });
 
+    it('routes the ChatGPT subscription provider through the fixed Codex Responses endpoint', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        const routes: Array<{ endpoint: string; providerId: string; model: string; reasoning?: string }> = [];
+        service.callOpenAIResponses = async (endpoint: string, _apiKey: string, request: any, providerId: string) => {
+            routes.push({
+                endpoint,
+                providerId,
+                model: request.model,
+                reasoning: request.reasoning_effort,
+            });
+            return completionResponse(request.model);
+        };
+
+        await service.chatCompletion([{ role: 'user', content: 'Hello' }], {
+            providerId: 'codex-chatgpt',
+            model: 'gpt-5.6-sol',
+            reasoningEffort: 'max',
+            endpoint: 'https://malicious-relay.example/v1',
+        });
+
+        expect(routes).to.deep.equal([{
+            endpoint: 'https://chatgpt.com/backend-api/codex',
+            providerId: 'codex-chatgpt',
+            model: 'gpt-5.6-sol',
+            reasoning: 'max',
+        }]);
+    });
+
     it('keeps the selected protocol for custom OpenAI-compatible channels', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;
@@ -111,6 +140,92 @@ describe('AIService provider protocol routing', () => {
 });
 
 describe('AIService OpenAI Responses payload', () => {
+    it('builds the Codex-compatible payload while keeping system instructions outside input', () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+
+        const payload = service.buildOpenAIResponsesPayload({
+            model: 'gpt-5.6-sol',
+            messages: [
+                { role: 'system', content: 'Follow the native Agent policy.' },
+                { role: 'user', content: 'Inspect the workspace.' },
+            ],
+            reasoning_effort: 'max',
+            max_tokens: 8192,
+            tools: [{
+                type: 'function',
+                function: { name: 'read_file', description: 'Read', parameters: { type: 'object' } },
+            }],
+        }, {
+            fastPath: true,
+            promptCacheKey: 'agent-thread:codex-1',
+            reasoningSummary: 'auto',
+            codexCompatibility: true,
+        });
+
+        expect(payload).to.deep.include({
+            model: 'gpt-5.6-sol',
+            instructions: 'Follow the native Agent policy.',
+            stream: true,
+            store: false,
+            parallel_tool_calls: true,
+        });
+        expect(payload.include).to.deep.equal(['reasoning.encrypted_content']);
+        expect(payload.input).to.deep.equal([{
+            role: 'user',
+            content: [{ type: 'input_text', text: 'Inspect the workspace.' }],
+        }]);
+        expect(payload.reasoning).to.deep.equal({ effort: 'max', summary: 'auto' });
+        expect(payload).to.not.have.property('max_output_tokens');
+    });
+
+    it('refreshes ChatGPT OAuth once after a Codex Responses 401', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        const refreshFlags: boolean[] = [];
+        const requests: Array<{ url: string; authorization: string | null }> = [];
+        service.chatGptOAuth = {
+            getRequestHeaders: async (forceRefresh: boolean) => {
+                refreshFlags.push(forceRefresh);
+                return { Authorization: forceRefresh ? 'Bearer fresh' : 'Bearer stale' };
+            },
+        };
+        service.fetchWithRetry = async (url: string, init: RequestInit) => {
+            requests.push({
+                url,
+                authorization: new Headers(init.headers).get('Authorization'),
+            });
+            if (requests.length === 1) {
+                return {
+                    ok: false,
+                    status: 401,
+                    body: { cancel: async () => undefined },
+                };
+            }
+            return {
+                ok: true,
+                status: 200,
+                headers: new Headers({ 'content-type': 'application/json' }),
+                json: async () => ({ id: 'resp_codex', model: 'gpt-5.6-sol', output_text: 'ok', usage: {} }),
+            };
+        };
+
+        const response = await service.callOpenAIResponses(
+            'https://chatgpt.com/backend-api/codex',
+            '',
+            { model: 'gpt-5.6-sol', messages: [{ role: 'user', content: 'Hello' }], reasoning_effort: 'max' },
+            'codex-chatgpt',
+            new AbortController(),
+        );
+
+        expect(refreshFlags).to.deep.equal([false, true]);
+        expect(requests).to.deep.equal([
+            { url: 'https://chatgpt.com/backend-api/codex/responses', authorization: 'Bearer stale' },
+            { url: 'https://chatgpt.com/backend-api/codex/responses', authorization: 'Bearer fresh' },
+        ]);
+        expect(response.choices[0].message.content).to.equal('ok');
+    });
+
     it('enables the isolated Responses fast path with streaming, parallel tools, summaries, and a hashed cache key', () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;

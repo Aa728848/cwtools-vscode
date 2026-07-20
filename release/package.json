@@ -893,6 +893,7 @@
                     "scope": "window",
                     "type": "string",
                     "enum": [
+                        "codex-chatgpt",
                         "openai",
                         "claude",
                         "deepseek",
@@ -916,6 +917,7 @@
                         "kimi-code-plan"
                     ],
                     "enumDescriptions": [
+                        "%configuration.stellarisLanguageServices.ai.provider.enum.codex-chatgpt%",
                         "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
                         "%configuration.stellarisLanguageServices.ai.provider.enum.claude%",
                         "%configuration.stellarisLanguageServices.ai.provider.enum.deepseek%",

@@ -100,6 +100,15 @@ export async function routeWebviewMessage(
         case 'testConnection':
             await provider.settingsManager.testConnection(msg.settings);
             break;
+        case 'codexLogin':
+            await provider.settingsManager.loginCodex();
+            break;
+        case 'codexRefreshAccount':
+            await provider.settingsManager.refreshCodexAccount();
+            break;
+        case 'codexLogout':
+            await provider.settingsManager.logoutCodex();
+            break;
         case 'deleteDynamicModel':
             await provider.settingsManager.deleteDynamicModel(msg.providerId, msg.modelId);
             break;

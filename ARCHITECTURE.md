@@ -152,6 +152,7 @@ sequenceDiagram
     participant Chat as chatPanel.ts
     participant Runner as agentRunner.ts
     participant Service as aiService.ts
+    participant OAuth as ChatGPT OAuth
     participant Tools as agentTools.ts
     participant Index as IndexService
     participant LSP as LSP
@@ -159,6 +160,11 @@ sequenceDiagram
     User->>Chat: sendMessage
     Chat->>Runner: runAgent(mode, workflowId, context)
     Runner->>Service: chat/completion request
+    opt Codex ChatGPT subscription provider
+        Service->>OAuth: refresh OAuth token when needed
+        Service->>OAuth: fixed Codex Responses request
+        OAuth-->>Service: SSE text + tool calls
+    end
     Service-->>Runner: text + tool calls
     Runner->>Tools: execute tools
     Tools->>Index: optional shared-index queries
@@ -175,6 +181,7 @@ sequenceDiagram
 | `agentRunner.ts` | Reasoning loops, tool permissions, workflow execution, context compression, checkpointing, and model fallbacks |
 | `agentTools.ts` | Tool dispatching, execution timeouts, shared blackboard, and orchestrator tool entry |
 | `aiService.ts` | Multi-provider HTTP/SSE clients, request formatting, fallback policies, and custom wire formats (`customApiFormat`) |
+| `codex/` | Browser PKCE OAuth, VS Code SecretStorage credentials, automatic token refresh, account status, compatibility models, and quota windows for the ChatGPT subscription provider |
 | `promptBuilder.ts` / `prompt/sections/` | Prompt builder facade, project context, and mode system instructions |
 | `providers.ts` / `providers/models/` | Provider registry, default models, capabilities, pricing, and prompt caching discounts |
 | `types.ts` | Messages, tools, modes, contexts, Artifacts, and setting schemas |
@@ -286,6 +293,7 @@ The Runner restricts tools based on the active workflow and appends supplementar
 - VS Code Workspace Trust is the outer execution gate: Restricted Mode keeps read/LSP features but blocks mutations, shell, network, media, git, and MCP tools.
 - Captured commands use the fail-closed broker. A configured Windows helper must pass the protocol-v1 self-test and report enforced filesystem plus allow/deny networking before selection. Background captured commands retain piped output/stdin controls through `processRegistry.ts`; explicitly escalated interactive commands use a visible VS Code Terminal. Shell networking is enforced as broad allow/deny, while declared hostnames remain approval/audit metadata and are labelled that way in permission cards.
 - Agent Web access is separate from shell-command networking. `web_search` works in indexed mode; `web_open` and cached-page `web_find` are offered only in live mode. OpenAI, Brave, Exa, Tavily, Serper, SerpAPI, SearXNG, and DuckDuckGo normalize into source IDs and citations. Provider keys live in VS Code SecretStorage. Every provider request and page open uses the same public-address DNS check with connection-time address pinning, per-hop redirect validation, credential redirect guard, response-size cap, domain policy, and untrusted-content envelope. A disabled-by-default compatibility switch accepts only DNS-derived `198.18.0.0/15` addresses used by controlled synthetic-DNS proxies; literal addresses and every other private/reserved range remain blocked. The in-memory caches are bounded and the TTL cache is an efficiency cache, not a pre-indexed/cached-search claim.
+- The `codex-chatgpt` provider is a native Agent HTTP runtime backed by a browser PKCE OAuth flow compatible with [OpenCode's ChatGPT Plus/Pro integration](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/codex.ts). The extension owns a separate access/refresh token pair in VS Code SecretStorage, refreshes it automatically, and deletes only that secret on logout. It never reads or changes Codex CLI/Desktop credentials, never launches an App Server child process, rejects API keys and endpoint overrides, and does not fall back to OpenAI Platform billing. Requests go only to the fixed ChatGPT Codex Responses endpoint with `store: false`, encrypted reasoning continuation, streaming, parallel function tools, and a per-Agent session id. The selected model and effective reasoning effort are passed directly in the request. Because turns stay inside `agentRunner.ts`, every tool call crosses the same `policyEngine.ts`, mode guard, scheduler, write queue, permission flow, MCP registry, and effective sandbox profile as other providers; no external Codex MCP inventory is imported. Account, plan, and quota status are best-effort reads from the subscription usage endpoint. The model list and wire contract are compatibility data because this is an internal endpoint, not a public stable API. This provider does not participate in FIM, translation, title/routing utility calls, or child-Agent provider selection.
 - Private runs, checkpoints, goals, and learned memory use extension storage; only user-shareable plans, workflows, blueprints, and project rules remain in `.cwtools-ai/`.
 
 ##### Orchestrator
@@ -554,6 +562,7 @@ sequenceDiagram
     participant Chat as chatPanel.ts
     participant Runner as agentRunner.ts
     participant Service as aiService.ts
+    participant OAuth as ChatGPT OAuth
     participant Tools as agentTools.ts
     participant Index as IndexService
     participant LSP as LSP
@@ -561,6 +570,11 @@ sequenceDiagram
     User->>Chat: sendMessage
     Chat->>Runner: runAgent(mode, workflowId, context)
     Runner->>Service: chat/completion request
+    opt Codex ChatGPT 订阅 Provider
+        Service->>OAuth: 按需刷新 OAuth Token
+        Service->>OAuth: 固定 Codex Responses 请求
+        OAuth-->>Service: SSE 文本与工具调用
+    end
     Service-->>Runner: text + tool calls
     Runner->>Tools: execute tools
     Tools->>Index: optional shared-index queries
@@ -577,6 +591,7 @@ sequenceDiagram
 | `agentRunner.ts` | 推理循环、工具权限、workflow 应用、上下文压缩、检查点、回退 |
 | `agentTools.ts` | 工具分发、超时、共享黑板和 orchestrator 工具入口 |
 | `aiService.ts` | 各 AI Provider HTTP/SSE 客户端、请求适配、回退和 custom 线协议分发（`customApiFormat`） |
+| `codex/` | ChatGPT 订阅 Provider 的浏览器 PKCE OAuth、VS Code SecretStorage 凭据、Token 自动刷新、账户状态、兼容模型与额度窗口 |
 | `promptBuilder.ts` / `prompt/sections/` | Prompt facade、项目上下文和模式系统提示词 |
 | `providers.ts` / `providers/models/` | Provider facade、默认模型、能力、价格和缓存折扣 |
 | `types.ts` | 消息、工具、模式、上下文、Artifact、设置类型 |
@@ -769,6 +784,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 - `workspaceSandbox.ts` 负责路径输入清洗（去引号、去 code span、去自然语言前缀）、workspace folder 别名解析、`.cwtools-ai` 路径别名解析、以及四级作用域分类（`project`/`ai`/`workspace`/`outside`）和信任判定。
 - VS Code Restricted Mode 是外层门禁：未信任工作区保留读取/LSP 能力，但禁止写入、命令、网络、Git、媒体和 MCP 工具。
 - captured 命令经独立 `sandboxBroker` 执行；Windows 后端按“已验证原生 helper → WSL2 + Bubblewrap”选择，其中 helper 必须通过 protocol-v1 自检，并明确报告文件系统强制隔离和网络允许/禁止能力；Linux/开发容器使用 Bubblewrap，macOS 使用 Seatbelt。找不到可验证的操作系统后端时失败关闭并在权限选择器显示后端健康状态。工作区写绑定会重新把 `.git`、`.agents`、`.codex` 以及 `.cwtools-ai` 内兼容保留的私有运行状态子目录设为只读，同时保留 topic 共享产物可写。captured 后台任务保留管道输出与 stdin/终止控制；交互任务必须显式授权后在可见 VS Code Terminal 中运行。shell 网络隔离只强制广泛允许/禁止，域名列表仅作为审批和审计声明，并在权限卡片中明确标注。
+- `codex-chatgpt` 是使用原生 Agent 的 HTTP 运行时，浏览器 PKCE OAuth 流程与 [OpenCode 的 ChatGPT Plus / Pro 集成](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/codex.ts)兼容。插件在 VS Code SecretStorage 中独立保存 Access / Refresh Token 并自动刷新；退出账号只删除这份 Secret。它不会读取或修改 Codex CLI / Desktop 凭据，不会启动 App Server 子进程，拒绝 API Key 和 Endpoint 覆盖，也不会降级到 OpenAI Platform 计费。请求只发送到固定的 ChatGPT Codex Responses 端点，并启用 `store: false`、加密推理续接、流式输出、并行函数工具及每个 Agent 会话的 Session ID；所选模型与生效的思考等级直接写入请求。由于回合始终在 `agentRunner.ts` 内执行，每次工具调用都会经过与其他 Provider 相同的 `policyEngine.ts`、模式守卫、调度器、写入队列、权限流程、MCP 注册表和当前生效的沙盒 Profile，不会导入任何外部 Codex MCP 清单。账户、套餐与额度状态通过订阅额度端点尽力读取。由于该端点并非公开稳定 API，模型列表与线协议都属于兼容数据。本 Provider 同时从 FIM、翻译、标题/路由辅助调用和子 Agent Provider 选择中排除。
 
 ##### Runner Policy
 

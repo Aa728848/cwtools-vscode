@@ -419,6 +419,7 @@ export class Orchestrator {
             sandbox,
             providerId,
             model,
+            reasoningEffort: orchestratorOptions.reasoningEffort,
             mode: profile.mode,
             onStep,
             abortSignal, // Will be overwritten later by the child controller with timeout

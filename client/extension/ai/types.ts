@@ -131,6 +131,40 @@ export interface AIProviderConfig {
     supportsVision: boolean;
     /** URL to register an API key for this provider (displayed in Settings UI) */
     registerUrl?: string;
+    /** Transport used for primary chat turns. */
+    runtimeKind?: 'http';
+    /** Credential mechanism used by this provider. */
+    authKind?: 'api-key' | 'none' | 'chatgpt-oauth';
+    /** Whether stateless utility calls (translation, titles, routing) are supported. */
+    supportsUtilityCalls?: boolean;
+}
+
+export interface CodexRateLimitWindow {
+    usedPercent: number;
+    windowDurationMins?: number | null;
+    resetsAt?: number | null;
+}
+
+export interface CodexRateLimitBucket {
+    limitId: string;
+    limitName?: string | null;
+    planType?: string | null;
+    primary?: CodexRateLimitWindow | null;
+    secondary?: CodexRateLimitWindow | null;
+    rateLimitReachedType?: string | null;
+}
+
+/** Sanitized Codex account state. This deliberately contains no tokens or credential paths. */
+export interface CodexAccountStatus {
+    available: boolean;
+    signedIn: boolean;
+    authMode?: string | null;
+    accountType?: string | null;
+    email?: string | null;
+    planType?: string | null;
+    models: string[];
+    rateLimits: CodexRateLimitBucket[];
+    error?: string;
 }
 
 export type CustomApiFormat =
@@ -2000,6 +2034,9 @@ export type WebViewMessage =
     | { type: 'fetchApiModels'; providerId: string; endpoint: string; apiKey: string; customApiFormat?: CustomApiFormat }
     | { type: 'deleteApiKey'; providerId: string }
     | { type: 'testConnection'; settings: PanelSettings } | { type: 'deleteDynamicModel'; providerId: string; modelId: string }
+    | { type: 'codexLogin' }
+    | { type: 'codexRefreshAccount' }
+    | { type: 'codexLogout' }
     | { type: 'installSkill'; source: string }
     | { type: 'deleteSkill'; skill: string }
     | { type: 'retractMessage'; messageIndex: number }
@@ -2065,7 +2102,7 @@ export type HostMessage =
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
     | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
     | { type: 'todoUpdate'; todos: TodoItem[] }
-    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[] }
+    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; codexAccount?: CodexAccountStatus }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'apiModelsFetched'; providerId: string; models: Array<{ id: string }>; dynContexts?: Record<string, number>; error?: string; ctxNote?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }
@@ -2151,6 +2188,9 @@ export interface ProviderMeta {
     supportsFIM: boolean;
     maxContextTokens?: number;
     registerUrl?: string;
+    runtimeKind?: 'http';
+    authKind?: 'api-key' | 'none' | 'chatgpt-oauth';
+    supportsUtilityCalls?: boolean;
 }
 
 /** Ollama model info for the settings UI */

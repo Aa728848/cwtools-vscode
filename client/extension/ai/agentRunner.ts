@@ -202,6 +202,8 @@ export interface AgentRunnerOptions {
     providerId?: string;
     /** Override model for this run */
     model?: string;
+    /** Override reasoning effort for external runtimes. */
+    reasoningEffort?: 'low' | 'medium' | 'high' | 'max';
     /** Dynamic maximum context tokens for this run */
     maxContextTokens?: number;
     /** Optional durable-goal aggregate token budget for the run. */
@@ -212,6 +214,8 @@ export interface AgentRunnerOptions {
     mode?: AgentMode;
     /** Callback for real-time step updates (for UI) */
     onStep?: (step: AgentStep) => void;
+    /** Called when an external runtime has allocated a durable run id. */
+    onRunStarted?: (runId: string) => void;
     /** Abort signal */
     abortSignal?: AbortSignal;
     /** Enable streaming text tokens (emits text_delta steps) */
@@ -227,9 +231,9 @@ export interface AgentRunnerOptions {
     parentRunId?: string;
     /** Stable agent id inside a multi-agent graph. */
     agentId?: string;
-    /** Durable thread id for protocol/app-server style runtimes. */
+    /** Durable provider thread id for protocol-backed runtimes. */
     threadId?: string;
-    /** Durable turn id for protocol/app-server style runtimes. */
+    /** Durable provider turn id for protocol-backed runtimes. */
     turnId?: string;
     /** Explicit event sink for this run. Avoids global latest-run routing. */
     runEventSink?: RunEventSink;
@@ -1836,6 +1840,7 @@ export class AgentRunner {
                     tools: availableTools,
                     providerId: options?.providerId,
                     model: options?.model,
+                    reasoningEffort: options?.reasoningEffort,
                     maxTokens: requestMaxTokens,
                     disableThinking: requestDisableThinking,
                     promptCacheKey: options?.threadId ? `agent-thread:${options.threadId}` : undefined,
@@ -2967,6 +2972,7 @@ export class AgentRunner {
         const finalResponse = await this.aiService.chatCompletion(messages, {
             providerId: options?.providerId,
             model: options?.model,
+            reasoningEffort: options?.reasoningEffort,
         });
         await runLedger.appendEvent(
             runRecord.runId,
@@ -3311,6 +3317,7 @@ export class AgentRunner {
                 const retryResponse = await this.aiService.chatCompletion(retryMessages, {
                     providerId: options?.providerId,
                     model: options?.model,
+                    reasoningEffort: options?.reasoningEffort,
                 });
 
                 const retryContent = contentToString(retryResponse.choices[0]?.message?.content);
@@ -3627,7 +3634,7 @@ export class AgentRunner {
     async generateTopicTitle(
         userMessage: string,
         assistantReply: string,
-        options?: Pick<AgentRunnerOptions, 'providerId' | 'model'>
+        options?: Pick<AgentRunnerOptions, 'providerId' | 'model' | 'reasoningEffort'>
     ): Promise<string | null> {
         try {
             const context = [userMessage, assistantReply]
@@ -3648,6 +3655,7 @@ export class AgentRunner {
                 temperature: 0.3,
                 providerId: options?.providerId,
                 model: options?.model,
+                reasoningEffort: options?.reasoningEffort,
             });
 
             const raw = contentToString(response.choices[0]?.message?.content).trim();

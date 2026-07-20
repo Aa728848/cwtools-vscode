@@ -1,4 +1,6 @@
 const MAX_MERMAID_SOURCE_LENGTH = 20_000;
+const MERMAID_FLOWCHART_WRAP_WIDTH = 180;
+const MIN_MERMAID_NATURAL_WIDTH = 180;
 let diagramCounter = 0;
 let renderQueue = Promise.resolve();
 
@@ -49,6 +51,11 @@ function initializeMermaid(): void {
             htmlLabels: false,
             useMaxWidth: true,
             curve: 'basis',
+            diagramPadding: 6,
+            nodeSpacing: 36,
+            rankSpacing: 42,
+            padding: 10,
+            wrappingWidth: MERMAID_FLOWCHART_WRAP_WIDTH,
         },
         themeVariables: {
             background,
@@ -85,8 +92,17 @@ function initializeMermaid(): void {
             signalColor: foreground,
             signalTextColor: foreground,
             fontFamily,
+            fontSize: '13px',
         },
     });
+}
+
+function preserveNaturalDiagramSize(output: HTMLElement): void {
+    const svg = output.querySelector<SVGSVGElement>('svg');
+    const viewBox = svg?.viewBox.baseVal;
+    if (!svg || !viewBox || !Number.isFinite(viewBox.width) || viewBox.width <= 0) return;
+    const naturalWidth = Math.max(MIN_MERMAID_NATURAL_WIDTH, Math.ceil(viewBox.width));
+    svg.style.setProperty('--mermaid-natural-width', `${naturalWidth}px`);
 }
 
 function sanitizeSvg(svgText: string): string {
@@ -208,6 +224,7 @@ async function renderContainer(container: HTMLElement): Promise<void> {
         initializeMermaid();
         const rendered = await getMermaidRuntime().render(id, source);
         output.innerHTML = sanitizeSvg(rendered.svg);
+        preserveNaturalDiagramSize(output);
         loading?.remove();
         createToolbar(container, source);
         container.dataset.mermaidState = 'rendered';

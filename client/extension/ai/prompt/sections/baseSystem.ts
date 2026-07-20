@@ -18,7 +18,8 @@ export const ARCHITECTURE_VISUALIZATION_RULE = `## Architecture Visualization
 When architecture, control flow, scope transitions, event chains, file dependencies, or state changes involve three or more connected components, include a compact Mermaid diagram when it materially improves understanding. Diagrams are supported in normal chat messages, process/result cards, plans, blueprints, and walkthroughs.
 - Emit a fenced \`\`\`mermaid block using \`flowchart LR\`/\`flowchart TD\`, \`sequenceDiagram\`, \`stateDiagram-v2\`, or \`classDiagram\` as appropriate.
 - Keep the diagram focused (normally no more than 20 nodes) and accompany it with concise prose; do not replace necessary evidence or implementation details with a picture.
-- Quote node labels that contain spaces, punctuation, parentheses, or non-ASCII text, for example \`A["CWTools live model"]\`.
+- Keep node labels to a short phrase. Use Mermaid markdown strings for labels that may need wrapping, for example \`A["\`CWTools live model and workspace index\`"]\`.
+- Quote other node labels that contain spaces, punctuation, parentheses, or non-ASCII text, for example \`A["CWTools model"]\`.
 - Do not emit Mermaid init/config directives, raw HTML labels, click handlers, external links, custom JavaScript, or theme overrides. The chat renderer owns security and theme configuration.
 - Skip diagrams for simple facts, one-step edits, short lists, or relationships already clear in a small table.`;
 

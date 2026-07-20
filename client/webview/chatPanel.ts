@@ -54,6 +54,7 @@ import {
 import { type WorkflowView } from './chat/workflows';
 import { createMarkdownRenderer } from './chat/markdown';
 import { startMermaidRendering } from './chat/mermaidRenderer';
+import { formatSelectionForTask, startMessageSelectionActions } from './chat/messageSelectionActions';
 import { createAnnotationCard, type AnnotationCardOptions } from './chat/annotations';
 import { renderAssistantTurnCodex } from './chat/codexConversation';
 import {
@@ -1237,6 +1238,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         placeCaretAtEnd(input);
         insertPlainTextAtRange(current.trim() ? separator + text : text);
     }
+
+    startMessageSelectionActions({
+        root: chatArea,
+        labels: {
+            addToTask: tr('Add to task', '添加到任务'),
+            addToTaskHint: tr('Add selected text to the task input', '将选中内容添加到任务输入框'),
+        },
+        onAddToTask: text => {
+            cancelInlineEdit();
+            appendInputText(formatSelectionForTask(text), '\n\n');
+        },
+    });
 
     function clearInput() {
         input.innerHTML = '';

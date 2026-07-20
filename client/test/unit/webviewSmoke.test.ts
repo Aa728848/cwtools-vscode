@@ -73,6 +73,7 @@ describe('webview smoke checks', () => {
             'liveSteps.ts',
             'markdown.ts',
             'mermaidRenderer.ts',
+            'messageSelectionActions.ts',
             'annotations.ts',
             'contextMentions.ts',
             'i18n.ts',
@@ -91,6 +92,7 @@ describe('webview smoke checks', () => {
         const html = fs.readFileSync(path.join(root, 'client/extension/ai/chatHtml.ts'), 'utf8');
         const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
         const mermaidRenderer = fs.readFileSync(path.join(root, 'client/webview/chat/mermaidRenderer.ts'), 'utf8');
+        const selectionActions = fs.readFileSync(path.join(root, 'client/webview/chat/messageSelectionActions.ts'), 'utf8');
 
         for (const selector of [
             '.message.assistant',
@@ -108,6 +110,7 @@ describe('webview smoke checks', () => {
             '.md-table-wrap',
             '.md-codeblock',
             '.md-mermaid',
+            '.message-selection-toolbar',
             '.context-compaction-card',
         ]) {
             expect(css).to.include(selector);
@@ -136,8 +139,14 @@ describe('webview smoke checks', () => {
         expect(css).to.include('.md-mermaid-output svg .flowchart-link');
         expect(css).to.include('.ap-section-text .md-mermaid-toolbar { pointer-events: auto; }');
         expect(mermaidRenderer).to.include('htmlLabels: false');
+        expect(mermaidRenderer).to.include('wrappingWidth: MERMAID_FLOWCHART_WRAP_WIDTH');
+        expect(mermaidRenderer).to.include('--mermaid-natural-width');
         expect(mermaidRenderer).to.include('nodeTextColor');
         expect(mermaidRenderer).to.include('edgeLabelBackground');
+        expect(script).to.include('startMessageSelectionActions({');
+        expect(script).to.include("tr('Add to task', '添加到任务')");
+        expect(selectionActions).to.include("start.closest('.message')");
+        expect(selectionActions).to.include('window.getSelection()?.removeAllRanges()');
         const annotations = fs.readFileSync(path.join(root, 'client/webview/chat/annotations.ts'), 'utf8');
         expect(annotations).to.include("target?.closest('button, textarea, input, select, a')");
     });

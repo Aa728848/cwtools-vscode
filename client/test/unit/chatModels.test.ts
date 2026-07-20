@@ -285,6 +285,7 @@ describe('chat markdown and mention helpers', () => {
         for (const prompt of [explore, plan]) {
             expect(prompt).to.include('## Architecture Visualization');
             expect(prompt).to.include('```mermaid');
+            expect(prompt).to.include('Use Mermaid markdown strings for labels that may need wrapping');
             expect(prompt).to.include('Do not emit Mermaid init/config directives');
         }
     });

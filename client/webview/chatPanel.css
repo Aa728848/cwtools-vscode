@@ -369,6 +369,30 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .message.retracted .msg-bubble { opacity: 0.4; font-style: italic; pointer-events: none; }
 .message.retracted .message-actions { display: none !important; }
 
+.message-selection-toolbar {
+    position: fixed;
+    z-index: 10020;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--vscode-editorWidget-background);
+    box-shadow: 0 5px 18px rgba(0, 0, 0, .3);
+}
+.message-selection-toolbar[hidden] { display: none; }
+.message-selection-add {
+    min-height: 26px;
+    padding: 3px 9px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--fg);
+    cursor: pointer;
+    font: 500 11px/1.2 var(--vscode-font-family, sans-serif);
+    white-space: nowrap;
+}
+.message-selection-add:hover,
+.message-selection-add:focus-visible { background: var(--vscode-toolbar-hoverBackground); outline: none; }
+
 /* ── Agent run summary ── */
 .run-summary { margin: 4px 0 8px; border: 1px solid rgba(255,255,255,0.11); border-left-width: 3px; border-radius: 8px; background: rgba(255,255,255,0.035); overflow: hidden; }
 .run-summary-live { background: rgba(100,149,237,0.045); }
@@ -641,8 +665,8 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .md-mermaid-output:empty { display: none; }
 .md-mermaid-output svg {
     display: inline-block;
-    width: auto;
-    min-width: min(680px, 100%);
+    width: min(100%, var(--mermaid-natural-width, 100%));
+    min-width: 0;
     max-width: 100%;
     height: auto;
     vertical-align: top;

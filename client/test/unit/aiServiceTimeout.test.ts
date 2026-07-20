@@ -116,6 +116,34 @@ describe('AIService provider protocol routing', () => {
         expect(chatCompletionsCalls).to.equal(1);
     });
 
+    it('applies provider-specific thinking levels before Chat Completions routing', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        const requests: any[] = [];
+        service.callOpenAICompatibleStreaming = async (_endpoint: string, _apiKey: string, request: any) => {
+            requests.push(request);
+            return completionResponse(request.model);
+        };
+
+        await service.chatCompletion([{ role: 'user', content: 'Hello' }], {
+            providerId: 'qwen', model: 'qwen3.7-plus', apiKey: 'test-key', reasoningEffort: 'medium',
+        });
+        await service.chatCompletion([{ role: 'user', content: 'Hello' }], {
+            providerId: 'openrouter', model: 'google/gemini-3.5-flash', apiKey: 'test-key', reasoningEffort: 'max',
+        });
+        await service.chatCompletion([{ role: 'user', content: 'Hello' }], {
+            providerId: 'siliconflow', model: 'deepseek-ai/DeepSeek-V4-Pro', apiKey: 'test-key', reasoningEffort: 'high',
+        });
+        await service.chatCompletion([{ role: 'user', content: 'Hello' }], {
+            providerId: 'ollama', model: 'gpt-oss:120b', reasoningEffort: 'max',
+        });
+
+        expect(requests[0]).to.include({ enable_thinking: true, thinking_budget: 8192 });
+        expect(requests[1].reasoning).to.deep.equal({ effort: 'max' });
+        expect(requests[2]).to.include({ enable_thinking: true, thinking_budget: 16384 });
+        expect(requests[3].reasoning_effort).to.equal('high');
+    });
+
     it('routes MiniMax Token Plan through Anthropic Messages without side-channel checks', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;

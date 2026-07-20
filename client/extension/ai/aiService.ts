@@ -26,10 +26,9 @@ import {
     BUILTIN_PROVIDERS,
     getModelOutputTokens,
     getReducedThinkingParams,
-    getEnableThinkingParams,
+    getThinkingParams,
     getEffectiveTemperature,
     getProviderApiFormat,
-    getEffectiveReasoningEffort,
 } from './providers';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
@@ -46,8 +45,11 @@ const OPTIONAL_CHAT_REQUEST_FIELDS = [
     'temperature',
     'parallel_tool_calls',
     'enable_thinking',
+    'thinking_budget',
     'thinking',
     'thinking_config',
+    'reasoning',
+    'google',
 ] as const;
 const DEFAULT_CHAT_COMPLETION_TIMEOUT_MS = 20 * 60 * 1000;
 const MIN_CHAT_COMPLETION_TIMEOUT_MS = 60 * 1000;
@@ -480,7 +482,6 @@ export class AIService {
         const rawModel = options?.model ?? getEffectiveModel(providerId, config.model);
         // Strip the UI '(免费)' suffix from the model ID before sending to the API
         const model = rawModel.replace(/\s*\(免费\)$/i, '');
-        const lowerModel = model.toLowerCase();
         const effectiveApiFormat = getProviderApiFormat(providerId, model, selectedCustomApiFormat);
 
         // ── Disable thinking: per-provider API parameters ──
@@ -489,9 +490,13 @@ export class AIService {
         let finalMessages = messages;
 
         let extraBody: Record<string, any> | undefined;
+        const requestedEffort = options?.reasoningEffort ?? config.reasoningEffort ?? 'high';
         const reducedThinkingParams = options?.disableThinking
             ? getReducedThinkingParams(model, providerId, effectiveApiFormat)
             : undefined;
+        const enabledThinkingParams = options?.disableThinking
+            ? undefined
+            : getThinkingParams(model, providerId, effectiveApiFormat, requestedEffort);
 
         if (options?.disableThinking) {
             // Data-driven lookup keeps provider-specific thinking controls out of this flow.
@@ -515,9 +520,8 @@ export class AIService {
                 }
             }
         } else {
-            const thinkingParams = getEnableThinkingParams(model, providerId);
-            if (thinkingParams?.extraBody) {
-                extraBody = { ...(extraBody ?? {}), ...thinkingParams.extraBody } as Record<string, any>;
+            if (enabledThinkingParams?.extraBody) {
+                extraBody = { ...(extraBody ?? {}), ...enabledThinkingParams.extraBody } as Record<string, any>;
             }
         }
 
@@ -541,26 +545,8 @@ export class AIService {
                 request.reasoning_effort = reducedThinkingParams.reasoningEffort;
             }
         } else {
-            const rEffort = getEffectiveReasoningEffort(
-                model,
-                options?.reasoningEffort ?? config.reasoningEffort ?? 'high',
-                effectiveApiFormat
-            );
-            if (providerId === 'deepseek' || providerId === 'openai' || effectiveApiFormat === 'openai-responses') {
-                request.reasoning_effort = rEffort;
-            } else if (providerId === 'claude' || effectiveApiFormat === 'anthropic-messages') {
-                // Consumed by toClaudeRequest: mapped to output_config.effort and
-                // adaptive thinking on models that support them (Fable 5, Opus/Sonnet 4.6+).
-                request.reasoning_effort = rEffort;
-            } else if (providerId === 'qwen' && (lowerModel.includes('qwen3') || lowerModel.includes('qwen-max'))) {
-                request.enable_thinking = true;
-            } else if ((providerId === 'google' || effectiveApiFormat === 'gemini-generate-content') && lowerModel.startsWith('gemini-3')) {
-                const mappedLevel = rEffort === 'max' ? 'high' : rEffort;
-                if (effectiveApiFormat === 'gemini-generate-content') {
-                    request.thinking_config = { thinking_level: mappedLevel };
-                } else {
-                    request.google = { thinking_config: { thinking_level: mappedLevel } };
-                }
+            if (enabledThinkingParams?.reasoningEffort) {
+                request.reasoning_effort = enabledThinkingParams.reasoningEffort;
             }
         }
 

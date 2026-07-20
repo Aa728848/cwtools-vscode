@@ -504,7 +504,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         name: 'Kimi Code Plan (月之暗面)',
         endpoint: 'https://api.kimi.com/coding/v1',
         defaultModel: 'kimi-for-coding',
-        models: ['kimi-for-coding'],
+        models: ['k3', 'kimi-for-coding', 'kimi-for-coding-highspeed'],
         supportsToolUse: true,
         requiresApiKey: true,
         supportsStreaming: true,

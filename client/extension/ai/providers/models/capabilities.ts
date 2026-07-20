@@ -92,7 +92,9 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'mimo-v2.5-free': true,
     'mimo-v2.5': true,
     'kimi-k3': true,
+    'k3': true,
     'kimi-for-coding': true,
+    'kimi-for-coding-highspeed': true,
     'kimi-k2.7-code': true,
     'kimi-k2.6': true,
     'kimi-k2.5': true,
@@ -157,7 +159,9 @@ export const ALWAYS_THINKING_PREFIXES: string[] = [
     'QwQ', 'qwq',
     'Thinking', 'thinking',
     'kimi-k3',
+    'k3',
     'kimi-for-coding',
+    'kimi-for-coding-highspeed',
     'kimi-k2.7-code',
     'phi-4-reasoning',
 ];
@@ -363,6 +367,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'GLM-4': 128000,
     'glm': 128000,
     'kimi-for-coding': 1048576,
+    'k3': 1048576,
     'kimi-k3': 1048576,
     'kimi-k2.7-code-highspeed': 262144,
     'kimi-k2.7-code': 262144,
@@ -507,8 +512,8 @@ export function getModelOutputTokens(model: string, providerId?: string): number
     if (providerId === 'mimo' || providerId === 'mimo-token-plan' || providerId?.includes('mimo') || lower.includes('mimo')) {
         return 131072;
     }
-    if (providerId === 'kimi' || lower.includes('kimi') || lower.includes('moonshot')) {
-        if (lower.includes('kimi-k3') || lower.includes('kimi-for-coding')) return 131072;
+    if (providerId === 'kimi' || providerId === 'kimi-code-plan' || lower.includes('kimi') || lower.includes('moonshot')) {
+        if (lower === 'k3' || lower.includes('kimi-k3') || lower.includes('kimi-for-coding')) return 131072;
         return 32768;
     }
 
@@ -565,9 +570,15 @@ export function getAnthropicModelFeatures(model: string): AnthropicModelFeatures
 
     const opusMinor = lower.match(/claude-opus-(\d+)[.-](\d+)/);
     const opusVer = opusMinor ? Number(opusMinor[1]) + Number(opusMinor[2]) / 10 : 0;
-    const sonnetMinor = lower.match(/claude-sonnet-(\d+)[.-](\d+)/);
-    const sonnetVer = sonnetMinor ? Number(sonnetMinor[1]) + Number(sonnetMinor[2]) / 10 : 0;
+    const sonnetMinor = lower.match(/claude-sonnet-(\d+)(?:[.-](\d+))?/);
+    const sonnetVer = sonnetMinor ? Number(sonnetMinor[1]) + Number(sonnetMinor[2] ?? 0) / 10 : 0;
     const isFable = lower.includes('claude-fable');
+
+    // Sonnet 5 has adaptive thinking on by default, rejects sampling parameters,
+    // and only needs output_config.effort to control depth.
+    if (sonnetVer >= 5) {
+        return { adaptiveThinking: false, thinkingDisplay: false, effort: true, samplingRemoved: true };
+    }
 
     // Fable 5 / Opus 4.7+: adaptive-only thinking, display param, sampling params removed
     if (isFable || opusVer >= 4.7) {

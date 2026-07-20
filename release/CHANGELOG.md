@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.8.28] - 2026-07-20
+
+### 功能与优化 / Features & Optimizations
+- **[功能] 支持GPT PLUS会员登陆**
+  English: Supported GPT PLUS member login.
+
 ## [2.8.27] - 2026-07-19
 
 ### 修复 / Fixes

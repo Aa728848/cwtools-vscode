@@ -208,10 +208,10 @@ For CWT rule authoring, see [CWT Rule Configuration Guide](docs/cwt-rule-config.
 ##### Submodules
 This repository uses two submodules with different roles:
 
-- `submodules/cwtools/`: upstream CWTools F# library used by the language server
+- [`submodules/cwtools/`](submodules/cwtools/README.md): upstream CWTools F# library used by the language server
   for parsing, validation, game semantics, shader support, and scripted-type
   refresh behavior.
-- `submodules/cwtools-stellaris-config/`: Stellaris CWT rule configuration data.
+- [`submodules/cwtools-stellaris-config/`](submodules/cwtools-stellaris-config/README.md): Stellaris CWT rule configuration data.
   Rules sync tooling compares it against game `script_documentation` logs and
   vanilla `common/`; packaging uses its `config/` directory as the fallback
   rules bundle.
@@ -459,8 +459,8 @@ CWT 规则编写说明见 [CWT 规则配置开发指南](docs/cwt-rule-config.md
 ##### 子模块
 本仓库使用两个职责不同的子模块：
 
-- `submodules/cwtools/`：上游 CWTools F# 库，供语言服务器复用解析、校验、游戏语义、Shader 支持和 scripted type 增量刷新等能力。
-- `submodules/cwtools-stellaris-config/`：Stellaris CWT 规则配置数据。规则同步工具会把它与游戏 `script_documentation` 日志和原版 `common/` 对比；打包时使用其中的 `config/` 目录作为 fallback 规则包来源。
+- [`submodules/cwtools/`](submodules/cwtools/README.md)：上游 CWTools F# 库，供语言服务器复用解析、校验、游戏语义、Shader 支持和 scripted type 增量刷新等能力。
+- [`submodules/cwtools-stellaris-config/`](submodules/cwtools-stellaris-config/README.md)：Stellaris CWT 规则配置数据。规则同步工具会把它与游戏 `script_documentation` 日志和原版 `common/` 对比；打包时使用其中的 `config/` 目录作为 fallback 规则包来源。
 
 ##### 📦 插件打包
 生成的 VSIX 会包含自包含的 `win-x64`、`linux-x64` 和 `osx-x64` 服务端。

@@ -2635,16 +2635,15 @@ type Server(client: ILanguageClient) =
         setFileDiagnosticState filePath Stale pendingKinds []
 
     let markFilePendingGlobalRevalidation filePath =
+        // publishDiagnostics replaces a URI's whole list. Keep the client list
+        // untouched until this file has a complete replacement result.
         let retainedDiagnostics =
             existingDiagnosticsForFile filePath
-            |> List.filter DiagnosticMerge.isParserDiagnostic
+            |> DiagnosticMerge.preserveWhilePending
         let pendingKinds =
             refreshDomainsForPath filePath @ [ "types"; "rules" ]
             |> List.distinct
         let version = docs.GetVersionByPath(filePath)
-        client.PublishDiagnostics
-            { uri = diagnosticUri filePath
-              diagnostics = retainedDiagnostics }
         setFileDiagnosticStateWithSnapshot
             filePath
             (nextDiagnosticEpoch ())

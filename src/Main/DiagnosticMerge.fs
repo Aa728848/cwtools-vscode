@@ -43,6 +43,10 @@ let mergeDeferredValidationDiagnostics existing refreshed =
 let mergeDeferredDefinitionDiagnostics existing refreshed =
     replaceDomain isDynamicExpansionDiagnostic existing refreshed
 
+/// A model refresh makes diagnostics pending, not disproven. Keep the last
+/// complete result visible until a validation pass for that file replaces it.
+let preserveWhilePending (existing: Diagnostic list) = existing
+
 /// A per-file lint of a dynamic definition sees the raw template, not every
 /// parameterized call-site expansion. It owns direct/parser diagnostics and
 /// must preserve the expansion diagnostics until deferred validation replaces

@@ -191,7 +191,7 @@ export class MemoryParser {
     }
 
     /**
-     * Append a new memory entry to the .cwtools-ai-memory.md file.
+     * Append a new memory entry to the .cwtools-memory.md file.
      * Auto-creates the file if it doesn't exist.
      * Auto-prunes if the file exceeds the character limit.
      */

@@ -108,7 +108,7 @@ export class WorktreeManager {
         await runGit(['worktree', 'remove', '--force', '--', info.worktreePath], this.workspaceRoot, 60_000);
     }
 
-    /** Registered cwtools-ai worktrees of this repo. */
+    /** Registered agent worktrees of this repo. */
     async list(): Promise<string[]> {
         const { stdout } = await runGit(['worktree', 'list', '--porcelain'], this.workspaceRoot);
         const marker = path.join(this.workspaceRoot, WORKTREE_ROOT).replace(/\\/g, '/').toLowerCase();

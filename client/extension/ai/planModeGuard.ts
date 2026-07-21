@@ -107,7 +107,7 @@ export function isPlanModeCardArtifactFile(filePath: string, workspaceRoot: stri
 
     const lowerSegments = segments.map(s => s.toLowerCase());
     // UI cards and inline diff previews write topic-local temp files such as
-    // .cwtools-ai/<topic>/tmp/artifacts/...; these are not project mutations.
+    // .cwtools/<topic>/tmp/artifacts/...; these are not project mutations.
     if (lowerSegments.includes('tmp') || lowerSegments.includes('artifacts')) return true;
 
     return false;

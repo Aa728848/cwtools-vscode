@@ -73,4 +73,17 @@ describe('ProjectProfile localisation detection', () => {
             cleanupWorkspace(workspaceRoot);
         }
     });
+
+    it('should detect the canonical .cwtools vanilla cache directory', () => {
+        const workspaceRoot = makeWorkspace();
+        try {
+            fs.mkdirSync(path.join(workspaceRoot, '.cwtools'));
+
+            const profile = buildProjectProfile(workspaceRoot);
+
+            expect(profile.validation.vanillaCache).to.equal('configured');
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
 });

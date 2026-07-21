@@ -1585,6 +1585,18 @@ export async function activate(context: ExtensionContext) {
 		aiSemanticWatcher.onDidCreate(uri => toolExecutor.invalidateCacheForFile(uri.fsPath)),
 		aiSemanticWatcher.onDidDelete(uri => toolExecutor.invalidateCacheForFile(uri.fsPath)),
 	);
+	// Frozen system prompts key on CWTOOLS.md / project profile content hashes,
+	// so they miss naturally on edit; this watcher proactively drops the parsed
+	// mtime caches so the next fingerprint reflects current content immediately
+	// (plan §7.1).
+	const aiPromptInputsWatcher = workspace.createFileSystemWatcher('{CWTOOLS.md,.cwtools/project/profile.json,.cwtools-ai/project/profile.json}');
+	const invalidatePromptInputs = () => promptBuilder.invalidateProjectPromptInputs();
+	context.subscriptions.push(
+		aiPromptInputsWatcher,
+		aiPromptInputsWatcher.onDidChange(invalidatePromptInputs),
+		aiPromptInputsWatcher.onDidCreate(invalidatePromptInputs),
+		aiPromptInputsWatcher.onDidDelete(invalidatePromptInputs),
+	);
 	// Backspacing never auto-triggers completion in VS Code (only typed word characters do),
 	// so a mistyped character inside an @variable token would dead-end the suggestion list.
 	// Re-open it when a small deletion leaves the cursor inside an @token. Similarly, typing

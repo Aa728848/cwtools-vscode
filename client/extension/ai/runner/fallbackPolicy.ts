@@ -30,7 +30,7 @@ export async function executeFallbackRetry(
     aiService: AIService,
     messages: ChatMessage[],
     originalProviderId: string,
-    options?: { tools?: ToolDefinition[]; model?: string },
+    options?: { tools?: ToolDefinition[]; model?: string; onAttempt?: () => void },
     emitStep?: (step: AgentStep) => void
 ): Promise<ChatCompletionResponse | null> {
     const fallbacks = PROVIDER_FALLBACK[originalProviderId];
@@ -43,6 +43,7 @@ export async function executeFallbackRetry(
                 content: `Provider fallback: ${originalProviderId} → ${fb.providerId} (${fb.model})`,
                 timestamp: Date.now(),
             });
+            options?.onAttempt?.();
             const response = await aiService.chatCompletion(messages, {
                 tools: options?.tools,
                 providerId: fb.providerId,

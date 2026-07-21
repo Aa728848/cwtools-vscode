@@ -26,6 +26,7 @@
     "test:unit": "npx ts-mocha -p tsconfig.json \"client/test/unit/**/*.test.ts\" && npm run test:rules-sync",
     "test:rules-sync": "ts-mocha -p tools/rules-sync/tsconfig.test.json \"tools/rules-sync/**/*.test.ts\"",
     "test:coverage": "nyc npm run test:unit",
+    "baseline:ai-context": "node tools/perf/ai-context-baseline.mjs",
     "lint": "eslint client/",
     "check:release": "node tools/check-release.js",
     "verify": "npm run lint && npm run compile && npm run test:unit && npm run check:release -- --skip-compile --skip-test"

@@ -65,6 +65,7 @@ const EVENT_GROUP_MAP: Record<string, TimelineGroupId> = {
     'worktree_created': 'files',
     'worktree_diff_collected': 'files',
     'worktree_cleaned': 'files',
+    'evidence_gate_decision': 'validation',
 };
 
 import type { ChatI18nText } from './i18n';

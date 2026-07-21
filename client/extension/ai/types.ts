@@ -313,6 +313,9 @@ export interface ChatCompletionResponse {
         total_tokens: number;
         /** Provider prefix-cache hit tokens (DeepSeek, Claude, etc.) */
         cached_tokens?: number;
+        prompt_tokens_details?: { cached_tokens?: number };
+        prompt_cache_hit_tokens?: number;
+        cached_content_token_count?: number;
         /** Anthropic-only: tokens written into the prompt cache this turn (billed at 1.25x). */
         cache_creation_tokens?: number;
     };
@@ -1074,6 +1077,16 @@ export interface AgentToolContext {
     onStep?: (step: AgentStep) => void;
     onPermissionRequest?: (id: string, tool: string, description: string, command?: string, context?: any) => Promise<boolean>;
     onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
+    /**
+     * Async semantic preflight invoked after a PDX tool has resolved its path
+     * and built the exact complete content, but before confirmation or commit.
+     */
+    onBeforePdxWrite?: (request: {
+        toolName: string;
+        filePath: string;
+        previousContent: string;
+        content: string;
+    }) => Promise<{ allowed: boolean; message?: string }>;
     onTodoUpdate?: (todos: import('./types').TodoItem[]) => void;
     escalation?: boolean;
 }
@@ -1228,6 +1241,7 @@ export type AgentToolName =
     | 'write_localisation'
     // ── Design tools ──
     | 'write_design_blueprint'
+    | 'get_design_blueprint_contract'
     | 'save_workflow'
     // ── Git tools ──
     | 'git_ops'
@@ -1645,6 +1659,24 @@ export interface GetDiagnosticsResult {
 
 // ─── Token Usage & Cost ──────────────────────────────────────────────────────
 
+export type AgentToolStage = 'discovery' | 'design' | 'validation' | 'write' | 'finalize';
+
+/** One completed provider request used for request-accurate cache metrics. */
+export interface CacheRequestUsage {
+    provider: string;
+    model: string;
+    inputTokens: number;
+    cachedTokens: number;
+    cacheCapable: boolean;
+    agentMode?: string;
+    toolStage?: AgentToolStage;
+    promptFingerprint?: string;
+    purpose?: 'reasoning' | 'compaction' | 'fallback' | 'validation' | 'final_summary'
+        | 'routing' | 'approval_review' | 'title';
+    /** Why a cache-capable zero-hit request did not reuse the preceding prefix. */
+    invalidationReason?: string;
+}
+
 export interface TokenUsage {
     /** Total tokens used across all API calls in this generation */
     total: number;
@@ -1664,11 +1696,33 @@ export interface TokenUsage {
     netTotal?: number;
     /** Estimated cost saved by cache hits in CNY, pre-computed during API call */
     cacheSavedCostCny?: number;
+    /** Paid model requests made by the run, including compaction and fallback attempts. */
+    apiCalls?: number;
+    /** Subset of apiCalls used for context compaction. */
+    compactionCalls?: number;
+    /** Subset of apiCalls used for provider fallback attempts. */
+    fallbackCalls?: number;
+    /** Mode/fingerprint metadata for legacy run-level usage consumers. */
+    agentMode?: string;
+    promptFingerprint?: string;
+    toolStage?: AgentToolStage;
+    /** Local frozen-prompt lookup miss attached to the first provider request. */
+    promptCacheMissReason?: string;
+    /** Per-provider-call cache samples; bounded by the request path. */
+    cacheRequests?: CacheRequestUsage[];
 }
 
 export interface AgentRunMetrics {
     /** Number of reasoning loop iterations used by this generation. */
     iterations: number;
+    /** Paid model API calls, including compaction, fallback, and validation retries. */
+    modelCalls: number;
+    /** Model calls used specifically for compaction. */
+    compactionCalls: number;
+    /** Provider fallback attempts. */
+    fallbackCalls: number;
+    /** Input tokens that did not hit a provider cache. */
+    uncachedInputTokens: number;
     /** Maximum reasoning loop iterations allowed for this generation. */
     maxIterations: number;
     /** Total tool calls emitted by the model. */
@@ -1732,6 +1786,8 @@ export interface AgentResumeState {
     transcriptSha256?: string;
     transcriptMessageCount?: number;
     recoveredFromBackup?: boolean;
+    /** A newer checksummed model-request artifact was replayed after the last periodic snapshot. */
+    recoveredFromEventLog?: boolean;
     /** @deprecated V3 never persists session-only approval rules. */
     permissionRules?: import('./runner/permissionPolicy').PermissionRule[];
 }

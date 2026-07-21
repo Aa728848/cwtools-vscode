@@ -33,6 +33,7 @@ import { ErrorReporter } from '../errorReporter';
 import { SOURCE, ORCHESTRATOR_MSG, aiText } from '../messages';
 import { getAgentToolTargetFiles } from '../runner/toolScheduler';
 import { WRITE_TOOLS } from '../tools/registry';
+import { mergeTokenUsageTotals } from '../cacheCapability';
 
 // Type references of AgentRunner and AgentToolExecutor (to avoid circular dependencies, use import type)
 import type { AgentRunner, AgentRunnerOptions } from '../agentRunner';
@@ -231,6 +232,7 @@ export class Orchestrator {
                         emitStep,
                         options
                     );
+                    mergeTokenUsageTotals(result.totalTokenUsage, sweepResult.tokenUsage);
                     
                     if (sweepResult.writtenFiles && sweepResult.writtenFiles.length > 0) {
                         allWrittenFiles.push(...sweepResult.writtenFiles);
@@ -265,6 +267,7 @@ export class Orchestrator {
                         taskGraph,
                         workspaceRoot: this.agentRunner.toolExecutor.workspaceRoot,
                     },
+                    result.totalTokenUsage,
                 );
 
                 if (reviewResult.passed) {
@@ -299,6 +302,7 @@ export class Orchestrator {
                             emitStep,
                             options,
                         );
+                        mergeTokenUsageTotals(result.totalTokenUsage, fixResult.tokenUsage);
                         for (const target of fixResult.writtenFiles) {
                             if (!allWrittenFiles.includes(target)) allWrittenFiles.push(target);
                         }
@@ -317,6 +321,7 @@ export class Orchestrator {
                                 taskGraph,
                                 workspaceRoot: this.agentRunner.toolExecutor.workspaceRoot,
                             },
+                            result.totalTokenUsage,
                         );
                         if (reviewResult.passed) {
                             emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.QG_PASS, timestamp: Date.now() });

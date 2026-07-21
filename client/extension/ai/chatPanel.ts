@@ -31,6 +31,8 @@ import { contentToString } from './types';
 import { AgentRunner } from './agentRunner';
 import { AIService } from './aiService';
 import { UsageTracker } from './usageTracker';
+import { supportsOpenAiStylePrefixCache } from './cacheCapability';
+import { buildProviderCallTokenUsage } from './providerCallUsage';
 import { routeWebviewMessage } from './chat/bridge';
 import { getChatPanelHtml } from './chatHtml';
 import { getAgentManagerHtml } from './agentManagerHtml';
@@ -714,7 +716,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private async inferBuildModeRouteWithModel(text: string): Promise<AgentMode | undefined> {
         try {
-            const response = await this.aiService.chatCompletion([
+            const messages: ChatMessage[] = [
                 {
                     role: 'system',
                     content: 'You are a fast request router for a VS Code coding agent. Return only the requested JSON.',
@@ -723,12 +725,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     role: 'user',
                     content: buildModeRoutingPrompt(text),
                 },
-            ], {
+            ];
+            const startedAt = Date.now();
+            const response = await this.aiService.chatCompletion(messages, {
                 temperature: 0,
                 maxTokens: 80,
                 disableThinking: true,
                 requestTimeoutMs: 10_000,
             });
+            this.recordAuxiliaryProviderUsage(response, messages, 'routing', 'routing', startedAt);
             const content = response.choices?.[0]?.message?.content;
             const raw = typeof content === 'string' ? content : JSON.stringify(content ?? '');
             return parseModelRouteResponse(raw) ?? inferBuildModeRoute(text);
@@ -1096,6 +1101,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.usageTracker.addUsage(config.provider, config.model || 'unknown', result.tokenUsage, {
                     toolCalls: result.runMetrics?.toolCallsByName,
                     topicId: this.topicManager.currentTopic?.id,
+                    cacheCapable: supportsOpenAiStylePrefixCache(config.provider, config.customApiFormat),
                 });
                 this.postMessage({
                     type: 'tokenUsage',
@@ -1112,7 +1118,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const topicId = this.topicManager.currentTopic.id;
                 const replyText = result.explanation || (result.code ? result.code.substring(0, 400) : '');
                 // Non-blocking: run in background, update UI when done
-                this.agentRunner.generateTopicTitle(text, replyText).then(title => {
+                this.agentRunner.generateTopicTitle(text, replyText, {
+                    onUsage: sample => this.usageTracker.addUsage(sample.providerId, sample.model, sample.usage, {
+                        durationMs: sample.durationMs,
+                        topicId,
+                        cacheCapable: sample.cacheCapable,
+                    }),
+                }).then(title => {
                     if (!title) return;
                     const topic = this.topicManager.topics.find(t => t.id === topicId);
                     if (topic) {
@@ -2734,13 +2746,38 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private autoReviewer?: AutoReviewer;
 
+    private recordAuxiliaryProviderUsage(
+        response: import('./types').ChatCompletionResponse,
+        messages: ChatMessage[],
+        agentMode: string,
+        purpose: 'routing' | 'approval_review',
+        startedAt: number,
+    ): void {
+        const config = this.aiService.getConfig();
+        const sample = buildProviderCallTokenUsage(response, messages, {
+            providerId: config.provider,
+            requestedModel: config.model,
+            customApiFormat: config.customApiFormat,
+            agentMode,
+            purpose,
+        });
+        this.usageTracker.addUsage(sample.providerId, sample.model, sample.usage, {
+            durationMs: Date.now() - startedAt,
+            topicId: this.topicManager.currentTopic?.id,
+            cacheCapable: sample.cacheCapable,
+        });
+    }
+
     private getAutoReviewer(): AutoReviewer {
         if (!this.autoReviewer) {
             this.autoReviewer = new AutoReviewer(async (system, user) => {
+                const messages: ChatMessage[] = [{ role: 'system', content: system }, { role: 'user', content: user }];
+                const startedAt = Date.now();
                 const res = await this.aiService.chatCompletion(
-                    [{ role: 'system', content: system }, { role: 'user', content: user }],
+                    messages,
                     { temperature: 0, maxTokens: 300, disableThinking: true, requestTimeoutMs: 30_000 }
                 );
+                this.recordAuxiliaryProviderUsage(res, messages, 'approval_review', 'approval_review', startedAt);
                 const content = res.choices?.[0]?.message?.content;
                 return typeof content === 'string' ? content : JSON.stringify(content ?? '');
             });

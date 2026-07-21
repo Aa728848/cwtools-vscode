@@ -396,6 +396,7 @@ export interface PolicyActivitySnapshot {
     rulesCreated: Array<{ ruleId?: string; tool?: string; commandPrefix?: string[]; createdBy?: string }>;
     reviewerDecisions: { approved: number; denied: number; askUser: number; cacheHits: number };
     sandboxDenials: number;
+    evidenceGate: { decisions: number; allowed: number; blocked: number; overrides: number; degraded: number };
 }
 
 export function reducePolicyActivity(events: AgentRunEvent[]): PolicyActivitySnapshot {
@@ -408,6 +409,7 @@ export function reducePolicyActivity(events: AgentRunEvent[]): PolicyActivitySna
         rulesCreated: [],
         reviewerDecisions: { approved: 0, denied: 0, askUser: 0, cacheHits: 0 },
         sandboxDenials: 0,
+        evidenceGate: { decisions: 0, allowed: 0, blocked: 0, overrides: 0, degraded: 0 },
     };
     for (const ev of events) {
         const p = (ev.payload as Record<string, any>) ?? {};
@@ -436,6 +438,14 @@ export function reducePolicyActivity(events: AgentRunEvent[]): PolicyActivitySna
             case 'subagent_refused':
                 snap.sandboxDenials++;
                 break;
+            case 'evidence_gate_decision': {
+                snap.evidenceGate.decisions++;
+                if (p.verdict === 'allow') snap.evidenceGate.allowed++;
+                else if (p.verdict === 'block') snap.evidenceGate.blocked++;
+                else if (p.verdict === 'override') snap.evidenceGate.overrides++;
+                if (p.degraded === true) snap.evidenceGate.degraded++;
+                break;
+            }
         }
     }
     return snap;

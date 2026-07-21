@@ -5,7 +5,7 @@
 
 import type { ToolDefinition } from '../types';
 
-export const TOOL_DEFINITIONS: ToolDefinition[] = [
+const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
@@ -1632,4 +1632,45 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+];
+
+const detailedBlueprintTool = RAW_TOOL_DEFINITIONS.find(tool => tool.function.name === 'write_design_blueprint');
+if (!detailedBlueprintTool) throw new Error('write_design_blueprint schema is missing');
+
+/** Loaded on demand by get_design_blueprint_contract instead of every model request. */
+export const DESIGN_BLUEPRINT_DETAILED_PARAMETERS = detailedBlueprintTool.function.parameters;
+
+const COMPACT_BLUEPRINT_WRITE_TOOL: ToolDefinition = {
+    type: 'function',
+    function: {
+        name: 'write_design_blueprint',
+        description: 'Validate and save a complete executable design blueprint. First call get_design_blueprint_contract for the detailed versioned contract, then pass the completed object as blueprint. The host validates required sections, evidence, entity edges, task dependencies, and acceptance criteria.',
+        parameters: {
+            type: 'object',
+            properties: {
+                blueprint: {
+                    type: 'object',
+                    description: 'Complete blueprint object conforming to get_design_blueprint_contract.',
+                    additionalProperties: true,
+                },
+            },
+            required: ['blueprint'],
+        },
+    },
+};
+
+const GET_BLUEPRINT_CONTRACT_TOOL: ToolDefinition = {
+    type: 'function',
+    function: {
+        name: 'get_design_blueprint_contract',
+        description: 'Load the detailed versioned JSON Schema for write_design_blueprint on demand. Call only when a connected multi-entity blueprint is actually required.',
+        parameters: { type: 'object', properties: {}, required: [] },
+    },
+};
+
+export const TOOL_DEFINITIONS: ToolDefinition[] = [
+    ...RAW_TOOL_DEFINITIONS.map(tool => tool.function.name === 'write_design_blueprint'
+        ? COMPACT_BLUEPRINT_WRITE_TOOL
+        : tool),
+    GET_BLUEPRINT_CONTRACT_TOOL,
 ];

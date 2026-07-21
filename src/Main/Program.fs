@@ -7669,6 +7669,25 @@ type Server(client: ILanguageClient) =
                                 |> Option.bind (function
                                     | JsonValue.String s when s.Trim() <> "" -> Some (s.Trim())
                                     | _ -> None)
+                            // Optional second argument narrows the lookup to concrete CWT
+                            // entity types. This prevents a same-named technology (or any
+                            // unrelated definition) from being accepted as proof that a
+                            // scripted effect/trigger/event exists.
+                            let expectedTypes =
+                                args
+                                |> List.tryItem 1
+                                |> Option.map (function
+                                    | JsonValue.Array values ->
+                                        values
+                                        |> Array.choose (function
+                                            | JsonValue.String value when value.Trim() <> "" ->
+                                                Some(value.Trim().ToLowerInvariant())
+                                            | _ -> None)
+                                        |> Set.ofArray
+                                    | JsonValue.String value when value.Trim() <> "" ->
+                                        Set.singleton (value.Trim().ToLowerInvariant())
+                                    | _ -> Set.empty)
+                                |> Option.defaultValue Set.empty
                             let result =
                                 match symbolName with
                                 | None ->
@@ -7680,17 +7699,22 @@ type Server(client: ILanguageClient) =
                                     let tryFindInTypes (g: IGame) =
                                         g.Types()
                                         |> Map.toSeq
-                                        |> Seq.tryPick (fun (_typeName, instances) ->
-                                            instances
-                                            |> Array.tryFind (fun td ->
-                                                String.Equals(td.id, name, StringComparison.OrdinalIgnoreCase))
-                                            |> Option.map (fun td ->
-                                                JsonValue.Record
-                                                    [| "name",   JsonValue.String name
-                                                       "file",   JsonValue.String (td.range.FileName.Replace('\\', '/'))
-                                                       "line",   JsonValue.Number(decimal (int td.range.StartLine))
-                                                       "col",    JsonValue.Number(decimal (int td.range.StartColumn))
-                                                       "ok",     JsonValue.Boolean true |]))
+                                        |> Seq.tryPick (fun (typeName, instances) ->
+                                            let normalizedType = typeName.ToLowerInvariant()
+                                            if not expectedTypes.IsEmpty && not (expectedTypes.Contains normalizedType) then
+                                                None
+                                            else
+                                                instances
+                                                |> Array.tryFind (fun td ->
+                                                    String.Equals(td.id, name, StringComparison.OrdinalIgnoreCase))
+                                                |> Option.map (fun td ->
+                                                    JsonValue.Record
+                                                        [| "name",   JsonValue.String name
+                                                           "type",   JsonValue.String typeName
+                                                           "file",   JsonValue.String (td.range.FileName.Replace('\\', '/'))
+                                                           "line",   JsonValue.Number(decimal (int td.range.StartLine))
+                                                           "col",    JsonValue.Number(decimal (int td.range.StartColumn))
+                                                           "ok",     JsonValue.Boolean true |]))
 
                                     // Phase 2: Fallback to full AllEntities scan (for non-typed symbols)
                                     let tryFindInGame (g: IGame<'T>) =
@@ -7712,11 +7736,13 @@ type Server(client: ILanguageClient) =
                                     let found =
                                         (gameObj |> Option.bind tryFindInTypes)
                                         |> Option.orElse (
-                                            let visitor = 
-                                                { new IGameVisitor<_> with 
-                                                    member this.Visit game = tryFindInGame game 
-                                                }
-                                            gameDispatcher.Dispatch visitor |> Option.flatten
+                                            if expectedTypes.IsEmpty then
+                                                let visitor =
+                                                    { new IGameVisitor<_> with
+                                                        member this.Visit game = tryFindInGame game }
+                                                gameDispatcher.Dispatch visitor |> Option.flatten
+                                            else
+                                                None
                                         )
                                     match found with
                                     | Some json -> json
@@ -7725,9 +7751,16 @@ type Server(client: ILanguageClient) =
                                         | None ->
                                             JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
                                         | Some _ ->
+                                            let expectedTypeList =
+                                                expectedTypes
+                                                |> Seq.toList
+                                                |> String.concat ", "
+                                            let expectedHint =
+                                                if expectedTypes.IsEmpty then ""
+                                                else $" with expected type [{expectedTypeList}]"
                                             JsonValue.Record
                                                 [| "ok",    JsonValue.Boolean false
-                                                   "error", JsonValue.String $"Symbol '{name}' not found. Try query_scripted_effects or query_scripted_triggers with a filter instead." |]
+                                                   "error", JsonValue.String $"Symbol '{name}' was not found{expectedHint}. Try query_scripted_effects or query_scripted_triggers with a filter instead." |]
                             Some result
 
                         // - cwtools.ai.exploreProject -

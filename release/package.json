@@ -1028,6 +1028,22 @@
                     "default": "auto",
                     "description": "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.description%"
                 },
+                "stellarisLanguageServices.ai.evidenceGate.mode": {
+                    "scope": "window",
+                    "type": "string",
+                    "enum": [
+                        "off",
+                        "shadow",
+                        "enforce"
+                    ],
+                    "enumDescriptions": [
+                        "%configuration.stellarisLanguageServices.ai.evidenceGate.mode.enum.off%",
+                        "%configuration.stellarisLanguageServices.ai.evidenceGate.mode.enum.shadow%",
+                        "%configuration.stellarisLanguageServices.ai.evidenceGate.mode.enum.enforce%"
+                    ],
+                    "default": "enforce",
+                    "description": "%configuration.stellarisLanguageServices.ai.evidenceGate.mode.description%"
+                },
                 "stellarisLanguageServices.ai.approvals.reviewer": {
                     "scope": "window",
                     "type": "string",
@@ -1608,6 +1624,55 @@
                     "type": "boolean",
                     "default": false,
                     "description": "%configuration.stellarisLanguageServices.ai.performance.includeFullSmallFiles.description%"
+                },
+                "stellarisLanguageServices.ai.performance.compactionMinIntervalSeconds": {
+                    "scope": "window",
+                    "type": "number",
+                    "default": 60,
+                    "minimum": 0,
+                    "description": "%configuration.stellarisLanguageServices.ai.performance.compactionMinIntervalSeconds.description%"
+                },
+                "stellarisLanguageServices.ai.performance.modelCallBudget": {
+                    "scope": "window",
+                    "type": "number",
+                    "default": 64,
+                    "minimum": 1,
+                    "description": "%configuration.stellarisLanguageServices.ai.performance.modelCallBudget.description%"
+                },
+                "stellarisLanguageServices.ai.performance.wallTimeBudgetMinutes": {
+                    "scope": "window",
+                    "type": "number",
+                    "default": 20,
+                    "minimum": 1,
+                    "description": "%configuration.stellarisLanguageServices.ai.performance.wallTimeBudgetMinutes.description%"
+                },
+                "stellarisLanguageServices.ai.performance.uncachedInputTokenBudget": {
+                    "scope": "window",
+                    "type": "number",
+                    "default": 300000,
+                    "minimum": 1000,
+                    "description": "%configuration.stellarisLanguageServices.ai.performance.uncachedInputTokenBudget.description%"
+                },
+                "stellarisLanguageServices.ai.performance.subAgentModelCallBudget": {
+                    "scope": "window",
+                    "type": "number",
+                    "default": 24,
+                    "minimum": 1,
+                    "description": "%configuration.stellarisLanguageServices.ai.performance.subAgentModelCallBudget.description%"
+                },
+                "stellarisLanguageServices.ai.performance.subAgentWallTimeBudgetMinutes": {
+                    "scope": "window",
+                    "type": "number",
+                    "default": 8,
+                    "minimum": 1,
+                    "description": "%configuration.stellarisLanguageServices.ai.performance.subAgentWallTimeBudgetMinutes.description%"
+                },
+                "stellarisLanguageServices.ai.performance.subAgentUncachedInputTokenBudget": {
+                    "scope": "window",
+                    "type": "number",
+                    "default": 100000,
+                    "minimum": 1000,
+                    "description": "%configuration.stellarisLanguageServices.ai.performance.subAgentUncachedInputTokenBudget.description%"
                 }
             }
         },

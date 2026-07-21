@@ -2,26 +2,45 @@ import type { ChatMessage, AgentStep, TokenUsage } from '../types';
 import type { AgentRunnerOptions } from '../agentRunner';
 import { contentToString } from '../types';
 import { getModelContextTokens, getProvider } from '../providers';
-import { getModelPricing } from '../pricing';
+import { getCacheDiscountFactor, getModelPricing } from '../pricing';
 import { AGENT } from '../messages';
 import type { AIService } from '../aiService';
 import type { PromptBuilder } from '../promptBuilder';
 import { OutputRepetitionDetector } from './outputRepetitionDetector';
 import { estimateTokenCount, CHARS_PER_TOKEN } from '../agentRunner';
-import { normalizeTranscriptForPersistence, splitTranscriptForCompaction } from './contextTranscript';
+import { cloneChatMessage, normalizeTranscriptForPersistence, splitTranscriptForCompaction } from './contextTranscript';
+import type { CompactionTranscriptSplit } from './contextTranscript';
+import * as crypto from 'crypto';
+import { appendCacheRequestUsage, isCacheCapableUsage } from '../cacheCapability';
 
 // Leave room for the system prompt, tool schemas, the current turn, and output.
 // Both Codex and Claude Code compact before the model's hard context boundary.
+// High watermark: automatic compaction triggers at this fraction of the window.
 export const COMPACTION_THRESHOLD_RATIO = 0.80;
+// Low watermark: compaction shrinks the retained tail until the projected
+// post-compaction request fits under this fraction, so the high watermark is
+// not immediately re-armed by the next turn.
+export const COMPACTION_TARGET_RATIO = 0.60;
 // Default context limit if unknown
 export const DEFAULT_CONTEXT_LIMIT = 128000;
-// How many recent messages to keep un-compressed during compaction
+// Upper bound on recent messages kept un-compressed during compaction; the
+// low-watermark target may shrink the retained tail below this count.
 export const COMPACTION_KEEP_LAST_N = 8;
 // Mid-loop compaction: check every N iterations within reasoningLoop
 export const MID_LOOP_COMPACTION_INTERVAL = 3;
 // Mid-loop compaction triggers at this fraction of context limit
 export const MID_LOOP_COMPACTION_RATIO = 0.78;
+// Minimum spacing between two paid automatic compactions; near-threshold
+// histories would otherwise recompact on every turn with barely-changed content.
+export const AUTO_COMPACTION_MIN_INTERVAL_MS = 60_000;
 const MIN_HISTORY_TOKENS_FOR_AUTO_COMPACTION = 2_048;
+// Reserve for the generated summary when projecting post-compaction tokens.
+const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
+// Above this fraction of the window the minimum-interval throttle never skips
+// an automatic compaction, so near-full contexts still compact on time.
+const AUTO_COMPACTION_THROTTLE_BYPASS_RATIO = 0.92;
+// Bounded cache of recent compaction results keyed by transcript fingerprint.
+const COMPACTION_SUMMARY_CACHE_CAPACITY = 4;
 
 const COMPACTION_SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the section order unchanged:
 
@@ -66,11 +85,22 @@ export interface CompactionDependencies {
     promptBuilder: PromptBuilder;
 }
 
+export interface AutoCompactionThrottle {
+    /** Timestamp (ms) of the last completed paid automatic compaction; 0 = never. */
+    lastAutoCompactionAt: number;
+    /** Minimum spacing between two paid automatic compactions. */
+    minIntervalMs: number;
+}
+
 export interface CompactionBudgetOptions {
     /** Tokens outside conversation history: system/context messages and tool schemas. */
     reservedTokens?: number;
     /** Force a compact pass even when the normal threshold has not been reached. */
     force?: boolean;
+    /** Cancels the paid summarization request when the owning turn is aborted. */
+    abortSignal?: AbortSignal;
+    /** Shared throttle state for automatic compaction; ignored when force is set. */
+    autoThrottle?: AutoCompactionThrottle;
 }
 
 export function resolveCompactionContextLimit(
@@ -152,18 +182,9 @@ function buildSafeFallbackTail(history: ChatMessage[], count: number): ChatMessa
     ]);
 }
 
-export async function maybeCompactHistory(
-    history: ChatMessage[],
-    emitStep: (step: AgentStep) => void,
-    deps: CompactionDependencies,
-    options?: AgentRunnerOptions,
-    tokenAccumulator?: TokenUsage,
-    thresholdRatio: number = COMPACTION_THRESHOLD_RATIO,
-    budgetOptions: CompactionBudgetOptions = {},
-): Promise<ChatMessage[]> {
-    const canonicalHistory = normalizeTranscriptForPersistence(history);
-    // Estimate total token usage using CJK-aware estimation.
-    const estimatedTokens = canonicalHistory.reduce((sum, m) => {
+/** Estimate total token usage using CJK-aware estimation. */
+function estimateMessagesTokens(messages: ChatMessage[]): number {
+    return messages.reduce((sum, m) => {
         if (typeof m.content === 'string') return sum + estimateTokenCount(m.content);
         if (Array.isArray(m.content)) {
             return sum + (m.content as import('../types').ContentPart[]).reduce((s, part) => {
@@ -177,6 +198,36 @@ export async function maybeCompactHistory(
         }
         return sum;
     }, 0);
+}
+
+const compactionSummaryCache = new Map<string, ChatMessage[]>();
+
+/** Clear the summary-reuse cache (used by tests; production code never needs to). */
+export function clearCompactionSummaryCache(): void {
+    compactionSummaryCache.clear();
+}
+
+/** Fingerprint the canonical transcript so an unchanged history reuses its summary. */
+function fingerprintTranscript(messages: ChatMessage[]): string {
+    const hash = crypto.createHash('sha256');
+    for (const message of messages) {
+        hash.update(JSON.stringify(message));
+        hash.update('\u0000');
+    }
+    return hash.digest('hex');
+}
+
+export async function maybeCompactHistory(
+    history: ChatMessage[],
+    emitStep: (step: AgentStep) => void,
+    deps: CompactionDependencies,
+    options?: AgentRunnerOptions,
+    tokenAccumulator?: TokenUsage,
+    thresholdRatio: number = COMPACTION_THRESHOLD_RATIO,
+    budgetOptions: CompactionBudgetOptions = {},
+): Promise<ChatMessage[]> {
+    const canonicalHistory = normalizeTranscriptForPersistence(history);
+    const estimatedTokens = estimateMessagesTokens(canonicalHistory);
     if (estimatedTokens === 0 || (!budgetOptions.force && estimatedTokens < MIN_HISTORY_TOKENS_FOR_AUTO_COMPACTION)) {
         return canonicalHistory;
     }
@@ -193,6 +244,39 @@ export async function maybeCompactHistory(
         return canonicalHistory;
     }
 
+    // Minimum-interval guard for automatic compaction. Forced callers
+    // (mid-loop, emergency, manual) are never throttled, and near-full
+    // contexts bypass the guard so context safety is preserved.
+    const throttle = budgetOptions.autoThrottle;
+    if (
+        !budgetOptions.force
+        && throttle
+        && throttle.lastAutoCompactionAt > 0
+        && Date.now() - throttle.lastAutoCompactionAt < throttle.minIntervalMs
+        && estimatedRequestTokens <= Math.floor(modelLimit * AUTO_COMPACTION_THROTTLE_BYPASS_RATIO)
+    ) {
+        return canonicalHistory;
+    }
+
+    // Reuse the previous compaction when the transcript has not changed since:
+    // re-summarizing identical history buys nothing but costs a full LLM call.
+    const cacheKey = `${providerId}:${model ?? ''}:${modelLimit}:${Math.max(0, budgetOptions.reservedTokens ?? 0)}:${fingerprintTranscript(canonicalHistory)}`;
+    const cached = compactionSummaryCache.get(cacheKey);
+    if (cached) {
+        emitStep({
+            type: 'compaction',
+            content: AGENT.COMPACTION_REUSED(cached.length),
+            timestamp: Date.now(),
+            compactionInfo: {
+                state: 'complete',
+                kind: 'history',
+                beforeTokens: estimatedRequestTokens,
+                thresholdTokens: compactionThreshold,
+            },
+        });
+        return cached.map(cloneChatMessage);
+    }
+
     emitStep({
         type: 'compaction',
         content: AGENT.COMPACTION_START(estimatedRequestTokens, compactionThreshold),
@@ -206,8 +290,21 @@ export async function maybeCompactHistory(
     });
 
     try {
-        const keepN = Math.min(COMPACTION_KEEP_LAST_N, Math.max(1, canonicalHistory.length - 1));
-        const split = splitTranscriptForCompaction(canonicalHistory, keepN);
+        // Low-watermark target: shrink the retained tail until the projected
+        // post-compaction request fits under COMPACTION_TARGET_RATIO, so the
+        // high watermark is not re-armed immediately after compacting.
+        const targetRequestTokens = Math.floor(modelLimit * COMPACTION_TARGET_RATIO);
+        const projectRequestTokens = (candidate: CompactionTranscriptSplit): number =>
+            Math.max(0, budgetOptions.reservedTokens ?? 0)
+            + estimateMessagesTokens(candidate.persistentSystemMessages)
+            + estimateMessagesTokens(candidate.recentMessages)
+            + COMPACTION_SUMMARY_RESERVE_TOKENS;
+        let keepN = Math.min(COMPACTION_KEEP_LAST_N, Math.max(1, canonicalHistory.length - 1));
+        let split = splitTranscriptForCompaction(canonicalHistory, keepN);
+        while (keepN > 1 && projectRequestTokens(split) > targetRequestTokens) {
+            keepN -= 1;
+            split = splitTranscriptForCompaction(canonicalHistory, keepN);
+        }
         const persistentSystemMessages = split.persistentSystemMessages;
         let olderMessages = split.olderMessages;
         const recentMessages = split.recentMessages;
@@ -271,24 +368,72 @@ export async function maybeCompactHistory(
             { role: 'user', content: compactionInstruction },
         ];
 
+        // Fail fast before the paid request when the turn was already aborted,
+        // and propagate the signal so an in-flight compaction is cancelled too.
+        budgetOptions.abortSignal?.throwIfAborted();
+        if (tokenAccumulator) {
+            tokenAccumulator.apiCalls = (tokenAccumulator.apiCalls ?? 0) + 1;
+            tokenAccumulator.compactionCalls = (tokenAccumulator.compactionCalls ?? 0) + 1;
+        }
         const compactionResponse = await deps.aiService.chatCompletion(compactionMessages, {
             temperature: 0.1,
             maxTokens: 2048,
             providerId,
             model,
+            abortSignal: budgetOptions.abortSignal,
         });
 
-        if (tokenAccumulator && compactionResponse.usage) {
-            const pricing = getModelPricing(compactionResponse.model ?? model ?? '', providerId);
-            tokenAccumulator.input += compactionResponse.usage.prompt_tokens;
-            tokenAccumulator.output += compactionResponse.usage.completion_tokens;
-            tokenAccumulator.total += compactionResponse.usage.total_tokens;
+        const summary = contentToString(compactionResponse.choices?.[0]?.message?.content);
+        if (tokenAccumulator) {
+            const responseModel = compactionResponse.model ?? model ?? 'unknown';
+            const promptTokens = compactionResponse.usage?.prompt_tokens ?? estimateMessagesTokens(compactionMessages);
+            const completionTokens = compactionResponse.usage?.completion_tokens ?? estimateTokenCount(summary);
+            const totalTokens = compactionResponse.usage?.total_tokens ?? promptTokens + completionTokens;
+            const usage = compactionResponse.usage as (typeof compactionResponse.usage & {
+                prompt_tokens_details?: { cached_tokens?: number };
+                prompt_cache_hit_tokens?: number;
+                cache_read_input_tokens?: number;
+                cached_content_token_count?: number;
+            }) | undefined;
+            const cachedTokens = usage?.cached_tokens
+                ?? usage?.prompt_tokens_details?.cached_tokens
+                ?? usage?.prompt_cache_hit_tokens
+                ?? usage?.cache_read_input_tokens
+                ?? usage?.cached_content_token_count
+                ?? 0;
+            const uncachedInputTokens = Math.max(0, promptTokens - cachedTokens);
+            const pricing = getModelPricing(responseModel, providerId);
+            const cacheDiscount = getCacheDiscountFactor(responseModel, providerId);
+            tokenAccumulator.input += promptTokens;
+            tokenAccumulator.output += completionTokens;
+            tokenAccumulator.total += totalTokens;
             tokenAccumulator.estimatedCostCny +=
-                (compactionResponse.usage.prompt_tokens / 1_000_000) * pricing[0] +
-                (compactionResponse.usage.completion_tokens / 1_000_000) * pricing[1];
+                (uncachedInputTokens / 1_000_000) * pricing[0] +
+                (cachedTokens / 1_000_000) * pricing[0] * cacheDiscount +
+                (completionTokens / 1_000_000) * pricing[1];
+            tokenAccumulator.cachedTokens = (tokenAccumulator.cachedTokens ?? 0) + cachedTokens;
+            tokenAccumulator.netInput = (tokenAccumulator.netInput ?? 0) + uncachedInputTokens;
+            tokenAccumulator.netTotal = (tokenAccumulator.netTotal ?? 0) + uncachedInputTokens + completionTokens;
+            tokenAccumulator.cacheSavedCostCny = (tokenAccumulator.cacheSavedCostCny ?? 0)
+                + (cachedTokens / 1_000_000) * pricing[0] * (1 - cacheDiscount);
+            const customFormat = deps.aiService.getConfig().provider === providerId
+                ? deps.aiService.getConfig().customApiFormat
+                : undefined;
+            const cacheCapable = isCacheCapableUsage(providerId, cachedTokens, customFormat);
+            appendCacheRequestUsage(tokenAccumulator, {
+                provider: providerId,
+                model: responseModel,
+                inputTokens: promptTokens,
+                cachedTokens,
+                cacheCapable,
+                agentMode: tokenAccumulator.agentMode,
+                toolStage: tokenAccumulator.toolStage,
+                promptFingerprint: fingerprintTranscript(compactionMessages).slice(0, 24),
+                purpose: 'compaction',
+                invalidationReason: cacheCapable && cachedTokens === 0 ? 'provider_miss' : undefined,
+            });
         }
 
-        const summary = contentToString(compactionResponse.choices?.[0]?.message?.content);
         const summaryRepetition = new OutputRepetitionDetector().append(summary);
         if (summaryRepetition) {
             throw new Error(`Compaction summary entered a repeated-output cycle (${summaryRepetition.cycleChars} chars).`);
@@ -311,7 +456,7 @@ export async function maybeCompactHistory(
                 },
             });
 
-            return normalizeTranscriptForPersistence([
+            const compacted = normalizeTranscriptForPersistence([
                 ...persistentSystemMessages,
                 {
                     role: 'user',
@@ -323,6 +468,16 @@ export async function maybeCompactHistory(
                 },
                 ...recentMessages,
             ]);
+            // Cache a private copy: callers mutate the returned array in place.
+            compactionSummaryCache.set(cacheKey, compacted.map(cloneChatMessage));
+            if (compactionSummaryCache.size > COMPACTION_SUMMARY_CACHE_CAPACITY) {
+                const oldestKey = compactionSummaryCache.keys().next().value;
+                if (oldestKey !== undefined) compactionSummaryCache.delete(oldestKey);
+            }
+            if (!budgetOptions.force && throttle) {
+                throttle.lastAutoCompactionAt = Date.now();
+            }
+            return compacted;
         }
     } catch (e) {
         emitStep({

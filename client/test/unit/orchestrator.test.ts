@@ -762,12 +762,39 @@ describe('approved blueprint dispatch', () => {
         const executor = new AgentToolExecutor({ onNotification: () => undefined, sendNotification: () => undefined } as any, root);
         executor.parentAgentRunner = { run: async () => undefined } as any;
         let capturedGraph: import('../../extension/ai/orchestrator/types').TaskGraph | undefined;
+        const parentUsage: import('../../extension/ai/types').TokenUsage = {
+            total: 10,
+            input: 8,
+            output: 2,
+            estimatedCostCny: 0.01,
+            apiCalls: 1,
+        };
         const originalExecute = Orchestrator.prototype.execute;
         (Orchestrator.prototype as any).execute = async (graph: import('../../extension/ai/orchestrator/types').TaskGraph) => {
             capturedGraph = graph;
             return {
                 success: true, summary: 'ok', agentResults: new Map(),
-                totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                totalTokenUsage: {
+                    total: 120,
+                    input: 100,
+                    output: 20,
+                    estimatedCostCny: 0.2,
+                    cachedTokens: 40,
+                    netInput: 60,
+                    netTotal: 80,
+                    apiCalls: 2,
+                    cacheRequests: [{
+                        provider: 'deepseek',
+                        model: 'deepseek-chat',
+                        inputTokens: 100,
+                        cachedTokens: 40,
+                        cacheCapable: true,
+                        agentMode: 'build',
+                        toolStage: 'write',
+                        promptFingerprint: 'child-fp',
+                        purpose: 'reasoning',
+                    }],
+                },
                 failedNodes: [], cancelledNodes: [],
             };
         };
@@ -775,10 +802,23 @@ describe('approved blueprint dispatch', () => {
         try {
             const result = await executor.execute('dispatch_agents', { blueprintFile }, {
                 runnerOptions: { mode: 'script', abortSignal: new AbortController().signal },
+                tokenAccumulator: parentUsage,
             } as any) as any;
             expect(result.success).to.equal(true);
             expect(capturedGraph?.metadata.featureManifest?.objective).to.equal('Build approved event');
             expect(capturedGraph?.nodes.get('build_event')?.produces?.[0].id).to.equal('approved.1');
+            expect(parentUsage).to.include({
+                total: 130,
+                input: 108,
+                output: 22,
+                estimatedCostCny: 0.21000000000000002,
+                cachedTokens: 40,
+                netInput: 60,
+                netTotal: 80,
+                apiCalls: 3,
+            });
+            expect(parentUsage.cacheRequests).to.have.length(1);
+            expect(parentUsage.cacheRequests?.[0]?.promptFingerprint).to.equal('child-fp');
         } finally {
             (Orchestrator.prototype as any).execute = originalExecute;
             fs.rmSync(root, { recursive: true, force: true });
@@ -905,6 +945,65 @@ describe('Orchestrator runtime safety', () => {
 
         expect(result.success).to.equal(true);
         expect(maxActive).to.equal(2);
+    });
+
+    it('executeGraph: preserves child cache and request-level usage in totals', async () => {
+        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const graph = TaskGraphEngine.createGraph('usage aggregation');
+        TaskGraphEngine.addNode(graph, 'A', 'build', 'build A');
+
+        const result = await executor.executeGraph(
+            graph,
+            new Blackboard(),
+            async () => ({
+                nodeId: 'A',
+                success: true,
+                output: 'ok',
+                tokenUsage: {
+                    total: 120,
+                    input: 100,
+                    output: 20,
+                    estimatedCostCny: 0.2,
+                    cachedTokens: 40,
+                    netInput: 60,
+                    netTotal: 80,
+                    cacheSavedCostCny: 0.05,
+                    apiCalls: 2,
+                    compactionCalls: 1,
+                    fallbackCalls: 1,
+                    cacheRequests: [{
+                        provider: 'deepseek',
+                        model: 'deepseek-chat',
+                        inputTokens: 100,
+                        cachedTokens: 40,
+                        cacheCapable: true,
+                        agentMode: 'build',
+                        toolStage: 'write',
+                        promptFingerprint: 'child-fp',
+                        purpose: 'reasoning',
+                    }],
+                },
+                writtenFiles: [],
+                stepCount: 1,
+            }),
+            {},
+        );
+
+        expect(result.totalTokenUsage).to.include({
+            total: 120,
+            input: 100,
+            output: 20,
+            estimatedCostCny: 0.2,
+            cachedTokens: 40,
+            netInput: 60,
+            netTotal: 80,
+            cacheSavedCostCny: 0.05,
+            apiCalls: 2,
+            compactionCalls: 1,
+            fallbackCalls: 1,
+        });
+        expect(result.totalTokenUsage.cacheRequests).to.have.length(1);
+        expect(result.totalTokenUsage.cacheRequests?.[0]?.promptFingerprint).to.equal('child-fp');
     });
 
     it('executeGraph: serializes ready nodes that declare the same planned entity', async () => {
@@ -1280,8 +1379,29 @@ describe('QualityGate', () => {
                     validationErrors: [],
                     retryCount: 0,
                     steps: [],
+                    tokenUsage: {
+                        total: 120,
+                        input: 100,
+                        output: 20,
+                        estimatedCostCny: 0.2,
+                        cachedTokens: 40,
+                        netInput: 60,
+                        netTotal: 80,
+                        apiCalls: 2,
+                        cacheRequests: [{
+                            provider: 'deepseek', model: 'deepseek-chat', inputTokens: 100, cachedTokens: 40,
+                            cacheCapable: true, agentMode: 'script_reviewer', toolStage: 'validation',
+                            promptFingerprint: 'review-fp', purpose: 'reasoning',
+                        }],
+                    },
                 };
             },
+        };
+        const usage: import('../../extension/ai/types').TokenUsage = {
+            total: 0,
+            input: 0,
+            output: 0,
+            estimatedCostCny: 0,
         };
 
         const result = await new QualityGate().reviewOutput(
@@ -1289,6 +1409,7 @@ describe('QualityGate', () => {
             ['package.json'],
             { onStep: step => reviewSteps.push(step) },
             { taskGraph: graph, workspaceRoot: process.cwd() },
+            usage,
         );
 
         expect(result.passed).to.equal(false);
@@ -1300,6 +1421,17 @@ describe('QualityGate', () => {
         expect(reviewerOptions.abortSignal).to.be.instanceOf(AbortSignal);
         expect(reviewSteps.map(step => step.type)).to.deep.equal(['subtask_start', 'subtask_complete']);
         expect(reviewSteps.every(step => step.agentId === 'quality_gate_review')).to.equal(true);
+        expect(usage).to.include({
+            total: 120,
+            input: 100,
+            output: 20,
+            estimatedCostCny: 0.2,
+            cachedTokens: 40,
+            netInput: 60,
+            netTotal: 80,
+            apiCalls: 2,
+        });
+        expect(usage.cacheRequests?.[0]?.promptFingerprint).to.equal('review-fp');
     });
 
     it('reviewOutput stops promptly when the parent run is cancelled', async () => {

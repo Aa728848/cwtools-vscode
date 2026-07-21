@@ -81,6 +81,7 @@ describe('AI Workflow Registry', () => {
     it('event-chain-design includes write_design_blueprint', () => {
         const wf = getWorkflow('event-chain-design')!;
         expect(wf.toolPolicy.tools).to.include('write_design_blueprint');
+        expect(wf.toolPolicy.tools).to.include('get_design_blueprint_contract');
     });
 
     it('event-chain-design includes common review and reward planning gates', () => {

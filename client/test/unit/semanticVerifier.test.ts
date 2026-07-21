@@ -111,6 +111,33 @@ describe('SemanticVerifier', () => {
         expect(result.acceptanceFailures).to.deep.equal([]);
     });
 
+    it('proves a declared event-to-scripted-effect edge in the repository sample mod corpus', async () => {
+        const sampleRoot = path.resolve(__dirname, '..', 'sample');
+        const eventFile = path.join(sampleRoot, 'events', 'irm_faction.txt');
+        const effectFile = path.join(sampleRoot, 'common', 'scripted_effects', 'irm_scripted_effects.txt');
+        const graph = TaskGraphEngine.createGraph('verify IRM faction leader chain', {
+            objective: 'Verify the checked-in sample mod event calls its scripted effect',
+            requiredEdges: [
+                { from: 'irm_faction.2', relation: 'call', to: 'faction_set_leader' },
+            ],
+            acceptanceCriteria: [
+                { id: 'sample_event_exists', description: 'Sample event exists', type: 'entity_exists', subject: 'irm_faction.2' },
+                { id: 'sample_effect_referenced', description: 'Sample scripted effect is called', type: 'entity_referenced', subject: 'faction_set_leader' },
+            ],
+        });
+
+        const result = await new SemanticVerifier().verify(sampleRoot, [eventFile, effectFile], graph);
+        const edgeEvidence = result.evidence.filter(item =>
+            (item.id === 'irm_faction.2' && item.operation === 'define')
+            || (item.id === 'faction_set_leader' && (item.operation === 'define' || item.operation === 'call')));
+
+        expect(edgeEvidence.some(item => item.id === 'irm_faction.2' && item.operation === 'define')).to.equal(true);
+        expect(edgeEvidence.some(item => item.id === 'faction_set_leader' && item.operation === 'define')).to.equal(true);
+        expect(edgeEvidence.some(item => item.id === 'faction_set_leader' && item.operation === 'call')).to.equal(true);
+        expect(result.issues.some(issue => issue.code === 'missing_required_edge')).to.equal(false, result.report);
+        expect(result.acceptanceFailures).to.deep.equal([]);
+    });
+
     it('detects duplicated responsibility between an event and its scripted effect', async () => {
         const eventFile = path.join(root, 'events', 'duplicate.txt');
         const effectFile = path.join(root, 'common', 'scripted_effects', 'duplicate.txt');
@@ -124,4 +151,3 @@ describe('SemanticVerifier', () => {
         expect(result.issues.some(issue => issue.code === 'duplicate_responsibility')).to.equal(true);
     });
 });
-

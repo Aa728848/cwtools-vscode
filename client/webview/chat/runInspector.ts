@@ -122,6 +122,32 @@ export function formatEventPayload(event: any, i18n?: ChatI18nText): string {
         return html;
     }
 
+    if (event.type === 'evidence_gate_decision') {
+        const verdict = String(payload.verdict || '');
+        const verdictIcon = verdict === 'allow' ? svgIcon('check') : verdict === 'override' ? svgIcon('shield') : svgIcon('x');
+        let html = `<div class="inspector-evidence-gate">`;
+        html += `<h4>${verdictIcon} ${tt('Evidence gate', '证据门禁')}: ${escapeHtml(verdict)}${payload.degraded ? ` (${tt('degraded', '降级')})` : ''}${payload.fromCache ? ` (${tt('cached', '缓存')})` : ''}</h4>`;
+        html += `<div class="inspector-section"><strong>${tt('Target', '目标')}:</strong> <code>${escapeHtml(String(payload.target || ''))}</code> · ${escapeHtml(String(payload.tool || ''))} · ${escapeHtml(String(payload.mode || ''))} · ${Number(payload.durationMs ?? 0)}ms</div>`;
+        const counts = payload.counts;
+        if (counts && typeof counts === 'object') {
+            html += `<div class="inspector-section"><strong>${tt('Claims', '声明')}:</strong> ${tt('verified', '已验证')} ${Number(counts.verified ?? 0)} / ${tt('unknown', '未知')} ${Number(counts.unknown ?? 0)} / ${tt('conflict', '冲突')} ${Number(counts.conflict ?? 0)} / ${tt('stale', '过期')} ${Number(counts.stale ?? 0)}</div>`;
+        }
+        if (Array.isArray(payload.blockingClaims) && payload.blockingClaims.length > 0) {
+            html += `<div class="inspector-section"><strong>${tt('Blocking claims', '阻断性声明')}:</strong><ul>${payload.blockingClaims.map((c: any) => `<li><code>[${escapeHtml(String(c?.kind ?? ''))}/${escapeHtml(String(c?.status ?? ''))}]</code> ${escapeHtml(String(c?.claim ?? ''))}</li>`).join('')}</ul></div>`;
+        }
+        if (Array.isArray(payload.missingEvidence) && payload.missingEvidence.length > 0) {
+            const queries = payload.missingEvidence.flatMap((m: any) => Array.isArray(m?.suggestedQueries) ? m.suggestedQueries : []);
+            if (queries.length > 0) {
+                html += `<div class="inspector-section"><strong>${tt('Suggested queries', '建议查询')}:</strong><ul>${queries.map((q: unknown) => `<li><code>${escapeHtml(String(q))}</code></li>`).join('')}</ul></div>`;
+            }
+        }
+        if (payload.artifactRef) {
+            html += `<div class="inspector-section"><a class="open-result-link" data-path="${escapeHtml(String(payload.artifactRef))}" href="#">${svgIcon('folder')} ${t?.openFullContent ?? 'Open full content'}</a></div>`;
+        }
+        html += `</div>`;
+        return html;
+    }
+
     if (event.type === 'reviewer_decision' || event.type === 'approval_rule_created') {
         let html = `<div class="inspector-policy">`;
         if (event.type === 'reviewer_decision') {

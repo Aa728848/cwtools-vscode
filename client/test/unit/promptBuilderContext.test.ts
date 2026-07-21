@@ -174,6 +174,54 @@ describe('PromptBuilder context budgeting', () => {
         }
     });
 
+    it('ranks dynamic memory by the current task and active path scope', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const workspaceRoot = makeWorkspace();
+        try {
+            const topicId = 'topic-memory-relevance';
+            const topicDir = path.join(workspaceRoot, '.cwtools', topicId);
+            fs.mkdirSync(topicDir, { recursive: true });
+            const now = Date.now();
+            const fillerEntries = Array.from({ length: 10 }, (_, index) => ({
+                key: `filler ${index}`,
+                content: `Generic banana convention ${index}.`,
+                priority: 'normal',
+                confidence: 0.8,
+                createdAt: now,
+                updatedAt: now,
+            }));
+            fs.writeFileSync(path.join(topicDir, 'memory.json'), JSON.stringify({
+                version: 2,
+                entries: [
+                    ...fillerEntries,
+                    {
+                        key: 'event namespace path rule',
+                        content: 'For events/alpha.txt, use the alpha namespace for country events.',
+                        priority: 'normal',
+                        confidence: 0.8,
+                        createdAt: now,
+                        updatedAt: now,
+                    },
+                ],
+            }), 'utf8');
+
+            const builder = new PromptBuilder(workspaceRoot);
+            const dynamic = builder.buildDynamicPromptBlock(undefined, topicId, undefined, {
+                mode: 'build',
+                taskText: 'Add a country event to the alpha namespace',
+                pathScope: ['events/alpha.txt'],
+            });
+            const content = String(dynamic[0]!.content);
+
+            expect(content).to.include('event namespace path rule');
+            expect(content).to.include('events/alpha.txt');
+            expect(content.match(/^## /gm)).to.have.lengthOf(10);
+            expect(content).to.not.include('filler 9');
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
+
     it('tells agents to reuse one temporary helper script per task', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());

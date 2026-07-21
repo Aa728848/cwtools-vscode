@@ -17,7 +17,7 @@ export type AgentToolName =
     | 'get_memory' | 'search_memory' | 'save_memory'
     | 'convert_image_to_dds' | 'convert_audio' | 'deploy_mod_asset' | 'mcp_call'
     | 'write_localisation' | 'write_design_blueprint' | 'save_workflow' | 'git_ops' | 'dispatch_agents'
-    | 'query_blackboard' | 'merge_results';
+    | 'query_blackboard' | 'merge_results' | 'get_design_blueprint_contract';
 
 export type ToolEffect =
     | 'none'
@@ -59,7 +59,7 @@ export const TOOL_REGISTRY = new Map<AgentToolName, ToolRegistryEntry>();
 
 // Categories to help assign modes
 const BASE_READ: AgentToolName[] = [
-    'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_references',
+    'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_references', 'get_design_blueprint_contract',
     'query_project_profile', 'query_project_knowledge', 'run_skill', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory', 'glob_files',
     'lsp_operation', 'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name', 'web_find',

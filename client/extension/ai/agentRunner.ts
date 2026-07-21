@@ -17,8 +17,8 @@ import type {
     AgentMode,
     ChatCompletionResponse,
     ContentPart,
-    CustomApiFormat,
     TokenUsage,
+    AgentToolStage,
     AgentRunMetrics,
     AnalyzeDiagnosticErrorResult,
     GetDiagnosticsResult,
@@ -32,9 +32,10 @@ import * as path from 'path';
 
 import { AIService } from './aiService';
 import { AgentToolExecutor, TOOL_DEFINITIONS } from './agentTools';
-import { PromptBuilder } from './promptBuilder';
+import { PromptBuilder, hashToolDefinitionsForFingerprint, orderMessagesForStablePrefix } from './promptBuilder';
 import { getProvider, isModelVisionCapable } from './providers';
 import { getModelPricing, getCacheDiscountFactor } from './pricing';
+import { buildProviderCallTokenUsage } from './providerCallUsage';
 import { parseDsmlToolCalls as _parseDsmlToolCalls, stripDsmlMarkup as _stripDsmlMarkup, stripThinkBlocks as _stripThinkBlocks, cleanFinalContent as _cleanFinalContent } from './toolCallParser';
 import { tryRepairJson as _tryRepairJson } from './jsonRepair';
 import { repairToolArgs } from './tools/argRepair';
@@ -42,9 +43,14 @@ import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compa
 import type { CompactMessagesOptions } from './contextBudget';
 import { AGENT, SOURCE, aiText } from './messages';
 import { ErrorReporter } from './errorReporter';
+import { MemoryParser } from './memoryParser';
 import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from './workspacePaths';
 import {
     filterToolDefinitionsForMode,
+    filterToolDefinitionsForStage,
+    initialToolStageForMode,
+    advanceToolStage,
+    buildToolStageReminder,
     resolveMaxToolIterations,
     resolveRunMaxOutputTokens,
     SLIM_SUB_AGENT_OUTPUT_BUDGET_RECOVERY_LIMIT,
@@ -56,7 +62,7 @@ import { PartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { atomicWriteText, sha256Text } from './runner/durableStorage';
 import { loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
-import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT, type CompactionBudgetOptions } from './runner/compaction';
+import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT, AUTO_COMPACTION_MIN_INTERVAL_MS, type CompactionBudgetOptions, type AutoCompactionThrottle } from './runner/compaction';
 import { refreshLiveVsCodeContext } from './runner/liveContext';
 import { executeFallbackRetry, isFallbackEligibleApiError } from './runner/fallbackPolicy';
 import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles, toolScheduler } from './runner/toolScheduler';
@@ -70,6 +76,9 @@ import type { RunEventSink } from './runner/runContext';
 import { activeTurnRegistry } from './runner/activeTurnRegistry';
 import { threadStore } from './runner/threadStore';
 import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
+import { appendCacheRequestUsage, isCacheCapableUsage, supportsOpenAiStylePrefixCache } from './cacheCapability';
+import { RunBudgetTracker, shouldPersistResumeSnapshot, type RunBudgetEvaluation } from './runner/runBudget';
+import { buildModelRequestMessageArchive, type ModelRequestArchiveState } from './runner/requestArtifacts';
 
 export { isFallbackEligibleApiError } from './runner/fallbackPolicy';
 export { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } from './runner/toolScheduler';
@@ -175,14 +184,6 @@ export function estimateChatMessageTokens(message: ChatMessage): number {
 
 // Backward-compat alias for non-text token estimation (images etc.)
 export const CHARS_PER_TOKEN = 4;
-
-export function supportsOpenAiStylePrefixCache(providerId: string, customApiFormat?: CustomApiFormat): boolean {
-    if (providerId.startsWith('deepseek') || providerId.startsWith('openai')) return true;
-    if (providerId === 'custom') {
-        return customApiFormat === 'openai-chat-completions' || customApiFormat === 'openai-responses';
-    }
-    return false;
-}
 // Compact when conversation exceeds this fraction of provider context
 // Default context limit if unknown
 // How many recent messages to keep un-compressed during compaction
@@ -194,6 +195,8 @@ export function supportsOpenAiStylePrefixCache(providerId: string, customApiForm
 // On crash or context-window overflow, the agent can load the last checkpoint
 // instead of starting from scratch.
 const CHECKPOINT_INTERVAL = 10;
+const RESUME_SNAPSHOT_INTERVAL = 10;
+const RESUME_SNAPSHOT_MIN_INTERVAL_MS = 30_000;
 
 
 
@@ -413,6 +416,14 @@ export class AgentRunner {
         this.toolExecutor.parentAgentRunner = this;
     }
 
+    /** Usage accumulator of the in-flight or most recent run; manual compaction attributes its LLM cost here. */
+    private activeTokenAccumulator?: TokenUsage;
+    /** Per-runner throttle state for automatic (non-forced) compaction. */
+    private readonly autoCompactionThrottle: AutoCompactionThrottle = {
+        lastAutoCompactionAt: 0,
+        minIntervalMs: AUTO_COMPACTION_MIN_INTERVAL_MS,
+    };
+
     public clearPromptCache(): void {
         this.promptBuilder.clearFrozenPromptCache();
     }
@@ -601,10 +612,105 @@ export class AgentRunner {
     private async tryFallbackProvider(
         messages: ChatMessage[],
         originalProviderId: string,
-        options?: { tools?: import('./types').ToolDefinition[]; model?: string },
+        options?: { tools?: import('./types').ToolDefinition[]; model?: string; onAttempt?: () => void },
         emitStep?: (step: AgentStep) => void
     ): Promise<ChatCompletionResponse | null> {
         return executeFallbackRetry(this.aiService, messages, originalProviderId, options, emitStep);
+    }
+
+    /** Account for paid runner-side calls outside the main reasoning request. */
+    private accumulateAuxiliaryUsage(
+        response: ChatCompletionResponse,
+        messages: ChatMessage[],
+        accumulator: TokenUsage | undefined,
+        providerId: string | undefined,
+        requestedModel: string | undefined,
+        metadata: {
+            toolStage?: AgentToolStage;
+            purpose: 'validation' | 'final_summary';
+            promptFingerprint?: string;
+        },
+    ): void {
+        if (!accumulator) return;
+        const promptTokens = response.usage?.prompt_tokens
+            ?? messages.reduce((sum, message) => sum + estimateChatMessageTokens(message), 0);
+        const completionText = response.choices[0]?.message
+            ? contentToString(response.choices[0].message.content)
+            : '';
+        const completionTokens = response.usage?.completion_tokens ?? estimateTokenCount(completionText);
+        const totalTokens = response.usage?.total_tokens ?? promptTokens + completionTokens;
+        const effectiveProvider = (response as { __providerId?: string }).__providerId
+            ?? providerId
+            ?? this.aiService.getConfig().provider;
+        const effectiveModel = response.model ?? requestedModel ?? '';
+        const pricing = getModelPricing(effectiveModel, effectiveProvider);
+        const cachedTokens = response.usage?.cached_tokens
+            ?? response.usage?.prompt_tokens_details?.cached_tokens
+            ?? response.usage?.prompt_cache_hit_tokens
+            ?? response.usage?.cached_content_token_count
+            ?? 0;
+        const uncachedInputTokens = Math.max(0, promptTokens - cachedTokens);
+        const cacheDiscount = getCacheDiscountFactor(effectiveModel, effectiveProvider);
+        const cachedCost = (cachedTokens / 1_000_000) * pricing[0] * cacheDiscount;
+        const uncachedCost = (uncachedInputTokens / 1_000_000) * pricing[0];
+        const outputCost = (completionTokens / 1_000_000) * pricing[1];
+
+        accumulator.input += promptTokens;
+        accumulator.output += completionTokens;
+        accumulator.total += totalTokens;
+        accumulator.estimatedCostCny += cachedCost + uncachedCost + outputCost;
+        accumulator.cachedTokens = (accumulator.cachedTokens ?? 0) + cachedTokens;
+        accumulator.netInput = (accumulator.netInput ?? 0) + uncachedInputTokens;
+        accumulator.netTotal = (accumulator.netTotal ?? 0) + uncachedInputTokens + completionTokens;
+        accumulator.cacheSavedCostCny = (accumulator.cacheSavedCostCny ?? 0)
+            + (cachedTokens / 1_000_000) * pricing[0] * (1 - cacheDiscount);
+        this.appendProviderCacheSample(accumulator, {
+            provider: effectiveProvider,
+            model: effectiveModel,
+            inputTokens: promptTokens,
+            cachedTokens,
+            toolStage: metadata.toolStage,
+            purpose: metadata.purpose,
+            promptFingerprint: metadata.promptFingerprint,
+        });
+    }
+
+    private appendProviderCacheSample(
+        accumulator: TokenUsage | undefined,
+        sample: {
+            provider: string;
+            model: string;
+            inputTokens: number;
+            cachedTokens: number;
+            toolStage?: AgentToolStage;
+            purpose: 'reasoning' | 'fallback' | 'validation' | 'final_summary';
+            promptFingerprint?: string;
+            invalidationReason?: string;
+        },
+    ): void {
+        if (!accumulator) return;
+        const config = this.aiService.getConfig();
+        const customFormat = sample.provider === config.provider ? config.customApiFormat : undefined;
+        const cacheCapable = isCacheCapableUsage(sample.provider, sample.cachedTokens, customFormat);
+        const previousComparable = [...(accumulator.cacheRequests ?? [])]
+            .reverse()
+            .find(request => request.purpose === sample.purpose);
+        let invalidationReason = sample.invalidationReason;
+        if (sample.cachedTokens > 0 || !cacheCapable) {
+            invalidationReason = undefined;
+        } else if (!invalidationReason && previousComparable?.toolStage !== sample.toolStage) {
+            invalidationReason = 'toolset_changed';
+        } else if (!invalidationReason && !sample.promptFingerprint) {
+            invalidationReason = 'fingerprint_missing';
+        } else if (!invalidationReason) {
+            invalidationReason = 'provider_miss';
+        }
+        appendCacheRequestUsage(accumulator, {
+            ...sample,
+            cacheCapable,
+            agentMode: accumulator.agentMode,
+            invalidationReason,
+        });
     }
 
     /**
@@ -668,6 +774,10 @@ export class AgentRunner {
             runRecordPromise.then(r => {
                 runLedger.appendEvent(r.runId, 'status_changed', { status }).catch(() => {});
                 if (status === 'completed' || status === 'failed') {
+                    runMetrics.modelCalls = tokenAccumulator.apiCalls ?? 0;
+                    runMetrics.compactionCalls = tokenAccumulator.compactionCalls ?? 0;
+                    runMetrics.fallbackCalls = tokenAccumulator.fallbackCalls ?? 0;
+                    runMetrics.uncachedInputTokens = tokenAccumulator.netInput ?? 0;
                     threadStore.markStatus(topicId, threadId, status === 'completed' ? 'completed' : 'failed').catch(() => {});
                     runLedger.appendEvent(r.runId, 'metrics_updated', {
                         metrics: {
@@ -677,6 +787,10 @@ export class AgentRunner {
                             cachedTokens: tokenAccumulator.cachedTokens || 0,
                             costCny: tokenAccumulator.estimatedCostCny,
                             iterations: runMetrics.iterations,
+                            modelCalls: runMetrics.modelCalls,
+                            compactionCalls: runMetrics.compactionCalls,
+                            fallbackCalls: runMetrics.fallbackCalls,
+                            uncachedInputTokens: runMetrics.uncachedInputTokens,
                             toolCalls: runMetrics.toolCallCount
                         }
                     }).catch(() => {});
@@ -688,9 +802,25 @@ export class AgentRunner {
 
         // Accumulate token usage across all API calls in this generation
         // (declared here so compaction call and sub-agent dispatch can also contribute to the total)
-        const tokenAccumulator: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
+        // Widened with cache-observability fields (plan sec.7.3); they ride
+        // GenerationResult.tokenUsage into UsageTracker.addUsage without chatPanel changes.
+        const tokenAccumulator: TokenUsage = {
+            total: 0,
+            input: 0,
+            output: 0,
+            estimatedCostCny: 0,
+            agentMode: mode,
+            toolStage: initialToolStageForMode(mode),
+        };
+        // Expose the run-level accumulator so manual compaction between turns
+        // still attributes its summarization cost to this run's totals.
+        this.activeTokenAccumulator = tokenAccumulator;
         const runMetrics: AgentRunMetrics = {
             iterations: 0,
+            modelCalls: 0,
+            compactionCalls: 0,
+            fallbackCalls: 0,
+            uncachedInputTokens: 0,
             maxIterations: 0,
             toolCallCount: 0,
             toolCallsByName: {},
@@ -897,50 +1027,86 @@ export class AgentRunner {
             };
         }
 
-        // 异步静默触发一次 Context Memory Compaction 看板压缩
-        if (topicId && runId) {
-            const runRec = runLedger.getRun(runId);
-            if (runRec) {
-                import('./runner/contextMemory').then(async ({ compactHistory }) => {
-                    await runLedger.appendEvent(runId, 'compaction_start', { kind: 'structured_summary', trigger: 'background' }).catch(() => {});
-                    const summary = await compactHistory(topicId, runId, conversationHistory, runRec.steps || [], this.aiService);
-                    await runLedger.appendEvent(runId, 'compaction_end', { kind: 'structured_summary', success: true, summary }).catch(() => {});
-                }).catch((error) => {
-                    runLedger.appendEvent(runId, 'compaction_end', { kind: 'structured_summary', success: false, error: error instanceof Error ? error.message : String(error) }).catch(() => {});
-                }).catch(() => {});
-            }
-        }
-
         const promptConfig = this.aiService.getConfig();
         const providerForPrompt = options?.providerId ?? promptConfig.provider;
         const supportsPrefixCache = supportsOpenAiStylePrefixCache(providerForPrompt, promptConfig.customApiFormat);
+        // The model-visible tool set feeds both the frozen prompt fingerprint
+        // (plan sec.7.1) and the reserved-token estimate below; mirror the
+        // reasoning loop's filter inputs so both describe the real toolset.
+        const promptPerformanceConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
+        const promptLegacyFullToolset = promptPerformanceConfig.get<boolean>('legacyFullToolset') === true;
+        const promptModeTools = filterWebToolsForConfiguredAccess(filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
+            useSlimPrompt: options?.useSlimPrompt,
+            excludeTools: options?.excludeTools,
+            legacyFullToolset: promptLegacyFullToolset,
+        }));
+        const promptToolDefinitions = filterToolDefinitionsForStage(
+            promptModeTools,
+            mode,
+            initialToolStageForMode(mode),
+            promptLegacyFullToolset,
+        );
         // DeepSeek prefix-cache optimization: use frozen (session-cached) system prompt
         // to ensure byte-level stability across API calls for cache hits.
-        let systemPrompt = options?.useSlimPrompt
+        // rebuildSystemPrompt drops this fingerprint's cache entry before building (plan sec.7.1).
+        const systemPrompt = options?.useSlimPrompt
             ? this.promptBuilder.buildSlimSystemPromptForMode(mode, providerForPrompt, undefined, topicId)
             : supportsPrefixCache
-                ? this.promptBuilder.buildFrozenSystemPrompt(mode, providerForPrompt, undefined)
-                : this.promptBuilder.buildSystemPromptForMode(mode, providerForPrompt, undefined, topicId, runId, pinnedData);
+                ? this.promptBuilder.buildFrozenSystemPrompt(mode, providerForPrompt, undefined, {
+                    toolsetHash: hashToolDefinitionsForFingerprint(promptToolDefinitions),
+                    rebuild: options?.rebuildSystemPrompt === true,
+                })
+                : this.promptBuilder.buildSystemPromptForMode(
+                    mode,
+                    providerForPrompt,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    false,
+                    false,
+                );
+        tokenAccumulator.promptFingerprint = supportsPrefixCache && !options?.useSlimPrompt
+            ? this.promptBuilder.getLastFrozenPromptFingerprintHash()
+            : undefined;
+        tokenAccumulator.promptCacheMissReason = supportsPrefixCache && !options?.useSlimPrompt
+            ? this.promptBuilder.getLastFrozenPromptLookup()?.missReason
+            : undefined;
 
-        // Inject workflow prompt supplement if running within a workflow
         const activeWorkflowForPrompt = options?.workflowId ? getWorkflow(options.workflowId) : undefined;
-        if (!supportsPrefixCache && activeWorkflowForPrompt?.promptSupplement) {
-            systemPrompt = activeWorkflowForPrompt.promptSupplement + '\n\n' + systemPrompt;
-        }
+        const workspaceRoot = getProjectWorkspaceRoot();
+        const memoryPathScope = [...new Set([
+            context.activeFile,
+            ...runRecord.writtenFiles.slice(-10),
+        ].flatMap(filePath => {
+            if (typeof filePath !== 'string' || !filePath.trim()) return [];
+            const normalized = filePath.replace(/\\/g, '/');
+            const relative = path.isAbsolute(filePath)
+                ? path.relative(workspaceRoot, filePath).replace(/\\/g, '/')
+                : normalized;
+            return [normalized, relative, path.basename(filePath)].filter(Boolean);
+        }))];
 
-        // Build the dynamic prompt block containing pinned data / summaries
-        const dynamicBlock = supportsPrefixCache
-            ? this.promptBuilder.buildDynamicPromptBlock(pinnedData, topicId, runId, {
-                mode,
-                workflow: activeWorkflowForPrompt
-                    ? {
-                        id: activeWorkflowForPrompt.id,
-                        title: activeWorkflowForPrompt.title,
-                        promptSupplement: activeWorkflowForPrompt.promptSupplement,
-                    }
-                    : undefined,
-            })
-            : [];
+        // Keep all runtime-only state after the static system/history prefix for
+        // every provider. This also makes task-ranked memory retrieval consistent
+        // instead of silently falling back to priority-only selection when prefix
+        // caching is unavailable.
+        const promptDynamicBlock = this.promptBuilder.buildDynamicPromptBlock(pinnedData, topicId, runId, {
+            mode,
+            taskText: userMessage,
+            pathScope: memoryPathScope,
+            workflow: activeWorkflowForPrompt
+                ? {
+                    id: activeWorkflowForPrompt.id,
+                    title: activeWorkflowForPrompt.title,
+                    promptSupplement: activeWorkflowForPrompt.promptSupplement,
+                }
+                : undefined,
+        });
+        const initialStageReminder = buildToolStageReminder(mode, initialToolStageForMode(mode), promptToolDefinitions);
+        const dynamicBlock: ChatMessage[] = initialStageReminder
+            ? [...promptDynamicBlock, { role: 'user', content: initialStageReminder }]
+            : promptDynamicBlock;
 
         const contextMessages = this.promptBuilder.buildContextMessages({
             ...context,
@@ -962,9 +1128,6 @@ export class AgentRunner {
         }, 0);
         // Tool schemas are part of every model request even though they are not
         // represented in ChatMessage[]. Reserve their full known size here.
-        const promptToolDefinitions = filterWebToolsForConfiguredAccess(filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
-            useSlimPrompt: options?.useSlimPrompt,
-        }));
         const toolSchemaTokens = estimateTokenCount(JSON.stringify(promptToolDefinitions));
         const compactedHistory = await this.maybeCompactHistory(
             conversationHistory,
@@ -980,7 +1143,13 @@ export class AgentRunner {
             conversationHistory.splice(0, conversationHistory.length, ...compactedHistory);
         }
 
-        // Build the message array
+        // Build the message array. Stable-prefix ordering (plan sec.7.2): the
+        // frozen system prompt stays at the head, cacheable (possibly compacted)
+        // history follows, and dynamic editor/project state sits immediately
+        // before the user turn so the long static prefix remains byte-stable for
+        // provider prefix caches. The OpenAI Responses path merges system
+        // messages into top-level instructions preserving their relative order,
+        // so this reorder does not conflict with that merge.
         let messages: ChatMessage[];
         
         if (options?.resumeFromState && context.topicId) {
@@ -1001,23 +1170,26 @@ export class AgentRunner {
                     timestamp: Date.now(),
                 });
             } else {
-                messages = [
-                    { role: 'system', content: systemPrompt },
-                    ...contextMessages,
-                    ...compactedHistory,
-                    ...dynamicBlock,
-                    { role: 'user', content: userContent },
-                ];
+                messages = orderMessagesForStablePrefix({
+                    systemPrompt,
+                    compactedHistory,
+                    contextMessages,
+                    dynamicBlock,
+                    userContent,
+                });
             }
         } else {
-            messages = [
-                { role: 'system', content: systemPrompt },
-                ...contextMessages,
-                ...compactedHistory,
-                ...dynamicBlock,
-                { role: 'user', content: userContent },
-            ];
+            messages = orderMessagesForStablePrefix({
+                systemPrompt,
+                compactedHistory,
+                contextMessages,
+                dynamicBlock,
+                userContent,
+            });
         }
+
+        // mode may have been overridden by the resumed checkpoint; record the final one.
+        tokenAccumulator.agentMode = mode;
 
         if (context.topicId) {
             options = { ...options, topicId: context.topicId, mode };
@@ -1107,7 +1279,7 @@ export class AgentRunner {
 
             const targetFile = context.activeFile ?? '';
             const validationResult = await this.validationLoop(
-                code, targetFile, messages, emitStep, options
+                code, targetFile, messages, emitStep, options, tokenAccumulator
             );
 
             updateRunStatus('completed');
@@ -1195,6 +1367,11 @@ export class AgentRunner {
         tokenAccumulator?: import('./types').TokenUsage,
         budgetOptions?: CompactionBudgetOptions,
     ): Promise<import('./types').ChatMessage[]> {
+        if (!budgetOptions?.force) {
+            const intervalSeconds = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance')
+                .get<number>('compactionMinIntervalSeconds', AUTO_COMPACTION_MIN_INTERVAL_MS / 1000);
+            this.autoCompactionThrottle.minIntervalMs = Math.max(0, intervalSeconds) * 1000;
+        }
         return _maybeCompactHistory(
             history,
             emitStep,
@@ -1202,7 +1379,15 @@ export class AgentRunner {
             options,
             tokenAccumulator,
             undefined,
-            budgetOptions,
+            {
+                ...budgetOptions,
+                // Cancel in-flight compaction with the turn so a cancelled run
+                // never completes a billed summarization call.
+                abortSignal: options?.abortSignal,
+                // Throttle only automatic compaction; mid-loop, emergency, and
+                // manual compaction must always run.
+                autoThrottle: budgetOptions?.force ? undefined : this.autoCompactionThrottle,
+            },
         );
     }
 
@@ -1211,6 +1396,7 @@ export class AgentRunner {
         history: ChatMessage[],
         options?: AgentRunnerOptions,
         onStep?: (step: AgentStep) => void,
+        tokenAccumulator?: TokenUsage,
     ): Promise<{ compacted: boolean; steps: AgentStep[] }> {
         if (history.length < 2) return { compacted: false, steps: [] };
         const steps: AgentStep[] = [];
@@ -1224,7 +1410,8 @@ export class AgentRunner {
                 onStep?.(manualStep);
             },
             options,
-            undefined,
+            // Count the paid summarization call into the run-level usage totals.
+            tokenAccumulator ?? this.activeTokenAccumulator,
             {
                 force: true,
                 reservedTokens: estimateTokenCount(JSON.stringify(TOOL_DEFINITIONS)),
@@ -1281,12 +1468,15 @@ export class AgentRunner {
             const wsRoot = getProjectWorkspaceRoot();
             const runDir = pathModule.join(getPrivateTopicStorageDir(topicId, wsRoot), 'runs', runId, 'large_results');
 
-            const filePath = pathModule.join(runDir, `${invocationId}_result.json`);
             const archivedResult = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
             const resultSha256 = sha256Text(archivedResult);
-            await atomicWriteText(filePath, archivedResult);
+            const artifactName = `${resultSha256}.json`;
+            const filePath = pathModule.join(runDir, artifactName);
+            if (!fs.existsSync(filePath)) {
+                await atomicWriteText(filePath, archivedResult);
+            }
 
-            const relativeDiskPath = pathModule.posix.join('runs', runId, 'large_results', `${invocationId}_result.json`);
+            const relativeDiskPath = pathModule.posix.join('runs', runId, 'large_results', artifactName);
             const preview = strContent.substring(0, 1000);
             await runLedger.appendEvent(
                 runId,
@@ -1406,6 +1596,22 @@ export class AgentRunner {
         }
     }
 
+    /**
+     * Best-effort long-term memory usage tracking (plan §8): when the assistant's
+     * response mentions a stored memory key verbatim, count it as an actual use.
+     * Persistence is debounced inside MemoryParser; failures never break the loop.
+     */
+    private trackMemoryKeyReferences(topicId: string | undefined, assistantText: string): void {
+        if (!assistantText) return;
+        try {
+            const wsRoot = getProjectWorkspaceRoot();
+            if (!wsRoot) return;
+            new MemoryParser(wsRoot, topicId).markMemoryUsedInText(topicId, assistantText);
+        } catch (e) {
+            ErrorReporter.debug(SOURCE.AGENT_RUNNER, 'Failed to track memory key references', e);
+        }
+    }
+
     private async reasoningLoop(
         messages: ChatMessage[],
         emitStep: (step: AgentStep) => void,
@@ -1481,6 +1687,60 @@ export class AgentRunner {
         const confirmedWrittenFiles = new Set<string>();
         const performanceConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
         const legacyFullToolset = performanceConfig.get<boolean>('legacyFullToolset') === true;
+        let toolStage = initialToolStageForMode(mode);
+        if (tokenAccumulator) tokenAccumulator.toolStage = toolStage;
+        let requestArchiveState: ModelRequestArchiveState | undefined;
+        const archivedToolsets = new Map<string, { ref: string; sha256: string }>();
+        const archiveModelRequest = async (
+            modelCallId: string,
+            metadata: Record<string, unknown>,
+            requestMessages: readonly ChatMessage[],
+            requestTools: readonly ToolDefinition[],
+        ): Promise<{ ref: string; sha256: string } | undefined> => {
+            const toolsContentSha256 = sha256Text(JSON.stringify(requestTools));
+            let toolsetArtifact = archivedToolsets.get(toolsContentSha256);
+            if (!toolsetArtifact) {
+                const written = await runLedger.writeJsonArtifact(
+                    runRecord.runId,
+                    `model_inputs/tools/${toolsContentSha256}.json`,
+                    {
+                        version: 1,
+                        kind: 'model_toolset',
+                        contentSha256: toolsContentSha256,
+                        tools: requestTools,
+                    },
+                );
+                if (written) {
+                    toolsetArtifact = written;
+                    archivedToolsets.set(toolsContentSha256, written);
+                }
+            }
+
+            const messagePlan = buildModelRequestMessageArchive(requestMessages, requestArchiveState);
+            const requestArtifact = await runLedger.writeJsonArtifact(
+                runRecord.runId,
+                `model_requests/${modelCallId}.json`,
+                {
+                    version: 2,
+                    kind: 'model_request',
+                    ...metadata,
+                    messageArchive: messagePlan.archive,
+                    toolset: {
+                        ref: toolsetArtifact?.ref,
+                        artifactSha256: toolsetArtifact?.sha256,
+                        contentSha256: toolsContentSha256,
+                        count: requestTools.length,
+                    },
+                },
+            );
+            if (requestArtifact) {
+                requestArchiveState = {
+                    requestRef: requestArtifact.ref,
+                    messageHashes: messagePlan.messageHashes,
+                };
+            }
+            return requestArtifact;
+        };
         let availableTools = filterWebToolsForConfiguredAccess(filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
             useSlimPrompt: options?.useSlimPrompt,
             excludeTools: options?.excludeTools,
@@ -1516,6 +1776,8 @@ export class AgentRunner {
             }
             ErrorReporter.debug('AgentRunner', `Workflow "${activeWorkflow.id}" tool policy applied: ${availableTools.length} tools available`);
         }
+        const stagedToolPool = availableTools;
+        availableTools = filterToolDefinitionsForStage(stagedToolPool, mode, toolStage, legacyFullToolset);
 
         // M3 Fix: remove per-call dynamic import — getProvider is already statically
         // imported at the top of this file; dynamic import added latency for nothing.
@@ -1547,6 +1809,46 @@ export class AgentRunner {
         });
         if (runMetrics) runMetrics.maxIterations = maxToolIterations;
 
+        const runBudgetConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
+        const isSlimRun = options?.useSlimPrompt === true;
+        const budgetTracker = new RunBudgetTracker({
+            modelCalls: runBudgetConfig.get<number>(
+                isSlimRun ? 'subAgentModelCallBudget' : 'modelCallBudget',
+                isSlimRun ? 24 : 64,
+            ),
+            wallTimeMs: runBudgetConfig.get<number>(
+                isSlimRun ? 'subAgentWallTimeBudgetMinutes' : 'wallTimeBudgetMinutes',
+                isSlimRun ? 8 : 20,
+            ) * 60_000,
+            uncachedInputTokens: runBudgetConfig.get<number>(
+                isSlimRun ? 'subAgentUncachedInputTokenBudget' : 'uncachedInputTokenBudget',
+                isSlimRun ? 100_000 : 300_000,
+            ),
+        });
+        let lastResumeSnapshotAt = Date.now();
+        let lastResumeSnapshotIteration = 0;
+        const maybeSaveResumeSnapshot = async (force = false): Promise<void> => {
+            if (!options?.topicId) return;
+            const now = Date.now();
+            if (!shouldPersistResumeSnapshot({
+                force,
+                iteration,
+                lastIteration: lastResumeSnapshotIteration,
+                intervalIterations: RESUME_SNAPSHOT_INTERVAL,
+                now,
+                lastSavedAt: lastResumeSnapshotAt,
+                minIntervalMs: RESUME_SNAPSHOT_MIN_INTERVAL_MS,
+            })) return;
+            await this.saveResumeState(options.topicId, messages, mode, runRecord.runId);
+            lastResumeSnapshotAt = now;
+            lastResumeSnapshotIteration = iteration;
+        };
+        const describeBudget = (evaluation: RunBudgetEvaluation): string => {
+            const u = evaluation.usage;
+            const l = evaluation.limits;
+            return `model calls ${u.modelCalls}/${l.modelCalls}, wall time ${Math.ceil(u.wallTimeMs / 60_000)}/${Math.ceil(l.wallTimeMs / 60_000)} min, uncached input ${u.uncachedInputTokens}/${l.uncachedInputTokens} tokens`;
+        };
+
         // Global tool call counter for timeline step indexing (Phase 4)
         let globalToolCallIndex = 0;
         let slimOutputBudgetRecoveries = 0;
@@ -1567,19 +1869,52 @@ export class AgentRunner {
 
         while (iteration < maxToolIterations) {
             options?.abortSignal?.throwIfAborted();
+            const budgetEvaluation = budgetTracker.evaluate(
+                tokenAccumulator?.apiCalls ?? iteration,
+                tokenAccumulator?.netInput ?? 0,
+            );
+            if (budgetEvaluation.state !== 'within') {
+                const detail = describeBudget(budgetEvaluation);
+                if (budgetEvaluation.state === 'hard') {
+                    emitStep({
+                        type: 'error',
+                        content: `Emergency Agent runtime budget reached (${detail}).`,
+                        timestamp: Date.now(),
+                    });
+                    await maybeSaveResumeSnapshot(true);
+                    return `The emergency runtime budget was reached (${detail}). Progress is checkpointed; review the current evidence before continuing.`;
+                }
+                emitStep({
+                    type: 'validation',
+                    content: `Agent runtime soft budget reached (${detail}). Waiting for explicit continuation approval.`,
+                    timestamp: Date.now(),
+                });
+                const approved = options?.onPermissionRequest
+                    ? await options.onPermissionRequest(
+                        `run_budget_${runRecord.runId}_${iteration}`,
+                        'continue_agent_run',
+                        `The Agent reached its soft runtime budget (${detail}). Continue for one additional budget window?\nAgent 已达到软运行预算（${detail}）。是否继续一个预算窗口？`,
+                        undefined,
+                        agentToolContext,
+                    )
+                    : false;
+                if (!approved) {
+                    await maybeSaveResumeSnapshot(true);
+                    return `The Agent paused at its soft runtime budget (${detail}). Progress is checkpointed; continue the task to resume.`;
+                }
+                budgetTracker.extend();
+            }
             if (options?.tokenBudget && tokenAccumulator && tokenAccumulator.total >= options.tokenBudget) {
                 emitStep({
                     type: 'error',
                     content: `Durable goal token budget reached (${tokenAccumulator.total}/${options.tokenBudget}).`,
                     timestamp: Date.now(),
                 });
+                await maybeSaveResumeSnapshot(true);
                 return `The durable goal token budget was reached (${tokenAccumulator.total}/${options.tokenBudget}). Progress is checkpointed; increase the goal budget or continue in a new turn.`;
             }
             iteration++;
             if (runMetrics) runMetrics.iterations = iteration;
-            if (options?.topicId) {
-                await this.saveResumeState(options.topicId, messages, mode, runRecord.runId);
-            }
 
             let toolCalls: any[] | undefined = undefined;
             let needsHashValidation = false;
@@ -1794,12 +2129,9 @@ export class AgentRunner {
                     { invocationId: modelCallId, status: 'running' }
                 ).catch(() => {});
             };
-            const requestArtifact = await runLedger.writeJsonArtifact(
-                runRecord.runId,
-                `model_requests/${modelCallId}.json`,
+            const requestArtifact = await archiveModelRequest(
+                modelCallId,
                 {
-                    version: 1,
-                    kind: 'model_request',
                     runId: runRecord.runId,
                     invocationId: modelCallId,
                     iteration,
@@ -1813,9 +2145,9 @@ export class AgentRunner {
                         workflowId: options?.workflowId,
                         replayOf: options?.replayOf,
                     },
-                    messages,
-                    tools: availableTools,
-                }
+                },
+                messages,
+                availableTools,
             ).catch(error => {
                 ErrorReporter.warn('AgentRunner', `Failed to archive model request ${modelCallId}`, error);
                 return undefined;
@@ -1836,6 +2168,9 @@ export class AgentRunner {
             );
             let fallbackFromError: string | undefined;
             try {
+                if (tokenAccumulator) {
+                    tokenAccumulator.apiCalls = (tokenAccumulator.apiCalls ?? 0) + 1;
+                }
                 response = await this.aiService.chatCompletion(messages, {
                     tools: availableTools,
                     providerId: options?.providerId,
@@ -1981,7 +2316,14 @@ export class AgentRunner {
                     const fallbackResponse = await this.tryFallbackProvider(
                         messages,
                         _providerId0,
-                        { tools: availableTools },
+                        {
+                            tools: availableTools,
+                            onAttempt: () => {
+                                if (!tokenAccumulator) return;
+                                tokenAccumulator.apiCalls = (tokenAccumulator.apiCalls ?? 0) + 1;
+                                tokenAccumulator.fallbackCalls = (tokenAccumulator.fallbackCalls ?? 0) + 1;
+                            },
+                        },
                         emitStep
                     );
                     if (fallbackResponse) {
@@ -2062,6 +2404,29 @@ export class AgentRunner {
                 // Accumulate cache savings: difference between full-price and discounted cost for cached tokens
                 const thisSaved = (cachedTokens / 1_000_000) * pricing[0] * (1 - cacheDiscount);
                 tokenAccumulator.cacheSavedCostCny = (tokenAccumulator.cacheSavedCostCny ?? 0) + thisSaved;
+
+                const systemPrefix = messages
+                    .filter(message => message.role === 'system')
+                    .map(message => contentToString(message.content))
+                    .join('\n\u0000');
+                const requestPromptFingerprint = sha256Text([
+                    tokenAccumulator.promptFingerprint ?? sha256Text(systemPrefix),
+                    mode,
+                    toolStage ?? 'full',
+                    hashToolDefinitionsForFingerprint(availableTools),
+                ].join('|')).slice(0, 24);
+                const firstReasoningSample = !(tokenAccumulator.cacheRequests ?? [])
+                    .some(sample => sample.purpose === 'reasoning' || sample.purpose === 'fallback');
+                this.appendProviderCacheSample(tokenAccumulator, {
+                    provider: responseProviderId,
+                    model: response.model ?? options?.model ?? 'unknown',
+                    inputTokens: promptTokens,
+                    cachedTokens,
+                    toolStage,
+                    purpose: fallbackFromError ? 'fallback' : 'reasoning',
+                    promptFingerprint: requestPromptFingerprint,
+                    invalidationReason: firstReasoningSample ? tokenAccumulator.promptCacheMissReason : undefined,
+                });
 
                 // Emit cache hit rate, cache creation, and saved costs for real-time auditing in the UI
                 const cacheCreationTokens = response.usage?.cache_creation_tokens ?? 0;
@@ -2185,6 +2550,10 @@ export class AgentRunner {
             }
 
             messages.push(assistantMessage);
+
+            // Plan §8: count long-term memory usage only when the model's response
+            // actually references a stored memory key (verbatim match, debounced).
+            this.trackMemoryKeyReferences(options?.topicId, contentToString(assistantMessage.content));
 
             // ── M3: Length Truncation Fallback ──
             if (choice.finish_reason === 'length') {
@@ -2818,6 +3187,41 @@ export class AgentRunner {
                 }
             }
 
+            let nextToolStage = toolStage;
+            for (let j = 0; j < parsedCalls.length; j++) {
+                const result = toolResults[j];
+                const record = result && typeof result === 'object' && !Array.isArray(result)
+                    ? result as Record<string, unknown>
+                    : undefined;
+                const diagnostics = Array.isArray(record?.diagnostics) ? record.diagnostics : [];
+                const hasDiagnosticErrors = diagnostics.some(item => {
+                    if (!item || typeof item !== 'object') return false;
+                    const severity = (item as Record<string, unknown>).severity;
+                    return severity === 'error' || severity === 0;
+                });
+                nextToolStage = advanceToolStage(mode, nextToolStage, parsedCalls[j]!.toolName, {
+                    success: record?.success !== false && record?.error === undefined,
+                    hasValidationErrors: hasDiagnosticErrors
+                        || record?.postWriteValidationPassed === false
+                        || record?.requiresRepair === true,
+                });
+            }
+            if (nextToolStage !== toolStage) {
+                const previousStage = toolStage;
+                toolStage = nextToolStage;
+                if (tokenAccumulator) tokenAccumulator.toolStage = toolStage;
+                availableTools = filterToolDefinitionsForStage(stagedToolPool, mode, toolStage, legacyFullToolset);
+                const stageReminder = buildToolStageReminder(mode, toolStage, availableTools);
+                if (stageReminder) {
+                    messages.push({ role: 'user', content: stageReminder });
+                }
+                emitStep({
+                    type: 'thinking',
+                    content: `Tool stage advanced: ${previousStage ?? 'full'} -> ${toolStage ?? 'full'} (${availableTools.length} tools).`,
+                    timestamp: Date.now(),
+                });
+            }
+
             // Run emergency compaction only after every tool result has been
             // appended. Compacting between an assistant tool call and its result
             // creates an invalid orphaned tool_result sequence.
@@ -2888,7 +3292,7 @@ export class AgentRunner {
             }
 
             if (options?.topicId && !forceStop) {
-                await this.saveResumeState(options.topicId, messages, mode, runRecord.runId);
+                await maybeSaveResumeSnapshot();
             }
 
             // If forceStop was set in the emit-results loop, exit outer while now
@@ -2905,6 +3309,7 @@ export class AgentRunner {
         // assistant message were not fully appended, which would result in an API 400 error:
         // "No tool output found for function call...".
         if (forceStop) {
+            await maybeSaveResumeSnapshot(true);
             updateFinalPromptMetric();
             return '[Agent Execution Terminated]: Tool execution failed consecutively or doom-loop detected.';
         }
@@ -2930,12 +3335,9 @@ export class AgentRunner {
         const finalProviderConfig = this.aiService.getConfig();
         const finalProviderId = options?.providerId ?? finalProviderConfig.provider;
         const finalModel = options?.model ?? finalProviderConfig.model;
-        const finalRequestArtifact = await runLedger.writeJsonArtifact(
-            runRecord.runId,
-            `model_requests/${finalModelCallId}.json`,
+        const finalRequestArtifact = await archiveModelRequest(
+            finalModelCallId,
             {
-                version: 1,
-                kind: 'model_request',
                 runId: runRecord.runId,
                 invocationId: finalModelCallId,
                 iteration,
@@ -2947,9 +3349,9 @@ export class AgentRunner {
                     workflowId: options?.workflowId,
                     replayOf: options?.replayOf,
                 },
-                messages,
-                tools: [],
-            }
+            },
+            messages,
+            [],
         ).catch(error => {
             ErrorReporter.warn('AgentRunner', `Failed to archive model request ${finalModelCallId}`, error);
             return undefined;
@@ -2969,10 +3371,18 @@ export class AgentRunner {
             },
             { invocationId: finalModelCallId, status: 'running' }
         );
+        if (tokenAccumulator) {
+            tokenAccumulator.apiCalls = (tokenAccumulator.apiCalls ?? 0) + 1;
+        }
         const finalResponse = await this.aiService.chatCompletion(messages, {
             providerId: options?.providerId,
             model: options?.model,
             reasoningEffort: options?.reasoningEffort,
+        });
+        this.accumulateAuxiliaryUsage(finalResponse, messages, tokenAccumulator, finalProviderId, finalModel, {
+            toolStage: 'finalize',
+            purpose: 'final_summary',
+            promptFingerprint: tokenAccumulator?.promptFingerprint,
         });
         await runLedger.appendEvent(
             runRecord.runId,
@@ -3033,7 +3443,8 @@ export class AgentRunner {
         targetFile: string,
         conversationMessages: ChatMessage[],
         emitStep: (step: AgentStep) => void,
-        options?: AgentRunnerOptions
+        options?: AgentRunnerOptions,
+        tokenAccumulator?: TokenUsage,
     ): Promise<Omit<GenerationResult, 'explanation' | 'steps'>> {
         let currentCode = initialCode;
         let retryCount = 0;
@@ -3314,11 +3725,26 @@ export class AgentRunner {
             ];
 
             try {
+                if (tokenAccumulator) {
+                    tokenAccumulator.apiCalls = (tokenAccumulator.apiCalls ?? 0) + 1;
+                }
                 const retryResponse = await this.aiService.chatCompletion(retryMessages, {
                     providerId: options?.providerId,
                     model: options?.model,
                     reasoningEffort: options?.reasoningEffort,
                 });
+                this.accumulateAuxiliaryUsage(
+                    retryResponse,
+                    retryMessages,
+                    tokenAccumulator,
+                    options?.providerId,
+                    options?.model,
+                    {
+                        toolStage: 'validation',
+                        purpose: 'validation',
+                        promptFingerprint: tokenAccumulator?.promptFingerprint,
+                    },
+                );
 
                 const retryContent = contentToString(retryResponse.choices[0]?.message?.content);
                 const fixedCode = this.extractCode(retryContent);
@@ -3634,14 +4060,22 @@ export class AgentRunner {
     async generateTopicTitle(
         userMessage: string,
         assistantReply: string,
-        options?: Pick<AgentRunnerOptions, 'providerId' | 'model' | 'reasoningEffort'>
+        options?: Pick<AgentRunnerOptions, 'providerId' | 'model' | 'reasoningEffort'> & {
+            onUsage?: (sample: {
+                usage: TokenUsage;
+                providerId: string;
+                model: string;
+                cacheCapable: boolean;
+                durationMs: number;
+            }) => void;
+        }
     ): Promise<string | null> {
         try {
             const context = [userMessage, assistantReply]
                 .map(s => s.substring(0, 400))
                 .join('\n\n---\n\n');
 
-            const response = await this.aiService.chatCompletion([
+            const messages: ChatMessage[] = [
                 {
                     role: 'system',
                     content: 'You are a conversation title generator. Generate a concise title (max 50 characters) in the same language as the user message. Output ONLY the title text, no quotes, no punctuation at the end, no preamble.',
@@ -3650,13 +4084,28 @@ export class AgentRunner {
                     role: 'user',
                     content: `Generate a short title for this conversation:\n\n${context}`,
                 },
-            ], {
+            ];
+            const startedAt = Date.now();
+            const response = await this.aiService.chatCompletion(messages, {
                 maxTokens: 60,
                 temperature: 0.3,
                 providerId: options?.providerId,
                 model: options?.model,
                 reasoningEffort: options?.reasoningEffort,
             });
+            const config = this.aiService.getConfig();
+            const usageSample = buildProviderCallTokenUsage(response, messages, {
+                providerId: options?.providerId ?? config.provider,
+                requestedModel: options?.model ?? config.model,
+                customApiFormat: config.customApiFormat,
+                agentMode: 'title',
+                purpose: 'title',
+            });
+            try {
+                options?.onUsage?.({ ...usageSample, durationMs: Date.now() - startedAt });
+            } catch (error) {
+                ErrorReporter.warn(SOURCE.AGENT_RUNNER, 'Failed to record topic-title provider usage.', error);
+            }
 
             const raw = contentToString(response.choices[0]?.message?.content).trim();
             // Clean up think blocks and extra quotes

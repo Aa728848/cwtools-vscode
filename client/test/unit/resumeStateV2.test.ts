@@ -195,6 +195,54 @@ describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
         }
     });
 
+    it('replays a newer incremental model request after the periodic resume snapshot', async () => {
+        const { saveResumeState, loadResumeState } = loadCheckpointModule();
+        const { runLedger } = require('../../extension/ai/runner/runLedger') as typeof import('../../extension/ai/runner/runLedger');
+        const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-resume-event-replay-'));
+        vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: tmpRoot } }];
+        try {
+            const topicId = 'topic_event_replay';
+            const run = await runLedger.createRun(topicId, 'build', 'recover after crash');
+            const snapshotMessages: ChatMessage[] = [
+                { role: 'system', content: 'policy' },
+                { role: 'user', content: 'snapshot task' },
+            ];
+            await saveResumeState(
+                topicId,
+                'build',
+                snapshotMessages,
+                { getTodos: () => [] } as any,
+                run.runId,
+            );
+
+            const newerMessages: ChatMessage[] = [
+                ...snapshotMessages,
+                { role: 'assistant', content: 'newer verified progress' },
+                { role: 'user', content: 'continue from the latest request' },
+            ];
+            const requestRef = 'model_requests/model_after_snapshot.json';
+            const artifact = await runLedger.writeJsonArtifact(run.runId, requestRef, {
+                version: 2,
+                kind: 'model_request',
+                messageArchive: { format: 'full', messages: newerMessages },
+                toolset: { count: 0 },
+            });
+            await runLedger.appendEvent(run.runId, 'model_call_start', {
+                requestRef: artifact?.ref,
+                requestSha256: artifact?.sha256,
+            });
+
+            const loaded = await loadResumeState(topicId);
+            expect(loaded?.recoveredFromEventLog).to.equal(true);
+            expect(loaded?.messages.some(message => message.content === 'newer verified progress')).to.equal(true);
+            expect(loaded?.messages.some(message => message.content === 'continue from the latest request')).to.equal(true);
+            expect((loaded?.lastStableSequence ?? 0)).to.be.greaterThan(1);
+        } finally {
+            fs.rmSync(tmpRoot, { recursive: true, force: true });
+            vscodeStub.workspace.workspaceFolders = [];
+        }
+    });
+
     it('uses the checksummed transcript backup when the primary transcript is valid JSON but damaged', async () => {
         const { saveResumeState, loadResumeState } = loadCheckpointModule();
         const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-transcript-backup-'));
@@ -285,5 +333,13 @@ function loadCheckpointModule() {
 const vscodeStub = {
     workspace: {
         workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
+    },
+    window: {
+        createOutputChannel: () => ({
+            appendLine: () => undefined,
+            show: () => undefined,
+            clear: () => undefined,
+            dispose: () => undefined,
+        }),
     },
 };

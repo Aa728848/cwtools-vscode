@@ -3,10 +3,14 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { getPrivateTopicRootCandidates, getPrivateTopicStorageDir } from '../workspacePaths';
 import { ErrorReporter } from '../errorReporter';
-import { AgentRunRecord } from '../types';
+import { AgentRunRecord, type ChatMessage } from '../types';
 import { isPathInsideOrEqual } from '../../pathScope';
 import { atomicWriteJson, readJsonWithBackup, sha256Text } from './durableStorage';
 import { getHistoryPolicy } from './historyPolicy';
+import {
+    applyModelRequestMessageArchive,
+    type ModelRequestMessageArchive,
+} from './requestArtifacts';
 
 const RUN_LEDGER_FIELD_MAX_CHARS = 6000;
 const RUN_STATE_MAX_LOAD_BYTES = 4_000_000;
@@ -67,7 +71,8 @@ export type AgentRunEventType =
     | 'env_allowlist_shadow'
     | 'worktree_created'
     | 'worktree_diff_collected'
-    | 'worktree_cleaned';
+    | 'worktree_cleaned'
+    | 'evidence_gate_decision';
 
 export interface AgentRunEvent {
     eventId: string;
@@ -444,6 +449,100 @@ export class RunLedger {
             transcriptPath,
             (value): value is import('../types').ChatMessage[] => Array.isArray(value),
         )?.value;
+    }
+
+    /**
+     * Replay the newest checksummed model-request transcript newer than a
+     * periodic resume snapshot. Model requests are archived before provider
+     * execution, so a crash can safely resume from this last complete prompt.
+     */
+    public async readLatestModelRequestMessages(
+        runId: string,
+        topicId?: string,
+        afterSequence = 0,
+    ): Promise<{ messages: ChatMessage[]; eventId: string; sequence: number } | undefined> {
+        const snapshot = await this.getOrLoadSnapshot(runId, topicId);
+        if (!snapshot) return undefined;
+        const runDir = this.resolveRunDir(snapshot.run.topicId, runId);
+        const requestEvents = snapshot.events
+            .filter(event => (
+                event.type === 'model_call_start'
+                && event.sequence > afterSequence
+                && typeof event.payload?.requestRef === 'string'
+            ))
+            .sort((left, right) => right.sequence - left.sequence);
+        if (requestEvents.length === 0) return undefined;
+
+        const expectedHashes = new Map<string, string>();
+        for (const event of snapshot.events) {
+            const ref = event.payload?.requestRef;
+            const sha256 = event.payload?.requestSha256;
+            if (typeof ref === 'string' && typeof sha256 === 'string') expectedHashes.set(ref, sha256);
+        }
+
+        type PersistedModelRequest = {
+            version: 2;
+            kind: 'model_request';
+            messageArchive: ModelRequestMessageArchive;
+        };
+        const isMessage = (value: unknown): value is ChatMessage => (
+            !!value && typeof value === 'object'
+            && typeof (value as { role?: unknown }).role === 'string'
+            && 'content' in value
+        );
+        const isArchive = (value: unknown): value is ModelRequestMessageArchive => {
+            if (!value || typeof value !== 'object') return false;
+            const archive = value as Partial<ModelRequestMessageArchive>;
+            if (archive.format === 'full') {
+                return Array.isArray(archive.messages) && archive.messages.every(isMessage);
+            }
+            return archive.format === 'delta'
+                && typeof archive.baseRequestRef === 'string'
+                && Number.isInteger(archive.commonPrefixLength)
+                && (archive.commonPrefixLength ?? -1) >= 0
+                && Array.isArray(archive.appendedMessages)
+                && archive.appendedMessages.every(isMessage);
+        };
+
+        const resolveArchive = (
+            requestRef: string,
+            seen: Set<string>,
+            depth: number,
+        ): ChatMessage[] | undefined => {
+            const normalizedRef = requestRef.replace(/\\/g, '/').replace(/^\/+/, '');
+            if (!normalizedRef || depth > 64 || seen.has(normalizedRef)) return undefined;
+            const requestPath = path.join(runDir, ...normalizedRef.split('/'));
+            if (!isPathInsideOrEqual(requestPath, runDir)) return undefined;
+            seen.add(normalizedRef);
+            const expectedHash = expectedHashes.get(requestRef) ?? expectedHashes.get(normalizedRef);
+            const loaded = readJsonWithBackup<PersistedModelRequest>(
+                requestPath,
+                (value): value is PersistedModelRequest => {
+                    if (!value || typeof value !== 'object') return false;
+                    const candidate = value as Partial<PersistedModelRequest>;
+                    if (candidate.version !== 2 || candidate.kind !== 'model_request' || !isArchive(candidate.messageArchive)) {
+                        return false;
+                    }
+                    return !expectedHash || sha256Text(JSON.stringify(value, null, 2)) === expectedHash;
+                },
+            );
+            if (!loaded) return undefined;
+            const archive = loaded.value.messageArchive;
+            if (archive.format === 'full') return applyModelRequestMessageArchive(archive);
+            const base = resolveArchive(archive.baseRequestRef, seen, depth + 1);
+            return base ? applyModelRequestMessageArchive(archive, base) : undefined;
+        };
+
+        for (const event of requestEvents) {
+            const requestRef = event.payload.requestRef as string;
+            try {
+                const messages = resolveArchive(requestRef, new Set<string>(), 0);
+                if (messages) return { messages, eventId: event.eventId, sequence: event.sequence };
+            } catch (error) {
+                ErrorReporter.warn('RunLedger', `Failed to replay model request artifact ${requestRef}`, error);
+            }
+        }
+        return undefined;
     }
 
     public async writeJsonArtifact(

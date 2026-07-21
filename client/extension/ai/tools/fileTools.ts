@@ -361,6 +361,24 @@ export class FileToolHandler {
         return `${toolName} refused to write ${path.basename(filePath)} because it would unbalance the PDX brace structure (${problem}; openings: ${nextStructure.openCount}, closings: ${nextStructure.closeCount}). Re-read the exact block/context and retry with the surrounding braces intact.`;
     }
 
+    private async rejectPdxEvidenceWrite(
+        toolName: string,
+        filePath: string,
+        originalContent: string,
+        newContent: string,
+        context?: import('../types').AgentToolContext,
+    ): Promise<string | null> {
+        if (!this.isPdxStructureGuardedPath(filePath) || originalContent === newContent) return null;
+        const preflight = context?.onBeforePdxWrite;
+        if (!preflight) return null;
+        try {
+            const result = await preflight({ toolName, filePath, previousContent: originalContent, content: newContent });
+            return result.allowed ? null : (result.message ?? `Semantic evidence gate blocked ${toolName}.`);
+        } catch (error) {
+            return `Semantic evidence verification failed before ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
+        }
+    }
+
     private readTextFile(filePath: string, context?: import('../types').AgentToolContext): { content: string; hasBom: boolean } {
         const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
         if (vfsOverlay && vfsOverlay.has(filePath)) {
@@ -659,6 +677,10 @@ export class FileToolHandler {
                 if (pdxStructureReject) {
                     return { success: false, message: pdxStructureReject };
                 }
+                const pdxEvidenceReject = await this.rejectPdxEvidenceWrite('write_file', args.file, originalContent, args.content, context);
+                if (pdxEvidenceReject) {
+                    return { success: false, message: pdxEvidenceReject };
+                }
 
                 const _diff = this.buildUnifiedDiff(args.file, originalContent ?? '', args.content);
 
@@ -738,6 +760,10 @@ export class FileToolHandler {
             if (pdxStructureReject) {
                 const hint = this.recordEditFailure(filePath);
                 return { success: false, message: pdxStructureReject + hint };
+            }
+            const pdxEvidenceReject = await this.rejectPdxEvidenceWrite('edit_file', filePath, originalContent, newContent, context);
+            if (pdxEvidenceReject) {
+                return { success: false, message: pdxEvidenceReject };
             }
 
             const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
@@ -877,6 +903,10 @@ export class FileToolHandler {
         if (pdxStructureReject) {
             return { success: false, message: pdxStructureReject };
         }
+        const pdxEvidenceReject = await this.rejectPdxEvidenceWrite('ast_mutate', filePath, originalContent, newContent, context);
+        if (pdxEvidenceReject) {
+            return { success: false, message: pdxEvidenceReject };
+        }
         const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
 
         if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context)) {
@@ -998,6 +1028,10 @@ export class FileToolHandler {
             const pdxStructureReject = this.rejectUnsafePdxStructureWrite('multi_replace_file_content', filePath, originalContent, content);
             if (pdxStructureReject) {
                 return { success: false, message: pdxStructureReject + this.recordEditFailure(filePath) } as any;
+            }
+            const pdxEvidenceReject = await this.rejectPdxEvidenceWrite('multi_replace_file_content', filePath, originalContent, content, context);
+            if (pdxEvidenceReject) {
+                return { success: false, message: pdxEvidenceReject } as any;
             }
             const diff = this.buildUnifiedDiff(filePath, originalContent, content);
 
@@ -1123,6 +1157,10 @@ export class FileToolHandler {
             const pdxStructureReject = this.rejectUnsafePdxStructureWrite('replace_lines', filePath, originalContent, newContent);
             if (pdxStructureReject) {
                 return { success: false, message: pdxStructureReject + this.recordEditFailure(filePath) };
+            }
+            const pdxEvidenceReject = await this.rejectPdxEvidenceWrite('replace_lines', filePath, originalContent, newContent, context);
+            if (pdxEvidenceReject) {
+                return { success: false, message: pdxEvidenceReject };
             }
 
             const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
@@ -1296,6 +1334,11 @@ export class FileToolHandler {
             const pdxStructureReject = this.rejectUnsafePdxStructureWrite('apply_patch', filePath, originalContent, newContent);
             if (pdxStructureReject) {
                 errors.push(pdxStructureReject);
+                continue;
+            }
+            const pdxEvidenceReject = await this.rejectPdxEvidenceWrite('apply_patch', filePath, originalContent, newContent, context);
+            if (pdxEvidenceReject) {
+                errors.push(pdxEvidenceReject);
             }
         }
 
@@ -1815,8 +1858,9 @@ export class FileToolHandler {
 
     // - writeDesignBlueprint -
 
-    async writeDesignBlueprint(args: import('../types').WriteDesignBlueprintArgs, context?: import('../types').AgentToolContext): Promise<import('../types').WriteDesignBlueprintResult> {
+    async writeDesignBlueprint(input: import('../types').WriteDesignBlueprintArgs | { blueprint: import('../types').WriteDesignBlueprintArgs }, context?: import('../types').AgentToolContext): Promise<import('../types').WriteDesignBlueprintResult> {
         try {
+            const args = 'blueprint' in input ? input.blueprint : input;
             const failBlueprint = (message: string): import('../types').WriteDesignBlueprintResult => ({
                 success: false,
                 message,

@@ -14,6 +14,7 @@ import type {
     OrchestratorOptions,
 } from './types';
 import type { TokenUsage, AgentStep } from '../types';
+import { mergeTokenUsageTotals } from '../cacheCapability';
 import { TaskGraphEngine } from './taskGraphEngine';
 import { Blackboard } from './blackboard';
 import { ConflictDetector } from './conflictDetector';
@@ -253,10 +254,7 @@ export class ParallelExecutor {
                     taggedStep,
                 );
 
-                totalTokenUsage.total += result.tokenUsage.total;
-                totalTokenUsage.input += result.tokenUsage.input;
-                totalTokenUsage.output += result.tokenUsage.output;
-                totalTokenUsage.estimatedCostCny += result.tokenUsage.estimatedCostCny;
+                mergeTokenUsageTotals(totalTokenUsage, result.tokenUsage);
                 this.consumedTokens.total += result.tokenUsage.total;
 
                 node.tokenUsage = result.tokenUsage;

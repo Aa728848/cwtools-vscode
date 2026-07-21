@@ -278,7 +278,7 @@ registerWorkflow({
 			// Web research
 			'web_search', 'web_open', 'web_find',
 			// Design output
-			'write_design_blueprint',
+			'get_design_blueprint_contract', 'write_design_blueprint',
 			// Memory
 			'set_memory', 'get_memory', 'search_memory',
 			// Task tracking

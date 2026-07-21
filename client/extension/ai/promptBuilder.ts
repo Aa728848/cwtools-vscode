@@ -8,13 +8,14 @@
  */
 
 import * as vs from 'vscode';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { ChatMessage, AgentMode } from './types';
+import type { ChatMessage, AgentMode, ToolDefinition } from './types';
 import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
 import { MemoryParser } from './memoryParser';
 import { ErrorReporter } from './errorReporter';
-import { SOURCE, aiText } from './messages';
+import { SOURCE, aiText, getAiMessageLocale } from './messages';
 import { getExistingTopicFilePath, getPrivateTopicStorageDir } from './workspacePaths';
 import {
     buildProfileSummary,
@@ -39,6 +40,10 @@ interface ParsedProjectRules {
 
 interface RuntimePromptState {
     mode?: AgentMode;
+    /** Current user task used only for relevance-ranked memory retrieval. */
+    taskText?: string;
+    /** Active/recent files used as path-scope hints for memory retrieval. */
+    pathScope?: string[];
     workflow?: {
         id: string;
         title: string;
@@ -65,7 +70,102 @@ import {
     buildOrchestratorSystemPrompt,
     buildScriptModeSystemPrompt
 } from './prompt/sections/modePrompts';
-import { buildSkillIndexPrompt } from './skills';
+import { buildSkillIndexPrompt, listSkills } from './skills';
+
+// ─── Frozen prompt fingerprint (plan §7.1) ──────────────────────────────────
+
+/**
+ * Manual version counter for the frozen system prompt template. Bump this
+ * whenever the prompt structure changes (sections added/removed/reordered, or
+ * shared policy text edited) so prompts cached by older builds are never
+ * reused across extension updates (plan §7.1).
+ */
+export const PROMPT_TEMPLATE_VERSION = 2;
+
+/**
+ * Why a frozen system prompt lookup missed. Process-local diagnostics only —
+ * see PromptBuilder.getFrozenPromptCacheStats().
+ */
+export type FrozenPromptMissReason =
+    | 'cold'               // first build for this identity (mode/provider/game/locale)
+    | 'template_version'   // PROMPT_TEMPLATE_VERSION changed
+    | 'rules_changed'      // CWTOOLS.md content hash changed
+    | 'profile_changed'    // .cwtools/project/profile.json content hash changed
+    | 'skills_changed'     // installed skill index changed
+    | 'toolset_changed'    // filtered tool definition set changed
+    | 'flag_changed'       // prompt-affecting feature flag changed
+    | 'fingerprint_missing'// a fingerprint component could not be computed
+    | 'evicted'            // same fingerprint but the LRU entry was gone
+    | 'rebuild';           // explicit AgentRunnerOptions.rebuildSystemPrompt
+
+interface FrozenPromptFingerprintComponents {
+    templateVersion: number;
+    mode: AgentMode;
+    providerId: string;
+    gameId: string;
+    locale: string;
+    rulesHash: string;
+    profileHash: string;
+    skillsHash: string;
+    toolsetHash: string;
+    flagsHash: string;
+}
+
+interface FrozenPromptFingerprint {
+    /** sha256 (truncated) over the serialized components — the cache key. */
+    hash: string;
+    /** Identity dimensions only (mode/provider/game/locale), for miss classification. */
+    baseKey: string;
+    /** Resolved game language id (never undefined — fixes the old `languageId ?? ''` key). */
+    gameId: string;
+    components: FrozenPromptFingerprintComponents;
+    /** True when one or more components could not be computed. */
+    incomplete: boolean;
+}
+
+/** sha256 hex digest truncated for cache keys/hashes (cache identity only, not security-sensitive). */
+function shortSha256(content: string, length = 16): string {
+    return crypto.createHash('sha256').update(content).digest('hex').slice(0, length);
+}
+
+/**
+ * Fingerprint the model-visible tool definitions for the frozen prompt cache
+ * key. Only tool names and `required` parameter lists are hashed: description
+ * text churn is covered by PROMPT_TEMPLATE_VERSION, so editing a description
+ * does not needlessly invalidate cached prompts (plan §7.1).
+ */
+export function hashToolDefinitionsForFingerprint(tools: readonly ToolDefinition[]): string {
+    const stable = tools.map(tool => ({
+        name: tool.function.name,
+        required: (tool.function.parameters as { required?: unknown }).required ?? [],
+    }));
+    return shortSha256(JSON.stringify(stable));
+}
+
+/**
+ * Order the initial request messages for provider prefix caching (plan §7.2):
+ * the stable system prompt stays at the head, cacheable (possibly compacted)
+ * history follows, and dynamic editor/project state sits immediately before
+ * the user turn so the long static prefix remains byte-stable. The OpenAI
+ * Responses API merges system messages into top-level instructions preserving
+ * their relative order (aiService buildOpenAIResponsesPayload), so this
+ * ordering does not conflict with that merge.
+ */
+export function orderMessagesForStablePrefix(parts: {
+    systemPrompt: string;
+    compactedHistory: ChatMessage[];
+    contextMessages: ChatMessage[];
+    dynamicBlock: ChatMessage[];
+    userContent: ChatMessage['content'];
+}): ChatMessage[] {
+    return [
+        { role: 'system', content: parts.systemPrompt },
+        ...parts.compactedHistory,
+        ...parts.contextMessages,
+        ...parts.dynamicBlock,
+        { role: 'user', content: parts.userContent },
+    ];
+}
 
 // ─── Model-specific instruction supplements ───────────────────────────────────
 
@@ -92,15 +192,25 @@ export class PromptBuilder {
     private memoryParser: MemoryParser;
 
     /** Frozen system prompt cache for prefix-cache optimization (DeepSeek etc.).
-     *  Key: `${mode}|${providerId}` — value is the cached prompt string.
-     *  Once built, the same string is returned on subsequent calls within the session. */
-    /** Frozen system prompt cache for prefix-cache optimization (DeepSeek etc.).
-     *  Key: `${mode}|${providerId}|${languageId}` — value is the cached prompt string.
+     *  Key: sha256 over the structured prompt fingerprint (template version,
+     *  mode, provider, resolved game id, locale, CWTOOLS.md / project profile
+     *  content hashes, skill index hash, toolset hash, prompt-affecting flags)
+     *  — value is the cached prompt string (plan §7.1).
      *  Bounded by FROZEN_PROMPT_CACHE_MAX to guard against runaway growth from
      *  unexpected key explosion (e.g. providerId variations). LRU eviction relies
      *  on Map's insertion-order semantics. */
     private static readonly FROZEN_PROMPT_CACHE_MAX = 32;
     private _frozenPromptCache = new Map<string, string>();
+    /** Last-seen fingerprint components per identity key (mode|provider|game|locale),
+     *  used to classify cache misses. Bounded, insertion-order trimmed. */
+    private static readonly FROZEN_FINGERPRINT_HISTORY_MAX = 64;
+    private _frozenFingerprintHistory = new Map<string, FrozenPromptFingerprintComponents>();
+    /** Process-local hit/miss counters; deliberately not persisted — see
+     *  getFrozenPromptCacheStats() for the rationale. */
+    private _frozenPromptHits = 0;
+    private _frozenPromptMisses = new Map<FrozenPromptMissReason, number>();
+    private _lastFrozenPromptLookup?: { hit: boolean; missReason?: FrozenPromptMissReason };
+    private _lastFrozenPromptFingerprint: FrozenPromptFingerprint | undefined;
 
     constructor(
         private workspaceRoot: string,
@@ -246,7 +356,10 @@ export class PromptBuilder {
         }
 
         if (includeMemory) {
-            const memoryPrompt = this.memoryParser.getMemoryPrompt(topicId);
+            // Direct prompt-builder callers may not have a current user task.
+            // AgentRunner keeps includeMemory=false here and supplies task/path
+            // retrieval context through buildDynamicPromptBlock instead.
+            const memoryPrompt = this.memoryParser.getMemoryPrompt(topicId, { gameId });
             if (memoryPrompt) finalPrompt += memoryPrompt + '\n';
         }
 
@@ -269,20 +382,55 @@ export class PromptBuilder {
      * Build a frozen (session-cached) system prompt for DeepSeek prefix-cache optimization.
      * The first call builds and caches the prompt; subsequent calls return the cached string
      * verbatim, ensuring byte-level stability across API calls for prefix cache hits.
-     * 
+     *
      * Kept byte-stable by excluding transient/dynamic parameters (pinned context, topic, run summaries).
+     *
+     * The cache key is a sha256 over a structured fingerprint (plan §7.1):
+     * PROMPT_TEMPLATE_VERSION, mode, providerId, the RESOLVED game language id
+     * (never undefined — auto-detection used to leave the key segment empty),
+     * locale, CWTOOLS.md and project-profile content hashes, skill index hash,
+     * the filtered toolset hash, and prompt-affecting feature flags. Any
+     * component change therefore produces a distinct entry instead of reusing a
+     * stale prompt.
+     *
+     * @param options.toolsetHash - hashToolDefinitionsForFingerprint() of the run's tool set
+     * @param options.rebuild - AgentRunnerOptions.rebuildSystemPrompt: drop this
+     *   fingerprint's entry and rebuild (counts as a 'rebuild' miss).
      */
     buildFrozenSystemPrompt(
-        mode: AgentMode = 'build', 
-        providerId?: string, 
-        languageId?: string
+        mode: AgentMode = 'build',
+        providerId?: string,
+        languageId?: string,
+        options?: { toolsetHash?: string; rebuild?: boolean }
     ): string {
-        const cacheKey = `${mode}|${providerId ?? ''}|${languageId ?? ''}`;
-        const cached = this._frozenPromptCache.get(cacheKey);
-        if (cached !== undefined) return cached;
+        const fingerprint = this.computeFrozenPromptFingerprint(mode, providerId, languageId, options?.toolsetHash);
+        if (options?.rebuild) {
+            // Precise invalidation: only this fingerprint's entry is dropped;
+            // other modes/providers keep their cached prompts.
+            this._frozenPromptCache.delete(fingerprint.hash);
+            this.recordFrozenPromptMiss('rebuild');
+            this._lastFrozenPromptLookup = { hit: false, missReason: 'rebuild' };
+            return this.buildAndStoreFrozenPrompt(mode, providerId, fingerprint);
+        }
+        const cached = this._frozenPromptCache.get(fingerprint.hash);
+        if (cached !== undefined) {
+            this._frozenPromptHits++;
+            this._lastFrozenPromptLookup = { hit: true };
+            this._lastFrozenPromptFingerprint = fingerprint;
+            this.rememberFrozenFingerprint(fingerprint);
+            return cached;
+        }
+        const missReason = this.classifyFrozenPromptMiss(fingerprint);
+        this.recordFrozenPromptMiss(missReason);
+        this._lastFrozenPromptLookup = { hit: false, missReason };
+        return this.buildAndStoreFrozenPrompt(mode, providerId, fingerprint);
+    }
 
+    private buildAndStoreFrozenPrompt(mode: AgentMode, providerId: string | undefined, fingerprint: FrozenPromptFingerprint): string {
         // Force stable mode by leaving topicId, runId, pinned, and memory undefined.
-        const prompt = this.buildSystemPromptForMode(mode, providerId, languageId, undefined, undefined, undefined, false, false);
+        // The resolved gameId is passed explicitly so the built prompt and the
+        // fingerprint always describe the same game.
+        const prompt = this.buildSystemPromptForMode(mode, providerId, fingerprint.gameId, undefined, undefined, undefined, false, false);
         // LRU eviction: drop oldest entry once we exceed the cap (Map iterates in insertion order).
         if (this._frozenPromptCache.size >= PromptBuilder.FROZEN_PROMPT_CACHE_MAX) {
             const oldestKey = this._frozenPromptCache.keys().next().value;
@@ -290,8 +438,157 @@ export class PromptBuilder {
                 this._frozenPromptCache.delete(oldestKey);
             }
         }
-        this._frozenPromptCache.set(cacheKey, prompt);
+        this._frozenPromptCache.set(fingerprint.hash, prompt);
+        this._lastFrozenPromptFingerprint = fingerprint;
+        this.rememberFrozenFingerprint(fingerprint);
         return prompt;
+    }
+
+    private rememberFrozenFingerprint(fingerprint: FrozenPromptFingerprint): void {
+        this._frozenFingerprintHistory.delete(fingerprint.baseKey);
+        this._frozenFingerprintHistory.set(fingerprint.baseKey, fingerprint.components);
+        while (this._frozenFingerprintHistory.size > PromptBuilder.FROZEN_FINGERPRINT_HISTORY_MAX) {
+            const oldestKey = this._frozenFingerprintHistory.keys().next().value;
+            if (oldestKey === undefined) break;
+            this._frozenFingerprintHistory.delete(oldestKey);
+        }
+    }
+
+    private recordFrozenPromptMiss(reason: FrozenPromptMissReason): void {
+        this._frozenPromptMisses.set(reason, (this._frozenPromptMisses.get(reason) ?? 0) + 1);
+    }
+
+    private classifyFrozenPromptMiss(fingerprint: FrozenPromptFingerprint): FrozenPromptMissReason {
+        if (fingerprint.incomplete) return 'fingerprint_missing';
+        const previous = this._frozenFingerprintHistory.get(fingerprint.baseKey);
+        if (!previous) return 'cold';
+        if (previous.templateVersion !== fingerprint.components.templateVersion) return 'template_version';
+        if (previous.rulesHash !== fingerprint.components.rulesHash) return 'rules_changed';
+        if (previous.profileHash !== fingerprint.components.profileHash) return 'profile_changed';
+        if (previous.skillsHash !== fingerprint.components.skillsHash) return 'skills_changed';
+        if (previous.toolsetHash !== fingerprint.components.toolsetHash) return 'toolset_changed';
+        if (previous.flagsHash !== fingerprint.components.flagsHash) return 'flag_changed';
+        // Identical fingerprint but no cache entry: the LRU evicted it (or it was cleared).
+        return 'evicted';
+    }
+
+    private computeFrozenPromptFingerprint(mode: AgentMode, providerId: string | undefined, languageId: string | undefined, toolsetHash?: string): FrozenPromptFingerprint {
+        let incomplete = false;
+        let gameId = 'unknown';
+        let locale = 'unknown';
+        let rulesHash = 'unknown';
+        let profileHash = 'unknown';
+        let skillsHash = 'unknown';
+        let flagsHash = 'unknown';
+        try { gameId = languageId ?? this.detectGameLanguageId(); } catch { incomplete = true; }
+        try { locale = getAiMessageLocale(); } catch { incomplete = true; }
+        try {
+            const rules = this.parseProjectRules();
+            rulesHash = rules ? shortSha256(rules.raw) : 'none';
+        } catch { incomplete = true; }
+        try {
+            const profile = this.parseProjectProfile();
+            profileHash = profile ? shortSha256(JSON.stringify(profile)) : 'none';
+        } catch { incomplete = true; }
+        try { skillsHash = this.computeSkillsIndexHash(); } catch { incomplete = true; }
+        try { flagsHash = this.computePromptFlagsHash(); } catch { incomplete = true; }
+        const components: FrozenPromptFingerprintComponents = {
+            templateVersion: PROMPT_TEMPLATE_VERSION,
+            mode,
+            providerId: providerId ?? '',
+            gameId,
+            locale,
+            rulesHash,
+            profileHash,
+            skillsHash,
+            toolsetHash: toolsetHash ?? '',
+            flagsHash,
+        };
+        return {
+            hash: shortSha256(JSON.stringify(components), 24),
+            baseKey: `${mode}|${providerId ?? ''}|${gameId}|${locale}`,
+            gameId,
+            components,
+            incomplete,
+        };
+    }
+
+    /**
+     * Hash the installed skill index: frontmatter fields plus file mtime/size,
+     * so SKILL.md body edits without frontmatter changes still invalidate the
+     * frozen prompt (plan §7.1). listSkills() is sorted by name, so the hash
+     * is deterministic.
+     */
+    private computeSkillsIndexHash(): string {
+        const skills = listSkills({
+            workspaceRoot: this.workspaceRoot,
+            globalStoragePath: this.globalStoragePath,
+            extensionPath: this.extensionPath,
+        });
+        if (skills.length === 0) return 'none';
+        const parts = skills.map(skill => {
+            let fileSig = 'unreadable';
+            try {
+                const stat = fs.statSync(skill.filePath);
+                fileSig = `${stat.mtimeMs}:${stat.size}`;
+            } catch { /* keep fallback marker */ }
+            return [skill.name, skill.description, skill.runAs ?? '', (skill.allowedTools ?? []).join(','), fileSig].join('|');
+        });
+        return shortSha256(parts.join('\n'));
+    }
+
+    /**
+     * Feature flags that change prompt or tool message content (plan §7.1).
+     * legacyFullToolset does not alter the prompt text itself but gates the
+     * tool set, so flipping it must rebuild the frozen prompt together with
+     * the toolset hash. Read directly from configuration (no new settings).
+     */
+    private computePromptFlagsHash(): string {
+        const perfConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
+        return shortSha256(JSON.stringify({
+            fullProjectRulesInBuild: perfConfig.get<boolean>('fullProjectRulesInBuild') === true,
+            includeFullSmallFiles: perfConfig.get<boolean>('includeFullSmallFiles') === true,
+            legacyFullToolset: perfConfig.get<boolean>('legacyFullToolset') === true,
+        }));
+    }
+
+    /** Short fingerprint hash of the most recently served frozen prompt, for usage records (plan §7.3). */
+    getLastFrozenPromptFingerprintHash(): string | undefined {
+        return this._lastFrozenPromptFingerprint?.hash;
+    }
+
+    /** Result of the most recent frozen-prompt lookup for persisted invalidation diagnostics. */
+    getLastFrozenPromptLookup(): { hit: boolean; missReason?: FrozenPromptMissReason } | undefined {
+        return this._lastFrozenPromptLookup ? { ...this._lastFrozenPromptLookup } : undefined;
+    }
+
+    /**
+     * Process-local frozen prompt cache diagnostics (plan §7.3). Deliberately
+     * not persisted to globalState: these are session-scoped cache-correctness
+     * counters, not billing data, so they live next to the cache itself
+     * instead of inside UsageTracker's persisted store.
+     */
+    getFrozenPromptCacheStats(): { size: number; hits: number; misses: number; missReasons: Record<string, number> } {
+        const missReasons: Record<string, number> = {};
+        let misses = 0;
+        for (const [reason, count] of this._frozenPromptMisses) {
+            missReasons[reason] = count;
+            misses += count;
+        }
+        return { size: this._frozenPromptCache.size, hits: this._frozenPromptHits, misses, missReasons };
+    }
+
+    /**
+     * Drop the parsed CWTOOLS.md / project profile mtime caches so the next
+     * prompt build re-reads them from disk. Frozen prompt entries key on
+     * content hashes and therefore miss naturally; called by file watchers on
+     * those inputs (plan §7.1).
+     */
+    invalidateProjectPromptInputs(): void {
+        this._parsedRulesCache = null;
+        this._parsedRulesMtime = 0;
+        this._projectProfileCache = null;
+        this._projectProfileMtime = 0;
     }
 
     /**
@@ -337,7 +634,11 @@ export class PromptBuilder {
             if (blueprintPrompt) dynamicParts.push(blueprintPrompt);
         }
 
-        const memoryPrompt = this.memoryParser.getMemoryPrompt(topicId);
+        const memoryPrompt = this.memoryParser.getMemoryPrompt(topicId, {
+            taskText: runtime?.taskText,
+            gameId: this.detectGameLanguageId(),
+            pathScope: runtime?.pathScope,
+        });
         if (memoryPrompt) dynamicParts.push(memoryPrompt);
 
         // 1. Compacted Summary (来自历史会话看板的压缩)

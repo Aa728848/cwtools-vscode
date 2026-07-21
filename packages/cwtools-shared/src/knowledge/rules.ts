@@ -1,4 +1,6 @@
 import * as path from 'path';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
 import type { HostServices } from '../host/hostServices';
 import type { SharedToolResult } from '../tools/schema';
 
@@ -26,6 +28,15 @@ export interface QueryRulesResult {
   truncated: boolean;
   source: 'cwtools-node-rules';
   warnings?: string[];
+  /**
+   * Cache lifecycle metadata (plan §7.4): monotonic per-host reload counter
+   * plus a content hash of the rule files, so evidence consumers can detect
+   * stale rule data. `generation` 0 means the memoization lifecycle is
+   * unavailable (no fs access to compute a freshness signature).
+   */
+  rulesGeneration?: number;
+  /** sha256 (16 hex chars) over the rule file contents; see computeRulesContentHash. */
+  rulesContentHash?: string;
 }
 
 export interface QueryCwtSchemaArgs {
@@ -97,6 +108,9 @@ export interface SearchRuleCapabilitiesResult {
   totalConsidered: number;
   source: 'cwtools-node-rules';
   warnings?: string[];
+  /** Cache lifecycle metadata (plan §7.4); see QueryRulesResult. */
+  rulesGeneration?: number;
+  rulesContentHash?: string;
 }
 
 export interface ExplainScopeArgs {
@@ -116,6 +130,9 @@ export interface ExplainScopeResult {
   };
   semanticHints?: RuleSemanticHint[];
   suggestions?: string[];
+  /** Cache lifecycle metadata (plan §7.4); see QueryRulesResult. */
+  rulesGeneration?: number;
+  rulesContentHash?: string;
 }
 
 export interface RuleHardFacts {
@@ -164,7 +181,7 @@ interface CwtRuleCache {
 }
 
 export async function queryRulesWithHost(host: HostServices, args: QueryRulesArgs): Promise<SharedToolResult<QueryRulesResult>> {
-  const cache = await loadCwtRules(host);
+  const { cache, meta } = await loadCwtRulesMemoized(host);
   let rules = args.category === 'trigger'
     ? cache.triggers
     : args.category === 'effect'
@@ -211,6 +228,8 @@ export async function queryRulesWithHost(host: HostServices, args: QueryRulesArg
       totalCount: rules.length,
       truncated,
       source: 'cwtools-node-rules',
+      rulesGeneration: meta.generation,
+      rulesContentHash: meta.contentHash,
       warnings: [
         ...(rules.length === 0
           ? ['No CWT rule files were loaded for the active game/rules source; check rules configuration or reload CWTools before trusting empty results.']
@@ -321,7 +340,7 @@ export async function searchRuleCapabilitiesWithHost(
   host: HostServices,
   args: SearchRuleCapabilitiesArgs = {},
 ): Promise<SharedToolResult<SearchRuleCapabilitiesResult>> {
-  const cache = await loadCwtRules(host);
+  const { cache, meta } = await loadCwtRulesMemoized(host);
   const categories = args.category && args.category !== 'all'
     ? [args.category]
     : ['trigger', 'effect', 'scope_change', 'modifier'] as const;
@@ -348,6 +367,8 @@ export async function searchRuleCapabilitiesWithHost(
       candidates: candidates.slice(0, limit),
       totalConsidered: rules.length,
       source: 'cwtools-node-rules',
+      rulesGeneration: meta.generation,
+      rulesContentHash: meta.contentHash,
       warnings: [
         ...(rules.length === 0
           ? ['No CWT rule files were loaded for the active game/rules source; check rules configuration or reload CWTools before trusting empty results.']
@@ -362,7 +383,7 @@ export async function explainScopeWithHost(
   host: HostServices,
   args: ExplainScopeArgs,
 ): Promise<SharedToolResult<ExplainScopeResult>> {
-  const cache = await loadCwtRules(host);
+  const { cache, meta } = await loadCwtRulesMemoized(host);
   const query = args.scope.trim();
   if (cache.scopes.size === 0) {
     return {
@@ -373,6 +394,8 @@ export async function explainScopeWithHost(
         status: 'not_found',
         scope: query,
         suggestions: [],
+        rulesGeneration: meta.generation,
+        rulesContentHash: meta.contentHash,
       },
       error: {
         code: 'rules_source_empty',
@@ -393,6 +416,8 @@ export async function explainScopeWithHost(
         status: 'not_found',
         scope: query,
         suggestions,
+        rulesGeneration: meta.generation,
+        rulesContentHash: meta.contentHash,
       },
       error: {
         code: 'scope_not_found',
@@ -430,6 +455,8 @@ export async function explainScopeWithHost(
       description: scope.description,
       source: { file: scope.file, line: scope.line },
       semanticHints: hints,
+      rulesGeneration: meta.generation,
+      rulesContentHash: meta.contentHash,
     },
   };
 }
@@ -755,9 +782,128 @@ function scoreCwtSchemaEntity(summary: CwtSchemaEntitySummary, normalizedTarget:
   return score;
 }
 
-async function loadCwtRules(host: HostServices): Promise<CwtRuleCache> {
-  const configPaths = await resolveRulesConfigPaths(host);
+// ─── Parsed-rules memoization (plan §7.4) ───────────────────────────────────
+//
+// loadCwtRules used to re-read and re-parse every rule file on each query.
+// The memo keeps one parsed CwtRuleCache per host identity, invalidated by an
+// mtime/size signature over a bounded candidate file set (11 files per config
+// root). `generation` is a per-host monotonic reload counter; `contentHash` is
+// sha256 (16 hex chars) over the length-prefixed concatenation of every
+// candidate rule file's content — the same algorithm the extension-side
+// LspToolHandler uses, so both ends describe rule revisions with the same
+// hash semantics. The cache is process-local and bounded
+// (CWT_RULES_MEMO_MAX_ENTRIES).
 
+const CWT_RULE_FILE_CANDIDATES: readonly string[] = [
+  'scopes.cwt',
+  path.join('logs', 'trigger_docs.log'),
+  path.join('logs', 'modifiers.log'),
+  'triggers.cwt',
+  'trigger.cwt',
+  path.join('generated', 'triggers.generated.cwt'),
+  'effects.cwt',
+  'effect.cwt',
+  path.join('generated', 'effects.generated.cwt'),
+  'scope_changes.cwt',
+  path.join('generated', 'scope_changes.generated.cwt'),
+];
+
+const CWT_RULES_MEMO_MAX_ENTRIES = 8;
+/**
+ * When no candidate rule file exists on disk, the mtime signature cannot
+ * observe changes (e.g. a fully virtual rules host), so such entries are
+ * re-validated at most once per this interval.
+ */
+const CWT_RULES_MEMO_REFRESH_MS = 30_000;
+
+interface CwtRulesMemoEntry {
+  signature: string;
+  sawDiskFiles: boolean;
+  generation: number;
+  contentHash: string;
+  cache: CwtRuleCache;
+  computedAt: number;
+}
+
+export interface CwtRulesCacheMeta {
+  generation: number;
+  contentHash: string;
+}
+
+const cwtRulesMemo = new Map<string, CwtRulesMemoEntry>();
+
+function computeRulesSignature(configPaths: string[]): { signature: string; sawDiskFiles: boolean } {
+  const parts: string[] = [];
+  let sawDiskFiles = false;
+  for (const configPath of configPaths) {
+    for (const file of CWT_RULE_FILE_CANDIDATES) {
+      const fullPath = path.join(configPath, file);
+      try {
+        const stat = fs.statSync(fullPath);
+        parts.push(`${fullPath}:${stat.mtimeMs}:${stat.size}`);
+        sawDiskFiles = true;
+      } catch {
+        parts.push(`${fullPath}:missing`);
+      }
+    }
+  }
+  return { signature: parts.join('|'), sawDiskFiles };
+}
+
+/**
+ * sha256 (truncated to 16 hex chars) over the length-prefixed concatenation
+ * of every existing candidate rule file's content, read through the host so
+ * the hash reflects exactly what was parsed. The extension-side
+ * LspToolHandler uses the same length-prefixed algorithm over its fs reads,
+ * so both ends share rule-revision hash semantics (plan §7.4).
+ */
+async function computeRulesContentHash(host: HostServices, configPaths: string[]): Promise<string> {
+  const hash = crypto.createHash('sha256');
+  for (const configPath of configPaths) {
+    for (const file of CWT_RULE_FILE_CANDIDATES) {
+      const read = await readRulesTextFile(host, path.join(configPath, file)).catch(() => ({ exists: false, content: '', hasBom: false }));
+      if (!read.exists) continue;
+      hash.update(`${read.content.length}:`);
+      hash.update(read.content);
+    }
+  }
+  return hash.digest('hex').slice(0, 16);
+}
+
+function cwtRulesHostKey(host: HostServices): string {
+  return [host.workspaceRoot, host.rules?.gameId ?? '', (host.rules?.configDirs ?? []).join(';')].join('|');
+}
+
+async function loadCwtRulesMemoized(host: HostServices): Promise<{ cache: CwtRuleCache; meta: CwtRulesCacheMeta }> {
+  const configPaths = await resolveRulesConfigPaths(host);
+  const hostKey = cwtRulesHostKey(host);
+  const { signature, sawDiskFiles } = computeRulesSignature(configPaths);
+  const memo = cwtRulesMemo.get(hostKey);
+  if (memo && memo.signature === signature && (memo.sawDiskFiles || host.now() - memo.computedAt < CWT_RULES_MEMO_REFRESH_MS)) {
+    return { cache: memo.cache, meta: { generation: memo.generation, contentHash: memo.contentHash } };
+  }
+  const cache = await loadCwtRulesFromPaths(host, configPaths);
+  const entry: CwtRulesMemoEntry = {
+    signature,
+    sawDiskFiles,
+    generation: (memo?.generation ?? 0) + 1,
+    // Computed after the reload; re-reads the bounded candidate set through
+    // the host, which is acceptable because reloads are rare.
+    contentHash: await computeRulesContentHash(host, configPaths),
+    cache,
+    computedAt: host.now(),
+  };
+  cwtRulesMemo.set(hostKey, entry);
+  // Bounded: insertion-order eviction once the cap is exceeded.
+  while (cwtRulesMemo.size > CWT_RULES_MEMO_MAX_ENTRIES) {
+    const oldest = cwtRulesMemo.keys().next().value;
+    if (oldest === undefined) break;
+    cwtRulesMemo.delete(oldest);
+  }
+  return { cache, meta: { generation: entry.generation, contentHash: entry.contentHash } };
+}
+
+async function loadCwtRulesFromPaths(host: HostServices, configPaths: string[]): Promise<CwtRuleCache> {
   for (const configPath of configPaths) {
     const triggerDocs = await readRulesTextFile(host, path.join(configPath, 'logs', 'trigger_docs.log')).catch(() => ({ exists: false, content: '', hasBom: false }));
     const docs = triggerDocs.exists

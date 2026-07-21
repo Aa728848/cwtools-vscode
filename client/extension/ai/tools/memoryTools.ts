@@ -87,7 +87,7 @@ export class MemoryToolHandler {
             const { MemoryParser } = await import('../memoryParser');
             const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId;
             const parser = new MemoryParser(this.ctx.workspaceRoot, topicId);
-            return await parser.appendMemory({
+            const result = await parser.appendMemory({
                 key,
                 content,
                 priority: priority || 'normal',
@@ -98,6 +98,12 @@ export class MemoryToolHandler {
                 source: `run:${context?.runnerOptions?.runRecord?.runId ?? 'unknown'}`,
                 scope: 'private',
             });
+            // Plan §8: re-saving an existing key means the model actively worked
+            // with that memory — count it as an actual use (debounced persistence).
+            if (result.success && result.existed) {
+                parser.markMemoryUsed(topicId, [key]);
+            }
+            return result;
         }
     }
 

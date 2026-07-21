@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import * as fs from 'fs';
 import * as path from 'path';
+import { DESIGN_BLUEPRINT_DETAILED_PARAMETERS } from '../../extension/ai/tools/definitions';
 
 let diagnosticPairs: Array<[any, any[]]> = [];
 let ignoredDiagnostics: string[] = [];
@@ -556,10 +557,14 @@ describe('agent tool file path safety', () => {
         expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('multi_replace_file_content')).to.equal(false);
     });
 
-    it('requires rich blueprint sections in write_design_blueprint schema', () => {
+    it('loads the rich blueprint contract on demand instead of every request', () => {
         const tool = TOOL_DEFINITIONS.find(def => def.function.name === 'write_design_blueprint');
-        const required = tool?.function.parameters.required ?? [];
+        const contractTool = TOOL_DEFINITIONS.find(def => def.function.name === 'get_design_blueprint_contract');
+        const required = DESIGN_BLUEPRINT_DETAILED_PARAMETERS.required ?? [];
 
+        expect(tool?.function.parameters.required).to.deep.equal(['blueprint']);
+        expect(contractTool).to.not.equal(undefined);
+        expect(JSON.stringify(tool).length).to.be.lessThan(1_500);
         expect(required).to.include.members([
             'title',
             'entities',

@@ -45,6 +45,11 @@ export function getRunStorageDir(topicId: string, runId: string): string {
 
 /**
  * 对复杂的对话历史与事务记录进行多维度分析，由 LLM 进行自适应概括与状态提炼
+ *
+ * 注意：自「统一摘要与 compaction」改造（docs/ai-agent-reliability-efficiency-plan.md §5.1）起，
+ * AgentRunner.run() 已不再在每个 turn 自动调用本函数——摘要统一由 runner/compaction.ts 的
+ * maybeCompactHistory 负责。本模块暂时保留供显式/诊断用途；其写出的 summary.json/summary.md
+ * 仍可能被 promptBuilder、chat/bridge 与 checkpoint 读取（缺文件时读取方均安全回退）。
  */
 export async function compactHistory(
     topicId: string,

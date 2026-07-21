@@ -216,6 +216,19 @@ export async function loadResumeState(topicId: string): Promise<AgentResumeState
             }
         }
         if (!Array.isArray(raw.messages)) return null;
+        if (raw.runId) {
+            const replayed = await runLedger.readLatestModelRequestMessages(
+                raw.runId,
+                raw.topicId || topicId,
+                raw.lastStableSequence ?? 0,
+            );
+            if (replayed) {
+                raw.messages = buildResumeMessages(replayed.messages, readSummarySnippet(raw.summaryRef));
+                raw.lastStableEventId = replayed.eventId;
+                raw.lastStableSequence = replayed.sequence;
+                raw.recoveredFromEventLog = true;
+            }
+        }
         raw.messages = prepareMessagesForResume(raw.messages);
         raw.recoveredFromBackup = loaded.recoveredFromBackup;
         // A process restart ends the approval session. Only explicitly durable

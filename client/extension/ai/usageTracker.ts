@@ -1,7 +1,8 @@
 import * as vs from 'vscode';
-import { TokenUsage } from './types';
+import { CacheRequestUsage, TokenUsage } from './types';
 import { ErrorReporter } from './errorReporter';
 import { getModelPricing, getCacheDiscountFactor } from './providers/models/pricing';
+import { isCacheCapableUsage } from './cacheCapability';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -21,12 +22,23 @@ export interface UsageRecord {
     netTotalTokens?: number;
     /** Pre-computed cost saved by cache hits (from agentRunner) */
     cacheSavedCostCny?: number;
+    /**
+     * Whether this request was cache-capable (prefix cache supported by the
+     * provider/format). Records without this flag are inferred at read time.
+     */
+    cacheCapable?: boolean;
     /** Tool calls made in this request (Batch 4.2) */
     toolCalls?: Record<string, number>;
     /** Response latency in ms (Batch 4.2) */
     durationMs?: number;
     /** Topic/session ID for grouping (Batch 4.2) */
     topicId?: string;
+    /** Agent mode that produced this request (plan §7.3 per-mode cache aggregation) */
+    agentMode?: string;
+    /** Short frozen-prompt fingerprint hash for cache grouping (plan §7.3) */
+    promptFingerprint?: string;
+    /** Completed provider-call samples for request-accurate cache metrics. */
+    cacheRequests?: CacheRequestUsage[];
 }
 
 export interface ProviderStats {
@@ -49,6 +61,13 @@ export interface ModelDistribution {
     percentage: number; // 0-100
 }
 
+export interface CacheDimensionStats {
+    requests: number;
+    hitRequests: number;
+    requestHitRate: number;
+    cacheHitRate: number;
+}
+
 export interface UsageStats {
     totalTokens: number;
     /** Net total tokens excluding cache hits */
@@ -66,9 +85,25 @@ export interface UsageStats {
     cacheStats: {
         totalCachedTokens: number;
         totalInputTokens: number;
-        /** Input tokens from models that support cache statistics */
+        /** Input tokens from cache-capable requests, including zero-hit requests */
         cacheCapableInputTokens: number;
-        cacheHitRate: number;       // 0-100 percentage
+        /** cachedTokens / cacheCapableInputTokens (0-100 percentage) */
+        cacheHitRate: number;
+        /** cachedTokens / totalInputTokens across all requests (0-100 percentage) */
+        cachedInputTokenRatio: number;
+        /**
+         * Share of cache-capable requests that observed any cached tokens
+         * (0-100 percentage). Distinguishes "provider did not hit at all"
+         * (cacheCapable but cachedTokens=0) from token-level partial hits.
+         */
+        requestHitRate: number;
+        byProvider: Record<string, CacheDimensionStats>;
+        byModel: Record<string, CacheDimensionStats>;
+        byAgentMode: Record<string, CacheDimensionStats>;
+        byToolStage: Record<string, CacheDimensionStats>;
+        byPromptFingerprint: Record<string, CacheDimensionStats>;
+        /** Cache-capable zero-hit request count by explicit invalidation/miss reason. */
+        invalidationReasons: Record<string, number>;
         estimatedSavingsCny: number; // cost saved by cache hits
     };
 }
@@ -98,11 +133,15 @@ export class UsageTracker {
     addUsage(
         providerId: string,
         model: string,
+        // agentMode/promptFingerprint arrive as extra fields on the runner's
+        // token accumulator (see agentRunner); chatPanel passes it through unchanged.
         usage: TokenUsage,
         options?: {
             toolCalls?: Record<string, number>;
             durationMs?: number;
             topicId?: string;
+            /** Caller-computed cache capability (provider + wire format). Inferred from providerId when omitted. */
+            cacheCapable?: boolean;
         }
     ) {
         if (!usage || typeof usage.total !== 'number') return;
@@ -121,9 +160,13 @@ export class UsageTracker {
             netInputTokens: usage.netInput ?? (usage.input - (usage.cachedTokens ?? 0)),
             netTotalTokens: usage.netTotal ?? (usage.input - (usage.cachedTokens ?? 0) + usage.output),
             cacheSavedCostCny: usage.cacheSavedCostCny,
+            cacheCapable: options?.cacheCapable ?? isCacheCapableUsage(providerId, usage.cachedTokens),
             toolCalls: options?.toolCalls,
             durationMs: options?.durationMs,
             topicId: options?.topicId,
+            agentMode: usage.agentMode,
+            promptFingerprint: usage.promptFingerprint,
+            cacheRequests: usage.cacheRequests?.slice(0, 256).map(request => ({ ...request })),
         });
 
         // Auto-cleanup stale records
@@ -219,22 +262,101 @@ export class UsageTracker {
             .sort((a, b) => b.count - a.count);
         const avgResponseMs = durationCount > 0 ? Math.round(totalDurationMs / durationCount) : 0;
 
-        // Cache hit statistics
+        // Cache hit statistics.
+        // The hit-rate denominator covers every cache-capable request, including
+        // zero-hit requests (e.g. cache warm-up calls); counting only requests
+        // with observed hits would systematically inflate the rate.
+        const cacheSamples = records.flatMap((record): CacheRequestUsage[] => {
+            if (Array.isArray(record.cacheRequests) && record.cacheRequests.length > 0) {
+                return record.cacheRequests;
+            }
+            const cacheCapable = record.cacheCapable ?? isCacheCapableUsage(record.provider, record.cachedTokens);
+            return [{
+                provider: record.provider,
+                model: record.model,
+                inputTokens: record.inputTokens,
+                cachedTokens: record.cachedTokens ?? 0,
+                cacheCapable,
+                agentMode: record.agentMode,
+                promptFingerprint: record.promptFingerprint,
+                invalidationReason: cacheCapable && (record.cachedTokens ?? 0) === 0
+                    ? 'provider_miss'
+                    : undefined,
+            }];
+        });
         let totalCachedTokens = 0;
         let totalInputTokens = 0;
-        let cacheCapableInputTokens = 0; // Only count input from cache-capable models
-        for (const r of records) {
-            totalCachedTokens += r.cachedTokens ?? 0;
-            totalInputTokens += r.inputTokens;
-            // Only count input tokens from models that support cache statistics
-            if (r.cachedTokens && r.cachedTokens > 0) {
-                cacheCapableInputTokens += r.inputTokens;
+        let cacheCapableInputTokens = 0;
+        let cacheCapableRequests = 0;
+        let cacheHitRequests = 0;
+        type MutableCacheBucket = { requests: number; hitRequests: number; cachedTokens: number; inputTokens: number };
+        const byProviderMap = new Map<string, MutableCacheBucket>();
+        const byModelMap = new Map<string, MutableCacheBucket>();
+        const byAgentModeMap = new Map<string, MutableCacheBucket>();
+        const byToolStageMap = new Map<string, MutableCacheBucket>();
+        const byPromptFingerprintMap = new Map<string, MutableCacheBucket>();
+        const invalidationReasons = new Map<string, number>();
+        const addBucket = (map: Map<string, MutableCacheBucket>, key: string, sample: CacheRequestUsage, hit: boolean) => {
+            const bucket = map.get(key) ?? { requests: 0, hitRequests: 0, cachedTokens: 0, inputTokens: 0 };
+            bucket.requests += 1;
+            if (hit) bucket.hitRequests += 1;
+            bucket.cachedTokens += sample.cachedTokens;
+            bucket.inputTokens += sample.inputTokens;
+            map.set(key, bucket);
+        };
+        for (const sample of cacheSamples) {
+            totalCachedTokens += sample.cachedTokens;
+            totalInputTokens += sample.inputTokens;
+            if (!sample.cacheCapable) continue;
+            cacheCapableInputTokens += sample.inputTokens;
+            cacheCapableRequests += 1;
+            const hit = sample.cachedTokens > 0;
+            if (hit) cacheHitRequests += 1;
+            addBucket(byProviderMap, sample.provider || 'unknown', sample, hit);
+            addBucket(byModelMap, sample.model || 'unknown', sample, hit);
+            addBucket(byAgentModeMap, sample.agentMode ?? 'unspecified', sample, hit);
+            addBucket(byToolStageMap, sample.toolStage ?? 'unspecified', sample, hit);
+            addBucket(byPromptFingerprintMap, sample.promptFingerprint ?? 'unspecified', sample, hit);
+            if (!hit) {
+                const reason = sample.invalidationReason ?? 'provider_miss';
+                invalidationReasons.set(reason, (invalidationReasons.get(reason) ?? 0) + 1);
             }
         }
-        // Calculate cache hit rate based only on cache-capable models
         const cacheHitRate = cacheCapableInputTokens > 0
             ? Math.round((totalCachedTokens / cacheCapableInputTokens) * 10000) / 100
             : 0;
+        const cachedInputTokenRatio = totalInputTokens > 0
+            ? Math.round((totalCachedTokens / totalInputTokens) * 10000) / 100
+            : 0;
+        const requestHitRate = cacheCapableRequests > 0
+            ? Math.round((cacheHitRequests / cacheCapableRequests) * 10000) / 100
+            : 0;
+        // Sorted keys keep the aggregated output deterministic.
+        const finishBuckets = (map: Map<string, MutableCacheBucket>): Record<string, CacheDimensionStats> => {
+            const result: Record<string, CacheDimensionStats> = {};
+            for (const [key, bucket] of [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+                result[key] = {
+                    requests: bucket.requests,
+                    hitRequests: bucket.hitRequests,
+                    requestHitRate: bucket.requests > 0
+                        ? Math.round((bucket.hitRequests / bucket.requests) * 10000) / 100
+                        : 0,
+                    cacheHitRate: bucket.inputTokens > 0
+                        ? Math.round((bucket.cachedTokens / bucket.inputTokens) * 10000) / 100
+                        : 0,
+                };
+            }
+            return result;
+        };
+        const cacheByProvider = finishBuckets(byProviderMap);
+        const cacheByModel = finishBuckets(byModelMap);
+        const cacheByAgentMode = finishBuckets(byAgentModeMap);
+        const cacheByToolStage = finishBuckets(byToolStageMap);
+        const cacheByPromptFingerprint = finishBuckets(byPromptFingerprintMap);
+        const invalidationReasonCounts: Record<string, number> = {};
+        for (const [reason, count] of [...invalidationReasons.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+            invalidationReasonCounts[reason] = count;
+        }
         // Estimated savings: cached tokens billed at discounted rate vs full price
         // Use actual cost data per record for more accurate savings calculation
         let estimatedSavingsCny = 0;
@@ -270,6 +392,14 @@ export class UsageTracker {
                 totalInputTokens,
                 cacheCapableInputTokens,
                 cacheHitRate,
+                cachedInputTokenRatio,
+                requestHitRate,
+                byProvider: cacheByProvider,
+                byModel: cacheByModel,
+                byAgentMode: cacheByAgentMode,
+                byToolStage: cacheByToolStage,
+                byPromptFingerprint: cacheByPromptFingerprint,
+                invalidationReasons: invalidationReasonCounts,
                 estimatedSavingsCny,
             },
         };

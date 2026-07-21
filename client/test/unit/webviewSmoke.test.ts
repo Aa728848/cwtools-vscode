@@ -65,6 +65,23 @@ describe('webview smoke checks', () => {
         expect(script).to.include('provSel.onchange =');
     });
 
+    it('usage panel exposes request-level cache metrics and every required grouping', () => {
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+
+        expect(script).to.include("tr('Cache requests', '缓存请求')");
+        expect(script).to.include("tr('cached input tokens', '缓存输入 token')");
+        expect(script).to.include("tr('token hit rate', 'token 命中率')");
+        expect(script).to.include("tr('saved tokens', '节省 token')");
+        expect(script).to.include('cache.totalCachedTokens');
+        expect(script).to.include("tr('saved about', '约节省')");
+        expect(script).to.include("renderCacheDimension(tr('Provider', '供应商'), cache.byProvider)");
+        expect(script).to.include("renderCacheDimension(tr('Model', '模型'), cache.byModel)");
+        expect(script).to.include("renderCacheDimension(tr('Agent mode', 'Agent 模式'), cache.byAgentMode)");
+        expect(script).to.include("renderCacheDimension(tr('Tool stage', '工具阶段'), cache.byToolStage)");
+        expect(script).to.include("renderCacheDimension(tr('Prompt fingerprint', '提示词指纹'), cache.byPromptFingerprint)");
+        expect(script).to.include("tr('Zero-hit reasons', '零命中原因')");
+    });
+
     it('chat webview modules expose split UI contracts', () => {
         const modules = [
             'artifactDrawer.ts',

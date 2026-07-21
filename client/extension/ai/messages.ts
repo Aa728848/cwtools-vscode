@@ -63,6 +63,8 @@ const AGENT_TEXT = {
             `Compacting context... (${tokens} tokens -> target <${threshold})`,
         COMPACTION_DONE: (type: string, msgCount: number, summaryLen: number, pinnedCount: number) =>
             `Context compacted (${type}): ${msgCount} ${plural(msgCount, 'message')} -> summary (${summaryLen} chars, ${pinnedCount} pinned entities)`,
+        COMPACTION_REUSED: (msgCount: number) =>
+            `Transcript unchanged since the last compaction; reusing the previous summary (${msgCount} ${plural(msgCount, 'message')}).`,
         COMPACTION_INCREMENTAL: 'incremental merge',
         COMPACTION_INITIAL: 'initial compaction',
         COMPACTION_FAILED: (detail: string) => `Context compaction failed: ${detail}`,
@@ -103,6 +105,8 @@ const AGENT_TEXT = {
             `上下文压缩中... (${tokens} tokens -> 目标 <${threshold})`,
         COMPACTION_DONE: (type: string, msgCount: number, summaryLen: number, pinnedCount: number) =>
             `上下文已压缩 (${type}): ${msgCount} 条消息 -> 摘要 (${summaryLen} chars, ${pinnedCount} pinned entities)`,
+        COMPACTION_REUSED: (msgCount: number) =>
+            `上下文自上次压缩后未变化，直接复用上次摘要 (${msgCount} 条消息)。`,
         COMPACTION_INCREMENTAL: '增量合并',
         COMPACTION_INITIAL: '初始压缩',
         COMPACTION_FAILED: (detail: string) => `上下文压缩失败: ${detail}`,
@@ -142,6 +146,7 @@ export const AGENT = {
     COMPACTION_START: (tokens: number, threshold: number) => AGENT_TEXT[currentLocale].COMPACTION_START(tokens, threshold),
     COMPACTION_DONE: (type: string, msgCount: number, summaryLen: number, pinnedCount: number) =>
         AGENT_TEXT[currentLocale].COMPACTION_DONE(type, msgCount, summaryLen, pinnedCount),
+    COMPACTION_REUSED: (msgCount: number) => AGENT_TEXT[currentLocale].COMPACTION_REUSED(msgCount),
     get COMPACTION_INCREMENTAL() { return AGENT_TEXT[currentLocale].COMPACTION_INCREMENTAL; },
     get COMPACTION_INITIAL() { return AGENT_TEXT[currentLocale].COMPACTION_INITIAL; },
     COMPACTION_FAILED: (detail: string) => AGENT_TEXT[currentLocale].COMPACTION_FAILED(detail),
@@ -313,3 +318,45 @@ export const SOURCE = {
     UPDATE_CHECKER: 'UpdateChecker',
     ORCHESTRATOR: 'Orchestrator',
 } as const;
+
+const EVIDENCE_GATE_TEXT = {
+    en: {
+        BLOCKED_HEADER: (count: number, target: string) =>
+            `Semantic evidence gate blocked the write to ${target}: ${count} blocking ${plural(count, 'claim')} ${count === 1 ? 'is' : 'are'} unverified, contradicted, or stale.`,
+        UNAVAILABLE:
+            'The semantic evidence service is unavailable (LSP not connected or timed out). In enforce mode, semantic-sensitive PDX writes are blocked by default.',
+        OVERRIDE_REQUEST: (target: string, summary: string) =>
+            `The semantic evidence gate wants to block a PDX write to ${target}. Unverified claims:\n${summary}\nApprove only if you accept writing without verified evidence.`,
+        OVERRIDE_DENIED:
+            'Write blocked by the semantic evidence gate. You denied the manual override.',
+        RETRY_HINT:
+            'Collect the missing evidence with the suggested read-only queries, then retry. The gate re-verifies every attempt; you cannot promote a claim to verified yourself.',
+        RESULT_TAG: (decisionId: string, verdict: string, mode: string) =>
+            `Evidence gate: ${verdict} (${mode}, decision ${decisionId})`,
+        CLAIM_LINE: (kind: string, status: string, claim: string) => `- [${kind}/${status}] ${claim}`,
+    },
+    'zh-cn': {
+        BLOCKED_HEADER: (count: number, target: string) =>
+            `语义证据门禁阻止了对 ${target} 的写入：${count} 条阻断性声明未验证、存在冲突或已过期。`,
+        UNAVAILABLE:
+            '语义证据服务不可用（LSP 未连接或超时）。在 enforce 模式下，语义敏感的 PDX 写入默认被拒绝。',
+        OVERRIDE_REQUEST: (target: string, summary: string) =>
+            `语义证据门禁建议阻止对 ${target} 的 PDX 写入。未验证声明：\n${summary}\n仅在您接受“无证据也写入”时才应批准。`,
+        OVERRIDE_DENIED: '写入已被语义证据门禁阻止，您拒绝了人工覆盖。',
+        RETRY_HINT:
+            '请先用建议的只读查询收集缺失证据，再重试。门禁每次都会重新验证；不能由模型自行把 unknown 提升为 verified。',
+        RESULT_TAG: (decisionId: string, verdict: string, mode: string) =>
+            `证据门禁：${verdict}（${mode}，决策 ${decisionId}）`,
+        CLAIM_LINE: (kind: string, status: string, claim: string) => `- [${kind}/${status}] ${claim}`,
+    },
+} as const;
+
+export const EVIDENCE_GATE_MSG = {
+    BLOCKED_HEADER: (count: number, target: string) => EVIDENCE_GATE_TEXT[currentLocale].BLOCKED_HEADER(count, target),
+    get UNAVAILABLE() { return EVIDENCE_GATE_TEXT[currentLocale].UNAVAILABLE; },
+    OVERRIDE_REQUEST: (target: string, summary: string) => EVIDENCE_GATE_TEXT[currentLocale].OVERRIDE_REQUEST(target, summary),
+    get OVERRIDE_DENIED() { return EVIDENCE_GATE_TEXT[currentLocale].OVERRIDE_DENIED; },
+    get RETRY_HINT() { return EVIDENCE_GATE_TEXT[currentLocale].RETRY_HINT; },
+    RESULT_TAG: (decisionId: string, verdict: string, mode: string) => EVIDENCE_GATE_TEXT[currentLocale].RESULT_TAG(decisionId, verdict, mode),
+    CLAIM_LINE: (kind: string, status: string, claim: string) => EVIDENCE_GATE_TEXT[currentLocale].CLAIM_LINE(kind, status, claim),
+};

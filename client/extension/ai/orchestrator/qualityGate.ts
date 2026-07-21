@@ -6,10 +6,11 @@
 */
 
 import type { QualityGateResult, SubAgentResult, TaskGraph } from './types';
-import type { AgentStep, GenerationResult } from '../types';
+import type { AgentStep, GenerationResult, TokenUsage } from '../types';
 import { aiText } from '../messages';
 import type { RunEventSink } from '../runner/runContext';
 import { SemanticVerifier } from './semanticVerifier';
+import { mergeTokenUsageTotals } from '../cacheCapability';
 
 /** Quality gate configuration */
 export interface QualityGateConfig {
@@ -176,6 +177,7 @@ export class QualityGate {
         writtenFiles: string[],
         options: Partial<import('../agentRunner').AgentRunnerOptions>,
         reviewContext?: QualityGateReviewContext,
+        tokenAccumulator?: TokenUsage,
     ): Promise<QualityGateResult> {
         const taskGraph = reviewContext?.taskGraph;
         const workspaceRoot = reviewContext?.workspaceRoot ?? agentRunner.toolExecutor.workspaceRoot;
@@ -277,7 +279,7 @@ export class QualityGate {
             }
         });
 
-        let reviewResult: GenerationResult;
+        let reviewResult!: GenerationResult;
         try {
             forwardStep({
                 type: 'subtask_start',
@@ -363,6 +365,7 @@ export class QualityGate {
                 fixSuggestions: semantic.issues.map(issue => issue.message),
             };
         } finally {
+            mergeTokenUsageTotals(tokenAccumulator, reviewResult?.tokenUsage);
             clearTimeout(reviewTimeout);
             parentAbortSignal?.removeEventListener('abort', forwardParentAbort);
             if (abortListener) reviewController.signal.removeEventListener('abort', abortListener);

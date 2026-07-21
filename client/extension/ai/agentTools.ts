@@ -22,6 +22,7 @@ import type {
 
 // Re-export the canonical tool definitions (unchanged public API)
 export { TOOL_DEFINITIONS } from './tools/definitions';
+import { DESIGN_BLUEPRINT_DETAILED_PARAMETERS } from './tools/definitions';
 
 // Import handler classes
 import { FileToolHandler, findFiles } from './tools/fileTools';
@@ -30,13 +31,13 @@ import { ExternalToolHandler } from './tools/externalTools';
 import { MemoryToolHandler } from './tools/memoryTools';
 import type { IndexService } from '../indexing/indexService';
 import { validateToolAccess, evaluateMcpPermission } from './tools/permissions';
-import { queryProjectProfile } from './projectProfile';
+import { readProjectProfile, queryProjectProfile } from './projectProfile';
 import { queryProjectKnowledge } from './projectKnowledge';
 import { loadSkill } from './skills';
 import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 import { saveProjectWorkflow } from './workflowRegistry';
 import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
-import { aiText } from './messages';
+import { aiText, EVIDENCE_GATE_MSG } from './messages';
 import { getTopicStorageDir } from './workspacePaths';
 import { TOOL_REGISTRY } from './tools/registry';
 import { runAgentHooks } from './runner/hookRunner';
@@ -46,6 +47,11 @@ import { preflightCommand, type ConfiguredCommandPolicyRule } from './runner/com
 import { sessionFileWriteMode, sessionPolicyPreset } from './runner/sessionPermissions';
 import type { ApiKeyManager } from './aiService';
 import { normalizeLegacyWebToolCall, type WebSearchProvider } from './tools/webAccess';
+import { EvidenceGate } from './evidence/evidenceGate';
+import { normalizeEvidenceGateMode, type EvidenceGateDecision, type EvidenceGateMode } from './evidence/evidenceTypes';
+import { runLedger } from './runner/runLedger';
+import { ErrorReporter } from './errorReporter';
+import { mergeTokenUsageTotals } from './cacheCapability';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
 const TOOL_TIMEOUTS: Record<string, number> = {
@@ -253,6 +259,8 @@ export class AgentToolExecutor {
     private externalHandler: ExternalToolHandler;
     private memoryHandler: MemoryToolHandler;
     private readonly diagnosticAnalysisCounts = new Map<string, { count: number; lastSeen: number }>();
+    /** Lazily constructed semantic evidence gate (plan §4 P0). */
+    private evidenceGate?: EvidenceGate;
 
     private readonly clientGetter: () => LanguageClient;
     public readonly workspaceRoot: string;
@@ -587,6 +595,289 @@ export class AgentToolExecutor {
         return allowed ? { allowed: true } : { allowed: false, error: `Permission denied for ${toolName}.` };
     }
 
+    // - Semantic evidence gate (plan §4 P0) -
+
+    private evidenceGateMode(): EvidenceGateMode {
+        const raw = vs.workspace.getConfiguration('stellarisLanguageServices.ai.evidenceGate').get<string>('mode', 'enforce');
+        return normalizeEvidenceGateMode(raw);
+    }
+
+    /** LSP executeCommand sender for the gate, with its own timeout guard. */
+    private async evidenceLspRequest(command: string, cmdArgs: unknown[], timeoutMs = 3_000): Promise<unknown> {
+        const client = this.clientGetter();
+        if (!client) throw new Error('LSP client is not available.');
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            const promise = client.sendRequest('workspace/executeCommand', { command, arguments: cmdArgs });
+            const timeout = new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`LSP request "${command}" timed out after ${timeoutMs / 1000}s`)), timeoutMs);
+            });
+            return await Promise.race([promise, timeout]);
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    }
+
+    /** Candidate CWT rules roots for the gate's rules-revision fingerprint (mirrors LspToolHandler.resolveCwtConfigPaths). */
+    private evidenceRulesRoots(game: string): string[] {
+        const roots: string[] = [];
+        const add = (candidate: string | undefined) => {
+            if (!candidate?.trim()) return;
+            const resolved = path.resolve(candidate);
+            if (!roots.some(r => r.toLowerCase() === resolved.toLowerCase())) roots.push(resolved);
+        };
+        const addRoot = (candidate: string | undefined) => {
+            add(candidate);
+            if (candidate?.trim()) add(path.join(candidate, 'config'));
+        };
+        const cwtoolsConfig = vs.workspace.getConfiguration('stellarisLanguageServices');
+        const rulesVersion = cwtoolsConfig.get<string>('rules_version', 'latest');
+        const customRulesFolder = cwtoolsConfig.get<string>('rules_folder');
+        if (rulesVersion === 'manual' && customRulesFolder) addRoot(customRulesFolder);
+        addRoot(this.globalStoragePath ? path.join(this.globalStoragePath, '.cwtools', game) : undefined);
+        addRoot(this.extensionPath ? path.join(this.extensionPath, '.cwtools', game) : undefined);
+        if (game === 'stellaris') add(this.extensionPath ? path.join(this.extensionPath, 'config') : undefined);
+        addRoot(path.join(this.workspaceRoot, '.cwtools', game));
+        addRoot(path.join(this.workspaceRoot, 'release', 'rules', game));
+        addRoot(path.join(this.workspaceRoot, 'submodules', `cwtools-${game}-config`));
+        if (game === 'stellaris') add(path.join(this.workspaceRoot, 'submodules', 'cwtools-stellaris-config', 'config'));
+        return roots;
+    }
+
+    private getEvidenceGate(): EvidenceGate {
+        if (!this.evidenceGate) {
+            const profileGame = readProjectProfile(this.workspaceRoot)?.game?.id;
+            const gameProfile = profileGame && profileGame !== 'unknown' ? profileGame.toLowerCase() : 'stellaris';
+            this.evidenceGate = new EvidenceGate({
+                workspaceRoot: this.workspaceRoot,
+                gameProfile,
+                sendLspCommand: (command, cmdArgs, timeoutMs) => this.evidenceLspRequest(command, cmdArgs, timeoutMs),
+                queryRules: async (category, name) => {
+                    const result = await this.lspHandler.queryRules({ category, name });
+                    return result.rules.map(rule => ({
+                        name: rule.name,
+                        scopes: Array.isArray(rule.scopes) ? rule.scopes.filter((s): s is string => typeof s === 'string') : [],
+                        pushScope: rule.hardFacts?.pushScope,
+                    }));
+                },
+                indexLookup: async (name) => {
+                    const index = this.indexService;
+                    if (!index) return undefined;
+                    try {
+                        const readiness = index.ensureWorkspaceSymbolsReady?.({ includeVanilla: true });
+                        if (readiness !== undefined) {
+                            await Promise.race([
+                                readiness.catch(() => undefined),
+                                new Promise<void>(resolve => setTimeout(resolve, 2_000)),
+                            ]);
+                        }
+                        const entries = index.queryWorkspaceSymbols({ name, exact: true, limit: 3 });
+                        return {
+                            found: entries.length > 0,
+                            fileVersion: entries[0]?.fileVersion,
+                            indexUpdatedAt: index.workspaceSymbolUpdatedAt,
+                        };
+                    } catch {
+                        return undefined;
+                    }
+                },
+                queryReferences: async (name) => {
+                    const result = await this.lspHandler.queryReferences({ identifier: name });
+                    return result.references.map(reference => ({
+                        file: reference.file,
+                        line: reference.line,
+                        context: reference.context,
+                    }));
+                },
+                getIndexRevision: () => {
+                    const index = this.indexService;
+                    return index
+                        ? `${index.workspaceSymbolUpdatedAt ?? 'unbuilt'}:${index.workspaceSymbolCount}:${index.workspaceSymbolStatus}`
+                        : 'unavailable';
+                },
+                rulesRoots: this.evidenceRulesRoots(gameProfile),
+            });
+        }
+        return this.evidenceGate;
+    }
+
+    /** Persist the full decision as a ledger artifact and append the summary run event. */
+    private async recordEvidenceGateDecision(
+        decision: EvidenceGateDecision,
+        context?: import('./types').AgentToolContext,
+    ): Promise<Record<string, unknown>> {
+        const counts = { verified: 0, unknown: 0, conflict: 0, stale: 0 };
+        for (const claim of decision.claims) counts[claim.status]++;
+        const summary: Record<string, unknown> = {
+            decisionId: decision.decisionId,
+            verdict: decision.verdict,
+            mode: decision.mode,
+            phase: decision.phase,
+            degraded: decision.degraded === true,
+            counts,
+            durationMs: decision.durationMs,
+        };
+        const sink = context?.runEventSink;
+        if (!sink) return summary;
+
+        let artifactRef: string | undefined;
+        try {
+            // The full decision (claims + sources) goes to an artifact; the run
+            // event only carries the aggregate summary, never the written text.
+            const artifact = await runLedger.writeJsonArtifact(sink.runId, `evidence/${decision.decisionId}.json`, decision);
+            artifactRef = artifact?.ref;
+        } catch (error) {
+            ErrorReporter.warn('AgentTools', `Failed to persist evidence gate artifact for ${decision.decisionId}`, error);
+        }
+        sink.appendSoon('evidence_gate_decision', {
+            decisionId: decision.decisionId,
+            tool: decision.tool,
+            target: decision.target,
+            mode: decision.mode,
+            phase: decision.phase,
+            verdict: decision.verdict,
+            degraded: decision.degraded === true,
+            fromCache: decision.fromCache === true,
+            counts,
+            blockingClaims: decision.claims
+                .filter(c => c.blocking)
+                .slice(0, 20)
+                .map(c => ({ kind: c.kind, claim: c.claim.slice(0, 200), status: c.status })),
+            missingEvidence: decision.missingEvidence.slice(0, 10),
+            durationMs: decision.durationMs,
+            artifactRef,
+        });
+        return summary;
+    }
+
+    private buildEvidenceGateBlockResult(decision: EvidenceGateDecision, prefixMessage: string | undefined): Record<string, unknown> {
+        const targetRel = path.isAbsolute(decision.target)
+            ? (path.relative(this.workspaceRoot, decision.target) || decision.target)
+            : decision.target;
+        const header = EVIDENCE_GATE_MSG.BLOCKED_HEADER(decision.missingEvidence.length, targetRel);
+        return {
+            success: false,
+            error: [prefixMessage, header, EVIDENCE_GATE_MSG.RETRY_HINT].filter(Boolean).join(' '),
+            evidenceGateBlocked: true,
+            evidenceGate: {
+                decisionId: decision.decisionId,
+                verdict: decision.verdict,
+                mode: decision.mode,
+                phase: decision.phase,
+                degraded: decision.degraded === true,
+                missingEvidence: decision.missingEvidence,
+                suggestedQueries: [...new Set(decision.missingEvidence.flatMap(m => m.suggestedQueries))],
+            },
+        };
+    }
+
+    /**
+     * Run the semantic evidence gate for a write tool call. Returns a result
+     * summary to attach to the tool result, or an errorResult when enforce
+     * mode blocks the write. Runs strictly after the policy engine, plan-mode
+     * and trust checks — it adds a layer and never bypasses existing ones.
+     */
+    private async evaluateEvidenceGate(
+        toolName: string,
+        targetFile: string,
+        text: string,
+        previousText: string,
+        context?: import('./types').AgentToolContext,
+    ): Promise<{ summary?: Record<string, unknown>; errorResult?: Record<string, unknown> } | undefined> {
+        const mode = this.evidenceGateMode();
+        if (mode === 'off') return undefined;
+        const resolvedTargetFile = path.isAbsolute(targetFile)
+            ? targetFile
+            : path.resolve(this.workspaceRoot, targetFile);
+        let decision: EvidenceGateDecision;
+        try {
+            decision = await this.getEvidenceGate().evaluate({
+                toolName,
+                targetFile: resolvedTargetFile,
+                text,
+                previousText,
+                mode,
+            });
+        } catch (error) {
+            // The gate itself must never crash a write path; a gate failure in
+            // enforce mode fails closed with a clear error.
+            ErrorReporter.warn('AgentTools', `Evidence gate evaluation failed for ${toolName} on ${resolvedTargetFile}`, error);
+            if (mode === 'enforce') {
+                return {
+                    errorResult: {
+                        success: false,
+                        error: `${EVIDENCE_GATE_MSG.UNAVAILABLE} (${error instanceof Error ? error.message : String(error)})`,
+                        evidenceGateBlocked: true,
+                    },
+                };
+            }
+            return undefined;
+        }
+
+        const summary = await this.recordEvidenceGateDecision(decision, context);
+        if (mode === 'shadow' || decision.verdict === 'allow') {
+            return { summary };
+        }
+
+        if (decision.evidenceUnavailable) {
+            // Fail closed (plan §11): the evidence service itself is down, so
+            // there is nothing meaningful for a user to override with.
+            return { summary, errorResult: this.buildEvidenceGateBlockResult(decision, EVIDENCE_GATE_MSG.UNAVAILABLE) };
+        }
+
+        // Manual override (plan §3.6/§4.3): only the user can approve, via the
+        // shared approval channel. Tool args are never consulted for an
+        // override flag, so the model cannot self-authorize.
+        const requestPermission = context?.onPermissionRequest;
+        if (requestPermission) {
+            const targetRel = path.relative(this.workspaceRoot, resolvedTargetFile) || resolvedTargetFile;
+            const claimLines = decision.missingEvidence
+                .slice(0, 5)
+                .map(m => EVIDENCE_GATE_MSG.CLAIM_LINE(m.kind, m.status, m.claim));
+            try {
+                const approved = await requestPermission(
+                    `evidence_gate_${decision.decisionId}`,
+                    toolName,
+                    EVIDENCE_GATE_MSG.OVERRIDE_REQUEST(targetRel, claimLines.join('\n')),
+                    undefined,
+                    context,
+                );
+                if (approved) {
+                    decision.verdict = 'override';
+                    const overrideSummary = await this.recordEvidenceGateDecision(decision, context);
+                    return { summary: overrideSummary };
+                }
+                return { summary, errorResult: this.buildEvidenceGateBlockResult(decision, EVIDENCE_GATE_MSG.OVERRIDE_DENIED) };
+            } catch (error) {
+                ErrorReporter.warn('AgentTools', `Evidence gate override approval failed for ${decision.decisionId}`, error);
+            }
+        }
+        return { summary, errorResult: this.buildEvidenceGateBlockResult(decision, undefined) };
+    }
+
+    private async evaluatePostWriteEvidence(
+        request: { toolName: string; filePath: string; content: string },
+        context?: import('./types').AgentToolContext,
+    ): Promise<{ decision: EvidenceGateDecision; summary: Record<string, unknown> } | undefined> {
+        const mode = this.evidenceGateMode();
+        if (mode === 'off') return undefined;
+        try {
+            const decision = await this.getEvidenceGate().evaluate({
+                toolName: request.toolName,
+                targetFile: request.filePath,
+                text: request.content,
+                previousText: '',
+                mode,
+                phase: 'post_write',
+            });
+            const summary = await this.recordEvidenceGateDecision(decision, context);
+            return { decision, summary };
+        } catch (error) {
+            ErrorReporter.warn('AgentTools', `Post-write evidence verification failed for ${request.filePath}`, error);
+            return undefined;
+        }
+    }
+
     async execute(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
         // Persisted histories may still contain the pre-unification tool names.
         ({ toolName, args } = normalizeLegacyWebToolCall(toolName, args));
@@ -762,15 +1053,40 @@ export class AgentToolExecutor {
                 abortSignal.addEventListener('abort', abortListener, { once: true });
             });
 
-            const toolContext = context
-                ? {
-                    ...context,
-                    runnerOptions: {
-                        ...(context.runnerOptions ?? {}),
-                        abortSignal,
-                    },
-                } as import('./types').AgentToolContext
-                : undefined;
+            let gateOutcome: { summary?: Record<string, unknown>; errorResult?: Record<string, unknown> } | undefined;
+            let completedPdxWrite: { toolName: string; filePath: string; content: string } | undefined;
+            const inheritedPdxPreflight = context?.onBeforePdxWrite;
+            const toolContext: import('./types').AgentToolContext = {
+                ...(context ?? {}),
+                runnerOptions: {
+                    ...(context?.runnerOptions ?? {}),
+                    abortSignal,
+                },
+            };
+            toolContext.onBeforePdxWrite = async request => {
+                if (inheritedPdxPreflight) {
+                    const inherited = await inheritedPdxPreflight(request);
+                    if (!inherited.allowed) return inherited;
+                }
+                gateOutcome = await this.evaluateEvidenceGate(
+                    request.toolName,
+                    request.filePath,
+                    request.content,
+                    request.previousContent,
+                    toolContext,
+                );
+                const error = gateOutcome?.errorResult?.error;
+                if (!gateOutcome?.errorResult) {
+                    completedPdxWrite = {
+                        toolName: request.toolName,
+                        filePath: request.filePath,
+                        content: request.content,
+                    };
+                }
+                return gateOutcome?.errorResult
+                    ? { allowed: false, message: typeof error === 'string' ? error : EVIDENCE_GATE_MSG.UNAVAILABLE }
+                    : { allowed: true };
+            };
 
             await runAgentHooks('preToolUse', {
                 toolName,
@@ -779,6 +1095,10 @@ export class AgentToolExecutor {
                 threadId: context?.runnerOptions?.threadId,
             });
 
+            // Semantic evidence gate (plan §4): semantic PDX writes must carry
+            // FileToolHandler invokes the async preflight after it has resolved
+            // the path and built the exact final content. This keeps policy and
+            // path gates outside it while preventing fragment-only validation.
             const racePromises: Promise<unknown>[] = [
                 this.executeInternal(toolName, args, toolContext),
                 abortPromise,
@@ -786,12 +1106,56 @@ export class AgentToolExecutor {
 
             try {
                 const result = await Promise.race(racePromises);
+                const resultRecord = result && typeof result === 'object' && !Array.isArray(result)
+                    ? result as Record<string, unknown>
+                    : undefined;
+                const writeSucceeded = resultRecord?.success !== false && !gateOutcome?.errorResult;
+                const postWriteEvidence = completedPdxWrite && writeSucceeded
+                    ? await this.evaluatePostWriteEvidence(completedPdxWrite, toolContext)
+                    : undefined;
                 await runAgentHooks('postToolUse', {
                     toolName,
                     success: !(result && typeof result === 'object' && ('error' in result || (result as any).success === false)),
                     runId: context?.runnerOptions?.runRecord?.runId,
                     threadId: context?.runnerOptions?.threadId,
                 });
+                // Attach the evidence gate decision id so the model and the UI
+                // can correlate the write with its evidence (plan §4.2 step 7
+                // stays with the existing post-write diagnostics revalidation).
+                if (resultRecord) {
+                    if (gateOutcome?.errorResult) {
+                        Object.assign(resultRecord, gateOutcome.errorResult);
+                    }
+                    if (gateOutcome?.summary && !gateOutcome.errorResult) {
+                        resultRecord.evidenceGate = gateOutcome.summary;
+                    }
+                    if (postWriteEvidence) {
+                        const diagnosticErrors = Array.isArray(resultRecord.diagnostics)
+                            ? resultRecord.diagnostics.filter(item => {
+                                if (!item || typeof item !== 'object') return false;
+                                const severity = (item as Record<string, unknown>).severity;
+                                return severity === 'error' || severity === 0;
+                            })
+                            : undefined;
+                        const diagnosticsPassed = diagnosticErrors !== undefined && diagnosticErrors.length === 0;
+                        const evidencePassed = postWriteEvidence.decision.verdict === 'allow';
+                        resultRecord.postWriteEvidence = {
+                            ...postWriteEvidence.summary,
+                            missingEvidence: postWriteEvidence.decision.missingEvidence,
+                        };
+                        resultRecord.postWriteValidation = {
+                            verdict: evidencePassed && diagnosticsPassed ? 'allow' : 'repair',
+                            evidencePassed,
+                            diagnosticsPassed,
+                            diagnosticErrorCount: diagnosticErrors?.length,
+                            evidenceDecisionId: postWriteEvidence.decision.decisionId,
+                        };
+                        resultRecord.postWriteValidationPassed = evidencePassed && diagnosticsPassed;
+                        if (!evidencePassed || !diagnosticsPassed) {
+                            resultRecord.requiresRepair = true;
+                        }
+                    }
+                }
                 const writtenFiles = this.extractResultWrittenFiles(result);
 
                 // ReadTracker read/write synchronization and Blackboard invalidation cascade (T2.2 & B3)
@@ -942,6 +1306,13 @@ export class AgentToolExecutor {
                 result = await this.fileHandler.writeLocalisation(args as any, context); break;
             case 'write_design_blueprint':
                 result = await this.fileHandler.writeDesignBlueprint(args as any, context); break;
+            case 'get_design_blueprint_contract':
+                result = {
+                    success: true,
+                    schemaVersion: 2,
+                    usage: 'Pass a complete object conforming to parameters as write_design_blueprint({ blueprint: <object> }).',
+                    parameters: DESIGN_BLUEPRINT_DETAILED_PARAMETERS,
+                }; break;
             case 'save_workflow':
                 result = this.saveWorkflow(args); break;
             case 'git_ops':
@@ -2055,6 +2426,7 @@ export class AgentToolExecutor {
             // A later dispatch may belong to another top-level run and must
             // not replace or cancel this graph.
             const result = await orchestrator.execute(graph, options);
+            mergeTokenUsageTotals(context?.tokenAccumulator, result.totalTokenUsage);
 
             // Cache results for use by merge_results
             this._lastOrchestratorResult = result;

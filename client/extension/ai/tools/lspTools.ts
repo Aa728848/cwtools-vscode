@@ -6,6 +6,7 @@
  */
 
 import * as vs from 'vscode';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { LanguageClient } from 'vscode-languageclient/node';
@@ -164,6 +165,17 @@ export interface LspToolContext {
 
 export class LspToolHandler {
     private cwtRulesCache: CwtRuleCache | null = null;
+    /**
+     * Cache lifecycle for cwtRulesCache (plan §7.4): the parsed rule cache used
+     * to live forever. It now reloads when the mtime/size signature over the
+     * bounded candidate file set changes; `cwtRulesGeneration` is a monotonic
+     * reload counter and `cwtRulesContentHash` a sha256 (16 hex chars) over the
+     * rule file contents. Both are process-local and exposed in tool results so
+     * evidence consumers can detect stale rule data.
+     */
+    private cwtRulesGeneration = 0;
+    private cwtRulesContentHash: string | undefined;
+    private cwtRulesSignature: string | null = null;
     /** 5-second TTL cache for heavy read-only LSP commands */
     private lspReadCache = new Map<string, { data: unknown; expiresAt: number }>();
 
@@ -739,12 +751,8 @@ export class LspToolHandler {
         return matrix[b.length]![a.length]!;
     }
 
-    async queryRules(args: { category: string; name?: string; scope?: string }): Promise<QueryRulesResult> {
-        if (!this.cwtRulesCache) {
-            this.cwtRulesCache = await this.loadCWTRules();
-        }
-
-        const cache = this.cwtRulesCache;
+    async queryRules(args: { category: string; name?: string; scope?: string }): Promise<QueryRulesResult & { rulesGeneration?: number; rulesContentHash?: string }> {
+        const cache = await this.getCwtRulesCache();
         let rules: RuleInfo[];
         if (args.category === 'trigger') {
             rules = cache.triggers;
@@ -780,7 +788,14 @@ export class LspToolHandler {
             );
         }
 
-        return { rules: rules.slice(0, 80), totalCount: rules.length, truncated: rules.length > 80 };
+        return {
+            rules: rules.slice(0, 80),
+            totalCount: rules.length,
+            truncated: rules.length > 80,
+            // Cache lifecycle metadata so evidence consumers can detect stale rule data (plan §7.4).
+            rulesGeneration: this.cwtRulesGeneration,
+            rulesContentHash: this.cwtRulesContentHash,
+        };
     }
 
     async queryCwtSchema(args: {
@@ -895,11 +910,10 @@ export class LspToolHandler {
         totalConsidered: number;
         source: string;
         warnings: string[];
+        rulesGeneration?: number;
+        rulesContentHash?: string;
     }> {
-        if (!this.cwtRulesCache) {
-            this.cwtRulesCache = await this.loadCWTRules();
-        }
-        const cache = this.cwtRulesCache;
+        const cache = await this.getCwtRulesCache();
         const categories = args.category && args.category !== 'all'
             ? [args.category]
             : ['trigger', 'effect', 'scope_change', 'modifier'] as const;
@@ -922,6 +936,9 @@ export class LspToolHandler {
             candidates: candidates.slice(0, limit),
             totalConsidered: rules.length,
             source: 'cwtools-node-rules',
+            // Cache lifecycle metadata so evidence consumers can detect stale rule data (plan §7.4).
+            rulesGeneration: this.cwtRulesGeneration,
+            rulesContentHash: this.cwtRulesContentHash,
             warnings: [
                 ...(rules.length === 0
                     ? ['No CWT rule files were loaded for the active game/rules source; check rules configuration or reload CWTools before trusting empty results.']
@@ -941,29 +958,35 @@ export class LspToolHandler {
         source?: { file: string; line: number };
         semanticHints?: NonNullable<RuleInfo['semanticHints']>;
         suggestions?: string[];
+        rulesGeneration?: number;
+        rulesContentHash?: string;
         error?: string;
     }> {
-        if (!this.cwtRulesCache) {
-            this.cwtRulesCache = await this.loadCWTRules();
-        }
+        const cache = await this.getCwtRulesCache();
         const query = args.scope.trim();
-        if (this.cwtRulesCache.scopes.size === 0) {
+        const cacheMeta = {
+            rulesGeneration: this.cwtRulesGeneration,
+            rulesContentHash: this.cwtRulesContentHash,
+        };
+        if (cache.scopes.size === 0) {
             return {
                 status: 'not_found',
                 scope: query,
                 suggestions: [],
+                ...cacheMeta,
                 error: 'No scopes were loaded from scopes.cwt. Check the active CWT rules source or reload rules; this is not evidence that the scope is invalid.',
             };
         }
-        const scope = this.cwtRulesCache.scopes.get(query.toLowerCase());
+        const scope = cache.scopes.get(query.toLowerCase());
         if (!scope) {
-            const suggestions = Array.from(new Set(Array.from(this.cwtRulesCache.scopes.values()).map(item => item.name)))
+            const suggestions = Array.from(new Set(Array.from(cache.scopes.values()).map(item => item.name)))
                 .filter(name => name.toLowerCase().includes(query.toLowerCase()) || this.levenshtein(query.toLowerCase(), name.toLowerCase()) <= 3)
                 .slice(0, 10);
             return {
                 status: 'not_found',
                 scope: query,
                 suggestions,
+                ...cacheMeta,
                 error: `Scope '${query}' was not found in scopes.cwt.`,
             };
         }
@@ -990,6 +1013,7 @@ export class LspToolHandler {
             description: scope.description,
             source: { file: scope.file, line: scope.line },
             semanticHints,
+            ...cacheMeta,
         };
     }
 
@@ -1445,6 +1469,86 @@ export class LspToolHandler {
         if (normalizedTarget && normalizedPath === normalizedTarget) score += 20;
         if (name && summary.name.toLowerCase() === name.toLowerCase()) score += 20;
         return score;
+    }
+
+    /** Candidate rule files (per config root) feeding the CWT rule cache, in a
+     * fixed order so signatures/hashes are deterministic. Bounded: 11 files per root. */
+    private static readonly CWT_RULE_FILE_CANDIDATES: readonly string[] = [
+        'scopes.cwt',
+        path.join('logs', 'trigger_docs.log'),
+        path.join('logs', 'modifiers.log'),
+        'triggers.cwt',
+        'trigger.cwt',
+        path.join('generated', 'triggers.generated.cwt'),
+        'effects.cwt',
+        'effect.cwt',
+        path.join('generated', 'effects.generated.cwt'),
+        'scope_changes.cwt',
+        path.join('generated', 'scope_changes.generated.cwt'),
+    ];
+
+    /**
+     * Return the parsed CWT rule cache, reloading when any candidate rule
+     * file's mtime/size changed (plan §7.4). The signature pass stats a small
+     * bounded file set (11 files per config root) on every call, which is far
+     * cheaper than the previous choice of never invalidating at all.
+     */
+    private async getCwtRulesCache(): Promise<CwtRuleCache> {
+        const signature = this.computeCwtRulesSignature();
+        if (this.cwtRulesCache && signature === this.cwtRulesSignature) {
+            return this.cwtRulesCache;
+        }
+        const cache = await this.loadCWTRules();
+        this.cwtRulesCache = cache;
+        this.cwtRulesSignature = signature;
+        this.cwtRulesGeneration += 1;
+        this.cwtRulesContentHash = this.computeCwtRulesContentHash();
+        return cache;
+    }
+
+    /** Process-local generation counter + content hash of the current CWT rule cache. */
+    get cwtRulesCacheMeta(): { generation: number; contentHash?: string } {
+        return { generation: this.cwtRulesGeneration, contentHash: this.cwtRulesContentHash };
+    }
+
+    private computeCwtRulesSignature(): string {
+        const parts: string[] = [];
+        for (const configPath of this.resolveCwtConfigPaths()) {
+            for (const file of LspToolHandler.CWT_RULE_FILE_CANDIDATES) {
+                const fullPath = path.join(configPath, file);
+                try {
+                    const stat = fs.statSync(fullPath);
+                    parts.push(`${fullPath}:${stat.mtimeMs}:${stat.size}`);
+                } catch {
+                    parts.push(`${fullPath}:missing`);
+                }
+            }
+        }
+        return parts.join('|');
+    }
+
+    /**
+     * sha256 (truncated to 16 hex chars) over the length-prefixed concatenation
+     * of every existing candidate rule file's content, covering ALL config
+     * roots (not just the first yielding one) so edits to shadowed rule files
+     * still bump the generation. The MCP side (cwtools-shared knowledge/rules)
+     * uses the same algorithm, so both ends describe rule revisions with the
+     * same hash semantics (plan §7.4).
+     */
+    private computeCwtRulesContentHash(): string {
+        const hash = crypto.createHash('sha256');
+        for (const configPath of this.resolveCwtConfigPaths()) {
+            for (const file of LspToolHandler.CWT_RULE_FILE_CANDIDATES) {
+                const fullPath = path.join(configPath, file);
+                try {
+                    if (!fs.existsSync(fullPath)) continue;
+                    const content = fs.readFileSync(fullPath, 'utf8');
+                    hash.update(`${content.length}:`);
+                    hash.update(content);
+                } catch { /* skip unreadable files */ }
+            }
+        }
+        return hash.digest('hex').slice(0, 16);
     }
 
     private async loadCWTRules(): Promise<CwtRuleCache> {

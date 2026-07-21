@@ -2,9 +2,13 @@
 
 ## [Unreleased]
 
+## [2.8.29] - 2026-07-21
+
 ### 功能与优化 / Features & Optimizations
 - **[功能] 静态银河预览与位置编辑**：为 `map/setup_scenarios/*.txt` 中的 `static_galaxy_scenario` 提供 Canvas2D 银河地图预览（系统、坐标范围、星云、显式超空间航道）；编辑模式支持拖动系统与星云回写 X/Y、精确编辑或补充 Z，以及添加/断开显式航道（范围宽度保持、最小跨度写回、原生撤销），并提供反向范围、重复 ID、悬空航道等可视化诊断与 Steam Workshop 编辑风险确认。标题栏改用独立的地图图标，避免与翻译命令混淆。
   English: [Feature] Static galaxy preview & position editor: Canvas2D galaxy map for `static_galaxy_scenario` in `map/setup_scenarios/*.txt` (systems, coordinate ranges, nebulas, explicit hyperlanes). Edit Mode can drag systems and nebulas to write X/Y, edit or add Z, and add/disconnect explicit lanes with minimal span-precise edits (range width preserved, native undo), plus visual diagnostics for reversed ranges, duplicate ids and dangling lanes, Steam Workshop edit-risk confirmation, and a distinct map toolbar icon.
+- **[优化] 优化了载入和运行性能**
+  English: [Optimization] Optimized loading and runtime performance.
 
 ## [2.8.28] - 2026-07-20
 

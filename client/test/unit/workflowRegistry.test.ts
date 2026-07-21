@@ -177,7 +177,7 @@ describe('AI Workflow Registry', () => {
 
             expect(result.success).to.be.true;
             expect(result.id).to.equal('saved-demo');
-            expect(result.filePath).to.equal(path.join(tempRoot, '.cwtools-ai', 'workflows', 'saved-demo.md'));
+            expect(result.filePath).to.equal(path.join(tempRoot, '.cwtools', 'workflows', 'saved-demo.md'));
             expect(fs.existsSync(result.filePath!)).to.be.true;
             expect(snapshottedPath).to.equal(result.filePath);
             expect(snapshottedContent).to.equal(null);

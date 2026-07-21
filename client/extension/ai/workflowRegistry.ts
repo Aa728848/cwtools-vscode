@@ -451,7 +451,7 @@ registerWorkflow({
 // ─── Query helpers ───────────────────────────────────────────────────────────
 
 // Project workflow files:
-// .cwtools-ai/workflows/<id>.md or .agents/workflows/<id>.md
+// .cwtools/workflows/<id>.md or .agents/workflows/<id>.md
 // Frontmatter keys: id, title, description, mode, allowed-tools, blocked-tools,
 // required-context, verification-tool.
 function parseWorkflowFrontmatter(content: string): { meta: Record<string, string>; body: string } {
@@ -576,6 +576,7 @@ function loadProjectWorkflows(): Map<string, AiWorkflow> {
 	if (!workspaceRoot) return out;
 
 	const dirs = [
+		path.join(workspaceRoot, '.cwtools', 'workflows'),
 		path.join(workspaceRoot, '.cwtools-ai', 'workflows'),
 		path.join(workspaceRoot, '.agents', 'workflows'),
 	];
@@ -651,7 +652,7 @@ export function saveProjectWorkflow(
 	}
 
 	const id = sanitizeWorkflowId(input.id, title);
-	const workflowDir = path.join(workspaceRoot, '.cwtools-ai', 'workflows');
+	const workflowDir = path.join(workspaceRoot, '.cwtools', 'workflows');
 	const filePath = path.join(workflowDir, `${id}.md`);
 	if (fs.existsSync(filePath) && !input.overwrite) {
 		return {

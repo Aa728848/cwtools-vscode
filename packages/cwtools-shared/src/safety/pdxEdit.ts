@@ -34,7 +34,7 @@ export async function editPdxBlockWithHost(
     return toolDenied('outside_workspace', `Path '${args.file}' is outside the workspace root.`) as SharedToolResult<EditPdxBlockResult>;
   }
   if (isScratchRelativePath(resolution.relativePath)) {
-    return toolDenied('scratch_path', 'edit_pdx_block must not write under .cwtools-ai scratch or topic folders.') as SharedToolResult<EditPdxBlockResult>;
+    return toolDenied('scratch_path', 'edit_pdx_block must not write under .cwtools scratch or topic folders.') as SharedToolResult<EditPdxBlockResult>;
   }
   if (path.extname(resolution.resolvedPath).toLowerCase() === '.yml') {
     return toolDenied('localisation_file', 'Use write_localisation for .yml localisation files.') as SharedToolResult<EditPdxBlockResult>;

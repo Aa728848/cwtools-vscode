@@ -103,7 +103,7 @@ export function getAgentToolTargetFiles(
         case 'save_workflow':
             if (workspaceRoot) {
                 const id = workflowId(args.id, args.title);
-                if (id) paths.push(path.join(workspaceRoot, '.cwtools-ai', 'workflows', `${id}.md`));
+                if (id) paths.push(path.join(workspaceRoot, '.cwtools', 'workflows', `${id}.md`));
             }
             break;
     }

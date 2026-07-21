@@ -55,7 +55,7 @@ export function sanitizePathInput(inputPath: string): string {
 
 function resolveAiStorageAlias(filePath: string, workspaceRoot: string, preferExisting = false): string | undefined {
     const normalized = filePath.trim().replace(/\\/g, '/');
-    const match = normalized.match(/^\.cwtools-ai(?:\/(.*))?$/i);
+    const match = normalized.match(/^\.(?:cwtools|cwtools-ai)(?:\/(.*))?$/i);
     if (!match) return undefined;
 
     const rest = (match[1] ?? '').split('/').filter(Boolean);

@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFile } from 'child_process';
 
-const WORKTREE_ROOT = '.cwtools-ai/worktrees';
+const WORKTREE_ROOT = '.cwtools/worktrees';
 
 export interface WorktreeInfo {
     runId: string;
@@ -28,6 +28,29 @@ function runGit(args: string[], cwd: string, timeoutMs = 30_000): Promise<{ stdo
             else resolve({ stdout, stderr });
         });
     });
+}
+
+/** Repair Git metadata after legacy Agent worktrees move with the storage root. */
+export async function repairMovedAgentWorktrees(workspaceRoot: string): Promise<number> {
+    const worktreeRoot = path.join(workspaceRoot, WORKTREE_ROOT);
+    if (!fs.existsSync(worktreeRoot)) return 0;
+    const worktreePaths: string[] = [];
+    const runDirectories = fs.readdirSync(worktreeRoot, { withFileTypes: true })
+        .filter(entry => entry.isDirectory())
+        .sort((a, b) => a.name.localeCompare(b.name));
+    for (const runDirectory of runDirectories) {
+        const runPath = path.join(worktreeRoot, runDirectory.name);
+        const agentDirectories = fs.readdirSync(runPath, { withFileTypes: true })
+            .filter(entry => entry.isDirectory())
+            .sort((a, b) => a.name.localeCompare(b.name));
+        for (const agentDirectory of agentDirectories) {
+            const candidate = path.join(runPath, agentDirectory.name);
+            if (fs.existsSync(path.join(candidate, '.git'))) worktreePaths.push(candidate);
+        }
+    }
+    if (worktreePaths.length === 0) return 0;
+    await runGit(['worktree', 'repair', ...worktreePaths], workspaceRoot, 60_000);
+    return worktreePaths.length;
 }
 
 export class WorktreeManager {
@@ -89,10 +112,14 @@ export class WorktreeManager {
     async list(): Promise<string[]> {
         const { stdout } = await runGit(['worktree', 'list', '--porcelain'], this.workspaceRoot);
         const marker = path.join(this.workspaceRoot, WORKTREE_ROOT).replace(/\\/g, '/').toLowerCase();
+        const legacyMarker = path.join(this.workspaceRoot, '.cwtools-ai/worktrees').replace(/\\/g, '/').toLowerCase();
         return stdout.split('\n')
             .filter(line => line.startsWith('worktree '))
             .map(line => line.slice('worktree '.length).trim())
-            .filter(p => p.replace(/\\/g, '/').toLowerCase().startsWith(marker));
+            .filter(p => {
+                const normalized = p.replace(/\\/g, '/').toLowerCase();
+                return normalized.startsWith(marker) || normalized.startsWith(legacyMarker);
+            });
     }
 
     /** Retention: keep the newest `keep` worktrees, prune the rest. */

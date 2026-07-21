@@ -1,0 +1,232 @@
+﻿.gitignore:24:.cwtools-ai/
+ARCHITECTURE.md:101:- Workspace symbols persist in `.cwtools-ai/index/workspace-symbols.sqlite`; vanilla symbols use root-keyed SQLite files under extension global storage. Builds restore cached rows first, compare file `size + mtime`, parse only changed files with bounded concurrency, and use a sorted-name array plus binary-search prefix ranges. Normal queries remain lazy, while `/init` eagerly materializes the workspace database before deep knowledge export.
+ARCHITECTURE.md:121:.cwtools-ai/project/
+ARCHITECTURE.md:197:| `workspacePaths.ts` | Separates project artifacts under `.cwtools-ai/` from private runtime state under `ExtensionContext.storageUri`, with legacy migration |
+ARCHITECTURE.md:298:- Private runs, checkpoints, goals, and learned memory use extension storage; only user-shareable plans, workflows, blueprints, and project rules remain in `.cwtools-ai/`.
+ARCHITECTURE.md:384:Every model-visible tool passes the enforced `policyEngine.ts` boundary before its domain handler. `run_command` has one command-policy source of truth: a quote-aware parser accepts plain command sequences, action-sensitive Git/tool classifiers derive `allow` / `prompt` / `forbidden`, and optional ordered-token prefix rules can only refine non-destructive results. Ordinary mutations run inside the OS workspace sandbox without an approval prompt; complex syntax, Git metadata changes, extra cwd/network scope, and explicit policy prompts require approval, while destructive commands require escalation. A specifically configured Git `allow` prefix opens only the matching command's `.git` metadata writes and preserves every other sandbox boundary; broad Git/shell/interpreter allow prefixes are ignored. Approving additional cwd or network scope keeps the OS sandbox enabled, while disabling the sandbox requires a separate explicit `unsandboxed` request. Approved Git-only commands can receive a visible one-shot `.git` metadata override without dropping the rest of the sandbox. Writable workspace binds otherwise re-protect `.git`, `.agents`, `.codex`, and legacy private run-state subdirectories under `.cwtools-ai` while leaving shareable topic artifacts writable. Permission and process work is persisted as `item_started` / `item_updated` / `item_completed` events with stable item ids, and process inspection/control is limited to the owning task thread.
+ARCHITECTURE.md:514:- 宸ヤ綔鍖虹鍙锋寔涔呭寲鍒?`.cwtools-ai/index/workspace-symbols.sqlite`锛涘師鐗堢鍙锋寜鍘熺増鏍圭洰褰曞垎搴撳瓨鍏?extension global storage銆傛瀯寤烘椂鍏堟仮澶嶇紦瀛樿锛屽啀鎸夋枃浠?`size + mtime` 鍙В鏋愬彉鍖栨枃浠讹紝骞朵娇鐢ㄦ湁闄愬苟鍙戙€佹帓搴忓悕绉版暟缁勫拰浜屽垎鍓嶇紑鍖洪棿銆傛櫘閫氭煡璇粛淇濇寔鎳掑姞杞斤紝鑰?`/init` 浼氬湪娣卞眰鐭ヨ瘑瀵煎嚭鍓嶇洿鎺ュ垱寤哄伐浣滃尯鏁版嵁搴撱€?
+ARCHITECTURE.md:534:.cwtools-ai/project/
+ARCHITECTURE.md:609:| `workspacePaths.ts` | 鍒嗙 `.cwtools-ai/` 椤圭洰浜х墿涓?`ExtensionContext.storageUri` 绉佹湁杩愯鐘舵€侊紝骞跺吋瀹硅縼绉绘棫鏁版嵁 |
+ARCHITECTURE.md:786:- `workspacePaths.ts` 灏嗚鍒掋€佸伐浣滄祦銆佽摑鍥剧瓑鍙叡浜骇鐗╀繚鐣欏湪 `.cwtools-ai/`锛孴hread銆丩edger銆丆heckpoint銆丟oal 涓庤嚜鍔ㄥ涔犺蹇嗗啓鍏?`ExtensionContext.storageUri`锛涙棫鐩綍鍙綔涓鸿縼绉诲拰鍏煎璇诲彇婧愩€?
+ARCHITECTURE.md:787:- `workspaceSandbox.ts` 璐熻矗璺緞杈撳叆娓呮礂锛堝幓寮曞彿銆佸幓 code span銆佸幓鑷劧璇█鍓嶇紑锛夈€亀orkspace folder 鍒悕瑙ｆ瀽銆乣.cwtools-ai` 璺緞鍒悕瑙ｆ瀽銆佷互鍙婂洓绾т綔鐢ㄥ煙鍒嗙被锛坄project`/`ai`/`workspace`/`outside`锛夊拰淇′换鍒ゅ畾銆?
+ARCHITECTURE.md:789:- captured 鍛戒护缁忕嫭绔?`sandboxBroker` 鎵ц锛沇indows 鍚庣鎸夆€滃凡楠岃瘉鍘熺敓 helper 鈫?WSL2 + Bubblewrap鈥濋€夋嫨锛屽叾涓?helper 蹇呴』閫氳繃 protocol-v1 鑷锛屽苟鏄庣‘鎶ュ憡鏂囦欢绯荤粺寮哄埗闅旂鍜岀綉缁滃厑璁?绂佹鑳藉姏锛汱inux/寮€鍙戝鍣ㄤ娇鐢?Bubblewrap锛宮acOS 浣跨敤 Seatbelt銆傛壘涓嶅埌鍙獙璇佺殑鎿嶄綔绯荤粺鍚庣鏃跺け璐ュ叧闂苟鍦ㄦ潈闄愰€夋嫨鍣ㄦ樉绀哄悗绔仴搴风姸鎬併€傚伐浣滃尯鍐欑粦瀹氫細閲嶆柊鎶?`.git`銆乣.agents`銆乣.codex` 浠ュ強 `.cwtools-ai` 鍐呭吋瀹逛繚鐣欑殑绉佹湁杩愯鐘舵€佸瓙鐩綍璁句负鍙锛屽悓鏃朵繚鐣?topic 鍏变韩浜х墿鍙啓銆俢aptured 鍚庡彴浠诲姟淇濈暀绠￠亾杈撳嚭涓?stdin/缁堟鎺у埗锛涗氦浜掍换鍔″繀椤绘樉寮忔巿鏉冨悗鍦ㄥ彲瑙?VS Code Terminal 涓繍琛屻€俿hell 缃戠粶闅旂鍙己鍒跺箍娉涘厑璁?绂佹锛屽煙鍚嶅垪琛ㄤ粎浣滀负瀹℃壒鍜屽璁″０鏄庯紝骞跺湪鏉冮檺鍗＄墖涓槑纭爣娉ㄣ€?ARCHITECTURE.md:823:`memoryParser.ts` 绠＄悊 topic 绾х鏈夌粨鏋勫寲闀挎湡璁板繂锛沗memory.json` 鏄潵婧愭暟鎹紝`.cwtools-ai-memory.md` 鏄究浜庢鏌ョ殑闀滃儚锛屾棫宸ヤ綔鍖烘枃浠朵粛浣滀负鍙鍥為€€锛?
+CONTRIBUTING.md:278:- `workspacePaths.ts` resolves `.cwtools-ai/` paths, topics, and scratch dirs.
+CONTRIBUTING.md:642:- `workspacePaths.ts` 璐熻矗瑙ｆ瀽 AI 瀛樺偍鏍圭洰褰曪紙`.cwtools-ai/`锛夈€乼opic 鐩綍鍜?scratch 鐩綍锛屾敮鎸佸 workspace folder 鍦烘櫙銆?README.md:134:* **Compact `/init` Knowledge Database**: the deep `/init` phase stores project + vanilla understanding as `.cwtools-ai/project/knowledge/manifest.json` plus `knowledge.sqlite`, replacing the former duplicated capability/archetype JSON set. `/init` also directly creates or incrementally updates `.cwtools-ai/index/workspace-symbols.sqlite` before deep export. A lower-left VS Code progress indicator remains visible while the workspace index is built, CWTools becomes ready, and the knowledge database is published. `query_project_knowledge` resolves explicit IDs through SQLite indexes, expands their reference/event/logic neighbourhood, and falls back to bounded intent search only when no identifier seed is supplied. It retrieves definitions, stacks, topology, project/vanilla patterns, and event structure/logic鈥攊ncluding call phases, `on_action` entries, flags, technologies, variables, and scope bridges鈥攚ithout loading the whole database into the prompt. Lazy `query_workspace_index` calls restore persistent SQLite rows, publish the workspace phase first, parse only changed files, and wait at most eight seconds before returning partial results while vanilla indexing continues. When the serialized vanilla `.cwb` changes, the matching global vanilla-symbol cache and the current project's `knowledge.sqlite` are rebuilt in one coordinated refresh stage.
+README.md:390:* **绱у噾鐨?`/init` 鐭ヨ瘑鏁版嵁搴?*锛氭繁搴?`/init` 闃舵灏嗛」鐩笌鍘熺増鐞嗚В淇濆瓨涓?`.cwtools-ai/project/knowledge/manifest.json` 鍜?`knowledge.sqlite`锛屾浛浠ｅ師鍏堥噸澶嶇殑 capability/archetype JSON 闆嗗悎銆俙/init` 杩樹細鍦ㄦ繁灞傚鍑哄墠鐩存帴鍒涘缓鎴栧閲忔洿鏂?`.cwtools-ai/index/workspace-symbols.sqlite`銆傛瀯寤哄伐浣滃尯绱㈠紩銆佺瓑寰?CWTools 鍜屽彂甯冪煡璇嗘暟鎹簱鏈熼棿锛孷S Code 宸︿笅瑙掍細鎸佺画鏄剧ず杩涘害銆俙query_project_knowledge` 浼氬厛閫氳繃 SQLite 绱㈠紩瑙ｆ瀽鏄惧紡 ID锛屽啀鎵╁睍鍏跺紩鐢ㄣ€佷簨浠朵笌閫昏緫閭诲煙锛涘彧鏈夋湭鎻愪緵鏍囪瘑绗︾瀛愭椂鎵嶉€€鍥炴湁鐣屾剰鍥炬绱€傚畠鍙寜闇€妫€绱㈠畾涔夈€佸畾涔夋爤銆佹嫇鎵戙€侀」鐩?鍘熺増鑼冧緥锛屼互鍙婁簨浠惰皟鐢ㄩ樁娈点€乣on_action` 鍏ュ彛銆丗lag銆佺鎶€銆佸彉閲忓拰浣滅敤鍩熸ˉ鎺ョ瓑浜嬩欢缁撴瀯涓庨€昏緫鍏崇郴锛屾棤闇€鎶婃暣涓暟鎹簱濉炲叆鎻愮ず璇嶃€傛噿鍔犺浇鐨?`query_workspace_index` 浼氬厛鎭㈠鎸佷箙鍖?SQLite銆佷紭鍏堝彂甯冨伐浣滃尯闃舵銆佸彧瑙ｆ瀽鍙樺寲鏂囦欢锛屽苟鏈€澶氱瓑寰呭叓绉掑悗杩斿洖閮ㄥ垎缁撴灉锛屽悓鏃惰鍘熺増绱㈠紩缁х画鏋勫缓銆傚綋搴忓垪鍖栧師鐗?`.cwb` 鍙樺寲鏃讹紝瀵瑰簲鐨勫叏灞€鍘熺増绗﹀彿缂撳瓨鍜屽綋鍓嶉」鐩殑 `knowledge.sqlite` 浼氬湪鍚屼竴鍗忚皟鍒锋柊闃舵閲嶅缓銆?client/extension/ai/agentTools.ts:1005:            // - Persistent memory (cross-session, written to the topic-scoped .cwtools-ai-memory.md) -
+client/extension/ai/agentTools.ts:1841:            if (!insideWorkspace || (!normalizedRelative.includes('/.cwtools-ai/') && !normalizedRelative.startsWith('.cwtools-ai/'))) {
+client/extension/ai/agentTools.ts:1842:                return { success: false, error: 'blueprintFile must be a topic-scoped design_blueprint.json inside the workspace .cwtools-ai directory.' };
+client/extension/ai/chatPanel.ts:107:    if (segments[0] === '.cwtools-ai' && segments[2] === 'scratch') return true;
+client/extension/ai/chatPanel.ts:1541:        const fallbackDir = this.storageUri?.fsPath ?? path.join(path.dirname(this.extensionUri.fsPath), '.cwtools-ai', 'default');
+client/extension/ai/chatPanel.ts:1717:            relPath = path.posix.join('.cwtools-ai', topicId, fileName);
+client/extension/ai/chatPanel.ts:1769:            const relPath = path.posix.join('.cwtools-ai', topicId, 'walkthrough.md');
+client/extension/ai/chatPanel.ts:1813:            const relPath = path.posix.join('.cwtools-ai', topicId, 'design_blueprint.md');
+client/extension/ai/chatPanel.ts:2042:        const scheme = 'cwtools-ai-preview';
+client/extension/ai/chatPanel.ts:2144:        // Asynchronously clean up the disk folder corresponding to the topic (.cwtools-ai/{topicId}/),
+client/extension/ai/chatPanel.ts:3567:                `*Generated by the Eddy CWTool AI coordinator after multi-agent collaboration and archived at \`.cwtools-ai/${topicId}/walkthrough.md\`.*`,
+client/extension/ai/chatPanel.ts:3568:                `*鎶ュ憡鐢?Eddy CWTool AI 鍗忚皟鍣ㄥ湪澶?Agent 鍗忎綔缁撴潫鍚庣敓鎴愬苟瀛樻。浜?\`.cwtools-ai/${topicId}/walkthrough.md\`銆?`,
+client/extension/ai/contextReferences.ts:20:    return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
+client/extension/ai/mcpBridgeServer.ts:343:                    _hint: 'Run /init in the extension AI chat or create .cwtools-ai/project/profile.json.',
+client/extension/ai/mcpBridgeServer.ts:493:            description: 'The generated .cwtools-ai/project/profile.json if available.',
+client/extension/ai/memoryParser.ts:23: * Parses topic-scoped .cwtools-ai-memory.md files to extract workspace-specific rules.
+client/extension/ai/memoryParser.ts:26: * .cwtools-ai/<topicId>/.cwtools-ai-memory.md.
+client/extension/ai/memoryParser.ts:33:    static readonly MEMORY_FILE_NAME = '.cwtools-ai-memory.md';
+client/extension/ai/memoryParser.ts:178:                warning = `\n> [!WARNING] The .cwtools-ai-memory.md file exceeds the recommended length and has been truncated. Please edit the file to keep only the absolute core rules to save context tokens.\n`;
+client/extension/ai/memoryParser.ts:186:            ErrorReporter.debug(SOURCE.MEMORY_PARSER, 'Error reading .cwtools-ai-memory.md', e);
+client/extension/ai/memoryParser.ts:192:     * Append a new memory entry to the .cwtools-ai-memory.md file.
+client/extension/ai/orchestrator/subAgentSandbox.ts:29:const TOPIC_ARTIFACT_SCOPE = '.cwtools-ai';
+client/extension/ai/orchestrator/worktreeManager.ts:10:const WORKTREE_ROOT = '.cwtools-ai/worktrees';
+client/extension/ai/orchestrator/worktreeManager.ts:88:    /** Registered cwtools-ai worktrees of this repo. */
+client/extension/ai/planModeGuard.ts:56:    const aiRoot = path.join(workspace, '.cwtools-ai');
+client/extension/ai/planModeGuard.ts:60:    if (normalized.includes('/.cwtools-ai/')) return true;
+client/extension/ai/planModeGuard.ts:63:    if (path.basename(workspace).toLowerCase() === '.cwtools-ai' && isInside(resolved, workspace)) return true;
+client/extension/ai/planModeGuard.ts:71:    const aiRoot = path.join(workspace, '.cwtools-ai');
+client/extension/ai/planModeGuard.ts:76:    } else if (path.basename(workspace).toLowerCase() === '.cwtools-ai' && isInside(resolved, workspace)) {
+client/extension/ai/planModeGuard.ts:80:        const marker = '/.cwtools-ai/';
+client/extension/ai/planModeGuard.ts:100:    // .cwtools-ai/<topic>/tmp/artifacts/...; these are not project mutations.
+client/extension/ai/projectKnowledge.ts:15:export const PROJECT_KNOWLEDGE_RELATIVE_DIR = path.join('.cwtools-ai', 'project', 'knowledge');
+client/extension/ai/projectKnowledge.ts:89:const EXCLUDED_DIRECTORIES = new Set(['.git', '.cwtools-ai', 'node_modules', 'release', 'artifacts', 'dist', 'out']);
+client/extension/ai/projectKnowledge.ts:616:        const profilePath = path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json');
+client/extension/ai/projectKnowledge.ts:651:        if (!relative || relative.startsWith('.cwtools-ai/') || relative.startsWith('.git/') || relative.startsWith('node_modules/')) return;
+client/extension/ai/projectProfile.ts:10:export const PROJECT_PROFILE_RELATIVE_PATH = path.join('.cwtools-ai', 'project', 'profile.json');
+client/extension/ai/projectProfile.ts:253:                _hint: 'Run /init to generate .cwtools-ai/project/profile.json, then retry query_project_profile.',
+client/extension/ai/projectProfile.ts:471:        path.join(root, '.cwtools-ai'),
+client/extension/ai/prompt/sections/baseSystem.ts:96:- 鈿狅笍 CRITICAL: NEVER store massive data (e.g. hundreds of keys, large ASTs, file manifests) in the Blackboard or output them in your reasoning/thinking process! If you need to pass massive data, use \`write_file\` to save it to a local temporary file inside the exact Agent Workspace Dir shown in Current Editor Context (e.g. \`.cwtools-ai/<current-topic-id>/scratch/data.md\`) and then use \`set_memory\` to only share the file path.
+client/extension/ai/prompt/sections/modePrompts.ts:289:- **TEMPORARY FILES**: New throwaway scratchpads and helper scripts created only to support a command must go under the current topic scratch directory: \`.cwtools-ai/<current-topic-id>/scratch/\` or the \`CWT_AGENT_SCRATCH_DIR\` environment variable. For temporary Python helpers, reuse and overwrite one script for the whole task: \`.cwtools-ai/{current-topic-id}/scratch/agent_helper.py\` or \`CWT_AGENT_HELPER_SCRIPT\`. Fold search, replace, and verify steps into that same script instead of creating names like \`search_*.py\`, \`replace_*.py\`, \`verify2.py\`, or \`sf2.py\`. Delete only temporary helper scripts that were created solely to support command execution or verification after the batch/verification they support is complete. Never delete user-requested deliverable scripts, existing project scripts, or scripts the user explicitly asked you to create. Create multiple helper scripts only when the user explicitly asks for separate scripts or when the scripts themselves are the requested deliverable. Existing project scripts (for example a user-provided .py file) are normal workspace files: edit them in place and run them directly; do not create .bat/.ps1/launcher wrappers just to execute them.
+client/extension/ai/prompt/sections/modePrompts.ts:290:- **RUN COMMAND CWD**: \`run_command\` defaults to the Project Workspace Root, not the scratch directory. Keep the default cwd for project scripts unless the user asks otherwise. ${RUN_COMMAND_SHELL_NOTE} **Preferred approach for running scratch scripts**: use the \`.cwtools-ai/{current-topic-id}/scratch/agent_helper.py\` alias directly; the system will resolve it to the correct absolute path automatically: \`python ".cwtools-ai/{topic-id}/scratch/agent_helper.py"\`. When you must reference environment variables, ${ENV_VAR_SYNTAX_NOTE}. Always wrap paths containing spaces in double quotes.`}
+client/extension/ai/prompt/sections/modePrompts.ts:589:- For temporary command-support Python scripts, reuse and overwrite one script for the whole task: \`CWT_AGENT_HELPER_SCRIPT\` / \`.cwtools-ai/{current-topic-id}/scratch/agent_helper.py\`. Put search, replace, and verify modes in that one helper instead of creating multiple scratch scripts. Delete the helper only when it is a temporary execution/verification helper and the batch/verification step is finished; preserve user-requested deliverable scripts, scripts the user explicitly asked you to create, and existing project scripts. ${RUN_COMMAND_SHELL_NOTE} Prefer the \`.cwtools-ai/{topic-id}/scratch/agent_helper.py\` alias, e.g. \`python ".cwtools-ai/{topic-id}/scratch/agent_helper.py"\`; if environment variables are necessary, ${ENV_VAR_SYNTAX_NOTE}. Always wrap paths containing spaces in double quotes.
+client/extension/ai/prompt/sections/modePrompts.ts:931:3. **Use the Blackboard Safely** 鈥?store concise shared data (entity IDs, namespace allocations) in the Blackboard. For massive data (e.g. file manifests, ASTs), instruct agents to write to a local file inside the exact Agent Workspace Dir shown in Current Editor Context, such as \`.cwtools-ai/<current-topic-id>/scratch/\`, and only share the file path.
+client/extension/ai/promptBuilder.ts:562:        return `<project-premise>\n# PROJECT PROFILE (from .cwtools-ai/project/profile.json)\nUse this compact profile for routing and project convention hints. Do not broad-scan the workspace until you have checked the profile and the relevant indexed tools. Cross-check profile facts against current files and CWT/LSP evidence before treating them as binding. For more details, call \`query_project_profile\` with a targeted section.\n\n## Summary\n${buildProfileSummary(profile)}\n\n## Active Mode Card\n${this.truncateProjectRuleSection(promptCard || 'No mode-specific project card was generated.', 1800)}\n\n## Recommended Workflows\n${workflowHints || '- No workflow recommendations generated.'}\n\n## Efficiency Hints\n${profile.efficiencyHints.slice(0, 5).map(hint => `- ${hint}`).join('\n')}${custom}\n</project-premise>\n`;
+client/extension/ai/promptBuilder.ts:797:            contextParts.push(`**Agent Workspace Dir**: \`.cwtools-ai/${options.topicId}/\``);
+client/extension/ai/promptBuilder.ts:798:            contextParts.push(`**Agent Scratch Dir**: \`.cwtools-ai/${options.topicId}/scratch/\``);
+client/extension/ai/promptBuilder.ts:800:                contextParts.push(`**Agent Helper Script**: \`.cwtools-ai/${options.topicId}/scratch/agent_helper.py\` (reuse/overwrite for temporary Python helpers; delete only temporary execution/verification helpers, never user-requested deliverables)`);
+client/extension/ai/promptBuilder.ts:802:            contextParts.push(`**Agent Media Dir**: \`.cwtools-ai/${options.topicId}/media/\``);
+client/extension/ai/runner/autoReviewer.ts:232:    return /(?:^|\/)\.cwtools-ai\/(?:[^/]+\/)?scratch\/agent_helper\.py$/.test(normalizedPath);
+client/extension/ai/runner/hookRunner.ts:34:        ErrorReporter.warn('AgentHooks', 'Failed to read .cwtools-ai/hooks.json', error);
+client/extension/ai/runner/policyEngine.ts:94:    '.cwtools-ai/*/runs/**', '.cwtools-ai/*/threads/**', '.cwtools-ai/*/goals/**',
+client/extension/ai/runner/policyEngine.ts:95:    '.cwtools-ai/*/blackboard/**', '.cwtools-ai/*/resume_state.json*',
+client/extension/ai/runner/policyEngine.ts:286:const READABLE_BUT_WRITE_PROTECTED_PREFIXES = ['.git/', '.agents/', '.codex/', '.cwtools-ai/'];
+client/extension/ai/runner/toolScheduler.ts:106:                if (id) paths.push(path.join(workspaceRoot, '.cwtools-ai', 'workflows', `${id}.md`));
+client/extension/ai/skills.ts:126:        scanSkillDir(path.join(roots.workspaceRoot, '.cwtools-ai', 'skills'), 'project', skills);
+client/extension/ai/tools/definitions.ts:88:            description: 'Read the /init-generated Agent project profile from .cwtools-ai/project/profile.json. Use this before broad scans to get workspace type, key directories, localisation languages/encoding, namespaces, workflow routing, validation hints, and mode-specific prompt cards.',
+client/extension/ai/tools/definitions.ts:727:            description: 'Run a shell command in the project workspace root by default. Commands execute through PowerShell on Windows and POSIX /bin/sh (sh -c) on macOS/Linux; use the matching shell syntax (PowerShell cmdlets on Windows, standard POSIX commands like ls/grep/find/cp on macOS/Linux) and do not wrap commands in another shell or launcher script just to run a file. Temporary scripts may live under the current topic scratch directory (.cwtools-ai/<topicId>/scratch). Reuse one temporary Python helper per task, preferably .cwtools-ai/<topicId>/scratch/agent_helper.py or CWT_AGENT_HELPER_SCRIPT, instead of creating separate search/replace/verify scripts. Delete only temporary helpers created solely for execution/verification after the batch/verification they support is complete; preserve user-requested deliverable scripts, scripts the user explicitly asked you to create, and existing project scripts. Commands that need project files should usually keep the default cwd or explicitly pass the project root. The process receives CWT_WORKSPACE_ROOT, CWT_AGENT_WORKSPACE_DIR, CWT_AGENT_SCRATCH_DIR, CWT_AGENT_HELPER_SCRIPT, and CWT_AGENT_MEDIA_DIR environment variables. Prefer .cwtools-ai/<topicId>/scratch/agent_helper.py aliases over environment-variable path concatenation; if environment variables are necessary, use PowerShell syntax such as $env:CWT_AGENT_SCRATCH_DIR on Windows or POSIX syntax such as $CWT_AGENT_SCRATCH_DIR on macOS/Linux. Read-only safe commands such as "git status", "git diff", version checks, and basic listing/search commands may run automatically. In Utility mode, when Agent file write mode is set to auto/direct-write, normal non-escalated commands are also auto-approved with no permission card. Other commands ask the user through the permission flow, and the user can choose one-time approval, denial, or Always Allow for this session. Destructive commands (rm -rf, del /f, format, shutdown, reboot) and unsafe inline execution patterns remain sandboxed unless requestEscalation is explicitly used.',
+client/extension/ai/tools/definitions.ts:1086:            description: 'MANDATORY for all .yml localisation file operations. Safely write PDXScript localisation entries. filePath MUST be a real localisation path under localisation/, localisation_synced/, or localization/; never write localisation YAML into .cwtools-ai scratch/topic folders. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use edit_file, replace_lines, or write_file for .yml localisation files - ALWAYS use this tool instead.',
+client/extension/ai/tools/definitions.ts:1090:                    filePath: { type: 'string', description: 'Path to the real .yml localisation file (absolute or relative to workspace), under localisation/, localisation_synced/, or localization/. Do not use .cwtools-ai paths.' },
+client/extension/ai/tools/definitions.ts:1388:            description: 'Save a reusable project workflow from the current conversation or task process. Use only when the user asks to save the process/workflow or when preserving a clearly reusable workflow is the task. Writes .cwtools-ai/workflows/<id>.md and makes it available through /workflow:<id>.',
+client/extension/ai/tools/definitions.ts:1455:            description: '[Orchestrator/Script Mode] Dispatch an approved executable blueprint or an explicitly supplied task DAG. For approved connected multi-entity work, pass blueprintFile=.cwtools-ai/<topic>/design_blueprint.json; the system loads its canonical featureManifest and taskPlan without model reinterpretation. Ad-hoc read waves may still pass tasks directly. Script Mode supports up to 8 tasks; classic Orchestrator mode supports 4.',
+client/extension/ai/tools/externalTools.ts:55:    '.cwtools-ai', '.git', '.hg', '.svn', '.tmp-test', '.vscode-test', '.vs', '.idea',
+client/extension/ai/tools/externalTools.ts:299:            const rest = normalized.replace(/^\.cwtools-ai(?:[\\/]|$)/i, '').replace(/^\/+/, '');
+client/extension/ai/tools/externalTools.ts:300:            if (!rest) return aiRoot || '.cwtools-ai';
+client/extension/ai/tools/externalTools.ts:312:                return `.cwtools-ai/${targetSegments.join('/')}`;
+client/extension/ai/tools/externalTools.ts:330:        const quotedAgentPathPattern = /(^|[\s(])\\?(["'])(\.cwtools-ai(?:[\\/][^"']+?)?)\\?\2/g;
+client/extension/ai/tools/externalTools.ts:335:        const quotedPattern = /(^|[\s(])(["'])(\.cwtools-ai(?:[\\/][^"']+)?)\2/g;
+client/extension/ai/tools/externalTools.ts:340:        const barePattern = /(^|[\s(])(\.cwtools-ai(?:[\\/][^\s"';&|<>]+)?)/g;
+client/extension/ai/tools/externalTools.ts:352:            if (!alias || alias.toLowerCase() === '.cwtools-ai') continue;
+client/extension/ai/tools/externalTools.ts:387:            if (!root || path.basename(root).toLowerCase() === '.cwtools-ai') return;
+client/extension/ai/tools/externalTools.ts:422:        if (segments[0] === '.cwtools-ai') return true;
+client/extension/ai/tools/externalTools.ts:823:                `AI requests to ignore this LSP validation error:\n\nError details: ${args.errorId}\nReason: ${args.reason}\n\nDo you want to permanently add this rule to the local whitelist (.cwtools-ai-memory.md) to suppress future reports?`,
+client/extension/ai/tools/externalTools.ts:824:                `AI 璇锋眰蹇界暐锛圛GNORE锛夋 LSP 楠岃瘉閿欒锛歕n\n銆愰敊璇鎯呫€戯細${args.errorId}\n銆愬垽鏂悊鐢便€戯細${args.reason}\n\n鎮ㄦ槸鍚﹀悓鎰忓皢姝よ鍒欐案涔呭姞鍏ユ湰鍦扮櫧鍚嶅崟 (.cwtools-ai-memory.md) 浠ュ厤闄ゅ悗缁姤閿欙紵`,
+client/extension/ai/tools/externalTools.ts:1252:            const agentRoot = path.join(root, '.cwtools-ai');
+client/extension/ai/tools/fileTools.ts:139:        const match = normalized.match(/^\.cwtools-ai(?:\/(.*))?$/i);
+client/extension/ai/tools/fileTools.ts:148:        return path.posix.join('.cwtools-ai', safeTopicId, ...rest);
+client/extension/ai/tools/fileTools.ts:231:        // 1. All writes under the .cwtools-ai folder
+client/extension/ai/tools/fileTools.ts:232:        if (normalized.includes('/.cwtools-ai/') || normalized.startsWith('.cwtools-ai/') || normalized.includes('.cwtools-ai')) {
+client/extension/ai/tools/fileTools.ts:294:            message: `${toolName} refused to write a .yml localisation file. Use write_localisation with a real localisation path under localisation/, localisation_synced/, or localization/. Do not write localisation YAML into .cwtools-ai scratch/topic folders.`,
+client/extension/ai/tools/fileTools.ts:303:            return `write_localisation refused '${this.workspaceRelativePath(filePath)}'. Localisation files must be written under localisation/, localisation_synced/, or localization/, never under .cwtools-ai scratch/topic folders.`;
+client/extension/ai/tools/fileTools.ts:1874:                const hasKnowledge = evidenceKinds.some(value => value.includes('project_knowledge') || value.includes('query_project_knowledge') || value.includes('.cwtools-ai/project/knowledge'));
+client/extension/ai/tools/lspTools.ts:35:    return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
+client/extension/ai/tools/lspTools.ts:44:    if (segments.some(segment => ['.cwtools-ai', '.git', 'node_modules', 'release'].includes(segment))) return true;
+client/extension/ai/tools/lspTools.ts:2259:                exclude: new vs.RelativePattern(this.ctx.workspaceRoot, '**/{.cwtools-ai,.git,node_modules,release}/**'),
+client/extension/ai/tools/lspTools.ts:2323:                        '**/{.cwtools-ai,.git,node_modules,release}/**',
+client/extension/ai/tools/lspTools.ts:2994:            exclude: new vs.RelativePattern(this.ctx.workspaceRoot, '**/{.cwtools-ai,.git,node_modules,release}/**'),
+client/extension/ai/tools/lspTools.ts:3037:                    '**/{.cwtools-ai,.git,node_modules,release}/**',
+client/extension/ai/workflowRegistry.ts:454:// .cwtools-ai/workflows/<id>.md or .agents/workflows/<id>.md
+client/extension/ai/workflowRegistry.ts:579:		path.join(workspaceRoot, '.cwtools-ai', 'workflows'),
+client/extension/ai/workflowRegistry.ts:654:	const workflowDir = path.join(workspaceRoot, '.cwtools-ai', 'workflows');
+client/extension/ai/workspacePaths.ts:61:        '.cwtools-ai-memory.md', 'memory.json',
+client/extension/ai/workspacePaths.ts:85:    return folders.find(folder => path.basename(folder.uri.fsPath).toLowerCase() !== '.cwtools-ai')?.uri.fsPath
+client/extension/ai/workspacePaths.ts:92:    const aiFolder = folders.find(folder => path.basename(folder.uri.fsPath).toLowerCase() === '.cwtools-ai');
+client/extension/ai/workspacePaths.ts:96:        const childAiRoot = path.join(folder.uri.fsPath, '.cwtools-ai');
+client/extension/ai/workspacePaths.ts:100:    if (fallbackWorkspaceRoot && path.basename(fallbackWorkspaceRoot).toLowerCase() === '.cwtools-ai') {
+client/extension/ai/workspacePaths.ts:105:    return workspaceRoot ? path.join(workspaceRoot, '.cwtools-ai') : '';
+client/extension/ai/workspacePaths.ts:122:        if (path.basename(folder.uri.fsPath).toLowerCase() === '.cwtools-ai') continue;
+client/extension/ai/workspacePaths.ts:123:        const childAiRoot = path.join(folder.uri.fsPath, '.cwtools-ai');
+client/extension/ai/workspacePaths.ts:130:    if (projectRoot && path.basename(projectRoot).toLowerCase() !== '.cwtools-ai') {
+client/extension/ai/workspacePaths.ts:131:        const legacyProjectRoot = path.join(projectRoot, '.cwtools-ai');
+client/extension/ai/workspaceSandbox.ts:58:    const match = normalized.match(/^\.cwtools-ai(?:\/(.*))?$/i);
+client/extension/extension.ts:302:	'.cwtools-ai',
+client/extension/extension.ts:2517:		const markerFiles = await workspace.findFiles("**/*.txt", '**/{node_modules,.git,.vscode,.vscode-test,.cwtools-ai}/**', 2);
+client/extension/indexing/indexService.ts:379:			'**/{node_modules,.git,.cwtools,.cwtools-ai,release,artifacts,dist,coverage,out}/**',
+client/extension/indexing/indexService.ts:486:			const files = await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,.cwtools,.cwtools-ai,release,artifacts,dist,coverage,out}/**', IndexService.VANILLA_SYMBOL_FILE_LIMIT);
+client/extension/indexing/workspaceSymbolCache.ts:8:export const WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH = path.join('.cwtools-ai', 'index', 'workspace-symbols.sqlite');
+client/extension/specialPaths.ts:124:		pushFolder(items, localize('AI Workspace Storage (.cwtools-ai)', 'AI 宸ヤ綔鍖哄瓨鍌?(.cwtools-ai)'), path.join(workspaceRoot, '.cwtools-ai'), true);
+client/test/unit/agentToolSafety.test.ts:191:    it('remaps legacy .cwtools-ai/scratch writes into the current topic folder', async () => {
+client/test/unit/agentToolSafety.test.ts:194:            { file: '.cwtools-ai/scratch/notes.txt', content: 'hello topic scratch' },
+client/test/unit/agentToolSafety.test.ts:199:        const expectedPath = path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'scratch', 'notes.txt');
+client/test/unit/agentToolSafety.test.ts:200:        const legacyPath = path.join(workspaceRoot, '.cwtools-ai', 'scratch', 'notes.txt');
+client/test/unit/agentToolSafety.test.ts:205:    it('remaps loose .cwtools-ai writes into the current topic folder', async () => {
+client/test/unit/agentToolSafety.test.ts:208:            { file: '.cwtools-ai/notes.md', content: 'topic note' },
+client/test/unit/agentToolSafety.test.ts:213:        const expectedPath = path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'notes.md');
+client/test/unit/agentToolSafety.test.ts:214:        const loosePath = path.join(workspaceRoot, '.cwtools-ai', 'notes.md');
+client/test/unit/agentToolSafety.test.ts:479:            filePath: '.cwtools-ai/scratch/bad_l_english.yml',
+client/test/unit/agentToolSafety.test.ts:486:        const rejectedPath = path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'scratch', 'bad_l_english.yml');
+client/test/unit/agentToolSafety.test.ts:519:                path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'design_blueprint.md'),
+client/test/unit/agentToolSafety.test.ts:520:                path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'design_blueprint.json'),
+client/test/unit/agentToolSafety.test.ts:557:        expect(fs.existsSync(path.join(workspaceRoot, '.cwtools-ai', 'topic-blueprint', 'design_blueprint.md'))).to.equal(false);
+client/test/unit/agentToolSafety.test.ts:667:        const content = fs.readFileSync(path.join(workspaceRoot, '.cwtools-ai', 'topic-blueprint', 'design_blueprint.md'), 'utf8');
+client/test/unit/agentToolSafety.test.ts:673:        const dataPath = path.join(workspaceRoot, '.cwtools-ai', 'topic-blueprint', 'design_blueprint.json');
+client/test/unit/agentToolSafety.test.ts:1065:        const profileDir = path.join(workspaceRoot, '.cwtools-ai', 'project');
+client/test/unit/agentToolSafety.test.ts:1106:        expect(isExcludedModSearchPath(workspaceRoot, path.join(workspaceRoot, '.cwtools-ai', 'topic', 'resume_transcript.json.bak'))).to.equal(true);
+client/test/unit/agentToolSafety.test.ts:1252:        expect(dir).to.equal(path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'media'));
+client/test/unit/agentToolSafety.test.ts:1445:        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'scratch');
+client/test/unit/agentToolSafety.test.ts:1451:            command: 'node ".cwtools-ai/scratch/helper.js"',
+client/test/unit/agentToolSafety.test.ts:1506:        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'scratch');
+client/test/unit/agentToolSafety.test.ts:1512:            command: 'node \\".cwtools-ai/scratch/agent_helper.js\\"',
+client/test/unit/agentToolSafety.test.ts:1531:        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'topic_1779112553395', 'scratch');
+client/test/unit/agentToolSafety.test.ts:1537:            command: 'node \\".cwtools-ai\\topic_1779112553395\\scratch\\search_fallen.js"',
+client/test/unit/agentToolSafety.test.ts:1556:        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'topic_1779112553395', 'scratch');
+client/test/unit/agentToolSafety.test.ts:1562:            command: 'Get-Content \\".cwtools-ai\\topic_1779112553395\\scratch\\search_fallen.txt"',
+client/test/unit/agentToolSafety.test.ts:1581:        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'topic_1779112553395', 'scratch');
+client/test/unit/agentToolSafety.test.ts:1587:            command: 'Get-Content \\".cwtools-ai\\topic_1779112553395\\scratch\\search_fallen.txt"',
+client/test/unit/agentToolSafety.test.ts:1813:        const sourcePath = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'media', 'generated.asset');
+client/test/unit/agentToolSafety.test.ts:1832:        const sourcePath = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'media', 'source.png');
+client/test/unit/approvalBoundary.test.ts:187:            command: 'python ".cwtools-ai\\topic_123\\scratch\\agent_helper.py" --dry-run',
+client/test/unit/approvalBoundary.test.ts:215:            command: 'python "D:\\other\\.cwtools-ai\\topic_123\\scratch\\agent_helper.py"',
+client/test/unit/chatInit.test.ts:19:        const knowledgeRoot = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+client/test/unit/chatInit.test.ts:21:        const workspaceIndexPath = path.join(workspaceRoot, '.cwtools-ai', 'index', 'workspace-symbols.sqlite');
+client/test/unit/chatInit.test.ts:87:            expect(fs.existsSync(path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json'))).to.equal(true);
+client/test/unit/memoryParser.test.ts:32:        const topicMemoryPath = path.join(workspaceRoot, '.cwtools-ai', 'topic_123', '.cwtools-ai-memory.md');
+client/test/unit/memoryParser.test.ts:33:        const legacyRootPath = path.join(workspaceRoot, '.cwtools-ai-memory.md');
+client/test/unit/memoryParser.test.ts:44:        const topicDir = path.join(workspaceRoot, '.cwtools-ai', 'topic_legacy');
+client/test/unit/memoryParser.test.ts:46:        fs.writeFileSync(path.join(workspaceRoot, '.cwtools-ai-memory.md'), '# Legacy\n\nLEGACY_MEMORY', 'utf8');
+client/test/unit/memoryParser.test.ts:47:        fs.writeFileSync(path.join(topicDir, '.cwtools-ai-memory.md'), '# Topic\n\nTOPIC_MEMORY', 'utf8');
+client/test/unit/orchestrator.test.ts:737:        const blueprintDir = path.join(root, '.cwtools-ai', 'topic');
+client/test/unit/planModeGuard.test.ts:24:            { filePath: path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'annotations.md') },
+client/test/unit/policyEngine.test.ts:228:        const privateRun = descriptor({ targetPaths: [path.join(WS, '.cwtools-ai', 'topic', 'runs', 'run-1', 'events.jsonl')] });
+client/test/unit/policyEngine.test.ts:229:        const blueprint = descriptor({ targetPaths: [path.join(WS, '.cwtools-ai', 'topic', 'blueprint.md')] });
+client/test/unit/projectKnowledge.test.ts:108:        const root = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+client/test/unit/projectKnowledge.test.ts:175:        const root = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+client/test/unit/projectKnowledge.test.ts:235:        const root = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+client/test/unit/projectKnowledge.test.ts:283:        fs.mkdirSync(path.join(workspaceRoot, '.cwtools-ai', 'project'), { recursive: true });
+client/test/unit/projectKnowledge.test.ts:284:        fs.writeFileSync(path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json'), JSON.stringify(profile));
+client/test/unit/promptBuilderContext.test.ts:81:            const profileDir = path.join(workspaceRoot, '.cwtools-ai', 'project');
+client/test/unit/promptBuilderContext.test.ts:132:            const topicA = path.join(workspaceRoot, '.cwtools-ai', 'topic-a');
+client/test/unit/promptBuilderContext.test.ts:133:            const topicB = path.join(workspaceRoot, '.cwtools-ai', 'topic-b');
+client/test/unit/promptBuilderContext.test.ts:155:            const topicA = path.join(workspaceRoot, '.cwtools-ai', 'topic-memory-a');
+client/test/unit/promptBuilderContext.test.ts:156:            const topicB = path.join(workspaceRoot, '.cwtools-ai', 'topic-memory-b');
+client/test/unit/promptBuilderContext.test.ts:159:            fs.writeFileSync(path.join(topicA, '.cwtools-ai-memory.md'), '# Memory\n\nTOPIC_A_MEMORY', 'utf8');
+client/test/unit/promptBuilderContext.test.ts:160:            fs.writeFileSync(path.join(topicB, '.cwtools-ai-memory.md'), '# Memory\n\nTOPIC_B_MEMORY', 'utf8');
+client/test/unit/promptBuilderContext.test.ts:189:        expect(String(context[0]!.content)).to.include('.cwtools-ai/topic-123/scratch/agent_helper.py');
+client/test/unit/resumeStateV2.test.ts:135:            const runDir = path.join(tmpRoot, '.cwtools-ai', topicId, 'runs', runId);
+client/test/unit/resumeStateV2.test.ts:156:            const resumePath = path.join(tmpRoot, '.cwtools-ai', topicId, 'resume_state.json');
+client/test/unit/resumeStateV2.test.ts:184:            const resumePath = path.join(tmpRoot, '.cwtools-ai', topicId, 'resume_state.json');
+client/test/unit/resumeStateV2.test.ts:205:            const runDir = path.join(tmpRoot, '.cwtools-ai', topicId, 'runs', runId);
+client/test/unit/resumeStateV2.test.ts:211:            const resumePath = path.join(tmpRoot, '.cwtools-ai', topicId, 'resume_state.json');
+client/test/unit/resumeStateV2.test.ts:237:            const resumeDir = path.join(tmpRoot, '.cwtools-ai', topicId);
+client/test/unit/runLedger.test.ts:107:        const runDir = path.join(workspaceRoot, '.cwtools-ai', 'topic_replay', 'runs', run.runId);
+client/test/unit/runLedger.test.ts:133:            '.cwtools-ai',
+client/test/unit/runLedger.test.ts:184:        const runDir = path.join(workspaceRoot, '.cwtools-ai', 'topic_order', 'runs', run.runId);
+client/test/unit/runLedger.test.ts:204:            '.cwtools-ai',
+client/test/unit/runLedger.test.ts:224:        const runsDir = path.join(workspaceRoot, '.cwtools-ai', topicId, 'runs');
+client/test/unit/runLedger.test.ts:546:            expect(fs.existsSync(path.join(workspaceRoot, '.cwtools-ai', 'topic_private', 'runs', run.runId))).to.equal(false);
+client/test/unit/subAgentSandbox.test.ts:99:            expect(normalizedPaths).to.include('.cwtools-ai');
+client/test/unit/subAgentSandbox.test.ts:221:                writeScope: ['common/buildings/kuat_buildings.txt', '.cwtools-ai'],
+client/test/unit/subAgentSandbox.test.ts:228:                { TargetFile: '.cwtools-ai/topic_123/walkthrough.md' },
+client/test/unit/subAgentSandbox.test.ts:241:                writeScope: ['common/buildings/kuat_buildings.txt', '.cwtools-ai'],
+client/test/unit/subAgentSandbox.test.ts:265:        it('.cwtools-ai 鍓嶇紑杈圭晫锛氭嫆缁?.cwtools-ai-evil锛屼粎绮剧‘鎴?/ 鍓嶇紑鏀捐', () => {
+client/test/unit/subAgentSandbox.test.ts:270:                writeScope: ['.cwtools-ai'],
+client/test/unit/subAgentSandbox.test.ts:273:            const evil = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: '.cwtools-ai-evil/x.md' }, process.cwd());
+client/test/unit/subAgentSandbox.test.ts:275:            const ok = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: '.cwtools-ai/topic/walkthrough.md' }, process.cwd());
+client/test/unit/subAgentSandbox.test.ts:322:                { filePath: path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'annotations.md') },
+client/test/unit/toolScheduler.test.ts:77:        expect(paths[0]!.replace(/\\/g, '/')).to.equal('C:/project/.cwtools-ai/workflows/review-flow.md');
+client/test/unit/workflowRegistry.test.ts:180:            expect(result.filePath).to.equal(path.join(tempRoot, '.cwtools-ai', 'workflows', 'saved-demo.md'));
+packages/cwtools-mcp/src/config.ts:191:    '                      events/, localisation/, .cwtools-ai/). On other workspaces tool calls are',
+packages/cwtools-mcp/src/hosts/lspProcessHost.ts:228:      ignored: [/(^|[\\/])(?:node_modules|\.git|\.cwtools|\.cwtools-ai)(?:[\\/]|$)/],
+packages/cwtools-mcp/src/hosts/lspProcessHost.ts:427:    || segment === '.cwtools-ai')) return false;
+packages/cwtools-mcp/src/hosts/nodeHostServices.ts:432:    if (entry.name.startsWith('.') && entry.name !== '.cwtools-ai') continue;
+packages/cwtools-mcp/src/hosts/projectDetect.ts:15:const ROOT_DIR_MARKERS = ['.cwtools-ai'];
+packages/cwtools-mcp/src/hosts/projectDetect.ts:112:    reason: `No Paradox mod markers (descriptor.mod, common/, events/, localisation/, .cwtools-ai/) at, above, or directly under '${workspaceRoot}'.`,
+packages/cwtools-mcp/src/hosts/revalidation.ts:8:const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', '.git', '.cwtools', '.cwtools-ai', '.vscode']);
+packages/cwtools-mcp/src/mcp/resources.ts:41:      description: 'The generated .cwtools-ai/project/profile.json if available.',
+packages/cwtools-mcp/src/mcp/resources.ts:90:            _hint: 'Run /init in the VS Code extension or create .cwtools-ai/project/profile.json.',
+packages/cwtools-mcp/src/mcp/resources.ts:94:      const manifestPath = path.join(host.workspaceRoot, '.cwtools-ai', 'project', 'knowledge', 'manifest.json');
+packages/cwtools-mcp/src/test/lspWatcher.contract.test.ts:16:    assert.equal(isLspWatchedFile(root, path.join(root, '.cwtools-ai', 'topic', 'scratch.txt')), false);
+packages/cwtools-mcp/src/test/projectDetect.contract.test.ts:32:    fs.mkdirSync(path.join(parent, 'MyMod', '.cwtools-ai'), { recursive: true });
+packages/cwtools-shared/src/generated/mcpTools.ts:358:      "description": "Read the /init-generated Agent project profile from .cwtools-ai/project/profile.json. Use this before broad scans to get workspace type, key directories, localisation languages/encoding, namespaces, workflow routing, validation hints, and mode-specific prompt cards.",
+packages/cwtools-shared/src/knowledge/rules.ts:822:  const profilePath = path.join(host.workspaceRoot, '.cwtools-ai', 'project', 'profile.json');
+packages/cwtools-shared/src/project/knowledge.ts:18:const KNOWLEDGE_DIR = path.join('.cwtools-ai', 'project', 'knowledge');
+packages/cwtools-shared/src/project/profile.ts:56:export const PROJECT_PROFILE_RELATIVE_PATH = path.join('.cwtools-ai', 'project', 'profile.json');
+packages/cwtools-shared/src/project/profile.ts:133:          _hint: 'Run /init in the VS Code extension or create .cwtools-ai/project/profile.json, then retry.',
+packages/cwtools-shared/src/safety/paths.ts:62:    .includes('.cwtools-ai');
+packages/cwtools-shared/src/safety/paths.ts:91:      message: 'Localisation files must not be written under .cwtools-ai scratch or topic folders.',
+packages/cwtools-shared/src/safety/pdxEdit.ts:37:    return toolDenied('scratch_path', 'edit_pdx_block must not write under .cwtools-ai scratch or topic folders.') as SharedToolResult<EditPdxBlockResult>;
+packages/cwtools-shared/src/test/pathSafety.contract.test.ts:32:  it('rejects .cwtools-ai scratch localisation writes', () => {
+packages/cwtools-shared/src/test/pathSafety.contract.test.ts:33:    const result = validateLocalisationPath(workspaceRoot, '.cwtools-ai/topic/scratch/bad_l_english.yml');
+packages/cwtools-shared/src/test/projectKnowledge.contract.test.ts:17:      const knowledgeRoot = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+packages/cwtools-shared/src/test/projectKnowledge.contract.test.ts:71:      const knowledgeRoot = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+packages/cwtools-shared/src/tools/symbols.ts:582:    return normalized.includes('/generated/') || normalized.includes('/.cwtools-ai/')
+packages/cwtools-shared/src/tools/symbols.ts:589:  if (normalized.includes('/generated/') || normalized.includes('/.cwtools-ai/')) return 'generated';
+release/CHANGELOG.md:598:- **[浼樺寲] 榛戞澘鍐呭瓨闃茬垎 (Blackboard Auto-Spill)**锛氱敱浜庡ぇ瀹归噺鏁版嵁鐨勪紶閫掓瀬鏄撴拺鐖?Prompt Token Budget锛宍set_memory` 宸ュ叿鐜板湪浼氬瓒呰繃 500 涓瓧绗︾殑鏁版嵁瀹炴柦鑷姩婧㈠嚭淇濇姢锛屽嵆鑷姩杞瓨鍒?`.cwtools-ai` 鐨勯殣钘忔湰鍦版枃浠朵腑锛岃€岄粦鏉夸笂浠呬繚鐣欏叾鐗╃悊璺緞寮曠敤锛坄file://...`锛夈€?
+release/README.md:134:* **Compact `/init` Knowledge Database**: the deep `/init` phase stores project + vanilla understanding as `.cwtools-ai/project/knowledge/manifest.json` plus `knowledge.sqlite`, replacing the former duplicated capability/archetype JSON set. `/init` also directly creates or incrementally updates `.cwtools-ai/index/workspace-symbols.sqlite` before deep export. A lower-left VS Code progress indicator remains visible while the workspace index is built, CWTools becomes ready, and the knowledge database is published. `query_project_knowledge` resolves explicit IDs through SQLite indexes, expands their reference/event/logic neighbourhood, and falls back to bounded intent search only when no identifier seed is supplied. It retrieves definitions, stacks, topology, project/vanilla patterns, and event structure/logic鈥攊ncluding call phases, `on_action` entries, flags, technologies, variables, and scope bridges鈥攚ithout loading the whole database into the prompt. Lazy `query_workspace_index` calls restore persistent SQLite rows, publish the workspace phase first, parse only changed files, and wait at most eight seconds before returning partial results while vanilla indexing continues. When the serialized vanilla `.cwb` changes, the matching global vanilla-symbol cache and the current project's `knowledge.sqlite` are rebuilt in one coordinated refresh stage.
+release/README.md:390:* **绱у噾鐨?`/init` 鐭ヨ瘑鏁版嵁搴?*锛氭繁搴?`/init` 闃舵灏嗛」鐩笌鍘熺増鐞嗚В淇濆瓨涓?`.cwtools-ai/project/knowledge/manifest.json` 鍜?`knowledge.sqlite`锛屾浛浠ｅ師鍏堥噸澶嶇殑 capability/archetype JSON 闆嗗悎銆俙/init` 杩樹細鍦ㄦ繁灞傚鍑哄墠鐩存帴鍒涘缓鎴栧閲忔洿鏂?`.cwtools-ai/index/workspace-symbols.sqlite`銆傛瀯寤哄伐浣滃尯绱㈠紩銆佺瓑寰?CWTools 鍜屽彂甯冪煡璇嗘暟鎹簱鏈熼棿锛孷S Code 宸︿笅瑙掍細鎸佺画鏄剧ず杩涘害銆俙query_project_knowledge` 浼氬厛閫氳繃 SQLite 绱㈠紩瑙ｆ瀽鏄惧紡 ID锛屽啀鎵╁睍鍏跺紩鐢ㄣ€佷簨浠朵笌閫昏緫閭诲煙锛涘彧鏈夋湭鎻愪緵鏍囪瘑绗︾瀛愭椂鎵嶉€€鍥炴湁鐣屾剰鍥炬绱€傚畠鍙寜闇€妫€绱㈠畾涔夈€佸畾涔夋爤銆佹嫇鎵戙€侀」鐩?鍘熺増鑼冧緥锛屼互鍙婁簨浠惰皟鐢ㄩ樁娈点€乣on_action` 鍏ュ彛銆丗lag銆佺鎶€銆佸彉閲忓拰浣滅敤鍩熸ˉ鎺ョ瓑浜嬩欢缁撴瀯涓庨€昏緫鍏崇郴锛屾棤闇€鎶婃暣涓暟鎹簱濉炲叆鎻愮ず璇嶃€傛噿鍔犺浇鐨?`query_workspace_index` 浼氬厛鎭㈠鎸佷箙鍖?SQLite銆佷紭鍏堝彂甯冨伐浣滃尯闃舵銆佸彧瑙ｆ瀽鍙樺寲鏂囦欢锛屽苟鏈€澶氱瓑寰呭叓绉掑悗杩斿洖閮ㄥ垎缁撴灉锛屽悓鏃惰鍘熺増绱㈠紩缁х画鏋勫缓銆傚綋搴忓垪鍖栧師鐗?`.cwb` 鍙樺寲鏃讹紝瀵瑰簲鐨勫叏灞€鍘熺増绗﹀彿缂撳瓨鍜屽綋鍓嶉」鐩殑 `knowledge.sqlite` 浼氬湪鍚屼竴鍗忚皟鍒锋柊闃舵閲嶅缓銆?
+release/package.json:81:            "cwtools-ai-panel": [
+release/package.json:92:                    "id": "cwtools-ai-panel",

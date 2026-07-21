@@ -559,7 +559,7 @@ export class PromptBuilder {
         const custom = customRules?.trim()
             ? `\n\n## Custom Rules (from CWTOOLS.md)\n${this.truncateProjectRuleSection(customRules.trim(), 1800)}`
             : '';
-        return `<project-premise>\n# PROJECT PROFILE (from .cwtools-ai/project/profile.json)\nUse this compact profile for routing and project convention hints. Do not broad-scan the workspace until you have checked the profile and the relevant indexed tools. Cross-check profile facts against current files and CWT/LSP evidence before treating them as binding. For more details, call \`query_project_profile\` with a targeted section.\n\n## Summary\n${buildProfileSummary(profile)}\n\n## Active Mode Card\n${this.truncateProjectRuleSection(promptCard || 'No mode-specific project card was generated.', 1800)}\n\n## Recommended Workflows\n${workflowHints || '- No workflow recommendations generated.'}\n\n## Efficiency Hints\n${profile.efficiencyHints.slice(0, 5).map(hint => `- ${hint}`).join('\n')}${custom}\n</project-premise>\n`;
+        return `<project-premise>\n# PROJECT PROFILE (from .cwtools/project/profile.json)\nUse this compact profile for routing and project convention hints. Do not broad-scan the workspace until you have checked the profile and the relevant indexed tools. Cross-check profile facts against current files and CWT/LSP evidence before treating them as binding. For more details, call \`query_project_profile\` with a targeted section.\n\n## Summary\n${buildProfileSummary(profile)}\n\n## Active Mode Card\n${this.truncateProjectRuleSection(promptCard || 'No mode-specific project card was generated.', 1800)}\n\n## Recommended Workflows\n${workflowHints || '- No workflow recommendations generated.'}\n\n## Efficiency Hints\n${profile.efficiencyHints.slice(0, 5).map(hint => `- ${hint}`).join('\n')}${custom}\n</project-premise>\n`;
     }
 
     /**
@@ -794,12 +794,12 @@ ${trimmed}
         }
 
         if (options.topicId) {
-            contextParts.push(`**Agent Workspace Dir**: \`.cwtools-ai/${options.topicId}/\``);
-            contextParts.push(`**Agent Scratch Dir**: \`.cwtools-ai/${options.topicId}/scratch/\``);
+            contextParts.push(`**Agent Workspace Dir**: \`.cwtools/${options.topicId}/\``);
+            contextParts.push(`**Agent Scratch Dir**: \`.cwtools/${options.topicId}/scratch/\``);
             if (commandToolsAvailable) {
-                contextParts.push(`**Agent Helper Script**: \`.cwtools-ai/${options.topicId}/scratch/agent_helper.py\` (reuse/overwrite for temporary Python helpers; delete only temporary execution/verification helpers, never user-requested deliverables)`);
+                contextParts.push(`**Agent Helper Script**: \`.cwtools/${options.topicId}/scratch/agent_helper.py\` (reuse/overwrite for temporary Python helpers; delete only temporary execution/verification helpers, never user-requested deliverables)`);
             }
-            contextParts.push(`**Agent Media Dir**: \`.cwtools-ai/${options.topicId}/media/\``);
+            contextParts.push(`**Agent Media Dir**: \`.cwtools/${options.topicId}/media/\``);
         }
 
         if (options.activeFile) {

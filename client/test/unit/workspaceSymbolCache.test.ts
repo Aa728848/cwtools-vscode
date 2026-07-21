@@ -2,7 +2,11 @@ import { expect } from 'chai';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { WorkspaceSymbolSqliteCache } from '../../extension/indexing/workspaceSymbolCache';
+import {
+    WorkspaceSymbolSqliteCache,
+    getLegacyWorkspaceSymbolCachePath,
+    getWorkspaceSymbolCachePath,
+} from '../../extension/indexing/workspaceSymbolCache';
 
 describe('WorkspaceSymbolSqliteCache', () => {
     let tempDir: string;
@@ -74,5 +78,30 @@ describe('WorkspaceSymbolSqliteCache', () => {
         expect(changed.load().entries).to.deep.equal([]);
         expect(changed.load().files.size).to.equal(0);
         changed.close();
+    });
+
+    it('moves a legacy workspace cache under .cwtools after loading it', async () => {
+        const legacyPath = getLegacyWorkspaceSymbolCachePath(tempDir);
+        const primaryPath = getWorkspaceSymbolCachePath(tempDir);
+        const legacy = new WorkspaceSymbolSqliteCache(legacyPath, wasmDirectory, tempDir, 'cwb-v1');
+        await legacy.open();
+        legacy.update([{
+            path: path.join(tempDir, 'events', 'legacy.txt'),
+            size: 12,
+            mtimeMs: 100,
+            origin: 'workspace',
+            fileVersion: 1,
+            entries: [{ name: 'legacy.1', kind: 'event', file: path.join(tempDir, 'events', 'legacy.txt'), line: 1, source: 'script', origin: 'workspace' }],
+        }], []);
+        await legacy.save();
+        legacy.close();
+        const migrated = new WorkspaceSymbolSqliteCache(primaryPath, wasmDirectory, tempDir, 'cwb-v1', [legacyPath]);
+        await migrated.open();
+
+        expect(migrated.load().entries.map(entry => entry.name)).to.deep.equal(['legacy.1']);
+        expect(fs.existsSync(primaryPath)).to.equal(true);
+        expect(fs.existsSync(legacyPath)).to.equal(false);
+        expect(fs.existsSync(path.join(tempDir, '.cwtools-ai'))).to.equal(false);
+        migrated.close();
     });
 });

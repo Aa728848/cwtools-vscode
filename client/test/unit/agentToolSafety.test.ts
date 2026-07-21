@@ -196,8 +196,8 @@ describe('agent tool file path safety', () => {
         );
 
         expect(result.success).to.equal(true);
-        const expectedPath = path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'scratch', 'notes.txt');
-        const legacyPath = path.join(workspaceRoot, '.cwtools-ai', 'scratch', 'notes.txt');
+        const expectedPath = path.join(workspaceRoot, '.cwtools', 'topic-123', 'scratch', 'notes.txt');
+        const legacyPath = path.join(workspaceRoot, '.cwtools', 'scratch', 'notes.txt');
         expect(fs.readFileSync(expectedPath, 'utf8')).to.equal('hello topic scratch');
         expect(fs.existsSync(legacyPath)).to.equal(false);
     });
@@ -210,10 +210,41 @@ describe('agent tool file path safety', () => {
         );
 
         expect(result.success).to.equal(true);
-        const expectedPath = path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'notes.md');
-        const loosePath = path.join(workspaceRoot, '.cwtools-ai', 'notes.md');
+        const expectedPath = path.join(workspaceRoot, '.cwtools', 'topic-123', 'notes.md');
+        const loosePath = path.join(workspaceRoot, '.cwtools', 'notes.md');
         expect(fs.readFileSync(expectedPath, 'utf8')).to.equal('topic note');
         expect(fs.existsSync(loosePath)).to.equal(false);
+    });
+
+    it('bypasses ReadTracker only for exact .cwtools path segments', async () => {
+        const handler = createFileHandler();
+        const rejectedContext = makeContext('topic-123');
+        const rejectedCanWrite = sinon.stub().returns({ ok: false, reason: 'file was not read' });
+        rejectedContext.agentRunner = {
+            readTracker: { canWrite: rejectedCanWrite, markWritten: sinon.spy() },
+        };
+
+        const rejected = await handler.writeFile(
+            { file: '.cwtools-evil/notes.md', content: 'must be read first' },
+            rejectedContext,
+        );
+
+        expect(rejected.success).to.equal(false);
+        expect(rejected.message).to.include('ReadTracker Blocked');
+        expect(rejectedCanWrite.calledOnce).to.equal(true);
+
+        const allowedContext = makeContext('topic-123');
+        const allowedCanWrite = sinon.stub().returns({ ok: false, reason: 'file was not read' });
+        allowedContext.agentRunner = {
+            readTracker: { canWrite: allowedCanWrite, markWritten: sinon.spy() },
+        };
+        const allowed = await handler.writeFile(
+            { file: '.cwtools/topic-123/notes.md', content: 'topic artifact' },
+            allowedContext,
+        );
+
+        expect(allowed.success).to.equal(true);
+        expect(allowedCanWrite.called).to.equal(false);
     });
 
     it('rejects absolute paths that only share the workspace path prefix', async () => {
@@ -483,7 +514,7 @@ describe('agent tool file path safety', () => {
 
         expect(result.success).to.equal(false);
         expect(result.message).to.include('Localisation files must be written under');
-        const rejectedPath = path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'scratch', 'bad_l_english.yml');
+        const rejectedPath = path.join(workspaceRoot, '.cwtools', 'topic-123', 'scratch', 'bad_l_english.yml');
         expect(fs.existsSync(rejectedPath)).to.equal(false);
     });
 
@@ -516,8 +547,8 @@ describe('agent tool file path safety', () => {
             .to.deep.equal([path.join(workspaceRoot, 'common', 'relics', 'kuat.txt')]);
         expect(getAgentToolTargetFiles('write_design_blueprint', {}, workspaceRoot, 'topic-123'))
             .to.deep.equal([
-                path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'design_blueprint.md'),
-                path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'design_blueprint.json'),
+                path.join(workspaceRoot, '.cwtools', 'topic-123', 'design_blueprint.md'),
+                path.join(workspaceRoot, '.cwtools', 'topic-123', 'design_blueprint.json'),
             ]);
 
         expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('write_file')).to.equal(true);
@@ -554,7 +585,7 @@ describe('agent tool file path safety', () => {
 
         expect(result.success).to.equal(false);
         expect(result.message).to.include('missing required planning section');
-        expect(fs.existsSync(path.join(workspaceRoot, '.cwtools-ai', 'topic-blueprint', 'design_blueprint.md'))).to.equal(false);
+        expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'design_blueprint.md'))).to.equal(false);
     });
 
     it('writes complete design blueprints with a completeness gate', async () => {
@@ -664,13 +695,13 @@ describe('agent tool file path safety', () => {
         }, makeContext('topic-blueprint'));
 
         expect(result.success).to.equal(true);
-        const content = fs.readFileSync(path.join(workspaceRoot, '.cwtools-ai', 'topic-blueprint', 'design_blueprint.md'), 'utf8');
+        const content = fs.readFileSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'design_blueprint.md'), 'utf8');
         expect(content).to.include('## Blueprint Completeness Gate');
         expect(content).to.include('Common Directory Capability Review');
         expect(content).to.include('Reward and Outcome Plan');
         expect(content).to.include('Executable Feature Relationship Contract');
         expect(content).to.include('Approved Multi-Agent Task DAG');
-        const dataPath = path.join(workspaceRoot, '.cwtools-ai', 'topic-blueprint', 'design_blueprint.json');
+        const dataPath = path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'design_blueprint.json');
         expect(result.dataFilePath).to.equal(dataPath);
         const data = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
         expect(data.schemaVersion).to.equal(2);
@@ -1062,7 +1093,7 @@ describe('agent sprite candidate tool contract', () => {
     });
 
     it('queries the /init project profile without scanning the workspace', async () => {
-        const profileDir = path.join(workspaceRoot, '.cwtools-ai', 'project');
+        const profileDir = path.join(workspaceRoot, '.cwtools', 'project');
         fs.mkdirSync(profileDir, { recursive: true });
         fs.writeFileSync(path.join(profileDir, 'profile.json'), JSON.stringify({
             schemaVersion: 1,
@@ -1103,7 +1134,7 @@ describe('agent sprite candidate tool contract', () => {
 
     it('excludes agent transcripts and backup artifacts from project reference searches', () => {
         const { isExcludedModSearchPath } = require('../../extension/ai/tools/lspTools') as typeof import('../../extension/ai/tools/lspTools');
-        expect(isExcludedModSearchPath(workspaceRoot, path.join(workspaceRoot, '.cwtools-ai', 'topic', 'resume_transcript.json.bak'))).to.equal(true);
+        expect(isExcludedModSearchPath(workspaceRoot, path.join(workspaceRoot, '.cwtools', 'topic', 'resume_transcript.json.bak'))).to.equal(true);
         expect(isExcludedModSearchPath(workspaceRoot, path.join(workspaceRoot, 'events', 'legacy.txt.bak'))).to.equal(true);
         expect(isExcludedModSearchPath(workspaceRoot, path.join(workspaceRoot, 'release', 'events', 'packed.txt'))).to.equal(true);
         expect(isExcludedModSearchPath(workspaceRoot, path.join(workspaceRoot, 'events', 'live.txt'))).to.equal(false);
@@ -1249,7 +1280,7 @@ describe('agent tool topic artifacts', () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         const dir = await (handler as any).getMediaOutputDir(makeContext('media-topic'));
 
-        expect(dir).to.equal(path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'media'));
+        expect(dir).to.equal(path.join(workspaceRoot, '.cwtools', 'media-topic', 'media'));
         expect(fs.existsSync(dir)).to.equal(true);
     });
 
@@ -1442,7 +1473,7 @@ describe('agent tool topic artifacts', () => {
 
     it('maps legacy scratch paths into the current topic scratch directory for commands', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
-        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'scratch');
+        const topicScratch = path.join(workspaceRoot, '.cwtools', 'media-topic', 'scratch');
         fs.mkdirSync(topicScratch, { recursive: true });
         const targetPath = path.join(topicScratch, 'helper.js');
         fs.writeFileSync(targetPath, 'console.log("ok");\n', 'utf8');
@@ -1503,7 +1534,7 @@ describe('agent tool topic artifacts', () => {
 
     it('normalizes backslash-escaped quoted scratch script paths before running commands', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
-        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'scratch');
+        const topicScratch = path.join(workspaceRoot, '.cwtools', 'media-topic', 'scratch');
         fs.mkdirSync(topicScratch, { recursive: true });
         const targetPath = path.join(topicScratch, 'agent_helper.js');
         fs.writeFileSync(targetPath, 'console.log("escaped ok");\n', 'utf8');
@@ -1528,7 +1559,7 @@ describe('agent tool topic artifacts', () => {
 
     it('normalizes one-sided escaped quoted topic scratch script paths before running commands', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
-        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'topic_1779112553395', 'scratch');
+        const topicScratch = path.join(workspaceRoot, '.cwtools', 'topic_1779112553395', 'scratch');
         fs.mkdirSync(topicScratch, { recursive: true });
         const targetPath = path.join(topicScratch, 'search_fallen.js');
         fs.writeFileSync(targetPath, 'console.log("topic escaped ok");\n', 'utf8');
@@ -1553,7 +1584,7 @@ describe('agent tool topic artifacts', () => {
 
     it('normalizes one-sided escaped quoted topic scratch paths for PowerShell commands', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
-        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'topic_1779112553395', 'scratch');
+        const topicScratch = path.join(workspaceRoot, '.cwtools', 'topic_1779112553395', 'scratch');
         fs.mkdirSync(topicScratch, { recursive: true });
         const targetPath = path.join(topicScratch, 'search_fallen.txt');
         fs.writeFileSync(targetPath, 'powershell path ok\n', 'utf8');
@@ -1578,7 +1609,7 @@ describe('agent tool topic artifacts', () => {
 
     it('uses PowerShell for normal Windows commands instead of cmd quoting', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
-        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'topic_1779112553395', 'scratch');
+        const topicScratch = path.join(workspaceRoot, '.cwtools', 'topic_1779112553395', 'scratch');
         fs.mkdirSync(topicScratch, { recursive: true });
         const targetPath = path.join(topicScratch, 'search_fallen.txt');
         fs.writeFileSync(targetPath, 'normal powershell path ok\n', 'utf8');
@@ -1810,7 +1841,7 @@ describe('agent tool topic artifacts', () => {
 
     it('returns deployed asset paths as written files for downstream refresh', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
-        const sourcePath = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'media', 'generated.asset');
+        const sourcePath = path.join(workspaceRoot, '.cwtools', 'media-topic', 'media', 'generated.asset');
         const targetRelativePath = 'interface/generated.asset';
         const targetPath = path.join(workspaceRoot, targetRelativePath);
         fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
@@ -1829,7 +1860,7 @@ describe('agent tool topic artifacts', () => {
 
     it('rejects media deployment targets outside the workspace boundary', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
-        const sourcePath = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'media', 'source.png');
+        const sourcePath = path.join(workspaceRoot, '.cwtools', 'media-topic', 'media', 'source.png');
         fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
         fs.writeFileSync(sourcePath, 'fake image', 'utf8');
 

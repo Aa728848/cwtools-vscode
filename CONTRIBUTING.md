@@ -275,7 +275,7 @@ Key constraints for tools:
 - `runner/contextTranscript.ts` is the shared transcript-integrity boundary for compaction and resume. Preserve leading system instructions and complete assistant-tool groups when changing it.
 - `runner/checkpoint.ts` writes atomic V3 resume state and transcript checksums while retaining V2 read compatibility. Never persist or restore `sessionOnly` approvals.
 - `runner/runReplay.ts` enables recorded-tool replays (Mode A) answering tool calls from the ledger; full original prompts must be resolved from checksummed `prompt.json` artifacts after restart.
-- `workspacePaths.ts` resolves `.cwtools-ai/` paths, topics, and scratch dirs.
+- `workspacePaths.ts` resolves `.cwtools/` paths, topics, and scratch dirs.
 - `workspaceSandbox.ts` handles path input sanitization, workspace folder resolution, and sandbox scope categorization.
 - `runnerPolicy.ts` manages mode-based tool filters, iteration limits, and output budgets.
 - `projectProfile.ts` scans the workspace during `/init`, extracting localization language, sampling namespaces, and determining games.
@@ -639,7 +639,7 @@ Webview 运行在浏览器沙盒中：
 - `runner/contextTranscript.ts` 是 compaction 与 resume 共用的 transcript 完整性边界；修改时必须保留前置 system 指令和完整 assistant-tool 调用组。
 - `runner/checkpoint.ts` 原子写入 V3 resume state 与 transcript 校验和，并兼容读取 V2；绝不能持久化或恢复 `sessionOnly` 审批。
 - `runner/runReplay.ts` 提供运行回放功能：模式 A (recorded-tool) 使用原始 ledger 的工具结果回答工具调用，模式 B (full-replay) 暂缓。完整原始 prompt 必须在重启后从带校验和的 `prompt.json` artifact 读取；`ReplaySession` 按规范化参数索引工具结果。
-- `workspacePaths.ts` 负责解析 AI 存储根目录（`.cwtools-ai/`）、topic 目录和 scratch 目录，支持多 workspace folder 场景。
+- `workspacePaths.ts` 负责解析 AI 存储根目录（`.cwtools/`）、topic 目录和 scratch 目录，支持多 workspace folder 场景。
 - `workspaceSandbox.ts` 负责路径输入清洗、作用域分类（`project`/`ai`/`workspace`/`outside`）和信任判定。
 - `runnerPolicy.ts` 集中管理模式级工具过滤、每种模式的迭代次数上限、slim sub-agent 输出预算。
 - `projectProfile.ts` 处理 `/init` 命令的项目扫描：目录检测、本地化语言/编码检测、命名空间/标识符采样、游戏检测、prompt card 生成和 `queryProjectProfile` 工具处理器。

@@ -98,7 +98,7 @@ The extension entry point, indexing layer, and AI game knowledge should prioriti
 
 - Localization keys are indexed during activation for hover, definitions, and AI lookups.
 - Heavier workspace/vanilla symbol indexes are lazy-loaded via `ensureWorkspaceSymbolsReady()` to avoid slow startup. The workspace phase is published before the vanilla phase; Agent queries wait at most eight seconds, then consume the partial index while vanilla indexing continues in the background.
-- Workspace symbols persist in `.cwtools-ai/index/workspace-symbols.sqlite`; vanilla symbols use root-keyed SQLite files under extension global storage. Builds restore cached rows first, compare file `size + mtime`, parse only changed files with bounded concurrency, and use a sorted-name array plus binary-search prefix ranges. Normal queries remain lazy, while `/init` eagerly materializes the workspace database before deep knowledge export.
+- Workspace symbols persist in `.cwtools/index/workspace-symbols.sqlite`; vanilla symbols use root-keyed SQLite files under extension global storage. Builds restore cached rows first, compare file `size + mtime`, parse only changed files with bounded concurrency, and use a sorted-name array plus binary-search prefix ranges. Normal queries remain lazy, while `/init` eagerly materializes the workspace database before deep knowledge export.
 - The symbol layer supports `.txt`, `.gfx`, `.asset`, `.gui`, storing `origin`, `updatedAt`, and `fileVersion`. Initial parsing omits references; targeted queries load references only from the bounded result-file set.
 - File system watchers incrementally update `.yml` and symbol files; symbol indexes are garbage-collected when idle.
 - The AI consumes these indexes via `query_localisation_index` and `query_workspace_index`.
@@ -118,7 +118,7 @@ Because the graph reads the existing game model, scripted-type refreshes and ord
 The persistent layout is intentionally compact:
 
 ```text
-.cwtools-ai/project/
+.cwtools/project/
 ├─ profile.json
 └─ knowledge/
    ├─ manifest.json
@@ -194,7 +194,7 @@ sequenceDiagram
 | `gameKnowledge.ts` | Paradox script rule-bases for 9 games mapped by language ID |
 | `skills.ts` | Skill index loader (`SKILL.md` for built-in, user, or project scopes) and `run_skill` execution |
 | `memoryParser.ts` | Private structured memory with provenance, confidence, usage, expiry, redaction, and bounded consolidation |
-| `workspacePaths.ts` | Separates project artifacts under `.cwtools-ai/` from private runtime state under `ExtensionContext.storageUri`, with legacy migration |
+| `workspacePaths.ts` | Separates project artifacts under `.cwtools/` from private runtime state under `ExtensionContext.storageUri`, with legacy migration |
 | `workspaceSandbox.ts` | Input path cleaning, scope classification (project, workspace, outside, etc.), and trust checks |
 | `runner/sandboxRunner.ts` / `sandboxBroker.ts` | Fail-closed command broker: verified native Windows helper when configured, WSL2 + Bubblewrap fallback, Linux Bubblewrap, or macOS Seatbelt |
 | `runner/threadStore.ts` / `goalStore.ts` | Durable thread lineage, exact-run forks, transcript recovery, and long-running goals |
@@ -295,7 +295,7 @@ The Runner restricts tools based on the active workflow and appends supplementar
 - Captured commands use the fail-closed broker. A configured Windows helper must pass the protocol-v1 self-test and report enforced filesystem plus allow/deny networking before selection. Background captured commands retain piped output/stdin controls through `processRegistry.ts`; explicitly escalated interactive commands use a visible VS Code Terminal. Shell networking is enforced as broad allow/deny, while declared hostnames remain approval/audit metadata and are labelled that way in permission cards.
 - Agent Web access is separate from shell-command networking. `web_search` works in indexed mode; `web_open` and cached-page `web_find` are offered only in live mode. OpenAI, Brave, Exa, Tavily, Serper, SerpAPI, SearXNG, and DuckDuckGo normalize into source IDs and citations. Provider keys live in VS Code SecretStorage. Every provider request and page open uses the same public-address DNS check with connection-time address pinning, per-hop redirect validation, credential redirect guard, response-size cap, domain policy, and untrusted-content envelope. A disabled-by-default compatibility switch accepts only DNS-derived `198.18.0.0/15` addresses used by controlled synthetic-DNS proxies; literal addresses and every other private/reserved range remain blocked. The in-memory caches are bounded and the TTL cache is an efficiency cache, not a pre-indexed/cached-search claim.
 - The `codex-chatgpt` provider is a native Agent HTTP runtime backed by a browser PKCE OAuth flow compatible with [OpenCode's ChatGPT Plus/Pro integration](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/codex.ts). The extension owns a separate access/refresh token pair in VS Code SecretStorage, refreshes it automatically, and deletes only that secret on logout. It never reads or changes Codex CLI/Desktop credentials, never launches an App Server child process, rejects API keys and endpoint overrides, and does not fall back to OpenAI Platform billing. Requests go only to the fixed ChatGPT Codex Responses endpoint with `store: false`, encrypted reasoning continuation, streaming, parallel function tools, and a per-Agent session id. The selected model and effective reasoning effort are passed directly in the request. Because turns stay inside `agentRunner.ts`, every tool call crosses the same `policyEngine.ts`, mode guard, scheduler, write queue, permission flow, MCP registry, and effective sandbox profile as other providers; no external Codex MCP inventory is imported. Account, plan, and quota status are best-effort reads from the subscription usage endpoint. The model list and wire contract are compatibility data because this is an internal endpoint, not a public stable API. This provider does not participate in FIM, translation, title/routing utility calls, or child-Agent provider selection.
-- Private runs, checkpoints, goals, and learned memory use extension storage; only user-shareable plans, workflows, blueprints, and project rules remain in `.cwtools-ai/`.
+- Private runs, checkpoints, goals, and learned memory use extension storage; only user-shareable plans, workflows, blueprints, and project rules remain in `.cwtools/`.
 
 ##### Orchestrator
 
@@ -381,7 +381,7 @@ Webviews are completely sandboxed. **Node.js (fs, path) and vscode APIs cannot b
 `PartitionedWriteQueue` serializes edits per file. Multi-file actions acquire locks in dictionary path order to prevent deadlocks.
 
 ##### Command and Permission Boundary
-Every model-visible tool passes the enforced `policyEngine.ts` boundary before its domain handler. `run_command` has one command-policy source of truth: a quote-aware parser accepts plain command sequences, action-sensitive Git/tool classifiers derive `allow` / `prompt` / `forbidden`, and optional ordered-token prefix rules can only refine non-destructive results. Ordinary mutations run inside the OS workspace sandbox without an approval prompt; complex syntax, Git metadata changes, extra cwd/network scope, and explicit policy prompts require approval, while destructive commands require escalation. A specifically configured Git `allow` prefix opens only the matching command's `.git` metadata writes and preserves every other sandbox boundary; broad Git/shell/interpreter allow prefixes are ignored. Approving additional cwd or network scope keeps the OS sandbox enabled, while disabling the sandbox requires a separate explicit `unsandboxed` request. Approved Git-only commands can receive a visible one-shot `.git` metadata override without dropping the rest of the sandbox. Writable workspace binds otherwise re-protect `.git`, `.agents`, `.codex`, and legacy private run-state subdirectories under `.cwtools-ai` while leaving shareable topic artifacts writable. Permission and process work is persisted as `item_started` / `item_updated` / `item_completed` events with stable item ids, and process inspection/control is limited to the owning task thread.
+Every model-visible tool passes the enforced `policyEngine.ts` boundary before its domain handler. `run_command` has one command-policy source of truth: a quote-aware parser accepts plain command sequences, action-sensitive Git/tool classifiers derive `allow` / `prompt` / `forbidden`, and optional ordered-token prefix rules can only refine non-destructive results. Ordinary mutations run inside the OS workspace sandbox without an approval prompt; complex syntax, Git metadata changes, extra cwd/network scope, and explicit policy prompts require approval, while destructive commands require escalation. A specifically configured Git `allow` prefix opens only the matching command's `.git` metadata writes and preserves every other sandbox boundary; broad Git/shell/interpreter allow prefixes are ignored. Approving additional cwd or network scope keeps the OS sandbox enabled, while disabling the sandbox requires a separate explicit `unsandboxed` request. Approved Git-only commands can receive a visible one-shot `.git` metadata override without dropping the rest of the sandbox. Writable workspace binds otherwise re-protect `.git`, `.agents`, `.codex`, and legacy private run-state subdirectories under `.cwtools` while leaving shareable topic artifacts writable. Permission and process work is persisted as `item_started` / `item_updated` / `item_completed` events with stable item ids, and process inspection/control is limited to the owning task thread.
 
 ##### Context Metrics
 `agentRunner.ts` extracts cache hits (`usage.cached_tokens`, etc.) and pricing calculations. The frontend displays these inside a 3-bar sparkline.
@@ -511,7 +511,7 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 
 - 本地化 key 在激活阶段建立索引，用于 hover、definition 和 AI 查询。
 - 更重的 workspace/vanilla symbol 索引通过 `ensureWorkspaceSymbolsReady()` 懒加载，避免拖慢启动。工作区阶段先于原版阶段发布；Agent 查询最多等待八秒，之后使用已完成的部分索引，同时让原版索引继续在后台构建。
-- 工作区符号持久化到 `.cwtools-ai/index/workspace-symbols.sqlite`；原版符号按原版根目录分库存入 extension global storage。构建时先恢复缓存行，再按文件 `size + mtime` 只解析变化文件，并使用有限并发、排序名称数组和二分前缀区间。普通查询仍保持懒加载，而 `/init` 会在深层知识导出前直接创建工作区数据库。
+- 工作区符号持久化到 `.cwtools/index/workspace-symbols.sqlite`；原版符号按原版根目录分库存入 extension global storage。构建时先恢复缓存行，再按文件 `size + mtime` 只解析变化文件，并使用有限并发、排序名称数组和二分前缀区间。普通查询仍保持懒加载，而 `/init` 会在深层知识导出前直接创建工作区数据库。
 - 符号层支持 `.txt`、`.gfx`、`.asset`、`.gui`，记录 `origin`、`updatedAt` 和 `fileVersion`。初始解析不收集引用；只有目标查询才从有界结果文件集合按需补充引用。
 - watcher 对 `.yml` 与 symbol 文件做增量更新；symbol 索引闲置后可回收。
 - AI 通过 `query_localisation_index` 和 `query_workspace_index` 消费共享索引。
@@ -531,7 +531,7 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 持久化结构保持为两个核心产物：
 
 ```text
-.cwtools-ai/project/
+.cwtools/project/
 ├─ profile.json
 └─ knowledge/
    ├─ manifest.json
@@ -606,7 +606,7 @@ sequenceDiagram
 | `gameKnowledge.ts` | 按 languageId 选择的 9 款游戏 PDXScript 知识块 |
 | `skills.ts` | `SKILL.md` 技能索引（built-in/user/project）+ `run_skill` 按需正文加载 |
 | `memoryParser.ts` | 带来源、置信度、使用次数、过期、脱敏和有界合并的私有结构化长期记忆 |
-| `workspacePaths.ts` | 分离 `.cwtools-ai/` 项目产物与 `ExtensionContext.storageUri` 私有运行状态，并兼容迁移旧数据 |
+| `workspacePaths.ts` | 分离 `.cwtools/` 项目产物与 `ExtensionContext.storageUri` 私有运行状态，并兼容迁移旧数据 |
 | `workspaceSandbox.ts` | 路径输入清洗、作用域分类（project/ai/workspace/outside）和信任判定 |
 | `runner/sandboxRunner.ts` / `sandboxBroker.ts` | 失败关闭的命令 Broker：优先使用已配置并验证的 Windows 原生 helper，其次回退到 WSL2 + Bubblewrap，并支持 Linux Bubblewrap 与 macOS Seatbelt |
 | `runner/threadStore.ts` / `goalStore.ts` | 持久 Thread 谱系、指定 Run 分叉、转录恢复与长任务目标 |
@@ -783,10 +783,10 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ##### Workspace Paths 与 Sandbox
 
-- `workspacePaths.ts` 将计划、工作流、蓝图等可共享产物保留在 `.cwtools-ai/`，Thread、Ledger、Checkpoint、Goal 与自动学习记忆写入 `ExtensionContext.storageUri`；旧目录只作为迁移和兼容读取源。
-- `workspaceSandbox.ts` 负责路径输入清洗（去引号、去 code span、去自然语言前缀）、workspace folder 别名解析、`.cwtools-ai` 路径别名解析、以及四级作用域分类（`project`/`ai`/`workspace`/`outside`）和信任判定。
+- `workspacePaths.ts` 将计划、工作流、蓝图等可共享产物保留在 `.cwtools/`，Thread、Ledger、Checkpoint、Goal 与自动学习记忆写入 `ExtensionContext.storageUri`；旧目录只作为迁移和兼容读取源。
+- `workspaceSandbox.ts` 负责路径输入清洗（去引号、去 code span、去自然语言前缀）、workspace folder 别名解析、`.cwtools` 路径别名解析、以及四级作用域分类（`project`/`ai`/`workspace`/`outside`）和信任判定。
 - VS Code Restricted Mode 是外层门禁：未信任工作区保留读取/LSP 能力，但禁止写入、命令、网络、Git、媒体和 MCP 工具。
-- captured 命令经独立 `sandboxBroker` 执行；Windows 后端按“已验证原生 helper → WSL2 + Bubblewrap”选择，其中 helper 必须通过 protocol-v1 自检，并明确报告文件系统强制隔离和网络允许/禁止能力；Linux/开发容器使用 Bubblewrap，macOS 使用 Seatbelt。找不到可验证的操作系统后端时失败关闭并在权限选择器显示后端健康状态。工作区写绑定会重新把 `.git`、`.agents`、`.codex` 以及 `.cwtools-ai` 内兼容保留的私有运行状态子目录设为只读，同时保留 topic 共享产物可写。captured 后台任务保留管道输出与 stdin/终止控制；交互任务必须显式授权后在可见 VS Code Terminal 中运行。shell 网络隔离只强制广泛允许/禁止，域名列表仅作为审批和审计声明，并在权限卡片中明确标注。
+- captured 命令经独立 `sandboxBroker` 执行；Windows 后端按“已验证原生 helper → WSL2 + Bubblewrap”选择，其中 helper 必须通过 protocol-v1 自检，并明确报告文件系统强制隔离和网络允许/禁止能力；Linux/开发容器使用 Bubblewrap，macOS 使用 Seatbelt。找不到可验证的操作系统后端时失败关闭并在权限选择器显示后端健康状态。工作区写绑定会重新把 `.git`、`.agents`、`.codex` 以及 `.cwtools` 内兼容保留的私有运行状态子目录设为只读，同时保留 topic 共享产物可写。captured 后台任务保留管道输出与 stdin/终止控制；交互任务必须显式授权后在可见 VS Code Terminal 中运行。shell 网络隔离只强制广泛允许/禁止，域名列表仅作为审批和审计声明，并在权限卡片中明确标注。
 - `codex-chatgpt` 是使用原生 Agent 的 HTTP 运行时，浏览器 PKCE OAuth 流程与 [OpenCode 的 ChatGPT Plus / Pro 集成](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/codex.ts)兼容。插件在 VS Code SecretStorage 中独立保存 Access / Refresh Token 并自动刷新；退出账号只删除这份 Secret。它不会读取或修改 Codex CLI / Desktop 凭据，不会启动 App Server 子进程，拒绝 API Key 和 Endpoint 覆盖，也不会降级到 OpenAI Platform 计费。请求只发送到固定的 ChatGPT Codex Responses 端点，并启用 `store: false`、加密推理续接、流式输出、并行函数工具及每个 Agent 会话的 Session ID；所选模型与生效的思考等级直接写入请求。由于回合始终在 `agentRunner.ts` 内执行，每次工具调用都会经过与其他 Provider 相同的 `policyEngine.ts`、模式守卫、调度器、写入队列、权限流程、MCP 注册表和当前生效的沙盒 Profile，不会导入任何外部 Codex MCP 清单。账户、套餐与额度状态通过订阅额度端点尽力读取。由于该端点并非公开稳定 API，模型列表与线协议都属于兼容数据。本 Provider 同时从 FIM、翻译、标题/路由辅助调用和子 Agent Provider 选择中排除。
 
 ##### Runner Policy
@@ -820,7 +820,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ##### Memory Parser
 
-`memoryParser.ts` 管理 topic 级私有结构化长期记忆；`memory.json` 是来源数据，`.cwtools-ai-memory.md` 是便于检查的镜像，旧工作区文件仍作为只读回退：
+`memoryParser.ts` 管理 topic 级私有结构化长期记忆；`memory.json` 是来源数据，`.cwtools-memory.md` 是便于检查的镜像，旧工作区文件仍作为只读回退：
 
 - 每条记忆记录来源、置信度、创建/更新时间、使用次数、最近使用时间、过期时间和作用域
 - 写入时脱敏 API Key、Bearer Token 和常见 secret 字段；同 key 合并而不是无限追加

@@ -36,6 +36,7 @@ import { getAllProfiles, getLocalisationDirectoryGlob, getVanillaCacheFileName }
 import { parseLocFile, addEntriesToIndex, removeFileFromIndex, queryLocIndex } from './locParser';
 import {
 	WorkspaceSymbolSqliteCache,
+	getLegacyWorkspaceSymbolCachePath,
 	getWorkspaceSymbolCachePath,
 	type WorkspaceSymbolCachedFile,
 	type WorkspaceSymbolFileFact,
@@ -690,6 +691,7 @@ export class IndexService implements vscode.Disposable {
 			path.join(this._options.extensionPath, 'node_modules', 'sql.js', 'dist'),
 			workspaceRoot,
 			IndexService._hashParts(roots),
+			[getLegacyWorkspaceSymbolCachePath(workspaceRoot)],
 		);
 		await cache.open();
 		return cache;

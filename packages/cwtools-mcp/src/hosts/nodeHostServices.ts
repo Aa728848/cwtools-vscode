@@ -429,7 +429,7 @@ async function walk(root: string, visit: (filePath: string) => Promise<void>): P
   if (!fssync.existsSync(root)) return;
   const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
-    if (entry.name.startsWith('.') && entry.name !== '.cwtools-ai') continue;
+    if (entry.name.startsWith('.') && entry.name !== '.cwtools' && entry.name !== '.cwtools-ai') continue;
     if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === 'coverage') continue;
     const fullPath = path.join(root, entry.name);
     if (entry.isDirectory()) {

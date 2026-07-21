@@ -31,7 +31,7 @@ function loadConfiguration(): HookConfiguration | undefined {
         if (!fs.existsSync(file)) return undefined;
         return JSON.parse(fs.readFileSync(file, 'utf8')) as HookConfiguration;
     } catch (error) {
-        ErrorReporter.warn('AgentHooks', 'Failed to read .cwtools-ai/hooks.json', error);
+        ErrorReporter.warn('AgentHooks', 'Failed to read .cwtools/hooks.json', error);
         return undefined;
     }
 }

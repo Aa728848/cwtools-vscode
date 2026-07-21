@@ -15,7 +15,7 @@ export interface QueryProjectKnowledgeArgs {
   limit?: number;
 }
 
-const KNOWLEDGE_DIR = path.join('.cwtools-ai', 'project', 'knowledge');
+const KNOWLEDGE_DIR = path.join('.cwtools', 'project', 'knowledge');
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -55,9 +55,20 @@ export async function queryProjectKnowledgeWithHost(
   host: HostServices,
   args: QueryProjectKnowledgeArgs = {},
 ): Promise<SharedToolResult> {
-  const root = path.join(host.workspaceRoot, KNOWLEDGE_DIR);
-  const manifestPath = path.join(root, 'manifest.json');
-  const manifest = await readJson(host, manifestPath);
+  let root = path.join(host.workspaceRoot, KNOWLEDGE_DIR);
+  let manifestPath = path.join(root, 'manifest.json');
+  let manifest = await readJson(host, manifestPath);
+  if (!manifest) {
+    const legacyRoot = path.join(host.workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+    const legacyManifestPath = path.join(legacyRoot, 'manifest.json');
+    const legacyManifest = await readJson(host, legacyManifestPath);
+    if (legacyManifest) {
+      root = legacyRoot;
+      manifestPath = legacyManifestPath;
+      manifest = legacyManifest;
+    }
+  }
+
   if (!manifest) {
     return {
       ok: false,

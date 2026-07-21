@@ -121,7 +121,8 @@ export function buildSpecialPathItems(options: SpecialPathOptions): SpecialPathI
 
 	pushFolder(items, localize('Workspace Folder', '工作区目录'), workspaceRoot);
 	if (workspaceRoot) {
-		pushFolder(items, localize('AI Workspace Storage (.cwtools-ai)', 'AI 工作区存储 (.cwtools-ai)'), path.join(workspaceRoot, '.cwtools-ai'), true);
+		const { getAiStorageRoot } = require('./ai/workspacePaths') as typeof import('./ai/workspacePaths');
+		pushFolder(items, localize('AI Workspace Storage (.cwtools)', 'AI 工作区存储 (.cwtools)'), getAiStorageRoot(workspaceRoot), true);
 	}
 
 	pushFolder(items, localize('Extension Global Storage', '扩展全局存储'), options.globalStoragePath, true);

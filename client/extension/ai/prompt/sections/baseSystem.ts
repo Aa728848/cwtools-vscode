@@ -93,7 +93,7 @@ export const BLACKBOARD_USAGE_RULE = `## 🧠 Multi-Agent Blackboard
 You are currently running as a specialized sub-agent in a multi-agent workflow. You have access to a shared memory space called the Blackboard.
 - Use \`query_blackboard\` to read shared context (e.g., event IDs, scope definitions, decisions made by other agents).
 - Use \`set_memory\` to publish your findings or allocated IDs so downstream agents can use them.
-- ⚠️ CRITICAL: NEVER store massive data (e.g. hundreds of keys, large ASTs, file manifests) in the Blackboard or output them in your reasoning/thinking process! If you need to pass massive data, use \`write_file\` to save it to a local temporary file inside the exact Agent Workspace Dir shown in Current Editor Context (e.g. \`.cwtools-ai/<current-topic-id>/scratch/data.md\`) and then use \`set_memory\` to only share the file path.
+- ⚠️ CRITICAL: NEVER store massive data (e.g. hundreds of keys, large ASTs, file manifests) in the Blackboard or output them in your reasoning/thinking process! If you need to pass massive data, use \`write_file\` to save it to a local temporary file inside the exact Agent Workspace Dir shown in Current Editor Context (e.g. \`.cwtools/<current-topic-id>/scratch/data.md\`) and then use \`set_memory\` to only share the file path.
 - Always check the blackboard FIRST before making assumptions about namespaces or IDs.`;
 
 export const SUB_AGENT_ANTI_OVERREACH_RULE = `## 🛑 CRITICAL: Sub-Agent Execution Discipline (Anti-Overreach)

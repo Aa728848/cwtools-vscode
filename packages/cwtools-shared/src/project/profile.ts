@@ -53,10 +53,19 @@ export interface ProjectProfile {
   [key: string]: unknown;
 }
 
-export const PROJECT_PROFILE_RELATIVE_PATH = path.join('.cwtools-ai', 'project', 'profile.json');
+export const PROJECT_PROFILE_RELATIVE_PATH = path.join('.cwtools', 'project', 'profile.json');
 
 export function getProjectProfilePath(workspaceRoot: string): string {
-  return path.join(workspaceRoot, PROJECT_PROFILE_RELATIVE_PATH);
+  try {
+    const fs = require('fs');
+    const primary = path.join(workspaceRoot, '.cwtools', 'project', 'profile.json');
+    if (fs.existsSync(primary)) return primary;
+    const legacy = path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json');
+    if (fs.existsSync(legacy)) return legacy;
+    return primary;
+  } catch {
+    return path.join(workspaceRoot, PROJECT_PROFILE_RELATIVE_PATH);
+  }
 }
 
 export function isProjectProfile(value: unknown): value is ProjectProfile {
@@ -130,7 +139,7 @@ export async function queryProjectProfileWithHost(
         data: {
           status: 'missing',
           profilePath,
-          _hint: 'Run /init in the VS Code extension or create .cwtools-ai/project/profile.json, then retry.',
+          _hint: 'Run /init in the VS Code extension or create .cwtools/project/profile.json, then retry.',
         },
       };
     }

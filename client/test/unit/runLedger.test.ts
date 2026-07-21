@@ -104,7 +104,7 @@ describe('RunLedger Unit Tests', () => {
         );
         await runLedger.appendEvent(run.runId, 'status_changed', { status: 'completed' });
 
-        const runDir = path.join(workspaceRoot, '.cwtools-ai', 'topic_replay', 'runs', run.runId);
+        const runDir = path.join(workspaceRoot, '.cwtools', 'topic_replay', 'runs', run.runId);
         const promptArtifact = JSON.parse(fs.readFileSync(path.join(runDir, 'prompt.json'), 'utf-8'));
         expect(promptArtifact.prompt).to.equal(fullPrompt);
         expect(promptArtifact.sha256).to.match(/^[a-f0-9]{64}$/);
@@ -130,7 +130,7 @@ describe('RunLedger Unit Tests', () => {
 
         const artifactPath = path.join(
             workspaceRoot,
-            '.cwtools-ai',
+            '.cwtools',
             'topic_artifact',
             'runs',
             run.runId,
@@ -181,7 +181,7 @@ describe('RunLedger Unit Tests', () => {
             runLedger.appendEvent(run.runId, 'todo_update', { index })
         )));
 
-        const runDir = path.join(workspaceRoot, '.cwtools-ai', 'topic_order', 'runs', run.runId);
+        const runDir = path.join(workspaceRoot, '.cwtools', 'topic_order', 'runs', run.runId);
         const persistedSequences = fs.readFileSync(path.join(runDir, 'events.jsonl'), 'utf-8')
             .trim()
             .split(/\r?\n/)
@@ -201,7 +201,7 @@ describe('RunLedger Unit Tests', () => {
 
         const statePath = path.join(
             workspaceRoot,
-            '.cwtools-ai',
+            '.cwtools',
             'topic_state_backup',
             'runs',
             run.runId,
@@ -221,7 +221,7 @@ describe('RunLedger Unit Tests', () => {
     it('cleans old or excess large tool result artifacts', async () => {
         const { runLedger } = loadRunLedgerModule();
         const topicId = 'topic_cleanup';
-        const runsDir = path.join(workspaceRoot, '.cwtools-ai', topicId, 'runs');
+        const runsDir = path.join(workspaceRoot, '.cwtools', topicId, 'runs');
         const largeDirA = path.join(runsDir, 'run_a', 'large_results');
         const largeDirB = path.join(runsDir, 'run_b', 'large_results');
         fs.mkdirSync(largeDirA, { recursive: true });
@@ -543,7 +543,7 @@ describe('RunLedger Unit Tests', () => {
             const ledger = new (RunLedger as any)() as InstanceType<typeof RunLedger>;
             const run = await ledger.createRun('topic_private', 'build', 'private prompt', undefined, 'private prompt');
             expect(fs.existsSync(path.join(privateRoot, 'topics', 'topic_private', 'runs', run.runId, 'run_state.json'))).to.equal(true);
-            expect(fs.existsSync(path.join(workspaceRoot, '.cwtools-ai', 'topic_private', 'runs', run.runId))).to.equal(false);
+            expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic_private', 'runs', run.runId))).to.equal(false);
         } finally {
             workspacePaths.configurePrivateAgentStorage(undefined);
         }

@@ -85,7 +85,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_project_profile',
-            description: 'Read the /init-generated Agent project profile from .cwtools-ai/project/profile.json. Use this before broad scans to get workspace type, key directories, localisation languages/encoding, namespaces, workflow routing, validation hints, and mode-specific prompt cards.',
+            description: 'Read the /init-generated Agent project profile from .cwtools/project/profile.json. Use this before broad scans to get workspace type, key directories, localisation languages/encoding, namespaces, workflow routing, validation hints, and mode-specific prompt cards.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -724,7 +724,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'run_command',
-            description: 'Run a shell command in the project workspace root by default. Commands execute through PowerShell on Windows and POSIX /bin/sh (sh -c) on macOS/Linux; use the matching shell syntax (PowerShell cmdlets on Windows, standard POSIX commands like ls/grep/find/cp on macOS/Linux) and do not wrap commands in another shell or launcher script just to run a file. Temporary scripts may live under the current topic scratch directory (.cwtools-ai/<topicId>/scratch). Reuse one temporary Python helper per task, preferably .cwtools-ai/<topicId>/scratch/agent_helper.py or CWT_AGENT_HELPER_SCRIPT, instead of creating separate search/replace/verify scripts. Delete only temporary helpers created solely for execution/verification after the batch/verification they support is complete; preserve user-requested deliverable scripts, scripts the user explicitly asked you to create, and existing project scripts. Commands that need project files should usually keep the default cwd or explicitly pass the project root. The process receives CWT_WORKSPACE_ROOT, CWT_AGENT_WORKSPACE_DIR, CWT_AGENT_SCRATCH_DIR, CWT_AGENT_HELPER_SCRIPT, and CWT_AGENT_MEDIA_DIR environment variables. Prefer .cwtools-ai/<topicId>/scratch/agent_helper.py aliases over environment-variable path concatenation; if environment variables are necessary, use PowerShell syntax such as $env:CWT_AGENT_SCRATCH_DIR on Windows or POSIX syntax such as $CWT_AGENT_SCRATCH_DIR on macOS/Linux. Read-only safe commands such as "git status", "git diff", version checks, and basic listing/search commands may run automatically. In Utility mode, when Agent file write mode is set to auto/direct-write, normal non-escalated commands are also auto-approved with no permission card. Other commands ask the user through the permission flow, and the user can choose one-time approval, denial, or Always Allow for this session. Destructive commands (rm -rf, del /f, format, shutdown, reboot) and unsafe inline execution patterns remain sandboxed unless requestEscalation is explicitly used.',
+            description: 'Run a shell command in the project workspace root by default. Commands execute through PowerShell on Windows and POSIX /bin/sh (sh -c) on macOS/Linux; use the matching shell syntax (PowerShell cmdlets on Windows, standard POSIX commands like ls/grep/find/cp on macOS/Linux) and do not wrap commands in another shell or launcher script just to run a file. Temporary scripts may live under the current topic scratch directory (.cwtools/<topicId>/scratch). Reuse one temporary Python helper per task, preferably .cwtools/<topicId>/scratch/agent_helper.py or CWT_AGENT_HELPER_SCRIPT, instead of creating separate search/replace/verify scripts. Delete only temporary helpers created solely for execution/verification after the batch/verification they support is complete; preserve user-requested deliverable scripts, scripts the user explicitly asked you to create, and existing project scripts. Commands that need project files should usually keep the default cwd or explicitly pass the project root. The process receives CWT_WORKSPACE_ROOT, CWT_AGENT_WORKSPACE_DIR, CWT_AGENT_SCRATCH_DIR, CWT_AGENT_HELPER_SCRIPT, and CWT_AGENT_MEDIA_DIR environment variables. Prefer .cwtools/<topicId>/scratch/agent_helper.py aliases over environment-variable path concatenation; if environment variables are necessary, use PowerShell syntax such as $env:CWT_AGENT_SCRATCH_DIR on Windows or POSIX syntax such as $CWT_AGENT_SCRATCH_DIR on macOS/Linux. Read-only safe commands such as "git status", "git diff", version checks, and basic listing/search commands may run automatically. In Utility mode, when Agent file write mode is set to auto/direct-write, normal non-escalated commands are also auto-approved with no permission card. Other commands ask the user through the permission flow, and the user can choose one-time approval, denial, or Always Allow for this session. Destructive commands (rm -rf, del /f, format, shutdown, reboot) and unsafe inline execution patterns remain sandboxed unless requestEscalation is explicitly used.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1083,11 +1083,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_localisation',
-            description: 'MANDATORY for all .yml localisation file operations. Safely write PDXScript localisation entries. filePath MUST be a real localisation path under localisation/, localisation_synced/, or localization/; never write localisation YAML into .cwtools-ai scratch/topic folders. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use edit_file, replace_lines, or write_file for .yml localisation files - ALWAYS use this tool instead.',
+            description: 'MANDATORY for all .yml localisation file operations. Safely write PDXScript localisation entries. filePath MUST be a real localisation path under localisation/, localisation_synced/, or localization/; never write localisation YAML into .cwtools scratch/topic folders. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use edit_file, replace_lines, or write_file for .yml localisation files - ALWAYS use this tool instead.',
             parameters: {
                 type: 'object',
                 properties: {
-                    filePath: { type: 'string', description: 'Path to the real .yml localisation file (absolute or relative to workspace), under localisation/, localisation_synced/, or localization/. Do not use .cwtools-ai paths.' },
+                    filePath: { type: 'string', description: 'Path to the real .yml localisation file (absolute or relative to workspace), under localisation/, localisation_synced/, or localization/. Do not use .cwtools paths.' },
                     language: { type: 'string', description: 'Language header, e.g. "l_english", "l_simp_chinese", "l_braz_por". Used when creating a new file.' },
                     entries: {
                         type: 'array',
@@ -1385,7 +1385,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'save_workflow',
-            description: 'Save a reusable project workflow from the current conversation or task process. Use only when the user asks to save the process/workflow or when preserving a clearly reusable workflow is the task. Writes .cwtools-ai/workflows/<id>.md and makes it available through /workflow:<id>.',
+            description: 'Save a reusable project workflow from the current conversation or task process. Use only when the user asks to save the process/workflow or when preserving a clearly reusable workflow is the task. Writes .cwtools/workflows/<id>.md and makes it available through /workflow:<id>.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1452,7 +1452,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'dispatch_agents',
-            description: '[Orchestrator/Script Mode] Dispatch an approved executable blueprint or an explicitly supplied task DAG. For approved connected multi-entity work, pass blueprintFile=.cwtools-ai/<topic>/design_blueprint.json; the system loads its canonical featureManifest and taskPlan without model reinterpretation. Ad-hoc read waves may still pass tasks directly. Script Mode supports up to 8 tasks; classic Orchestrator mode supports 4.',
+            description: '[Orchestrator/Script Mode] Dispatch an approved executable blueprint or an explicitly supplied task DAG. For approved connected multi-entity work, pass blueprintFile=.cwtools/<topic>/design_blueprint.json; the system loads its canonical featureManifest and taskPlan without model reinterpretation. Ad-hoc read waves may still pass tasks directly. Script Mode supports up to 8 tasks; classic Orchestrator mode supports 4.',
             parameters: {
                 type: 'object',
                 properties: {

@@ -78,7 +78,7 @@ describe('PromptBuilder context budgeting', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const workspaceRoot = makeWorkspace();
         try {
-            const profileDir = path.join(workspaceRoot, '.cwtools-ai', 'project');
+            const profileDir = path.join(workspaceRoot, '.cwtools', 'project');
             fs.mkdirSync(profileDir, { recursive: true });
             fs.writeFileSync(path.join(profileDir, 'profile.json'), JSON.stringify({
                 schemaVersion: 1,
@@ -129,8 +129,8 @@ describe('PromptBuilder context budgeting', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const workspaceRoot = makeWorkspace();
         try {
-            const topicA = path.join(workspaceRoot, '.cwtools-ai', 'topic-a');
-            const topicB = path.join(workspaceRoot, '.cwtools-ai', 'topic-b');
+            const topicA = path.join(workspaceRoot, '.cwtools', 'topic-a');
+            const topicB = path.join(workspaceRoot, '.cwtools', 'topic-b');
             fs.mkdirSync(topicA, { recursive: true });
             fs.mkdirSync(topicB, { recursive: true });
             fs.writeFileSync(path.join(topicA, 'design_blueprint.md'), '# Design Blueprint: Topic A\n\nA_ONLY_ENTITY\n', 'utf8');
@@ -152,12 +152,12 @@ describe('PromptBuilder context budgeting', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const workspaceRoot = makeWorkspace();
         try {
-            const topicA = path.join(workspaceRoot, '.cwtools-ai', 'topic-memory-a');
-            const topicB = path.join(workspaceRoot, '.cwtools-ai', 'topic-memory-b');
+            const topicA = path.join(workspaceRoot, '.cwtools', 'topic-memory-a');
+            const topicB = path.join(workspaceRoot, '.cwtools', 'topic-memory-b');
             fs.mkdirSync(topicA, { recursive: true });
             fs.mkdirSync(topicB, { recursive: true });
-            fs.writeFileSync(path.join(topicA, '.cwtools-ai-memory.md'), '# Memory\n\nTOPIC_A_MEMORY', 'utf8');
-            fs.writeFileSync(path.join(topicB, '.cwtools-ai-memory.md'), '# Memory\n\nTOPIC_B_MEMORY', 'utf8');
+            fs.writeFileSync(path.join(topicA, '.cwtools-memory.md'), '# Memory\n\nTOPIC_A_MEMORY', 'utf8');
+            fs.writeFileSync(path.join(topicB, '.cwtools-memory.md'), '# Memory\n\nTOPIC_B_MEMORY', 'utf8');
 
             const builder = new PromptBuilder(workspaceRoot);
             const prompt = builder.buildSystemPromptForMode('build', undefined, undefined, 'topic-memory-a');
@@ -186,7 +186,7 @@ describe('PromptBuilder context budgeting', () => {
         expect(prompt).to.include('Delete the helper only when it is a temporary execution/verification helper');
         expect(prompt).to.include('preserve user-requested deliverable scripts');
         expect(String(context[0]!.content)).to.include('Agent Helper Script');
-        expect(String(context[0]!.content)).to.include('.cwtools-ai/topic-123/scratch/agent_helper.py');
+        expect(String(context[0]!.content)).to.include('.cwtools/topic-123/scratch/agent_helper.py');
         expect(String(context[0]!.content)).to.include('never user-requested deliverables');
     });
 

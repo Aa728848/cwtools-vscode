@@ -32,7 +32,7 @@ import { readProjectProfile } from '../projectProfile';
 type CwtSchemaEntitySummary = NonNullable<QueryCwtSchemaResult['entities']>[number];
 
 function isAgentTempPath(filePath: string): boolean {
-    return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
+    return /(?:^|[\\/])\.(?:cwtools|cwtools-ai)[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
 }
 
 /** Generated agent state and backup artifacts must never count as project references. */
@@ -41,7 +41,7 @@ export function isExcludedModSearchPath(workspaceRoot: string, filePath: string)
     if (!relative || relative.startsWith('../') || path.isAbsolute(relative)) return true;
     const lower = relative.toLowerCase();
     const segments = lower.split('/');
-    if (segments.some(segment => ['.cwtools-ai', '.git', 'node_modules', 'release'].includes(segment))) return true;
+    if (segments.some(segment => ['.cwtools', '.cwtools-ai', '.git', 'node_modules', 'release'].includes(segment))) return true;
     const base = segments[segments.length - 1] ?? '';
     return base.endsWith('.bak')
         || base.endsWith('.tmp')
@@ -2256,7 +2256,7 @@ export class LspToolHandler {
 
             const options: any = {
                 include: new vs.RelativePattern(this.ctx.workspaceRoot, includeGlob),
-                exclude: new vs.RelativePattern(this.ctx.workspaceRoot, '**/{.cwtools-ai,.git,node_modules,release}/**'),
+                exclude: new vs.RelativePattern(this.ctx.workspaceRoot, '**/{.cwtools,.cwtools-ai,.git,node_modules,release}/**'),
                 maxResults: limit * 10,
                 previewOptions: { matchLines: 1, charsPerLine: 120 },
             };
@@ -2320,7 +2320,7 @@ export class LspToolHandler {
                     const globPattern = new vs.RelativePattern(this.ctx.workspaceRoot, includeGlob);
                     const uris = (await vs.workspace.findFiles(
                         globPattern,
-                        '**/{.cwtools-ai,.git,node_modules,release}/**',
+                        '**/{.cwtools,.cwtools-ai,.git,node_modules,release}/**',
                         limit * 20,
                     )).filter(uri => !isExcludedModSearchPath(this.ctx.workspaceRoot, uri.fsPath));
                     const regex = new RegExp(finalPattern, args.caseSensitive ? '' : 'i');
@@ -2991,7 +2991,7 @@ export class LspToolHandler {
 
         const options: any = {
             include: new vs.RelativePattern(this.ctx.workspaceRoot, includePattern),
-            exclude: new vs.RelativePattern(this.ctx.workspaceRoot, '**/{.cwtools-ai,.git,node_modules,release}/**'),
+            exclude: new vs.RelativePattern(this.ctx.workspaceRoot, '**/{.cwtools,.cwtools-ai,.git,node_modules,release}/**'),
             maxResults: limit,
             previewOptions: { matchLines: 1, charsPerLine: 150 },
         };
@@ -3034,7 +3034,7 @@ export class LspToolHandler {
                 const globPattern = new vs.RelativePattern(this.ctx.workspaceRoot, includePattern);
                 const uris = (await vs.workspace.findFiles(
                     globPattern,
-                    '**/{.cwtools-ai,.git,node_modules,release}/**',
+                    '**/{.cwtools,.cwtools-ai,.git,node_modules,release}/**',
                     limit * 20,
                 )).filter(uri => !isExcludedModSearchPath(this.ctx.workspaceRoot, uri.fsPath));
                 const regex = new RegExp(pattern, args.caseSensitive ? '' : 'i');

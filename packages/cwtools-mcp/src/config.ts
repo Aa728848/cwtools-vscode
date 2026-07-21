@@ -188,7 +188,7 @@ export function helpText(): string {
     'Project gate:',
     '  (default)           Tools are always listed. The language server starts only when the',
     '                      workspace is (or sits in/above) a Paradox mod (descriptor.mod, common/,',
-    '                      events/, localisation/, .cwtools-ai/). On other workspaces tool calls are',
+    '                      events/, localisation/, .cwtools/). On other workspaces tool calls are',
     '                      rejected with a reason and no server spawns.',
     '  --force-start       Treat the workspace as supported even without mod markers.',
   ].join('\n');

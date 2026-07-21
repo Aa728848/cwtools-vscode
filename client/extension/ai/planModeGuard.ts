@@ -53,14 +53,14 @@ export function isImplementationPlanFile(filePath: string, workspaceRoot: string
 
     const resolved = path.resolve(filePath);
     const workspace = path.resolve(workspaceRoot);
-    const aiRoot = path.join(workspace, '.cwtools-ai');
-    if (isInside(resolved, aiRoot)) return true;
+    if (isInside(resolved, path.join(workspace, '.cwtools')) || isInside(resolved, path.join(workspace, '.cwtools-ai'))) return true;
 
     const normalized = normalize(resolved);
-    if (normalized.includes('/.cwtools-ai/')) return true;
+    if (normalized.includes('/.cwtools/') || normalized.includes('/.cwtools-ai/')) return true;
 
     // When the AI storage folder itself is opened as the workspace root.
-    if (path.basename(workspace).toLowerCase() === '.cwtools-ai' && isInside(resolved, workspace)) return true;
+    const workspaceName = path.basename(workspace).toLowerCase();
+    if ((workspaceName === '.cwtools' || workspaceName === '.cwtools-ai') && isInside(resolved, workspace)) return true;
 
     return false;
 }
@@ -68,19 +68,29 @@ export function isImplementationPlanFile(filePath: string, workspaceRoot: string
 function getAiRelativeSegments(filePath: string, workspaceRoot: string): string[] | undefined {
     const resolved = path.resolve(filePath);
     const workspace = path.resolve(workspaceRoot);
-    const aiRoot = path.join(workspace, '.cwtools-ai');
+    const aiRoot = path.join(workspace, '.cwtools');
+    const aiRootLegacy = path.join(workspace, '.cwtools-ai');
 
     let relative = '';
     if (isInside(resolved, aiRoot)) {
         relative = path.relative(aiRoot, resolved);
-    } else if (path.basename(workspace).toLowerCase() === '.cwtools-ai' && isInside(resolved, workspace)) {
-        relative = path.relative(workspace, resolved);
+    } else if (isInside(resolved, aiRootLegacy)) {
+        relative = path.relative(aiRootLegacy, resolved);
     } else {
-        const normalized = normalize(resolved);
-        const marker = '/.cwtools-ai/';
-        const idx = normalized.indexOf(marker);
-        if (idx < 0) return undefined;
-        relative = normalized.slice(idx + marker.length);
+        const workspaceName = path.basename(workspace).toLowerCase();
+        if ((workspaceName === '.cwtools' || workspaceName === '.cwtools-ai') && isInside(resolved, workspace)) {
+            relative = path.relative(workspace, resolved);
+        } else {
+            const normalized = normalize(resolved);
+            let marker = '/.cwtools/';
+            let idx = normalized.indexOf(marker);
+            if (idx < 0) {
+                marker = '/.cwtools-ai/';
+                idx = normalized.indexOf(marker);
+            }
+            if (idx < 0) return undefined;
+            relative = normalized.slice(idx + marker.length);
+        }
     }
 
     const segments = relative.split(/[\\/]+/).filter(Boolean);

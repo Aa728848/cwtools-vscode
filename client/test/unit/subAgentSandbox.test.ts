@@ -96,7 +96,7 @@ describe('SubAgentSandbox', () => {
             const normalizedPaths = sandbox.writeScope!.map(p => p.toLowerCase());
             expect(normalizedPaths).to.include(path.normalize('common/events/test_event.txt').toLowerCase());
             expect(normalizedPaths).to.include(path.normalize('interface/gfx.gui').toLowerCase());
-            expect(normalizedPaths).to.include('.cwtools-ai');
+            expect(normalizedPaths).to.include('.cwtools');
         });
 
         it('lets general build workers write workspace files when plannedFiles are omitted', () => {
@@ -218,7 +218,7 @@ describe('SubAgentSandbox', () => {
                 agentId: 'builder_topic_artifact',
                 role: 'build',
                 mode: 'build' as any,
-                writeScope: ['common/buildings/kuat_buildings.txt', '.cwtools-ai'],
+                writeScope: ['common/buildings/kuat_buildings.txt', '.cwtools'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
 
@@ -232,13 +232,39 @@ describe('SubAgentSandbox', () => {
             expect(result.allowed).to.be.true;
         });
 
+        it('keeps legacy topic artifact scopes compatible with both storage directory names', () => {
+            const sandbox = {
+                agentId: 'legacy_builder_topic_artifact',
+                role: 'build',
+                mode: 'build' as any,
+                writeScope: ['.cwtools-ai'],
+                permissionPolicy: 'delegate_to_parent' as const
+            };
+
+            const legacyResult = enforceSubAgentSafety(
+                sandbox,
+                'write_file',
+                { TargetFile: '.cwtools-ai/topic_123/walkthrough.md' },
+                process.cwd()
+            );
+            const primaryResult = enforceSubAgentSafety(
+                sandbox,
+                'write_file',
+                { TargetFile: '.cwtools/topic_123/walkthrough.md' },
+                process.cwd()
+            );
+
+            expect(legacyResult.allowed).to.be.true;
+            expect(primaryResult.allowed).to.be.true;
+        });
+
         // ── 跨平台与作用域边界（采纳评审 #3：directory-scope-from-file / 子串逃逸 / 前缀边界 / 大小写）──
         it('directory-scope-from-file：放行同目录兄弟文件写入', () => {
             const sandbox = {
                 agentId: 'builder_sibling',
                 role: 'build',
                 mode: 'build' as any,
-                writeScope: ['common/buildings/kuat_buildings.txt', '.cwtools-ai'],
+                writeScope: ['common/buildings/kuat_buildings.txt', '.cwtools'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
             // 同目录的另一个文件（由文件推导出目录作用域）→ 放行
@@ -267,12 +293,12 @@ describe('SubAgentSandbox', () => {
                 agentId: 'builder_topic_boundary',
                 role: 'build',
                 mode: 'build' as any,
-                writeScope: ['.cwtools-ai'],
+                writeScope: ['.cwtools'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
             const evil = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: '.cwtools-ai-evil/x.md' }, process.cwd());
             expect(evil.allowed).to.be.false;
-            const ok = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: '.cwtools-ai/topic/walkthrough.md' }, process.cwd());
+            const ok = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: '.cwtools/topic/walkthrough.md' }, process.cwd());
             expect(ok.allowed).to.be.true;
         });
 
@@ -319,7 +345,7 @@ describe('SubAgentSandbox', () => {
             const artifactResult = enforceSubAgentSafety(
                 sandbox,
                 'edit_file',
-                { filePath: path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'annotations.md') },
+                { filePath: path.join(workspaceRoot, '.cwtools', 'topic-123', 'annotations.md') },
                 workspaceRoot
             );
             expect(artifactResult.allowed).to.equal(true);

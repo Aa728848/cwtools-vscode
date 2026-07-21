@@ -41,7 +41,7 @@ import { registerLocalisationAiCommands } from './localisationAiCommands';
 import { registerTranslationPreviewCommands } from './translationPreview';
 import { registerSpecialPathCommands } from './specialPaths';
 import { registerInspectionOverviewCommand } from './inspectionOverview';
-import { configurePrivateAgentStorage, getProjectWorkspaceRoot, getPrivateAiStorageRoot, migrateLegacyPrivateAgentState } from './ai/workspacePaths';
+import { configurePrivateAgentStorage, getProjectWorkspaceRoot, getPrivateAiStorageRoot, migrateLegacyAiStorageRoot, migrateLegacyPrivateAgentState } from './ai/workspacePaths';
 import { configureHistoryPolicy, enforceHistoryRetention } from './ai/runner/historyPolicy';
 import { sha256Text } from './ai/runner/durableStorage';
 import { processRegistry } from './ai/runner/processRegistry';
@@ -51,6 +51,7 @@ import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService
 import { McpBridgeServer } from './ai/mcpBridgeServer';
 import { maybePromptForDefaultDarkModernTheme } from './themePrompt';
 import { registerProjectKnowledgeWatcher } from './ai/projectKnowledge';
+import { repairMovedAgentWorktrees } from './ai/orchestrator/worktreeManager';
 import { QuickPickSelectionGuard } from './quickPickSelectionGuard';
 import { getDefaultLocalisationLanguagesForUiLocale } from './localisationLanguagePreference';
 
@@ -299,6 +300,7 @@ const RULE_WORKSPACE_SCAN_IGNORED_DIRS = new Set([
 	'.git',
 	'.vscode',
 	'.vscode-test',
+	'.cwtools',
 	'.cwtools-ai',
 	'node_modules',
 	'bin',
@@ -1081,6 +1083,18 @@ export async function activate(context: ExtensionContext) {
 		}
 	}).catch((e) => ErrorReporter.warn(SOURCE.UPDATE_CHECKER, 'Failed to check for updates', e));
 
+	const workspaceRoot = getProjectWorkspaceRoot();
+	const aiStorageMigration = migrateLegacyAiStorageRoot(workspaceRoot);
+	if (aiStorageMigration.migrated) {
+		ErrorReporter.debug(
+			'Extension',
+			`Migrated AI workspace storage to ${aiStorageMigration.primaryRoot} (${aiStorageMigration.movedEntries} moved, ${aiStorageMigration.resolvedConflicts} conflicts kept from .cwtools)`,
+		);
+		await repairMovedAgentWorktrees(workspaceRoot).catch(error =>
+			ErrorReporter.warn('Extension', 'Failed to repair Agent worktrees after AI storage migration', error)
+		);
+	}
+
 	const indexService = new IndexService({
 		extensionPath: context.extensionPath,
 		globalStoragePath: context.globalStorageUri.fsPath,
@@ -1376,7 +1390,6 @@ export async function activate(context: ExtensionContext) {
 	// Retire the legacy global endpoint into the per-provider map early so quick-switching
 	// providers before opening settings cannot leak one provider's endpoint into another.
 	void aiService.migrateLegacyEndpoint();
-	const workspaceRoot = getProjectWorkspaceRoot();
 	const privateAgentRoot = context.storageUri?.fsPath
 		?? path.join(context.globalStorageUri.fsPath, 'agent-workspaces', sha256Text(workspaceRoot || 'empty-window').slice(0, 16));
 	configurePrivateAgentStorage(privateAgentRoot);
@@ -2514,7 +2527,7 @@ export async function activate(context: ExtensionContext) {
 
 	let languageId: string;
 	const getLanguageIdFallback = async function () {
-		const markerFiles = await workspace.findFiles("**/*.txt", '**/{node_modules,.git,.vscode,.vscode-test,.cwtools-ai}/**', 2);
+		const markerFiles = await workspace.findFiles("**/*.txt", '**/{node_modules,.git,.vscode,.vscode-test,.cwtools,.cwtools-ai}/**', 2);
 		if (markerFiles.length == 1) {
 			 
 			return (await workspace.openTextDocument(markerFiles[0]!)).languageId;

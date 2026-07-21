@@ -136,7 +136,7 @@ export class FileToolHandler {
         if (!topicId) return filePath;
 
         const normalized = filePath.trim().replace(/\\/g, '/');
-        const match = normalized.match(/^\.cwtools-ai(?:\/(.*))?$/i);
+        const match = normalized.match(/^\.(?:cwtools|cwtools-ai)(?:\/(.*))?$/i);
         if (!match) return filePath;
 
         const safeTopicId = topicId.replace(/[^a-zA-Z0-9_.-]/g, '_');
@@ -145,7 +145,7 @@ export class FileToolHandler {
             return filePath;
         }
 
-        return path.posix.join('.cwtools-ai', safeTopicId, ...rest);
+        return path.posix.join('.cwtools', safeTopicId, ...rest);
     }
 
     private normalizeAgentWorkspaceWritePath(filePath: string, context?: import('../types').AgentToolContext): string {
@@ -227,9 +227,9 @@ export class FileToolHandler {
     }
 
     private shouldBypassReadTrackerCheck(filePath: string): boolean {
-        const normalized = filePath.replace(/\\/g, '/').toLowerCase();
-        // 1. All writes under the .cwtools-ai folder
-        if (normalized.includes('/.cwtools-ai/') || normalized.startsWith('.cwtools-ai/') || normalized.includes('.cwtools-ai')) {
+        const segments = filePath.replace(/\\/g, '/').toLowerCase().split('/').filter(Boolean);
+        // 1. All writes under the .cwtools / .cwtools-ai folder
+        if (segments.includes('.cwtools') || segments.includes('.cwtools-ai')) {
             return true;
         }
         // 2. Common command scripts and helper script suffixes
@@ -291,7 +291,7 @@ export class FileToolHandler {
 
         return {
             success: false,
-            message: `${toolName} refused to write a .yml localisation file. Use write_localisation with a real localisation path under localisation/, localisation_synced/, or localization/. Do not write localisation YAML into .cwtools-ai scratch/topic folders.`,
+            message: `${toolName} refused to write a .yml localisation file. Use write_localisation with a real localisation path under localisation/, localisation_synced/, or localization/. Do not write localisation YAML into .cwtools scratch/topic folders.`,
         };
     }
 
@@ -300,7 +300,7 @@ export class FileToolHandler {
             return 'write_localisation only works with .yml files.';
         }
         if (!this.isLocalisationPath(filePath)) {
-            return `write_localisation refused '${this.workspaceRelativePath(filePath)}'. Localisation files must be written under localisation/, localisation_synced/, or localization/, never under .cwtools-ai scratch/topic folders.`;
+            return `write_localisation refused '${this.workspaceRelativePath(filePath)}'. Localisation files must be written under localisation/, localisation_synced/, or localization/, never under .cwtools scratch/topic folders.`;
         }
         return null;
     }
@@ -1871,7 +1871,7 @@ export class FileToolHandler {
                     return failBlueprint(`Design blueprint refused: unresolved critical fact(s): ${args.unresolvedCritical.join('; ')}`);
                 }
                 const evidenceKinds = (args.evidence ?? []).map(item => `${item.sourceType} ${item.source}`.toLowerCase());
-                const hasKnowledge = evidenceKinds.some(value => value.includes('project_knowledge') || value.includes('query_project_knowledge') || value.includes('.cwtools-ai/project/knowledge'));
+                const hasKnowledge = evidenceKinds.some(value => value.includes('project_knowledge') || value.includes('query_project_knowledge') || value.includes('.cwtools/project/knowledge') || value.includes('.cwtools-ai/project/knowledge'));
                 const hasVanilla = evidenceKinds.some(value => value.includes('vanilla'));
                 const hasCwt = evidenceKinds.some(value => /\b(cwt|lsp|schema|rule)\b/.test(value));
                 const missingEvidence = [

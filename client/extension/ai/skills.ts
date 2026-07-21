@@ -123,6 +123,7 @@ export function listSkills(roots: SkillLookupRoots): SkillIndexEntry[] {
     }
     if (roots.workspaceRoot) {
         scanSkillDir(path.join(roots.workspaceRoot, '.agents', 'skills'), 'project', skills);
+        scanSkillDir(path.join(roots.workspaceRoot, '.cwtools', 'skills'), 'project', skills);
         scanSkillDir(path.join(roots.workspaceRoot, '.cwtools-ai', 'skills'), 'project', skills);
     }
 

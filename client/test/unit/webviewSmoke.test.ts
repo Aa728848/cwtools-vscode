@@ -137,7 +137,7 @@ describe('webview smoke checks', () => {
         expect(css).to.include('.md-mermaid-output svg text');
         expect(css).to.include('.md-mermaid-output svg .node rect');
         expect(css).to.include('.md-mermaid-output svg .flowchart-link');
-        expect(css).to.include('.ap-section-text .md-mermaid-toolbar { pointer-events: auto; }');
+        expect(css).to.include('.ap-section-text .md-mermaid-toolbar,');
         expect(mermaidRenderer).to.include('htmlLabels: false');
         expect(mermaidRenderer).to.include('wrappingWidth: MERMAID_FLOWCHART_WRAP_WIDTH');
         expect(mermaidRenderer).to.include('--mermaid-natural-width');

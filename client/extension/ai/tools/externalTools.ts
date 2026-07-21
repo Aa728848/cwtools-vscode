@@ -52,7 +52,7 @@ const COMMAND_TEMP_SCRIPT_EXTENSIONS = new Set([
     '.bat', '.cmd', '.cjs', '.js', '.mjs', '.ps1', '.py', '.sh',
 ]);
 const COMMAND_SNAPSHOT_EXCLUDED_DIRS = new Set([
-    '.cwtools-ai', '.git', '.hg', '.svn', '.tmp-test', '.vscode-test', '.vs', '.idea',
+    '.cwtools', '.cwtools-ai', '.git', '.hg', '.svn', '.tmp-test', '.vscode-test', '.vs', '.idea',
     'node_modules', 'dist', 'out', 'build', 'coverage',
 ]);
 const COMMAND_TEMP_SCRIPT_DIR_NAMES = new Set([
@@ -296,8 +296,8 @@ export class ExternalToolHandler {
         const safeTopicLower = safeTopicId.toLowerCase();
         const rewriteAgentPath = (rawPath: string): string => {
             const normalized = rawPath.replace(/\\/g, '/');
-            const rest = normalized.replace(/^\.cwtools-ai(?:[\\/]|$)/i, '').replace(/^\/+/, '');
-            if (!rest) return aiRoot || '.cwtools-ai';
+            const rest = normalized.replace(/^\.(?:cwtools|cwtools-ai)(?:[\\/]|$)/i, '').replace(/^\/+/, '');
+            if (!rest) return aiRoot || '.cwtools';
 
             const restSegments = rest.split('/').filter(Boolean);
             const firstSegment = restSegments[0]?.toLowerCase() ?? '';
@@ -309,7 +309,7 @@ export class ExternalToolHandler {
                     : [safeTopicId, ...restSegments];
 
             if (!aiRoot) {
-                return `.cwtools-ai/${targetSegments.join('/')}`;
+                return `.cwtools/${targetSegments.join('/')}`;
             }
 
             const candidates: string[] = [];
@@ -327,17 +327,17 @@ export class ExternalToolHandler {
             return path.join(aiRoot, ...targetSegments);
         };
 
-        const quotedAgentPathPattern = /(^|[\s(])\\?(["'])(\.cwtools-ai(?:[\\/][^"']+?)?)\\?\2/g;
+        const quotedAgentPathPattern = /(^|[\s(])\\?(["'])(\.(?:cwtools|cwtools-ai)(?:[\\/][^"']+?)?)\\?\2/g;
         const withEscapedQuotedPaths = command.replace(quotedAgentPathPattern, (_match, prefix: string, quote: string, agentPath: string) =>
             `${prefix}${quote}${rewriteAgentPath(agentPath)}${quote}`
         );
 
-        const quotedPattern = /(^|[\s(])(["'])(\.cwtools-ai(?:[\\/][^"']+)?)\2/g;
+        const quotedPattern = /(^|[\s(])(["'])(\.(?:cwtools|cwtools-ai)(?:[\\/][^"']*)?)\2/g;
         const withQuotedPaths = withEscapedQuotedPaths.replace(quotedPattern, (_match, prefix: string, quote: string, agentPath: string) =>
             `${prefix}${quote}${rewriteAgentPath(agentPath)}${quote}`
         );
 
-        const barePattern = /(^|[\s(])(\.cwtools-ai(?:[\\/][^\s"';&|<>]+)?)/g;
+        const barePattern = /(^|[\s(])(\.(?:cwtools|cwtools-ai)(?:[\\/][^\s"';&|<>]+)?)/g;
         return withQuotedPaths.replace(barePattern, (_match, prefix: string, agentPath: string) =>
             `${prefix}${this.quoteCommandPath(rewriteAgentPath(agentPath), false)}`
         );
@@ -349,7 +349,7 @@ export class ExternalToolHandler {
         const folders = vs.workspace.workspaceFolders ?? [];
         for (const folder of folders) {
             const alias = path.basename(folder.uri.fsPath);
-            if (!alias || alias.toLowerCase() === '.cwtools-ai') continue;
+            if (!alias || alias.toLowerCase() === '.cwtools-ai' || alias.toLowerCase() === '.cwtools') continue;
             const aliasPattern = escapeRegExp(alias);
 
             const rewriteAliasPath = (aliasPath: string): string | null => {
@@ -384,7 +384,7 @@ export class ExternalToolHandler {
     private getCommandSnapshotRoots(): string[] {
         const roots: string[] = [];
         const addRoot = (root: string | undefined) => {
-            if (!root || path.basename(root).toLowerCase() === '.cwtools-ai') return;
+            if (!root || path.basename(root).toLowerCase() === '.cwtools-ai' || path.basename(root).toLowerCase() === '.cwtools') return;
             const resolved = path.resolve(root);
             const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
             if (!roots.some(existing => this.commandSnapshotKey(existing) === key)) {
@@ -419,7 +419,7 @@ export class ExternalToolHandler {
 
         const relPath = this.getCommandSnapshotRelativePath(filePath);
         const segments = relPath.split('/').filter(Boolean).map(segment => segment.toLowerCase());
-        if (segments[0] === '.cwtools-ai') return true;
+        if (segments[0] === '.cwtools-ai' || segments[0] === '.cwtools') return true;
 
         const basename = path.basename(filePath).toLowerCase();
         const ext = path.extname(basename).toLowerCase();
@@ -820,8 +820,8 @@ export class ExternalToolHandler {
             onPermissionRequest, permId,
             'ignore_validation_error',
             aiText(
-                `AI requests to ignore this LSP validation error:\n\nError details: ${args.errorId}\nReason: ${args.reason}\n\nDo you want to permanently add this rule to the local whitelist (.cwtools-ai-memory.md) to suppress future reports?`,
-                `AI 请求忽略（IGNORE）此 LSP 验证错误：\n\n【错误详情】：${args.errorId}\n【判断理由】：${args.reason}\n\n您是否同意将此规则永久加入本地白名单 (.cwtools-ai-memory.md) 以免除后续报错？`,
+                `AI requests to ignore this LSP validation error:\n\nError details: ${args.errorId}\nReason: ${args.reason}\n\nDo you want to permanently add this rule to the local whitelist (.cwtools-memory.md) to suppress future reports?`,
+                `AI 请求忽略（IGNORE）此 LSP 验证错误：\n\n【错误详情】：${args.errorId}\n【判断理由】：${args.reason}\n\n您是否同意将此规则永久加入本地白名单 (.cwtools-memory.md) 以免除后续报错？`,
             ),
             context
         );
@@ -1249,13 +1249,15 @@ export class ExternalToolHandler {
                     if (match?.[1]) protectedPaths.push(path.resolve(root, match[1].trim()));
                 }
             } catch { /* non-worktree or inaccessible marker */ }
-            const agentRoot = path.join(root, '.cwtools-ai');
+            const agentRoots = [path.join(root, '.cwtools'), path.join(root, '.cwtools-ai')];
             const privateNames = ['runs', 'threads', 'goals', 'blackboard', 'resume_state.json', 'resume_state.json.bak'];
-            try {
-                for (const topic of fs.readdirSync(agentRoot, { withFileTypes: true }).filter(entry => entry.isDirectory())) {
-                    for (const name of privateNames) protectedPaths.push(path.join(agentRoot, topic.name, name));
-                }
-            } catch { /* no legacy/project Agent storage */ }
+            for (const agentRoot of agentRoots) {
+                try {
+                    for (const topic of fs.readdirSync(agentRoot, { withFileTypes: true }).filter(entry => entry.isDirectory())) {
+                        for (const name of privateNames) protectedPaths.push(path.join(agentRoot, topic.name, name));
+                    }
+                } catch { /* no legacy/project Agent storage */ }
+            }
         }
         const sandboxProfile = {
             sandboxMode: directExecution ? 'disabled' : 'workspace-write',

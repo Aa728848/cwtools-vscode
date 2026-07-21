@@ -7,7 +7,7 @@ import type {
     QueryProjectProfileResult,
 } from './types';
 
-export const PROJECT_PROFILE_RELATIVE_PATH = path.join('.cwtools-ai', 'project', 'profile.json');
+export const PROJECT_PROFILE_RELATIVE_PATH = path.join('.cwtools', 'project', 'profile.json');
 
 const SCRIPT_DIR_KEYS = [
     ['events', 'events'],
@@ -30,10 +30,18 @@ export function getProjectProfilePath(workspaceRoot: string): string {
 
 export function readProjectProfile(workspaceRoot: string): ProjectProfile | null {
     const profilePath = getProjectProfilePath(workspaceRoot);
-    if (!fs.existsSync(profilePath)) return null;
-    const raw = fs.readFileSync(profilePath, 'utf8');
-    const parsed = JSON.parse(raw) as ProjectProfile;
-    return parsed?.schemaVersion === 1 ? parsed : null;
+    if (fs.existsSync(profilePath)) {
+        const raw = fs.readFileSync(profilePath, 'utf8');
+        const parsed = JSON.parse(raw) as ProjectProfile;
+        return parsed?.schemaVersion === 1 ? parsed : null;
+    }
+    const legacyPath = path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json');
+    if (fs.existsSync(legacyPath)) {
+        const raw = fs.readFileSync(legacyPath, 'utf8');
+        const parsed = JSON.parse(raw) as ProjectProfile;
+        return parsed?.schemaVersion === 1 ? parsed : null;
+    }
+    return null;
 }
 
 export function writeProjectProfile(workspaceRoot: string, profile: ProjectProfile): string {
@@ -250,7 +258,7 @@ export function queryProjectProfile(workspaceRoot: string, args: QueryProjectPro
             return {
                 status: 'missing',
                 profilePath,
-                _hint: 'Run /init to generate .cwtools-ai/project/profile.json, then retry query_project_profile.',
+                _hint: 'Run /init to generate .cwtools/project/profile.json, then retry query_project_profile.',
             };
         }
         const section = args.section ?? 'summary';

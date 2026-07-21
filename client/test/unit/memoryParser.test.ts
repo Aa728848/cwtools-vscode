@@ -29,8 +29,8 @@ describe('MemoryParser topic storage', () => {
             priority: 'normal',
         });
 
-        const topicMemoryPath = path.join(workspaceRoot, '.cwtools-ai', 'topic_123', '.cwtools-ai-memory.md');
-        const legacyRootPath = path.join(workspaceRoot, '.cwtools-ai-memory.md');
+        const topicMemoryPath = path.join(workspaceRoot, '.cwtools', 'topic_123', '.cwtools-memory.md');
+        const legacyRootPath = path.join(workspaceRoot, '.cwtools-memory.md');
 
         expect(result.success).to.equal(true);
         expect(parser.memoryFilePath).to.equal(topicMemoryPath);
@@ -41,10 +41,10 @@ describe('MemoryParser topic storage', () => {
 
     it('reads legacy root memory as a fallback alongside topic memory', () => {
         const { MemoryParser } = loadMemoryParserModule();
-        const topicDir = path.join(workspaceRoot, '.cwtools-ai', 'topic_legacy');
+        const topicDir = path.join(workspaceRoot, '.cwtools', 'topic_legacy');
         fs.mkdirSync(topicDir, { recursive: true });
-        fs.writeFileSync(path.join(workspaceRoot, '.cwtools-ai-memory.md'), '# Legacy\n\nLEGACY_MEMORY', 'utf8');
-        fs.writeFileSync(path.join(topicDir, '.cwtools-ai-memory.md'), '# Topic\n\nTOPIC_MEMORY', 'utf8');
+        fs.writeFileSync(path.join(workspaceRoot, '.cwtools-memory.md'), '# Legacy\n\nLEGACY_MEMORY', 'utf8');
+        fs.writeFileSync(path.join(topicDir, '.cwtools-memory.md'), '# Topic\n\nTOPIC_MEMORY', 'utf8');
 
         const parser = new MemoryParser(workspaceRoot, 'topic_legacy');
         const prompt = parser.getMemoryPrompt();

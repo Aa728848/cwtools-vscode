@@ -74,7 +74,7 @@ describe('ToolScheduler V2 concurrencyClass Dispatch (P2-3)', () => {
     it('extracts save_workflow target paths when the id is deterministic', () => {
         const mod = loadModule();
         const paths = mod.getAgentToolTargetFiles('save_workflow', { id: 'Review Flow', title: 'unused' }, 'C:/project');
-        expect(paths[0]!.replace(/\\/g, '/')).to.equal('C:/project/.cwtools-ai/workflows/review-flow.md');
+        expect(paths[0]!.replace(/\\/g, '/')).to.equal('C:/project/.cwtools/workflows/review-flow.md');
 
         const unknown = mod.getAgentToolTargetFiles('save_workflow', { title: '纯中文流程' }, 'C:/project');
         expect(unknown).to.deep.equal([]);

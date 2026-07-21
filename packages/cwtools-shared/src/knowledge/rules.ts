@@ -819,8 +819,12 @@ async function readProjectGameId(host: HostServices): Promise<string | undefined
 }
 
 async function readProjectProfileFile(host: HostServices): Promise<unknown | null> {
-  const profilePath = path.join(host.workspaceRoot, '.cwtools-ai', 'project', 'profile.json');
-  const read = await host.filesystem.readTextFile(profilePath).catch(() => ({ exists: false, content: '', hasBom: false }));
+  let profilePath = path.join(host.workspaceRoot, '.cwtools', 'project', 'profile.json');
+  let read = await host.filesystem.readTextFile(profilePath).catch(() => ({ exists: false, content: '', hasBom: false }));
+  if (!read.exists) {
+    const legacyPath = path.join(host.workspaceRoot, '.cwtools-ai', 'project', 'profile.json');
+    read = await host.filesystem.readTextFile(legacyPath).catch(() => ({ exists: false, content: '', hasBom: false }));
+  }
   if (!read.exists) return null;
   try {
     return JSON.parse(read.content) as unknown;

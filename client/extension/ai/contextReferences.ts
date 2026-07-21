@@ -17,7 +17,7 @@ import type { BlackboardEntry } from './orchestrator/types';
 import { getProjectWorkspaceRoot } from './workspacePaths';
 
 function isAgentTempPath(filePath: string): boolean {
-    return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
+    return /(?:^|[\\/])\.(?:cwtools|cwtools-ai)[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
 }
 
 export interface MentionSearchResult {

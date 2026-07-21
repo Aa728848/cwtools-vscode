@@ -76,7 +76,9 @@ function loadProjectKnowledge() {
     const moduleLoader = require('module') as { _load: (...args: any[]) => any };
     const originalLoad = moduleLoader._load;
     const modulePath = require.resolve('../../extension/ai/projectKnowledge');
+    const workspacePathsModulePath = require.resolve('../../extension/ai/workspacePaths');
     delete require.cache[modulePath];
+    delete require.cache[workspacePathsModulePath];
     moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
         if (request === 'vscode') return vscodeStub;
         return originalLoad.apply(this, [request, ...args]);
@@ -85,6 +87,7 @@ function loadProjectKnowledge() {
         return require('../../extension/ai/projectKnowledge') as typeof import('../../extension/ai/projectKnowledge');
     } finally {
         moduleLoader._load = originalLoad;
+        delete require.cache[workspacePathsModulePath];
     }
 }
 
@@ -105,7 +108,7 @@ describe('project knowledge SQLite V2', () => {
     });
 
     it('publishes only manifest + SQLite and cleans V1 artifacts after a successful export', async () => {
-        const root = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+        const root = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
         fs.mkdirSync(path.join(root, 'capabilities'), { recursive: true });
         fs.mkdirSync(path.join(root, 'archetypes'), { recursive: true });
         for (const legacy of ['snapshot.json', 'topology.json', 'definition-stacks.json', 'override-map.json', 'unresolved.json']) {
@@ -165,6 +168,42 @@ describe('project knowledge SQLite V2', () => {
         }]);
     });
 
+    it('moves a legacy knowledge pack to .cwtools and keeps subsequent writes there', async () => {
+        const legacyRoot = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+        const primaryRoot = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
+        fs.mkdirSync(legacyRoot, { recursive: true });
+        fs.writeFileSync(path.join(legacyRoot, 'manifest.json'), JSON.stringify({
+            schemaVersion: 2,
+            status: 'ready',
+            staleReasons: [],
+        }), 'utf8');
+        fs.writeFileSync(path.join(legacyRoot, 'knowledge.sqlite'), 'legacy-sqlite', 'utf8');
+        nextSnapshot = {
+            ok: true,
+            status: 'ready',
+            schemaVersion: 2,
+            game: 'stellaris',
+            graphVersion: 1,
+            generatedAtUnixMs: Date.now(),
+            projectRoots: [workspaceRoot],
+            generationMode: 'full',
+            domains: [{ id: 'events' }],
+            counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
+            warnings: [],
+        };
+
+        await projectKnowledge.generateProjectKnowledge(
+            workspaceRoot,
+            { game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile,
+        );
+
+        expect(fs.readFileSync(path.join(primaryRoot, 'knowledge.sqlite'), 'utf8')).to.equal('sqlite-v2');
+        expect(fs.existsSync(path.join(primaryRoot, 'manifest.json'))).to.equal(true);
+        expect(fs.existsSync(legacyRoot)).to.equal(false);
+        expect((commandCalls[0]!.args[0] as { databasePath: string }).databasePath)
+            .to.equal(path.join(primaryRoot, 'knowledge.sqlite'));
+    });
+
     it('writes only a lightweight manifest when the LSP export is unavailable', () => {
         const profile = { game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
         const manifest = projectKnowledge.writeUnavailableProjectKnowledge(
@@ -172,7 +211,7 @@ describe('project knowledge SQLite V2', () => {
             profile,
             'LSP server has not loaded a game model yet.',
         );
-        const root = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+        const root = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
 
         expect(manifest.status).to.equal('unavailable');
         expect(manifest.staleReasons).to.include('lsp_export_unavailable');
@@ -232,7 +271,7 @@ describe('project knowledge SQLite V2', () => {
     });
 
     it('keeps one-version V1 JSON query compatibility', async () => {
-        const root = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+        const root = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
         fs.mkdirSync(path.join(root, 'capabilities'), { recursive: true });
         fs.writeFileSync(path.join(root, 'manifest.json'), JSON.stringify({
             schemaVersion: 1,
@@ -278,10 +317,10 @@ describe('project knowledge SQLite V2', () => {
             counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
             warnings: [],
         };
-        const profile = { game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
         await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
-        fs.mkdirSync(path.join(workspaceRoot, '.cwtools-ai', 'project'), { recursive: true });
-        fs.writeFileSync(path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json'), JSON.stringify(profile));
+        fs.mkdirSync(path.join(workspaceRoot, '.cwtools', 'project'), { recursive: true });
+        fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), JSON.stringify(profile));
         const refreshedGames: Array<readonly string[] | undefined> = [];
         const context = {
             globalStorageUri: { fsPath: path.join(workspaceRoot, 'global-storage') },

@@ -12,7 +12,7 @@ export interface ProjectSupport {
 // Strong, unambiguous "this directory is a mod root" signals.
 const ROOT_FILE_MARKERS = ['descriptor.mod'];
 const ROOT_NESTED_FILE_MARKERS = [path.join('.metadata', 'metadata.json')];
-const ROOT_DIR_MARKERS = ['.cwtools-ai'];
+const ROOT_DIR_MARKERS = ['.cwtools', '.cwtools-ai'];
 // PDX content dirs — specific enough at a mod root, but too generic to trust in a
 // far-off ancestor. Generic graphics dirs (gfx/, interface/) are excluded.
 const CONTENT_DIR_MARKERS = ['common', 'events', 'localisation', 'localization'];
@@ -109,6 +109,6 @@ export function detectProjectSupport(workspaceRoot: string): ProjectSupport {
   return {
     supported: false,
     markers: [],
-    reason: `No Paradox mod markers (descriptor.mod, common/, events/, localisation/, .cwtools-ai/) at, above, or directly under '${workspaceRoot}'.`,
+    reason: `No Paradox mod markers (descriptor.mod, common/, events/, localisation/, .cwtools/) at, above, or directly under '${workspaceRoot}'.`,
   };
 }

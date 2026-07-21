@@ -26,7 +26,8 @@ export interface SubAgentSandbox {
     rejectedScopes?: string[];
 }
 
-const TOPIC_ARTIFACT_SCOPE = '.cwtools-ai';
+const TOPIC_ARTIFACT_SCOPE = '.cwtools';
+const LEGACY_TOPIC_ARTIFACT_SCOPE = '.cwtools-ai';
 
 /**
  * 根据 TaskNode 任务节点与项目环境动态构造子 Agent 隔离沙盒
@@ -115,13 +116,14 @@ function targetMatchesWriteScope(targetFile: string, writeScope: string[], works
     for (const scope of writeScope) {
         const scopeLower = scope.toLowerCase();
 
-        if (scope.startsWith('.') && scopeLower !== TOPIC_ARTIFACT_SCOPE) {
+        if (scope.startsWith('.') && scopeLower !== TOPIC_ARTIFACT_SCOPE && scopeLower !== LEGACY_TOPIC_ARTIFACT_SCOPE) {
             if (relTarget.endsWith(foldPathCase(scope))) return true;
             continue;
         }
 
-        if (scopeLower === TOPIC_ARTIFACT_SCOPE) {
-            if (relTarget === TOPIC_ARTIFACT_SCOPE || relTarget.startsWith(`${TOPIC_ARTIFACT_SCOPE}/`)) return true;
+        if (scopeLower === TOPIC_ARTIFACT_SCOPE || scopeLower === LEGACY_TOPIC_ARTIFACT_SCOPE) {
+            if (relTarget === TOPIC_ARTIFACT_SCOPE || relTarget.startsWith(`${TOPIC_ARTIFACT_SCOPE}/`) ||
+                relTarget === LEGACY_TOPIC_ARTIFACT_SCOPE || relTarget.startsWith(`${LEGACY_TOPIC_ARTIFACT_SCOPE}/`)) return true;
             continue;
         }
 

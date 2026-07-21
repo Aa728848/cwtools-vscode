@@ -4,6 +4,14 @@ import * as vs from 'vscode';
 
 let privateAgentStorageRoot = '';
 
+export interface AiStorageMigrationResult {
+    legacyRoot: string;
+    primaryRoot: string;
+    migrated: boolean;
+    movedEntries: number;
+    resolvedConflicts: number;
+}
+
 /** Configure the extension-owned directory used for private Agent state. */
 export function configurePrivateAgentStorage(storageRoot: string | undefined): void {
     privateAgentStorageRoot = storageRoot ? path.resolve(storageRoot) : '';
@@ -58,7 +66,7 @@ export function migrateLegacyPrivateAgentState(fallbackWorkspaceRoot = ''): numb
     let copied = 0;
     const privateNames = new Set([
         'runs', 'threads', 'goals', 'resume_state.json', 'resume_state.json.bak',
-        '.cwtools-ai-memory.md', 'memory.json',
+        '.cwtools-ai-memory.md', '.cwtools-memory.md', 'memory.json',
     ]);
     for (const legacyRoot of getAiStorageRootCandidates(fallbackWorkspaceRoot)) {
         if (!fs.existsSync(legacyRoot)) continue;
@@ -80,29 +88,140 @@ export function migrateLegacyPrivateAgentState(fallbackWorkspaceRoot = ''): numb
     return copied;
 }
 
+function resolveAiStorageRoots(fallbackWorkspaceRoot = ''): { legacyRoot: string; primaryRoot: string } | undefined {
+    const workspaceRoot = getProjectWorkspaceRoot(fallbackWorkspaceRoot);
+    if (!workspaceRoot) return undefined;
+    const name = path.basename(workspaceRoot).toLowerCase();
+    if (name === '.cwtools') {
+        return {
+            primaryRoot: workspaceRoot,
+            legacyRoot: path.join(path.dirname(workspaceRoot), '.cwtools-ai'),
+        };
+    }
+    if (name === '.cwtools-ai') {
+        return {
+            primaryRoot: path.join(path.dirname(workspaceRoot), '.cwtools'),
+            legacyRoot: workspaceRoot,
+        };
+    }
+    return {
+        primaryRoot: path.join(workspaceRoot, '.cwtools'),
+        legacyRoot: path.join(workspaceRoot, '.cwtools-ai'),
+    };
+}
+
+function mergeLegacyStorageEntry(
+    source: string,
+    target: string,
+    primaryRoot: string,
+    result: { movedEntries: number; resolvedConflicts: number },
+): void {
+    if (!fs.existsSync(target)) {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.renameSync(source, target);
+        result.movedEntries++;
+        return;
+    }
+
+    const sourceStat = fs.lstatSync(source);
+    const targetStat = fs.lstatSync(target);
+    if (sourceStat.isDirectory() && !sourceStat.isSymbolicLink()
+        && targetStat.isDirectory() && !targetStat.isSymbolicLink()) {
+        const entries = fs.readdirSync(source, { withFileTypes: true })
+            .sort((a, b) => a.name.localeCompare(b.name));
+        for (const entry of entries) {
+            mergeLegacyStorageEntry(path.join(source, entry.name), path.join(target, entry.name), primaryRoot, result);
+        }
+        fs.rmdirSync(source);
+        return;
+    }
+
+    // The current .cwtools copy is authoritative, but preserve the legacy conflict.
+    const relativeTarget = path.relative(primaryRoot, target);
+    const archiveBase = path.join(primaryRoot, 'migration-conflicts', 'cwtools-ai', relativeTarget);
+    let archiveTarget = archiveBase;
+    let suffix = 1;
+    while (fs.existsSync(archiveTarget)) {
+        archiveTarget = `${archiveBase}.${suffix++}`;
+    }
+    fs.mkdirSync(path.dirname(archiveTarget), { recursive: true });
+    fs.renameSync(source, archiveTarget);
+    result.resolvedConflicts++;
+}
+
+/** Merge the old project storage root into .cwtools and remove .cwtools-ai. */
+export function migrateLegacyAiStorageRoot(fallbackWorkspaceRoot = ''): AiStorageMigrationResult {
+    const roots = resolveAiStorageRoots(fallbackWorkspaceRoot);
+    if (!roots) {
+        return { legacyRoot: '', primaryRoot: '', migrated: false, movedEntries: 0, resolvedConflicts: 0 };
+    }
+    const result: AiStorageMigrationResult = {
+        ...roots,
+        migrated: false,
+        movedEntries: 0,
+        resolvedConflicts: 0,
+    };
+    if (!fs.existsSync(roots.legacyRoot)) return result;
+
+    if (!fs.existsSync(roots.primaryRoot)) {
+        fs.mkdirSync(path.dirname(roots.primaryRoot), { recursive: true });
+        fs.renameSync(roots.legacyRoot, roots.primaryRoot);
+        result.migrated = true;
+        result.movedEntries = 1;
+        return result;
+    }
+
+    const entries = fs.readdirSync(roots.legacyRoot, { withFileTypes: true })
+        .sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+        mergeLegacyStorageEntry(
+            path.join(roots.legacyRoot, entry.name),
+            path.join(roots.primaryRoot, entry.name),
+            roots.primaryRoot,
+            result,
+        );
+    }
+    fs.rmdirSync(roots.legacyRoot);
+    result.migrated = true;
+    return result;
+}
+
 export function getProjectWorkspaceRoot(fallback = ''): string {
     const folders = vs.workspace.workspaceFolders ?? [];
-    return folders.find(folder => path.basename(folder.uri.fsPath).toLowerCase() !== '.cwtools-ai')?.uri.fsPath
+    return folders.find(folder => {
+        const name = path.basename(folder.uri.fsPath).toLowerCase();
+        return name !== '.cwtools' && name !== '.cwtools-ai';
+    })?.uri.fsPath
         ?? folders[0]?.uri.fsPath
         ?? fallback;
 }
 
 export function getAiStorageRoot(fallbackWorkspaceRoot = ''): string {
     const folders = vs.workspace.workspaceFolders ?? [];
-    const aiFolder = folders.find(folder => path.basename(folder.uri.fsPath).toLowerCase() === '.cwtools-ai');
+    const aiFolder = folders.find(folder => path.basename(folder.uri.fsPath).toLowerCase() === '.cwtools');
     if (aiFolder) return aiFolder.uri.fsPath;
 
     for (const folder of folders) {
-        const childAiRoot = path.join(folder.uri.fsPath, '.cwtools-ai');
+        const name = path.basename(folder.uri.fsPath).toLowerCase();
+        if (name === '.cwtools' || name === '.cwtools-ai') continue;
+        const childAiRoot = path.join(folder.uri.fsPath, '.cwtools');
         if (fs.existsSync(childAiRoot)) return childAiRoot;
     }
 
-    if (fallbackWorkspaceRoot && path.basename(fallbackWorkspaceRoot).toLowerCase() === '.cwtools-ai') {
-        return fallbackWorkspaceRoot;
+    const legacyAiFolder = folders.find(folder => path.basename(folder.uri.fsPath).toLowerCase() === '.cwtools-ai');
+    if (legacyAiFolder) return path.join(path.dirname(legacyAiFolder.uri.fsPath), '.cwtools');
+
+    if (fallbackWorkspaceRoot) {
+        const fallbackName = path.basename(fallbackWorkspaceRoot).toLowerCase();
+        if (fallbackName === '.cwtools') return fallbackWorkspaceRoot;
+        if (fallbackName === '.cwtools-ai') return path.join(path.dirname(fallbackWorkspaceRoot), '.cwtools');
     }
 
     const workspaceRoot = getProjectWorkspaceRoot(fallbackWorkspaceRoot);
-    return workspaceRoot ? path.join(workspaceRoot, '.cwtools-ai') : '';
+    if (path.basename(workspaceRoot).toLowerCase() === '.cwtools-ai') {
+        return path.join(path.dirname(workspaceRoot), '.cwtools');
+    }
+    return workspaceRoot ? path.join(workspaceRoot, '.cwtools') : '';
 }
 
 export function getAiStorageRootCandidates(fallbackWorkspaceRoot = ''): string[] {
@@ -119,18 +238,35 @@ export function getAiStorageRootCandidates(fallbackWorkspaceRoot = ''): string[]
     add(primary);
 
     for (const folder of vs.workspace.workspaceFolders ?? []) {
-        if (path.basename(folder.uri.fsPath).toLowerCase() === '.cwtools-ai') continue;
-        const childAiRoot = path.join(folder.uri.fsPath, '.cwtools-ai');
+        const name = path.basename(folder.uri.fsPath).toLowerCase();
+        if (name === '.cwtools' || name === '.cwtools-ai') {
+            add(folder.uri.fsPath);
+            continue;
+        }
+        const childAiRoot = path.join(folder.uri.fsPath, '.cwtools');
         if (fs.existsSync(childAiRoot)) {
             add(childAiRoot);
+        }
+        const legacyAiRoot = path.join(folder.uri.fsPath, '.cwtools-ai');
+        if (fs.existsSync(legacyAiRoot)) {
+            add(legacyAiRoot);
         }
     }
 
     const projectRoot = getProjectWorkspaceRoot(fallbackWorkspaceRoot);
-    if (projectRoot && path.basename(projectRoot).toLowerCase() !== '.cwtools-ai') {
-        const legacyProjectRoot = path.join(projectRoot, '.cwtools-ai');
-        if (fs.existsSync(legacyProjectRoot)) {
-            add(legacyProjectRoot);
+    if (projectRoot) {
+        const name = path.basename(projectRoot).toLowerCase();
+        if (name === '.cwtools' || name === '.cwtools-ai') {
+            add(projectRoot);
+        } else {
+            const legacyProjectRoot = path.join(projectRoot, '.cwtools');
+            if (fs.existsSync(legacyProjectRoot)) {
+                add(legacyProjectRoot);
+            }
+            const legacyProjectRootAi = path.join(projectRoot, '.cwtools-ai');
+            if (fs.existsSync(legacyProjectRootAi)) {
+                add(legacyProjectRootAi);
+            }
         }
     }
 

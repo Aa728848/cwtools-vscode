@@ -132,7 +132,7 @@ describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
         try {
             const topicId = 'topic_resume';
             const runId = 'run_resume';
-            const runDir = path.join(tmpRoot, '.cwtools-ai', topicId, 'runs', runId);
+            const runDir = path.join(tmpRoot, '.cwtools', topicId, 'runs', runId);
             fs.mkdirSync(runDir, { recursive: true });
             fs.writeFileSync(path.join(runDir, 'summary.md'), '# Summary\n\nKeep the important decision.', 'utf-8');
 
@@ -153,7 +153,7 @@ describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
                 [{ id: 'call_pending' }]
             );
 
-            const resumePath = path.join(tmpRoot, '.cwtools-ai', topicId, 'resume_state.json');
+            const resumePath = path.join(tmpRoot, '.cwtools', topicId, 'resume_state.json');
             const saved = JSON.parse(fs.readFileSync(resumePath, 'utf-8'));
             expect(saved.version).to.equal(3);
             expect(saved.compacted).to.equal(true);
@@ -181,7 +181,7 @@ describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
             await saveResumeState(topicId, 'build', [{ role: 'user', content: 'generation one' }], toolExecutor);
             await saveResumeState(topicId, 'build', [{ role: 'user', content: 'generation two' }], toolExecutor);
 
-            const resumePath = path.join(tmpRoot, '.cwtools-ai', topicId, 'resume_state.json');
+            const resumePath = path.join(tmpRoot, '.cwtools', topicId, 'resume_state.json');
             expect(fs.existsSync(`${resumePath}.bak`)).to.equal(true);
             fs.writeFileSync(resumePath, '{broken json', 'utf-8');
 
@@ -202,13 +202,13 @@ describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
         try {
             const topicId = 'topic_transcript_backup';
             const runId = 'run_transcript_backup';
-            const runDir = path.join(tmpRoot, '.cwtools-ai', topicId, 'runs', runId);
+            const runDir = path.join(tmpRoot, '.cwtools', topicId, 'runs', runId);
             fs.mkdirSync(runDir, { recursive: true });
             const toolExecutor = { getTodos: () => [] } as any;
             await saveResumeState(topicId, 'build', [{ role: 'user', content: 'transcript generation one' }], toolExecutor, runId);
             await saveResumeState(topicId, 'build', [{ role: 'user', content: 'transcript generation two' }], toolExecutor, runId);
 
-            const resumePath = path.join(tmpRoot, '.cwtools-ai', topicId, 'resume_state.json');
+            const resumePath = path.join(tmpRoot, '.cwtools', topicId, 'resume_state.json');
             const generationOneState = JSON.parse(fs.readFileSync(`${resumePath}.bak`, 'utf-8'));
             delete generationOneState.messages;
             fs.writeFileSync(resumePath, JSON.stringify(generationOneState), 'utf-8');
@@ -234,7 +234,7 @@ describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
         try {
             store.clear();
             const topicId = 'topic_v2_compat';
-            const resumeDir = path.join(tmpRoot, '.cwtools-ai', topicId);
+            const resumeDir = path.join(tmpRoot, '.cwtools', topicId);
             fs.mkdirSync(resumeDir, { recursive: true });
             fs.writeFileSync(path.join(resumeDir, 'resume_state.json'), JSON.stringify({
                 version: 2,

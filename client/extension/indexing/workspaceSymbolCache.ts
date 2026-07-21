@@ -5,10 +5,14 @@ import type { WorkspaceSymbolEntry, WorkspaceSymbolOrigin } from './workspaceSym
 
 const SCHEMA_VERSION = 1;
 const PARSER_VERSION = 2;
-export const WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH = path.join('.cwtools-ai', 'index', 'workspace-symbols.sqlite');
+export const WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH = path.join('.cwtools', 'index', 'workspace-symbols.sqlite');
 
 export function getWorkspaceSymbolCachePath(workspaceRoot: string): string {
     return path.join(workspaceRoot, WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH);
+}
+
+export function getLegacyWorkspaceSymbolCachePath(workspaceRoot: string): string {
+    return path.join(workspaceRoot, '.cwtools-ai', 'index', 'workspace-symbols.sqlite');
 }
 
 export interface WorkspaceSymbolFileFact {
@@ -43,6 +47,21 @@ function normalizePath(value: string): string {
     return path.resolve(value).replace(/\\/g, '/');
 }
 
+function removeMigratedFallback(sourcePath: string, sourceRoot: string): void {
+    fs.rmSync(sourcePath, { force: true });
+    const legacyRoot = path.resolve(sourceRoot, '.cwtools-ai');
+    let current = path.dirname(path.resolve(sourcePath));
+    while (current === legacyRoot || (!path.relative(legacyRoot, current).startsWith('..') && !path.isAbsolute(path.relative(legacyRoot, current)))) {
+        try {
+            fs.rmdirSync(current);
+        } catch {
+            break;
+        }
+        if (current === legacyRoot) break;
+        current = path.dirname(current);
+    }
+}
+
 function stringValue(value: unknown): string | undefined {
     return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
@@ -55,14 +74,19 @@ export class WorkspaceSymbolSqliteCache {
 		private readonly wasmDirectory: string,
 		private readonly sourceRoot: string,
 		private readonly sourceFingerprint = '',
+		private readonly fallbackDatabasePaths: readonly string[] = [],
 	) {}
 
     async open(): Promise<void> {
         if (this.database) return;
         const SQL = await getSql(this.wasmDirectory);
         let bytes: Uint8Array | undefined;
+        const sourcePath = fs.existsSync(this.databasePath)
+            ? this.databasePath
+            : this.fallbackDatabasePaths.find(candidate => fs.existsSync(candidate)) ?? this.databasePath;
+        const loadedFallback = path.resolve(sourcePath) !== path.resolve(this.databasePath);
         try {
-            bytes = new Uint8Array(await fs.promises.readFile(this.databasePath));
+            bytes = new Uint8Array(await fs.promises.readFile(sourcePath));
         } catch {
             bytes = undefined;
         }
@@ -73,6 +97,10 @@ export class WorkspaceSymbolSqliteCache {
             this.database?.close();
             this.database = new SQL.Database();
             this.ensureSchema(true);
+        }
+        if (loadedFallback) {
+            await this.save();
+            removeMigratedFallback(sourcePath, this.sourceRoot);
         }
     }
 

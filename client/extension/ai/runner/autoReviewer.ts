@@ -229,7 +229,7 @@ function isAgentScratchPythonHelper(req: ApprovalReviewRequest): boolean {
             return false;
         }
     }
-    return /(?:^|\/)\.cwtools-ai\/(?:[^/]+\/)?scratch\/agent_helper\.py$/.test(normalizedPath);
+    return /(?:^|\/)\.(?:cwtools|cwtools-ai)\/(?:[^/]+\/)?scratch\/agent_helper\.py$/.test(normalizedPath);
 }
 
 export class AutoReviewer {

@@ -1002,7 +1002,7 @@ export class AgentToolExecutor {
                 result = this.memoryHandler.searchMemory(args as any); break;
             case 'search_memory_disabled': break;
 
-            // - Persistent memory (cross-session, written to the topic-scoped .cwtools-ai-memory.md) -
+            // - Persistent memory (cross-session, written to the topic-scoped .cwtools-memory.md) -
             case 'save_memory':
                 result = await this.memoryHandler.saveMemory(args as any, context); break;
             case 'save_memory_disabled': break;
@@ -1838,8 +1838,8 @@ export class AgentToolExecutor {
                 && !relativeBlueprint.startsWith('..')
                 && !path.isAbsolute(relativeBlueprint);
             const normalizedRelative = relativeBlueprint.replace(/\\/g, '/').toLowerCase();
-            if (!insideWorkspace || (!normalizedRelative.includes('/.cwtools-ai/') && !normalizedRelative.startsWith('.cwtools-ai/'))) {
-                return { success: false, error: 'blueprintFile must be a topic-scoped design_blueprint.json inside the workspace .cwtools-ai directory.' };
+            if (!insideWorkspace || (!normalizedRelative.includes('/.cwtools/') && !normalizedRelative.startsWith('.cwtools/') && !normalizedRelative.includes('/.cwtools-ai/') && !normalizedRelative.startsWith('.cwtools-ai/'))) {
+                return { success: false, error: 'blueprintFile must be a topic-scoped design_blueprint.json inside the workspace .cwtools directory.' };
             }
             if (path.basename(resolvedBlueprint).toLowerCase() !== 'design_blueprint.json') {
                 return { success: false, error: 'blueprintFile must point to design_blueprint.json.' };

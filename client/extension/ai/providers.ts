@@ -388,9 +388,9 @@ const DISABLE_THINKING_PARAMS: Array<{
         ),
         result: { extraBody: { enable_thinking: false }, injectPrompt: true },
     },
-    // GLM 4.5+ hybrid models use the same explicit thinking switch.
+    // GLM 4.0+ hybrid models use the same explicit thinking switch.
     {
-        match: (m) => /(?:^|\/)glm-(?:4[.]?[5-9]|5)(?:[-.]|$)/.test(m),
+        match: (m) => /(?:^|\/)glm-(?:4[.]?[0-9]v?|5)(?:[-.]|$)/.test(m),
         result: { extraBody: { thinking: { type: 'disabled' } } },
     },
     // ── Gemini 2.5 Flash: thinkingBudget=0 (fully disables thinking) ──

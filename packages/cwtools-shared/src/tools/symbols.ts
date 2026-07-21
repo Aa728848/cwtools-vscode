@@ -579,14 +579,14 @@ function classifyOrigin(filePath: string, workspaceRoot: string): SymbolOrigin {
   if (!filePath) return 'external';
   const normalized = filePath.replace(/\\/g, '/').toLowerCase();
   if (isPathInsideOrEqual(workspaceRoot, filePath)) {
-    return normalized.includes('/generated/') || normalized.includes('/.cwtools-ai/')
+    return normalized.includes('/generated/') || normalized.includes('/.cwtools/') || normalized.includes('/.cwtools-ai/')
       ? 'generated'
       : 'workspace';
   }
   if (normalized.includes('/vanilla/') || normalized.includes('/cache/') || normalized.includes('/steamapps/common/')) {
     return 'vanilla';
   }
-  if (normalized.includes('/generated/') || normalized.includes('/.cwtools-ai/')) return 'generated';
+  if (normalized.includes('/generated/') || normalized.includes('/.cwtools/') || normalized.includes('/.cwtools-ai/')) return 'generated';
   return 'external';
 }
 

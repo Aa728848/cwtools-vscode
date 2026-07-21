@@ -340,7 +340,7 @@ export class McpBridgeServer implements Disposable {
                 return profile ?? {
                     status: 'missing',
                     profilePath,
-                    _hint: 'Run /init in the extension AI chat or create .cwtools-ai/project/profile.json.',
+                    _hint: 'Run /init in the extension AI chat or create .cwtools/project/profile.json.',
                 };
             }
             case 'cwtools://project/knowledge-manifest': {
@@ -490,7 +490,7 @@ function listResources() {
         {
             uri: 'cwtools://project/profile',
             name: 'CWTools project profile',
-            description: 'The generated .cwtools-ai/project/profile.json if available.',
+            description: 'The generated .cwtools/project/profile.json if available.',
             mimeType: 'application/json',
         },
         {

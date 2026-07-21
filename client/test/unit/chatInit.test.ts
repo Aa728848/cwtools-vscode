@@ -16,9 +16,9 @@ describe('/init artifact generation', () => {
     });
 
     it('keeps base artifacts and writes a recoverable manifest when the LSP export never becomes ready', async () => {
-        const knowledgeRoot = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+        const knowledgeRoot = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
         const manifestPath = path.join(knowledgeRoot, 'manifest.json');
-        const workspaceIndexPath = path.join(workspaceRoot, '.cwtools-ai', 'index', 'workspace-symbols.sqlite');
+        const workspaceIndexPath = path.join(workspaceRoot, '.cwtools', 'index', 'workspace-symbols.sqlite');
         const progressMessages: string[] = [];
         let progressOptions: Record<string, unknown> | undefined;
         let workspaceIndexOptions: Record<string, unknown> | undefined;
@@ -84,7 +84,7 @@ describe('/init artifact generation', () => {
             expect(result.success).to.equal(true);
             expect(result.degraded).to.equal(true);
             expect(fs.existsSync(path.join(workspaceRoot, 'CWTOOLS.md'))).to.equal(true);
-            expect(fs.existsSync(path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json'))).to.equal(true);
+            expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'))).to.equal(true);
             expect(fs.existsSync(manifestPath)).to.equal(true);
             expect(fs.existsSync(workspaceIndexPath)).to.equal(true);
             expect(workspaceIndexOptions).to.deep.equal({ includeVanilla: false });

@@ -55,11 +55,11 @@ export function isLocalisationRelativePath(relativePath: string): boolean {
 }
 
 export function isScratchRelativePath(relativePath: string): boolean {
-  return relativePath
+  const parts = relativePath
     .replace(/\\/g, '/')
     .toLowerCase()
-    .split('/')
-    .includes('.cwtools-ai');
+    .split('/');
+  return parts.includes('.cwtools') || parts.includes('.cwtools-ai');
 }
 
 export function validateLocalisationPath(workspaceRoot: string, inputPath: string): LocalisationPathValidation {
@@ -88,7 +88,7 @@ export function validateLocalisationPath(workspaceRoot: string, inputPath: strin
       reason: 'scratch_path',
       resolvedPath: resolution.resolvedPath,
       relativePath: resolution.relativePath,
-      message: 'Localisation files must not be written under .cwtools-ai scratch or topic folders.',
+      message: 'Localisation files must not be written under .cwtools scratch or topic folders.',
     };
   }
 

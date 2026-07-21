@@ -5,6 +5,8 @@ import * as vs from 'vscode';
 import { getCacheSettingKey, getGameIdForVanillaCacheFile, getVanillaCacheFileName } from '../gameProfiles';
 import type { IndexService } from '../indexing/indexService';
 import { ErrorReporter } from './errorReporter';
+import { readProjectProfile } from './projectProfile';
+import { migrateLegacyAiStorageRoot } from './workspacePaths';
 import type {
     ProjectProfile,
     QueryProjectKnowledgeArgs,
@@ -12,7 +14,7 @@ import type {
 } from './types';
 
 export const PROJECT_KNOWLEDGE_SCHEMA_VERSION = 2;
-export const PROJECT_KNOWLEDGE_RELATIVE_DIR = path.join('.cwtools-ai', 'project', 'knowledge');
+export const PROJECT_KNOWLEDGE_RELATIVE_DIR = path.join('.cwtools', 'project', 'knowledge');
 
 export interface ProjectKnowledgeManifest {
     schemaVersion: 1 | 2;
@@ -86,7 +88,7 @@ export interface GenerateProjectKnowledgeOptions {
 }
 
 const RELEVANT_EXTENSIONS = new Set(['.txt', '.gfx', '.asset', '.gui', '.yml', '.cwt', '.mod']);
-const EXCLUDED_DIRECTORIES = new Set(['.git', '.cwtools-ai', 'node_modules', 'release', 'artifacts', 'dist', 'out']);
+const EXCLUDED_DIRECTORIES = new Set(['.git', '.cwtools', '.cwtools-ai', 'node_modules', 'release', 'artifacts', 'dist', 'out']);
 const DOMAIN_NAMES = ['events', 'on_actions', 'special_projects', 'archaeology', 'situations', 'technology', 'ships', 'scripted_logic', 'assets', 'localisation', 'other'];
 let watcherRegistration: vs.Disposable | undefined;
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -98,16 +100,38 @@ const pendingVanillaIndexGames = new Set<string>();
 const pendingStaleReasons = new Set<string>();
 let vanillaCacheDirectory: string | undefined;
 
-function knowledgeRoot(workspaceRoot: string): string {
-    return path.join(workspaceRoot, PROJECT_KNOWLEDGE_RELATIVE_DIR);
+function primaryKnowledgeRoot(workspaceRoot: string): string {
+    return path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
 }
 
-export function getProjectKnowledgeManifestPath(workspaceRoot: string): string {
+function legacyKnowledgeRoot(workspaceRoot: string): string {
+    return path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+}
+
+function knowledgeRoot(workspaceRoot: string): string {
+    const primary = primaryKnowledgeRoot(workspaceRoot);
+    const legacy = legacyKnowledgeRoot(workspaceRoot);
+    if (fs.existsSync(path.join(primary, 'manifest.json'))) return primary;
+    if (fs.existsSync(path.join(legacy, 'manifest.json'))) return legacy;
+    return primary;
+}
+
+function ensurePrimaryKnowledgeRoot(workspaceRoot: string): string {
+    const primary = primaryKnowledgeRoot(workspaceRoot);
+    migrateLegacyAiStorageRoot(workspaceRoot);
+    return primary;
+}
+
+function existingProjectKnowledgeManifestPath(workspaceRoot: string): string {
     return path.join(knowledgeRoot(workspaceRoot), 'manifest.json');
 }
 
+export function getProjectKnowledgeManifestPath(workspaceRoot: string): string {
+    return path.join(primaryKnowledgeRoot(workspaceRoot), 'manifest.json');
+}
+
 export function getProjectKnowledgeDatabasePath(workspaceRoot: string): string {
-    return path.join(knowledgeRoot(workspaceRoot), 'knowledge.sqlite');
+    return path.join(primaryKnowledgeRoot(workspaceRoot), 'knowledge.sqlite');
 }
 
 function normalizePath(value: string): string {
@@ -294,7 +318,7 @@ export async function generateProjectKnowledge(
     profile: ProjectProfile,
     options: GenerateProjectKnowledgeOptions = {},
 ): Promise<ProjectKnowledgeManifest> {
-    const root = knowledgeRoot(workspaceRoot);
+    const root = ensurePrimaryKnowledgeRoot(workspaceRoot);
     fs.mkdirSync(root, { recursive: true });
     const snapshot = await requestLspKnowledgeSnapshot(workspaceRoot, options);
     const databasePath = getProjectKnowledgeDatabasePath(workspaceRoot);
@@ -355,7 +379,7 @@ export function writeUnavailableProjectKnowledge(
     profile: ProjectProfile,
     reason: string,
 ): ProjectKnowledgeManifest {
-    const root = knowledgeRoot(workspaceRoot);
+    const root = ensurePrimaryKnowledgeRoot(workspaceRoot);
     fs.mkdirSync(root, { recursive: true });
     const generatedAt = new Date().toISOString();
     const gameId = profile.game.id || 'unknown';
@@ -395,7 +419,9 @@ export function writeUnavailableProjectKnowledge(
 }
 
 export function readProjectKnowledgeManifest(workspaceRoot: string): ProjectKnowledgeManifest | undefined {
-    return readJson<ProjectKnowledgeManifest>(getProjectKnowledgeManifestPath(workspaceRoot));
+    const manifestPath = existingProjectKnowledgeManifestPath(workspaceRoot);
+    if (fs.existsSync(manifestPath)) return readJson<ProjectKnowledgeManifest>(manifestPath);
+    return undefined;
 }
 
 function currentStaleReasons(workspaceRoot: string, manifest: ProjectKnowledgeManifest): string[] {
@@ -412,7 +438,8 @@ export function markProjectKnowledgeStale(workspaceRoot: string, reasons: string
     if (!manifest) return;
     manifest.status = 'stale';
     manifest.staleReasons = Array.from(new Set([...(manifest.staleReasons ?? []), ...reasons]));
-    writeJson(getProjectKnowledgeManifestPath(workspaceRoot), manifest);
+    const primary = path.join(ensurePrimaryKnowledgeRoot(workspaceRoot), 'manifest.json');
+    writeJson(primary, manifest);
 }
 
 function tokenizeQuery(args: QueryProjectKnowledgeArgs): string[] {
@@ -434,7 +461,7 @@ function queryLegacyProjectKnowledge(workspaceRoot: string, args: QueryProjectKn
     if (!manifest) {
         return {
             status: 'missing',
-            manifestPath: getProjectKnowledgeManifestPath(workspaceRoot),
+            manifestPath: existingProjectKnowledgeManifestPath(workspaceRoot),
             domains: [],
             evidence: [],
             unresolved: [],
@@ -479,7 +506,7 @@ function queryLegacyProjectKnowledge(workspaceRoot: string, args: QueryProjectKn
     const unresolved = args.includeUnresolved === false ? [] : (unresolvedFile?.entries ?? []).slice(0, 100);
     return {
         status: staleReasons.length > 0 || manifest.status !== 'ready' ? 'stale' : 'ready',
-        manifestPath: getProjectKnowledgeManifestPath(workspaceRoot),
+        manifestPath: existingProjectKnowledgeManifestPath(workspaceRoot),
         generatedAt: manifest.generatedAt,
         game: manifest.game,
         graphVersion: manifest.graphVersion,
@@ -508,8 +535,9 @@ export async function queryProjectKnowledge(
         return queryLegacyProjectKnowledge(workspaceRoot, args);
     }
 
-    const manifestPath = getProjectKnowledgeManifestPath(workspaceRoot);
-    const databasePath = path.resolve(knowledgeRoot(workspaceRoot), manifest.database?.path ?? 'knowledge.sqlite');
+    const root = knowledgeRoot(workspaceRoot);
+    const manifestPath = path.join(root, 'manifest.json');
+    const databasePath = path.resolve(root, manifest.database?.path ?? 'knowledge.sqlite');
     if (!fs.existsSync(databasePath)) {
         return {
             status: 'error',
@@ -613,8 +641,7 @@ async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexSer
         if (!fullRefresh && files.length === 0) return;
         const manifest = readProjectKnowledgeManifest(workspaceRoot);
         if (!manifest) return;
-        const profilePath = path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json');
-        const profile = readJson<ProjectProfile>(profilePath);
+        const profile = readProjectProfile(workspaceRoot);
         if (!profile) return;
         markProjectKnowledgeStale(workspaceRoot, staleReasons.length > 0 ? staleReasons : ['workspace_files_changed']);
         try {
@@ -648,7 +675,7 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, in
         const workspaceFolder = vs.workspace.getWorkspaceFolder(uri);
         if (!workspaceFolder) return;
         const relative = normalizePath(path.relative(workspaceFolder.uri.fsPath, uri.fsPath));
-        if (!relative || relative.startsWith('.cwtools-ai/') || relative.startsWith('.git/') || relative.startsWith('node_modules/')) return;
+        if (!relative || relative.startsWith('.cwtools/') || relative.startsWith('.cwtools-ai/') || relative.startsWith('.git/') || relative.startsWith('node_modules/')) return;
         pendingChangedFiles.add(uri.fsPath);
         pendingStaleReasons.add('workspace_files_changed');
         if (refreshTimer) clearTimeout(refreshTimer);

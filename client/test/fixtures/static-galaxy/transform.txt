@@ -1,0 +1,38 @@
+# Coordinate transforms apply in document order; a file may hold several scenarios.
+static_galaxy_scenario = {
+    name = "TRANSFORM_A"
+    priority = 1
+
+    coordinate_transform = {
+        x = { add = 100 mul = 2 }
+        y = { sub = 50 }
+    }
+
+    system = {
+        id = 1
+        name = "Transformed"
+        position = { x = 10 y = 100 }
+    }
+
+    coordinate_transform = {
+        x = { add = 1000 }
+    }
+
+    system = { id = 2 position = { x = 1 y = 1 } }
+
+    # mul = 0 makes the transform non-invertible: preview only, no canvas editing.
+    coordinate_transform = {
+        x = { mul = 0 }
+    }
+
+    system = { id = 3 position = { x = 7 y = 7 } }
+}
+
+static_galaxy_scenario = {
+    name = "SECOND_SCENARIO"
+    priority = 2
+
+    system = { id = 100 position = { x = -10 y = -10 } }
+    system = { id = 101 position = { x = 10 y = 10 } }
+    add_hyperlane = { from = 100 to = 101 }
+}

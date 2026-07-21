@@ -53,6 +53,12 @@ export function tokenize(input: string, opts: TokenizeOptions = {}): Token[] {
             i++;
             const start = i;
             while (i < input.length && input[i] !== '"') {
+                // Keep escaped characters (e.g. \") inside the string token.
+                if (input[i] === '\\' && i + 1 < input.length) {
+                    if (input[i + 1] === '\n') line++;
+                    i += 2;
+                    continue;
+                }
                 if (input[i] === '\n') line++;
                 i++;
             }

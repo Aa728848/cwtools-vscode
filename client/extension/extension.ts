@@ -19,6 +19,7 @@ import { classifyAssetFile } from './particleSniff';
 import { UI, SOURCE, aiText, setAiMessageLocale } from './ai/messages';
 import { ErrorReporter } from './ai/errorReporter';
 import { SolarSystemPanel } from './solarSystemPanel';
+import { openStaticGalaxyPreview, registerStaticGalaxyEditor } from './staticGalaxyEditorProvider';
 import { EventChainPanel } from './eventChainPanel';
 import { TechTreePanel } from './techTreePanel';
 import * as exe from './executable';
@@ -1957,6 +1958,7 @@ export async function activate(context: ExtensionContext) {
 
 	// ── Graphics Features: DDS hover preview, GFX sprite goto, room completion ──
 	registerTexturePreviewEditor(context);
+	registerStaticGalaxyEditor(context);
 	registerGraphicsFeatures(context);
 	registerImageTools(context);
 
@@ -2417,6 +2419,11 @@ export async function activate(context: ExtensionContext) {
 				if (result !== 'Preview') return;
 			}
 			await SolarSystemPanel.create(context.extensionPath, doc);
+		});
+
+		// Static Galaxy Preview/Edit command (also reachable via explorer/editor context menus)
+		safeRegisterCommand(context, "cwtools.previewStaticGalaxy", async (target?: vs.Uri) => {
+			await openStaticGalaxyPreview(target);
 		});
 
 		// Event Chain Visualizer command

@@ -2,7 +2,7 @@
 
 ## 1. 文档状态
 
-- 状态：设计完成，等待实现。
+- 状态：首版实现完成，进入验收与缺陷收敛阶段。
 - 目标版本：后续功能版本，具体版本号以根目录 `package.json` 和 `release/package.json` 为准。
 - 功能范围：Stellaris `map/setup_scenarios/*.txt` 中的 `static_galaxy_scenario`。
 - 主要参考实现：
@@ -45,19 +45,20 @@ Stellaris 支持 `static_galaxy_scenario`，可以在脚本中直接声明恒星
 1. 从 `map/setup_scenarios/*.txt` 打开独立的静态银河预览器。
 2. 在顶部工具栏提供与现有星系预览一致的“预览 / 编辑”分段按钮。
 3. 预览系统中心、坐标范围、星云和源码中明确声明的航道。
-4. 支持选择恒星系统、查看详情、跳转源码和拖拽修改 X/Y 位置。
-5. 拖动范围坐标时默认整体平移 `min/max`，保持原有随机范围宽度。
-6. 使用精确源码跨度和 `WorkspaceEdit` 做最小写回，不重排文件、不删除注释。
-7. 使用 VS Code 原生文档保存、撤销、重做和脏状态。
-8. 在文档外部变化或请求过期时拒绝旧编辑并重新同步。
-9. 对解析失败、反向范围、重复 ID、悬空航道等情况显示诊断。
-10. 在约 2000 个系统规模下保持流畅缩放、平移、选择和拖拽。
+4. 支持选择恒星系统或星云、查看详情、跳转源码和拖拽修改 X/Y 位置。
+5. Inspector 支持固定/范围 X/Y/Z；当源码没有 Z 时可显式补充固定 Z。
+6. 支持在两个系统之间添加或断开显式超空间航道，分别写回 `add_hyperlane` / `remove_hyperlane`。
+7. 拖动范围坐标时默认整体平移 `min/max`，保持原有随机范围宽度。
+8. 使用精确源码跨度和 `WorkspaceEdit` 做最小写回，不重排文件、不删除注释。
+9. 使用 VS Code 原生文档保存、撤销、重做和脏状态。
+10. 在文档外部变化或请求过期时拒绝旧编辑并重新同步。
+11. 对解析失败、反向范围、重复 ID、悬空航道等情况显示诊断。
+12. 在约 2000 个系统规模下保持流畅缩放、平移、选择和拖拽。
 
 ### 3.2 后续增强
 
 - 多选、框选和批量平移。
-- 星云位置及半径编辑。
-- 显式超空间航道的添加和删除。
+- 星云半径编辑。
 - 通过 initializer 解析恒星类型并显示更接近游戏的颜色或图标。
 - “估算随机航道”可选图层。
 - 坐标对齐、均匀分布和碰撞检查等辅助工具。
@@ -89,6 +90,7 @@ Stellaris：预览/编辑静态银河
 - 编辑器标题栏按钮。
 - `map/setup_scenarios/*.txt` 的资源管理器和编辑器上下文菜单。
 - 可选 Custom Editor：`cwtools.staticGalaxyEditor`，`priority` 设为 `option`，不替换默认文本编辑器。
+- 标题栏命令使用 `$(map)` 地图图标，避免与本地化翻译命令的 `$(globe)` 图标混淆。
 
 打开前由 Extension Host 检查文件：
 
@@ -108,7 +110,7 @@ app-header
 ├─ app-identity
 │  ├─ app-kicker: STATIC GALAXY / 静态银河
 │  └─ title: 当前文件名
-├─ scenario-picker
+├─ scenario-picker      （仅当文件含多个场景时显示；单场景文件隐藏并收起该列）
 │  └─ scenario-select
 ├─ mode-switch
 │  ├─ btn-preview
@@ -132,7 +134,7 @@ app-header
   - 使用与现有星系预览相同的铅笔图标和分段按钮样式。
   - 标题为“编辑模式 (E)”。
   - 激活后给 `body` 增加 `is-edit-mode`。
-  - 显示 `edit-only` 文档操作，启用拖拽和坐标输入。
+  - 显示 `edit-only` 文档操作，启用系统/星云拖拽、X/Y/Z 坐标输入和显式航道操作。
   - 鼠标进入可编辑节点时使用 `move`，空白区域保持 `grab`。
 - 两种模式使用同一个 Canvas，不重建场景，不重置缩放、平移、筛选和选中项。
 - 模式变化同步更新 `.active`、`aria-pressed`、光标、属性面板和命令可用状态。
@@ -187,16 +189,17 @@ app-header
 
 编辑模式在预览模式基础上增加：
 
-- 拖动恒星系统中心修改 X/Y。
-- Inspector 中输入精确坐标。
+- 拖动恒星系统或星云中心修改 X/Y。
+- Inspector 中输入精确 X/Y/Z；Z 未声明时显示空输入，用户填入后才新增 `z = ...`。
 - 固定坐标与范围坐标使用不同的属性控件。
+- 系统 Inspector 可选择另一端点并执行“添加航道”或“断开航道”。
 - 拖动过程中显示坐标 HUD、位移量和吸附结果。
 - `Escape` 取消本次拖动并恢复拖动前模型。
 - `pointerup` 后只提交一次写回。
 - 提交期间锁定该节点，避免连续请求覆盖。
 - 写回失败时恢复 Host 返回的最新状态，而不是继续使用前端猜测值。
 
-第一版只编辑系统位置。星云可选择和查看，但其位置及半径编辑放入增强阶段，以降低首版写回风险。
+星云半径仍为只读；位置编辑与系统共用相同的 span、transform 逆变换和 revision 安全检查。
 
 ## 5. 技术架构
 
@@ -309,6 +312,8 @@ interface StaticGalaxySystemView {
 ```
 
 `nodeKey` 使用“解析 revision 内稳定”的不透明 ID，而不是只使用系统 `id`。重复 ID 是需要报告的错误，但不能导致前端节点互相覆盖。
+
+星云渲染模型同样携带 `rawPosition`、`effectivePosition`、`editable` 和 `editBlockedReason`；半径保留为预览字段。Host 私有解析模型额外保存 `positionBlockSpan`，仅用于用户填写缺失 Z 时在位置块闭合括号前插入一个字段，该跨度不会发送到 Webview。
 
 ### 6.3 场景模型
 
@@ -447,7 +452,7 @@ position = { x = { min = -97 max = -93 } y = 20 }
 
 - 使用 `devicePixelRatio`，最大截断为 2，避免超高 DPI 占用过多内存。
 - 所有世界坐标通过统一 `worldToScreen/screenToWorld` 变换。
-- Y 轴方向在一个函数中统一转换，不在各绘制函数中散落负号。
+- X/Y 轴方向在 `worldToScreen/screenToWorld` 中统一转换（Stellaris 银河地图 X 正方向朝左、Y 朝上），不在各绘制函数中散落负号；网格与范围框等需要世界极值的绘制按翻转后的方向归一化。
 - Z 轴第一版不改变 X/Y 布局；Inspector 展示 Z，视图可选用亮度或小型高度标记表达 Z。
 
 ### 8.2 绘制层级
@@ -574,7 +579,14 @@ x = { min = -87 max = -83 }
 - 不把范围自动折叠为固定值。
 - 只有 Inspector 中显式选择“转换为固定坐标”时才改变语法形态。
 
-### 9.5 WorkspaceEdit 构建
+### 9.5 Z 坐标写回
+
+- 已声明 Z 时沿用固定/范围 token 的精确替换规则。
+- 未声明 Z 时 Inspector 显示空输入，不把空值当作 0，也不因修改 X/Y 自动增加 Z。
+- 用户明确填写 Z 后，Builder 只在当前节点的 `position = { ... }` 闭合括号前插入 `z = <int>`，并保持原文件的单行/多行结构和 CRLF/LF 风格。
+- Canvas 仍是二维投影，拖拽只改变 X/Y；Z 仅通过 Inspector 精确编辑。
+
+### 9.6 WorkspaceEdit 构建
 
 新增纯逻辑模块：
 
@@ -590,7 +602,7 @@ client/extension/staticGalaxyEditBuilder.ts
 
 输出：
 
-- 一组确定性的数字跨度替换。
+- 一组确定性的跨度替换：坐标数字 token、航道声明 key，或缺失字段/新航道的最小插入。
 - 变更摘要。
 - 或明确的拒绝原因。
 
@@ -598,7 +610,7 @@ client/extension/staticGalaxyEditBuilder.ts
 
 1. 请求 revision 与 Host 当前 revision 一致。
 2. `document.version` 未变化。
-3. `nodeKey` 存在且属于当前场景。
+3. `nodeKey` 存在且属于当前场景；航道的两个端点必须同场景、非自身且 ID 唯一。
 4. 目标节点仍可编辑。
 5. 当前跨度内文本与解析时保存的 token 文本一致。
 6. 新值为有限、合法、在合理上限内的数字。
@@ -606,7 +618,15 @@ client/extension/staticGalaxyEditBuilder.ts
 
 所有替换通过一个 `WorkspaceEdit` 提交，使一次拖动对应一次撤销。编辑顺序按起始 offset 从后向前排序，保证构建结果确定且便于单元测试。
 
-### 9.6 文档同步
+### 9.7 显式航道写回
+
+- Webview 只提交两个系统 `nodeKey` 和目标状态 `connected`，不提交系统 ID、源码 key、offset 或替换文本。
+- Host 从当前 revision 解析模型解析端点 ID，并按无向端点对匹配已有 `add_hyperlane` / `remove_hyperlane` / `prevent_hyperlane`。
+- 已有声明时只把匹配声明的 key 统一改为目标 key；因此断开不会删除用户的端点、空格或行尾注释，重新连接也可逆。
+- 没有声明时，在当前 `static_galaxy_scenario` 闭合括号前插入一条声明，并复用源文件换行符和现有子节点缩进。
+- 不修改 `random_hyperlanes`，也不根据距离重算其他航道。
+
+### 9.8 文档同步
 
 Provider 监听 `onDidChangeTextDocument`：
 
@@ -617,7 +637,7 @@ Provider 监听 `onDidChangeTextDocument`：
 - 解析失败时保留最后一次可显示快照，但进入只读预览并显示“源码存在语法错误”。
 - 不使用容易产生竞态的单个 `_skipNextReload` 标志；自有编辑也通过同一文档变化流程收敛。
 
-### 9.7 保存与撤销
+### 9.9 保存与撤销
 
 - `btn-save` 调用 `TextDocument.save()`。
 - Ctrl+S 在 Webview 有焦点时转发到 Host。
@@ -646,7 +666,9 @@ type StaticGalaxyHostMessage =
 type StaticGalaxyWebviewMessage =
     | { type: 'ready' }
     | { type: 'moveSystems'; requestId: string; revisionId: string; documentVersion: number; moves: SystemMove[] }
+    | { type: 'moveNebula'; requestId: string; revisionId: string; documentVersion: number; move: NodeMove }
     | { type: 'updatePosition'; requestId: string; revisionId: string; documentVersion: number; update: PositionUpdate }
+    | { type: 'setHyperlane'; requestId: string; revisionId: string; documentVersion: number; update: HyperlaneUpdate }
     | { type: 'goToSource'; revisionId: string; nodeKey: string }
     | { type: 'saveDocument' }
     | { type: 'undo' }
@@ -661,6 +683,7 @@ type StaticGalaxyWebviewMessage =
 - 先判别 discriminant，再逐字段校验。
 - 限制 `moves` 长度；第一版最大为 1，批量编辑启用后设置明确上限。
 - Webview 不能指定 URI、源码 offset 或任意替换文本。
+- `setHyperlane` 只接受两个不同的非空 `nodeKey` 与布尔 `connected`；端点 ID 和声明文本只能由 Host 推导。
 - 所有失败通过结构化拒绝消息返回，并使用 `ErrorReporter` 记录必要上下文。
 
 ## 11. 航道预览策略
@@ -672,7 +695,18 @@ type StaticGalaxyWebviewMessage =
 - 端点不存在：仍进入诊断列表，但不绘制到不存在节点。
 - 重复的反向声明在渲染模型中去重，源码诊断保持各自位置。
 
-### 11.2 随机航道
+### 11.2 精确航道编辑
+
+- 仅系统选择显示端点下拉框；星云不参与航道操作。
+- “添加航道”目标状态为 `add_hyperlane`，“断开航道”目标状态为 `remove_hyperlane`。
+- 已经处于目标状态时禁用对应按钮；冲突声明可由任一操作归一为用户选择的状态。
+- 端点缺失、重复 ID、跨场景或自身连接由 Host 拒绝，不依赖 Webview 的 UI 限制作为安全边界。
+- 画布快捷操作与 Inspector 按钮共用同一 `setHyperlane` 消息：
+  - 编辑模式下右键点击系统进入航道绘制模式；该模式下左键不能拖动系统、不能选中星云，只用于续链端点。
+  - 左键逐个把端点加入链路（已在链中的系统被忽略），再次按右键把链路的所有航段合并为**一次** `add_hyperlane` 写回（单个 WorkspaceEdit、单次撤销）；新声明按场景合并为一个锚点插入，冲突声明就地改名，重复端点对去重。左键命中空白或非系统、`Escape` 或未续链时按右键均取消绘制。
+  - 右键直接点击已绘制的 `add_hyperlane` 航道时删除源码中的整条声明（不写 `remove_hyperlane`）：独占一行的声明连行删除，行尾注释与其他字段保留；同一端点对的重复声明一并删除；删除前按解析时保存的声明原文做过期校验。
+
+### 11.3 随机航道
 
 当 `random_hyperlanes = yes` 且源码没有明确拓扑时，最终航道由游戏运行时生成。第一版必须：
 
@@ -680,13 +714,13 @@ type StaticGalaxyWebviewMessage =
 - 在工具栏显示“运行时随机航道，无法精确预览”的说明。
 - 不根据截图或距离直接声称得到真实航道。
 
-增强阶段可以提供“估算航道”图层：
+“估算航道”图层已实现（默认关闭，视图工具栏“估算”开关，状态持久化）：
 
-- 视觉上使用明显弱化的虚线。
-- 图例固定标注“Estimated / 估算”。
-- 候选图可以采用 Delaunay，再按最大距离和密度稀疏化。
-- 估算只存在于前端，不自动转换为 `add_hyperlane`。
-- 引入 `d3-delaunay` 等新依赖前单独评估 bundle 体积；如果不引入依赖，则宁可省略估算层，也不实现未经验证的“游戏算法”。
+- 仅在 `random_hyperlanes = yes` 的场景可用；其他场景按钮禁用并说明原因。
+- 算法为文档化的 k 近邻启发式（`client/shared/staticGalaxyEstimate.ts`）：每个系统连接 `max_hyperlane_distance`（缺省 50）内最多 k 个最近邻，k 随 `hyperlane_density` 缩放并夹在 [1, 6]；无向去重。**明确标注为近似，不宣称是游戏算法。**
+- 视觉上使用明显弱化的虚线，绘制在显式航道之下。
+- 图例固定标注“估算航道 — 启发式近似，非游戏实际生成结果”。
+- 估算只存在于前端，不自动转换为 `add_hyperlane`；新 revision 到达后惰性重算，不引入 `d3-delaunay` 等新依赖。
 
 ## 12. 诊断设计
 
@@ -861,15 +895,19 @@ Workshop 文件可能被 Steam 更新覆盖。路径匹配 `steamapps/workshop/c
 8. 接通保存、撤销、重做和 document state。
 9. 实现错误回滚和 Host 最新快照重同步。
 10. 实现 Workshop 风险确认和只读模式。
+11. 让星云复用系统的拖拽与坐标写回路径。
+12. 增加 Z 精确输入和缺失 Z 的最小字段插入。
+13. 增加显式航道端点选择、添加/断开消息与声明写回。
 
 完成门槛：
 
 - 一次拖动只产生一次原生撤销记录。
-- 除目标数字外，文件字节内容保持不变。
+- 坐标编辑除目标数字或明确新增的 Z 字段外，文件其他字节保持不变；航道编辑只改声明 key 或插入一条声明。
 - 范围宽度保持不变。
 - 外部修改后旧请求不会写到错误位置。
 - 不可逆 transform 节点无法从 Canvas 编辑。
 - 预览模式下不会产生任何文档写入。
+- 系统和星云均可安全拖动；航道端点异常会被 Host 拒绝。
 
 ### 阶段 5：增强和润色
 
@@ -877,11 +915,9 @@ Workshop 文件可能被 Steam 更新覆盖。路径匹配 `steamapps/workshop/c
 
 1. initializer 解析和恒星类型着色。
 2. 多选、框选和批量平移。
-3. 星云位置及半径编辑。
-4. 显式航道编辑。
-5. 评估并实现 estimated lane 图层。
-6. 增加碰撞和范围重叠辅助视图。
-7. 增加复制到 Mod 工作区的安全工作流。
+3. 星云半径编辑。
+4. 评估并实现 estimated lane 图层。
+5. 增加碰撞和范围重叠辅助视图。
 
 这些任务不得阻塞首个可用的系统坐标预览/编辑版本。
 
@@ -967,6 +1003,10 @@ CHANGELOG.md
 - 原始空格、换行、注释和字段顺序保持不变。
 - CRLF 保持不变。
 - transform 逆变换正确。
+- 系统与星云共享拖拽写回且各自校验 editable 状态。
+- 已有 Z 的固定/范围更新，以及缺失 Z 的单字段插入。
+- 新增航道保持 LF/CRLF 和场景缩进；断开/重连只修改声明 key 并保留注释。
+- 跨场景、自身端点、空 ID 和重复 ID 航道请求被拒绝。
 - 反向范围拖动不被静默修正。
 - stale revision、错误 document version 和 token mismatch 被拒绝。
 - NaN、Infinity、过大数组和未知 nodeKey 被拒绝。
@@ -981,6 +1021,8 @@ CHANGELOG.md
 - mode switch 有正确 role 和 aria 属性。
 - edit-only 控件只在编辑模式显示。
 - Canvas、Inspector、状态、适应视图和图层按钮存在。
+- 星云 move 消息、Z 输入和添加/断开航道控件存在。
+- 标题栏使用 `$(map)`，不与翻译命令共用 `$(globe)`。
 - CSS 使用 VS Code theme variables。
 - CSS 包含 `prefers-reduced-motion`。
 - Rollup 复制对应 CSS 并产出 JS。
@@ -1030,6 +1072,7 @@ npm run verify
 - [ ] 模式切换不重置缩放、平移、筛选或选中项。
 - [ ] 编辑模式显示保存、撤销、重做和状态控件。
 - [ ] Inspector 可以折叠，Canvas 正确自适应。
+- [ ] 静态银河标题栏使用地图图标，与翻译命令图标可区分。
 - [ ] 中英文文案完整，键盘和屏幕阅读器状态正确。
 
 ### 18.2 预览
@@ -1046,6 +1089,10 @@ npm run verify
 - [ ] 预览模式不能修改文档。
 - [ ] 固定坐标拖动只修改目标数字。
 - [ ] 范围坐标拖动保持范围宽度。
+- [ ] 系统和星云均可拖动；不可写坐标或不可逆 transform 会禁用拖动。
+- [ ] Inspector 显示 X/Y/Z；缺失 Z 保持空白，明确填写后只新增一个 Z 字段。
+- [ ] 添加航道生成/转换为 `add_hyperlane`，断开航道生成/转换为 `remove_hyperlane`。
+- [ ] 航道编辑不修改 `random_hyperlanes` 或其他端点对。
 - [ ] 一次拖动对应一次撤销。
 - [ ] Ctrl+S 或保存按钮保存当前文档。
 - [ ] 外部修改导致旧编辑请求安全失败。
@@ -1098,6 +1145,6 @@ npm run verify
 
 ## 20. 完成定义
 
-首个可交付版本以“准确预览、可靠选择、范围保持拖动、最小源码写回、原生撤销和明确随机航道限制”为完成标准。
+首个可交付版本以“准确预览、可靠选择、系统/星云范围保持拖动、X/Y/Z 最小源码写回、显式航道添加/断开、原生撤销和明确随机航道限制”为完成标准。
 
-initializer 图标、估算航道、多选、星云编辑和显式航道编辑都属于增强功能；这些功能可以提升体验，但不得用来推迟安全可用的系统坐标编辑核心。
+initializer 图标、估算航道、多选和星云半径编辑仍属于增强功能；系统/星云位置、Z 与显式航道编辑已经纳入当前交付范围，并必须满足相同的 revision、类型守卫和最小写回约束。

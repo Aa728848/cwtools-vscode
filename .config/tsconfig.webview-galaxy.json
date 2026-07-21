@@ -1,0 +1,16 @@
+{
+    "compilerOptions": {
+        "module": "ES2020"
+    },
+    "extends": "../tsconfig.json",
+    "include": [
+        "../client/webview/staticGalaxyPreview.ts",
+        "../client/webview/vscode.d.ts",
+        "../client/shared/staticGalaxyProtocol.ts",
+        "../client/shared/staticGalaxyEstimate.ts"
+    ],
+    "exclude": [
+        "../client/extension/**",
+        "../client/test/**"
+    ]
+}

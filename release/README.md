@@ -31,6 +31,7 @@ The CWTools LSP server, customized using **.NET 10** and **F#**, serves as the c
 This project makes deep use of the VS Code Webview isolation sandbox, utilizing modern web rendering technologies (Canvas / Cytoscape.js / Three.js) to deliver an unprecedented WYSIWYG experience to mod developers.
 - **GUI Canvas Real-time Preview & Editing**: Supports real-time bidirectional interactive rendering of Stellaris `.gui` interface configuration files. It perfectly renders `corneredTileSpriteType` 9-slice stretching and multi-frame sprite (`noOfFrames`) animations. It supports visual layer trees and directly **drags controls to resize/reposition them, automatically writing back coordinate changes to the source code**.
 - **3D Solar System Rendering & Orbit Editing**: Enter any solar system initializer `.txt` script in `solar_system_initializers/` to launch a gorgeous 3D system space. It supports recursive nesting of stars, planets, moons, and ring worlds. Developers can directly drag planets to modify their `orbit_distance` and `orbit_angle`, syncing changes back to the script.
+- **Static Galaxy Preview & Position Editor**: Opens `map/setup_scenarios/*.txt` `static_galaxy_scenario` files in a Canvas2D galaxy map with systems, coordinate ranges, nebulas, and explicit hyperlanes. In Edit Mode, drag systems or nebulas to rewrite X/Y, edit or add Z in the Inspector, and add/disconnect explicit hyperlanes with minimal, span-precise `WorkspaceEdit`s that participate in native undo; reversed ranges, duplicate ids, and dangling lanes surface as visual diagnostics.
 - **Technology Tree & Event Reference Network**: Uses Cytoscape.js to render highly interactive tech dependency and multi-level event flow graphs. It supports quick searching, relationship filtering, and double-clicking nodes to instantly navigate to the declaring script file and line number.
 - **Three.js Entity & Animation Rendering**: Supports loading and debugging Paradox native `.asset` 3D meshes, textures, and skeletal animations within the Webview sandbox.
 - **Particle Effect Preview & Editor**: Provides a three-pane editor for `particle={...}` definitions in `gfx/particles/**/*.asset` files, featuring Three.js real-time simulation, curve editing, subsystem/force/property modification, texture decoding, and write-back to `.asset`.
@@ -42,7 +43,7 @@ This is the most innovative subsystem of the plugin. Unlike generic single-round
   - **Review Mode**: A secure read-only review environment that disables write permissions, designed to enforce code style rules, prevent logical flaws, and block out-of-scope write-overs.
 - **Sub-Agent Parallel DAG Orchestration**: The underlying reasoning flow is based on a topologically sorted task graph, scheduling specialized sub-agents (e.g., Explorer, Builder, LocWriter, Reviewer) in parallel via `Promise.allSettled` to write complex features on a **shared Blackboard**—speeding up execution several fold.
 - **Anti-Looping & Smart Context Windowing**: Built-in two-phase "Doom-Loop" prevention; when the dialogue tokens approach 70% of the maximum limit, it automatically triggers LLM-level structured memory compression and repairs orphan tool calls, ensuring high success rates for long-duration tasks.
-- **Bi-directional MCP Integration**: Serves as an **MCP Client** to consume external stdio/SSE tools; simultaneously, it **exports a read-only MCP Server** (`packages/cwtools-mcp`) bundled with the plugin, opening up its 27 semantic tools (project knowledge pack, bounded project graph, types, rules, scopes, diagnostics, etc.) for external agents like **Codex / Claude Code**—see Section 7 for details.
+- **Bi-directional MCP Integration**: Serves as an **MCP Client** to consume external stdio/SSE tools; simultaneously, it **exports a read-only MCP Server** (`packages/cwtools-mcp`) bundled with the plugin, opening up its 27 semantic tools (project knowledge pack, bounded project graph, types, rules, scopes, diagnostics, etc.) for external agents like **Codex / Claude Code**—see Section 8 for details.
 - **Workspace-wide Localization Indexing**: An asynchronous incremental indexing system based on VS Code `FileSystemWatcher` feeds stable, accurate localization context to the large model.
 
 ##### 📂 4. Differences & Fast Migration Pipeline (Vanilla Compare)
@@ -90,13 +91,22 @@ Below is the overall module interaction and data flow topology:
   - In **Edit Mode**, right-click the canvas to create stars, planets, moons, or ring worlds.
   - **Drag a planet directly along its orbit** to modify its distance and angle; variables like `orbit_distance` and `orbit_angle` will sync back to the editor.
 
-##### 🌐 3. Tech Tree & Event Dependency Graph
+##### 🌌 3. Static Galaxy Preview & Position Editor
+* **How to open**: Open any `.txt` file under `map/setup_scenarios/` and click the **Map Icon (Preview/Edit Static Galaxy)** in the editor title bar, or use the file's context menu. A `Static Galaxy Preview/Editor` entry is also available via **Open With...**.
+* **Operations**:
+  - Zoom with the mouse wheel, pan with `Space`/`Alt`/middle-drag, click to select a system or nebula, and **double-click to jump to its source block**.
+  - Use the **Preview / Edit** segmented control (shortcut `E`) to switch modes without losing zoom, pan, filters, or selection.
+  - In **Edit Mode**, drag a system or nebula to translate its X/Y position; range coordinates `{ min max }` keep their width, and only the touched number tokens are rewritten — one drag produces exactly one native undo step. The Inspector accepts precise X/Y/Z values (and can add a missing Z). Explicit hyperlanes can be drawn on the canvas: right-click a system to enter lane-drawing mode, left-click to chain endpoints (A→B→C…), and right-click again to confirm all segments as a single edit; right-clicking an existing lane deletes its `add_hyperlane` declaration from the source.
+  - `random_hyperlanes = yes` is called out explicitly: runtime-generated lanes are never presented as exact preview data. An optional **Estimated lanes** toggle (off by default) draws a clearly-labeled heuristic approximation — never written back to source.
+  - Steam Workshop files show a risk banner and require confirmation before editing; copying the file into your mod workspace is offered as the safe path.
+
+##### 🌐 4. Tech Tree & Event Dependency Graph
 * **How to open**: Inside tech or event definition scripts, click the **Graph Icon (Show Dependency Graph)**.
 * **Operations**:
   - Leverages Cytoscape.js to display pre-requisites and downstream effects.
   - Supports searching, filter constraints, and node highlighting. **Double-click any node** to navigate and jump to its declaration line in the source file.
 
-##### 🤖 4. Fully Autonomous Multi-Agent AI Panel
+##### 🤖 5. Fully Autonomous Multi-Agent AI Panel
 * **How to open**: Click the **AI Icon** in the Activity Bar or execute `AI: Open Chat Panel` in the Command Palette.
 * **Hotkeys**:
   - `Tab`: Cycle through agent modes (Build, Plan, Analyze, Review, Orchestrate, General).
@@ -105,11 +115,11 @@ Below is the overall module interaction and data flow topology:
 * **Architecture Diagrams**: When a design or analysis contains several connected components, the Agent can emit Mermaid flow/sequence/state diagrams. Chat messages, live process text, tool-result cards, plans, blueprints, and walkthrough cards render them locally with VS Code theme colors, source copy, fullscreen viewing, and safe source fallback.
 * **Web Access**: Agent settings separate search from live page access. Search providers include OpenAI, Brave, Exa, Tavily, Serper, SerpAPI, SearXNG, and a DuckDuckGo fallback; provider keys are kept in VS Code SecretStorage. Live pages pass public-address, redirect, size, and domain-policy checks and are always treated as untrusted evidence.
 
-##### 📂 5. Vanilla Compare & Safe Merge
+##### 📂 6. Vanilla Compare & Safe Merge
 * **Diff View**: When editing a mod file that shares the same name as a vanilla file, click the **Compare with Vanilla** CodeLens.
 * **Sync**: Click **Migrate Block from Vanilla** above a changed block. The system locks the write queue and applies changes bottom-up, keeping line coordinates accurate.
 
-##### 💎 6. Asset & 3D Mesh Animation Debugger
+##### 💎 7. Asset & 3D Mesh Animation Debugger
 * **How to open**: In `.asset` or `.gfx` files, click the **3D Model Icon (Preview Entity)**.
 * **3D & Material Debug**:
   - Parses and renders `.mesh` files.
@@ -118,7 +128,7 @@ Below is the overall module interaction and data flow topology:
   - Renders skeleton node trees, allowing you to select and play animations (e.g., move, idle, attack) in the right-hand panel.
   - Fine-tune materials (e.g., diffuse, specular) using slider panels.
 
-##### 🔌 7. Out-of-the-Box MCP Server (for Codex / Claude Code)
+##### 🔌 8. Out-of-the-Box MCP Server (for Codex / Claude Code)
 This extension bundles a **read-only** Model Context Protocol (MCP) server, offering 27 read-only semantic tools of CWTools (project knowledge pack, bounded project graph, syntax check, scope queries, definitions, references, diagnostics, scripted triggers/effects/enums) to external agents.
 * **Bounded Semantic Graph**: `explore_pdx_project` is the preferred first query for large mods. It returns ranked typed entry points, dependency edges, per-file semantic facts, provenance, truncation budgets, and freshness from the live CWTools model without reading whole files.
 * **Compact `/init` Knowledge Database**: the deep `/init` phase stores project + vanilla understanding as `.cwtools-ai/project/knowledge/manifest.json` plus `knowledge.sqlite`, replacing the former duplicated capability/archetype JSON set. `/init` also directly creates or incrementally updates `.cwtools-ai/index/workspace-symbols.sqlite` before deep export. A lower-left VS Code progress indicator remains visible while the workspace index is built, CWTools becomes ready, and the knowledge database is published. `query_project_knowledge` resolves explicit IDs through SQLite indexes, expands their reference/event/logic neighbourhood, and falls back to bounded intent search only when no identifier seed is supplied. It retrieves definitions, stacks, topology, project/vanilla patterns, and event structure/logic—including call phases, `on_action` entries, flags, technologies, variables, and scope bridges—without loading the whole database into the prompt. Lazy `query_workspace_index` calls restore persistent SQLite rows, publish the workspace phase first, parse only changed files, and wait at most eight seconds before returning partial results while vanilla indexing continues. When the serialized vanilla `.cwb` changes, the matching global vanilla-symbol cache and the current project's `knowledge.sqlite` are rebuilt in one coordinated refresh stage.
@@ -274,6 +284,7 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
 本项目深度利用了 VS Code Webview 隔离沙盒，基于现代 Web 渲染技术（Canvas / Cytoscape.js / Three.js），为 Mod 开发者带来了前所未有的所见即所得体验。
 - **GUI Canvas 实时预览与编辑**：支持群星 `.gui` 文件的实时双向交互渲染。完美实现 `corneredTileSpriteType` 9-切片拉伸绘制、多帧精灵（`noOfFrames`）动画循环，支持可视化图层树和直接在画布上**拖拽调整控件尺寸及坐标并回写源码**。
 - **3D 恒星系渲染与轨道编辑**：进入 `solar_system_initializers/` 脚本，即可开启精美的 3D 星系空间。支持恒星、行星、卫星、环形世界（Ring World）的任意递归嵌套。开发者可以通过直接拖动行星改变其 `orbit_distance` 与 `orbit_angle` 并自动同步至脚本。
+- **静态银河预览与位置编辑**：在 Canvas2D 银河地图上打开 `map/setup_scenarios/*.txt` 中的 `static_galaxy_scenario`，展示系统、坐标范围、星云与显式超空间航道。编辑模式下可拖动系统或星云回写 X/Y、在检视器中编辑或补充 Z，并添加/断开显式航道；所有修改均使用最小 `WorkspaceEdit` 并接入原生撤销。反向范围、重复 ID、悬空航道等问题会以可视化诊断呈现。
 - **科技树与事件引用网络**：利用 Cytoscape.js 渲染高交互性的科技依赖图与事件链流向图。支持快速检索、关系筛选及点击节点瞬间定位至对应的 `.txt` 脚本源码行。
 - **Three.js 实体与动画渲染**：支持 Paradox 原生 `.asset` 三维网格、贴图及骨骼动画在 Webview 中的沙盒化加载与动作调试。
 - **粒子特效预览与编辑**：支持 Stellaris `gfx/particles/**/*.asset` 中 `particle={...}` 的三栏粒子编辑器，提供 Three.js 实时近似模拟、曲线编辑、子系统/力/属性编辑、贴图解码预览与 `.asset` 写回。
@@ -285,7 +296,7 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
   - **Review 模式**：独立安全的只读审查环境，禁用任何写入特权，专为强制校验代码规范、防御逻辑漏洞和越界覆盖而设计。
 - **Sub-Agent 并行编排 (DAG)**：底层推理流基于拓扑排序任务图，通过 `Promise.allSettled` 并行调度多个专职子 Agent（如 Explorer, Builder, LocWriter, Reviewer），在**共享黑板 (Blackboard)** 上协同编写复杂的功能，速度相比单链 Agent 提升数倍。
 - **防循环与智能压缩 (Context Smart Windowing)**：内置两阶段 "Doom-Loop" 循环调用防御机制；当长对话 Token 消耗接近上限的 70% 时，将自动触发 LLM 级别的结构化记忆压缩，并对孤儿 Tool Call 智能补齐，确保长任务的高成功率。
-- **MCP 双向集成（消费 + 输出）**：作为 **MCP 客户端**集成 Model Context Protocol（stdio 与 SSE），让内置 Agent 调用外部 MCP 工具；同时**对外输出一个随插件分发的只读 MCP 服务**（`packages/cwtools-mcp`），把本项目的 PDX 语义能力（项目知识包、有界项目语义图、类型/规则/作用域/诊断/定义引用/补全/深层语义共 27 个只读工具）开放给 **Codex / Claude Code** 等外部 Agent 复用——详见下方功能指引第 7 节。
+- **MCP 双向集成（消费 + 输出）**：作为 **MCP 客户端**集成 Model Context Protocol（stdio 与 SSE），让内置 Agent 调用外部 MCP 工具；同时**对外输出一个随插件分发的只读 MCP 服务**（`packages/cwtools-mcp`），把本项目的 PDX 语义能力（项目知识包、有界项目语义图、类型/规则/作用域/诊断/定义引用/补全/深层语义共 27 个只读工具）开放给 **Codex / Claude Code** 等外部 Agent 复用——详见下方功能指引第 8 节。
 - **全工作区本地化索引**：全工作区本地化 YML 文本基于后台 `FileSystemWatcher` 异步实时增量索引，为大模型源源不断地输送稳定、精准的项目上下文。
 
 ##### 📂 4. 原版对比与极速迁移通道 (Vanilla Compare & Sync)
@@ -335,13 +346,22 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
   - 在**编辑模式**下，您可以通过右键菜单直接创建恒星、行星、卫星以及 Ring World。
   - 用鼠标**直接在 3D 轨道上拖拽行星**修改其轨道距离和角度，对应的 `orbit_distance` 与 `orbit_angle` 参数会同步写回至编辑器内的 Paradox 脚本。
 
-##### 🌐 3. 科技树与事件引用网络 (Dependency Graph)
+##### 🌌 3. 静态银河预览与位置编辑器 (Static Galaxy)
+* **如何打开**：打开 `map/setup_scenarios/` 目录下的 `.txt` 文件，点击编辑器标题栏的 **地图图标 (Preview/Edit Static Galaxy)**，或使用文件右键菜单；也可通过 **打开方式 (Open With...)** 选择 `Static Galaxy Preview/Editor`。
+* **交互操作**：
+  - 滚轮缩放，`空格`/`Alt`/中键拖动平移，单击选择系统或星云，**双击跳转到对应源码块**。
+  - 通过顶部的 **预览 / 编辑** 分段按钮（快捷键 `E`）切换模式，缩放、平移、筛选和选中项均不会重置。
+  - 在**编辑模式**下拖动系统或星云即可平移其 X/Y 位置；范围坐标 `{ min max }` 平移时保持宽度不变，写回只替换被修改的数字 token——一次拖动恰好对应一次原生撤销。检视器支持精确填写 X/Y/Z（包括为原本没有 Z 的位置补充 Z）。显式航道可直接在画布上绘制：右键点击系统进入绘制模式，左键连续链接端点（A→B→C…），再次右键把所有航段合并为一次写回；右键点击已有航道会从源码中删除对应的 `add_hyperlane` 声明。
+  - `random_hyperlanes = yes` 会明确提示：运行时生成的随机航道不会被当作精确预览结果展示。可选的**估算航道**开关（默认关闭）绘制明确标注的启发式近似航道——永远不会写回源码。
+  - Steam Workshop 文件会显示风险横幅，编辑前需要确认，并优先提供复制到 Mod 工作区的安全路径。
+
+##### 🌐 4. 科技树与事件引用网络 (Dependency Graph)
 * **如何打开**：在科技或事件定义脚本中，点击右上角的 **依赖图图标 (Show Dependency Graph)**。
 * **交互导航**：
   - 底层基于 Cytoscape.js 渲染高表现力的连线节点拓扑，直观呈现复杂科技前置要求或事件的多级触发链。
   - 完美支持搜索框快速过滤、层级限制与节点高亮。**双击任意节点**，编辑器将自动跳转并精准高亮至其声明所在的源文件代码行。
 
-##### 🤖 4. 全自主多 Agent AI 开发面板 (Autonomous AI)
+##### 🤖 5. 全自主多 Agent AI 开发面板 (Autonomous AI)
 * **如何打开**：点击侧边栏的 **AI 图标**，或按快捷键 `Ctrl+Shift+P` 搜索并执行 `AI: Open Chat Panel` 开启会话。
 * **全局快捷键**：
   - `Tab`：快捷切换Agent模式，支持构建、计划、分析、审查、协调，通用，六大基础模式一键切换。
@@ -351,11 +371,11 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
 * **架构流程图**：当设计或分析包含多个相互关联的组件时，Agent 可以按需输出 Mermaid 流程图、时序图或状态图。聊天消息、实时过程文本、工具结果卡、计划、蓝图和 walkthrough 卡片都会使用 VS Code 主题在本地渲染，并支持复制源码、全屏查看和失败时安全回退到源码。
 * **网页访问**：Agent 设置将搜索与实时网页访问分开控制。搜索供应商支持 OpenAI、Brave、Exa、Tavily、Serper、SerpAPI、SearXNG，并可降级到 DuckDuckGo；供应商密钥保存在 VS Code SecretStorage。实时网页必须经过公开地址、重定向、响应大小和域名策略检查，并始终作为不可信外部证据处理。
 
-##### 📂 5. 原版对比与块级安全合并 (Vanilla Sync)
+##### 📂 6. 原版对比与块级安全合并 (Vanilla Sync)
 * **一键对比**：插件激活后，当您编辑的 Mod 文件与原版游戏文件同名时，点击行上方的 CodeLens **Compare with Vanilla** 打开分屏 Diff。
 * **安全替换**：如果需要提取原版官方代码段，点击代码块上方出现的 **Migrate Block from Vanilla**。系统将锁定并发队列，自底向上智能应用合并，防止因前端坐标更改导致后续块偏移失效。
 
-##### 💎 6. Asset 资产与 3D Mesh 实体动画调试器 (Asset & Mesh Previewer)
+##### 💎 7. Asset 资产与 3D Mesh 实体动画调试器 (Asset & Mesh Previewer)
 * **如何打开**：在 VS Code 中打开 `.asset` 实体配置文件或 `.gfx` 图形定义文件，点击右上角编辑器工具栏的 **3D 模型图标 (Preview Entity)**。
 * **3D 网格与材质调试**：
   - 底层基于 Three.js 实现 Paradox 专有 3D 网格模型文件（`.mesh`）的极速沙盒化解析与三维渲染。
@@ -364,7 +384,7 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
   - 完美解析绑定的骨骼节点树，支持在右侧控制台中实时挑选、播放不同的骨骼动画序列（如移动、待机、战斗）。
   - 支持材质属性（如漫反射、高光强度）在侧边栏面板上的动态滑块调节与实时重绘调试。
 
-##### 🔌 7. 通用 MCP 服务（供 Codex / Claude Code 调用）
+##### 🔌 8. 通用 MCP 服务（供 Codex / Claude Code 调用）
 本插件随包分发一个**只读**的 MCP 服务，把 CWTools 的 PDX 语义能力（项目知识包、有界项目语义图、验证 ID、查语法、查作用域、全项目诊断、定义/引用、补全、scripted effects/triggers/enums/modifiers/variables、实体信息，共 27 个只读工具）开放给任意 MCP 客户端。文件写入仍由你的 Agent 自带环境完成。
 * **有界语义图**：大型 Mod 优先调用 `explore_pdx_project`。它直接读取 live CWTools model，返回排序后的 typed entry point、依赖边、逐文件语义事实、provenance、截断预算与 freshness，不需要读取整份文件。
 * **紧凑的 `/init` 知识数据库**：深度 `/init` 阶段将项目与原版理解保存为 `.cwtools-ai/project/knowledge/manifest.json` 和 `knowledge.sqlite`，替代原先重复的 capability/archetype JSON 集合。`/init` 还会在深层导出前直接创建或增量更新 `.cwtools-ai/index/workspace-symbols.sqlite`。构建工作区索引、等待 CWTools 和发布知识数据库期间，VS Code 左下角会持续显示进度。`query_project_knowledge` 会先通过 SQLite 索引解析显式 ID，再扩展其引用、事件与逻辑邻域；只有未提供标识符种子时才退回有界意图检索。它可按需检索定义、定义栈、拓扑、项目/原版范例，以及事件调用阶段、`on_action` 入口、Flag、科技、变量和作用域桥接等事件结构与逻辑关系，无需把整个数据库塞入提示词。懒加载的 `query_workspace_index` 会先恢复持久化 SQLite、优先发布工作区阶段、只解析变化文件，并最多等待八秒后返回部分结果，同时让原版索引继续构建。当序列化原版 `.cwb` 变化时，对应的全局原版符号缓存和当前项目的 `knowledge.sqlite` 会在同一协调刷新阶段重建。

@@ -56,6 +56,26 @@ export default [
             copyFile('client/webview/solarSystemPreview.css', 'release/bin/client/webview/solarSystemPreview.css'),
         ],
     },
+    // Static Galaxy Preview/Editor webview bundle
+    {
+        input: './client/webview/staticGalaxyPreview.ts',
+        output: {
+            file: './release/bin/client/webview/staticGalaxyPreview.js',
+            format: "iife",
+            name: "cwtoolsstaticgalaxy",
+            indent: false,
+        },
+        plugins: [
+            typescript({
+                tsconfig: ".config/tsconfig.webview-galaxy.json",
+                clean: false,
+                tsconfigOverride: {
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                }
+            }),
+            copyFile('client/webview/staticGalaxyPreview.css', 'release/bin/client/webview/staticGalaxyPreview.css'),
+        ],
+    },
     // Chat Panel webview bundle
     {
         input: './client/webview/chatPanel.ts',

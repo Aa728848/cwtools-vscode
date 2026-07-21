@@ -1,0 +1,32 @@
+# Range coordinates, reversed ranges, duplicate ids, missing axes, dangling hyperlane.
+static_galaxy_scenario = {
+    name = "RANGES_GALAXY"
+    priority = 5
+    random_hyperlanes = yes
+
+    system = {
+        id = 10
+        name = "Range System"
+        position = { x = { min = -97 max = -93 } y = { min = 10 max = 20 } }
+    }
+
+    # Reversed range: min > max. Parser must keep order and report a diagnostic.
+    system = { id = 11 position = { x = { min = 30 max = 10 } y = 5 } }
+
+    # Duplicate id on purpose: diagnostics must flag it, nodes must stay distinct.
+    system = { id = 11 name = "Duplicate" position = { x = 200 y = 200 } }
+
+    # Missing y falls back to 0 with a warning.
+    system = { id = 12 position = { x = -50 } }
+
+    # Unresolvable expression degrades to an unresolved axis.
+    system = { id = 13 position = { x = @[some_var * 2] y = 8 } }
+
+    nebula = {
+        position = { x = { min = -10 max = 10 } y = -60 }
+        radius = 25
+    }
+
+    add_hyperlane = { from = 10 to = 11 }
+    add_hyperlane = { from = 10 to = 999 }
+}

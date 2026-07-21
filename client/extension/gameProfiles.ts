@@ -51,6 +51,8 @@ export interface PreviewCapabilityProfile {
 	entityPreview: boolean;
 	/** Whether particle effect preview/editor is supported. */
 	particlePreview: boolean;
+	/** Whether static galaxy preview/editing (map/setup_scenarios) is supported. */
+	staticGalaxyPreview: boolean;
 }
 
 /** AI-specific profile data for prompt construction. */
@@ -132,6 +134,7 @@ const NO_PREVIEWS: PreviewCapabilityProfile = {
 	techTreePreview: false,
 	entityPreview: false,
 	particlePreview: false,
+	staticGalaxyPreview: false,
 };
 
 // ─── Profile registry ────────────────────────────────────────────────────────
@@ -167,6 +170,7 @@ registerProfile({
 		techTreePreview: true,
 		entityPreview: true,
 		particlePreview: true,
+		staticGalaxyPreview: true,
 	},
 	ai: { knowledgeKey: 'stellaris' },
 	install: {

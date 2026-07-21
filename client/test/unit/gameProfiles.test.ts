@@ -118,12 +118,14 @@ describe('GameProfile Registry', () => {
         expect(isPreviewAvailable('stellaris', 'eventChainPreview')).to.be.true;
         expect(isPreviewAvailable('stellaris', 'techTreePreview')).to.be.true;
         expect(isPreviewAvailable('stellaris', 'entityPreview')).to.be.true;
+        expect(isPreviewAvailable('stellaris', 'staticGalaxyPreview')).to.be.true;
     });
 
     it('non-Stellaris games do not have Stellaris-only preview capabilities', () => {
         for (const id of ['hoi4', 'eu4', 'ck2', 'ck3', 'vic2', 'vic3', 'imperator', 'eu5']) {
             expect(isPreviewAvailable(id, 'solarSystemPreview'), `${id}.solarSystemPreview`).to.be.false;
             expect(isPreviewAvailable(id, 'entityPreview'), `${id}.entityPreview`).to.be.false;
+            expect(isPreviewAvailable(id, 'staticGalaxyPreview'), `${id}.staticGalaxyPreview`).to.be.false;
         }
     });
 

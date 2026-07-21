@@ -70,6 +70,7 @@ Webviews communicate with the Extension Host exclusively via `postMessage`. They
 | `pathScope.ts` | Neutral path containment helpers (`isPathInsideOrEqual` / `foldPathCase`) shared by UI and AI sandboxes |
 | `guiPanel.ts` / `guiParser.ts` | `.gui` file parser and Canvas preview host |
 | `solarSystemPanel.ts` / `solarSystemParser.ts` | 星系 (Solar system) previewer for `solar_system_initializers/` |
+| `staticGalaxyEditorProvider.ts` / `staticGalaxyParser.ts` / `staticGalaxyEditBuilder.ts` | Static galaxy (`map/setup_scenarios/`) custom editor host, span-carrying parser, and minimal token write-back builder; shares `client/shared/staticGalaxyProtocol.ts` with the webview |
 | `eventChainPanel.ts` / `eventChainParser.ts` | Event chain scanner, subgraph extraction, and code jumps |
 | `techTreePanel.ts` / `techTreeParser.ts` | Tech tree scanner, filtering, and dependency graphs |
 | `entityPanel.ts` / `entityAssetParser.ts` | `.asset` entity model preview host and resource parsing |
@@ -345,6 +346,7 @@ The packages `packages/cwtools-shared` and `packages/cwtools-mcp` implement a **
 | Manager | `agentManager.ts` | Run list logs, token dashboards, and task graphs |
 | GUI | `guiPreview.ts` | Canvas render, drag modifiers, and GFX maps |
 | Space | `solarSystemPreview.ts` | 3D solar orbits editing |
+| Static Galaxy | `staticGalaxyPreview.ts` | Canvas2D static galaxy map; system/nebula X/Y/Z editing and explicit hyperlane operations |
 | Network | `eventChainPreview.ts` | Interactive Cytoscape graphs for event files |
 | Tech | `techTreePreview.ts` | Cytoscape technology pre-requisites mapping |
 | Entity | `entityPreview.ts` | Three.js renderer for mesh, textures, and skeleton animations |
@@ -481,6 +483,7 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 | `pathScope.ts` | 中立的 `isPathInsideOrEqual` / `foldPathCase` 路径包含判定，UI 与 AI 沙盒共用 |
 | `guiPanel.ts` / `guiParser.ts` | `.gui` 文件解析与 Canvas 预览宿主 |
 | `solarSystemPanel.ts` / `solarSystemParser.ts` | `solar_system_initializers/` 星系预览 |
+| `staticGalaxyEditorProvider.ts` / `staticGalaxyParser.ts` / `staticGalaxyEditBuilder.ts` | 静态银河（`map/setup_scenarios/`）自定义编辑器宿主、带源码跨度解析器与最小 token 写回构建器；与 Webview 共用 `client/shared/staticGalaxyProtocol.ts` |
 | `eventChainPanel.ts` / `eventChainParser.ts` | 事件链扫描、子图和源码跳转 |
 | `techTreePanel.ts` / `techTreeParser.ts` | 科技树扫描、筛选和依赖图 |
 | `entityPanel.ts` / `entityAssetParser.ts` | `.asset` 实体模型预览宿主和资源解析 |
@@ -882,7 +885,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 #### Webview 层
 
-`client/webview/` 编译为浏览器端脚本。Rollup 打包 8 个入口：
+`client/webview/` 编译为浏览器端脚本。Rollup 打包 9 个入口：
 
 | 入口 | 相关文件 | 作用 |
 | --- | --- | --- |
@@ -890,6 +893,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 | `agentManager.ts` | `agentManager.css`, `chat/` message contracts | Detached Agent Manager，查看 run、agents、artifacts、tasks |
 | `guiPreview.ts` | `guiPreview.css`, `canvas.ts` | `.gui` Canvas 预览、拖拽编辑、DDS/TGA 显示 |
 | `solarSystemPreview.ts` | `solarSystemPreview.css` | 星系、轨道、行星和环世界交互预览 |
+| `staticGalaxyPreview.ts` | `staticGalaxyPreview.css`, `client/shared/staticGalaxyProtocol.ts` | 静态银河 Canvas2D 地图、系统/星云 X/Y/Z 编辑、显式航道操作与最小写回请求 |
 | `eventChainPreview.ts` | `eventChainPreview.css` | Cytoscape.js 事件引用图 |
 | `techTreePreview.ts` | `techTreePreview.css` | Cytoscape.js 科技依赖图 |
 | `entityPreview.ts` | `entityPreview.css`, `meshWorker.ts`, `pdxMeshParser.ts`, `pdxShaders.ts` | Three.js 实体模型、网格、动画和材质渲染 |

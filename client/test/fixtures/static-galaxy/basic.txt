@@ -1,0 +1,35 @@
+# Minimal static galaxy fixture: fixed coordinates, z, nebula, explicit hyperlanes.
+static_galaxy_scenario = {
+    name = "BASIC_GALAXY"
+    priority = 10
+    num_empires = { min = 1 max = 4 }
+    num_empire_default = 2
+    radius = 250
+    random_hyperlanes = no
+    max_hyperlane_distance = 50
+
+    system = {
+        id = 0
+        name = "Sol"
+        position = { x = 0 y = 0 z = 5 }
+        initializer = sol_system_initializer
+    }
+
+    system = { id = 1 name = "Alpha Centauri" position = { x = 20 y = -30 } initializer = alpha_centauri_system }
+
+    system = {
+        id = 2
+        position = { x = -40.5 y = 60 }
+        spawn_weight = { base = 0 }
+    }
+
+    nebula = {
+        name = "TEST_NEBULA"
+        position = { x = 100 y = 100 }
+        radius = 40
+    }
+
+    add_hyperlane = { from = 0 to = 1 }
+    remove_hyperlane = { from = 1 to = 2 }
+    prevent_hyperlane = { from = 2 to = 0 }
+}

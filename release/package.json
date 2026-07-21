@@ -34,6 +34,7 @@
     "main": "./bin/client/extension/extension.js",
     "activationEvents": [
         "onCustomEditor:cwtools.texturePreview",
+        "onCustomEditor:cwtools.staticGalaxyEditor",
         "onCommand:cwtools.openTexturePreview",
         "onStartupFinished"
     ],
@@ -119,6 +120,16 @@
                     }
                 ],
                 "priority": "default"
+            },
+            {
+                "viewType": "cwtools.staticGalaxyEditor",
+                "displayName": "%customEditors.stellarisLanguageServices.staticGalaxyEditor.displayName%",
+                "selector": [
+                    {
+                        "filenamePattern": "**/map/setup_scenarios/*.txt"
+                    }
+                ],
+                "priority": "option"
             }
         ],
         "menus": {
@@ -156,6 +167,11 @@
                 {
                     "command": "cwtools.previewSolarSystem",
                     "when": "resourceExtname == .txt && resourcePath =~ /solar_system_initializers/",
+                    "group": "navigation"
+                },
+                {
+                    "command": "cwtools.previewStaticGalaxy",
+                    "when": "resourceExtname == .txt && resourcePath =~ /setup_scenarios/ && editorLangId == stellaris",
                     "group": "navigation"
                 },
                 {
@@ -271,6 +287,11 @@
                     "group": "stellaris@5"
                 },
                 {
+                    "command": "cwtools.previewStaticGalaxy",
+                    "when": "resourceExtname == .txt && resourcePath =~ /setup_scenarios/ && editorLangId == stellaris",
+                    "group": "stellaris@6"
+                },
+                {
                     "command": "cwtools.csv.insertRowAbove",
                     "when": "resourceExtname == .csv",
                     "group": "paradoxCsv@1"
@@ -316,6 +337,11 @@
                     "command": "cwtools.images.editExternally",
                     "when": "resourceExtname == .dds || resourceExtname == .tga || resourceExtname == .png || resourceExtname == .jpg || resourceExtname == .jpeg || resourceExtname == .bmp",
                     "group": "paradoxImages@3"
+                },
+                {
+                    "command": "cwtools.previewStaticGalaxy",
+                    "when": "resourceExtname == .txt && resourcePath =~ /setup_scenarios/",
+                    "group": "paradoxGalaxy@1"
                 }
             ]
         },
@@ -540,6 +566,12 @@
                 "title": "%commands.stellarisLanguageServices.previewSolarSystem.title%",
                 "category": "Stellaris",
                 "icon": "$(telescope)"
+            },
+            {
+                "command": "cwtools.previewStaticGalaxy",
+                "title": "%commands.stellarisLanguageServices.previewStaticGalaxy.title%",
+                "category": "Stellaris",
+                "icon": "$(map)"
             },
             {
                 "command": "cwtools.ai.configure",

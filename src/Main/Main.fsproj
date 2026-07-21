@@ -33,6 +33,7 @@
     <Compile Include="Git.fs" />
     <Compile Include="LanguageServerFeatures.fs" />
     <Compile Include="GameLoader.fs" />
+    <Compile Include="CompletionText.fs" />
     <Compile Include="Completion.fs" />
     <Compile Include="GraphTypes.fs" />
     <Compile Include="SemanticGraph.fs" />

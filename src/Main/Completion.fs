@@ -11,6 +11,7 @@ open FSharp.Data
 open LSP
 open LSP.Types
 open CWTools.Utilities.Utils
+open Main.CompletionText
 
 // Precompile regular expressions (avoid recompiling every time completion/resolve)
 let private varExtractPattern =
@@ -46,7 +47,6 @@ let private macroBracketParamPattern =
         @"\[\[\s*!?\s*([A-Za-z0-9_]+)(?=\]|\s)",
         System.Text.RegularExpressions.RegexOptions.Compiled)
 
-let private completionPrefixBoundaries = [|' '; '\t'; '='; '<'; '>'; '{'; '}'; ','; ':'; '|'; '('; ')'; '['; ']'; '"'; '\''; '\n'; '\r'|]
 let private valueCallTokenBoundaries = [|' '; '\t'; '='; '<'; '>'; '{'; '}'; ','; '"'; '\''; '\n'; '\r'|]
 
 /// Extract a single line from text without allocating a full string[] via Split.
@@ -571,18 +571,6 @@ let private tryGetParameterValueCompletion
     with _ ->
         None
 
-let private completionPrefixFromTextBeforeCursor (textBeforeCursor: string) =
-    let boundary = textBeforeCursor.LastIndexOfAny(completionPrefixBoundaries)
-    let token =
-        if boundary >= 0 then textBeforeCursor.Substring(boundary + 1)
-        else textBeforeCursor
-    let dotIdx = token.LastIndexOf('.')
-    let prefix =
-        if dotIdx >= 0 then token.Substring(dotIdx + 1)
-        else token
-
-    if String.IsNullOrWhiteSpace prefix then None else Some prefix
-
 let completionCache = System.Collections.Concurrent.ConcurrentDictionary<int, CompletionItem>()
 let private rangeCacheLock = obj()
 let mutable private rangeCache: (string * int * int * Range * Range) option = None
@@ -792,33 +780,7 @@ let computeCompletionRanges (filetext: string) (line: int) (character: int) =
     | _ ->
         let targetLine = getLineAt filetext (line - 1)
 
-        //TODO: This needs to handle localisation differently really
-        let isWordChar c =
-            not (
-                Char.IsWhiteSpace(c)
-                || c = '.'
-                || c = '|'
-                || c = '"'
-                || c = '='
-                || c = '{'
-                || c = '}'
-                || c = ','
-                || c = ':'
-            )
-
-        // Walk backward to find start of word/identifier
-        let mutable wordStart = character
-
-        while wordStart > 0
-              && wordStart <= targetLine.Length
-              && isWordChar targetLine.[wordStart - 1] do
-            wordStart <- wordStart - 1
-
-        // Walk forward to find end of word/identifier
-        let mutable wordEnd = character
-
-        while wordEnd < targetLine.Length && isWordChar targetLine.[wordEnd] do
-            wordEnd <- wordEnd + 1
+        let wordStart, cursor, wordEnd = tokenRangeInLine targetLine character
 
         // Return the ranges as a tuple to avoid anonymous record issues
         let insertRange =
@@ -827,7 +789,7 @@ let computeCompletionRanges (filetext: string) (line: int) (character: int) =
                   character = wordStart }
               ``end`` =
                 { line = line - 1
-                  character = character } }
+                  character = cursor } }
 
         let replaceRange =
             { start =
@@ -1180,7 +1142,7 @@ let completion
                 let items = getRawItems () |> Seq.toArray
                 logInfo $"completion items time %i{stopwatch.ElapsedMilliseconds}ms"
 
-                let prefixSoFar = completionPrefixFromTextBeforeCursor textBeforeCursor
+                let prefixSoFar = prefixFromTextBeforeCursor textBeforeCursor
 
                 // '@' scripted-variable tokens: always narrow server-side and mark the list
                 // incomplete so each keystroke re-requests. VS Code's client-side fuzzy filter

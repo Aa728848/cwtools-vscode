@@ -1541,10 +1541,7 @@ type Server(client: ILanguageClient) =
     /// resultId enables delta diff against the previous snapshot.
     let semanticTokensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * int[] * string>()
 
-    /// CodeLens cache: filePath (contentHash, lenses). A precache hash means
-    /// the lenses came from the freshly loaded game type index and can be used
-    /// without rereading the file on the first editor switch.
-    let codeLensPrecacheHash = Int32.MinValue
+    /// CodeLens cache: filePath -> (contentHash, lenses).
     let codeLensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * CodeLens list>()
     let typeReferenceResultCache = System.Collections.Concurrent.ConcurrentDictionary<string, range list>()
 
@@ -1643,36 +1640,8 @@ type Server(client: ILanguageClient) =
 
     let staleCompletionFallbackMaxItems = 300
     let staleCompletionFallbackEmptyPrefixMaxItems = 100
-    let completionFallbackPrefixBoundaries =
-        [| ' '; '\t'; '='; '<'; '>'; '{'; '}'; ','; ':'; '|'; '('; ')'; '['; ']'; '"'; '\''; '\n'; '\r' |]
-
-    let completionFallbackLineBeforeCursor (text: string) (line: int) (character: int) =
-        if line < 0 then ""
-        else
-            let mutable idx = 0
-            let mutable currentLine = 0
-            while currentLine < line && idx < text.Length do
-                if text.[idx] = '\n' then currentLine <- currentLine + 1
-                idx <- idx + 1
-            if idx >= text.Length then ""
-            else
-                let mutable lineEnd = idx
-                while lineEnd < text.Length && text.[lineEnd] <> '\n' && text.[lineEnd] <> '\r' do
-                    lineEnd <- lineEnd + 1
-                let safeCharacter = Math.Max(0, Math.Min(character, lineEnd - idx))
-                text.Substring(idx, safeCharacter)
-
     let completionFallbackPrefix (fileText: string) (position: LSP.Types.Position) =
-        let beforeCursor = completionFallbackLineBeforeCursor fileText position.line position.character
-        let boundary = beforeCursor.LastIndexOfAny(completionFallbackPrefixBoundaries)
-        let token =
-            if boundary >= 0 then beforeCursor.Substring(boundary + 1)
-            else beforeCursor
-        let dotIdx = token.LastIndexOf('.')
-        let prefix =
-            if dotIdx >= 0 then token.Substring(dotIdx + 1)
-            else token
-        if String.IsNullOrWhiteSpace prefix then None else Some prefix
+        CompletionText.prefixAtPosition fileText position.line position.character
 
     let staleCompletionItemMatchesPrefix prefix (item: CompletionItem) =
         match prefix with
@@ -1684,12 +1653,18 @@ type Server(client: ILanguageClient) =
             || item.label.Contains(p, StringComparison.OrdinalIgnoreCase)
             || filterText.Contains(p, StringComparison.OrdinalIgnoreCase)
 
-    let sanitizeStaleCompletionItem (item: CompletionItem) =
+    let reanchorStaleCompletionItem fileText (position: LSP.Types.Position) (item: CompletionItem) =
         match item.textEdit with
         | Some te ->
+            let insertRange, replaceRange =
+                computeCompletionRanges fileText (position.line + 1) position.character
+
             { item with
-                textEdit = None
-                insertText = item.insertText |> Option.orElse (Some te.newText) }
+                textEdit =
+                    Some
+                        { te with
+                            insert = insertRange
+                            replace = replaceRange } }
         | None -> item
 
     let filterStaleCompletionFallback fileText (position: LSP.Types.Position) cachedLine (cached: CompletionList) =
@@ -1704,7 +1679,7 @@ type Server(client: ILanguageClient) =
                 cached.items
                 |> List.filter (staleCompletionItemMatchesPrefix prefix)
                 |> List.truncate limit
-                |> List.map sanitizeStaleCompletionItem
+                |> List.map (reanchorStaleCompletionItem fileText position)
         { cached with
             isIncomplete = true
             items = items },
@@ -1772,36 +1747,52 @@ type Server(client: ILanguageClient) =
                 |> Seq.truncate overflow
                 |> Seq.iter (fun kvp -> completionListCache.TryRemove(kvp.Key) |> ignore)
 
-    /// Cached type-index: filePath -> (typeName, id, TypeDefInfo) list.
-    /// Built lazily from game.Types(), cleared on delayedAnalyze alongside codeLensCache.
-    /// Avoids repeated O(all-types) scans in CodeLens handler and precaching.
-    let mutable cachedGroupedTypes: Map<string, (string * string * TypeDefInfo) list> option = None
+    /// Lazily cached type definitions for files that actually request CodeLens.
+    /// Keeping this per-file avoids duplicating the complete project type map in large mods.
+    let typeDefinitionsByFileCacheMaxEntries = 128
+    let typeDefinitionsByFileCache =
+        System.Collections.Concurrent.ConcurrentDictionary<string, (string * string * TypeDefInfo) list>()
 
-    let getOrBuildGroupedTypes (game: IGame) =
-        match cachedGroupedTypes with
-        | Some g -> g
-        | None ->
-            let pathCache = System.Collections.Generic.Dictionary<string, string>()
-            let getFullName (path: string) =
-                match pathCache.TryGetValue(path) with
-                | true, fn -> fn
+    let getTypesForFile (game: IGame) filePath =
+        let key = normaliseCachePath filePath
+
+        match typeDefinitionsByFileCache.TryGetValue key with
+        | true, cached -> cached
+        | false, _ ->
+            let pathMatches = System.Collections.Generic.Dictionary<string, bool>()
+
+            let belongsToRequestedFile path =
+                match pathMatches.TryGetValue path with
+                | true, matches -> matches
                 | false, _ ->
-                    let fn = try FileInfo(path).FullName with _ -> path
-                    pathCache.[path] <- fn
-                    fn
+                    let matches = normaliseCachePath path = key
+                    pathMatches.[path] <- matches
+                    matches
+
             let result =
                 game.Types()
-                |> Map.toList
-                |> List.collect (fun (typeName, vs) ->
-                    if typeName.Contains(".") then []
-                    else vs |> Array.toList |> List.map (fun tdi -> (getFullName tdi.range.FileName, typeName, tdi)))
-                |> List.groupBy (fun (fn, _, _) -> fn)
-                |> Map.ofList
-            cachedGroupedTypes <- Some result
+                |> Map.toSeq
+                |> Seq.collect (fun (typeName, definitions) ->
+                    if typeName.Contains(".") then
+                        Seq.empty
+                    else
+                        definitions
+                        |> Seq.choose (fun definition ->
+                            if belongsToRequestedFile definition.range.FileName then
+                                Some(typeName, definition.id, definition)
+                            else
+                                None))
+                |> Seq.toList
+
+            if typeDefinitionsByFileCache.Count >= typeDefinitionsByFileCacheMaxEntries
+               && not (typeDefinitionsByFileCache.ContainsKey key) then
+                typeDefinitionsByFileCache.Clear()
+
+            typeDefinitionsByFileCache.[key] <- result
             result
 
     let clearTypeIndexCache () =
-        cachedGroupedTypes <- None
+        typeDefinitionsByFileCache.Clear()
 
     //- Cache partition cleaning function -
     // Precise invalidation strategy: avoid unnecessary performance overhead caused by global cleanup
@@ -1856,17 +1847,11 @@ type Server(client: ILanguageClient) =
     do
         getPerfCacheSnapshot <-
             fun () ->
-                let groupedTypeFiles =
-                    cachedGroupedTypes
-                    |> Option.map (fun grouped -> grouped.Count)
-                    |> Option.defaultValue 0
+                let groupedTypeFiles = typeDefinitionsByFileCache.Count
                 $" caches[semantic={semanticTokensCache.Count} codeLens={codeLensCache.Count} inlay={inlayHintCache.Count} locFiles={locCache.Count} locKeys={cachedLocMapCount} completionTTL={completionListCache.Count} typeRefs={typeReferenceResultCache.Count} groupedTypeFiles={groupedTypeFiles} cacheWriteKeys={cacheWriteTimes.Count}]"
 
     let getCacheSnapshotJson () =
-        let groupedTypeFiles =
-            cachedGroupedTypes
-            |> Option.map (fun grouped -> grouped.Count)
-            |> Option.defaultValue 0
+        let groupedTypeFiles = typeDefinitionsByFileCache.Count
         JsonValue.Record
             [| "semanticTokens", JsonValue.Number(decimal semanticTokensCache.Count)
                "codeLens", JsonValue.Number(decimal codeLensCache.Count)
@@ -4372,69 +4357,6 @@ type Server(client: ILanguageClient) =
                 lastCacheStatus = cacheStatus
                 lastError = cacheError })
 
-    /// Precache CodeLens for all files. InlayHints stay lazy because walking
-    /// every entity after load can starve editor requests during file switches.
-    let precacheAllFiles () =
-        let sw = Stopwatch.StartNew()
-        let mutable precacheFileCount = 0
-        let mutable precacheError: string option = None
-        updateLoadingRuntime (fun state ->
-            { state with
-                inProgress = true
-                phase = "precache"
-                lastStartedAtUnixMs = nowUnixMs ()
-                lastGame = activeGame.ToString()
-                lastError = None })
-        match gameObj with
-        | None ->
-            sw.Stop()
-            updateLoadingRuntime (fun state ->
-                { state with
-                    inProgress = false
-                    phase = "precache"
-                    lastCompletedAtUnixMs = nowUnixMs ()
-                    lastElapsedMs = int64 (sw.Elapsed.TotalMilliseconds)
-                    lastPrecacheFileCount = 0
-                    lastError = None })
-        | Some game ->
-            client.CustomNotification(
-                "loadingBar",
-                JsonValue.Record [| "value", JsonValue.String(LangResources.loadingBar_PrecachingUI); "enable", JsonValue.Boolean(true) |]
-            )
-            try
-                codeLensCache.Clear()
-
-                // Build CodeLens cache from type index (no file reads, instant)
-                let groupedTypes = getOrBuildGroupedTypes game
-                precacheFileCount <- groupedTypes.Count
-                for (filePath, items) in groupedTypes |> Map.toSeq do
-                    let lenses =
-                        items
-                        |> List.map (fun (typeName, id, tdi) -> makeTypeCodeLens None typeName id filePath tdi)
-                    cachePut codeLensCache filePath (codeLensPrecacheHash, lenses)
-
-                // Warm the direct reference index during the loading/precache phase
-                // so CodeLens clicks do not pay an all-project scan later.
-                game.TypeReferenceIndex() |> ignore
-
-            with e ->
-                precacheError <- Some e.Message
-                eprintfn $"Precache failed: %A{e}"
-            client.CustomNotification(
-                "loadingBar",
-                JsonValue.Record [| "value", JsonValue.String(""); "enable", JsonValue.Boolean(false) |]
-            )
-            maybeCollectGarbage ()
-            sw.Stop()
-            updateLoadingRuntime (fun state ->
-                { state with
-                    inProgress = false
-                    phase = "precache"
-                    lastCompletedAtUnixMs = nowUnixMs ()
-                    lastElapsedMs = int64 (sw.Elapsed.TotalMilliseconds)
-                    lastPrecacheFileCount = precacheFileCount
-                    lastError = precacheError })
-
     let processWorkspace (uri: option<Uri>) =
         let sw = Stopwatch.StartNew()
         let mutable loadedFileCount = 0
@@ -5176,9 +5098,7 @@ type Server(client: ILanguageClient) =
                                 bumpLocalisationModelEpoch ()
                                 processWorkspace rootUri
                             finally
-                                gameStateLock.ExitWriteLock()
-                            // Phase 2: precache (no lock needed - reads game data, writes ConcurrentDictionary)
-                            precacheAllFiles ())
+                                gameStateLock.ExitWriteLock())
 
                     task.Start()
             }
@@ -5940,20 +5860,13 @@ type Server(client: ILanguageClient) =
                             | None -> try System.IO.File.ReadAllText(filePath) with _ -> ""
                         let buildLenses fileText =
                             let hash = contentHash fileText
-                            // Use cached type index for O(1) lookup per file
-                            let grouped = getOrBuildGroupedTypes game
                             let lenses =
-                                match grouped.TryFind(filePath) with
-                                | Some items ->
-                                    items
-                                    |> List.map (fun (typeName, id, tdi) -> makeTypeCodeLens (Some fileText) typeName id filePath tdi)
-                                | None -> []
+                                getTypesForFile game filePath
+                                |> List.map (fun (typeName, id, tdi) -> makeTypeCodeLens (Some fileText) typeName id filePath tdi)
                             cachePut codeLensCache filePath (hash, lenses)
                             evictIfNeeded codeLensCache
                             lenses
                         match codeLensCache.TryGetValue(filePath) with
-                        | true, (cachedHash, cachedLenses) when cachedHash = codeLensPrecacheHash ->
-                            readFileText () |> buildLenses
                         | true, (cachedHash, cachedLenses) ->
                             let fileText = readFileText ()
                             let hash = contentHash fileText

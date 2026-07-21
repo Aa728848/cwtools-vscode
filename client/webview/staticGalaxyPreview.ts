@@ -80,6 +80,7 @@ interface PersistedState {
     showLanes?: boolean;
     showGrid?: boolean;
     showEstimatedLanes?: boolean;
+    brushRadius?: number;
     inspectorCollapsed?: boolean;
     activeScenarioKey?: string;
 }
@@ -114,6 +115,20 @@ const state = {
     previewPositions: new Map<string, { x: number; y: number }>(),
     applyingNodeKey: null as string | null,
     pendingLink: null as { path: string[]; cursorX: number; cursorY: number; hoverNodeKey?: string } | null,
+    paintMode: null as 'spray' | 'erase' | null,
+    paintStroke: null as {
+        pointerId: number;
+        ghosts: Array<{ x: number; y: number }>;
+        victims: Set<string>;
+        nextId: number;
+        lastX?: number;
+        lastY?: number;
+        lineAnchorX?: number;
+        lineAnchorY?: number;
+    } | null,
+    paintCursor: null as { x: number; y: number } | null,
+    brushRadius: persisted.brushRadius ?? 14,
+    radiusDrag: null as { pointerId: number; startX: number; startRadius: number } | null,
     pendingEditMode: false,
     requestCounter: 0,
 };
@@ -358,7 +373,51 @@ function render(): void {
     if (state.showRanges) drawRanges(sc, theme);
     drawSystems(sc, theme);
     if (state.pendingLink) drawPendingLink(theme);
+    if (state.paintMode) drawPaintOverlay(theme);
     drawLabels(sc, theme);
+}
+
+/** Brush circle, spray ghosts and erase marks for paint mode. */
+function drawPaintOverlay(theme: Theme): void {
+    if (state.paintCursor && state.mode === 'edit') {
+        ctx.beginPath();
+        ctx.arc(state.paintCursor.x, state.paintCursor.y, state.brushRadius * state.viewport.scale, 0, Math.PI * 2);
+        ctx.strokeStyle = state.paintMode === 'spray' ? theme.laneAdd : theme.error;
+        ctx.globalAlpha = 0.5;
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+    }
+    const stroke = state.paintStroke;
+    if (!stroke) return;
+    if (state.paintMode === 'spray') {
+        ctx.fillStyle = theme.laneAdd;
+        for (const ghost of stroke.ghosts) {
+            const s = worldToScreen(ghost.x, ghost.y);
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        return;
+    }
+    ctx.strokeStyle = theme.error;
+    ctx.lineWidth = 1.5;
+    for (const key of stroke.victims) {
+        const sys = findSystem(key);
+        if (!sys) continue;
+        const s = worldToScreen(...centerTuple(nodeCenter(sys)));
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(s.x - 4, s.y - 4);
+        ctx.lineTo(s.x + 4, s.y + 4);
+        ctx.moveTo(s.x + 4, s.y - 4);
+        ctx.lineTo(s.x - 4, s.y + 4);
+        ctx.stroke();
+    }
 }
 
 /** Chained lane drawing: committed segments solid, live segment dashed. */
@@ -600,6 +659,9 @@ function drawSystems(sc: StaticGalaxyScenarioView, theme: Theme): void {
             ctx.fillStyle = theme.accent;
         } else if (unresolved) {
             ctx.fillStyle = theme.fgDim;
+        } else if (sys.visual?.color) {
+            // Star-class color from the resolved initializer.
+            ctx.fillStyle = sys.visual.color;
         } else {
             ctx.fillStyle = named ? theme.fg : theme.fgDim;
         }
@@ -774,10 +836,18 @@ viewportEl.addEventListener('pointerdown', (e: PointerEvent) => {
     const p = canvasPoint(e);
     const hit = hitTest(p.x, p.y);
 
+    // Alt + right-drag resizes the brush (like PS/Blender brush sizing).
+    if (e.button === 2 && e.altKey) {
+        state.radiusDrag = { pointerId: e.pointerId, startX: e.clientX, startRadius: state.brushRadius };
+        viewportEl.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        return;
+    }
+
     // Right-click: confirm a chained drawing (≥2 endpoints), cancel it (no
     // endpoint yet), arm one from a system, or delete the lane under the cursor.
     if (e.button === 2) {
-        if (state.mode === 'edit' && state.permissions.canEdit) {
+        if (state.mode === 'edit' && state.permissions.canEdit && !state.paintMode) {
             if (state.pendingLink) {
                 const pending = state.pendingLink;
                 clearPendingLink();
@@ -816,6 +886,23 @@ viewportEl.addEventListener('pointerdown', (e: PointerEvent) => {
         } else if (!hit || hit.kind !== 'system') {
             clearPendingLink();
         }
+        scheduleRender();
+        e.preventDefault();
+        return;
+    }
+
+    // Paint strokes (spray/erase) take over left-drag in edit mode.
+    if (e.button === 0 && state.paintMode && state.mode === 'edit'
+        && state.permissions.canEdit && state.applyingNodeKey === null) {
+        state.paintStroke = {
+            pointerId: e.pointerId,
+            ghosts: [],
+            victims: new Set<string>(),
+            nextId: nextFreeSystemId(),
+        };
+        if (state.paintMode === 'spray') sprayAt(p.x, p.y, { shiftKey: e.shiftKey, ctrlKey: e.ctrlKey || e.metaKey });
+        else eraseAt(p.x, p.y);
+        viewportEl.setPointerCapture(e.pointerId);
         scheduleRender();
         e.preventDefault();
         return;
@@ -867,6 +954,12 @@ viewportEl.addEventListener('pointerdown', (e: PointerEvent) => {
 viewportEl.addEventListener('pointermove', (e: PointerEvent) => {
     const p = canvasPoint(e);
 
+    if (state.radiusDrag && state.radiusDrag.pointerId === e.pointerId) {
+        const next = clamp(state.radiusDrag.startRadius + (e.clientX - state.radiusDrag.startX) * 0.2, 4, 60);
+        setBrushRadius(Math.round(next));
+        return;
+    }
+
     if (state.pan && state.pan.pointerId === e.pointerId) {
         const dx = e.clientX - state.pan.lastX;
         const dy = e.clientY - state.pan.lastY;
@@ -898,6 +991,16 @@ viewportEl.addEventListener('pointermove', (e: PointerEvent) => {
         return;
     }
 
+    // Paint stroke in progress: spray places ghosts along the path, erase
+    // marks erasable systems under the brush.
+    if (state.paintStroke && state.paintStroke.pointerId === e.pointerId) {
+        if (state.paintMode === 'spray') sprayAt(p.x, p.y, { shiftKey: e.shiftKey, ctrlKey: e.ctrlKey || e.metaKey });
+        else eraseAt(p.x, p.y);
+        state.paintCursor = p;
+        scheduleRender();
+        return;
+    }
+
     // Pending chain: the rubber-band follows the cursor from the last endpoint;
     // left-click extends the chain, right-click confirms all segments.
     if (state.pendingLink) {
@@ -912,6 +1015,10 @@ viewportEl.addEventListener('pointermove', (e: PointerEvent) => {
     }
 
     // Hover.
+    if (state.paintMode) {
+        state.paintCursor = p;
+        scheduleRender();
+    }
     const hit = hitTest(p.x, p.y);
     const nextHover = hit ? { kind: hit.kind, nodeKey: hit.nodeKey } : null;
     const changed = nextHover?.nodeKey !== state.hover?.nodeKey;
@@ -956,6 +1063,18 @@ function endDrag(e: PointerEvent, commit: boolean): void {
 }
 
 viewportEl.addEventListener('pointerup', (e: PointerEvent) => {
+    if (state.radiusDrag && state.radiusDrag.pointerId === e.pointerId) {
+        state.radiusDrag = null;
+        persistState();
+        try {
+            viewportEl.releasePointerCapture(e.pointerId);
+        } catch { /* ignore */ }
+        return;
+    }
+    if (state.paintStroke && state.paintStroke.pointerId === e.pointerId) {
+        finishPaintStroke(true);
+        return;
+    }
     if (state.pan && state.pan.pointerId === e.pointerId) {
         state.pan = null;
         viewportEl.classList.remove('panning');
@@ -968,6 +1087,14 @@ viewportEl.addEventListener('pointerup', (e: PointerEvent) => {
 });
 
 viewportEl.addEventListener('pointercancel', (e: PointerEvent) => {
+    if (state.radiusDrag && state.radiusDrag.pointerId === e.pointerId) {
+        state.radiusDrag = null;
+        return;
+    }
+    if (state.paintStroke && state.paintStroke.pointerId === e.pointerId) {
+        finishPaintStroke(false);
+        return;
+    }
     if (state.pan && state.pan.pointerId === e.pointerId) {
         state.pan = null;
         viewportEl.classList.remove('panning');
@@ -1228,6 +1355,24 @@ function renderInspector(): void {
         if (sys.name) sections.push(detailRow(tr('Name', '名称'), sys.name));
         if (sys.initializer) sections.push(detailRow('initializer', sys.initializer));
         sections.push(`</div>`);
+
+        if (sys.initializerInfo) {
+            const info = sys.initializerInfo;
+            sections.push(`<div class="detail-section"><div class="detail-title">${tr('Initializer system', '初始化星系')}</div>`);
+            if (!info.found) {
+                sections.push(`<div class="edit-blocked-note">${tr('Initializer not found in workspace files', '未在工作区文件中找到该 initializer')}</div>`);
+            } else {
+                if (info.starClass) {
+                    const dot = info.color ? `<span style="color:${info.color}">●</span> ` : '';
+                    sections.push(`<div class="detail-row"><span class="detail-label">${tr('Star class', '恒星类型')}</span><span class="detail-value">${dot}${info.starClass}</span></div>`);
+                }
+                sections.push(detailRow(tr('Planets', '行星'), String(info.planetCount)));
+                if (info.moonCount > 0) sections.push(detailRow(tr('Moons', '卫星'), String(info.moonCount)));
+                if (info.beltCount > 0) sections.push(detailRow(tr('Asteroid belts', '小行星带'), String(info.beltCount)));
+                if (info.hasRing) sections.push(detailRow(tr('Ring world', '环形世界'), tr('yes', '有')));
+            }
+            sections.push(`</div>`);
+        }
 
         sections.push(`<div class="detail-section"><div class="detail-title">${tr('Raw coordinates (file)', '原始坐标（文件）')}</div>`);
         const rawX = axisSummary(sys.rawPosition.x);
@@ -1639,7 +1784,12 @@ function setMode(mode: Mode): void {
     }
     state.mode = mode;
     state.pendingEditMode = false;
-    if (mode !== 'edit') clearPendingLink();
+    if (mode !== 'edit') {
+        clearPendingLink();
+        state.paintStroke = null;
+        state.paintCursor = null;
+        if (state.paintMode) setPaintMode(null);
+    }
     document.body.classList.toggle('is-edit-mode', mode === 'edit');
     const btnPreview = el<HTMLButtonElement>('btn-preview');
     const btnEdit = el<HTMLButtonElement>('btn-edit');
@@ -1729,6 +1879,212 @@ bindToggle('btn-est-lanes', () => state.showEstimatedLanes, v => {
 
 el<HTMLButtonElement>('btn-undo').addEventListener('click', () => post({ type: 'undo' }));
 el<HTMLButtonElement>('btn-redo').addEventListener('click', () => post({ type: 'redo' }));
+
+// ─── Spray / erase paint mode ───────────────────────────────────────────────
+
+const SPRAY_SPACING = 12;
+const MAX_STROKE_ITEMS = 200;
+
+/** Only undefined random systems (no name, no initializer) may be sprayed/erased. */
+function isErasableSystem(sys: StaticGalaxySystemView): boolean {
+    return !sys.name && !sys.initializer;
+}
+
+function nextFreeSystemId(): number {
+    const sc = scenario();
+    let max = 0;
+    for (const sys of sc?.systems ?? []) {
+        const n = parseInt(sys.id, 10);
+        if (Number.isFinite(n) && n > max) max = n;
+    }
+    return max + 1;
+}
+
+function setPaintMode(mode: 'spray' | 'erase' | null): void {
+    state.paintMode = state.paintMode === mode ? null : mode;
+    state.paintStroke = null;
+    clearPendingLink();
+    viewportEl.classList.toggle('painting', state.paintMode !== null);
+    el<HTMLElement>('brush-controls').classList.toggle('hidden', state.paintMode === null);
+    const spray = el<HTMLButtonElement>('btn-spray');
+    const erase = el<HTMLButtonElement>('btn-erase');
+    spray.classList.toggle('active', state.paintMode === 'spray');
+    spray.setAttribute('aria-pressed', String(state.paintMode === 'spray'));
+    erase.classList.toggle('active', state.paintMode === 'erase');
+    erase.setAttribute('aria-pressed', String(state.paintMode === 'erase'));
+    scheduleRender();
+}
+
+el<HTMLButtonElement>('btn-spray').addEventListener('click', () => setPaintMode('spray'));
+el<HTMLButtonElement>('btn-erase').addEventListener('click', () => setPaintMode('erase'));
+
+const brushRadiusInput = el<HTMLInputElement>('brush-radius');
+const brushRadiusValueEl = el<HTMLSpanElement>('brush-radius-value');
+
+function setBrushRadius(value: number): void {
+    state.brushRadius = clamp(Math.round(value), 4, 60);
+    brushRadiusInput.value = String(state.brushRadius);
+    brushRadiusValueEl.textContent = String(state.brushRadius);
+    scheduleRender();
+}
+
+brushRadiusInput.value = String(state.brushRadius);
+brushRadiusValueEl.textContent = String(state.brushRadius);
+brushRadiusInput.addEventListener('input', () => {
+    const value = Number(brushRadiusInput.value);
+    if (!Number.isFinite(value) || value <= 0) return;
+    setBrushRadius(value);
+    persistState();
+});
+
+/** Spray places ghosts along the path; Shift/Ctrl+Shift switch to line modes. */
+function sprayAt(sx: number, sy: number, modifiers: { shiftKey: boolean; ctrlKey: boolean }): void {
+    const stroke = state.paintStroke;
+    if (!stroke) return;
+    const world = screenToWorld(sx, sy);
+    stroke.lineAnchorX ??= world.x;
+    stroke.lineAnchorY ??= world.y;
+
+    if (modifiers.shiftKey && modifiers.ctrlKey) {
+        // Precise line: points pressed exactly onto anchor→cursor, with extra
+        // parallel columns as the brush radius grows.
+        stroke.ghosts = samplePreciseLine(stroke.lineAnchorX, stroke.lineAnchorY, world.x, world.y, state.brushRadius);
+        stroke.lastX = world.x;
+        stroke.lastY = world.y;
+        return;
+    }
+    if (modifiers.shiftKey) {
+        // Straight direction with scatter inside the brush radius.
+        stroke.ghosts = sampleSprayLine(stroke.lineAnchorX, stroke.lineAnchorY, world.x, world.y, state.brushRadius);
+        stroke.lastX = world.x;
+        stroke.lastY = world.y;
+        return;
+    }
+
+    if (stroke.ghosts.length >= MAX_STROKE_ITEMS) return;
+    if (stroke.lastX !== undefined
+        && Math.hypot(world.x - stroke.lastX, world.y - (stroke.lastY ?? world.y)) < SPRAY_SPACING) {
+        return;
+    }
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * state.brushRadius;
+    stroke.ghosts.push({
+        x: Math.round(world.x + Math.cos(angle) * r),
+        y: Math.round(world.y + Math.sin(angle) * r),
+    });
+    stroke.lastX = world.x;
+    stroke.lastY = world.y;
+}
+
+/** Deterministic pseudo-random per seed — stable jitter while a stroke moves. */
+function seededScatter(seed: number): { angle: number; r: number } {
+    const a = Math.sin(seed * 127.1) * 43758.5453;
+    const b = Math.sin(seed * 311.7) * 28001.8384;
+    return { angle: (a - Math.floor(a)) * Math.PI * 2, r: Math.sqrt(b - Math.floor(b)) };
+}
+
+/** Exact points on the segment plus parallel columns filling the brush width. */
+function samplePreciseLine(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    radius: number,
+): Array<{ x: number; y: number }> {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const len = Math.hypot(dx, dy);
+    const steps = Math.max(1, Math.round(len / SPRAY_SPACING));
+    const perp = len > 0 ? { x: -dy / len, y: dx / len } : { x: 0, y: 1 };
+    const maxColumn = Math.min(4, Math.floor(radius / SPRAY_SPACING));
+
+    const seen = new Set<string>();
+    const points: Array<{ x: number; y: number }> = [];
+    for (let column = -maxColumn; column <= maxColumn; column++) {
+        for (let i = 0; i <= steps && points.length < MAX_STROKE_ITEMS; i++) {
+            const t = i / steps;
+            const x = Math.round(x0 + dx * t + perp.x * column * SPRAY_SPACING);
+            const y = Math.round(y0 + dy * t + perp.y * column * SPRAY_SPACING);
+            const key = `${x},${y}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            points.push({ x, y });
+        }
+    }
+    return points;
+}
+
+/** Evenly spaced points along the segment, each scattered inside the brush radius. */
+function sampleSprayLine(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    radius: number,
+): Array<{ x: number; y: number }> {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const len = Math.hypot(dx, dy);
+    const steps = Math.max(1, Math.min(MAX_STROKE_ITEMS - 1, Math.round(len / SPRAY_SPACING)));
+    const points: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const scatter = seededScatter(i + 1);
+        points.push({
+            x: Math.round(x0 + dx * t + Math.cos(scatter.angle) * scatter.r * radius),
+            y: Math.round(y0 + dy * t + Math.sin(scatter.angle) * scatter.r * radius),
+        });
+    }
+    return points;
+}
+
+/** Erase marks undefined random systems under the brush (protected ones skip). */
+function eraseAt(sx: number, sy: number): void {
+    const stroke = state.paintStroke;
+    const sc = scenario();
+    if (!stroke || !sc) return;
+    const world = screenToWorld(sx, sy);
+    for (const sys of sc.systems) {
+        if (!isErasableSystem(sys) || stroke.victims.has(sys.nodeKey)) continue;
+        const c = nodeCenter(sys);
+        if (Math.hypot(c.x - world.x, c.y - world.y) <= state.brushRadius) {
+            stroke.victims.add(sys.nodeKey);
+        }
+    }
+}
+
+/** Commits the stroke as one edit (or discards it when cancelled). */
+function finishPaintStroke(commit: boolean): void {
+    const stroke = state.paintStroke;
+    state.paintStroke = null;
+    if (!stroke) return;
+    const sc = scenario();
+    const rev = state.revision;
+    if (commit && sc && rev) {
+        if (state.paintMode === 'spray' && stroke.ghosts.length > 0) {
+            const systems = stroke.ghosts.map((g, i) => ({ id: String(stroke.nextId + i), x: g.x, y: g.y }));
+            state.applyingNodeKey = '__spray__';
+            post({
+                type: 'spraySystems',
+                requestId: `req-${++state.requestCounter}`,
+                revisionId: rev.revisionId,
+                documentVersion: rev.documentVersion,
+                scenarioKey: sc.scenarioKey,
+                systems,
+            });
+        } else if (state.paintMode === 'erase' && stroke.victims.size > 0) {
+            state.applyingNodeKey = '__erase__';
+            post({
+                type: 'eraseSystems',
+                requestId: `req-${++state.requestCounter}`,
+                revisionId: rev.revisionId,
+                documentVersion: rev.documentVersion,
+                nodeKeys: [...stroke.victims],
+            });
+        }
+    }
+    scheduleRender();
+}
 el<HTMLButtonElement>('btn-save').addEventListener('click', () => post({ type: 'saveDocument' }));
 el<HTMLButtonElement>('btn-copy-workspace').addEventListener('click', () => post({ type: 'copyToWorkspace' }));
 el<HTMLButtonElement>('btn-open-source').addEventListener('click', () => {
@@ -1815,7 +2171,10 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
     if (inInput) return;
 
     if (e.key === 'Escape') {
-        if (state.pendingLink) {
+        if (state.paintStroke) {
+            state.paintStroke = null;
+            scheduleRender();
+        } else if (state.pendingLink) {
             clearPendingLink();
             scheduleRender();
         } else if (state.drag) {

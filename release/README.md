@@ -96,7 +96,7 @@ Below is the overall module interaction and data flow topology:
 * **Operations**:
   - Zoom with the mouse wheel, pan with `Space`/`Alt`/middle-drag, click to select a system or nebula, and **double-click to jump to its source block**.
   - Use the **Preview / Edit** segmented control (shortcut `E`) to switch modes without losing zoom, pan, filters, or selection.
-  - In **Edit Mode**, drag a system or nebula to translate its X/Y position; range coordinates `{ min max }` keep their width, and only the touched number tokens are rewritten — one drag produces exactly one native undo step. The Inspector accepts precise X/Y/Z values (and can add a missing Z). Explicit hyperlanes can be drawn on the canvas: right-click a system to enter lane-drawing mode, left-click to chain endpoints (A→B→C…), and right-click again to confirm all segments as a single edit; right-clicking an existing lane deletes its `add_hyperlane` declaration from the source.
+  - In **Edit Mode**, drag a system or nebula to translate its X/Y position; range coordinates `{ min max }` keep their width, and only the touched number tokens are rewritten — one drag produces exactly one native undo step. The Inspector accepts precise X/Y/Z values (and can add a missing Z) plus nebula radius. Systems with an `initializer` show resolved details (star class with matching node color, planet/moon/belt counts, ring worlds). Explicit hyperlanes can be drawn on the canvas: right-click a system to enter lane-drawing mode, left-click to chain endpoints (A→B→C…), and right-click again to confirm all segments as a single edit; right-clicking an existing lane deletes its `add_hyperlane` declaration from the source. The **Spray/Erase** tools scatter or remove undefined random systems (named/initializer systems are always protected) with one undo step per stroke — the brush radius has a slider, `Alt+right-drag` resizes it, `Shift` sprays along a straight direction with scatter, and `Ctrl+Shift` presses exact lines whose column count grows with the radius.
   - `random_hyperlanes = yes` is called out explicitly: runtime-generated lanes are never presented as exact preview data. An optional **Estimated lanes** toggle (off by default) draws a clearly-labeled heuristic approximation — never written back to source.
   - Steam Workshop files show a risk banner and require confirmation before editing; copying the file into your mod workspace is offered as the safe path.
 
@@ -351,7 +351,7 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
 * **交互操作**：
   - 滚轮缩放，`空格`/`Alt`/中键拖动平移，单击选择系统或星云，**双击跳转到对应源码块**。
   - 通过顶部的 **预览 / 编辑** 分段按钮（快捷键 `E`）切换模式，缩放、平移、筛选和选中项均不会重置。
-  - 在**编辑模式**下拖动系统或星云即可平移其 X/Y 位置；范围坐标 `{ min max }` 平移时保持宽度不变，写回只替换被修改的数字 token——一次拖动恰好对应一次原生撤销。检视器支持精确填写 X/Y/Z（包括为原本没有 Z 的位置补充 Z）。显式航道可直接在画布上绘制：右键点击系统进入绘制模式，左键连续链接端点（A→B→C…），再次右键把所有航段合并为一次写回；右键点击已有航道会从源码中删除对应的 `add_hyperlane` 声明。
+  - 在**编辑模式**下拖动系统或星云即可平移其 X/Y 位置；范围坐标 `{ min max }` 平移时保持宽度不变，写回只替换被修改的数字 token——一次拖动恰好对应一次原生撤销。检视器支持精确填写 X/Y/Z（包括为原本没有 Z 的位置补充 Z）以及星云半径。定义了 `initializer` 的系统会显示解析出的星系详情（恒星类型及同色节点、行星/卫星/小行星带数量、环形世界）。显式航道可直接在画布上绘制：右键点击系统进入绘制模式，左键连续链接端点（A→B→C…），再次右键把所有航段合并为一次写回；右键点击已有航道会从源码中删除对应的 `add_hyperlane` 声明。**喷涂/擦除**工具可批量散布或移除未定义的随机星系（有名称或 initializer 的系统始终受保护），每次笔画恰好一次撤销——笔刷半径可用滑块或 `Alt+右键拖动` 调整，按住 `Shift` 沿直线方向散布，`Ctrl+Shift` 则精确压线且列数随半径增加。
   - `random_hyperlanes = yes` 会明确提示：运行时生成的随机航道不会被当作精确预览结果展示。可选的**估算航道**开关（默认关闭）绘制明确标注的启发式近似航道——永远不会写回源码。
   - Steam Workshop 文件会显示风险横幅，编辑前需要确认，并优先提供复制到 Mod 工作区的安全路径。
 

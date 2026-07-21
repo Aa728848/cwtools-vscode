@@ -188,6 +188,43 @@ describe('staticGalaxyProtocol', () => {
             })).to.equal(null);
         });
 
+        it('validates spraySystems payloads', () => {
+            const ok = parseStaticGalaxyWebviewMessage({
+                type: 'spraySystems', requestId: 'q1', revisionId: 'r1', documentVersion: 4,
+                scenarioKey: 'sc0', systems: [{ id: '42', x: 1, y: -2 }],
+            });
+            expect(ok).to.not.equal(null);
+            expect(parseStaticGalaxyWebviewMessage({
+                type: 'spraySystems', requestId: 'q1', revisionId: 'r1', documentVersion: 4,
+                scenarioKey: 'sc0', systems: [],
+            })).to.equal(null);
+            expect(parseStaticGalaxyWebviewMessage({
+                type: 'spraySystems', requestId: 'q1', revisionId: 'r1', documentVersion: 4,
+                scenarioKey: 'sc0', systems: [{ id: 'x', x: 1, y: 2 }],
+            })).to.equal(null);
+            expect(parseStaticGalaxyWebviewMessage({
+                type: 'spraySystems', requestId: 'q1', revisionId: 'r1', documentVersion: 4,
+                scenarioKey: 'sc0', systems: [{ id: '1', x: 1, y: 2 }, { id: '1', x: 3, y: 4 }],
+            })).to.equal(null);
+            expect(parseStaticGalaxyWebviewMessage({
+                type: 'spraySystems', requestId: 'q1', revisionId: 'r1', documentVersion: 4,
+                scenarioKey: 'sc0', systems: [{ id: '1', x: Infinity, y: 2 }],
+            })).to.equal(null);
+        });
+
+        it('validates eraseSystems payloads', () => {
+            expect(parseStaticGalaxyWebviewMessage({
+                type: 'eraseSystems', requestId: 'q1', revisionId: 'r1', documentVersion: 4,
+                nodeKeys: ['sc0.sys1', 'sc0.sys2'],
+            })).to.not.equal(null);
+            expect(parseStaticGalaxyWebviewMessage({
+                type: 'eraseSystems', requestId: 'q1', revisionId: 'r1', documentVersion: 4, nodeKeys: [],
+            })).to.equal(null);
+            expect(parseStaticGalaxyWebviewMessage({
+                type: 'eraseSystems', requestId: 'q1', revisionId: 'r1', documentVersion: 4, nodeKeys: [''],
+            })).to.equal(null);
+        });
+
         it('validates deleteHyperlane payloads', () => {
             expect(parseStaticGalaxyWebviewMessage({
                 type: 'deleteHyperlane', requestId: 'q1', revisionId: 'r1', documentVersion: 4,

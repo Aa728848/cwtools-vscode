@@ -359,6 +359,10 @@ body.workshop #main-layout {
     cursor: crosshair;
 }
 
+#viewport.painting {
+    cursor: cell;
+}
+
 #galaxy-canvas {
     height: 100%;
     inset: 0;
@@ -438,6 +442,30 @@ body.workshop #main-layout {
 
 #random-lanes-note:not(.hidden) ~ #lanes-legend:not(.hidden) {
     bottom: 48px;
+}
+
+#brush-controls {
+    align-items: center;
+    display: inline-flex;
+    gap: 5px;
+}
+
+#brush-controls.hidden {
+    display: none !important;
+}
+
+#brush-radius {
+    accent-color: var(--accent);
+    height: 14px;
+    width: 90px;
+}
+
+#brush-radius-value {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    min-width: 20px;
+    text-align: right;
 }
 
 #drag-hud {

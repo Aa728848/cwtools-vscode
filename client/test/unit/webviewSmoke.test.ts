@@ -502,4 +502,36 @@ describe('webview smoke checks', () => {
         const estimate = fs.readFileSync(path.join(root, 'client/shared/staticGalaxyEstimate.ts'), 'utf8');
         expect(estimate).to.include('NOT Stellaris');
     });
+
+    it('static galaxy spray/erase paint mode and initializer details are wired', () => {
+        const script = fs.readFileSync(path.join(root, 'client/webview/staticGalaxyPreview.ts'), 'utf8');
+        // Paint mode toggles, stroke state machine and submissions exist.
+        expect(script).to.include('setPaintMode');
+        expect(script).to.include('state.paintStroke');
+        expect(script).to.include('sprayAt');
+        expect(script).to.include('eraseAt');
+        expect(script).to.include('finishPaintStroke');
+        expect(script).to.include("type: 'spraySystems'");
+        expect(script).to.include("type: 'eraseSystems'");
+        // Erase only targets undefined random systems.
+        expect(script).to.include('isErasableSystem');
+        // Shift line spray and Alt+right-drag brush sizing.
+        expect(script).to.include('sampleSprayLine');
+        expect(script).to.include('samplePreciseLine');
+        expect(script).to.include('e.shiftKey');
+        expect(script).to.include('state.radiusDrag');
+        expect(script).to.include('setBrushRadius');
+        // Initializer detail section and star-class coloring.
+        expect(script).to.include('initializerInfo');
+        expect(script).to.include('sys.visual?.color');
+
+        const provider = fs.readFileSync(path.join(root, 'client/extension/staticGalaxyEditorProvider.ts'), 'utf8');
+        expect(provider).to.include('id="btn-spray"');
+        expect(provider).to.include('id="btn-erase"');
+        expect(provider).to.include('id="brush-radius"');
+        expect(provider).to.include('StaticGalaxyInitializerIndex');
+
+        const css = fs.readFileSync(path.join(root, 'client/webview/staticGalaxyPreview.css'), 'utf8');
+        expect(css).to.include('#viewport.painting');
+    });
 });

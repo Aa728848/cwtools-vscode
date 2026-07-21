@@ -52,12 +52,24 @@ export interface StaticGalaxyDiagnosticView {
 
 // ─── Render model ───────────────────────────────────────────────────────────
 
+export interface StaticGalaxyInitializerInfo {
+    starClass?: string;
+    color?: string;
+    planetCount: number;
+    moonCount: number;
+    beltCount: number;
+    hasRing: boolean;
+    /** False when the initializer was not found in the workspace. */
+    found: boolean;
+}
+
 export interface StaticGalaxySystemView {
     nodeKey: string;
     id: string;
     name?: string;
     displayName: string;
     initializer?: string;
+    initializerInfo?: StaticGalaxyInitializerInfo;
     rawPosition: StaticGalaxyPosition;
     effectivePosition: StaticGalaxyPosition;
     editable: boolean;
@@ -152,6 +164,9 @@ export const STATIC_GALAXY_MAX_MOVES = 1;
 
 /** Maximum chained hyperlane links confirmed in one request. */
 export const STATIC_GALAXY_MAX_LANE_LINKS = 64;
+
+/** Maximum systems created or erased in one spray stroke. */
+export const STATIC_GALAXY_MAX_SPRAY_SYSTEMS = 200;
 
 /** Absolute upper bound for coordinate values accepted by the Host. */
 export const STATIC_GALAXY_MAX_COORDINATE = 1_000_000;
@@ -269,6 +284,23 @@ export type StaticGalaxyWebviewMessage =
         fromNodeKey: string;
         toNodeKey: string;
     }
+    | {
+        /** Spray stroke: insert new undefined random systems in one edit. */
+        type: 'spraySystems';
+        requestId: string;
+        revisionId: string;
+        documentVersion: number;
+        scenarioKey: string;
+        systems: Array<{ id: string; x: number; y: number }>;
+    }
+    | {
+        /** Erase stroke: delete undefined random systems (no name/initializer). */
+        type: 'eraseSystems';
+        requestId: string;
+        revisionId: string;
+        documentVersion: number;
+        nodeKeys: string[];
+    }
     | { type: 'goToSource'; revisionId: string; nodeKey: string }
     | { type: 'saveDocument' }
     | { type: 'undo' }
@@ -377,6 +409,44 @@ export function parseStaticGalaxyWebviewMessage(input: unknown): StaticGalaxyWeb
         case 'requestWorkshopEdit':
         case 'copyToWorkspace':
             return { type: input.type };
+        case 'spraySystems': {
+            if (!isValidRequestEnvelope(input)) return null;
+            if (typeof input.scenarioKey !== 'string' || input.scenarioKey.length === 0) return null;
+            if (!Array.isArray(input.systems) || input.systems.length === 0
+                || input.systems.length > STATIC_GALAXY_MAX_SPRAY_SYSTEMS) return null;
+            const systems: Array<{ id: string; x: number; y: number }> = [];
+            const seenIds = new Set<string>();
+            for (const sys of input.systems) {
+                if (!isRecord(sys)) return null;
+                if (typeof sys.id !== 'string' || !/^-?\d+$/.test(sys.id)) return null;
+                if (!isFiniteNumber(sys.x) || !isFiniteNumber(sys.y)) return null;
+                if (!isCoordinateInRange(sys.x) || !isCoordinateInRange(sys.y)) return null;
+                if (seenIds.has(sys.id)) return null;
+                seenIds.add(sys.id);
+                systems.push({ id: sys.id, x: sys.x, y: sys.y });
+            }
+            return {
+                type: 'spraySystems',
+                requestId: input.requestId,
+                revisionId: input.revisionId,
+                documentVersion: input.documentVersion,
+                scenarioKey: input.scenarioKey,
+                systems,
+            };
+        }
+        case 'eraseSystems': {
+            if (!isValidRequestEnvelope(input)) return null;
+            if (!Array.isArray(input.nodeKeys) || input.nodeKeys.length === 0
+                || input.nodeKeys.length > STATIC_GALAXY_MAX_SPRAY_SYSTEMS) return null;
+            if (!input.nodeKeys.every(k => typeof k === 'string' && k.length > 0)) return null;
+            return {
+                type: 'eraseSystems',
+                requestId: input.requestId,
+                revisionId: input.revisionId,
+                documentVersion: input.documentVersion,
+                nodeKeys: input.nodeKeys as string[],
+            };
+        }
         case 'goToSource':
             // An empty nodeKey means "open the source" (used by the empty state).
             if (typeof input.revisionId === 'string'

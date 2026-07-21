@@ -44,7 +44,9 @@ export type StaticGalaxyEditRequest =
     | { kind: 'nebulaRadius'; nodeKey: string; radius: number }
     | { kind: 'hyperlane'; update: StaticGalaxyHyperlaneUpdate }
     | { kind: 'addLanes'; links: Array<{ fromNodeKey: string; toNodeKey: string }> }
-    | { kind: 'deleteLane'; fromNodeKey: string; toNodeKey: string };
+    | { kind: 'deleteLane'; fromNodeKey: string; toNodeKey: string }
+    | { kind: 'spraySystems'; scenarioKey: string; systems: Array<{ id: string; x: number; y: number }> }
+    | { kind: 'eraseSystems'; nodeKeys: string[] };
 
 type ParsedPositionNode = ParsedSystem | ParsedNebula;
 
@@ -88,6 +90,10 @@ export function buildStaticGalaxyEdits(
             return buildDeleteLaneEdit(request.fromNodeKey, request.toNodeKey, context);
         case 'nebulaRadius':
             return buildNebulaRadiusEdit(request.nodeKey, request.radius, context);
+        case 'spraySystems':
+            return buildSpraySystemsEdit(request.scenarioKey, request.systems, context);
+        case 'eraseSystems':
+            return buildEraseSystemsEdit(request.nodeKeys, context);
     }
 }
 
@@ -258,6 +264,106 @@ function axisUpdateReplacements(
     if (nextMin !== axis.min) replacements.push({ span: axis.spans.min!, text: formatInt(nextMin) });
     if (nextMax !== axis.max) replacements.push({ span: axis.spans.max!, text: formatInt(nextMax) });
     return replacements;
+}
+
+// ─── Spray / erase systems ──────────────────────────────────────────────────
+
+/**
+ * Spray: insert new undefined random systems (id + position only) before the
+ * scenario's closing brace as one anchored insertion. Ids must be unused ints.
+ */
+function buildSpraySystemsEdit(
+    scenarioKey: string,
+    systems: Array<{ id: string; x: number; y: number }>,
+    context: StaticGalaxyEditContext,
+): StaticGalaxyBuiltEdit {
+    const scenario = context.scenarios.find(s => s.scenarioKey === scenarioKey);
+    if (!scenario) {
+        throw new StaticGalaxyEditError('unknown-node', `Unknown scenario: ${scenarioKey}`);
+    }
+    if (systems.length === 0) {
+        throw new StaticGalaxyEditError('invalid-value', 'Spray request contains no systems');
+    }
+
+    const existingIds = new Set(scenario.systems.map(s => s.id));
+    const requestIds = new Set<string>();
+    const declarations: string[] = [];
+    for (const sys of systems) {
+        if (!/^-?\d+$/.test(sys.id)) {
+            throw new StaticGalaxyEditError('invalid-value', `System id ${sys.id} is not an integer`);
+        }
+        if (existingIds.has(sys.id) || requestIds.has(sys.id)) {
+            throw new StaticGalaxyEditError('invalid-value', `System id ${sys.id} already exists`);
+        }
+        const x = Math.round(sys.x);
+        const y = Math.round(sys.y);
+        assertLegalValue(x, 'x');
+        assertLegalValue(y, 'y');
+        requestIds.add(sys.id);
+        declarations.push(`system = { id = ${sys.id} position = { x = ${formatInt(x)} y = ${formatInt(y)} } }`);
+    }
+
+    const insertion = buildHyperlaneInsertion(scenario, declarations, context.text);
+    return finalize([insertion], `Spray ${systems.length} system(s)`);
+}
+
+/**
+ * Erase: delete whole system blocks. Only undefined random systems (no name,
+ * no initializer) may be erased — named/initializer systems are protected and
+ * rejected at the Host boundary, never silently skipped.
+ */
+function buildEraseSystemsEdit(nodeKeys: string[], context: StaticGalaxyEditContext): StaticGalaxyBuiltEdit {
+    if (nodeKeys.length === 0) {
+        throw new StaticGalaxyEditError('invalid-value', 'Erase request contains no systems');
+    }
+    const replacements: StaticGalaxyReplacement[] = [];
+    for (const nodeKey of nodeKeys) {
+        const node = findPositionNode(nodeKey, context.scenarios);
+        if (!('id' in node)) {
+            throw new StaticGalaxyEditError('not-editable', `Nebula ${node.name || nodeKey} cannot be erased — only undefined random systems`);
+        }
+        const system = node;
+        if (system.name !== undefined || system.initializer !== undefined) {
+            throw new StaticGalaxyEditError(
+                'not-editable',
+                `System ${system.id || nodeKey} has a name or initializer — only undefined random systems can be erased`,
+            );
+        }
+        if (!system.blockSpan) {
+            throw new StaticGalaxyEditError('not-editable', `System ${system.id || nodeKey} has no block to delete`);
+        }
+        if (context.text.slice(system.keySpan.start, system.keySpan.end) !== 'system') {
+            throw new StaticGalaxyEditError('token-mismatch', 'Source no longer matches the parsed system block');
+        }
+        replacements.push({ span: systemDeletionSpan(system, context.text), text: '' });
+    }
+    return finalize(replacements, `Erase ${nodeKeys.length} system(s)`);
+}
+
+/** Whole lines when the block owns them; otherwise the block plus one adjacent gap. */
+function systemDeletionSpan(system: ParsedSystem, text: string): OffsetSpan {
+    const keyStart = system.keySpan.start;
+    const blockEnd = system.blockSpan!.end;
+    const lineStart = lineStartAt(text, keyStart);
+    const nextNewline = text.indexOf('\n', blockEnd);
+    const contentEnd = nextNewline < 0 ? text.length : nextNewline;
+    const lineEnd = nextNewline < 0 ? text.length : nextNewline + 1;
+
+    const prefix = text.slice(lineStart, keyStart);
+    const suffix = text.slice(blockEnd, contentEnd);
+    if (/^\s*$/.test(prefix) && /^\s*$/.test(suffix)) {
+        return { start: lineStart, end: lineEnd };
+    }
+    let start = keyStart;
+    let end = blockEnd;
+    const following = /^[\t ]+/.exec(text.slice(end, contentEnd));
+    if (following) {
+        end += following[0].length;
+    } else {
+        const preceding = /[\t ]+$/.exec(text.slice(lineStart, start));
+        if (preceding) start -= preceding[0].length;
+    }
+    return { start, end };
 }
 
 // ─── Nebula radius ──────────────────────────────────────────────────────────

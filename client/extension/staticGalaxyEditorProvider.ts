@@ -14,6 +14,8 @@ import * as vscode from 'vscode';
 import { ErrorReporter } from './ai/errorReporter';
 import { isPreviewAvailable } from './gameProfiles';
 import { parseStaticGalaxy, toScenarioView, ParsedScenario, OffsetSpan } from './staticGalaxyParser';
+import { StaticGalaxyInitializerIndex } from './staticGalaxyInitializers';
+import { StaticGalaxyInitializerSummary } from './staticGalaxyInitializerSummary';
 import { buildStaticGalaxyEdits, StaticGalaxyEditError, StaticGalaxyEditRequest } from './staticGalaxyEditBuilder';
 import {
     parseStaticGalaxyWebviewMessage,
@@ -21,6 +23,7 @@ import {
     StaticGalaxyEditRejectCode,
     StaticGalaxyHostMessage,
     StaticGalaxyRevision,
+    StaticGalaxyScenarioView,
 } from '../shared/staticGalaxyProtocol';
 
 export const STATIC_GALAXY_VIEW_TYPE = 'cwtools.staticGalaxyEditor';
@@ -60,6 +63,8 @@ class StaticGalaxyEditorSession implements vscode.Disposable {
     private readonly _workshopFile: boolean;
     private _canEditFs = false;
     private _parseAllowsEdit = false;
+    private _parseSeq = 0;
+    private readonly _initializerIndex = new StaticGalaxyInitializerIndex();
     private _messageQueue: Promise<void> = Promise.resolve();
 
     constructor(
@@ -179,15 +184,55 @@ class StaticGalaxyEditorSession implements vscode.Disposable {
             scenarios: result.scenarios,
             sourceSpans,
         };
-        const revision: StaticGalaxyRevision = {
-            revisionId,
-            documentVersion: this._document.version,
-            scenarios: result.scenarios.map(toScenarioView),
-        };
-        this._lastGoodRevision = revision;
-        this._post({ type: 'render', revision });
-        this._sendPermissions();
-        this._sendDocumentState();
+
+        // Enrich with initializer details asynchronously; stale results from
+        // superseded parses are dropped before posting.
+        const seq = ++this._parseSeq;
+        const version = this._document.version;
+        void this._buildScenarioViews(result.scenarios).then(scenarios => {
+            if (this._disposed || seq !== this._parseSeq) return;
+            const revision: StaticGalaxyRevision = {
+                revisionId,
+                documentVersion: version,
+                scenarios,
+            };
+            this._lastGoodRevision = revision;
+            this._post({ type: 'render', revision });
+            this._sendPermissions();
+            this._sendDocumentState();
+        }, err => {
+            ErrorReporter.warn(SOURCE, 'Failed to build static galaxy view', err);
+        });
+    }
+
+    /** Maps parsed scenarios to views and resolves referenced initializers (bounded, cached). */
+    private async _buildScenarioViews(scenarios: ParsedScenario[]): Promise<StaticGalaxyScenarioView[]> {
+        const views = scenarios.map(toScenarioView);
+        const names = new Set<string>();
+        for (const scenario of scenarios) {
+            for (const sys of scenario.systems) {
+                if (sys.initializer) names.add(sys.initializer);
+            }
+        }
+        if (names.size === 0) return views;
+
+        const resolved = new Map<string, StaticGalaxyInitializerSummary | null>();
+        await Promise.all([...names].map(async name => {
+            resolved.set(name, await this._initializerIndex.resolve(name));
+        }));
+        for (const view of views) {
+            for (const sys of view.systems) {
+                if (!sys.initializer) continue;
+                const info = resolved.get(sys.initializer);
+                if (info) {
+                    sys.initializerInfo = { ...info, found: true };
+                    if (info.color) sys.visual = { color: info.color, starClass: info.starClass };
+                } else {
+                    sys.initializerInfo = { planetCount: 0, moonCount: 0, beltCount: 0, hasRing: false, found: false };
+                }
+            }
+        }
+        return views;
     }
 
     // ── Permissions ─────────────────────────────────────────────────────────
@@ -304,6 +349,19 @@ class StaticGalaxyEditorSession implements vscode.Disposable {
                 break;
             case 'addHyperlanes':
                 await this._applyEdit(message.requestId, message.revisionId, message.documentVersion, { kind: 'addLanes', links: message.links });
+                break;
+            case 'spraySystems':
+                await this._applyEdit(message.requestId, message.revisionId, message.documentVersion, {
+                    kind: 'spraySystems',
+                    scenarioKey: message.scenarioKey,
+                    systems: message.systems,
+                });
+                break;
+            case 'eraseSystems':
+                await this._applyEdit(message.requestId, message.revisionId, message.documentVersion, {
+                    kind: 'eraseSystems',
+                    nodeKeys: message.nodeKeys,
+                });
                 break;
             case 'deleteHyperlane':
                 await this._applyEdit(message.requestId, message.revisionId, message.documentVersion, {
@@ -543,6 +601,13 @@ class StaticGalaxyEditorSession implements vscode.Disposable {
                 <button id="btn-lanes" class="toggle-button active" type="button" aria-pressed="true" title="${panelText('Toggle explicit hyperlanes', '切换显式航道')}">${panelText('Lanes', '航道')}</button>
                 <button id="btn-est-lanes" class="toggle-button" type="button" aria-pressed="false" title="${panelText('Toggle estimated lanes (heuristic approximation, not the game algorithm)', '切换估算航道（启发式近似，非游戏算法）')}">${panelText('Estimated', '估算')}</button>
                 <button id="btn-grid" class="toggle-button" type="button" aria-pressed="false" title="${panelText('Toggle grid', '切换网格')}">${panelText('Grid', '网格')}</button>
+                <span class="toolbar-divider edit-only" aria-hidden="true"></span>
+                <button id="btn-spray" class="toggle-button edit-only" type="button" aria-pressed="false" title="${panelText('Spray random systems (left-drag)', '喷涂随机星系（左键拖动）')}">${panelText('Spray', '喷涂')}</button>
+                <button id="btn-erase" class="toggle-button edit-only" type="button" aria-pressed="false" title="${panelText('Erase undefined random systems (left-drag)', '擦除未定义随机星系（左键拖动）')}">${panelText('Erase', '擦除')}</button>
+                <span id="brush-controls" class="edit-only hidden" title="${panelText('Brush radius', '笔刷半径')}">
+                    <input id="brush-radius" type="range" min="4" max="60" step="2" value="14" aria-label="${panelText('Brush radius', '笔刷半径')}" />
+                    <span id="brush-radius-value">14</span>
+                </span>
             </div>
             <div id="random-lanes-note" class="floating-card hidden" role="note">
                 <span>${panelText('random_hyperlanes = yes — runtime lanes cannot be previewed exactly', 'random_hyperlanes = yes — 运行时随机航道无法精确预览')}</span>
@@ -555,6 +620,7 @@ class StaticGalaxyEditorSession implements vscode.Disposable {
                 <span>${panelText('Space/Alt/middle drag to pan', '空格/Alt/中键拖动平移')}</span>
                 <span>${panelText('Double-click to open source', '双击跳转源码')}</span>
                 <span class="edit-hint edit-only">${panelText('Drag a system or nebula to move it', '拖动系统或星云修改位置')}</span>
+                <span class="edit-hint edit-only">${panelText('Shift: line spray · Ctrl+Shift: exact line · Alt+right-drag: brush size', 'Shift 直线散布 · Ctrl+Shift 精确直线 · Alt+右键调半径')}</span>
                 <span class="edit-hint edit-only">${panelText('Right-click a system to draw lanes, left-click to chain endpoints, right-click to confirm; right-click a lane to delete it', '右键系统绘制航道，左键连续链接端点，再次右键确认；右键航道删除')}</span>
             </div>
             <div id="drag-hud" class="floating-card hidden" aria-live="polite"></div>

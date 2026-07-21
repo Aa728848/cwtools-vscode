@@ -608,4 +608,94 @@ static_galaxy_scenario = {
             links: [],
         }, text)).to.throw(StaticGalaxyEditError).with.property('code', 'invalid-value');
     });
+
+    it('sprays new random systems as one anchored insertion', () => {
+        const text = `static_galaxy_scenario = {
+    system = { id = 5 position = { x = 0 y = 0 } }
+}
+`;
+        const scenario = contextFor(text).scenarios[0]!;
+        const built = build({
+            kind: 'spraySystems',
+            scenarioKey: scenario.scenarioKey,
+            systems: [{ id: '6', x: 10, y: 12 }, { id: '7', x: -3, y: 4 }],
+        }, text);
+        expect(built.replacements).to.have.lengthOf(1);
+        const next = applyReplacements(text, built.replacements);
+        expect(next).to.include('system = { id = 6 position = { x = 10 y = 12 } }');
+        expect(next).to.include('system = { id = 7 position = { x = -3 y = 4 } }');
+        expect(next).to.include('system = { id = 5 position = { x = 0 y = 0 } }');
+    });
+
+    it('rejects spray ids that collide or are not integers', () => {
+        const text = `static_galaxy_scenario = {
+    system = { id = 5 position = { x = 0 y = 0 } }
+}
+`;
+        const scenario = contextFor(text).scenarios[0]!;
+        expect(() => build({
+            kind: 'spraySystems', scenarioKey: scenario.scenarioKey,
+            systems: [{ id: '5', x: 1, y: 1 }],
+        }, text)).to.throw(StaticGalaxyEditError).with.property('code', 'invalid-value');
+        expect(() => build({
+            kind: 'spraySystems', scenarioKey: scenario.scenarioKey,
+            systems: [{ id: 'abc', x: 1, y: 1 }],
+        }, text)).to.throw(StaticGalaxyEditError).with.property('code', 'invalid-value');
+    });
+
+    it('erases only undefined random systems and protects named/initializer ones', () => {
+        const text = `static_galaxy_scenario = {
+    system = { id = 1 position = { x = 0 y = 0 } }
+    system = {
+        id = 2
+        name = "Home"
+        position = { x = 10 y = 0 }
+    }
+    system = { id = 3 position = { x = 20 y = 0 } initializer = sol_system_initializer }
+}
+`;
+        const systems = contextFor(text).scenarios[0]!.systems;
+        const built = build({
+            kind: 'eraseSystems',
+            nodeKeys: [systems[0]!.nodeKey],
+        }, text);
+        const next = applyReplacements(text, built.replacements);
+        expect(next).to.not.include('id = 1');
+        expect(next).to.include('name = "Home"');
+        expect(next).to.include('initializer = sol_system_initializer');
+
+        expect(() => build({ kind: 'eraseSystems', nodeKeys: [systems[1]!.nodeKey] }, text))
+            .to.throw(StaticGalaxyEditError).with.property('code', 'not-editable');
+        expect(() => build({ kind: 'eraseSystems', nodeKeys: [systems[2]!.nodeKey] }, text))
+            .to.throw(StaticGalaxyEditError).with.property('code', 'not-editable');
+    });
+
+    it('erases a multi-line system block with its lines and keeps neighbors byte-identical', () => {
+        const text = 'static_galaxy_scenario = {\r\n' +
+            '    system = {\r\n' +
+            '        id = 1\r\n' +
+            '        position = { x = 0 y = 0 }\r\n' +
+            '    }\r\n' +
+            '    system = { id = 2 position = { x = 5 y = 5 } }\r\n' +
+            '}\r\n';
+        const systems = contextFor(text).scenarios[0]!.systems;
+        const built = build({ kind: 'eraseSystems', nodeKeys: [systems[0]!.nodeKey] }, text);
+        const next = applyReplacements(text, built.replacements);
+        expect(next).to.equal('static_galaxy_scenario = {\r\n' +
+            '    system = { id = 2 position = { x = 5 y = 5 } }\r\n' +
+            '}\r\n');
+    });
+
+    it('rejects erasing when the system block span is stale', () => {
+        const text = `static_galaxy_scenario = {
+    system = { id = 1 position = { x = 0 y = 0 } }
+}
+`;
+        const ctx = contextFor(text);
+        const mutated = text.replace('system', 'systen');
+        expect(() => buildStaticGalaxyEdits(
+            { kind: 'eraseSystems', nodeKeys: [ctx.scenarios[0]!.systems[0]!.nodeKey] },
+            { text: mutated, scenarios: ctx.scenarios },
+        )).to.throw(StaticGalaxyEditError).with.property('code', 'token-mismatch');
+    });
 });

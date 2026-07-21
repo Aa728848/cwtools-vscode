@@ -13,7 +13,7 @@
 | 阶段 | 状态 | 已落地结果 |
 | --- | --- | --- |
 | 0. 测量基线 | 完成 | 固定静态上下文测量脚本、全注册 profile 的结构化 synthetic golden matrix、仓库 sample mod 调用链用例、cache/usage/恢复指标与回归测试 |
-| 1. 可靠性门禁 | 完成 | 结构化 EvidenceClaim、四条模型可见 PDX 写路径的真实最终内容写前验证、写后诊断复验、同批定义、typed entity、on_action/triggered-only 入口、人工覆盖审计 |
+| 1. 可靠性门禁 | 完成 | 结构化 EvidenceClaim、四条模型可见 PDX 写路径的真实最终内容写前验证、写后诊断复验、同批定义、typed entity、on_action/triggered-only 入口、确定冲突阻断与低误杀告警策略 |
 | 2. 消除重复工作 | 完成 | 移除每 turn 无条件后台摘要，统一 compaction 与取消/usage 统计 |
 | 3. 运行边界 | 完成 | 顶层与子 Agent 独立的调用、wall time、未缓存输入 token 软预算；周期快照、增量事件与快照后 request artifact 重放 |
 | 4. Prompt/Tools | 完成 | build 五阶段及 plan/explore/review 只读阶段化工具面、短 build 契约、按需 blueprint contract |
@@ -113,7 +113,7 @@ flowchart LR
 2. CWT 语法合法、scope 合法、ID 存在、调用链成立和主观设计选择必须分别判断。
 3. 写入权限由确定性的运行时代码决定，而不是由系统提示中的一句要求决定。
 4. 无证据时返回 `unknown`；证据冲突时返回 `conflict`；证据版本失效时返回 `stale`。
-5. 只读解释和草案可以继续，但必须显式标注未验证项；语义敏感写入默认 fail closed。
+5. 只读解释和草案继续标注未验证项；写入仅在证据确认存在冲突时阻断，`unknown`、`stale` 或验证服务暂不可用时携带告警继续。
 6. 用户可以通过明确的人工覆盖继续，但覆盖必须由 UI 或策略层记录，不能由模型代替用户决定。
 
 ### 4. P0：SemanticEvidenceGate
@@ -161,27 +161,27 @@ interface EvidenceClaim {
 2. 使用 CWT/LSP 校验语法形状与 scope。
 3. 使用项目索引、vanilla 索引和真实 archetype 校验实体与引用存在性。
 4. 对任务声明的入口和结果检查可达调用链；仅“定义存在”不等于“玩法会触发”。
-5. 聚合全部声明；任何 blocking 声明为 `unknown`、`conflict` 或 `stale` 时拒绝写入。
+5. 聚合全部声明；blocking 声明为 `conflict` 时拒绝写入，`unknown` 或 `stale` 保留为结构化告警并在写后与任务收尾重新验证。
 6. 返回机器可读的缺失证据和建议查询，而不是只返回自然语言错误。
 7. 写入后等待诊断刷新，再复验解析、scope、引用和受影响的调用链。
 
 门禁必须位于工具策略和写入执行路径中，不能只作为模型可选择调用的普通工具。所有模型可见写入仍须经过现有 policy engine、路径检查、锁、权限和 plan-mode 限制。
 
-落实结果：当前模型可见的四条通用 PDX 写路径均在文件工具生成“完整最终内容”后调用同一个异步 preflight；`edit_pdx_block` 委托结构化替换时仍经过该 preflight。直接模型调用的旧 `apply_patch` 与 `multi_replace_file_content` 已退休。成功写入后重新收集 EvidenceGate 与 fresh diagnostics；任一失败都会返回 `postWriteValidation.verdict = repair` 与 `requiresRepair = true`。回归测试分别证明四条路径都不能绕过 enforce 门禁。
+落实结果：当前模型可见的四条通用 PDX 写路径均在文件工具生成“完整最终内容”后调用同一个异步 preflight；`edit_pdx_block` 委托结构化替换时仍经过该 preflight。直接模型调用的旧 `apply_patch` 与 `multi_replace_file_content` 已退休。成功写入后重新收集 EvidenceGate 与 fresh diagnostics；已确认的证据冲突或明确诊断错误会返回 `postWriteValidation.verdict = repair` 与 `requiresRepair = true`，证据不足本身不再破坏写入可用性。回归测试分别证明四条路径都不能绕过 enforce 门禁。
 
 #### 4.3 不同结论的处理规则
 
 | 结论 | 只读回答或设计草案 | PDX 文件写入 |
 | --- | --- | --- |
 | `verified` | 可陈述，并附主要来源 | 可进入写入及写后复验 |
-| `unknown` | 明确标为未验证，可给验证步骤 | 默认阻断 |
+| `unknown` | 明确标为未验证，可给验证步骤 | 告警后允许，写后及任务收尾重试验证 |
 | `conflict` | 展示冲突来源，不替用户猜测 | 阻断 |
-| `stale` | 重新查询后才能引用 | 阻断 |
+| `stale` | 展示过期来源并安排重新查询 | 告警后允许，不缓存该决策并尽快重新验证 |
 | `design_choice` | 明确说明属于建议而非游戏事实 | 用户接受设计后，仍需验证产生的脚本声明 |
 
 #### 4.4 为什么它能改善“AI 自认为可行”
 
-这个门禁不依赖模型是否谦虚，也不依赖模型是否遵守“不要幻觉”的提示。即使模型声称内容可行，只要缺少新鲜证据，写入层仍会拒绝。它直接降低的是错误方案被落盘的概率，而不是只改变回答语气。
+这个门禁不依赖模型是否谦虚，也不依赖模型是否遵守“不要幻觉”的提示。即使模型声称内容可行，只要证据确认语法、scope、类型或引用存在冲突，写入层仍会拒绝；证据暂缺则继续写入并保留告警，避免自定义内容、索引刷新和多 Agent 分阶段构建被误杀。
 
 它不能证明所有复杂玩法在游戏运行时一定符合设计预期。CWT/LSP 主要证明静态合法性，因此仍需用调用链检查、真实原型对照，以及必要时的游戏内测试来覆盖动态行为。
 
@@ -340,9 +340,9 @@ interface EvidenceClaim {
 
 首批上线的最低门槛：
 
-1. 固定高风险用例中，未验证语义不得自动写入。
+1. 固定高风险用例中，已确认的语法、scope、类型或引用冲突不得自动写入；仅证据不足不得中断写入。
 2. 所有语义敏感写入均产生结构化证据摘要。
-3. `unknown`、`conflict` 和 `stale` 不能由模型文本自动改为 `verified`。
+3. `unknown`、`conflict` 和 `stale` 不能由模型文本自动改为 `verified`；其中只有 `conflict` 触发写前阻断。
 4. compaction、fallback 和子 Agent 调用完整计入 usage 与取消链路。
 5. 主 Agent 静态上下文达到约 8k、slim Agent 达到 4k–6k，且可靠性 benchmark 不回退。
 6. 缓存命中率按全部请求计算，规则或项目配置更新后不会复用旧证据。
@@ -350,8 +350,8 @@ interface EvidenceClaim {
 
 #### 10.3 当前 benchmark 与验证记录
 
-- Paradox 高风险 golden matrix 对所有注册 game/profile 运行同一组结构化 synthetic 用例：0 false acceptance，0 legal-case false block。它证明 profile 隔离与 fail-closed 行为，不是假装每个游戏已有独立真实 corpus。
-- EvidenceGate 用例覆盖不存在名称、wrong scope、wrong entity type、缺失 ID、同批定义、索引冲突、不可达 triggered-only 事件、on_action 入口，以及 `write_file`、`edit_file`、`replace_lines`、`edit_pdx_block` 四条写入路径。
+- Paradox 高风险 golden matrix 对所有注册 game/profile 运行同一组结构化 synthetic 用例：已确认冲突 0 false acceptance，告警场景 0 false block。它证明 profile 隔离与低误杀策略，不是假装每个游戏已有独立真实 corpus。
+- EvidenceGate 用例覆盖不存在名称、wrong scope、wrong entity type、缺失 ID、同批定义、索引刷新分歧、等待未来调用方的 triggered-only 事件、on_action 入口，以及 `write_file`、`edit_file`、`replace_lines`、`edit_pdx_block` 四条写入路径。
 - 当前保守 typed ID 覆盖为 event、scripted effect、scripted trigger、technology、trait、building、starbase building；modifier 由 CWT modifier 规则单独校验。未被 schema 明确识别的通用参数不会被文档伪称为已验证。
 - SemanticVerifier 对显式 `featureManifest.requiredEdges`、task `produces/consumes` 和 acceptance checks 生成文件/行证据；仓库 sample mod 的 `irm_faction.2 -> faction_set_leader` 调用链作为真实文件回归。该验证是“声明过的任务级边和生命周期验收”，不是任意动态玩法的形式化证明。
 - 请求归档按首个完整 transcript + 后续公共前缀/增量保存；工具 Schema 与大型工具结果按内容 hash 去重；恢复测试覆盖周期快照后的 request artifact 重放。
@@ -364,9 +364,9 @@ interface EvidenceClaim {
 
 ### 11. 发布与风险控制
 
-- EvidenceGate 使用独立的 `off`/`shadow`/`enforce` 设置；当前默认值及无效配置的安全回退均为 `enforce`，`shadow` 仅用于显式诊断和对照。
+- EvidenceGate 使用独立的 `off`/`shadow`/`enforce` 设置；当前默认值及无效配置回退均为 `enforce`。`enforce` 只阻断已确认冲突，`unknown`、`stale` 与证据服务暂不可用均作为告警；`shadow` 仅用于显式诊断和对照。
 - build 阶段化工具和新 compaction 已进入默认路径；旧 build prompt 已删除，不再保留不可达回滚实现。
-- 门禁不可用时，语义敏感写入默认关闭；只读任务可降级并明确告知证据服务不可用。
+- 门禁不可用时，写入继续并记录 degraded/evidenceUnavailable 告警；恢复后重新验证，避免 LSP 或索引故障演变为写入故障。
 - 记录被阻断声明、来源、状态和用户人工覆盖，不记录不必要的完整私密 prompt；模型参数不能触发覆盖。
 - 对各 game/profile 分别灰度；不能把 Stellaris 的证据完整度等同于所有 Paradox 游戏。
 - 每个 observable behavior 变更添加定向回归测试，再运行 AI runtime 单元测试；涉及 MCP/LSP 协议时按仓库验证要求运行 schema、build 和 contract tests。

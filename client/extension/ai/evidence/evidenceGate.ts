@@ -235,11 +235,11 @@ export class EvidenceGate {
     }
 
     private storeInCache(key: string, decision: EvidenceGateDecision, evidenceRevision: string): void {
-        // Only short-cache clean 'allow' decisions: the plan requires that a
-        // blocked retry re-collects evidence (the model may have fixed the
-        // underlying problem, e.g. created the missing definition), and
-        // degraded evaluations must observe recovery promptly.
-        if (decision.degraded || decision.verdict !== 'allow') return;
+        // Only short-cache clean 'allow' decisions. Advisory unknown/stale
+        // results must observe newly indexed custom definitions promptly.
+        if (decision.degraded
+            || decision.verdict !== 'allow'
+            || decision.claims.some(claim => claim.blocking && claim.status !== 'verified')) return;
         const expiresAt = this.now() + DECISION_CACHE_TTL_MS;
         for (const [k, v] of this.decisionCache) {
             if (v.expiresAt <= this.now()) this.decisionCache.delete(k);
@@ -359,12 +359,13 @@ export class EvidenceGate {
         }
 
         const missingEvidence = this.buildMissingEvidence(claims, input);
-        let verdict: EvidenceGateDecision['verdict'] = missingEvidence.length > 0 ? 'block' : 'allow';
-        if (degraded && input.mode === 'enforce') {
-            // Fail closed (plan §11): semantic-sensitive writes default to
-            // denied when the evidence service itself is unavailable.
-            verdict = 'block';
-        }
+        // Write stability takes precedence over incomplete evidence. Unknown
+        // and stale claims remain visible and are rechecked after the write,
+        // but only a positively established contradiction blocks preflight.
+        const verdict: EvidenceGateDecision['verdict'] = claims.some(claim =>
+            claim.blocking && claim.status === 'conflict')
+            ? 'block'
+            : 'allow';
 
         return {
             version: 1,
@@ -702,8 +703,8 @@ export class EvidenceGate {
         }
         if (lspFound === false && indexFound === true) {
             return finish(
-                'conflict',
-                `LSP reports no definition of '${id}' but the workspace index has a match (revision ${indexRevision}). Re-check with verify_pdx_identifier before writing.`,
+                'stale',
+                `The workspace index contains '${id}' (revision ${indexRevision}) but the LSP has not indexed a matching typed definition yet. The write may proceed and post-write validation will re-check it.`,
             );
         }
         if (lspFound === false && indexFound === false) {
@@ -714,8 +715,8 @@ export class EvidenceGate {
         }
         if (lspFound === false && indexFound === undefined) {
             return finish(
-                'conflict',
-                `LSP reports no definition of '${id}' (workspace index unavailable for cross-check).`,
+                'unknown',
+                `The LSP reports no definition of '${id}', but the workspace index is unavailable for a second source. Treating this as advisory to avoid blocking a custom definition during index refresh.`,
             );
         }
         if (lspFound === undefined && indexFound === true) {
@@ -808,13 +809,13 @@ export class EvidenceGate {
             }
             return {
                 ...base,
-                status: 'conflict',
+                status: 'unknown',
                 sources: [this.makeSource(
                     'project.queryReferences',
                     entryId,
                     `index:${this.deps.getIndexRevision?.() ?? 'unavailable'}`,
                 )],
-                detail: this.joinDetail(base.detail, `No inbound call site for triggered-only event '${entryId}' was found outside its definition file.`),
+                detail: this.joinDetail(base.detail, `No inbound call site for triggered-only event '${entryId}' is indexed yet. A dependent Agent may create it later; final task validation must confirm the planned edge.`),
             };
         } catch (error) {
             return {

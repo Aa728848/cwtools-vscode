@@ -4,9 +4,9 @@
  * Layers covered:
  *  - claimExtractor: deterministic, bounded claim extraction from write args.
  *  - EvidenceGate: per-status verdicts with fake CWT rules / fake LSP / fake index.
- *  - AgentToolExecutor wiring: shadow never blocks, enforce blocks with
- *    machine-readable missing evidence, LSP outage fails closed, manual
- *    override only via the approval channel.
+ *  - AgentToolExecutor wiring: shadow never blocks, enforce blocks confirmed
+ *    conflicts with machine-readable evidence, infrastructure outages stay
+ *    advisory, and manual override only uses the approval channel.
  */
 
 import { expect } from 'chai';
@@ -544,29 +544,30 @@ describe('EvidenceGate', () => {
         expect(syntax?.detail).to.include('unexpected token');
     });
 
-    it('fails closed in enforce mode when the LSP evidence channel is down', async () => {
+    it('allows enforce-mode writes with advisory evidence when the LSP channel is down', async () => {
         const deps = makeGateDeps({ workspaceRoot, lsp: { throwAll: true } });
         const decision = await evaluate('effect = { add_opinion_modifier = yes }', deps, 'enforce');
-        expect(decision.verdict).to.equal('block');
+        expect(decision.verdict).to.equal('allow');
         expect(decision.degraded).to.equal(true);
         expect(decision.evidenceUnavailable).to.equal(true);
         expect(decision.claims.find(c => c.kind === 'syntax_shape')?.status).to.equal('unknown');
+        expect(decision.missingEvidence.some(item => item.status === 'unknown')).to.equal(true);
     });
 
     it('records degraded shadow decisions without turning unknowns into verified', async () => {
         const deps = makeGateDeps({ workspaceRoot, lsp: { throwAll: true } });
         const decision = await evaluate('effect = { add_opinion_modifier = yes }', deps, 'shadow');
-        expect(decision.verdict).to.equal('block'); // computed, but the caller must not enforce in shadow
+        expect(decision.verdict).to.equal('allow');
         expect(decision.degraded).to.equal(true);
     });
 
-    it('conflicts when the index and the LSP disagree about an id', async () => {
+    it('treats index/LSP disagreement as stale advisory evidence', async () => {
         const deps = makeGateDeps({ workspaceRoot, indexEntries: new Set(['other_event.7']) });
         const decision = await evaluate('effect = { country_event = { id = other_event.7 } }', deps, 'enforce');
         const ref = decision.claims.find(c => c.kind === 'reference_exists' && c.claim.includes('other_event.7'));
-        expect(ref?.status).to.equal('conflict');
+        expect(ref?.status).to.equal('stale');
         expect(ref?.detail).to.include('workspace index');
-        expect(decision.verdict).to.equal('block');
+        expect(decision.verdict).to.equal('allow');
     });
 
     it('stays unknown when only the index (not the LSP) can confirm an id', async () => {
@@ -600,12 +601,13 @@ describe('EvidenceGate', () => {
         expect(decision.verdict).to.equal('allow');
     });
 
-    it('blocks an unreachable triggered-only event and verifies an external caller', async () => {
+    it('allows a triggered-only event before a future caller and verifies an existing external caller', async () => {
         const content = 'country_event = { id = local_event.3 is_triggered_only = yes }';
         const unreachable = await evaluate(content, makeGateDeps({ workspaceRoot }), 'enforce');
         const missingCall = unreachable.claims.find(claim => claim.kind === 'call_chain');
-        expect(missingCall?.status).to.equal('conflict');
-        expect(unreachable.verdict).to.equal('block');
+        expect(missingCall?.status).to.equal('unknown');
+        expect(missingCall?.detail).to.include('dependent Agent');
+        expect(unreachable.verdict).to.equal('allow');
 
         const reachable = await evaluate(content, makeGateDeps({
             workspaceRoot,
@@ -631,7 +633,7 @@ describe('EvidenceGate', () => {
             },
         });
         const decision = await evaluate('effect = { add_opinion_modifier = yes }', deps, 'enforce');
-        expect(decision.verdict).to.equal('block');
+        expect(decision.verdict).to.equal('allow');
         expect(decision.claims.find(c => c.kind === 'syntax_shape')?.status).to.equal('stale');
     });
 
@@ -694,7 +696,7 @@ describe('EvidenceGate', () => {
             expect(claim.status).to.equal('unknown');
             expect(claim.detail).to.include('time budget');
         }
-        expect(decision.verdict).to.equal('block');
+        expect(decision.verdict).to.equal('allow');
     });
 
     it('produces machine-readable missing evidence with suggested queries', async () => {
@@ -900,7 +902,7 @@ describe('AgentToolExecutor evidence gate wiring', () => {
     }
 
     it('shadow mode records the decision but never blocks the write', async () => {
-        const lsp = makeFakeLspClient({ definitions: new Set() });
+        const lsp = makeFakeLspClient({ parseValid: false });
         const executor = makeExecutor(lsp);
         const events: Array<{ type: string; payload: any }> = [];
         const target = path.join(workspaceRoot, 'events', 'shadow.txt');
@@ -930,9 +932,9 @@ describe('AgentToolExecutor evidence gate wiring', () => {
         });
     });
 
-    it('enforce mode blocks with machine-readable missing evidence and decisionId', async () => {
+    it('enforce mode blocks a confirmed conflict with machine-readable evidence and decisionId', async () => {
         gateModeConfig = 'enforce';
-        const lsp = makeFakeLspClient({ definitions: new Set() });
+        const lsp = makeFakeLspClient({ parseValid: false });
         const executor = makeExecutor(lsp);
         const events: Array<{ type: string; payload: any }> = [];
         const target = path.join(workspaceRoot, 'events', 'enforce.txt');
@@ -949,7 +951,7 @@ describe('AgentToolExecutor evidence gate wiring', () => {
         expect(Array.isArray(result.evidenceGate?.missingEvidence)).to.equal(true);
         expect(result.evidenceGate.missingEvidence.length).to.be.greaterThan(0);
         const queries = result.evidenceGate.suggestedQueries as string[];
-        expect(queries.some(q => q.includes('verify_pdx_identifier'))).to.equal(true);
+        expect(queries.some(q => q.includes('parse_pdx_fragment'))).to.equal(true);
         expect(fs.existsSync(target)).to.equal(false);
         const gateEvents = events.filter(e => e.type === 'evidence_gate_decision');
         expect(gateEvents).to.have.lengthOf(1);
@@ -958,7 +960,7 @@ describe('AgentToolExecutor evidence gate wiring', () => {
 
     it('a model-supplied override flag does not bypass enforce mode', async () => {
         gateModeConfig = 'enforce';
-        const lsp = makeFakeLspClient({ definitions: new Set() });
+        const lsp = makeFakeLspClient({ parseValid: false });
         const executor = makeExecutor(lsp);
         const target = path.join(workspaceRoot, 'events', 'sneaky.txt');
         fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -977,7 +979,7 @@ describe('AgentToolExecutor evidence gate wiring', () => {
 
     it('manual override via the approval channel writes with verdict override and is recorded', async () => {
         gateModeConfig = 'enforce';
-        const lsp = makeFakeLspClient({ definitions: new Set() });
+        const lsp = makeFakeLspClient({ parseValid: false });
         const executor = makeExecutor(lsp);
         const events: Array<{ type: string; payload: any }> = [];
         const target = path.join(workspaceRoot, 'events', 'override.txt');
@@ -1000,7 +1002,7 @@ describe('AgentToolExecutor evidence gate wiring', () => {
 
     it('denying the override keeps the write blocked', async () => {
         gateModeConfig = 'enforce';
-        const lsp = makeFakeLspClient({ definitions: new Set() });
+        const lsp = makeFakeLspClient({ parseValid: false });
         const executor = makeExecutor(lsp);
         const target = path.join(workspaceRoot, 'events', 'denied.txt');
         fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -1014,7 +1016,7 @@ describe('AgentToolExecutor evidence gate wiring', () => {
         expect(fs.existsSync(target)).to.equal(false);
     });
 
-    it('fails closed without offering override when the LSP evidence channel is down', async () => {
+    it('keeps writes available without prompting when the LSP evidence channel is down', async () => {
         gateModeConfig = 'enforce';
         const lsp = makeFakeLspClient({ throwAll: true });
         const executor = makeExecutor(lsp);
@@ -1033,11 +1035,12 @@ describe('AgentToolExecutor evidence gate wiring', () => {
             content: 'effect = { add_opinion_modifier = yes }',
         }, context) as any;
 
-        expect(result.success).to.equal(false);
-        expect(result.evidenceGateBlocked).to.equal(true);
+        expect(result.success).to.equal(true);
+        expect(result.evidenceGateBlocked).to.not.equal(true);
         expect(result.evidenceGate?.degraded).to.equal(true);
+        expect(result.evidenceGate?.advisoryEvidence).to.be.an('array').that.is.not.empty;
         expect(permissionAsked).to.equal(false);
-        expect(fs.existsSync(target)).to.equal(false);
+        expect(fs.existsSync(target)).to.equal(true);
     });
 
     it('allows enforce-mode writes whose claims all verify', async () => {
@@ -1068,7 +1071,7 @@ describe('AgentToolExecutor evidence gate wiring', () => {
 
     it('gates edit_file against the exact complete content, not only newString', async () => {
         gateModeConfig = 'enforce';
-        const lsp = makeFakeLspClient({ definitions: new Set() });
+        const lsp = makeFakeLspClient({ parseValid: false });
         const executor = makeExecutor(lsp);
         const target = path.join(workspaceRoot, 'common', 'scripted_effects', 'edit.txt');
         fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -1087,7 +1090,7 @@ describe('AgentToolExecutor evidence gate wiring', () => {
 
     it('gates replace_lines against the exact complete PDX content before writing', async () => {
         gateModeConfig = 'enforce';
-        const lsp = makeFakeLspClient({ definitions: new Set() });
+        const lsp = makeFakeLspClient({ parseValid: false });
         const executor = makeExecutor(lsp);
         const target = path.join(workspaceRoot, 'common', 'scripted_effects', 'lines.txt');
         fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -1113,7 +1116,7 @@ describe('AgentToolExecutor evidence gate wiring', () => {
 
     it('gates edit_pdx_block through its delegated structured file write', async () => {
         gateModeConfig = 'enforce';
-        const lsp = makeFakeLspClient({ definitions: new Set() });
+        const lsp = makeFakeLspClient({ parseValid: false });
         const executor = makeExecutor(lsp);
         const target = path.join(workspaceRoot, 'common', 'scripted_effects', 'block.txt');
         fs.mkdirSync(path.dirname(target), { recursive: true });

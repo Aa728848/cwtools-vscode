@@ -75,7 +75,7 @@ export interface EvidenceGateDecision {
     durationMs: number;
     /** True when one or more evidence sources were unavailable/timed out. */
     degraded?: boolean;
-    /** True when the LSP evidence channel itself was down — enforce mode fails closed with no override. */
+    /** True when the LSP evidence channel itself was down; the write proceeds with advisory evidence only. */
     evidenceUnavailable?: boolean;
     /** True when the verdict came from the short-term decision cache. */
     fromCache?: boolean;

@@ -322,29 +322,29 @@ export const SOURCE = {
 const EVIDENCE_GATE_TEXT = {
     en: {
         BLOCKED_HEADER: (count: number, target: string) =>
-            `Semantic evidence gate blocked the write to ${target}: ${count} blocking ${plural(count, 'claim')} ${count === 1 ? 'is' : 'are'} unverified, contradicted, or stale.`,
+            `Semantic evidence gate blocked the write to ${target}: ${count} confirmed conflicting ${plural(count, 'claim')} ${count === 1 ? 'requires' : 'require'} correction.`,
         UNAVAILABLE:
-            'The semantic evidence service is unavailable (LSP not connected or timed out). In enforce mode, semantic-sensitive PDX writes are blocked by default.',
+            'The semantic evidence service is unavailable (LSP not connected or timed out). The write will proceed with advisory evidence and be rechecked when validation is available.',
         OVERRIDE_REQUEST: (target: string, summary: string) =>
-            `The semantic evidence gate wants to block a PDX write to ${target}. Unverified claims:\n${summary}\nApprove only if you accept writing without verified evidence.`,
+            `The semantic evidence gate found confirmed conflicts in a PDX write to ${target}:\n${summary}\nApprove only if you intentionally accept those conflicts.`,
         OVERRIDE_DENIED:
             'Write blocked by the semantic evidence gate. You denied the manual override.',
         RETRY_HINT:
-            'Collect the missing evidence with the suggested read-only queries, then retry. The gate re-verifies every attempt; you cannot promote a claim to verified yourself.',
+            'Correct the conflicting script or verify it with the suggested read-only queries, then retry. The gate re-verifies every attempt.',
         RESULT_TAG: (decisionId: string, verdict: string, mode: string) =>
             `Evidence gate: ${verdict} (${mode}, decision ${decisionId})`,
         CLAIM_LINE: (kind: string, status: string, claim: string) => `- [${kind}/${status}] ${claim}`,
     },
     'zh-cn': {
         BLOCKED_HEADER: (count: number, target: string) =>
-            `语义证据门禁阻止了对 ${target} 的写入：${count} 条阻断性声明未验证、存在冲突或已过期。`,
+            `语义证据门禁阻止了对 ${target} 的写入：${count} 条声明已确认存在冲突，需要修正。`,
         UNAVAILABLE:
-            '语义证据服务不可用（LSP 未连接或超时）。在 enforce 模式下，语义敏感的 PDX 写入默认被拒绝。',
+            '语义证据服务不可用（LSP 未连接或超时）。写入将携带告警继续，并在验证服务恢复后重新检查。',
         OVERRIDE_REQUEST: (target: string, summary: string) =>
-            `语义证据门禁建议阻止对 ${target} 的 PDX 写入。未验证声明：\n${summary}\n仅在您接受“无证据也写入”时才应批准。`,
+            `语义证据门禁在对 ${target} 的 PDX 写入中发现了已确认冲突：\n${summary}\n仅在您明确接受这些冲突时才应批准。`,
         OVERRIDE_DENIED: '写入已被语义证据门禁阻止，您拒绝了人工覆盖。',
         RETRY_HINT:
-            '请先用建议的只读查询收集缺失证据，再重试。门禁每次都会重新验证；不能由模型自行把 unknown 提升为 verified。',
+            '请修正冲突脚本，或使用建议的只读查询复核后重试。门禁每次都会重新验证。',
         RESULT_TAG: (decisionId: string, verdict: string, mode: string) =>
             `证据门禁：${verdict}（${mode}，决策 ${decisionId}）`,
         CLAIM_LINE: (kind: string, status: string, claim: string) => `- [${kind}/${status}] ${claim}`,

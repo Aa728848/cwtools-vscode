@@ -708,6 +708,9 @@ export class AgentToolExecutor {
     ): Promise<Record<string, unknown>> {
         const counts = { verified: 0, unknown: 0, conflict: 0, stale: 0 };
         for (const claim of decision.claims) counts[claim.status]++;
+        const advisoryEvidence = decision.missingEvidence
+            .filter(item => item.status === 'unknown' || item.status === 'stale')
+            .slice(0, 5);
         const summary: Record<string, unknown> = {
             decisionId: decision.decisionId,
             verdict: decision.verdict,
@@ -717,6 +720,7 @@ export class AgentToolExecutor {
             counts,
             durationMs: decision.durationMs,
         };
+        if (advisoryEvidence.length > 0) summary.advisoryEvidence = advisoryEvidence;
         const sink = context?.runEventSink;
         if (!sink) return summary;
 
@@ -754,7 +758,8 @@ export class AgentToolExecutor {
         const targetRel = path.isAbsolute(decision.target)
             ? (path.relative(this.workspaceRoot, decision.target) || decision.target)
             : decision.target;
-        const header = EVIDENCE_GATE_MSG.BLOCKED_HEADER(decision.missingEvidence.length, targetRel);
+        const conflicts = decision.missingEvidence.filter(item => item.status === 'conflict');
+        const header = EVIDENCE_GATE_MSG.BLOCKED_HEADER(conflicts.length, targetRel);
         return {
             success: false,
             error: [prefixMessage, header, EVIDENCE_GATE_MSG.RETRY_HINT].filter(Boolean).join(' '),
@@ -765,8 +770,8 @@ export class AgentToolExecutor {
                 mode: decision.mode,
                 phase: decision.phase,
                 degraded: decision.degraded === true,
-                missingEvidence: decision.missingEvidence,
-                suggestedQueries: [...new Set(decision.missingEvidence.flatMap(m => m.suggestedQueries))],
+                missingEvidence: conflicts,
+                suggestedQueries: [...new Set(conflicts.flatMap(item => item.suggestedQueries))],
             },
         };
     }
@@ -799,30 +804,24 @@ export class AgentToolExecutor {
                 mode,
             });
         } catch (error) {
-            // The gate itself must never crash a write path; a gate failure in
-            // enforce mode fails closed with a clear error.
+            // Evidence collection is advisory when its infrastructure fails;
+            // never turn an LSP/index outage into a workspace write outage.
             ErrorReporter.warn('AgentTools', `Evidence gate evaluation failed for ${toolName} on ${resolvedTargetFile}`, error);
-            if (mode === 'enforce') {
-                return {
-                    errorResult: {
-                        success: false,
-                        error: `${EVIDENCE_GATE_MSG.UNAVAILABLE} (${error instanceof Error ? error.message : String(error)})`,
-                        evidenceGateBlocked: true,
-                    },
-                };
-            }
-            return undefined;
+            return {
+                summary: {
+                    verdict: 'allow',
+                    mode,
+                    phase: 'pre_write',
+                    degraded: true,
+                    evidenceUnavailable: true,
+                    warning: `${EVIDENCE_GATE_MSG.UNAVAILABLE} (${error instanceof Error ? error.message : String(error)})`,
+                },
+            };
         }
 
         const summary = await this.recordEvidenceGateDecision(decision, context);
         if (mode === 'shadow' || decision.verdict === 'allow') {
             return { summary };
-        }
-
-        if (decision.evidenceUnavailable) {
-            // Fail closed (plan §11): the evidence service itself is down, so
-            // there is nothing meaningful for a user to override with.
-            return { summary, errorResult: this.buildEvidenceGateBlockResult(decision, EVIDENCE_GATE_MSG.UNAVAILABLE) };
         }
 
         // Manual override (plan §3.6/§4.3): only the user can approve, via the
@@ -832,6 +831,7 @@ export class AgentToolExecutor {
         if (requestPermission) {
             const targetRel = path.relative(this.workspaceRoot, resolvedTargetFile) || resolvedTargetFile;
             const claimLines = decision.missingEvidence
+                .filter(item => item.status === 'conflict')
                 .slice(0, 5)
                 .map(m => EVIDENCE_GATE_MSG.CLAIM_LINE(m.kind, m.status, m.claim));
             try {

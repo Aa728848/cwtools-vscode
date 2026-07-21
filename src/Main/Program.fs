@@ -771,7 +771,6 @@ let mergeLintRequestOptions a b =
 type LintRequestMsg =
     | UpdateRequest of VersionedTextDocumentIdentifier * LintRequestOptions
     | OpenRequest of VersionedTextDocumentIdentifier
-    | RevalidateRequest of VersionedTextDocumentIdentifier
     | WorkComplete of DateTime
 
 type private IncrementalTypeStage =
@@ -1119,6 +1118,7 @@ type CompletionRuntimeState =
 type Server(client: ILanguageClient) =
     do setupLogger client
     let docs = DocumentStore()
+    let dirtyDocumentPaths = System.Collections.Concurrent.ConcurrentDictionary<string, byte>()
 
     let mutable activeGame = STL
     let mutable isVanillaFolder = false
@@ -1173,7 +1173,6 @@ type Server(client: ILanguageClient) =
     let mutable deferDynamicParameterDiagnostics = true
     let mutable dynamicDeferDelayMs = 300
     let dynamicDeferMaxFiles = 500
-    let dynamicDeferBatchSize = 16
 
     let runtimeStateLock = obj()
     let mutable validationRuntimeState =
@@ -2626,13 +2625,44 @@ type Server(client: ILanguageClient) =
             existingDiagnosticsForFile filePath
             |> DiagnosticMerge.preserveWhilePending
         let pendingKinds =
-            refreshDomainsForPath filePath @ [ "types"; "rules" ]
+            let existingPendingKinds =
+                match fileDiagnosticStates.TryGetValue(filePath) with
+                | true, state -> state.pendingGlobalKinds
+                | false, _ -> []
+            existingPendingKinds @ refreshDomainsForPath filePath @ [ "types"; "rules" ]
             |> List.distinct
         let version = docs.GetVersionByPath(filePath)
         setFileDiagnosticStateWithSnapshot
             filePath
             (nextDiagnosticEpoch ())
             version
+            (modelEpochSnapshot ())
+            Pending
+            pendingKinds
+            retainedDiagnostics
+
+    let markFilePendingDynamicRevalidation filePath =
+        let priorState =
+            match fileDiagnosticStates.TryGetValue(filePath) with
+            | true, state -> Some state
+            | false, _ -> None
+        let retainedDiagnostics =
+            priorState
+            |> Option.map _.diagnostics
+            |> Option.defaultWith (fun () -> existingDiagnosticsForFile filePath)
+            |> DiagnosticMerge.preserveWhilePending
+        let pendingKinds =
+            (priorState |> Option.map _.pendingGlobalKinds |> Option.defaultValue [])
+            @ [ "dynamicParameters" ]
+            |> List.distinct
+        let validatedVersion =
+            priorState
+            |> Option.bind _.validatedVersion
+            |> Option.orElseWith (fun () -> docs.GetVersionByPath(filePath))
+        setFileDiagnosticStateWithSnapshot
+            filePath
+            (nextDiagnosticEpoch ())
+            validatedVersion
             (modelEpochSnapshot ())
             Pending
             pendingKinds
@@ -2755,8 +2785,6 @@ type Server(client: ILanguageClient) =
         for path in queued do
             clearFileCaches path
             markFilePendingGlobalRevalidation path
-
-    let mutable postDeferredRevalidationImpl: string -> unit = fun _ -> ()
 
     //-Lightweight bracket scanner -
     // Provide precise bracket error location when parser fails
@@ -3396,29 +3424,98 @@ type Server(client: ILanguageClient) =
                     scheduleDeferredDynamicRevalidation files
                     logDiag $"Deferred revalidation yielded to completion activity files={files.Length}"
                 else
-                    (try
-                        let warmSw = Stopwatch.StartNew()
-                        let warmed = game.ForceDynamicParameterData(dynamicPreflightTimeoutMs, dynamicPreflightMaxEntities)
-                        warmSw.Stop()
-                        logDiag
-                            $"Deferred revalidation warmed {warmed} dynamic-parameter entities (cap timeout={dynamicPreflightTimeoutMs}ms entities={dynamicPreflightMaxEntities}) in {warmSw.ElapsedMilliseconds}ms"
-                     with e -> logDiag $"Deferred revalidation warm-up error: {e.Message}")
                     let queued =
                         files
                         |> List.distinctBy normaliseCachePath
-                    let batch =
+                    let allocBefore = GC.GetTotalAllocatedBytes(false)
+                    let validationSw = Stopwatch.StartNew()
+                    let refreshedErrors, validatedModelEpoch =
+                        gameStateLock.EnterReadLock()
+                        try
+                            (try
+                                let warmSw = Stopwatch.StartNew()
+                                let warmed =
+                                    game.ForceDynamicParameterData(dynamicPreflightTimeoutMs, dynamicPreflightMaxEntities)
+                                warmSw.Stop()
+                                logDiag
+                                    $"Deferred revalidation warmed {warmed} dynamic-parameter entities (cap timeout={dynamicPreflightTimeoutMs}ms entities={dynamicPreflightMaxEntities}) in {warmSw.ElapsedMilliseconds}ms"
+                             with e -> logDiag $"Deferred revalidation warm-up error: {e.Message}")
+
+                            let errors = game.ValidateFiles queued
+                            errors, modelEpochSnapshot ()
+                        finally
+                            gameStateLock.ExitReadLock()
+                    validationSw.Stop()
+
+                    let refreshedDynamicDiagnostics =
+                        refreshedErrors
+                        |> List.choose (fun e ->
+                            if isDynamicParameterError e.code e.message e.relatedErrors then
+                                Some(
+                                    e.code,
+                                    e.severity,
+                                    e.range.FileName,
+                                    e.message,
+                                    e.range,
+                                    e.keyLength,
+                                    e.relatedErrors
+                                )
+                            else
+                                None)
+                        |> List.map parserErrorToDiagnostics
+                        |> List.filter diagnosticFilter
+
+                    let refreshedByFile =
+                        refreshedDynamicDiagnostics
+                        |> List.groupBy (fst >> normaliseCachePath)
+                        |> Map.ofList
+                    let filesToPublish =
                         queued
-                        |> List.truncate dynamicDeferBatchSize
-                    let deferred =
-                        queued
-                        |> List.skip batch.Length
-                    batch
-                    |> List.distinctBy normaliseCachePath
-                    |> List.iter (fun path ->
-                        clearFileCaches path
-                        postDeferredRevalidationImpl path)
-                    if not deferred.IsEmpty then
-                        scheduleDeferredDynamicRevalidation deferred
+                        @ (refreshedDynamicDiagnostics |> List.map fst)
+                        |> List.distinctBy normaliseCachePath
+                    let publishEpoch = nextDiagnosticEpoch ()
+
+                    for filePath in filesToPublish do
+                        let refreshed =
+                            refreshedByFile
+                            |> Map.tryFind (normaliseCachePath filePath)
+                            |> Option.map (List.map snd)
+                            |> Option.defaultValue []
+                        let priorState =
+                            match fileDiagnosticStates.TryGetValue(filePath) with
+                            | true, state -> Some state
+                            | false, _ -> None
+                        let merged =
+                            DiagnosticMerge.mergeDeferredDefinitionDiagnostics
+                                (existingDiagnosticsForFile filePath)
+                                refreshed
+                        client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = merged }
+
+                        let validatedVersion =
+                            priorState
+                            |> Option.bind _.validatedVersion
+                            |> Option.orElseWith (fun () -> docs.GetVersionByPath(filePath))
+                        let pendingKinds =
+                            priorState
+                            |> Option.map _.pendingGlobalKinds
+                            |> Option.defaultValue []
+                            |> List.filter (fun kind -> kind <> "dynamicParameters")
+                        let freshness =
+                            if validatedVersion <> docs.GetVersionByPath(filePath) then Stale
+                            elif pendingKinds.IsEmpty then Fresh
+                            else Pending
+                        setFileDiagnosticStateWithSnapshot
+                            filePath
+                            publishEpoch
+                            validatedVersion
+                            validatedModelEpoch
+                            freshness
+                            pendingKinds
+                            merged
+
+                    let allocatedMB = (GC.GetTotalAllocatedBytes(false) - allocBefore) / 1048576L
+                    monitorLog Lint
+                        $"ValidateFiles dynamic batch files={queued.Length} diagnostics={refreshedDynamicDiagnostics.Length} elapsedMs={validationSw.ElapsedMilliseconds} allocDeltaMB={allocatedMB}{getPerfDiagnosticSnapshot()}"
             with e -> logDiag $"Deferred dynamic revalidation failed: {e.Message}"
         | _ -> ()
 
@@ -3437,7 +3534,7 @@ type Server(client: ILanguageClient) =
                 logDiag $"Deferred dynamic revalidation capped files={files.Length} cap={dynamicDeferMaxFiles}"
             for path in queued do
                 clearFileCaches path
-                markFilePendingGlobalRevalidation path
+                markFilePendingDynamicRevalidation path
             let shouldStart =
                 lock deferredRevalidationLock (fun () ->
                     pendingDeferredRevalidationFiles <-
@@ -3515,7 +3612,7 @@ type Server(client: ILanguageClient) =
         let callFiles =
             (if isEditAction then
                  // Previous CW274D hints are only a source of stale call sites
-                 // after the definition itself changed. A RevalidateRequest is
+                 // after the definition itself changed. A background batch is
                  // already consuming that work and must not schedule itself.
                  priorDiagnostics
                  |> List.filter (fun (d: Diagnostic) -> d.code = Some "CW274D")
@@ -3532,6 +3629,42 @@ type Server(client: ILanguageClient) =
         elif isEditAction && isDynamicDefinitionPath defFile then
             logDiag $"Scheduling deferred revalidation for edited dynamic definition {defFile}"
             scheduleDeferredDynamicRevalidation [ defFile ]
+
+    let correctDynamicParameterValidationErrors context (game: IGame) (allErrors: CWError list) =
+        if not deferDynamicParameterDiagnostics then
+            allErrors
+        else
+            let dynamicErrors, plainErrors =
+                allErrors
+                |> List.partition (fun error ->
+                    isDynamicParameterError error.code error.message error.relatedErrors)
+            let candidateFiles =
+                dynamicErrors
+                |> List.collect (fun error ->
+                    error.range.FileName
+                    :: (error.relatedErrors
+                        |> Option.defaultValue []
+                        |> List.map (fun item -> item.location.FileName)))
+                |> List.distinctBy normaliseCachePath
+
+            if candidateFiles.IsEmpty || candidateFiles.Length > dynamicDeferMaxFiles then
+                if candidateFiles.Length > dynamicDeferMaxFiles then
+                    logDiag
+                        $"Skipped {context} dynamic-parameter correction files={candidateFiles.Length} cap={dynamicDeferMaxFiles}"
+                allErrors
+            else
+                let correctionSw = Stopwatch.StartNew()
+                let allocBeforeCorrection = GC.GetTotalAllocatedBytes(false)
+                let correctedDynamicErrors =
+                    game.ValidateFiles candidateFiles
+                    |> List.filter (fun error ->
+                        isDynamicParameterError error.code error.message error.relatedErrors)
+                correctionSw.Stop()
+                let correctionAllocatedMB =
+                    (GC.GetTotalAllocatedBytes(false) - allocBeforeCorrection) / 1048576L
+                logDiag
+                    $"Corrected {dynamicErrors.Length} {context} dynamic-parameter diagnostics with one batch pass across {candidateFiles.Length} files; result={correctedDynamicErrors.Length} elapsedMs={correctionSw.ElapsedMilliseconds} allocDeltaMB={correctionAllocatedMB}"
+                plainErrors @ correctedDynamicErrors
 
     let mutable delayTime = TimeSpan(0, 0, 5)
 
@@ -3893,9 +4026,9 @@ type Server(client: ILanguageClient) =
                                     | _ -> []
                                 let validateCachedOnly = options.forceDeepLint && not isEditAction
                                 do! lint uri useShallowAnalyze options.forceDisk isEditAction validateCachedOnly options.fastDefinitionIndex
-                                // Only deep/save paths schedule cross-file revalidation; shallow edits skip it
-                                // to avoid a whole-project revalidation pass on every keystroke.
-                                if not useShallowAnalyze then
+                                // Deep passes and the explicit fast-definition save path schedule
+                                // cross-file revalidation; ordinary shallow keystrokes still skip it.
+                                if not useShallowAnalyze || options.fastDefinitionIndex then
                                     refreshDynamicCallSitesForDefinition lintPath priorDiagnostics isEditAction
 
                                 if not useShallowAnalyze then
@@ -3982,19 +4115,6 @@ type Server(client: ILanguageClient) =
                             return! loop inprogress (state |> Map.add ur.uri.LocalPath (ur, normalLintRequest, false))
                         else
                             return! loop inprogress state  // edit request already queued, skip open
-                    // Caller revalidation after a definition save: force past the
-                    // already-fresh skip, but do not treat as an edit action.
-                    | Some (RevalidateRequest ur), false ->
-                        analyze ur deepLintRequest false
-                        return! loop true state
-                    | Some (RevalidateRequest ur), true ->
-                        match Map.tryFind ur.uri.LocalPath state with
-                        | Some (_, _, true) ->
-                            return! loop inprogress state  // queued edit supersedes revalidation
-                        | Some (queued, options, false) ->
-                            return! loop inprogress (state |> Map.add ur.uri.LocalPath (queued, mergeLintRequestOptions deepLintRequest options, false))
-                        | None ->
-                            return! loop inprogress (state |> Map.add ur.uri.LocalPath (ur, deepLintRequest, false))
                     | Some (WorkComplete time), _ ->
                         nextAnalyseTime <- time
 
@@ -4032,11 +4152,6 @@ type Server(client: ILanguageClient) =
 
             loop false Map.empty)
 
-    do
-        postDeferredRevalidationImpl <-
-            fun path ->
-                lintAgent.Post(RevalidateRequest({ uri = diagnosticUri path; version = 0 }))
-
     /// Debounce agent for DidChangeTextDocument lintAgent.
     /// Waits 1.5 seconds of inactivity before forwarding the lint request.
     /// This prevents write-lock contention during rapid typing.
@@ -4068,10 +4183,6 @@ type Server(client: ILanguageClient) =
                     | Some (OpenRequest ur) ->
                         // Open requests bypass debounce - forward immediately
                         lintAgent.Post(OpenRequest ur)
-                        return! loop pending deferCount
-                    | Some (RevalidateRequest ur) ->
-                        // Revalidation requests bypass debounce - forward immediately
-                        lintAgent.Post(RevalidateRequest ur)
                         return! loop pending deferCount
                     | Some (WorkComplete _) ->
                         // Ignore WorkComplete messages in debounce agent
@@ -4544,35 +4655,15 @@ type Server(client: ILanguageClient) =
                         $"Dynamic parameter preflight forced {forced} entities in {preflightSw.ElapsedMilliseconds}ms (timeout {dynamicPreflightTimeoutMs}ms, cap {dynamicPreflightMaxEntities})"
                  with e -> logDiag $"Dynamic parameter preflight error: {e.Message}")
 
-                let allValErrors =
+                let valErrorRaw =
                     game.ValidationErrors()
+                    |> correctDynamicParameterValidationErrors "initial" game
+                let valErrors =
+                    valErrorRaw
                     |> List.map (fun e ->
                         (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
-                validationErrorCount <- allValErrors.Length
 
-                let dynamicErrors, plainErrors =
-                    if deferDynamicParameterDiagnostics then
-                        allValErrors
-                        |> List.partition (fun (code, _, _, message, _, _, related) ->
-                            isDynamicParameterError code message related)
-                    else
-                        [], allValErrors
-
-                let candidateDeferredFiles =
-                    dynamicErrors
-                    |> List.map (fun (_, _, f, _, _, _, _) -> f)
-                    |> List.distinctBy normaliseCachePath
-
-                let useDefer =
-                    not candidateDeferredFiles.IsEmpty
-                    && candidateDeferredFiles.Length <= dynamicDeferMaxFiles
-
-                let valErrors = if useDefer then plainErrors else allValErrors
-                let deferredFiles = if useDefer then candidateDeferredFiles else []
-
-                if useDefer then
-                    logDiag
-                        $"Deferring {dynamicErrors.Length} dynamic-parameter diagnostics across {deferredFiles.Length} files until post-load revalidation"
+                validationErrorCount <- valErrorRaw.Length
 
                 let locRaw = game.LocalisationErrors(true, true)
                 localisationErrorCount <- locRaw.Length
@@ -4601,13 +4692,6 @@ type Server(client: ILanguageClient) =
 
                 let loadedNormalised = loadedFilePaths |> List.map normaliseCachePath |> Set.ofList
                 let loadEpoch = nextDiagnosticEpoch ()
-                let deferredNormalised = deferredFiles |> List.map normaliseCachePath |> Set.ofList
-
-                let initialFreshnessFor filePath =
-                    if deferredNormalised.Contains(normaliseCachePath filePath) then
-                        Pending, [ "dynamicParameters" ]
-                    else
-                        Fresh, []
 
                 for filePath in loadedFilePaths do
                     let diagnostics =
@@ -4615,23 +4699,15 @@ type Server(client: ILanguageClient) =
                         |> Map.tryFind (normaliseCachePath filePath)
                         |> Option.map (List.map snd)
                         |> Option.defaultValue []
-                    let freshness, pendingKinds = initialFreshnessFor filePath
-                    setFileDiagnosticStateWithEpoch filePath loadEpoch freshness pendingKinds diagnostics
+                    setFileDiagnosticStateWithEpoch filePath loadEpoch Fresh [] diagnostics
 
                 diagnosticsByFile
                 |> Map.toSeq
                 |> Seq.iter (fun (_, entries) ->
                     match entries with
                     | (filePath, _) :: _ when not (loadedNormalised.Contains(normaliseCachePath filePath)) ->
-                        let freshness, pendingKinds = initialFreshnessFor filePath
-                        setFileDiagnosticStateWithEpoch filePath loadEpoch freshness pendingKinds (entries |> List.map snd)
+                        setFileDiagnosticStateWithEpoch filePath loadEpoch Fresh [] (entries |> List.map snd)
                     | _ -> ())
-
-                if useDefer then
-                    for filePath in deferredFiles do
-                        if not (fileDiagnosticStates.ContainsKey filePath) then
-                            setFileDiagnosticStateWithEpoch filePath loadEpoch Pending [ "dynamicParameters" ] []
-                    scheduleDeferredDynamicRevalidation deferredFiles
 
                 // L6 Fix: non-blocking optimised GC avoids a 100ms freeze on load
                 maybeCollectGarbage ()
@@ -5164,6 +5240,7 @@ type Server(client: ILanguageClient) =
             async {
                 docs.Change p
                 let path = getPathFromDoc p.textDocument.uri
+                dirtyDocumentPaths.[normaliseCachePath path] <- 0uy
                 if isCompletionHeavyEditPath path then
                     markCompletionHeavyTextEditActivity ()
                     clearFileCachesPreservingSemanticTokens path
@@ -5201,20 +5278,24 @@ type Server(client: ILanguageClient) =
         member this.DidSaveTextDocument(p: DidSaveTextDocumentParams) =
             async {
                 let path = getPathFromDoc p.textDocument.uri
-                if isCompletionHeavyEditPath path then
-                    markCompletionHeavySaveActivity ()
-                let requestOptions =
-                    if isScriptedDefinitionPath path then
-                        fastDefinitionIndexRequest
-                    else
-                        deepLintRequest
-                lintDebounceAgent.Post(
-                    UpdateRequest(
-                        { uri = p.textDocument.uri
-                          version = 0 },
-                        requestOptions
+                let wasDirty, _ = dirtyDocumentPaths.TryRemove(normaliseCachePath path)
+                if wasDirty then
+                    if isCompletionHeavyEditPath path then
+                        markCompletionHeavySaveActivity ()
+                    let requestOptions =
+                        if isScriptedDefinitionPath path then
+                            fastDefinitionIndexRequest
+                        else
+                            deepLintRequest
+                    lintDebounceAgent.Post(
+                        UpdateRequest(
+                            { uri = p.textDocument.uri
+                              version = 0 },
+                            requestOptions
+                        )
                     )
-                )
+                else
+                    logDiag $"Skip unchanged save validation: {path}"
             }
 
         member this.DidCloseTextDocument(p: DidCloseTextDocumentParams) = async { 
@@ -5226,6 +5307,8 @@ type Server(client: ILanguageClient) =
             forgetFileCaches fullPath
             staleCompletionFallbackCache.TryRemove(normaliseCachePath localPath) |> ignore
             staleCompletionFallbackCache.TryRemove(normaliseCachePath fullPath) |> ignore
+            dirtyDocumentPaths.TryRemove(normaliseCachePath localPath) |> ignore
+            dirtyDocumentPaths.TryRemove(normaliseCachePath fullPath) |> ignore
             pendingCompletionRefresh.TryRemove(normaliseCachePath localPath) |> ignore
             pendingCompletionRefresh.TryRemove(normaliseCachePath fullPath) |> ignore
             (locCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore

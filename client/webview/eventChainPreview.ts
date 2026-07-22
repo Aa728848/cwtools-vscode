@@ -67,6 +67,12 @@ const searchInput = document.getElementById('search-input') as HTMLInputElement;
 const detailPanel = document.getElementById('details-panel') as HTMLDivElement | null;
 const locale = (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh') ? 'zh-cn' : 'en';
 const t = (en: string, zh: string) => locale === 'zh-cn' ? zh : en;
+const LARGE_GRAPH_NODE_THRESHOLD = 450;
+const LARGE_GRAPH_EDGE_THRESHOLD = 1_600;
+const MAX_RELATION_LINKS_PER_DIRECTION = 12;
+const MAX_SUBTREE_DRAG_NODES = 250;
+const NODE_WIDTH = 252;
+const NODE_HEIGHT = 66;
 
 const cy = cytoscape({
     container,
@@ -87,12 +93,13 @@ const cy = cytoscape({
                 'background-opacity': 0.96,
                 'border-width': 2,
                 'border-color': '#2d8fd7',
-                'width': 306,
-                'height': 74,
+                'width': NODE_WIDTH,
+                'height': NODE_HEIGHT,
                 'shape': 'round-rectangle',
                 'padding': '0px' as any,
                 'text-wrap': 'wrap' as any,
-                'text-max-width': '266px' as any,
+                'text-max-width': '218px' as any,
+                'min-zoomed-font-size': 9,
                 'text-outline-width': 1,
                 'text-outline-color': '#02070b',
                 'overlay-opacity': 0,
@@ -271,6 +278,8 @@ const cy = cytoscape({
     minZoom: 0.05,
     maxZoom: 8,
     wheelSensitivity: 0.8,
+    hideEdgesOnViewport: true,
+    textureOnViewport: true,
 });
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -280,6 +289,12 @@ let currentNamespace = '__all__';
 let tooltip: HTMLDivElement | null = null;
 let selectedNodeId: string | null = null;
 let seedIds = new Set<string>();
+let largeGraphMode = false;
+let activeLayout: cytoscape.Layouts | null = null;
+let layoutFrame: number | null = null;
+let renderGeneration = 0;
+let expandedRelationNodeId: string | null = null;
+const expandedRelationDirections = new Set<'incoming' | 'outgoing'>();
 
 // ─── UI helpers ──────────────────────────────────────────────────────────────
 
@@ -347,7 +362,8 @@ function edgeDisplayLabel(edge: EventEdge): string {
 }
 
 function clearFocusClasses() {
-    cy.elements().removeClass('faded highlighted focus-node focus-neighbor focus-edge search-match');
+    cy.$('.faded, .highlighted, .focus-node, .focus-neighbor, .focus-edge, .search-match')
+        .removeClass('faded highlighted focus-node focus-neighbor focus-edge search-match');
 }
 
 function chooseInitialNamespace(nodes: EventNode[]): string {
@@ -381,54 +397,61 @@ function focusReadableStart() {
     if (focusNodes.length === 0) {
         focusNodes = visibleNodes.filter(node => Boolean(node.data('isEntry')));
     }
-    const targetNodes = focusNodes.length > 0
-        ? focusNodes.closedNeighborhood().nodes().filter(node => !node.hasClass('filtered-out'))
-        : visibleNodes;
-
-    const bbox = targetNodes.length > 0
-        ? targetNodes.boundingBox({ includeLabels: true, includeOverlays: false })
-        : visibleNodes.boundingBox({ includeLabels: true, includeOverlays: false });
-    const availableWidth = Math.max(360, container.clientWidth - 120);
-    const columnsInView = container.clientWidth < 900 ? 2.2 : 3.1;
-    const targetZoom = Math.max(0.58, Math.min(1, availableWidth / (346 * columnsInView)));
-    cy.zoom({
-        level: targetZoom,
-        renderedPosition: { x: 0, y: 0 },
-    });
-    cy.pan({
-        x: 82 - bbox.x1 * targetZoom,
-        y: 82 - bbox.y1 * targetZoom,
-    });
+    const anchor = (focusNodes.length > 0 ? focusNodes[0] : visibleNodes[0]) as cytoscape.NodeSingular | undefined;
+    if (anchor) revealNode(anchor);
 }
 
-function focusNode(node: cytoscape.NodeSingular, scope: 'direct' | 'flow' = 'flow') {
-    clearFocusClasses();
-
+function focusNode(
+    node: cytoscape.NodeSingular,
+    scope: 'direct' | 'flow' = 'direct',
+    fadeUnrelated = true,
+) {
     const related = scope === 'direct'
         ? node.closedNeighborhood()
         : node.predecessors().union(node.successors()).union(node);
-    cy.elements().addClass('faded');
-    related.removeClass('faded').addClass('highlighted');
-    related.edges().addClass('focus-edge');
-    node.addClass('focus-node');
+    cy.batch(() => {
+        clearFocusClasses();
+        if (fadeUnrelated) cy.elements().addClass('faded');
+        related.removeClass('faded').addClass('highlighted');
+        related.edges().addClass('focus-edge');
+        node.addClass('focus-node');
 
-    related.nodes().forEach((relatedNode) => {
-        if (relatedNode.id() !== node.id()) {
-            relatedNode.addClass('focus-neighbor');
-        }
+        related.nodes().forEach((relatedNode) => {
+            if (relatedNode.id() !== node.id()) {
+                relatedNode.addClass('focus-neighbor');
+            }
+        });
     });
 }
 
-function selectNode(node: cytoscape.NodeSingular) {
+function revealNode(node: cytoscape.NodeSingular) {
+    const neighborhood = node.closedNeighborhood().filter(element => !element.hasClass('filtered-out'));
+    const target = neighborhood.nodes().length <= 18 ? neighborhood : node;
+    cy.stop();
+    cy.fit(target, 96);
+    if (cy.zoom() > 1.05) {
+        cy.zoom(1.05);
+        cy.center(node);
+    }
+}
+
+function selectNode(node: cytoscape.NodeSingular, reveal = false) {
+    if (selectedNodeId !== node.id()) {
+        expandedRelationNodeId = null;
+        expandedRelationDirections.clear();
+    }
     selectedNodeId = node.id();
     cy.nodes().unselect();
     node.select();
     focusNode(node);
     updateDetails(node);
+    if (reveal) revealNode(node);
 }
 
 function clearSelection() {
     selectedNodeId = null;
+    expandedRelationNodeId = null;
+    expandedRelationDirections.clear();
     cy.nodes().unselect();
     if (searchInput.value.trim()) {
         applySearch();
@@ -443,6 +466,66 @@ function getNodeKind(data: Record<string, unknown>): string {
     if (data.isOrphan) return t('External reference', '外部引用');
     if (data.isEntry) return t('Entry definition', '入口定义');
     return t('Definition', '定义');
+}
+
+interface DirectRelationLink {
+    id: string;
+    title: string;
+    evidence: string[];
+}
+
+function collectDirectRelationLinks(
+    node: cytoscape.NodeSingular,
+    direction: 'incoming' | 'outgoing',
+): DirectRelationLink[] {
+    const relations = new Map<string, DirectRelationLink>();
+    const edges = direction === 'incoming' ? node.incomers('edge') : node.outgoers('edge');
+    edges.forEach(edge => {
+        const relatedNode = direction === 'incoming' ? edge.source() : edge.target();
+        const id = relatedNode.id();
+        const existing = relations.get(id) ?? {
+            id,
+            title: String(relatedNode.data('title') || relatedNode.data('label') || id).replace(/\n/g, ' · '),
+            evidence: [],
+        };
+        const evidence = String(edge.data('shortLabel') || edge.data('label') || edgeTypeLabel(edge.data('edgeType')));
+        if (!existing.evidence.includes(evidence)) existing.evidence.push(evidence);
+        relations.set(id, existing);
+    });
+    return [...relations.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function renderRelationLinks(
+    nodeId: string,
+    heading: string,
+    direction: 'incoming' | 'outgoing',
+    links: DirectRelationLink[],
+): string {
+    const expanded = expandedRelationNodeId === nodeId && expandedRelationDirections.has(direction);
+    const shown = expanded ? links : links.slice(0, MAX_RELATION_LINKS_PER_DIRECTION);
+    const arrow = direction === 'incoming' ? '←' : '→';
+    return `
+        <section class="details-relations">
+            <div class="details-relations-heading">
+                <span>${escapeHtml(heading)}</span>
+                <span class="details-relations-count">${links.length}</span>
+            </div>
+            ${shown.length > 0 ? shown.map(link => `
+                <button type="button" class="details-relation-link" data-select-node-id="${escapeHtml(link.id)}"
+                    title="${escapeHtml(link.evidence.join(' · '))}">
+                    <span class="details-relation-arrow">${arrow}</span>
+                    <span>
+                        <strong>${escapeHtml(link.id)}</strong>
+                        ${link.title !== link.id ? `<small>${escapeHtml(link.title)}</small>` : ''}
+                    </span>
+                </button>
+            `).join('') : `<div class="details-relations-empty">${t('None', '无')}</div>`}
+            ${links.length > shown.length
+                ? `<button type="button" class="details-relations-more" data-expand-relations="${direction}"
+                    data-relation-node-id="${escapeHtml(nodeId)}">${t(`Show ${links.length - shown.length} more`, `显示其余 ${links.length - shown.length} 个`)}</button>`
+                : ''}
+        </section>
+    `;
 }
 
 function updateDetails(node: cytoscape.NodeSingular | null) {
@@ -462,6 +545,8 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
     const data = node.data();
     const incoming = node.incomers('edge').length;
     const outgoing = node.outgoers('edge').length;
+    const incomingLinks = collectDirectRelationLinks(node, 'incoming');
+    const outgoingLinks = collectDirectRelationLinks(node, 'outgoing');
     const canOpen = Boolean(data.file && data.line);
     const badges = [
         data.isSeed ? t('Seed', '种子') : '',
@@ -485,6 +570,10 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
             <div><dt>${t('Source', '来源')}</dt><dd>${canOpen ? `${escapeHtml(data.file)}:${escapeHtml(data.line)}` : t('External reference', '图外引用')}</dd></div>
             <div><dt>${t('Relations', '关系')}</dt><dd>${t(`${incoming} incoming / ${outgoing} outgoing`, `${incoming} 个前序 / ${outgoing} 个后续`)}</dd></div>
         </dl>
+        <div class="details-relation-grid">
+            ${renderRelationLinks(node.id(), t('Upstream', '上游节点'), 'incoming', incomingLinks)}
+            ${renderRelationLinks(node.id(), t('Downstream', '下游节点'), 'outgoing', outgoingLinks)}
+        </div>
         <div class="details-actions">
             <button type="button" data-open-source ${canOpen ? '' : 'disabled'}>${t('Open source file', '打开源文件')}</button>
         </div>
@@ -506,6 +595,8 @@ function applySearch() {
     }
 
     selectedNodeId = null;
+    expandedRelationNodeId = null;
+    expandedRelationDirections.clear();
     cy.nodes().unselect();
     clearFocusClasses();
     cy.elements().addClass('faded');
@@ -538,7 +629,7 @@ function applySearch() {
 
 // Click node → inspect details and keep the relevant chain highlighted.
 cy.on('tap', 'node', (evt) => {
-    selectNode(evt.target);
+    selectNode(evt.target, true);
 });
 
 cy.on('dbltap', 'node', (evt) => {
@@ -561,7 +652,7 @@ cy.on('mouseover', 'node', (evt) => {
     const node = evt.target;
     showTooltip(node);
     if (!selectedNodeId && !searchInput.value.trim()) {
-        focusNode(node, 'direct');
+        focusNode(node, 'direct', !largeGraphMode);
     }
 });
 cy.on('mouseout', 'node', () => {
@@ -575,6 +666,29 @@ detailPanel?.addEventListener('click', (event) => {
     event.stopPropagation();
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+
+    const relationButton = target.closest('[data-select-node-id]') as HTMLButtonElement | null;
+    const relationNodeId = relationButton?.dataset.selectNodeId;
+    if (relationNodeId) {
+        const relationNode = cy.getElementById(relationNodeId) as cytoscape.NodeSingular;
+        if (relationNode.length > 0) selectNode(relationNode, true);
+        return;
+    }
+
+    const expandButton = target.closest('[data-expand-relations]') as HTMLButtonElement | null;
+    const direction = expandButton?.dataset.expandRelations;
+    const relationOwnerId = expandButton?.dataset.relationNodeId;
+    if ((direction === 'incoming' || direction === 'outgoing') && relationOwnerId) {
+        const relationOwner = cy.getElementById(relationOwnerId) as cytoscape.NodeSingular;
+        if (relationOwner.length > 0) {
+            const scrollTop = detailPanel.scrollTop;
+            expandedRelationNodeId = relationOwnerId;
+            expandedRelationDirections.add(direction);
+            updateDetails(relationOwner);
+            detailPanel.scrollTop = scrollTop;
+        }
+        return;
+    }
 
     const openButton = target.closest('[data-open-source]') as HTMLButtonElement | null;
     if (openButton && !openButton.disabled && selectedNodeId) {
@@ -600,8 +714,11 @@ let draggedSubtree: cytoscape.NodeCollection | null = null;
 cy.on('grab', 'node', (evt) => {
     const node = evt.target;
     dragPrevPos = { ...node.position() };
-    // Get all descendant nodes
-    draggedSubtree = node.successors().nodes();
+    // Traversing and moving every successor is prohibitively expensive for a
+    // dense graph and can run even when the gesture was only a click.
+    draggedSubtree = cy.nodes().length <= MAX_SUBTREE_DRAG_NODES
+        ? node.successors().nodes()
+        : null;
 });
 
 cy.on('drag', 'node', (evt) => {
@@ -677,15 +794,26 @@ nsSelect?.addEventListener('change', () => {
 });
 
 // Search
+let searchDebounce: ReturnType<typeof setTimeout> | null = null;
 searchInput?.addEventListener('input', () => {
-    applySearch();
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(applySearch, 160);
 });
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
 
 function renderGraph() {
+    const generation = ++renderGeneration;
+    if (layoutFrame !== null) {
+        cancelAnimationFrame(layoutFrame);
+        layoutFrame = null;
+    }
+    activeLayout?.stop();
+    activeLayout = null;
     cy.elements().remove();
     selectedNodeId = null;
+    expandedRelationNodeId = null;
+    expandedRelationDirections.clear();
     updateDetails(null);
 
     // Filter by namespace
@@ -704,6 +832,8 @@ function renderGraph() {
         if (!nodeIds.has(e.source)) allReferencedIds.add(e.source);
         if (!nodeIds.has(e.target)) allReferencedIds.add(e.target);
     }
+    largeGraphMode = nodes.length + allReferencedIds.size > LARGE_GRAPH_NODE_THRESHOLD
+        || edges.length > LARGE_GRAPH_EDGE_THRESHOLD;
 
     if (nodes.length === 0) {
         emptyEl.classList.add('visible');
@@ -777,33 +907,58 @@ function renderGraph() {
 
     cy.add(elements);
 
-    // Layout — ELK (layered/hierarchical) for clean DAG visualization
-    const layout = cy.layout({
-        name: 'elk',
-        animate: false,
-        fit: false,
-        padding: 80,
-        elk: {
-            algorithm: 'layered',
-            'elk.direction': 'RIGHT',
-            'elk.edgeRouting': 'POLYLINE',
-            'elk.spacing.componentComponent': 100,
-            'elk.spacing.nodeNode': 48,
-            'elk.spacing.edgeNode': 36,
-            'elk.layered.spacing.nodeNodeBetweenLayers': 120,
-            'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
-        },
-    } as any);
+    const seedRoots = cy.nodes().filter(node => Boolean(node.data('isSeed')));
+    const layoutOptions = largeGraphMode
+        ? {
+            name: 'breadthfirst',
+            animate: false,
+            fit: false,
+            padding: 56,
+            directed: true,
+            circle: false,
+            grid: true,
+            avoidOverlap: true,
+            nodeDimensionsIncludeLabels: true,
+            spacingFactor: 1.05,
+            roots: seedRoots.length > 0 ? seedRoots : undefined,
+        }
+        : {
+            name: 'elk',
+            animate: false,
+            fit: false,
+            padding: 56,
+            elk: {
+                algorithm: 'layered',
+                'elk.direction': 'RIGHT',
+                'elk.edgeRouting': 'POLYLINE',
+                'elk.spacing.componentComponent': 52,
+                'elk.spacing.nodeNode': 28,
+                'elk.spacing.edgeNode': 20,
+                'elk.layered.spacing.nodeNodeBetweenLayers': 72,
+                'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+            },
+        };
+    activeLayout = cy.layout(layoutOptions as any);
     cy.one('layoutstop', () => {
+        if (generation !== renderGeneration) return;
+        activeLayout = null;
+        layoutFrame = null;
+        loadingEl.classList.add('hidden');
         applySearch();
         if (!searchInput.value.trim()) {
             focusReadableStart();
         }
     });
-    
+
+    if (largeGraphMode) {
+        loadingEl.textContent = t('Optimizing large event graph...', '正在优化大型事件关系图...');
+        loadingEl.classList.remove('hidden');
+    }
+
     // Run layout in the next frame to prevent race condition where ELK reads 0x0 node dimensions
-    requestAnimationFrame(() => {
-        layout.run();
+    layoutFrame = requestAnimationFrame(() => {
+        if (generation !== renderGeneration || !activeLayout) return;
+        activeLayout.run();
     });
 
     // Update stats
@@ -812,6 +967,7 @@ function renderGraph() {
         <span>${t('Edges', '边')}: ${edges.length}</span>
         <span>${t('Seed events', '种子事件')}: ${seedIds.size}</span>
         <span>${t('Namespace', '命名空间')}: ${currentNamespace === '__all__' ? t('All', '全部') : currentNamespace}</span>
+        <span>${t('Layout', '布局')}: ${largeGraphMode ? t('Optimized overview', '大型图优化') : t('Layered', '分层')}</span>
     `;
 }
 

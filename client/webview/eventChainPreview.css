@@ -290,6 +290,108 @@ body {
     word-break: break-word;
 }
 
+.details-relation-grid {
+    display: grid;
+    gap: 12px;
+    margin-top: 14px;
+}
+
+.details-relations-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 5px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.details-relations-count {
+    min-width: 20px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.07);
+    color: var(--fg);
+    text-align: center;
+    font-size: 10px;
+}
+
+.details-relation-link {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    align-items: center;
+    width: 100%;
+    margin-top: 4px;
+    padding: 6px 7px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: rgba(255,255,255,0.035);
+    color: var(--fg);
+    text-align: left;
+    cursor: pointer;
+}
+
+.details-relation-link:hover {
+    border-color: color-mix(in srgb, var(--focus-ring) 60%, var(--border));
+    background: rgba(255,255,255,0.09);
+}
+
+.details-relation-link:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+}
+
+.details-relation-link strong,
+.details-relation-link small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.details-relation-link strong {
+    font-size: 11px;
+}
+
+.details-relation-link small,
+.details-relations-empty,
+.details-relations-more {
+    color: var(--muted);
+    font-size: 10px;
+}
+
+.details-relation-link small {
+    margin-top: 2px;
+}
+
+.details-relation-arrow {
+    color: var(--accent);
+    font-size: 14px;
+}
+
+.details-relations-empty,
+.details-relations-more {
+    padding: 4px 2px;
+}
+
+.details-relations-more {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+
+.details-relations-more:hover {
+    color: var(--fg);
+    text-decoration: underline;
+}
+
+.details-relations-more:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+}
+
 .details-actions {
     margin-top: 14px;
 }
@@ -356,6 +458,13 @@ body {
 .cy-tooltip .tt-type { opacity: 0.6; font-size: 10px; }
 .cy-tooltip .tt-title { margin-top: 2px; }
 .cy-tooltip .tt-file { opacity: 0.5; font-size: 10px; margin-top: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+    #toolbar button,
+    .details-relation-link {
+        transition: none;
+    }
+}
 
 @media (max-width: 860px) {
     #toolbar {

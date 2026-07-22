@@ -285,16 +285,22 @@ function addEdgeDedup(
     edgeType: EventEdge['edgeType'],
     label?: string,
     conditionRelation?: EventConditionRelation,
+    edgeKeys?: Set<string>,
 ): void {
-    if (!edges.some(edge => edge.source === source
+    const key = `${source}\u0000${target}\u0000${edgeType}\u0000${label ?? ''}\u0000${conditionRelation ?? ''}`;
+    const duplicate = edgeKeys
+        ? edgeKeys.has(key)
+        : edges.some(edge => edge.source === source
         && edge.target === target
         && edge.edgeType === edgeType
         && edge.label === label
-        && edge.conditionRelation === conditionRelation)) {
-        const edge: EventEdge = { source, target, edgeType, label };
-        if (conditionRelation) edge.conditionRelation = conditionRelation;
-        edges.push(edge);
-    }
+        && edge.conditionRelation === conditionRelation);
+    if (duplicate) return;
+
+    const edge: EventEdge = { source, target, edgeType, label };
+    if (conditionRelation) edge.conditionRelation = conditionRelation;
+    edges.push(edge);
+    edgeKeys?.add(key);
 }
 
 function addEventReferenceEdges(
@@ -539,10 +545,11 @@ export function buildImplicitEdges(graph: EventGraph): EventEdge[] {
     }
 
     const edges: EventEdge[] = [];
+    const edgeKeys = new Set<string>();
     for (const [key, writerIds] of writers) {
         for (const readerId of readers.get(key) ?? []) {
             for (const writerId of writerIds) {
-                if (writerId !== readerId) addEdgeDedup(edges, writerId, readerId, 'semantic', key);
+                if (writerId !== readerId) addEdgeDedup(edges, writerId, readerId, 'semantic', key, undefined, edgeKeys);
             }
         }
     }
@@ -560,6 +567,7 @@ export function buildImplicitEdges(graph: EventGraph): EventEdge[] {
                     'mtth_condition',
                     `${condition.ruleName} = ${condition.value}`,
                     condition.relation,
+                    edgeKeys,
                 );
             }
         }
@@ -582,20 +590,28 @@ export function buildDefinitionReferenceEdges(graph: EventGraph): EventEdge[] {
             typeName: node.definitionIdentity.typeName.toLowerCase(),
             value: node.definitionIdentity.value.toLowerCase(),
         }));
+    const definitionsByValue = new Map<string, typeof definitions>();
+    for (const definition of definitions) {
+        const matches = definitionsByValue.get(definition.value) ?? [];
+        matches.push(definition);
+        definitionsByValue.set(definition.value, matches);
+    }
+    const existingPairs = new Set(graph.edges.map(edge => `${edge.source}\u0000${edge.target}`));
     const edges: EventEdge[] = [];
+    const edgeKeys = new Set<string>();
     for (const sourceNode of graph.nodes) {
         for (const reference of sourceNode.semanticReferences) {
-            const targets = definitions.filter(target => target.value === reference.value.toLowerCase()
-                && referenceMatchesDefinition(reference.typeName, target.typeName));
+            const targets = (definitionsByValue.get(reference.value.toLowerCase()) ?? [])
+                .filter(target => referenceMatchesDefinition(reference.typeName, target.typeName));
             for (const target of targets) {
                 if (target.node.id === sourceNode.id) continue;
                 const label = `${reference.ruleName} = ${reference.value}`;
                 if (reference.category === 'trigger') {
-                    addEdgeDedup(edges, target.node.id, sourceNode.id, 'definition_trigger', label);
+                    addEdgeDedup(edges, target.node.id, sourceNode.id, 'definition_trigger', label, undefined, edgeKeys);
                 } else {
                     // Explicit event/definition-member edges already carry this direction.
-                    if (graph.edges.some(edge => edge.source === sourceNode.id && edge.target === target.node.id)) continue;
-                    addEdgeDedup(edges, sourceNode.id, target.node.id, 'definition_effect', label);
+                    if (existingPairs.has(`${sourceNode.id}\u0000${target.node.id}`)) continue;
+                    addEdgeDedup(edges, sourceNode.id, target.node.id, 'definition_effect', label, undefined, edgeKeys);
                 }
             }
         }
@@ -608,23 +624,49 @@ export function extractConnectedSubgraph(
     seedIds: Set<string>,
     maxDepth = 10,
 ): EventGraph {
+    const knownNodeIds = new Set(fullGraph.nodes.map(node => node.id));
+    const adjacentIds = new Map<string, Set<string>>();
+    const connect = (source: string, target: string) => {
+        let adjacent = adjacentIds.get(source);
+        if (!adjacent) {
+            adjacent = new Set<string>();
+            adjacentIds.set(source, adjacent);
+        }
+        adjacent.add(target);
+    };
+    for (const edge of fullGraph.edges) {
+        connect(edge.source, edge.target);
+        connect(edge.target, edge.source);
+    }
+
     const visited = new Set<string>();
-    let frontier = [...seedIds];
-    for (let depth = 0; depth < maxDepth && frontier.length > 0; depth++) {
-        const next: string[] = [];
+    let frontier = new Set(seedIds);
+    for (let depth = 0; depth < maxDepth && frontier.size > 0; depth++) {
+        const next = new Set<string>();
         for (const id of frontier) {
             if (visited.has(id)) continue;
             visited.add(id);
-            for (const edge of fullGraph.edges) {
-                if (edge.source === id && !visited.has(edge.target)) next.push(edge.target);
-                if (edge.target === id && !visited.has(edge.source)) next.push(edge.source);
+            for (const adjacentId of adjacentIds.get(id) ?? []) {
+                if (!visited.has(adjacentId)) next.add(adjacentId);
             }
         }
         frontier = next;
     }
     frontier.forEach(id => visited.add(id));
+
+    const isVisibleNode = (id: string) => knownNodeIds.has(id) && visited.has(id);
     return {
         nodes: fullGraph.nodes.filter(node => visited.has(node.id)),
-        edges: fullGraph.edges.filter(edge => visited.has(edge.source) || visited.has(edge.target)),
+        edges: fullGraph.edges.filter(edge => {
+            const sourceVisible = isVisibleNode(edge.source);
+            const targetVisible = isVisibleNode(edge.target);
+            if (sourceVisible && targetVisible) return true;
+
+            // Keep unresolved references attached to the visible subgraph, but
+            // do not leak known nodes from beyond the requested depth back in
+            // as phantom nodes in the Webview.
+            return (sourceVisible && !knownNodeIds.has(edge.target))
+                || (targetVisible && !knownNodeIds.has(edge.source));
+        }),
     };
 }

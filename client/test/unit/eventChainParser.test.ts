@@ -320,6 +320,35 @@ realm_event = {
         ]);
     });
 
+    it('keeps depth-bounded subgraphs induced while retaining unresolved references', () => {
+        const makeNode = (id: string) => ({
+            id,
+            type: 'realm_event',
+            file: 'events/bounded.txt',
+            line: 1,
+            endLine: 1,
+            namespace: 'realm_test',
+            semanticReferences: [],
+        });
+        const graph = {
+            nodes: ['seed', 'near', 'outside', 'unrelated'].map(makeNode),
+            edges: [
+                { source: 'seed', target: 'near', edgeType: 'effect' as const },
+                { source: 'near', target: 'outside', edgeType: 'effect' as const },
+                { source: 'near', target: 'missing_definition', edgeType: 'effect' as const },
+                { source: 'outside', target: 'unrelated', edgeType: 'effect' as const },
+            ],
+        };
+
+        const visible = extractConnectedSubgraph(graph, new Set(['seed']), 1);
+
+        expect(visible.nodes.map(node => node.id)).to.deep.equal(['seed', 'near']);
+        expect(visible.edges).to.deep.equal([
+            { source: 'seed', target: 'near', edgeType: 'effect' },
+            { source: 'near', target: 'missing_definition', edgeType: 'effect' },
+        ]);
+    });
+
     it('uses CWT type-key filters to distinguish definition identities sharing a directory', () => {
         const result = parseCommonFile(`
 alpha_kind = { }

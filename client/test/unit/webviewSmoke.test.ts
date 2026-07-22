@@ -588,4 +588,18 @@ describe('webview smoke checks', () => {
         const css = fs.readFileSync(path.join(root, 'client/webview/staticGalaxyPreview.css'), 'utf8');
         expect(css).to.include('#viewport.painting');
     });
+
+    it('event chain preview optimizes large graphs and exposes direct relation navigation', () => {
+        const script = fs.readFileSync(path.join(root, 'client/webview/eventChainPreview.ts'), 'utf8');
+        const css = fs.readFileSync(path.join(root, 'client/webview/eventChainPreview.css'), 'utf8');
+
+        expect(script).to.include('LARGE_GRAPH_NODE_THRESHOLD');
+        expect(script).to.include("name: 'breadthfirst'");
+        expect(script).to.include('hideEdgesOnViewport: true');
+        expect(script).to.include('collectDirectRelationLinks');
+        expect(script).to.include('data-select-node-id');
+        expect(script).to.include('selectNode(relationNode, true)');
+        expect(css).to.include('.details-relation-link');
+        expect(css).to.include('prefers-reduced-motion');
+    });
 });

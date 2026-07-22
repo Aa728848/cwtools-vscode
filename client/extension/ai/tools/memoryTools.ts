@@ -97,6 +97,8 @@ export class MemoryToolHandler {
                     : undefined,
                 source: `run:${context?.runnerOptions?.runRecord?.runId ?? 'unknown'}`,
                 scope: 'private',
+            }, topicId, {
+                authoritativeProjectRevision: context?.authoritativeProjectRevision,
             });
             // Plan §8: re-saving an existing key means the model actively worked
             // with that memory — count it as an actual use (debounced persistence).

@@ -3,8 +3,9 @@
 
 对应 [ai-agent-reliability-efficiency-plan.md](./ai-agent-reliability-efficiency-plan.md) §9 阶段 0（测量基线），表格与 §2.1 同构。
 
-- 生成时间：2026-07-22T01:24:27.216Z
-- Commit：32b02edb
+- 生成时间：2026-07-22T02:16:09.656Z
+- 生成时基础 Commit：9164f367（工作树：dirty；报告可能包含尚未提交的测量输入）
+- 测量输入 SHA-256：83162836f1f3e1425efc0e68
 - Token 估算：仓库自身 `estimateTokenCount`（`client/extension/ai/agentRunner.ts`），适合相对比较，不等同于供应商计费。
 - Fixture：空临时 workspace（无 CWTOOLS.md、project profile、project knowledge、记忆、已安装技能），languageId 固定为 `stellaris`。
 - 工具 Schema 按 mode 过滤后，再按当前 build stage 过滤并以 `JSON.stringify` 估算。

@@ -1088,6 +1088,8 @@ export interface AgentToolContext {
         content: string;
     }) => Promise<{ allowed: boolean; message?: string }>;
     onTodoUpdate?: (todos: import('./types').TodoItem[]) => void;
+    /** Host-recorded workspace revision observed by a successful authoritative read in this run. */
+    authoritativeProjectRevision?: string;
     escalation?: boolean;
 }
 
@@ -1679,6 +1681,8 @@ export interface CacheRequestUsage {
     requestCount?: number;
     /** Requests in this rollup that observed cached tokens. */
     hitRequestCount?: number;
+    /** High-cardinality dimensions were intentionally collapsed into an explicit other bucket. */
+    dimensionsDropped?: boolean;
 }
 
 export interface TokenUsage {
@@ -1716,6 +1720,8 @@ export interface TokenUsage {
     cacheRequests?: CacheRequestUsage[];
     /** Bounded dimension-preserving rollups after the per-call sample cap is reached. */
     cacheRequestOverflow?: CacheRequestUsage[];
+    /** Exact global remainder after dimension-preserving overflow buckets are full. */
+    cacheRequestRemainder?: CacheRequestUsage[];
 }
 
 export interface AgentRunMetrics {

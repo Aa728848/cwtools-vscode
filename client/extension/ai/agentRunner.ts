@@ -85,6 +85,13 @@ import {
     type RunBudgetEvaluation,
 } from './runner/runBudget';
 import { buildModelRequestMessageArchive, type ModelRequestArchiveState } from './runner/requestArtifacts';
+import {
+    createTerminalValidationState,
+    hasOnlyPendingValidationErrors,
+    terminalValidationOutcome,
+    updateTerminalValidationState,
+    type TerminalValidationState,
+} from './runner/terminalValidation';
 
 export { isFallbackEligibleApiError } from './runner/fallbackPolicy';
 export { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } from './runner/toolScheduler';
@@ -1228,12 +1235,18 @@ export class AgentRunner {
 
             // Phase 1: Agent reasoning loop (with tool calls)
             updateRunStatus('running');
-            const finalMessage = await this.reasoningLoop(messages, emitStep, mode, options, tokenAccumulator, options?.onBeforeFileWrite, runMetrics);
+            const terminalValidation = createTerminalValidationState();
+            const finalMessage = await this.reasoningLoop(
+                messages,
+                emitStep,
+                mode,
+                options,
+                tokenAccumulator,
+                options?.onBeforeFileWrite,
+                runMetrics,
+                terminalValidation,
+            );
             runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0);
-
-            // A budget/doom-loop pause returns a summary through the normal path,
-            // but it is not task completion and must retain todos + resume state.
-            if (!this.retainedResumeRuns.has(runId)) this.autoCompleteTodos();
 
             // Phase 2: Extract code from the response
             const code = this.extractCode(finalMessage);
@@ -1265,17 +1278,55 @@ export class AgentRunner {
                 const orchestratorValidation = mode === 'script' || mode === 'orchestrator'
                     ? this.toolExecutor.getOrchestratorValidation(runId)
                     : undefined;
-                const isValid = orchestratorValidation?.success ?? true;
+                const toolValidationOutcome = terminalValidationOutcome(terminalValidation);
+                const parentQualityGateWillRevalidate = options?.useSlimPrompt === true && !!options.parentRunId;
+                const validationPending = !parentQualityGateWillRevalidate && (
+                    orchestratorValidation?.pendingOnly === true
+                    || (!orchestratorValidation && toolValidationOutcome === 'pending')
+                );
+                const validationFailed = (orchestratorValidation?.success === false && orchestratorValidation.pendingOnly !== true)
+                    || (!orchestratorValidation && toolValidationOutcome === 'repair');
+                if (validationPending && !validationFailed) {
+                    this.retainedResumeRuns.add(runId);
+                    if (context.topicId) {
+                        await this.saveResumeState(context.topicId, messages, mode, runId);
+                    }
+                    updateRunStatus('paused');
+                    await clearResumeStateIfComplete();
+                    return {
+                        runId,
+                        code: '',
+                        explanation: finalMessage,
+                        validationErrors: [{
+                            code: 'VALIDATION_PENDING',
+                            severity: 'error',
+                            message: orchestratorValidation?.summary
+                                ?? 'Written files are saved, but final deterministic validation is still pending. The run can be resumed.',
+                            line: 0,
+                            column: 0,
+                        }],
+                        isValid: false,
+                        retryCount: 0,
+                        steps,
+                        tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
+                        runMetrics,
+                    };
+                }
+                const isValid = orchestratorValidation?.success ?? (toolValidationOutcome !== 'repair');
                 updateRunStatus(isValid ? 'completed' : 'failed');
+                if (isValid) this.autoCompleteTodos();
                 await clearResumeStateIfComplete();
                 return {
                     runId,
                     code: '',
                     explanation: finalMessage,
                     validationErrors: isValid ? [] : [{
-                        code: 'orchestrator_quality_gate',
+                        code: orchestratorValidation ? 'orchestrator_quality_gate' : 'post_write_validation',
                         severity: 'error',
-                        message: orchestratorValidation?.summary ?? aiText('Orchestrator quality gate failed.', '协作质量门未通过。'),
+                        message: orchestratorValidation?.summary ?? aiText(
+                            `Post-write validation requires repair for ${terminalValidation.repairTargets.size + terminalValidation.diagnosticErrorTargets.size} target(s).`,
+                            `写后验证发现 ${terminalValidation.repairTargets.size + terminalValidation.diagnosticErrorTargets.size} 个目标需要修复。`,
+                        ),
                         line: 0,
                         column: 0,
                     }],
@@ -1293,6 +1344,7 @@ export class AgentRunner {
             // In addition, the validation loop will continue to generate steps after the reasoning ends, causing the external judgment card to be inconsistent with the internal state.
             if (options?.skipValidation) {
                 updateRunStatus('completed');
+                this.autoCompleteTodos();
                 await clearResumeStateIfComplete();
                 return {
                     runId,
@@ -1312,7 +1364,36 @@ export class AgentRunner {
                 code, targetFile, messages, emitStep, options, tokenAccumulator
             );
 
-            updateRunStatus('completed');
+            const toolValidationOutcome = terminalValidationOutcome(terminalValidation);
+            if (validationResult.isValid && toolValidationOutcome !== 'allow') {
+                validationResult.isValid = false;
+                validationResult.validationErrors.push({
+                    code: toolValidationOutcome === 'pending' ? 'VALIDATION_PENDING' : 'post_write_validation',
+                    severity: 'error',
+                    message: toolValidationOutcome === 'pending'
+                        ? aiText(
+                            'Written files are saved, but final deterministic validation is still pending. The run can be resumed.',
+                            '文件已写入，但最终确定性验证仍在等待中；该运行可以恢复。',
+                        )
+                        : aiText(
+                            'A tool-written file still requires repair after post-write validation.',
+                            '工具写入的文件在写后验证后仍需修复。',
+                        ),
+                    line: 0,
+                    column: 0,
+                });
+            }
+            const validationPending = hasOnlyPendingValidationErrors(validationResult.validationErrors);
+            if (validationPending) {
+                this.retainedResumeRuns.add(runId);
+                if (context.topicId) {
+                    await this.saveResumeState(context.topicId, messages, mode, runId);
+                }
+                updateRunStatus('paused');
+            } else {
+                updateRunStatus(validationResult.isValid ? 'completed' : 'failed');
+                if (validationResult.isValid) this.autoCompleteTodos();
+            }
             await clearResumeStateIfComplete();
             return {
                 runId,
@@ -1649,7 +1730,8 @@ export class AgentRunner {
         options?: AgentRunnerOptions,
         tokenAccumulator?: TokenUsage,
         onFileWrite?: (filePath: string, prevContent: string | null) => void,
-        runMetrics?: AgentRunMetrics
+        runMetrics?: AgentRunMetrics,
+        terminalValidation?: TerminalValidationState,
     ): Promise<string> {
         const runRecord = options?.runRecord ?? await this.activeRunRecordPromise!;
         this.readTracker.reset();
@@ -3273,6 +3355,9 @@ export class AgentRunner {
                     ? parsedCalls[j]!.targetPaths
                     : [`tool:${parsedCalls[j]!.toolName}`];
                 const resultSucceeded = record?.success !== false && record?.error === undefined && record?.skipped !== true;
+                if (terminalValidation) {
+                    updateTerminalValidationState(terminalValidation, targetKeys, record);
+                }
                 if (resultSucceeded && parsedCalls[j]!.toolName === 'todo_write') {
                     const rawTodos: unknown = parsedCalls[j]!.toolArgs.todos;
                     const todos: unknown[] = Array.isArray(rawTodos) ? rawTodos : [];

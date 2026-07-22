@@ -7,6 +7,12 @@ import {
     shouldPersistResumeSnapshot,
     shouldRetainResumeState,
 } from '../../extension/ai/runner/runBudget';
+import {
+    createTerminalValidationState,
+    hasOnlyPendingValidationErrors,
+    terminalValidationOutcome,
+    updateTerminalValidationState,
+} from '../../extension/ai/runner/terminalValidation';
 
 describe('RunBudgetTracker', () => {
     it('reports independent model-call, wall-time, and uncached-token soft limits', () => {
@@ -90,5 +96,70 @@ describe('RunBudgetTracker', () => {
         expect(shouldRetainResumeState(true, [])).to.equal(true);
         expect(shouldRetainResumeState(false, [{ type: 'error', content: 'Max tool iterations reached (10/10).' }])).to.equal(true);
         expect(shouldRetainResumeState(false, [{ type: 'thinking', content: 'done' }])).to.equal(false);
+    });
+});
+
+describe('terminal validation state', () => {
+    it('keeps pending writes out of the completed path until a later allow supersedes them', () => {
+        const state = createTerminalValidationState();
+        updateTerminalValidationState(state, ['events/test.txt'], {
+            requiresValidation: true,
+            postWriteValidation: { verdict: 'pending' },
+        });
+        expect(terminalValidationOutcome(state)).to.equal('pending');
+
+        updateTerminalValidationState(state, ['events/test.txt'], {
+            postWriteValidationPassed: true,
+            postWriteValidation: { verdict: 'allow' },
+        });
+        expect(terminalValidationOutcome(state)).to.equal('allow');
+    });
+
+    it('prioritizes repair over pending across different targets', () => {
+        const state = createTerminalValidationState();
+        updateTerminalValidationState(state, ['events/pending.txt'], { requiresValidation: true });
+        updateTerminalValidationState(state, ['events/broken.txt'], { requiresRepair: true });
+        expect(terminalValidationOutcome(state)).to.equal('repair');
+    });
+
+    it('resolves coverage-only pending after fresh full-file diagnostics', () => {
+        const state = createTerminalValidationState();
+        updateTerminalValidationState(state, ['interface/large.gfx'], {
+            requiresValidation: true,
+            postWriteValidation: { verdict: 'pending' },
+            postWriteEvidence: {
+                missingEvidence: [{
+                    claim: 'semantic evidence extraction covers the complete written file',
+                    status: 'unknown',
+                }],
+            },
+        });
+        expect(terminalValidationOutcome(state)).to.equal('pending');
+
+        updateTerminalValidationState(state, ['interface/large.gfx'], {
+            diagnostics: [],
+            freshness: 'fresh',
+        });
+        expect(terminalValidationOutcome(state)).to.equal('allow');
+    });
+
+    it('treats fresh diagnostic errors as terminal repair work', () => {
+        const state = createTerminalValidationState();
+        updateTerminalValidationState(state, ['events/test.txt'], {
+            diagnostics: [{ severity: 'error', message: 'broken' }],
+            freshness: 'fresh',
+        });
+        expect(terminalValidationOutcome(state)).to.equal('repair');
+    });
+
+    it('pauses only when pending is not accompanied by a real validation error', () => {
+        expect(hasOnlyPendingValidationErrors([
+            { code: 'VALIDATION_PENDING', severity: 'error' },
+            { code: 'advisory', severity: 'warning' },
+        ])).to.equal(true);
+        expect(hasOnlyPendingValidationErrors([
+            { code: 'VALIDATION_PENDING', severity: 'error' },
+            { code: 'syntax_error', severity: 'error' },
+        ])).to.equal(false);
     });
 });

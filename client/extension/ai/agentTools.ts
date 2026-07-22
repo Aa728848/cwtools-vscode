@@ -39,7 +39,7 @@ import { saveProjectWorkflow } from './workflowRegistry';
 import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
 import { aiText, EVIDENCE_GATE_MSG } from './messages';
 import { getTopicStorageDir } from './workspacePaths';
-import { TOOL_REGISTRY } from './tools/registry';
+import { TOOL_REGISTRY, WRITE_TOOLS } from './tools/registry';
 import { runAgentHooks } from './runner/hookRunner';
 import { getAgentToolTargetFiles } from './runner/toolScheduler';
 import { buildProfile, resolvePolicy, subjectForEffect, type PolicyPresetId, type PolicyRule } from './runner/policyEngine';
@@ -53,8 +53,50 @@ import { isPdxScriptTarget } from './evidence/claimExtractor';
 import { runLedger } from './runner/runLedger';
 import { ErrorReporter } from './errorReporter';
 import { mergeTokenUsageTotals } from './cacheCapability';
+import { MemoryParser } from './memoryParser';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
+const FINAL_EVIDENCE_CONCURRENCY = 4;
+
+const AUTHORITATIVE_MEMORY_EVIDENCE_TOOLS = new Set<string>([
+    'read_file',
+    'get_file_context',
+    'query_rules',
+    'query_cwt_schema',
+    'query_project_profile',
+    'query_project_knowledge',
+    'query_scope',
+    'query_types',
+    'query_definition_by_name',
+    'query_references',
+    'verify_pdx_identifier',
+    'workspace_symbols',
+    'document_symbols',
+    'explore_pdx_project',
+    'search_mod_files',
+]);
+
+function abortSignalError(signal: AbortSignal): Error {
+    if (signal.reason instanceof Error) return signal.reason;
+    const error = new Error(signal.reason ? String(signal.reason) : 'Operation cancelled.');
+    error.name = 'AbortError';
+    return error;
+}
+
+async function awaitWithAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+    if (!signal) return promise;
+    if (signal.aborted) throw abortSignalError(signal);
+    let listener: (() => void) | undefined;
+    const aborted = new Promise<never>((_, reject) => {
+        listener = () => reject(abortSignalError(signal));
+        signal.addEventListener('abort', listener, { once: true });
+    });
+    try {
+        return await Promise.race([promise, aborted]);
+    } finally {
+        if (listener) signal.removeEventListener('abort', listener);
+    }
+}
 
 export type PostWriteValidationVerdict = 'allow' | 'pending' | 'repair';
 
@@ -954,52 +996,88 @@ export class AgentToolExecutor {
         if (mode === 'off') {
             return { passed: true, filesChecked: [], conflictFiles: [], pendingFiles: [], coveragePendingFiles: [], report: '' };
         }
-        const filesChecked: string[] = [];
-        const conflictFiles: string[] = [];
-        const pendingFiles: string[] = [];
-        const coveragePendingFiles: string[] = [];
-        const details: string[] = [];
         const targets = [...new Set([...new Set(writtenFiles)]
             .map(file => path.isAbsolute(file) ? path.resolve(file) : path.resolve(this.workspaceRoot, file)))]
             .filter(isPdxScriptTarget)
             .sort((a, b) => a.localeCompare(b));
-
-        for (const target of targets) {
+        const abortSignal = context?.runnerOptions?.abortSignal;
+        type TargetOutcome = {
+            target: string;
+            checked: boolean;
+            status: 'verified' | 'conflict' | 'pending';
+            coveragePending?: boolean;
+            detail: string;
+        };
+        const outcomes = new Array<TargetOutcome>(targets.length);
+        let cursor = 0;
+        const validateTarget = async (target: string): Promise<TargetOutcome> => {
+            if (abortSignal?.aborted) throw abortSignalError(abortSignal);
             const relative = path.relative(this.workspaceRoot, target);
             if (relative.startsWith('..') || path.isAbsolute(relative)) {
-                pendingFiles.push(target);
-                details.push(`- pending: ${target} is outside the workspace evidence boundary.`);
-                continue;
+                return {
+                    target,
+                    checked: false,
+                    status: 'pending',
+                    detail: `- pending: ${target} is outside the workspace evidence boundary.`,
+                };
             }
             try {
-                const content = await fs.promises.readFile(target, 'utf8');
-                filesChecked.push(target);
-                const outcome = await this.evaluatePostWriteEvidence(
-                    { toolName: 'write_file', filePath: target, content },
-                    context,
+                const content = await awaitWithAbort(fs.promises.readFile(target, 'utf8'), abortSignal);
+                const outcome = await awaitWithAbort(
+                    this.evaluatePostWriteEvidence(
+                        { toolName: 'write_file', filePath: target, content },
+                        context,
+                    ),
+                    abortSignal,
                 );
                 const blocking = outcome?.decision?.claims.filter(claim => claim.blocking) ?? [];
                 if (blocking.some(claim => claim.status === 'conflict')) {
-                    conflictFiles.push(target);
-                    details.push(`- conflict: ${target}`);
+                    return { target, checked: true, status: 'conflict', detail: `- conflict: ${target}` };
                 } else if (outcome?.unavailable === true
                     || outcome?.decision?.degraded === true
                     || outcome?.decision === undefined
                     || blocking.some(claim => claim.status !== 'verified')) {
-                    pendingFiles.push(target);
                     const unresolved = blocking.filter(claim => claim.status !== 'verified');
                     const coverageOnly = unresolved.length > 0 && unresolved.every(claim =>
                         claim.claim === 'semantic evidence extraction covers the complete written file');
-                    if (coverageOnly) coveragePendingFiles.push(target);
-                    details.push(`- ${coverageOnly ? 'coverage-pending' : 'pending'}: ${target}`);
+                    return {
+                        target,
+                        checked: true,
+                        status: 'pending',
+                        coveragePending: coverageOnly || undefined,
+                        detail: `- ${coverageOnly ? 'coverage-pending' : 'pending'}: ${target}`,
+                    };
                 } else {
-                    details.push(`- verified: ${target}`);
+                    return { target, checked: true, status: 'verified', detail: `- verified: ${target}` };
                 }
             } catch (error) {
-                pendingFiles.push(target);
-                details.push(`- pending: ${target} (${error instanceof Error ? error.message : String(error)})`);
+                if (abortSignal?.aborted) throw abortSignalError(abortSignal);
+                return {
+                    target,
+                    checked: false,
+                    status: 'pending',
+                    detail: `- pending: ${target} (${error instanceof Error ? error.message : String(error)})`,
+                };
             }
-        }
+        };
+        const worker = async () => {
+            while (true) {
+                if (abortSignal?.aborted) throw abortSignalError(abortSignal);
+                const index = cursor++;
+                if (index >= targets.length) return;
+                outcomes[index] = await validateTarget(targets[index]!);
+            }
+        };
+        await Promise.all(Array.from(
+            { length: Math.min(FINAL_EVIDENCE_CONCURRENCY, targets.length) },
+            () => worker(),
+        ));
+
+        const filesChecked = outcomes.filter(outcome => outcome.checked).map(outcome => outcome.target);
+        const conflictFiles = outcomes.filter(outcome => outcome.status === 'conflict').map(outcome => outcome.target);
+        const pendingFiles = outcomes.filter(outcome => outcome.status === 'pending').map(outcome => outcome.target);
+        const coveragePendingFiles = outcomes.filter(outcome => outcome.coveragePending).map(outcome => outcome.target);
+        const details = outcomes.map(outcome => outcome.detail);
 
         const enforcedConflictFiles = mode === 'shadow' ? [] : conflictFiles;
         const enforcedPendingFiles = mode === 'shadow' ? [] : pendingFiles;
@@ -1248,6 +1326,18 @@ export class AgentToolExecutor {
                     ? result as Record<string, unknown>
                     : undefined;
                 const writeSucceeded = resultRecord?.success !== false && !gateOutcome?.errorResult;
+                if (context && WRITE_TOOLS.has(toolName) && writeSucceeded) {
+                    // A prior read no longer proves the post-mutation workspace
+                    // revision. Require another authoritative read before a stale
+                    // project fact can be revalidated.
+                    context.authoritativeProjectRevision = undefined;
+                }
+                if (context
+                    && AUTHORITATIVE_MEMORY_EVIDENCE_TOOLS.has(toolName)
+                    && resultRecord?.success !== false
+                    && resultRecord?.error === undefined) {
+                    context.authoritativeProjectRevision = MemoryParser.getWorkspaceProjectRevision(this.workspaceRoot);
+                }
                 const postWriteEvidence = completedPdxWrite && writeSucceeded
                     ? await this.evaluatePostWriteEvidence(completedPdxWrite, toolContext)
                     : undefined;
@@ -2304,7 +2394,11 @@ export class AgentToolExecutor {
     /** The latest coordinator execution result (read by merge_results) */
     private _lastOrchestratorResult?: import('./orchestrator/types').OrchestratorResult;
     private _lastOrchestratorGraph?: import('./orchestrator/types').TaskGraph;
-    private readonly _orchestratorValidationByRun = new Map<string, { success: boolean; summary: string }>();
+    private readonly _orchestratorValidationByRun = new Map<string, {
+        success: boolean;
+        summary: string;
+        pendingOnly?: boolean;
+    }>();
 
     /** 
 * Execute the dispatch_agents tool: convert the task array built by AI into TaskGraph, 
@@ -2571,6 +2665,14 @@ export class AgentToolExecutor {
                     // Read-only fanout waves do not overwrite this validation state.
                     success: result.success,
                     summary: result.summary,
+                    pendingOnly: !!result.qualityGate
+                        && (result.qualityGate.validationPending ?? 0) > 0
+                        && result.qualityGate.operationalFailure !== true
+                        && result.qualityGate.diagnosticErrors === 0
+                        && (result.qualityGate.evidenceConflicts ?? 0) === 0
+                        && result.qualityGate.semanticIssues === 0
+                        && result.qualityGate.logicIssues === 0
+                        && result.qualityGate.acceptanceFailures.length === 0,
                 });
                 while (this._orchestratorValidationByRun.size > 100) {
                     const oldest = this._orchestratorValidationByRun.keys().next().value as string | undefined;
@@ -2790,7 +2892,7 @@ export class AgentToolExecutor {
     getTodos(): TodoItem[] { return this.externalHandler.getTodos(); }
     clearTodos(): void { this.externalHandler.clearTodos(); }
     clearOrchestratorValidation(runId: string): void { this._orchestratorValidationByRun.delete(runId); }
-    getOrchestratorValidation(runId: string): { success: boolean; summary: string } | undefined {
+    getOrchestratorValidation(runId: string): { success: boolean; summary: string; pendingOnly?: boolean } | undefined {
         return this._orchestratorValidationByRun.get(runId);
     }
 }

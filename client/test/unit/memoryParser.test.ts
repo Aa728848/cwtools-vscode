@@ -288,13 +288,24 @@ describe('MemoryParser topic storage', () => {
         });
         parser.markMemoryStale(undefined, undefined, 'events_file_changed');
 
-        const result = await parser.appendMemory({
+        const denied = await parser.appendMemory({
             key: 'project namespace',
             content: 'Use new namespace.',
             priority: 'normal',
             source: 'run:revalidation-run',
             revision: 'sha256:new',
         });
+        expect(denied.success).to.equal(false);
+        expect(denied.message).to.include('current authoritative');
+
+        const currentProjectRevision = MemoryParser.getWorkspaceProjectRevision(workspaceRoot);
+        const result = await parser.appendMemory({
+            key: 'project namespace',
+            content: 'Use new namespace.',
+            priority: 'normal',
+            source: 'run:revalidation-run',
+            revision: 'sha256:new',
+        }, undefined, { authoritativeProjectRevision: currentProjectRevision });
 
         expect(result.revalidatedProjectFact).to.equal(true);
         const entries = JSON.parse(fs.readFileSync(parser.getStructuredMemoryFilePath(), 'utf8')).entries;
@@ -302,10 +313,60 @@ describe('MemoryParser topic storage', () => {
             kind: 'project_fact',
             source: 'events/project_events.txt',
             revision: 'sha256:new',
+            projectRevision: currentProjectRevision,
         });
         expect(entries[0].stale).to.equal(undefined);
         expect(parser.getMemoryPrompt(undefined, { taskText: 'project namespace' })).to.include('Use new namespace.');
         expect(parser.getMemoryPrompt(undefined, { taskText: 'project namespace' })).to.not.include('<stale-project-memory>');
+    });
+
+    it('lazily invalidates an inactive topic after the workspace revision advances', () => {
+        const { MemoryParser } = loadMemoryParserModule();
+        const currentRevision = MemoryParser.getWorkspaceProjectRevision(workspaceRoot);
+        const topicDir = path.join(workspaceRoot, '.cwtools', 'topic_inactive');
+        fs.mkdirSync(topicDir, { recursive: true });
+        fs.writeFileSync(path.join(topicDir, 'memory.json'), JSON.stringify({
+            version: 4,
+            entries: [{
+                key: 'inactive project fact',
+                content: 'This value belongs to the old project revision.',
+                priority: 'normal',
+                source: 'project-profile',
+                kind: 'project_fact',
+                projectRevision: currentRevision,
+            }],
+        }), 'utf8');
+
+        MemoryParser.advanceWorkspaceProjectRevision(workspaceRoot, 'project_changed_while_topic_inactive');
+        const parser = new MemoryParser(workspaceRoot, 'topic_inactive');
+        const prompt = parser.getMemoryPrompt(undefined, { taskText: 'inactive project fact' });
+
+        expect(prompt).to.include('<stale-project-memory>');
+        expect(prompt).to.not.include('This value belongs to the old project revision.');
+        const auditPrompt = parser.getMemoryPrompt(undefined, { includeStale: true });
+        expect(auditPrompt).to.include('stale=true');
+    });
+
+    it('treats project facts from an earlier extension session as stale without rewriting memory on read', async () => {
+        const firstModule = loadMemoryParserModule();
+        const firstParser = new firstModule.MemoryParser(workspaceRoot, 'topic_restart');
+        await firstParser.appendMemory({
+            key: 'session-bound project fact',
+            content: 'Value observed before the extension restarted.',
+            priority: 'normal',
+            source: 'project-profile',
+            kind: 'project_fact',
+        });
+        const jsonPath = firstParser.getStructuredMemoryFilePath();
+        const before = fs.readFileSync(jsonPath, 'utf8');
+
+        const restartedModule = loadMemoryParserModule();
+        const restartedParser = new restartedModule.MemoryParser(workspaceRoot, 'topic_restart');
+        const prompt = restartedParser.getMemoryPrompt(undefined, { taskText: 'session-bound project fact' });
+
+        expect(prompt).to.include('<stale-project-memory>');
+        expect(prompt).to.not.include('Value observed before the extension restarted.');
+        expect(fs.readFileSync(jsonPath, 'utf8')).to.equal(before);
     });
 
     it('reads version 1 memory files and infers kinds conservatively', () => {
@@ -331,8 +392,11 @@ describe('MemoryParser topic storage', () => {
         expect(prompt).to.include('agent learned fact');
         expect(prompt).to.include('kind=inferred');
         expect(prompt).to.include('kind=user_fact');
-        expect(prompt).to.include('kind=project_fact');
+        expect(prompt).to.not.include('project convention');
         expect(prompt).to.include('unsourced fact');
+        const auditPrompt = parser.getMemoryPrompt('topic_v1', { includeStale: true });
+        expect(auditPrompt).to.include('kind=project_fact');
+        expect(auditPrompt).to.include('stale=true');
         // Invalid entries are dropped at the untrusted-JSON boundary.
         expect(prompt).to.not.include('invalid entry without string key');
         expect(prompt).to.not.include('entry without any key');

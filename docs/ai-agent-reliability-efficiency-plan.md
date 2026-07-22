@@ -172,7 +172,7 @@ interface EvidenceClaim {
 
 门禁必须位于工具策略和写入执行路径中，不能只作为模型可选择调用的普通工具。所有模型可见写入仍须经过现有 policy engine、路径检查、锁、权限和 plan-mode 限制。
 
-落实结果：当前模型可见的四条通用 PDX 写路径均在文件工具生成“完整最终内容”后调用同一个异步 preflight；`edit_pdx_block` 委托结构化替换时仍经过该 preflight。直接模型调用的旧 `apply_patch` 与 `multi_replace_file_content` 已退休。成功写入后重新收集 EvidenceGate 与 diagnostics，并使用三态结果：已确认的证据冲突或明确诊断错误返回 `repair`/`requiresRepair`；blocking 证据为 `unknown`/`stale`、证据服务降级、诊断不是 `fresh` 时返回 `pending`/`requiresValidation`，且 `postWriteValidationPassed` 必须为 `false`；只有 blocking 声明全部 verified 且 fresh diagnostics 无错误时才为 `allow`。子 Agent 可继续完成依赖写入，父级 QualityGate 在全部写入合并后从磁盘重读文件并重新执行 EvidenceGate，再结合 fresh diagnostics 与任务级 SemanticVerifier 收口；仍 pending 的文件不能被报告为最终通过，也不会误启代码修复 Agent。超过语义提取上限的文件会用完整内容做语法解析并显式产生“覆盖待确认”声明；该声明只有在最终 full-file diagnostics 为 fresh 时才能收口，避免只验证前 100k 字符。
+落实结果：当前模型可见的四条通用 PDX 写路径均在文件工具生成“完整最终内容”后调用同一个异步 preflight；`edit_pdx_block` 委托结构化替换时仍经过该 preflight。直接模型调用的旧 `apply_patch` 与 `multi_replace_file_content` 已退休。成功写入后重新收集 EvidenceGate 与 diagnostics，并使用三态结果：已确认的证据冲突或明确诊断错误返回 `repair`/`requiresRepair`；blocking 证据为 `unknown`/`stale`、证据服务降级、诊断不是 `fresh` 时返回 `pending`/`requiresValidation`，且 `postWriteValidationPassed` 必须为 `false`；只有 blocking 声明全部 verified 且 fresh diagnostics 无错误时才为 `allow`。子 Agent 可继续完成依赖写入，父级 QualityGate 在全部写入合并后从磁盘重读文件并重新执行 EvidenceGate，再结合 fresh diagnostics 与任务级 SemanticVerifier 收口；顶层仍 pending 时保留 TODO 与恢复快照并进入可恢复暂停，不会被完成路径清理。最终证据与 diagnostics 都使用固定并发上限并继承取消/五分钟总时限；`.txt`、`.gui`、`.gfx`、`.asset`、`.entity` 均进入 full-file diagnostics。超过语义提取上限的文件会用完整内容做语法解析并显式产生“覆盖待确认”声明；该声明只有在最终 full-file diagnostics 为 fresh 时才能收口，避免只验证前 100k 字符。
 
 #### 4.3 不同结论的处理规则
 
@@ -280,7 +280,7 @@ interface EvidenceClaim {
 - 按 provider、model、Agent mode、工具阶段和 prompt fingerprint 聚合。
 - 记录 invalidation reason，区分正常失效、指纹缺失和供应商未命中。
 
-落实结果：Usage 按每次完成的 provider call 保存 cache sample，而不是只保存整次 run 的汇总。主推理、compaction、fallback、validation/final summary、子 Agent、质量审查、localisation sweep、自动修复均合并进顶层；自动模式路由、权限 AutoReviewer 和首轮标题生成作为独立 Usage 请求记录，连接测试不属于 Agent 任务计量。界面展示 request hit rate、cached input token ratio、节省 token、估算节省成本，并按 provider、model、Agent mode、tool stage、prompt fingerprint 五个维度聚合零命中原因。单次运行超过逐请求样本上限后改用有界 rollup，保留请求数、命中数和 token 总量；手动 `/compact` 使用独立 usage 累加器并立即持久化，不再写回上一次已结算运行的旧累加器。
+落实结果：Usage 按每次完成的 provider call 保存 cache sample，而不是只保存整次 run 的汇总。主推理、compaction、fallback、validation/final summary、子 Agent、质量审查、localisation sweep、自动修复均合并进顶层；自动模式路由、权限 AutoReviewer 和首轮标题生成作为独立 Usage 请求记录，连接测试不属于 Agent 任务计量。界面展示 request hit rate、cached input token ratio、节省 token、估算节省成本，并按 provider、model、Agent mode、tool stage、prompt fingerprint 五个维度聚合零命中原因。单次运行超过逐请求样本上限后改用有界 rollup；高基数维度超过 rollup 上限时进入显式 `__other__` remainder，而不是错误归入最后一个 provider/model 桶，并继续精确保留请求数、命中数和 token 总量。手动 `/compact` 使用独立 usage 累加器并立即持久化，不再写回上一次已结算运行的旧累加器。
 
 #### 7.4 CWT/LSP/MCP 缓存
 
@@ -299,7 +299,7 @@ interface EvidenceClaim {
 - 区分用户事实、项目事实、模型推断和临时工作记忆。模型推断不能自动升级为长期事实。
 - 记忆条目绑定来源和 revision；项目或规则变化后降级为 `stale`，等待重新验证。
 
-落实结果：AgentRunner 对所有 provider 统一将运行时记忆放在静态 system/history 前缀之后，并把本轮用户任务、实际 game/profile、活动文件及最近写入文件传给 top-k 检索。非 prefix-cache provider 不再退回“仅按优先级注入”，system prompt 也不再与 dynamic block 重复注入同一份记忆。项目脚本、规则、`CWTOOLS.md`、project profile 或 rules 配置变化时，文件/配置 watcher 会把本进程已使用 topic 中的 `project_fact` 标记 stale；`user_fact` 保留。过期事实的旧内容不再注入 prompt，而是以有界、仅含 key/source/revision/失效原因的待重验证队列提示后续任务重新读取权威项目证据；同 key 重存后清除 stale，并保持原 `project_fact` 来源分类，避免变成普通模型推断。活跃 workspace/topic 和待验证提示都有容量上限，不通过目录扫描发现记忆。
+落实结果：AgentRunner 对所有 provider 统一将运行时记忆放在静态 system/history 前缀之后，并把本轮用户任务、实际 game/profile、活动文件及最近写入文件传给 top-k 检索。非 prefix-cache provider 不再退回“仅按优先级注入”，system prompt 也不再与 dynamic block 重复注入同一份记忆。项目脚本、规则、`CWTOOLS.md`、project profile 或 rules 配置变化时，文件/配置 watcher 会推进 host 管理的 workspace revision，并把本进程已使用 topic 中的 `project_fact` 标记 stale；未活跃 topic 在下次读取时通过 revision 不匹配惰性失效，扩展重启也使用新的 session revision 保守失效可能漏掉的离线变化，`user_fact` 保留。提示构建只在内存中投影 stale 状态，不重写记忆文件。过期事实的旧内容不再注入 prompt，而是以有界、仅含 key/source/revision/失效原因的待重验证队列提示后续任务重新读取权威项目证据；只有同一运行中成功读取当前项目/CWT/LSP 权威来源后，才允许同 key 重存并清除 stale，且任一后续写入会撤销这份读取凭据。活跃 workspace/topic 和待验证提示都有容量上限，不通过目录扫描发现记忆。
 
 ### 9. 实施顺序
 
@@ -363,7 +363,7 @@ interface EvidenceClaim {
 - 当前保守 typed ID 覆盖为 event、scripted effect、scripted trigger、technology、trait、building、starbase building；modifier 由 CWT modifier 规则单独校验。未被 schema 明确识别的通用参数不会被文档伪称为已验证。
 - SemanticVerifier 对显式 `featureManifest.requiredEdges`、task `produces/consumes` 和 acceptance checks 生成文件/行证据；仓库 sample mod 的 `irm_faction.2 -> faction_set_leader` 调用链作为真实文件回归。该验证是“声明过的任务级边和生命周期验收”，不是任意动态玩法的形式化证明。
 - 请求归档按首个完整 transcript + 后续公共前缀/增量保存；工具 Schema 与大型工具结果按内容 hash 去重；恢复测试覆盖周期快照后的 request artifact 重放。
-- prompt 预算回归覆盖 build 五阶段的主/slim 上下文以及 plan/explore/review 只读阶段，而不是只覆盖首轮 discovery。
+- prompt 预算回归覆盖 build 五阶段的主/slim 上下文以及 plan/explore/review 只读阶段，而不是只覆盖首轮 discovery；生成报告同时记录基础 commit、工作树状态和测量输入 SHA-256，避免 dirty tree 的数字被误认成该 commit 的产物。
 - Usage 回归覆盖零命中分母、provider-call 级 cache sample、样本上限后的有界 rollup、五个聚合维度、节省 token/成本，以及子 Agent 与旁路 Agent provider 请求。
 - 2026-07-21 最终门禁通过：`npm run verify`（ESLint 零警告、TypeScript/Rollup、1,454 项 extension 单元测试、20 项 rules-sync、release gate）；`dotnet build src/Main/ --no-restore` 为 0 警告/0 错误；MCP schema/shared/MCP build 与 51+38 项 contract tests 通过；`npm run build:docs` 通过。
 - 本文或实现修改后必须重新运行 `npm run baseline:ai-context`、`npm run compile`、`npm run test:unit`、后端/MCP/contracts、`npm run build:docs`、release gate 和 `npm run verify`；最终一次执行结果以本次变更交付记录为准，避免在长期文档中保留会过期的测试总数。

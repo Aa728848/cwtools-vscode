@@ -88,16 +88,40 @@ export function appendCacheRequestUsage(accumulator: TokenUsage | undefined, sam
         bucket = { ...normalized, inputTokens: 0, cachedTokens: 0, requestCount: 0, hitRequestCount: 0 };
         overflow.push(bucket);
     }
-    if (!bucket) {
-        bucket = overflow[MAX_CACHE_REQUEST_OVERFLOW_BUCKETS - 1];
-    }
     if (bucket) {
         bucket.inputTokens += inputTokens;
         bucket.cachedTokens += cachedTokens;
         bucket.requestCount = (bucket.requestCount ?? 0) + requestCount;
         bucket.hitRequestCount = (bucket.hitRequestCount ?? 0) + hitRequestCount;
+        accumulator.cacheRequestOverflow = overflow;
+        return;
     }
+
+    // Preserve exact global denominators and hit counts without pretending the
+    // tail belongs to the final dimension bucket. At most two remainder rows
+    // exist (cache-capable and non-capable); all dropped dimensions are explicit.
+    const remainder = accumulator.cacheRequestRemainder ?? [];
+    let remainderBucket = remainder.find(item => item.cacheCapable === normalized.cacheCapable);
+    if (!remainderBucket) {
+        remainderBucket = {
+            provider: '__other__',
+            model: '__other__',
+            inputTokens: 0,
+            cachedTokens: 0,
+            cacheCapable: normalized.cacheCapable,
+            requestCount: 0,
+            hitRequestCount: 0,
+            invalidationReason: 'dimension_overflow',
+            dimensionsDropped: true,
+        };
+        remainder.push(remainderBucket);
+    }
+    remainderBucket.inputTokens += inputTokens;
+    remainderBucket.cachedTokens += cachedTokens;
+    remainderBucket.requestCount = (remainderBucket.requestCount ?? 0) + requestCount;
+    remainderBucket.hitRequestCount = (remainderBucket.hitRequestCount ?? 0) + hitRequestCount;
     accumulator.cacheRequestOverflow = overflow;
+    accumulator.cacheRequestRemainder = remainder;
 }
 
 /**
@@ -137,6 +161,9 @@ export function mergeTokenUsageTotals(target: TokenUsage | undefined, source: To
         appendCacheRequestUsage(target, request);
     }
     for (const request of source.cacheRequestOverflow ?? []) {
+        appendCacheRequestUsage(target, request);
+    }
+    for (const request of source.cacheRequestRemainder ?? []) {
         appendCacheRequestUsage(target, request);
     }
 }

@@ -992,7 +992,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'save_memory',
-            description: 'Persist a private structured memory with provenance, confidence, usage tracking, secret redaction, expiry, and bounded consolidation. Use sparingly for genuinely reusable rules or preferences. Project-shareable rules belong in AGENTS.md or an explicit workflow; do not save transient task state.',
+            description: 'Persist a private structured memory with provenance, confidence, usage tracking, secret redaction, expiry, and bounded consolidation. Use sparingly for genuinely reusable rules or preferences. Revalidating a stale project fact requires a successful authoritative project/CWT/LSP read earlier in the same run. Project-shareable rules belong in AGENTS.md or an explicit workflow; do not save transient task state.',
             parameters: {
                 type: 'object',
                 properties: {

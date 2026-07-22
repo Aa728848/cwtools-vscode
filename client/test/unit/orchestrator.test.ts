@@ -1326,13 +1326,14 @@ describe('QualityGate', () => {
         expect(prompt).to.include('common/tech.txt');
     });
 
-    it('checks only LSP-precise diagnostic file types', () => {
-        expect([...PDX_DIAGNOSTIC_EXTENSIONS]).to.deep.equal(['.txt', '.gui']);
+    it('checks every EvidenceGate PDX file type with full-file diagnostics', () => {
+        expect([...PDX_DIAGNOSTIC_EXTENSIONS]).to.deep.equal(['.txt', '.gui', '.gfx', '.asset', '.entity']);
         expect(isPdxDiagnosticFile('events/test.txt')).to.equal(true);
         expect(isPdxDiagnosticFile('interface/test.gui')).to.equal(true);
         expect(isPdxDiagnosticFile('localisation/test_l_english.yml')).to.equal(false);
-        expect(isPdxDiagnosticFile('interface/sprites.gfx')).to.equal(false);
-        expect(isPdxDiagnosticFile('sound/test.asset')).to.equal(false);
+        expect(isPdxDiagnosticFile('interface/sprites.gfx')).to.equal(true);
+        expect(isPdxDiagnosticFile('sound/test.asset')).to.equal(true);
+        expect(isPdxDiagnosticFile('gfx/models/test.entity')).to.equal(true);
         expect(isPdxDiagnosticFile('notes.md')).to.equal(false);
     });
 
@@ -1346,9 +1347,9 @@ describe('QualityGate', () => {
             'sound/test.asset',
         ]);
 
-        expect(prompt).to.include('.txt, .gui');
-        expect(prompt).to.include('LSP diagnostic target files include: events/test.txt, interface/test.gui');
-        expect(prompt).to.not.include('LSP diagnostic target files include: events/test.txt, interface/test.gui, localisation/test_l_english.yml');
+        expect(prompt).to.include('.txt, .gui, .gfx, .asset, .entity');
+        expect(prompt).to.include('LSP diagnostic target files include: events/test.txt, interface/test.gui, interface/sprites.gfx, sound/test.asset');
+        expect(prompt).to.not.include('localisation/test_l_english.yml, interface/sprites.gfx');
     });
 
     it('parseReviewResult: 识别通过结果', () => {
@@ -1482,7 +1483,7 @@ describe('QualityGate', () => {
     });
 
     it('accepts bounded extraction coverage only after fresh full-file diagnostics', async () => {
-        const target = path.resolve('events/large.txt');
+        const target = path.resolve('interface/large.gfx');
         const runner = {
             toolExecutor: {
                 workspaceRoot: process.cwd(),
@@ -1512,18 +1513,57 @@ describe('QualityGate', () => {
         expect(result.semanticReport).to.include('fresh diagnostics covered 1 file');
     });
 
+    it('prefetches final diagnostics with deterministic bounded concurrency', async () => {
+        let active = 0;
+        let maxActive = 0;
+        const runner = {
+            toolExecutor: {
+                workspaceRoot: process.cwd(),
+                finalizePdxEvidence: async () => ({
+                    passed: true,
+                    filesChecked: [],
+                    conflictFiles: [],
+                    pendingFiles: [],
+                    coveragePendingFiles: [],
+                    report: '',
+                }),
+                execute: async () => {
+                    active++;
+                    maxActive = Math.max(maxActive, active);
+                    await new Promise(resolve => setTimeout(resolve, 20));
+                    active--;
+                    return { totalDiagnosticCount: 0, diagnostics: [], freshness: 'fresh' };
+                },
+            },
+            run: async () => ({
+                explanation: '```json\n{"logicIssuesCount":0,"logicIssues":[],"fixSuggestions":[],"acceptanceEvidence":[],"acceptanceFailures":[]}\n```',
+                isValid: true,
+                validationErrors: [],
+                retryCount: 0,
+                steps: [],
+            }),
+        };
+        const files = Array.from({ length: 10 }, (_, index) => `events/test_${index}.txt`);
+
+        const result = await new QualityGate().reviewOutput(runner as any, files, {});
+
+        expect(result.passed).to.equal(true);
+        expect(maxActive).to.equal(4);
+    });
+
     it('reviewOutput stops promptly when the parent run is cancelled', async () => {
         const controller = new AbortController();
         const runner = {
             toolExecutor: {
                 workspaceRoot: process.cwd(),
+                finalizePdxEvidence: async () => new Promise(() => {}),
                 execute: async () => ({ totalDiagnosticCount: 0 }),
             },
             run: async () => new Promise(() => {}),
         };
         const pending = new QualityGate().reviewOutput(
             runner as any,
-            ['package.json'],
+            ['events/test.txt'],
             { abortSignal: controller.signal },
         );
         controller.abort(new Error('parent cancelled'));

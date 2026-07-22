@@ -17,6 +17,7 @@
  */
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -150,9 +151,26 @@ function renderReport({ rows, slimBuild, build, buildStageRows, slimBuildStageRo
   const fmt = (n) => Math.round(n).toLocaleString('en-US');
   const generatedAt = new Date().toISOString();
   let commit = 'unknown';
+  let workingTree = 'unknown';
   try {
     commit = execSync('git rev-parse --short HEAD', { cwd: repoRoot, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    workingTree = execSync('git status --porcelain --untracked-files=no', { cwd: repoRoot, stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString().trim().length > 0 ? 'dirty' : 'clean';
   } catch { /* git unavailable — record as unknown */ }
+  const measuredInputs = [
+    'client/extension/ai/promptBuilder.ts',
+    'client/extension/ai/tools/definitions.ts',
+    'client/extension/ai/runnerPolicy.ts',
+    'client/extension/ai/agentRunner.ts',
+  ];
+  const inputFingerprint = createHash('sha256');
+  for (const input of measuredInputs) {
+    inputFingerprint.update(input);
+    inputFingerprint.update('\0');
+    inputFingerprint.update(fs.readFileSync(path.join(repoRoot, input)));
+    inputFingerprint.update('\0');
+  }
+  const inputSha256 = inputFingerprint.digest('hex').slice(0, 24);
 
   const modeTable = rows.map(r =>
     `| ${r.label} | ${r.toolCount} | ${fmt(r.promptTokens)} | ${fmt(r.toolTokens)} | ${fmt(r.total)} |`,
@@ -171,7 +189,8 @@ function renderReport({ rows, slimBuild, build, buildStageRows, slimBuildStageRo
 对应 [ai-agent-reliability-efficiency-plan.md](./ai-agent-reliability-efficiency-plan.md) §9 阶段 0（测量基线），表格与 §2.1 同构。
 
 - 生成时间：${generatedAt}
-- Commit：${commit}
+- 生成时基础 Commit：${commit}（工作树：${workingTree}；报告可能包含尚未提交的测量输入）
+- 测量输入 SHA-256：${inputSha256}
 - Token 估算：仓库自身 \`estimateTokenCount\`（\`client/extension/ai/agentRunner.ts\`），适合相对比较，不等同于供应商计费。
 - Fixture：空临时 workspace（无 CWTOOLS.md、project profile、project knowledge、记忆、已安装技能），languageId 固定为 \`${GAME_ID}\`。
 - 工具 Schema 按 mode 过滤后，再按当前 build stage 过滤并以 \`JSON.stringify\` 估算。

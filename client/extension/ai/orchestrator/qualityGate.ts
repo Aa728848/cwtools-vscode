@@ -30,17 +30,61 @@ const DEFAULT_CONFIG: QualityGateConfig = {
 const QUALITY_GATE_REVIEW_AGENT_ID = 'quality_gate_review';
 const QUALITY_GATE_REVIEW_TIMEOUT_MS = 5 * 60 * 1000;
 const QUALITY_GATE_REVIEW_MAX_ITERATIONS = 15;
+const QUALITY_GATE_PREFLIGHT_CONCURRENCY = 4;
 
 export interface QualityGateReviewContext {
     taskGraph?: TaskGraph;
     workspaceRoot?: string;
 }
 
-export const PDX_DIAGNOSTIC_EXTENSIONS = ['.txt', '.gui'] as const;
+export const PDX_DIAGNOSTIC_EXTENSIONS = ['.txt', '.gui', '.gfx', '.asset', '.entity'] as const;
 
 export function isPdxDiagnosticFile(file: string): boolean {
     const normalized = file.toLowerCase();
     return PDX_DIAGNOSTIC_EXTENSIONS.some(ext => normalized.endsWith(ext));
+}
+
+function qualityGateAbortError(signal: AbortSignal): Error {
+    if (signal.reason instanceof Error) return signal.reason;
+    const error = new Error(signal.reason ? String(signal.reason) : 'Quality gate cancelled.');
+    error.name = 'AbortError';
+    return error;
+}
+
+async function qualityGateAwait<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+    if (signal.aborted) throw qualityGateAbortError(signal);
+    let listener: (() => void) | undefined;
+    const aborted = new Promise<never>((_, reject) => {
+        listener = () => reject(qualityGateAbortError(signal));
+        signal.addEventListener('abort', listener, { once: true });
+    });
+    try {
+        return await Promise.race([promise, aborted]);
+    } finally {
+        if (listener) signal.removeEventListener('abort', listener);
+    }
+}
+
+async function mapQualityGateBounded<T, R>(
+    values: readonly T[],
+    signal: AbortSignal,
+    mapper: (value: T) => Promise<R>,
+): Promise<R[]> {
+    const results = new Array<R>(values.length);
+    let cursor = 0;
+    const worker = async () => {
+        while (true) {
+            if (signal.aborted) throw qualityGateAbortError(signal);
+            const index = cursor++;
+            if (index >= values.length) return;
+            results[index] = await qualityGateAwait(mapper(values[index]!), signal);
+        }
+    };
+    await Promise.all(Array.from(
+        { length: Math.min(QUALITY_GATE_PREFLIGHT_CONCURRENCY, values.length) },
+        () => worker(),
+    ));
+    return results;
 }
 
 export const SPRITE_REPAIR_PROTOCOL = [
@@ -182,24 +226,58 @@ export class QualityGate {
     ): Promise<QualityGateResult> {
         const taskGraph = reviewContext?.taskGraph;
         const workspaceRoot = reviewContext?.workspaceRoot ?? agentRunner.toolExecutor.workspaceRoot;
-        const finalEvidence = typeof agentRunner.toolExecutor.finalizePdxEvidence === 'function'
-            ? await agentRunner.toolExecutor.finalizePdxEvidence(writtenFiles)
-            : { passed: true, filesChecked: [], conflictFiles: [], pendingFiles: [], coveragePendingFiles: [], report: '' };
-        const semantic = taskGraph
-            ? await new SemanticVerifier().verify(workspaceRoot, writtenFiles, taskGraph, agentRunner.toolExecutor)
-            : {
-                passed: true,
-                issues: [],
-                acceptanceFailures: [],
-                filesChecked: writtenFiles,
-                report: '',
-            };
+        const parentAbortSignal = options.abortSignal;
+        const reviewController = new AbortController();
+        const forwardParentAbort = () => reviewController.abort(parentAbortSignal?.reason);
+        if (parentAbortSignal?.aborted) {
+            forwardParentAbort();
+        } else {
+            parentAbortSignal?.addEventListener('abort', forwardParentAbort, { once: true });
+        }
+        const reviewTimeout = setTimeout(() => {
+            const error = new Error(aiText(
+                'Quality gate timed out after 5 minutes.',
+                '质量门在 5 分钟后超时，已终止。',
+            ));
+            error.name = 'TimeoutError';
+            reviewController.abort(error);
+        }, QUALITY_GATE_REVIEW_TIMEOUT_MS);
+        const cleanupReviewBudget = () => {
+            clearTimeout(reviewTimeout);
+            parentAbortSignal?.removeEventListener('abort', forwardParentAbort);
+        };
+
+        let finalEvidence: Awaited<ReturnType<typeof agentRunner.toolExecutor.finalizePdxEvidence>>;
+        let semantic: Awaited<ReturnType<SemanticVerifier['verify']>>;
+        try {
+            [finalEvidence, semantic] = await qualityGateAwait(Promise.all([
+                typeof agentRunner.toolExecutor.finalizePdxEvidence === 'function'
+                    ? agentRunner.toolExecutor.finalizePdxEvidence(writtenFiles, {
+                        runnerOptions: { abortSignal: reviewController.signal },
+                    })
+                    : Promise.resolve({ passed: true, filesChecked: [], conflictFiles: [], pendingFiles: [], coveragePendingFiles: [], report: '' }),
+                taskGraph
+                    ? new SemanticVerifier().verify(workspaceRoot, writtenFiles, taskGraph, agentRunner.toolExecutor)
+                    : Promise.resolve({
+                        passed: true,
+                        issues: [],
+                        evidence: [],
+                        acceptanceFailures: [],
+                        filesChecked: writtenFiles,
+                        report: '',
+                    }),
+            ]), reviewController.signal);
+        } catch (error) {
+            cleanupReviewBudget();
+            throw error;
+        }
         const expectedChanges = taskGraph?.metadata.featureManifest?.expectsFileChanges === true
             || [...(taskGraph?.nodes.values() ?? [])].some(node => ['build', 'loc_writer', 'gui_expert'].includes(node.agentType)
                 && ((node.plannedFiles?.length ?? 0) > 0 || (node.produces?.length ?? 0) > 0));
         if (writtenFiles.length === 0) {
             const acceptanceFailures = [...semantic.acceptanceFailures];
             if (expectedChanges) acceptanceFailures.push('Expected project changes were not written.');
+            cleanupReviewBudget();
             return {
                 passed: !expectedChanges && semantic.passed,
                 diagnosticErrors: 0,
@@ -215,13 +293,25 @@ export class QualityGate {
 
         let preFetchedDiagnostics = '';
         let diagnosticErrorCount = 0;
-        let validationPendingCount = 0;
+        const validationPendingFiles = new Set<string>();
         const freshDiagnosticFiles = new Set<string>();
         try {
             const diagResults: string[] = [];
-            for (const file of writtenFiles) {
-                if (!isPdxDiagnosticFile(file)) continue;
-                const res = await agentRunner.toolExecutor.execute('get_diagnostics', { file, severity: 'error' });
+            const diagnosticTargets = [...new Set(writtenFiles.filter(isPdxDiagnosticFile))];
+            const results = await mapQualityGateBounded(
+                diagnosticTargets,
+                reviewController.signal,
+                async file => ({
+                    file,
+                    result: await agentRunner.toolExecutor.execute(
+                        'get_diagnostics',
+                        { file, severity: 'error' },
+                        { runnerOptions: { abortSignal: reviewController.signal } },
+                    ),
+                }),
+            );
+            for (const { file, result: res } of results) {
+                const resolvedFile = path.isAbsolute(file) ? path.resolve(file) : path.resolve(workspaceRoot, file);
                 if (res && typeof res === 'object') {
                     const record = res as Record<string, unknown>;
                     const count = typeof record.totalDiagnosticCount === 'number' ? record.totalDiagnosticCount : 0;
@@ -230,27 +320,32 @@ export class QualityGate {
                         diagResults.push(`File: ${file}\n${JSON.stringify(record.diagnostics, null, 2)}`);
                     }
                     if (record.freshness !== 'fresh') {
-                        validationPendingCount++;
+                        validationPendingFiles.add(resolvedFile);
                         diagResults.push(`File: ${file}\nFinal diagnostics are ${String(record.freshness ?? 'unavailable')}; do not report this file as validated yet.`);
                     } else {
-                        freshDiagnosticFiles.add(path.isAbsolute(file) ? path.resolve(file) : path.resolve(workspaceRoot, file));
+                        freshDiagnosticFiles.add(resolvedFile);
                     }
                 } else {
-                    validationPendingCount++;
+                    validationPendingFiles.add(resolvedFile);
                 }
             }
             if (diagResults.length > 0) {
                 preFetchedDiagnostics = diagResults.join('\n\n');
             }
         } catch (error) {
-            validationPendingCount++;
+            if (reviewController.signal.aborted) {
+                cleanupReviewBudget();
+                throw qualityGateAbortError(reviewController.signal);
+            }
+            validationPendingFiles.add('__diagnostics_unavailable__');
             preFetchedDiagnostics = `Final diagnostics unavailable: ${error instanceof Error ? error.message : String(error)}`;
         }
 
         const coveragePending = new Set(finalEvidence.coveragePendingFiles.map(file => path.resolve(file)));
         const unresolvedEvidencePending = finalEvidence.pendingFiles.filter(file =>
             !coveragePending.has(path.resolve(file)) || !freshDiagnosticFiles.has(path.resolve(file)));
-        validationPendingCount += unresolvedEvidencePending.length;
+        for (const file of unresolvedEvidencePending) validationPendingFiles.add(path.resolve(file));
+        const validationPendingCount = validationPendingFiles.size;
         const coverageResolved = finalEvidence.coveragePendingFiles.length - unresolvedEvidencePending
             .filter(file => coveragePending.has(path.resolve(file))).length;
         const deterministicReport = [
@@ -265,24 +360,6 @@ export class QualityGate {
         // Run the hidden post-dispatch reviewer as a real bounded child agent.
         // Previously it inherited the top-level 10,000-iteration allowance, so
         // Script Mode could appear stuck after every visible task had completed.
-        const parentAbortSignal = options.abortSignal;
-        const reviewController = new AbortController();
-        const forwardParentAbort = () => reviewController.abort(parentAbortSignal?.reason);
-        if (parentAbortSignal?.aborted) {
-            forwardParentAbort();
-        } else {
-            parentAbortSignal?.addEventListener('abort', forwardParentAbort, { once: true });
-        }
-
-        const reviewTimeout = setTimeout(() => {
-            const error = new Error(aiText(
-                'Quality gate reviewer timed out after 5 minutes.',
-                '质量门审查超过 5 分钟，已终止。',
-            ));
-            error.name = 'TimeoutError';
-            reviewController.abort(error);
-        }, QUALITY_GATE_REVIEW_TIMEOUT_MS);
-
         const forwardStep = (step: AgentStep) => {
             options.onStep?.({ ...step, agentId: QUALITY_GATE_REVIEW_AGENT_ID });
         };
@@ -399,8 +476,7 @@ export class QualityGate {
             };
         } finally {
             mergeTokenUsageTotals(tokenAccumulator, reviewResult?.tokenUsage);
-            clearTimeout(reviewTimeout);
-            parentAbortSignal?.removeEventListener('abort', forwardParentAbort);
+            cleanupReviewBudget();
             if (abortListener) reviewController.signal.removeEventListener('abort', abortListener);
         }
 

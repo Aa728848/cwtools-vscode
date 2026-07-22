@@ -33,6 +33,8 @@ export interface MemoryEntry {
      * entry is excluded from prompts until re-validated.
      */
     revision?: string;
+    /** Host-managed workspace generation this project fact was verified against. */
+    projectRevision?: string;
     /** Stale entries await re-validation and are excluded from prompts by default. */
     stale?: boolean;
     /** When and why project evidence invalidated this entry. */
@@ -75,6 +77,7 @@ function sanitizeMemoryEntry(raw: unknown): MemoryEntry | null {
         scope: record.scope === 'project' ? 'project' : record.scope === 'private' ? 'private' : undefined,
         kind: kind === 'user_fact' || kind === 'project_fact' || kind === 'inferred' || kind === 'ephemeral' ? kind : undefined,
         revision: typeof record.revision === 'string' ? record.revision : undefined,
+        projectRevision: typeof record.projectRevision === 'string' ? record.projectRevision : undefined,
         stale: record.stale === true ? true : undefined,
         staleAt: num(record.staleAt),
         staleReason: typeof record.staleReason === 'string' ? record.staleReason : undefined,
@@ -106,13 +109,19 @@ export class MemoryParser {
     static readonly MEMORY_FILE_NAME = '.cwtools-memory.md';
     static readonly STRUCTURED_MEMORY_FILE_NAME = 'memory.json';
     /** Structured file format version written by this build. Readers stay lenient. */
-    static readonly STRUCTURED_MEMORY_VERSION = 3;
+    static readonly STRUCTURED_MEMORY_VERSION = 4;
     /** Half-life scale for freshness/last-used decay in retrieval scoring. */
     private static readonly FRESHNESS_DECAY_MS = 30 * 24 * 60 * 60 * 1000;
     private static readonly KNOWN_WORKSPACE_LIMIT = 16;
     private static readonly KNOWN_TOPIC_LIMIT = 128;
     /** Active topic ids only; bounded so invalidation never scans the workspace. */
     private static knownTopics = new Map<string, Set<string>>();
+    private static workspaceProjectRevisions = new Map<string, {
+        revision: string;
+        reason: string;
+        updatedAt: number;
+    }>();
+    private static projectRevisionCounter = 0;
 
     /**
      * Process-wide pending usage increments, keyed by workspace+topic so multiple
@@ -127,6 +136,7 @@ export class MemoryParser {
     }>();
 
     constructor(private workspaceRoot: string, private topicId?: string) {
+        MemoryParser.ensureWorkspaceSessionRevision(workspaceRoot);
         if (topicId) MemoryParser.rememberTopic(workspaceRoot, topicId);
     }
 
@@ -156,11 +166,46 @@ export class MemoryParser {
         }
     }
 
+    private static setWorkspaceProjectRevision(workspaceRoot: string, reason: string): string {
+        const key = MemoryParser.workspaceKey(workspaceRoot);
+        const updatedAt = Date.now();
+        const revision = `${updatedAt.toString(36)}-${process.pid.toString(36)}-${(++MemoryParser.projectRevisionCounter).toString(36)}`;
+        MemoryParser.workspaceProjectRevisions.set(key, { revision, reason, updatedAt });
+        while (MemoryParser.workspaceProjectRevisions.size > MemoryParser.KNOWN_WORKSPACE_LIMIT) {
+            const oldest = MemoryParser.workspaceProjectRevisions.keys().next().value as string | undefined;
+            if (oldest === undefined) break;
+            MemoryParser.workspaceProjectRevisions.delete(oldest);
+        }
+        return revision;
+    }
+
+    private static ensureWorkspaceSessionRevision(workspaceRoot: string): void {
+        const key = MemoryParser.workspaceKey(workspaceRoot);
+        if (MemoryParser.workspaceProjectRevisions.has(key)) return;
+        // A new extension process may have missed changes made while it was
+        // offline. A process-local session revision keeps prompt reads free of
+        // filesystem writes while conservatively invalidating older project facts.
+        MemoryParser.setWorkspaceProjectRevision(workspaceRoot, 'extension_session_started');
+    }
+
+    public static getWorkspaceProjectRevision(workspaceRoot: string): string {
+        MemoryParser.ensureWorkspaceSessionRevision(workspaceRoot);
+        return MemoryParser.workspaceProjectRevisions.get(MemoryParser.workspaceKey(workspaceRoot))?.revision ?? 'unavailable';
+    }
+
+    public static advanceWorkspaceProjectRevision(
+        workspaceRoot: string,
+        reason = 'project_or_rules_changed',
+    ): string {
+        return MemoryParser.setWorkspaceProjectRevision(workspaceRoot, reason);
+    }
+
     /** Mark project-derived facts stale for every topic used in this process. */
     public static markWorkspaceProjectFactsStale(
         workspaceRoot: string,
         reason = 'project_or_rules_changed',
     ): number {
+        MemoryParser.advanceWorkspaceProjectRevision(workspaceRoot, reason);
         const topics = MemoryParser.knownTopics.get(MemoryParser.workspaceKey(workspaceRoot));
         if (!topics) return 0;
         let marked = 0;
@@ -239,6 +284,7 @@ export class MemoryParser {
                     confidence: entry.confidence,
                     kind: entry.kind,
                     revision: entry.revision,
+                    projectRevision: entry.projectRevision,
                     stale: entry.stale,
                     staleAt: entry.staleAt,
                     staleReason: entry.staleReason,
@@ -336,6 +382,21 @@ export class MemoryParser {
         return `## ${entry.key} [priority=${entry.priority}; confidence=${entry.confidence ?? 0.8}; source=${entry.source ?? 'agent'}; kind=${entry.kind ?? MemoryParser.inferKind(entry.source)}${staleMarker}]\n${entry.content}`;
     }
 
+    private synchronizeProjectFactRevision(entries: MemoryEntry[]): boolean {
+        const currentRevision = MemoryParser.getWorkspaceProjectRevision(this.workspaceRoot);
+        const revisionRecord = MemoryParser.workspaceProjectRevisions.get(MemoryParser.workspaceKey(this.workspaceRoot));
+        let changed = false;
+        for (const entry of entries) {
+            if ((entry.kind ?? MemoryParser.inferKind(entry.source)) !== 'project_fact') continue;
+            if (entry.projectRevision === currentRevision) continue;
+            if (entry.stale !== true) changed = true;
+            entry.stale = true;
+            entry.staleAt ??= revisionRecord?.updatedAt ?? Date.now();
+            entry.staleReason ??= revisionRecord?.reason ?? 'project_revision_changed';
+        }
+        return changed;
+    }
+
     private buildStaleProjectFactPrompt(
         entries: MemoryEntry[],
         context: MemoryRetrievalContext | undefined,
@@ -395,6 +456,7 @@ export class MemoryParser {
 
             const structured = this.readStructuredEntries(topicId);
             if (structured.length > 0) {
+                this.synchronizeProjectFactRevision(structured);
                 const now = Date.now();
                 const staleProjectFactPrompt = this.buildStaleProjectFactPrompt(structured, context, now);
                 const usable = structured.filter(entry =>
@@ -600,7 +662,11 @@ export class MemoryParser {
      * priority only affects which entries are kept first, it never exempts an
      * entry (not even a high-priority one) from the total budget.
      */
-    public async appendMemory(entry: MemoryEntry, topicId = this.topicId): Promise<{ success: boolean; message: string; existed?: boolean; revalidatedProjectFact?: boolean }> {
+    public async appendMemory(
+        entry: MemoryEntry,
+        topicId = this.topicId,
+        options?: { authoritativeProjectRevision?: string },
+    ): Promise<{ success: boolean; message: string; existed?: boolean; revalidatedProjectFact?: boolean }> {
         try {
             if (!this.workspaceRoot) {
                 return { success: false, message: 'No workspace root' };
@@ -608,6 +674,7 @@ export class MemoryParser {
 
             const now = Date.now();
             const entries = this.readStructuredEntries(topicId);
+            this.synchronizeProjectFactRevision(entries);
             const normalizedKey = entry.key.trim().slice(0, 160);
             const existing = entries.find(candidate => candidate.key.toLowerCase() === normalizedKey.toLowerCase());
             const requestedSource = entry.source ?? 'agent:save_memory';
@@ -617,6 +684,15 @@ export class MemoryParser {
                 && existingKind === 'project_fact'
                 && entry.kind === undefined
                 && genericAgentRewrite;
+            const currentProjectRevision = MemoryParser.getWorkspaceProjectRevision(this.workspaceRoot);
+            if (revalidatedProjectFact && options?.authoritativeProjectRevision !== currentProjectRevision) {
+                return {
+                    success: false,
+                    existed: true,
+                    revalidatedProjectFact: false,
+                    message: `Project memory "${entry.key}" remains stale. Read a current authoritative project/CWT/LSP source in this run before saving the key again.`,
+                };
+            }
             const source = revalidatedProjectFact ? existing.source : requestedSource;
             // A single entry must fit the total budget on its own (with room for
             // the key and per-entry overhead), otherwise it could never be kept.
@@ -626,6 +702,7 @@ export class MemoryParser {
             if (content.length > maxContentLength) {
                 content = content.slice(0, Math.max(0, maxContentLength)) + truncationMarker;
             }
+            const normalizedKind = revalidatedProjectFact ? 'project_fact' : entry.kind ?? MemoryParser.inferKind(source);
             const normalized: MemoryEntry = {
                 ...entry,
                 key: normalizedKey,
@@ -633,8 +710,9 @@ export class MemoryParser {
                 source,
                 // Re-saving a key revalidates it: stale/revision come from the new
                 // entry only, never carried over from the superseded one.
-                kind: revalidatedProjectFact ? 'project_fact' : entry.kind ?? MemoryParser.inferKind(source),
+                kind: normalizedKind,
                 revision: entry.revision,
+                projectRevision: normalizedKind === 'project_fact' ? currentProjectRevision : undefined,
                 stale: undefined,
                 staleAt: undefined,
                 staleReason: undefined,

@@ -334,6 +334,58 @@ describe('UsageTracker request-level cache metrics (plan §7.3)', () => {
         expect(cache.totalInputTokens).to.equal(3000);
         expect(cache.totalCachedTokens).to.equal(750);
     });
+
+    it('uses an explicit remainder instead of attributing the 65th overflow dimension to another provider', () => {
+        const { UsageTracker } = loadUsageTrackerModule();
+        const { context } = makeContext();
+        const tracker = new UsageTracker(context);
+        const usage = makeUsage(3220, 10, 5);
+
+        for (let i = 0; i < 256; i++) {
+            appendCacheRequestUsage(usage, {
+                provider: 'seed-provider',
+                model: 'seed-model',
+                inputTokens: 10,
+                cachedTokens: 0,
+                cacheCapable: false,
+            });
+        }
+        for (let i = 0; i < 64; i++) {
+            appendCacheRequestUsage(usage, {
+                provider: `overflow-${i}`,
+                model: `model-${i}`,
+                inputTokens: 10,
+                cachedTokens: 0,
+                cacheCapable: false,
+                promptFingerprint: `fp-${i}`,
+            });
+        }
+        appendCacheRequestUsage(usage, {
+            provider: 'capable-hit-tail',
+            model: 'tail-model',
+            inputTokens: 10,
+            cachedTokens: 5,
+            cacheCapable: true,
+            promptFingerprint: 'fp-hit-tail',
+        });
+        appendCacheRequestUsage(usage, {
+            provider: 'capable-miss-tail',
+            model: 'tail-model',
+            inputTokens: 10,
+            cachedTokens: 0,
+            cacheCapable: true,
+            promptFingerprint: 'fp-miss-tail',
+        });
+        tracker.addUsage('mixed', 'mixed', usage);
+
+        const cache = tracker.getStats().cacheStats;
+        expect(usage.cacheRequestOverflow).to.have.lengthOf(64);
+        expect(usage.cacheRequestRemainder).to.have.lengthOf(1);
+        expect(cache.byProvider['overflow-63']).to.equal(undefined);
+        expect(cache.byProvider.__other__).to.include({ requests: 2, hitRequests: 1, requestHitRate: 50 });
+        expect(cache.requestHitRate).to.equal(50);
+        expect(cache.invalidationReasons.dimension_overflow).to.equal(1);
+    });
 });
 
 function legacyRecord(overrides: Record<string, unknown>): Record<string, unknown> {

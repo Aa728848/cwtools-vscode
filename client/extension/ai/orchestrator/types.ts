@@ -258,6 +258,8 @@ export interface OrchestratorOptions {
     topicId?: string;
     /** Parent durable run id for child agent threads. */
     parentRunId?: string;
+    /** Whether the parent run belongs to an active durable goal. */
+    durableGoal?: boolean;
     /** Explicit parent event sink for orchestration events. */
     runEventSink?: import('../runner/runContext').RunEventSink;
     /** Step callback */

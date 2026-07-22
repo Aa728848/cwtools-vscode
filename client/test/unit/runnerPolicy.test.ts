@@ -8,6 +8,7 @@ import {
     resolveMaxToolIterations,
     resolveRunMaxOutputTokens,
     SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS,
+    TOP_LEVEL_ITERATION_SAFETY_CAP,
 } from '../../extension/ai/runnerPolicy';
 import type { ToolDefinition } from '../../extension/ai/types';
 
@@ -121,19 +122,19 @@ describe('runnerPolicy', () => {
         expect(resolveRunMaxOutputTokens({ useSlimPrompt: true })).to.equal(SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS);
     });
 
-    it('keeps an emergency ceiling above the normal build soft budget', () => {
-        expect(resolveMaxToolIterations({ mode: 'build', baseContextLimit: 128000 })).to.equal(120);
+    it('lets top-level build runs rely on soft and hard runtime budgets', () => {
+        expect(resolveMaxToolIterations({ mode: 'build', baseContextLimit: 128000 })).to.equal(TOP_LEVEL_ITERATION_SAFETY_CAP);
         expect(resolveMaxToolIterations({ mode: 'build', baseContextLimit: 128000, isSubAgent: true })).to.equal(40);
     });
 
-    it('keeps an emergency ceiling above the orchestrator soft budget', () => {
-        expect(resolveMaxToolIterations({ mode: 'orchestrator', baseContextLimit: 128000 })).to.equal(160);
+    it('keeps orchestrator sub-agents bounded independently of top-level runs', () => {
+        expect(resolveMaxToolIterations({ mode: 'orchestrator', baseContextLimit: 128000 })).to.equal(TOP_LEVEL_ITERATION_SAFETY_CAP);
         expect(resolveMaxToolIterations({ mode: 'orchestrator', baseContextLimit: 128000, isSubAgent: true })).to.equal(48);
         expect(resolveMaxToolIterations({ mode: 'orchestrator', baseContextLimit: 200000, isSubAgent: true })).to.equal(60);
     });
 
-    it('keeps an emergency ceiling above the script soft budget', () => {
-        expect(resolveMaxToolIterations({ mode: 'script', baseContextLimit: 128000 })).to.equal(192);
+    it('keeps script sub-agents bounded independently of top-level runs', () => {
+        expect(resolveMaxToolIterations({ mode: 'script', baseContextLimit: 128000 })).to.equal(TOP_LEVEL_ITERATION_SAFETY_CAP);
         expect(resolveMaxToolIterations({ mode: 'script', baseContextLimit: 128000, isSubAgent: true })).to.equal(64);
         expect(resolveMaxToolIterations({ mode: 'script', baseContextLimit: 200000, isSubAgent: true })).to.equal(80);
     });
@@ -141,6 +142,6 @@ describe('runnerPolicy', () => {
     it('honors bounded overrides without letting sandbox bypass remove resource ceilings', () => {
         expect(resolveMaxToolIterations({ mode: 'build', baseContextLimit: 128000, override: 17 })).to.equal(17);
         expect(resolveMaxToolIterations({ mode: 'build', baseContextLimit: 128000, override: 10_000 })).to.equal(256);
-        expect(resolveMaxToolIterations({ mode: 'build', baseContextLimit: 128000, bypassSandbox: true })).to.equal(120);
+        expect(resolveMaxToolIterations({ mode: 'build', baseContextLimit: 128000, bypassSandbox: true })).to.equal(TOP_LEVEL_ITERATION_SAFETY_CAP);
     });
 });

@@ -78,7 +78,10 @@ import { threadStore } from './runner/threadStore';
 import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 import { appendCacheRequestUsage, isCacheCapableUsage, supportsOpenAiStylePrefixCache } from './cacheCapability';
 import {
+    DEFAULT_GOAL_HARD_BUDGET_MULTIPLIER,
+    DEFAULT_HARD_BUDGET_MULTIPLIER,
     RunBudgetTracker,
+    selectHardBudgetMultiplier,
     shouldAutoExtendRunBudget,
     shouldPersistResumeSnapshot,
     shouldRetainResumeState,
@@ -224,6 +227,8 @@ export interface AgentRunnerOptions {
     maxContextTokens?: number;
     /** Optional durable-goal aggregate token budget for the run. */
     tokenBudget?: number;
+    /** True when this run belongs to an active durable goal. Selects the goal emergency ceiling. */
+    durableGoal?: boolean;
     /** Override the reasoning-loop iteration limit. Used by orchestrator role budgets. */
     maxIterations?: number;
     /** Agent mode: build (default), plan (read-only), explore (parallel read), general (research) */
@@ -1939,7 +1944,17 @@ export class AgentRunner {
                 ),
             },
             Date.now(),
-            runBudgetConfig.get<number>('hardBudgetMultiplier', 4),
+            selectHardBudgetMultiplier({
+                durableGoal: options?.durableGoal === true,
+                regularMultiplier: runBudgetConfig.get<number>(
+                    'hardBudgetMultiplier',
+                    DEFAULT_HARD_BUDGET_MULTIPLIER,
+                ),
+                goalMultiplier: runBudgetConfig.get<number>(
+                    'goalHardBudgetMultiplier',
+                    DEFAULT_GOAL_HARD_BUDGET_MULTIPLIER,
+                ),
+            }),
         );
         let progressRevision = 0;
         let lastExtendedProgressRevision = 0;

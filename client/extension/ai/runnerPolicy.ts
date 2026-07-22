@@ -199,10 +199,12 @@ export interface IterationLimitOptions {
     baseContextLimit: number;
     bypassSandbox?: boolean;
     override?: number;
-    /** When true, apply MODE_ITERATION_LIMITS caps. Top-level agents run uncapped. */
+    /** When true, apply the bounded role-specific sub-Agent limits. */
     isSubAgent?: boolean;
 }
 
+/** Practical loop guard above the largest configurable hard model-call budget. */
+export const TOP_LEVEL_ITERATION_SAFETY_CAP = 10_000;
 export const SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS = 16_384;
 export const SLIM_SUB_AGENT_THINKING_CHAR_LIMIT = 24_000;
 export const SLIM_SUB_AGENT_OUTPUT_BUDGET_RECOVERY_LIMIT = 1;
@@ -263,10 +265,10 @@ export function resolveMaxToolIterations(options: IterationLimitOptions): number
         return Math.max(1, Math.min(256, Math.floor(options.override)));
     }
 
-    // Permission/sandbox bypasses never disable resource safety. Top-level
-    // Agents normally stop at the configurable soft runtime budget; this is
-    // the independent emergency ceiling if approval/accounting fails.
-    if (!options.isSubAgent) return Math.min(256, limits.cap * 2);
+    // Top-level execution is governed by renewable soft budgets and the
+    // non-renewable hard budget. Keep only a final loop guard here so it does
+    // not stop a healthy long-running task before those policies apply.
+    if (!options.isSubAgent) return TOP_LEVEL_ITERATION_SAFETY_CAP;
 
     const scale = Math.max(0.8, Math.min(1.25, options.baseContextLimit / 128000));
     const scaled = Math.floor(limits.base * scale);

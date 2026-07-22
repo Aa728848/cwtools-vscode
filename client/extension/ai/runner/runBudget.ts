@@ -30,6 +30,12 @@ export interface RunBudgetProgressState {
     blockingValidationIssues: number;
 }
 
+export const DEFAULT_HARD_BUDGET_MULTIPLIER = 8;
+export const DEFAULT_GOAL_HARD_BUDGET_MULTIPLIER = 32;
+const MIN_HARD_BUDGET_MULTIPLIER = 2;
+const MIN_GOAL_HARD_BUDGET_MULTIPLIER = 8;
+const MAX_HARD_BUDGET_MULTIPLIER = 100;
+
 function positiveFinite(value: number, fallback: number): number {
     return Number.isFinite(value) && value > 0 ? value : fallback;
 }
@@ -42,9 +48,31 @@ export function normalizeRunBudgetLimits(limits: RunBudgetLimits): RunBudgetLimi
     };
 }
 
-export function normalizeHardBudgetMultiplier(value: number): number {
-    if (!Number.isFinite(value)) return 4;
-    return Math.min(100, Math.max(2, Math.floor(value)));
+export function normalizeHardBudgetMultiplier(
+    value: number,
+    fallback = DEFAULT_HARD_BUDGET_MULTIPLIER,
+    minimum = MIN_HARD_BUDGET_MULTIPLIER,
+): number {
+    const normalizedFallback = Number.isFinite(fallback)
+        ? Math.min(MAX_HARD_BUDGET_MULTIPLIER, Math.max(minimum, Math.floor(fallback)))
+        : Math.max(minimum, DEFAULT_HARD_BUDGET_MULTIPLIER);
+    if (!Number.isFinite(value)) return normalizedFallback;
+    return Math.min(MAX_HARD_BUDGET_MULTIPLIER, Math.max(minimum, Math.floor(value)));
+}
+
+/** Goal runs use a separate emergency ceiling so long-lived productive work is not stopped by normal-run defaults. */
+export function selectHardBudgetMultiplier(input: {
+    durableGoal: boolean;
+    regularMultiplier: number;
+    goalMultiplier: number;
+}): number {
+    return input.durableGoal
+        ? normalizeHardBudgetMultiplier(
+            input.goalMultiplier,
+            DEFAULT_GOAL_HARD_BUDGET_MULTIPLIER,
+            MIN_GOAL_HARD_BUDGET_MULTIPLIER,
+        )
+        : normalizeHardBudgetMultiplier(input.regularMultiplier);
 }
 
 /**
@@ -64,7 +92,7 @@ export class RunBudgetTracker {
     constructor(
         private readonly baseLimits: RunBudgetLimits,
         private readonly startedAt = Date.now(),
-        private readonly hardBudgetMultiplier = 4,
+        private readonly hardBudgetMultiplier = DEFAULT_HARD_BUDGET_MULTIPLIER,
     ) {
         this.baseLimits = normalizeRunBudgetLimits(baseLimits);
         this.hardBudgetMultiplier = normalizeHardBudgetMultiplier(hardBudgetMultiplier);

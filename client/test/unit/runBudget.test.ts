@@ -3,6 +3,7 @@ import {
     RunBudgetTracker,
     normalizeHardBudgetMultiplier,
     normalizeRunBudgetLimits,
+    selectHardBudgetMultiplier,
     shouldAutoExtendRunBudget,
     shouldPersistResumeSnapshot,
     shouldRetainResumeState,
@@ -45,9 +46,32 @@ describe('RunBudgetTracker', () => {
     it('normalizes untrusted non-positive configuration values', () => {
         expect(normalizeRunBudgetLimits({ modelCalls: 0, wallTimeMs: Number.NaN, uncachedInputTokens: -1 }))
             .to.deep.equal({ modelCalls: 64, wallTimeMs: 1_200_000, uncachedInputTokens: 300_000 });
-        expect(normalizeHardBudgetMultiplier(Number.NaN)).to.equal(4);
+        expect(normalizeHardBudgetMultiplier(Number.NaN)).to.equal(8);
         expect(normalizeHardBudgetMultiplier(1)).to.equal(2);
         expect(normalizeHardBudgetMultiplier(1_000)).to.equal(100);
+    });
+
+    it('uses a much higher emergency ceiling for active durable goals', () => {
+        expect(selectHardBudgetMultiplier({
+            durableGoal: false,
+            regularMultiplier: Number.NaN,
+            goalMultiplier: Number.NaN,
+        })).to.equal(8);
+        expect(selectHardBudgetMultiplier({
+            durableGoal: true,
+            regularMultiplier: 6,
+            goalMultiplier: Number.NaN,
+        })).to.equal(32);
+        expect(selectHardBudgetMultiplier({
+            durableGoal: true,
+            regularMultiplier: 6,
+            goalMultiplier: 2,
+        })).to.equal(8);
+        expect(selectHardBudgetMultiplier({
+            durableGoal: true,
+            regularMultiplier: 6,
+            goalMultiplier: 64,
+        })).to.equal(64);
     });
 
     it('auto-extends only when durable progress is healthy', () => {

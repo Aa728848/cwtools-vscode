@@ -475,6 +475,15 @@ describe('RunLedger Unit Tests', () => {
         expect(started.threadId).to.equal('thread_protocol');
         expect(started.runId).to.equal('run_protocol');
         expect(capturedOptions[0].threadId).to.equal('thread_protocol');
+        expect(capturedOptions[0].durableGoal).to.equal(false);
+
+        await runtime.setGoal('topic_protocol', 'thread_protocol', 'finish the long Paradox task');
+        await runtime.startTurn({
+            userMessage: 'continue',
+            context: { topicId: 'topic_protocol' },
+            options: { threadId: 'thread_protocol' },
+        });
+        expect(capturedOptions[1].durableGoal).to.equal(true);
 
         const controller = new AbortController();
         const runtimeSteered: Array<{ message: string; images?: string[] }> = [];

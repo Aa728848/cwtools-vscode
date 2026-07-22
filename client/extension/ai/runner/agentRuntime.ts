@@ -64,7 +64,14 @@ export class AgentRuntime {
                 request.userMessage,
                 { ...context, topicId },
                 history,
-                { ...request.options, topicId, threadId, turnId, tokenBudget: request.options?.tokenBudget ?? goal?.tokenBudget },
+                {
+                    ...request.options,
+                    topicId,
+                    threadId,
+                    turnId,
+                    tokenBudget: request.options?.tokenBudget ?? goal?.tokenBudget,
+                    durableGoal: goal?.status === 'active',
+                },
                 request.images,
             );
         } finally {

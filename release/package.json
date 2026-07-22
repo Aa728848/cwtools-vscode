@@ -1656,10 +1656,18 @@
                 "stellarisLanguageServices.ai.performance.hardBudgetMultiplier": {
                     "scope": "window",
                     "type": "number",
-                    "default": 4,
+                    "default": 8,
                     "minimum": 2,
                     "maximum": 100,
                     "description": "%configuration.stellarisLanguageServices.ai.performance.hardBudgetMultiplier.description%"
+                },
+                "stellarisLanguageServices.ai.performance.goalHardBudgetMultiplier": {
+                    "scope": "window",
+                    "type": "number",
+                    "default": 32,
+                    "minimum": 8,
+                    "maximum": 100,
+                    "description": "%configuration.stellarisLanguageServices.ai.performance.goalHardBudgetMultiplier.description%"
                 },
                 "stellarisLanguageServices.ai.performance.subAgentModelCallBudget": {
                     "scope": "window",

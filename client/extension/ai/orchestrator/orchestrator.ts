@@ -436,6 +436,7 @@ export class Orchestrator {
             streaming: true, // Enable streaming output to visualize the progress of deep thinking
             topicId: orchestratorOptions.topicId,
             parentRunId: orchestratorOptions.parentRunId,
+            durableGoal: orchestratorOptions.durableGoal,
             agentId: taskNode.id,
             threadId: `${orchestratorOptions.parentRunId ?? orchestratorOptions.topicId ?? 'orchestrator'}/${taskNode.id}`,
             turnId: taskNode.id,

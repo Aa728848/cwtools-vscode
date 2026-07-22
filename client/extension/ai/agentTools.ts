@@ -2634,6 +2634,7 @@ export class AgentToolExecutor {
                 abortSignal: localAbort.signal,
                 topicId: runnerOpts?.topicId,
                 parentRunId: parentRun?.runId ?? parentRunSink?.runId,
+                durableGoal: runnerOpts?.durableGoal,
                 runEventSink: parentRunSink,
                 onStep: context?.onStep,
                 onBeforeFileWrite,

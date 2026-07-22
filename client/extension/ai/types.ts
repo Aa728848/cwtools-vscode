@@ -2022,6 +2022,8 @@ export interface ChatHistoryMessage {
     images?: string[];
     /** Whether this message should remain hidden from the UI (e.g. system programmatic instructions) */
     isHidden?: boolean;
+    /** Automatic task routing applied to this user turn, shown in conversation replay. */
+    resolvedAgentProfile?: ResolvedAgentProfile;
 }
 
 // ─── Context Tray Types ──────────────────────────────────────────────────────
@@ -2193,7 +2195,7 @@ export type WebViewMessage =
     | { type: 'openScratchFile'; file: string };
 
 export type HostMessage =
-    | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[] }
+    | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[]; resolvedAgentProfile?: ResolvedAgentProfile }
     | { type: 'queuedUserInput'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[] }
     | { type: 'startBackgroundGeneration' }
     | { type: 'agentStep'; step: AgentStep }
@@ -2207,7 +2209,6 @@ export type HostMessage =
     | { type: 'clearChat'; targetSurface?: 'chat' | 'manager' }
     | { type: 'modeChanged'; mode: AgentMode; label?: string }
     | { type: 'agentProfileChanged'; profile: AgentProfileSelection }
-    | { type: 'agentProfileResolved'; resolved: ResolvedAgentProfile }
     | { type: 'workflowList'; workflows: Array<{ id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }>; currentWorkflowId?: string | null; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
     | { type: 'workflowChanged'; workflowId?: string | null; workflow?: { id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }

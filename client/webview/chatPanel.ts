@@ -95,6 +95,26 @@ interface SideDiffFocus {
     file?: string;
 }
 
+interface ResolvedAgentProfileView {
+    intent: 'execute' | 'plan' | 'explore' | 'review';
+    strategy: 'single' | 'multi';
+    reason?: string;
+}
+
+function parseResolvedAgentProfileView(value: unknown): ResolvedAgentProfileView | undefined {
+    if (!value || typeof value !== 'object') return undefined;
+    const candidate = value as Record<string, unknown>;
+    const intent = candidate.intent;
+    const strategy = candidate.strategy;
+    if (intent !== 'execute' && intent !== 'plan' && intent !== 'explore' && intent !== 'review') return undefined;
+    if (strategy !== 'single' && strategy !== 'multi') return undefined;
+    return {
+        intent,
+        strategy,
+        reason: typeof candidate.reason === 'string' ? candidate.reason.slice(0, 240) : undefined,
+    };
+}
+
 function renderDiffFileStatusBadge(status?: string, classPrefix: 'ds' | 'side-diff' = 'ds'): string {
     const tone = artifactFileStatusTone(status);
     const label = formatArtifactFileStatusLabel(status);
@@ -4996,7 +5016,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return chipsContainer;
     }
 
-    function addUserMessage(text: string, msgIdx: number, images?: string[], contexts?: ActiveContext[]) {
+    function addUserMessage(text: string, msgIdx: number, images?: string[], contexts?: ActiveContext[], resolvedAgentProfile?: unknown) {
         emptyState.style.display = 'none';
         const div = document.createElement('div');
         div.className = 'message user codex-user-message';
@@ -5063,6 +5083,25 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
         div.appendChild(hdr);
         div.appendChild(bubble);
+
+        const resolved = parseResolvedAgentProfileView(resolvedAgentProfile);
+        if (resolved) {
+            const routing = document.createElement('div');
+            routing.className = `agent-routing-status agent-routing-${resolved.intent}`;
+            const intentLabels = {
+                execute: tr('Execute', '执行'),
+                plan: tr('Plan', '计划'),
+                explore: tr('Explore', '探索'),
+                review: tr('Review', '审查'),
+            };
+            const strategyLabel = resolved.strategy === 'multi'
+                ? tr('Multi-Agent', '多 Agent')
+                : tr('Single Agent', '单 Agent');
+            routing.textContent = `${tr('Auto', '自动')} · ${intentLabels[resolved.intent]} · ${strategyLabel}`;
+            routing.setAttribute('aria-label', `${tr('Automatic task routing', '自动任务路由')}：${intentLabels[resolved.intent]}，${strategyLabel}`);
+            if (resolved.reason) routing.title = resolved.reason;
+            div.appendChild(routing);
+        }
 
         if (msgIdx !== undefined && msgIdx >= 0) {
             userMessagePayloadMap.set(msgIdx, cloneInputPayload({ text, images, contexts }));
@@ -5566,7 +5605,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     subagentTicker = null;
                 }
                 removeLiveAssistantViews();
-                addUserMessage(msg.text, msg.messageIndex, msg.images, msg.contexts);
+                addUserMessage(msg.text, msg.messageIndex, msg.images, msg.contexts, msg.resolvedAgentProfile);
                 currentAssistantDiv = initLiveAssistantDiv();
                 chatArea.appendChild(currentAssistantDiv);
                 scrollBottom(true);
@@ -5829,7 +5868,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     if (m.isHidden === true) return;
                     
                     // M4 fix: pass images array when restoring user messages from history
-                    if (m.role === 'user') addUserMessage(m.displayContent || m.content, idx, m.images, m.contexts);
+                    if (m.role === 'user') addUserMessage(m.displayContent || m.content, idx, m.images, m.contexts, m.resolvedAgentProfile);
                     else {
                         chatArea.appendChild(buildAssistantMessage(m.content, m.steps, null));
                         scrollBottom();

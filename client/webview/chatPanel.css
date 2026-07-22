@@ -262,6 +262,9 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .codex-chat-shell .codex-floating-layer { width: var(--codex-chat-column); max-width: var(--codex-chat-column); }
 .codex-user-message { align-items: flex-end; }
 .codex-chat-shell .codex-user-bubble { max-width: 72%; margin-left: auto; border-radius: var(--codex-radius); background: rgba(255,255,255,0.055); }
+.agent-routing-status { display: inline-flex; align-items: center; min-height: 18px; margin-right: 2px; color: var(--codex-muted); font-size: 10.5px; line-height: 1.35; opacity: 0.78; }
+.agent-routing-plan { color: var(--vscode-charts-blue, #75a7e8); }
+.agent-routing-execute { color: var(--vscode-charts-green, #73c991); }
 .codex-message { gap: 8px; }
 .codex-message.message.assistant { align-items: stretch; }
 .codex-turn { display: flex; flex-direction: column; gap: 10px; color: var(--fg); }

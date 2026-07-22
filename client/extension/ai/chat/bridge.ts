@@ -206,8 +206,9 @@ export async function routeWebviewMessage(
                 contextStr = `\n\n${aiText('User annotations:', '用户批注:')}\n` + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
             }
 
+            const executionMode = provider.getApprovedPlanExecutionMode();
             provider.switchWorkflow(null);
-            provider.switchMode('script');
+            provider.switchMode(executionMode, false, false);
             const approvedArtifacts = provider.getApprovedPlanArtifactContext();
             const prompt = aiText(
                 'Approved. Execute the approved relationship design without reinterpreting it. If an Approved blueprintFile is listed below, call `dispatch_agents` with that exact `blueprintFile`; its featureManifest and taskPlan are canonical. Do not regenerate IDs, edges, produces/consumes, dependencies, or acceptance criteria.',

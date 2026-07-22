@@ -92,6 +92,7 @@ export type WebviewToHostMessage =
 // ─── Host → Webview messages (panel.webview.postMessage) ─────────────────────
 
 export interface StreamTextMessage { type: 'streamText'; text: string; isComplete: boolean }
+export interface AddUserMessage { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[]; contexts?: unknown[]; resolvedAgentProfile?: unknown }
 export interface QueuedUserInputMessage { type: 'queuedUserInput'; text: string; messageIndex: number; images?: string[]; contexts?: unknown[] }
 export interface AgentStepMessage { type: 'agentStep'; step: unknown }
 export interface ContextCompactionStatusMessage { type: 'contextCompactionStatus'; step: unknown }
@@ -99,7 +100,6 @@ export interface UpdateHistoryMessage { type: 'updateHistory'; messages: unknown
 export interface SetModeMessage { type: 'setMode'; mode: string }
 export interface SetAgentProfileMessage { type: 'setAgentProfile'; profile: AgentProfileSelectionView; resolved?: unknown }
 export interface AgentProfileChangedMessage { type: 'agentProfileChanged'; profile: AgentProfileSelectionView }
-export interface AgentProfileResolvedMessage { type: 'agentProfileResolved'; resolved: unknown }
 export interface WorkflowListMessage { type: 'workflowList'; workflows: unknown[]; currentWorkflowId?: string | null; labels?: unknown }
 export interface WorkflowChangedMessage { type: 'workflowChanged'; workflowId?: string | null; workflow?: unknown; labels?: unknown }
 export interface SlashCommandListMessage { type: 'slashCommandList'; commands: unknown[] }
@@ -119,6 +119,7 @@ export interface SkillsUpdateMessage { type: 'skillsUpdate'; skills: unknown[] }
 /** Union of all host → webview messages. */
 export type HostToWebviewMessage =
     | StreamTextMessage
+    | AddUserMessage
     | QueuedUserInputMessage
     | AgentStepMessage
     | ContextCompactionStatusMessage
@@ -126,7 +127,6 @@ export type HostToWebviewMessage =
     | SetModeMessage
     | SetAgentProfileMessage
     | AgentProfileChangedMessage
-    | AgentProfileResolvedMessage
     | WorkflowListMessage
     | WorkflowChangedMessage
     | SlashCommandListMessage

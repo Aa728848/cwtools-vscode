@@ -74,6 +74,25 @@ describe('webview smoke checks', () => {
         expect(script).to.include('provSel.onchange =');
     });
 
+    it('shows and restores the automatic routing decision on its user turn', () => {
+        const host = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const bridge = fs.readFileSync(path.join(root, 'client/extension/ai/chat/bridge.ts'), 'utf8');
+        const types = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
+
+        expect(host).to.include('resolvedAgentProfile: resolvedProfile');
+        expect(types).to.include('resolvedAgentProfile?: ResolvedAgentProfile');
+        expect(script).to.include('parseResolvedAgentProfileView(resolvedAgentProfile)');
+        expect(script).to.include("tr('Multi-Agent', '多 Agent')");
+        expect(script).to.include('m.resolvedAgentProfile');
+        expect(css).to.include('.agent-routing-status');
+        expect(host).to.include("public getApprovedPlanExecutionMode(): 'orchestrator' | 'script'");
+        expect(host).to.include('mode: approvalMode');
+        expect(bridge).to.include('const executionMode = provider.getApprovedPlanExecutionMode();');
+        expect(bridge).to.include('provider.switchMode(executionMode, false, false);');
+    });
+
     it('usage panel exposes request-level cache metrics and every required grouping', () => {
         const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
 

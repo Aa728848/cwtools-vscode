@@ -68,6 +68,8 @@ describe('agent profile', () => {
         }, {
             domain: 'paradox', intent: 'execute', strategy: 'multi', reason: '',
         })).to.include({ domain: 'paradox', intent: 'plan', strategy: 'single', mode: 'plan' });
+        expect(resolveAgentProfile('Use multiple agents to review this repository without changes'))
+            .to.include({ intent: 'review', strategy: 'single', mode: 'review' });
     });
 
     it('honors explicit dimensions while resolving Auto dimensions', () => {

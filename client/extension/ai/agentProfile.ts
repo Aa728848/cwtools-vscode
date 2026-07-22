@@ -235,6 +235,7 @@ export function resolveAgentProfile(
         const broadExecution = intent === 'execute' && BROAD_TASK_RE.test(request);
         strategy = explicitMulti || broadExecution ? 'multi' : 'single';
     }
+    if (intent !== 'execute') strategy = 'single';
 
     const mode = resolveMode(domain, intent, strategy);
     const domainReason = selection.domain === 'auto'

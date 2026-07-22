@@ -983,7 +983,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.session.lastResolvedProfile = resolvedProfile;
             if (turnMode !== this.currentMode) this.currentMode = turnMode;
             this.postMessage({ type: 'modeChanged', mode: turnMode });
-            this.postMessage({ type: 'agentProfileResolved', resolved: resolvedProfile });
         }
 
         // Ensure we have a topic
@@ -1019,13 +1018,29 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // Add user message to UI — pass images array directly (not just a bool flag)
         if (!resumeFromState) {
             if (!isBackground) {
-                this.postMessage({ type: 'addUserMessage', text: visibleUserText, messageIndex, images: images?.length ? images : undefined, contexts });
+                this.postMessage({
+                    type: 'addUserMessage',
+                    text: visibleUserText,
+                    messageIndex,
+                    images: images?.length ? images : undefined,
+                    contexts,
+                    resolvedAgentProfile: resolvedProfile,
+                });
             } else {
                 this.postMessage({ type: 'startBackgroundGeneration' });
             }
 
             // Add to history — store images for topic persistence
-            this.topicManager.addHistoryMessage({ role: 'user', content: text, displayContent: displayText, contexts, timestamp: Date.now(), images: images?.length ? images : undefined, isHidden: isBackground });
+            this.topicManager.addHistoryMessage({
+                role: 'user',
+                content: text,
+                displayContent: displayText,
+                contexts,
+                timestamp: Date.now(),
+                images: images?.length ? images : undefined,
+                isHidden: isBackground,
+                resolvedAgentProfile: resolvedProfile,
+            });
             
             // When a new task starts, clean up old breakpoint snapshots to prevent context pollution.
             if (this.topicManager.currentTopic?.id) {
@@ -1829,15 +1844,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         if (filePath) {
+            const approvalMode = mode === 'orchestrator' || mode === 'script'
+                ? mode
+                : this.getApprovedPlanExecutionMode();
             // Post plan file saved card and render interactive annotation UI
-            this.postMessage({ type: 'planFileSaved', filePath, relPath, mode });
+            this.postMessage({ type: 'planFileSaved', filePath, relPath, mode: approvalMode });
             this.upsertArtifact({
                 id: this.artifactId('plan', path.basename(filePath)),
                 kind: 'plan',
-                title: mode === 'orchestrator' ? 'General Multi-Agent Plan' : mode === 'script' ? 'Paradox Multi-Agent Plan' : 'Implementation Plan',
-                summary: (mode === 'orchestrator' || mode === 'script')
-                    ? 'DAG dispatch plan awaiting approval.'
-                    : 'Single-agent implementation plan awaiting approval.',
+                title: approvalMode === 'orchestrator' ? 'General Multi-Agent Plan' : 'Paradox Multi-Agent Plan',
+                summary: 'DAG dispatch plan awaiting approval.',
                 filePath,
                 relPath,
                 status: 'pending',
@@ -1860,10 +1876,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (currentSection.trim()) sections.push(currentSection.trim());
             if (sections.length === 0 && planText.trim()) sections.push(planText.trim());
 
-            this.postMessage({ type: 'renderPlan', sections, planText, mode });
+            this.postMessage({ type: 'renderPlan', sections, planText, mode: approvalMode });
 
             if (steps) {
-                steps.push({ type: 'plan_card', content: filePath, toolResult: sections, mode, uiState: 'pending', timestamp: Date.now() });
+                steps.push({ type: 'plan_card', content: filePath, toolResult: sections, mode: approvalMode, uiState: 'pending', timestamp: Date.now() });
                 this.topicManager.saveTopics();
             }
 
@@ -3125,6 +3141,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         this.persistAgentProfileForCurrentTopic();
         this.postMessage({ type: 'modeChanged', mode });
+    }
+
+    /** Approved implementation plans execute through the domain-matched multi-Agent coordinator. */
+    public getApprovedPlanExecutionMode(): 'orchestrator' | 'script' {
+        const domain = this.session.lastResolvedProfile?.domain
+            ?? (this.agentProfile.domain === 'auto'
+                ? this.topicManager.currentTopic?.resolvedAgentDomain
+                : this.agentProfile.domain)
+            ?? defaultDomainForMode(this.currentMode);
+        return domain === 'paradox' ? 'script' : 'orchestrator';
     }
 
     public switchWorkflow(workflowId?: string | null): void {

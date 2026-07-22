@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { buildDefinitionReferenceEdges, buildImplicitEdges, extractConnectedSubgraph, mergeGraphs, parseCommonFile, parseEventFile } from '../../extension/eventChainParser';
+import { buildDefinitionReferenceEdges, buildMtthConditionEdges, extractConnectedSubgraph, mergeGraphs, parseCommonFile, parseEventFile, selectEventSeedIds } from '../../extension/eventChainParser';
 import { parsePdxSemanticCatalog, type PdxSemanticCatalog } from '../../shared/pdxSemanticCatalog';
 
 const CATALOG: PdxSemanticCatalog = {
@@ -8,6 +8,7 @@ const CATALOG: PdxSemanticCatalog = {
     gameProfile: 'synthetic',
     rules: [
         { name: 'realm_event', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: 'id', access: 'type', typeName: 'event.realm' }] },
+        { name: 'has_happened_event', category: 'trigger', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'type', typeName: 'event.realm' }] },
         { name: 'has_realm_flag', category: 'trigger', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'value', typeName: 'realm_flag' }] },
         { name: 'set_realm_flag', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'value_set', typeName: 'realm_flag' }] },
     ],
@@ -31,7 +32,10 @@ realm_event = {
 
 realm_event = {
     event_key = realm_test.2
-    trigger = { has_realm_flag = ready }
+    trigger = {
+        has_happened_event = realm_test.1
+        has_realm_flag = ready
+    }
     immediate = { set_realm_flag = complete }
 }
 `, 'events/realm_test.txt', CATALOG);
@@ -46,6 +50,12 @@ realm_event = {
             && edge.edgeType === 'effect'
             && edge.label === 'realm_event'
         )).to.equal(true);
+        expect(graph.edges).to.deep.include({
+            source: 'realm_test.1',
+            target: 'realm_test.2',
+            edgeType: 'trigger',
+            label: 'has_happened_event',
+        });
         const realm = graph.nodes.find(node => node.id === 'realm_test.2')!;
         expect(realm.semanticReferences).to.deep.include({
             typeName: 'realm_flag', value: 'ready', access: 'value', category: 'trigger', ruleName: 'has_realm_flag',
@@ -55,7 +65,7 @@ realm_event = {
         });
     });
 
-    it('builds implicit relationships generically from typed writes and reads', () => {
+    it('does not turn ordinary typed value reads and writes into event-chain edges', () => {
         const graph = parseEventFile(`
 realm_event = {
     event_key = realm_test.1
@@ -67,12 +77,25 @@ realm_event = {
 }
 `, 'events/realm_test.txt', CATALOG);
 
-        expect(buildImplicitEdges(graph)).to.deep.include({
-            source: 'realm_test.1',
-            target: 'realm_test.2',
-            edgeType: 'semantic',
-            label: 'realm_flag:shared_value',
-        });
+        expect(buildMtthConditionEdges(graph)).to.deep.equal([]);
+    });
+
+    it('selects only the event containing the invoking cursor as the graph seed', () => {
+        const graph = parseEventFile(`
+realm_event = {
+    event_key = realm_test.first
+}
+
+realm_event = {
+    event_key = realm_test.second
+    immediate = { set_realm_flag = selected }
+}
+`, 'events/cursor.txt', CATALOG);
+        const second = graph.nodes.find(node => node.id === 'realm_test.second')!;
+
+        expect(selectEventSeedIds(graph, second.endLine - 1)).to.deep.equal(['realm_test.second']);
+        expect(selectEventSeedIds(graph, 1)).to.deep.equal(['realm_test.first']);
+        expect(selectEventSeedIds(graph)).to.deep.equal(['realm_test.first', 'realm_test.second']);
     });
 
     it('accepts an unfiltered event TypeDef and identifies definitions by its CWT name field', () => {
@@ -134,7 +157,7 @@ realm_event = {
             ['blocked', 'blocks'],
         ]);
 
-        const edges = buildImplicitEdges(graph);
+        const edges = buildMtthConditionEdges(graph);
         expect(edges).to.deep.include({
             source: 'realm_test.required_writer',
             target: 'realm_test.mtth',

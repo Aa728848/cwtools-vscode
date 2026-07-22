@@ -46,7 +46,7 @@ type EventConditionRelation = 'requires' | 'alternative' | 'blocks' | 'complex';
 interface EventEdge {
     source: string;
     target: string;
-    edgeType: 'effect' | 'semantic' | 'mtth_condition' | 'definition' | 'definition_effect' | 'definition_trigger' | 'sequence' | 'unknown';
+    edgeType: 'effect' | 'trigger' | 'mtth_condition' | 'definition' | 'definition_effect' | 'definition_trigger' | 'sequence' | 'unknown';
     label?: string;
     conditionRelation?: EventConditionRelation;
 }
@@ -99,7 +99,6 @@ const cy = cytoscape({
                 'padding': '0px' as any,
                 'text-wrap': 'wrap' as any,
                 'text-max-width': '218px' as any,
-                'min-zoomed-font-size': 9,
                 'text-outline-width': 1,
                 'text-outline-color': '#02070b',
                 'overlay-opacity': 0,
@@ -176,8 +175,8 @@ const cy = cytoscape({
             style: { 'line-color': '#ab47bc', 'target-arrow-color': '#ab47bc' },
         },
         {
-            selector: 'edge[edgeType="semantic"]',
-            style: { 'line-color': '#ff7043', 'target-arrow-color': '#ff7043', 'line-style': 'dotted' as any, 'width': 1 },
+            selector: 'edge[edgeType="trigger"]',
+            style: { 'line-color': '#ff7043', 'target-arrow-color': '#ff7043', 'line-style': 'dashed' as any, 'width': 1.8 },
         },
         {
             selector: 'edge[edgeType="mtth_condition"]',
@@ -298,8 +297,8 @@ const expandedRelationDirections = new Set<'incoming' | 'outgoing'>();
 
 // ─── UI helpers ──────────────────────────────────────────────────────────────
 
-const primaryEdgeTypes = new Set<EventEdge['edgeType']>(['effect', 'definition_effect', 'sequence']);
-const implicitEdgeTypes = new Set<EventEdge['edgeType']>(['semantic', 'mtth_condition', 'definition', 'definition_trigger']);
+const primaryEdgeTypes = new Set<EventEdge['edgeType']>(['effect', 'trigger', 'definition_effect', 'sequence']);
+const implicitEdgeTypes = new Set<EventEdge['edgeType']>(['mtth_condition', 'definition', 'definition_trigger']);
 
 function escapeHtml(value: unknown): string {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -333,7 +332,7 @@ function formatExternalLabel(id: string): string {
 function edgeTypeLabel(edgeType: EventEdge['edgeType'] | string): string {
     switch (edgeType) {
         case 'effect': return 'Effect';
-        case 'semantic': return t('Typed relation', '类型关系');
+        case 'trigger': return t('Trigger dependency', '触发器事件');
         case 'mtth_condition': return t('MTTH trigger condition', 'MTTH 触发条件');
         case 'definition': return t('Definition member', '定义成员');
         case 'definition_effect': return t('Definition creation / activation', '定义创建/启用');

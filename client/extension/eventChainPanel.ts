@@ -17,9 +17,10 @@ import {
     parseEventFile,
     parseCommonFile,
     mergeGraphs,
-    buildImplicitEdges,
+    buildMtthConditionEdges,
     buildDefinitionReferenceEdges,
     extractConnectedSubgraph,
+    selectEventSeedIds,
     type EventGraph,
 } from './eventChainParser';
 import { parsePdxSemanticCatalog } from '../shared/pdxSemanticCatalog';
@@ -55,30 +56,34 @@ export class EventChainPanel {
     private _disposables: vscode.Disposable[] = [];
     /** The document that seeded this panel */
     private _seedDocument: vscode.TextDocument | undefined;
+    /** One-based cursor line captured before focus moves to the Webview. */
+    private _seedLine: number | undefined;
 
     /**
      * Create or reveal the Event Chain Panel.
-     * If a document is provided, seeds the graph from that file's events.
+     * If a document is provided, seeds the graph from the cursor event.
      * Otherwise uses the active editor's document.
      */
-    public static async create(extensionPath: string, document?: vscode.TextDocument) {
+    public static async create(extensionPath: string, document?: vscode.TextDocument, seedLine?: number) {
         const column = vscode.ViewColumn.Beside;
         const seedDoc = document ?? vscode.window.activeTextEditor?.document;
 
         if (EventChainPanel.currentPanel) {
             EventChainPanel.currentPanel._seedDocument = seedDoc;
+            EventChainPanel.currentPanel._seedLine = seedLine;
             EventChainPanel.currentPanel._panel.reveal(column);
             await EventChainPanel.currentPanel._scanAndRender();
             return;
         }
 
-        const panel = new EventChainPanel(extensionPath, column, seedDoc);
+        const panel = new EventChainPanel(extensionPath, column, seedDoc, seedLine);
         EventChainPanel.currentPanel = panel;
     }
 
-    private constructor(extensionPath: string, column: vscode.ViewColumn, seedDoc?: vscode.TextDocument) {
+    private constructor(extensionPath: string, column: vscode.ViewColumn, seedDoc?: vscode.TextDocument, seedLine?: number) {
         this._extensionPath = extensionPath;
         this._seedDocument = seedDoc;
+        this._seedLine = seedLine;
         const webviewRootPath = path.join(extensionPath, 'bin/client/webview');
 
         const title = seedDoc
@@ -120,6 +125,7 @@ export class EventChainPanel {
     public dispose() {
         EventChainPanel.currentPanel = undefined;
         this._seedDocument = undefined;
+        this._seedLine = undefined;
         this._panel.dispose();
         while (this._disposables.length) {
             const d = this._disposables.pop();
@@ -182,7 +188,7 @@ export class EventChainPanel {
         if (this._seedDocument) {
             const seedContent = this._seedDocument.getText();
             const seedGraph = parseEventFile(seedContent, seedPath, catalog);
-            seedIds = new Set(seedGraph.nodes.map(n => n.id));
+            seedIds = new Set(selectEventSeedIds(seedGraph, this._seedLine));
         }
 
         // If seed document doesn't contain any event definitions, show empty
@@ -258,10 +264,9 @@ const eventsOnlyGraph = mergeGraphs(eventGraphs);
 // Resolve catalog-typed references against the definitions discovered above.
 eventsOnlyGraph.edges.push(...buildDefinitionReferenceEdges(eventsOnlyGraph));
 
-// Build implicit connections from catalog-declared typed reads and writes.
-this._panel.webview.postMessage({ command: 'loading', text: panelText('Building implicit connections...', '构建隐式连接关系...') });
-const implicitEdges = buildImplicitEdges(eventsOnlyGraph);
-eventsOnlyGraph.edges.push(...implicitEdges);
+// Only root MTTH trigger conditions create implicit event-to-event links.
+this._panel.webview.postMessage({ command: 'loading', text: panelText('Building MTTH dependencies...', '构建 MTTH 条件依赖...') });
+eventsOnlyGraph.edges.push(...buildMtthConditionEdges(eventsOnlyGraph));
 
 // Keep multi-step event → definition → definition → event chains visible while
 // retaining a bounded neighborhood for large vanilla graphs.
@@ -363,8 +368,8 @@ private async _findSemanticFiles(
             <div class="legend-title">${panelText('Legend', '图例')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#fff176;"></span> ${panelText('Seed definition', '种子定义')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#4caf50;"></span> ${panelText('Entry definition', '入口定义')}</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#ab47bc;"></span> ${panelText('Effect edge', 'Effect 边')}</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#ff7043;border:1px dotted #ff7043;"></span> ${panelText('Typed semantic relation', '类型语义关系')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#ab47bc;"></span> ${panelText('Triggered event', '触发事件')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#ff7043;border:1px dashed #ff7043;"></span> ${panelText('Trigger dependency', '触发器事件')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#42a5f5;border:1px dashed #42a5f5;"></span> ${panelText('MTTH trigger condition', 'MTTH 触发条件')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#26a69a;border:1px dotted #26a69a;"></span> ${panelText('Definition member', '定义成员')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#ec407a;"></span> ${panelText('Definition creation / activation', '定义创建/启用')}</div>

@@ -2477,7 +2477,11 @@ export async function activate(context: ExtensionContext) {
 		// Event Chain Visualizer command
 		safeRegisterCommand(context, "cwtools.visualizeEventChain", async () => {
 			const editor = vs.window.activeTextEditor;
-			await EventChainPanel.create(context.extensionPath, editor?.document);
+			await EventChainPanel.create(
+				context.extensionPath,
+				editor?.document,
+				editor ? editor.selection.active.line + 1 : undefined,
+			);
 		});
 
 		// Tech Tree Visualizer command

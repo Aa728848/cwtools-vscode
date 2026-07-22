@@ -90,7 +90,7 @@ export interface EventNode {
 export interface EventEdge {
     source: string;
     target: string;
-    edgeType: 'effect' | 'semantic' | 'mtth_condition' | 'definition' | 'definition_effect' | 'definition_trigger' | 'sequence' | 'unknown';
+    edgeType: 'effect' | 'trigger' | 'mtth_condition' | 'definition' | 'definition_effect' | 'definition_trigger' | 'sequence' | 'unknown';
     label?: string;
     conditionRelation?: EventConditionRelation;
 }
@@ -118,9 +118,31 @@ export interface CommonFileResult {
     externalSources: ExternalSourceNode[];
 }
 
+/** Prefer the event under, or nearest to, the invoking editor cursor. */
+export function selectEventSeedIds(graph: EventGraph, sourceLine?: number): string[] {
+    if (sourceLine === undefined || !Number.isInteger(sourceLine) || sourceLine < 1) {
+        return graph.nodes.map(node => node.id);
+    }
+    const containing = graph.nodes
+        .filter(node => node.line <= sourceLine && node.endLine >= sourceLine)
+        .sort((a, b) => (a.endLine - a.line) - (b.endLine - b.line)
+            || a.line - b.line
+            || a.id.localeCompare(b.id));
+    if (containing.length > 0) return [containing[0]!.id];
+
+    const nearest = [...graph.nodes].sort((a, b) => {
+        const distanceTo = (node: EventNode) => sourceLine < node.line
+            ? node.line - sourceLine
+            : sourceLine - node.endLine;
+        return distanceTo(a) - distanceTo(b) || a.line - b.line || a.id.localeCompare(b.id);
+    });
+    return nearest.length > 0 ? [nearest[0]!.id] : [];
+}
+
 interface EventReferenceRule {
     name: string;
     reference: CwtRuleValueReference;
+    category: PdxSemanticCatalog['rules'][number]['category'];
 }
 
 function normalizeReferenceType(typeName: string): string {
@@ -135,7 +157,7 @@ function eventDefinition(catalog: PdxSemanticCatalog) {
 function eventReferenceRules(catalog: PdxSemanticCatalog): EventReferenceRule[] {
     return catalog.rules.flatMap(rule => rule.valueReferences
         .filter(reference => normalizeReferenceType(reference.typeName) === 'event')
-        .map(reference => ({ name: rule.name, reference })));
+        .map(reference => ({ name: rule.name, reference, category: rule.category })));
 }
 
 function scalar(node: PdxNode | undefined): string | undefined {
@@ -323,7 +345,11 @@ function addEventReferenceEdges(
                 const targetId = valueForReference(node, rule.reference);
                 if (targetId && targetId !== sourceId) {
                     const label = includePath ? [...path, rule.name].join('.') : rule.name;
-                    addEdgeDedup(edges, sourceId, targetId, 'effect', label);
+                    if (rule.category === 'trigger') {
+                        addEdgeDedup(edges, targetId, sourceId, 'trigger', label);
+                    } else {
+                        addEdgeDedup(edges, sourceId, targetId, 'effect', label);
+                    }
                 }
             }
             if (node.children) walk(node.children, nodePath);
@@ -525,34 +551,21 @@ export function mergeGraphs(graphs: EventGraph[]): EventGraph {
     return { nodes: [...nodeMap.values()], edges: [...edgeMap.values()] };
 }
 
-/** Connect any CWT-declared typed writer to readers of the same type and value. */
-export function buildImplicitEdges(graph: EventGraph): EventEdge[] {
+/** Connect typed value writers only to MTTH events whose root trigger requires them. */
+export function buildMtthConditionEdges(graph: EventGraph): EventEdge[] {
     const writers = new Map<string, string[]>();
-    const readers = new Map<string, string[]>();
     for (const node of graph.nodes) {
         for (const reference of node.semanticReferences) {
+            if (reference.access !== 'value_set') continue;
             const key = `${reference.typeName.toLowerCase()}:${reference.value.toLowerCase()}`;
-            const isMtthTriggerCondition = node.meanTimeToHappen
-                && node.triggerConditions?.some(condition => condition.typeName.toLowerCase() === reference.typeName.toLowerCase()
-                    && condition.value.toLowerCase() === reference.value.toLowerCase()
-                    && condition.ruleName === reference.ruleName);
-            if (isMtthTriggerCondition && reference.access !== 'value_set') continue;
-            const index = reference.access === 'value_set' ? writers : readers;
-            const ids = index.get(key) ?? [];
+            const ids = writers.get(key) ?? [];
             if (!ids.includes(node.id)) ids.push(node.id);
-            index.set(key, ids);
+            writers.set(key, ids);
         }
     }
 
     const edges: EventEdge[] = [];
     const edgeKeys = new Set<string>();
-    for (const [key, writerIds] of writers) {
-        for (const readerId of readers.get(key) ?? []) {
-            for (const writerId of writerIds) {
-                if (writerId !== readerId) addEdgeDedup(edges, writerId, readerId, 'semantic', key, undefined, edgeKeys);
-            }
-        }
-    }
     for (const node of graph.nodes) {
         if (!node.meanTimeToHappen) continue;
         for (const condition of node.triggerConditions ?? []) {
@@ -607,6 +620,7 @@ export function buildDefinitionReferenceEdges(graph: EventGraph): EventEdge[] {
                 if (target.node.id === sourceNode.id) continue;
                 const label = `${reference.ruleName} = ${reference.value}`;
                 if (reference.category === 'trigger') {
+                    if (existingPairs.has(`${target.node.id}\u0000${sourceNode.id}`)) continue;
                     addEdgeDedup(edges, target.node.id, sourceNode.id, 'definition_trigger', label, undefined, edgeKeys);
                 } else {
                     // Explicit event/definition-member edges already carry this direction.

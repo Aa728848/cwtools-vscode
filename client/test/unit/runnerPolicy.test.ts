@@ -3,6 +3,7 @@ import {
     filterToolDefinitionsForMode,
     filterToolDefinitionsForStage,
     initialToolStageForMode,
+    normalizeToolStageForMode,
     advanceToolStage,
     buildToolStageReminder,
     resolveMaxToolIterations,
@@ -73,12 +74,20 @@ describe('runnerPolicy', () => {
     });
 
     it('advances build stages only after successful evidence and write steps', () => {
-        expect(advanceToolStage('build', 'discovery', 'read_file', { success: true })).to.equal('design');
-        expect(advanceToolStage('build', 'design', 'query_rules', { success: true })).to.equal('validation');
+        expect(advanceToolStage('build', 'discovery', 'read_file', { success: true })).to.equal('evidence');
+        expect(advanceToolStage('build', 'evidence', 'query_rules', { success: true })).to.equal('validation');
         expect(advanceToolStage('build', 'validation', 'parse_pdx_fragment', { success: true })).to.equal('write');
         expect(advanceToolStage('build', 'write', 'edit_file', { success: false })).to.equal('validation');
         expect(advanceToolStage('build', 'write', 'edit_file', { success: true })).to.equal('finalize');
         expect(advanceToolStage('build', 'finalize', 'get_diagnostics', { success: true, hasValidationErrors: true })).to.equal('validation');
+    });
+
+    it('maps persisted Build design checkpoints to the renamed evidence stage', () => {
+        expect(normalizeToolStageForMode('build', 'design')).to.equal('evidence');
+        expect(normalizeToolStageForMode('plan', 'design')).to.equal('design');
+        expect(advanceToolStage('build', 'design', 'query_rules', { success: true })).to.equal('validation');
+        expect(buildToolStageReminder('build', 'design', [])).to.include('Current build tool stage: evidence');
+        expect(filterToolDefinitionsForStage(toolDefinitions, 'plan', 'evidence')).to.deep.equal([]);
     });
 
     it('describes the current stage with a deterministic tool list', () => {
@@ -87,6 +96,19 @@ describe('runnerPolicy', () => {
         expect(reminder).to.include('query_workspace_index, read_file');
         expect(reminder).to.include('before writing');
         expect(buildToolStageReminder('build', undefined, toolDefinitions)).to.equal('');
+    });
+
+    it('advances ordinary Build evidence internally while keeping project writes out of design', () => {
+        expect(advanceToolStage('build', 'discovery', 'read_file', { success: true })).to.equal('evidence');
+        expect(advanceToolStage('build', 'evidence', 'read_file', { success: true })).to.equal('validation');
+        expect(advanceToolStage('build', 'validation', 'todo_write', { success: true })).to.equal('write');
+
+        const evidenceTools = filterToolDefinitionsForStage(registeredTools, 'build', 'evidence')
+            .map(tool => tool.function.name);
+        expect(evidenceTools).to.not.include.members(['write_file', 'replace_lines', 'write_localisation']);
+        const planDesignTools = filterToolDefinitionsForStage(registeredTools, 'plan', 'design')
+            .map(tool => tool.function.name);
+        expect(planDesignTools).to.not.include('write_localisation');
     });
 
     it('stages plan, explore, and review without exposing project write tools', () => {
@@ -104,6 +126,16 @@ describe('runnerPolicy', () => {
         expect(advanceToolStage('plan', 'validation', 'get_diagnostics', { success: true })).to.equal('finalize');
         expect(advanceToolStage('explore', 'discovery', 'read_file', { success: true })).to.equal('validation');
         expect(advanceToolStage('review', 'discovery', 'get_diagnostics', { success: true })).to.equal('validation');
+    });
+
+    it('lets Plan mode fan out read-only planning work without exposing project writes', () => {
+        const modeTools = filterToolDefinitionsForMode(registeredTools, 'plan');
+        const discoveryNames = filterToolDefinitionsForStage(modeTools, 'plan', 'discovery')
+            .map(tool => tool.function.name);
+        expect(discoveryNames).to.include.members(['dispatch_agents', 'query_blackboard', 'merge_results']);
+        expect(discoveryNames).to.not.include.members(['write_localisation', 'edit_pdx_block']);
+        expect(validateToolAccess('dispatch_agents', { mode: 'plan' }).allowed).to.equal(true);
+        expect(advanceToolStage('plan', 'discovery', 'dispatch_agents', { success: true })).to.equal('design');
     });
 
     it('keeps orchestration tools in coordinator modes', () => {

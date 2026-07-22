@@ -50,6 +50,7 @@ import {
     filterToolDefinitionsForMode,
     filterToolDefinitionsForStage,
     initialToolStageForMode,
+    normalizeToolStageForMode,
     advanceToolStage,
     buildToolStageReminder,
     resolveMaxToolIterations,
@@ -78,6 +79,7 @@ import type { RunEventSink } from './runner/runContext';
 import { activeTurnRegistry } from './runner/activeTurnRegistry';
 import { threadStore } from './runner/threadStore';
 import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
+import { buildApprovedPlanExecutionReminder } from './executePlanHandoff';
 import { appendCacheRequestUsage, isCacheCapableUsage, supportsOpenAiStylePrefixCache } from './cacheCapability';
 import {
     DEFAULT_GOAL_HARD_BUDGET_MULTIPLIER,
@@ -238,6 +240,10 @@ export interface AgentRunnerOptions {
     renewableIterationLimit?: boolean;
     /** Agent mode: build (default), plan (read-only), explore (parallel read), general (research) */
     mode?: AgentMode;
+    /** Main-Agent approved-plan continuation may resume directly at the write stage. */
+    initialToolStage?: AgentToolStage;
+    /** The user approved a design-complete plan; coordinators must execute it without a second design pass. */
+    approvedPlanExecution?: boolean;
     /** Resolved capability domain. General runs cannot access Paradox-only tools or prompts. */
     domain?: import('./types').AgentRuntimeDomain;
     /** Callback for real-time step updates (for UI) */
@@ -329,6 +335,8 @@ const _PLAN_MODE_TOOLS: AgentToolName[] = [
     'query_static_modifiers', 'query_variables',
     // Structured design blueprint output
     'write_design_blueprint', 'save_workflow',
+    // Read-only planning fan-out; the dispatch boundary rejects writer roles in Plan mode.
+    'dispatch_agents', 'query_blackboard', 'merge_results',
     // Memory tools for persisting architectural state
     'set_memory', 'get_memory', 'search_memory',
     // Git operations for investigation
@@ -844,7 +852,7 @@ export class AgentRunner {
             output: 0,
             estimatedCostCny: 0,
             agentMode: mode,
-            toolStage: initialToolStageForMode(mode),
+            toolStage: normalizeToolStageForMode(mode, options?.initialToolStage ?? initialToolStageForMode(mode)),
         };
         const runMetrics: AgentRunMetrics = {
             iterations: 0,
@@ -1072,10 +1080,11 @@ export class AgentRunner {
             excludeTools: options?.excludeTools,
             legacyFullToolset: promptLegacyFullToolset,
         }));
+        const initialToolStage = normalizeToolStageForMode(mode, options?.initialToolStage ?? initialToolStageForMode(mode));
         const promptToolDefinitions = filterToolDefinitionsForStage(
             promptModeTools,
             mode,
-            initialToolStageForMode(mode),
+            initialToolStage,
             promptLegacyFullToolset,
         );
         // DeepSeek prefix-cache optimization: use frozen (session-cached) system prompt
@@ -1138,10 +1147,14 @@ export class AgentRunner {
                 }
                 : undefined,
         });
-        const initialStageReminder = buildToolStageReminder(mode, initialToolStageForMode(mode), promptToolDefinitions, domain);
-        const dynamicBlock: ChatMessage[] = initialStageReminder
-            ? [...promptDynamicBlock, { role: 'user', content: initialStageReminder }]
-            : promptDynamicBlock;
+        const initialStageReminder = buildToolStageReminder(mode, initialToolStage, promptToolDefinitions, domain);
+        const dynamicBlock: ChatMessage[] = [...promptDynamicBlock];
+        if (options?.approvedPlanExecution) {
+            dynamicBlock.push({ role: 'user', content: buildApprovedPlanExecutionReminder() });
+        }
+        if (initialStageReminder) {
+            dynamicBlock.push({ role: 'user', content: initialStageReminder });
+        }
 
         const contextMessages = this.promptBuilder.buildContextMessages({
             ...context,
@@ -1822,7 +1835,7 @@ export class AgentRunner {
         const confirmedWrittenFiles = new Set<string>();
         const performanceConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
         const legacyFullToolset = performanceConfig.get<boolean>('legacyFullToolset') === true;
-        let toolStage = initialToolStageForMode(mode);
+        let toolStage = normalizeToolStageForMode(mode, options?.initialToolStage ?? initialToolStageForMode(mode));
         if (tokenAccumulator) tokenAccumulator.toolStage = toolStage;
         let requestArchiveState: ModelRequestArchiveState | undefined;
         const archivedToolsets = new Map<string, { ref: string; sha256: string }>();

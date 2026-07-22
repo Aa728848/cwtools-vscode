@@ -55,6 +55,10 @@ type private SemanticRuleInfo =
       pushScope: string option
       valueReferences: SemanticValueReference list }
 
+type private SemanticDefinitionReferenceInfo =
+    { definitionName: string
+      reference: SemanticValueReference }
+
 let private semanticAliasPattern =
     System.Text.RegularExpressions.Regex(
         @"^\s*alias\[(trigger|effect|modifier):([^\]]+)\]\s*=\s*(.*)$",
@@ -79,6 +83,11 @@ let private semanticEntityTypePattern =
     System.Text.RegularExpressions.Regex(
         @"^<([^>]+)>",
         System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private semanticDynamicSchemaKeyPattern =
+    System.Text.RegularExpressions.Regex(
+        @"^(?:(?:int|float|scalar|bool|date|localisation|value_field|percent)(?:\[.*\])?|<[^>]+>|enum\[.*\]|value(?:_set)?\[.*\]|scope\[.*\])$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
 
 let private splitSemanticDirectiveValues (value: string) =
     value.Trim().TrimStart('{').TrimEnd('}')
@@ -176,6 +185,61 @@ let private semanticRulesFromConfigs (requestedNames: string list) (configs: (st
         |> Convert.ToHexString
         |> fun value -> value.Substring(0, 16).ToLowerInvariant()
     rules |> Seq.toList, hash
+
+let private semanticDefinitionReferencesFromConfigs (configs: (string * string) list) =
+    let references = ResizeArray<SemanticDefinitionReferenceInfo>()
+    let normalizeKey (value: string) =
+        let normalized = value.Trim().Trim('"').ToLowerInvariant()
+        if semanticDynamicSchemaKeyPattern.IsMatch normalized then "*" else normalized
+    let tryEntityType (rawValue: string) =
+        let matched = semanticEntityTypePattern.Match(rawValue.Trim())
+        if matched.Success then Some(matched.Groups.[1].Value.Trim().ToLowerInvariant()) else None
+
+    for fileName, content in configs |> List.sortBy fst do
+        match CKParser.parseString content fileName with
+        | Failure _ -> ()
+        | Success(statements, _, _) ->
+            let rootNode =
+                CWTools.Process.STLProcess.simpleProcess.ProcessNode () "root" (mkZeroFile fileName) statements
+            for schema in rootNode.Nodes do
+                let definitionName = schema.Key.Trim().Trim('"').ToLowerInvariant()
+                let rec walk (path: string list) (node: CWTools.Process.Node) =
+                    for leaf in node.Leaves do
+                        match tryEntityType (leaf.Value.ToRawString()) with
+                        | Some typeName ->
+                            references.Add {
+                                definitionName = definitionName
+                                reference = {
+                                    argumentPath = String.concat "." (path @ [ normalizeKey leaf.Key ])
+                                    access = "type"
+                                    typeName = typeName
+                                }
+                            }
+                        | None -> ()
+                    for leafValue in node.LeafValues do
+                        match tryEntityType (leafValue.Value.ToRawString()) with
+                        | Some typeName ->
+                            references.Add {
+                                definitionName = definitionName
+                                reference = {
+                                    argumentPath = String.concat "." (path @ [ "$value" ])
+                                    access = "type"
+                                    typeName = typeName
+                                }
+                            }
+                        | None -> ()
+                    for child in node.Nodes do
+                        walk (path @ [ normalizeKey child.Key ]) child
+                walk [] schema
+
+    references
+    |> Seq.distinctBy (fun item ->
+        item.definitionName,
+        item.reference.argumentPath,
+        item.reference.access,
+        item.reference.typeName)
+    |> Seq.truncate 100_000
+    |> Seq.toList
 
 type private DefinitionInjectionKeyInfo =
     { mode: string
@@ -1623,7 +1687,7 @@ type Server(client: ILanguageClient) =
     let mutable manualRulesFolder: string option = None
     let mutable useManualRules: bool = false
     let mutable preferBundledRules: bool = false
-    let mutable semanticCatalogCache: (SemanticRuleInfo list * string * bool) option = None
+    let mutable semanticCatalogCache: (SemanticRuleInfo list * SemanticDefinitionReferenceInfo list * string * bool) option = None
     let mutable semanticCatalogGeneration = 0L
     let mutable validateVanilla: bool = false
     let mutable experimental: bool = false
@@ -8105,14 +8169,15 @@ type Server(client: ILanguageClient) =
                                     |> Array.truncate 4000
                                     |> Array.toList)
                                 |> Option.defaultValue []
-                            let allRules, rulesHash, hasConfigs =
+                            let allRules, allDefinitionReferences, rulesHash, hasConfigs =
                                 match semanticCatalogCache with
                                 | Some cached -> cached
                                 | None ->
                                     let configs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
                                     let parsedRules, parsedHash = semanticRulesFromConfigs [] configs
+                                    let parsedDefinitionReferences = semanticDefinitionReferencesFromConfigs configs
                                     semanticCatalogGeneration <- semanticCatalogGeneration + 1L
-                                    let cached = parsedRules, parsedHash, not configs.IsEmpty
+                                    let cached = parsedRules, parsedDefinitionReferences, parsedHash, not configs.IsEmpty
                                     semanticCatalogCache <- Some cached
                                     cached
                             let requested = System.Collections.Generic.HashSet<string>(requestedNames, StringComparer.OrdinalIgnoreCase)
@@ -8171,6 +8236,17 @@ type Server(client: ILanguageClient) =
                                                 fields.Add("paths", JsonValue.Array paths)
                                                 td.nameField |> Option.iter (fun nameField -> fields.Add("nameField", JsonValue.String(nameField.ToLowerInvariant())))
                                                 fields.Add("typeKeyFilters", JsonValue.Array typeKeyFilters)
+                                                let valueReferences =
+                                                    allDefinitionReferences
+                                                    |> List.filter (fun item -> String.Equals(item.definitionName, td.name, StringComparison.OrdinalIgnoreCase))
+                                                    |> List.map (fun item ->
+                                                        JsonValue.Record
+                                                            [| "argumentPath", JsonValue.String item.reference.argumentPath
+                                                               "access", JsonValue.String item.reference.access
+                                                               "typeName", JsonValue.String item.reference.typeName |])
+                                                    |> List.truncate 512
+                                                    |> List.toArray
+                                                fields.Add("valueReferences", JsonValue.Array valueReferences)
                                                 JsonValue.Record(fields.ToArray()))
                                             |> List.toArray
                                         let ruleValues =

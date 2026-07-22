@@ -6,7 +6,7 @@
  * from the active CWTools/CWT semantic catalog.
  */
 
-import type { CwtRuleValueReference, PdxSemanticCatalog } from '../shared/pdxSemanticCatalog';
+import { matchPdxDefinitionType, type CwtRuleValueReference, type PdxSemanticCatalog } from '../shared/pdxSemanticCatalog';
 import { tokenize, TokenType, type Token } from './pdxTokenizer';
 
 interface PdxNode {
@@ -14,6 +14,10 @@ interface PdxNode {
     value?: string;
     children?: PdxNode[];
     line: number;
+}
+
+function isPdxAtom(token: Token | undefined): token is Token {
+    return token?.type === TokenType.Identifier || token?.type === TokenType.String || token?.type === TokenType.Number;
 }
 
 function parseNodes(tokens: Token[], start = 0, stopAtBrace = false): { nodes: PdxNode[]; next: number } {
@@ -26,8 +30,10 @@ function parseNodes(tokens: Token[], start = 0, stopAtBrace = false): { nodes: P
         }
         const equals = tokens[index + 1];
         const rhs = tokens[index + 2];
-        if ((token.type !== TokenType.Identifier && token.type !== TokenType.String)
-            || equals?.type !== TokenType.Equals || !rhs) {
+        if (!isPdxAtom(token) || equals?.type !== TokenType.Equals || !rhs) {
+            if (isPdxAtom(token)) {
+                nodes.push({ key: '$value', value: token.value, line: token.line });
+            }
             index++;
             continue;
         }
@@ -73,6 +79,10 @@ export interface EventNode {
     endLine: number;
     namespace: string;
     semanticReferences: SemanticReference[];
+    definitionIdentity?: {
+        typeName: string;
+        value: string;
+    };
     meanTimeToHappen?: boolean;
     triggerConditions?: EventTriggerCondition[];
 }
@@ -80,7 +90,7 @@ export interface EventNode {
 export interface EventEdge {
     source: string;
     target: string;
-    edgeType: 'effect' | 'semantic' | 'mtth_condition' | 'unknown';
+    edgeType: 'effect' | 'semantic' | 'mtth_condition' | 'definition' | 'definition_effect' | 'definition_trigger' | 'sequence' | 'unknown';
     label?: string;
     conditionRelation?: EventConditionRelation;
 }
@@ -97,6 +107,10 @@ export interface ExternalSourceNode {
     file: string;
     line: number;
     semanticReferences: SemanticReference[];
+    definitionIdentity: {
+        typeName: string;
+        value: string;
+    };
 }
 
 export interface CommonFileResult {
@@ -136,13 +150,6 @@ function valueForReference(node: PdxNode, reference: CwtRuleValueReference): str
         if (!current) return undefined;
     }
     return scalar(current);
-}
-
-function definitionTypeForFile(filePath: string, catalog: PdxSemanticCatalog) {
-    const normalized = filePath.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
-    return catalog.definitionTypes
-        .filter(type => type.paths.some(typePath => normalized.startsWith(`${typePath}/`) || normalized.includes(`/${typePath}/`)))
-        .sort((a, b) => Math.max(0, ...b.paths.map(value => value.length)) - Math.max(0, ...a.paths.map(value => value.length)))[0];
 }
 
 function rulesByName(catalog: PdxSemanticCatalog): Map<string, PdxSemanticCatalog['rules']> {
@@ -295,6 +302,7 @@ function addEventReferenceEdges(
     nodes: readonly PdxNode[],
     catalog: PdxSemanticCatalog,
     edges: EventEdge[],
+    includePath = false,
 ): void {
     const byName = new Map<string, EventReferenceRule[]>();
     for (const rule of eventReferenceRules(catalog)) {
@@ -302,16 +310,76 @@ function addEventReferenceEdges(
         values.push(rule);
         byName.set(rule.name, values);
     }
-    const walk = (items: readonly PdxNode[]) => {
+    const walk = (items: readonly PdxNode[], path: readonly string[]) => {
         for (const node of items) {
+            const nodePath = node.key === '$value' ? path : [...path, node.key];
             for (const rule of byName.get(node.key.toLowerCase()) ?? []) {
                 const targetId = valueForReference(node, rule.reference);
-                if (targetId && targetId !== sourceId) addEdgeDedup(edges, sourceId, targetId, 'effect', rule.name);
+                if (targetId && targetId !== sourceId) {
+                    const label = includePath ? [...path, rule.name].join('.') : rule.name;
+                    addEdgeDedup(edges, sourceId, targetId, 'effect', label);
+                }
             }
-            if (node.children) walk(node.children);
+            if (node.children) walk(node.children, nodePath);
         }
     };
-    walk(nodes);
+    walk(nodes, []);
+}
+
+interface DefinitionEventOccurrence {
+    targetId: string;
+    argumentPath: string;
+    line: number;
+}
+
+function nodesAtArgumentPath(nodes: readonly PdxNode[], argumentPath: string): PdxNode[] {
+    const segments = argumentPath.split('.').map(segment => segment.trim().toLowerCase()).filter(Boolean);
+    let current = [...nodes];
+    for (let index = 0; index < segments.length; index++) {
+        const segment = segments[index]!;
+        const matched = current.filter(node => segment === '*'
+            ? node.key !== '$value'
+            : node.key.toLowerCase() === segment);
+        current = index === segments.length - 1
+            ? matched
+            : matched.flatMap(node => node.children ?? []);
+        if (current.length === 0) break;
+    }
+    return current;
+}
+
+function collectDefinitionEventOccurrences(
+    nodes: readonly PdxNode[],
+    definition: PdxSemanticCatalog['definitionTypes'][number] | undefined,
+): DefinitionEventOccurrence[] {
+    if (!definition) return [];
+    const result: DefinitionEventOccurrence[] = [];
+    for (const reference of definition.valueReferences ?? []) {
+        if (normalizeReferenceType(reference.typeName) !== 'event') continue;
+        for (const node of nodesAtArgumentPath(nodes, reference.argumentPath)) {
+            const targetId = scalar(node);
+            if (!targetId) continue;
+            const occurrence = { targetId, argumentPath: reference.argumentPath, line: node.line };
+            if (!result.some(existing => existing.targetId === occurrence.targetId
+                && existing.argumentPath === occurrence.argumentPath
+                && existing.line === occurrence.line)) result.push(occurrence);
+        }
+    }
+    return result.sort((left, right) => left.line - right.line || left.argumentPath.localeCompare(right.argumentPath));
+}
+
+function isOrderedDefinitionPath(nodes: readonly PdxNode[], argumentPath: string): boolean {
+    const segments = argumentPath.split('.').map(segment => segment.trim().toLowerCase()).filter(Boolean);
+    if (segments.includes('*')) return false;
+    if (segments[segments.length - 1] === '$value') return true;
+    let current = [...nodes];
+    for (const segment of segments.slice(0, -1)) {
+        const matched = current.filter(node => node.key.toLowerCase() === segment);
+        if (matched.length > 1) return true;
+        current = matched.flatMap(node => node.children ?? []);
+        if (current.length === 0) return false;
+    }
+    return false;
 }
 
 export function parseEventFile(content: string, filePath: string, catalog: PdxSemanticCatalog): EventGraph {
@@ -343,6 +411,7 @@ export function parseEventFile(content: string, filePath: string, catalog: PdxSe
             endLine,
             namespace: id.includes('.') ? id.split('.')[0]! : definition.name,
             semanticReferences,
+            definitionIdentity: { typeName: definition.name, value: id },
             meanTimeToHappen,
             triggerConditions,
         });
@@ -372,17 +441,47 @@ function findBlockEndLine(lines: readonly string[], startIndex: number): number 
 export function parseCommonFile(content: string, filePath: string, catalog: PdxSemanticCatalog): CommonFileResult {
     const edges: EventEdge[] = [];
     const externalSources: ExternalSourceNode[] = [];
-    const definition = definitionTypeForFile(filePath, catalog);
-    const sourceType = definition?.name ?? 'other';
 
     for (const root of parsePdx(content).filter(node => node.children)) {
+        const definition = matchPdxDefinitionType(catalog.definitionTypes, filePath, root.key);
+        const sourceType = definition?.name ?? 'other';
         const name = definition?.nameField
             ? scalar(root.children?.find(child => child.key.toLowerCase() === definition.nameField)) ?? root.key
             : root.key;
         const id = `[${sourceType}] ${name}`;
         const semanticReferences = collectSemanticReferences(root.children ?? [], catalog);
-        externalSources.push({ id, name, sourceType, file: filePath, line: root.line, semanticReferences });
-        addEventReferenceEdges(id, root.children ?? [], catalog, edges);
+        externalSources.push({
+            id,
+            name,
+            sourceType,
+            file: filePath,
+            line: root.line,
+            semanticReferences,
+            definitionIdentity: { typeName: sourceType, value: name },
+        });
+        addEventReferenceEdges(id, root.children ?? [], catalog, edges, true);
+
+        const definitionOccurrences = collectDefinitionEventOccurrences(root.children ?? [], definition);
+        for (const occurrence of definitionOccurrences) {
+            addEdgeDedup(edges, id, occurrence.targetId, 'definition', occurrence.argumentPath);
+        }
+        const orderedGroups = new Map<string, DefinitionEventOccurrence[]>();
+        for (const occurrence of definitionOccurrences) {
+            // Only plain value lists and repeated structural containers prove order.
+            // Wildcard-key CWT fields represent keyed/weighted alternatives.
+            if (!isOrderedDefinitionPath(root.children ?? [], occurrence.argumentPath)) continue;
+            const group = orderedGroups.get(occurrence.argumentPath) ?? [];
+            group.push(occurrence);
+            orderedGroups.set(occurrence.argumentPath, group);
+        }
+        for (const [argumentPath, occurrences] of orderedGroups) {
+            for (let index = 1; index < occurrences.length; index++) {
+                const previous = occurrences[index - 1]!;
+                const current = occurrences[index]!;
+                if (previous.targetId === current.targetId) continue;
+                addEdgeDedup(edges, previous.targetId, current.targetId, 'sequence', `${sourceType}.${argumentPath}`);
+            }
+        }
     }
     return { edges, externalSources };
 }
@@ -462,6 +561,42 @@ export function buildImplicitEdges(graph: EventGraph): EventEdge[] {
                     `${condition.ruleName} = ${condition.value}`,
                     condition.relation,
                 );
+            }
+        }
+    }
+    return edges;
+}
+
+function referenceMatchesDefinition(referenceType: string, definitionType: string): boolean {
+    const reference = referenceType.trim().toLowerCase();
+    const definition = definitionType.trim().toLowerCase();
+    return reference === definition || reference.startsWith(`${definition}.`);
+}
+
+/** Connect CWT-declared typed references to definition nodes present in the graph. */
+export function buildDefinitionReferenceEdges(graph: EventGraph): EventEdge[] {
+    const definitions = graph.nodes
+        .filter((node): node is EventNode & { definitionIdentity: NonNullable<EventNode['definitionIdentity']> } => Boolean(node.definitionIdentity))
+        .map(node => ({
+            node,
+            typeName: node.definitionIdentity.typeName.toLowerCase(),
+            value: node.definitionIdentity.value.toLowerCase(),
+        }));
+    const edges: EventEdge[] = [];
+    for (const sourceNode of graph.nodes) {
+        for (const reference of sourceNode.semanticReferences) {
+            const targets = definitions.filter(target => target.value === reference.value.toLowerCase()
+                && referenceMatchesDefinition(reference.typeName, target.typeName));
+            for (const target of targets) {
+                if (target.node.id === sourceNode.id) continue;
+                const label = `${reference.ruleName} = ${reference.value}`;
+                if (reference.category === 'trigger') {
+                    addEdgeDedup(edges, target.node.id, sourceNode.id, 'definition_trigger', label);
+                } else {
+                    // Explicit event/definition-member edges already carry this direction.
+                    if (graph.edges.some(edge => edge.source === sourceNode.id && edge.target === target.node.id)) continue;
+                    addEdgeDedup(edges, sourceNode.id, target.node.id, 'definition_effect', label);
+                }
             }
         }
     }

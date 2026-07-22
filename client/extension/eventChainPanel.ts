@@ -18,6 +18,7 @@ import {
     parseCommonFile,
     mergeGraphs,
     buildImplicitEdges,
+    buildDefinitionReferenceEdges,
     extractConnectedSubgraph,
     type EventGraph,
 } from './eventChainParser';
@@ -238,6 +239,7 @@ line: src.line,
 endLine: src.line,
 namespace: `__${src.sourceType}__`,
 semanticReferences: src.semanticReferences,
+definitionIdentity: src.definitionIdentity,
 });
 }
 if (graph.nodes.length > 0 || graph.edges.length > 0) {
@@ -253,13 +255,17 @@ this._panel.webview.postMessage({ command: 'loading', text: panelText('Building 
 
 const eventsOnlyGraph = mergeGraphs(eventGraphs);
 
+// Resolve catalog-typed references against the definitions discovered above.
+eventsOnlyGraph.edges.push(...buildDefinitionReferenceEdges(eventsOnlyGraph));
+
 // Build implicit connections from catalog-declared typed reads and writes.
 this._panel.webview.postMessage({ command: 'loading', text: panelText('Building implicit connections...', '构建隐式连接关系...') });
 const implicitEdges = buildImplicitEdges(eventsOnlyGraph);
 eventsOnlyGraph.edges.push(...implicitEdges);
 
-// Depth 2: seed events → their direct targets → one more hop
-const subgraph = extractConnectedSubgraph(eventsOnlyGraph, seedIds, 2);
+// Keep multi-step event → definition → definition → event chains visible while
+// retaining a bounded neighborhood for large vanilla graphs.
+const subgraph = extractConnectedSubgraph(eventsOnlyGraph, seedIds, 4);
 
 return { graph: subgraph, seedIds: Array.from(seedIds) };
 }
@@ -360,6 +366,10 @@ private async _findSemanticFiles(
             <div class="legend-item"><span class="legend-swatch" style="background:#ab47bc;"></span> ${panelText('Effect edge', 'Effect 边')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#ff7043;border:1px dotted #ff7043;"></span> ${panelText('Typed semantic relation', '类型语义关系')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#42a5f5;border:1px dashed #42a5f5;"></span> ${panelText('MTTH trigger condition', 'MTTH 触发条件')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#26a69a;border:1px dotted #26a69a;"></span> ${panelText('Definition member', '定义成员')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#ec407a;"></span> ${panelText('Definition creation / activation', '定义创建/启用')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#29b6f6;border:1px dashed #29b6f6;"></span> ${panelText('Definition trigger dependency', '定义触发依赖')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#66bb6a;"></span> ${panelText('Definition order', '定义顺序')}</div>
         </div>
         <aside id="details-panel" class="empty" aria-live="polite">
             <div class="details-empty">

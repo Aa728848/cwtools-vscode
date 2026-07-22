@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [2.8.30] - 2026-07-22
+
+### 功能与优化 / Features & Optimizations
+- **[优化] 优化Agent运行和使用体验**
+  English: [Optimization] Optimize agent execution and user experience.
+
 ## [2.8.29] - 2026-07-21
 
 ### 功能与优化 / Features & Optimizations

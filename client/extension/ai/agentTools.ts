@@ -2535,7 +2535,9 @@ export class AgentToolExecutor {
         }
         const normalizedTasks = tasks.map(task => normalizeDispatchTaskForLocalisationYml(task));
         const parentMode = runnerOptsForLimits?.mode;
-        const allowedAgentTypes = new Set(runtimeDomain === 'general'
+        const allowedAgentTypes = new Set(parentMode === 'plan'
+            ? ['explore', 'plan', 'review']
+            : runtimeDomain === 'general'
             ? ['explore', 'plan', 'utility', 'review']
             : parentMode === 'script'
                 ? ['explore', 'plan', 'build', 'review', 'loc_writer', 'gui_expert']
@@ -2549,7 +2551,7 @@ export class AgentToolExecutor {
         if (invalidAgentType) {
             return {
                 success: false,
-                error: `Agent type '${invalidAgentType.agentType}' is not allowed in ${isScriptMode ? 'Paradox Multi-Agent' : 'General Multi-Agent'} mode. Allowed roles: ${[...allowedAgentTypes].join(', ')}.`,
+                error: `Agent type '${invalidAgentType.agentType}' is not allowed in ${parentMode === 'plan' ? 'Plan' : isScriptMode ? 'Paradox Multi-Agent' : 'General Multi-Agent'} mode. Allowed roles: ${[...allowedAgentTypes].join(', ')}.`,
             };
         }
         const hasWriteTasks = normalizedTasks.some(task =>

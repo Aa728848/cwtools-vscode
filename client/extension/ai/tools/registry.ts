@@ -309,7 +309,7 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'query_blackboard',
 ]);
 
-const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'todo_write', 'write_file', 'edit_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
+const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'todo_write', 'write_file', 'edit_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
 const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
 const REVIEW_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
 const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ..._MCP]);

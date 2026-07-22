@@ -26,6 +26,8 @@ export interface PdxSemanticCatalog {
         paths: string[];
         nameField?: string;
         typeKeyFilters: string[];
+        /** Typed fields declared by this TypeDef's active CWT schema. */
+        valueReferences?: CwtRuleValueReference[];
     }>;
     warnings: string[];
 }
@@ -111,6 +113,22 @@ export function parsePdxSemanticCatalog(
         if (!item || typeof item !== 'object') continue;
         const definition = item as Record<string, unknown>;
         if (typeof definition.name !== 'string') continue;
+        const valueReferences: CwtRuleValueReference[] = [];
+        if (Array.isArray(definition.valueReferences)) {
+            for (const candidate of definition.valueReferences.slice(0, 512)) {
+                if (!candidate || typeof candidate !== 'object') continue;
+                const reference = candidate as Record<string, unknown>;
+                if (typeof reference.argumentPath !== 'string'
+                    || typeof reference.access !== 'string'
+                    || !accesses.has(reference.access as CwtRuleValueReference['access'])
+                    || typeof reference.typeName !== 'string') continue;
+                valueReferences.push({
+                    argumentPath: reference.argumentPath.toLowerCase(),
+                    access: reference.access as CwtRuleValueReference['access'],
+                    typeName: reference.typeName.toLowerCase(),
+                });
+            }
+        }
         definitionTypes.push({
             name: definition.name.toLowerCase(),
             paths: Array.isArray(definition.paths)
@@ -123,6 +141,7 @@ export function parsePdxSemanticCatalog(
             typeKeyFilters: Array.isArray(definition.typeKeyFilters)
                 ? definition.typeKeyFilters.filter((key): key is string => typeof key === 'string').map(key => key.toLowerCase()).sort()
                 : [],
+            valueReferences,
         });
     }
     const status = record.status === 'ready' || record.status === 'partial' || record.status === 'unavailable'

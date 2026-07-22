@@ -209,10 +209,11 @@ export async function routeWebviewMessage(
             const executionMode = provider.getApprovedPlanExecutionMode();
             provider.switchWorkflow(null);
             provider.switchMode(executionMode, false, false);
+            provider.beginApprovedPlanExecution();
             const approvedArtifacts = provider.getApprovedPlanArtifactContext();
             const prompt = aiText(
-                'Approved. Execute the approved relationship design without reinterpreting it. If an Approved blueprintFile is listed below, call `dispatch_agents` with that exact `blueprintFile`; its featureManifest and taskPlan are canonical. Do not regenerate IDs, edges, produces/consumes, dependencies, or acceptance criteria.',
-                '同意执行。请直接执行已批准的构建关系设计，不要重新解释。如果下方列出了 Approved blueprintFile，请使用该精确路径调用 `dispatch_agents`；其中的 featureManifest 和 taskPlan 是唯一执行契约。不得重新生成 ID、关系边、produces/consumes、依赖或验收条件。',
+                'Approved. The approved Implementation Plan is design-complete and is the final design authority. Enter Write/Execute now: do not re-enter discovery/design, regenerate a blueprint, reinterpret the architecture, or request approval again. If an Approved blueprintFile is listed below, call `dispatch_agents` with that exact `blueprintFile`; its featureManifest and taskPlan are canonical. Otherwise read the Approved Implementation Plan and mechanically dispatch its exact task DAG, files, contracts, dependencies, and acceptance criteria without adding design decisions. After implementation and verification finish, write a self-contained `walkthrough.md` into the Agent Workspace Dir describing changed files, validation, outcomes, and remaining limitations. This completes the approved Plan → Execute → Walkthrough lifecycle and lets the host render the report card.',
+                '同意执行。已批准的 Implementation Plan 已完成全部设计，并且是最终设计依据。现在直接进入写入/执行：不得重新进入发现或设计阶段，不得重新生成蓝图、重新解释架构或再次请求批准。如果下方列出了 Approved blueprintFile，请使用该精确路径调用 `dispatch_agents`；其中的 featureManifest 和 taskPlan 是唯一执行契约。否则读取 Approved Implementation Plan，严格按其中的任务 DAG、文件、契约、依赖和验收条件机械地形成调度参数，不得增加新的设计决策。实现和验证完成后，必须在 Agent Workspace Dir 中写入自包含的 `walkthrough.md`，说明修改文件、验证、结果和剩余限制，以完成已批准的“计划 → 执行 → 汇报”闭环，并由宿主渲染汇报卡。',
             ) + (approvedArtifacts ? `\n\n${approvedArtifacts}` : '') + contextStr;
             await provider.handleUserMessage(prompt, undefined, undefined, true, true);
             break;

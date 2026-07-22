@@ -1687,7 +1687,7 @@ export interface GetDiagnosticsResult {
 
 // ─── Token Usage & Cost ──────────────────────────────────────────────────────
 
-export type AgentToolStage = 'discovery' | 'design' | 'validation' | 'write' | 'finalize';
+export type AgentToolStage = 'discovery' | 'design' | 'evidence' | 'validation' | 'write' | 'finalize';
 
 /** One completed provider request used for request-accurate cache metrics. */
 export interface CacheRequestUsage {

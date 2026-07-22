@@ -2038,6 +2038,19 @@ describe('agent tool progress and aborts', () => {
         expect(permission.called).to.equal(false);
     });
 
+    it('rejects writer sub-agents when Plan mode fans out repository exploration', async () => {
+        const executor = createExecutor();
+        const result = await executor.execute('dispatch_agents', {
+            tasks: [{ id: 'writer', agentType: 'build', prompt: 'Modify a project file.' }],
+        }, {
+            runnerOptions: { mode: 'plan', domain: 'paradox' },
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include("Agent type 'build' is not allowed in Plan mode");
+        expect(result.error).to.include('explore, plan, review');
+    });
+
     it('emits heartbeat progress while a tool is still running and stops after abort', async () => {
         const clock = sinon.useFakeTimers();
         try {

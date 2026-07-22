@@ -51,7 +51,7 @@ describe('AI static prompt budgets', () => {
 
         expect(stage).to.equal('discovery');
 
-        for (const buildStage of ['discovery', 'design', 'validation', 'write', 'finalize'] as const) {
+        for (const buildStage of ['discovery', 'evidence', 'validation', 'write', 'finalize'] as const) {
             const modeTools = runnerPolicy.filterToolDefinitionsForMode(TOOL_DEFINITIONS, 'build');
             const tools = runnerPolicy.filterToolDefinitionsForStage(modeTools, 'build', buildStage);
             expect(tools.length, `${buildStage} tool count`).to.be.within(8, 15);
@@ -76,7 +76,8 @@ describe('AI static prompt budgets', () => {
             for (const stage of stages[mode]) {
                 const tools = runnerPolicy.filterToolDefinitionsForStage(modeTools, mode, stage);
                 const total = promptTokens + estimateTokenCount(JSON.stringify(tools));
-                expect(tools.length, `${mode}/${stage} tool count`).to.be.within(8, 15);
+                const maxToolCount = mode === 'plan' ? 18 : 15;
+                expect(tools.length, `${mode}/${stage} tool count`).to.be.within(8, maxToolCount);
                 expect(total, `${mode}/${stage} system + tools`).to.be.at.most(8_000);
                 expect(tools.some(tool => projectWriteTools.has(tool.function.name)), `${mode}/${stage} project writes`).to.equal(false);
             }

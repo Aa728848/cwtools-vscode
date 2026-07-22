@@ -46,7 +46,7 @@ type EventConditionRelation = 'requires' | 'alternative' | 'blocks' | 'complex';
 interface EventEdge {
     source: string;
     target: string;
-    edgeType: 'effect' | 'semantic' | 'mtth_condition' | 'unknown';
+    edgeType: 'effect' | 'semantic' | 'mtth_condition' | 'definition' | 'definition_effect' | 'definition_trigger' | 'sequence' | 'unknown';
     label?: string;
     conditionRelation?: EventConditionRelation;
 }
@@ -177,6 +177,22 @@ const cy = cytoscape({
             style: { 'line-color': '#42a5f5', 'target-arrow-color': '#42a5f5', 'line-style': 'dashed' as any, 'width': 1.5 },
         },
         {
+            selector: 'edge[edgeType="definition"]',
+            style: { 'line-color': '#26a69a', 'target-arrow-color': '#26a69a', 'line-style': 'dotted' as any, 'width': 1.4 },
+        },
+        {
+            selector: 'edge[edgeType="definition_effect"]',
+            style: { 'line-color': '#ec407a', 'target-arrow-color': '#ec407a', 'width': 2 },
+        },
+        {
+            selector: 'edge[edgeType="definition_trigger"]',
+            style: { 'line-color': '#29b6f6', 'target-arrow-color': '#29b6f6', 'line-style': 'dashed' as any, 'width': 1.6 },
+        },
+        {
+            selector: 'edge[edgeType="sequence"]',
+            style: { 'line-color': '#66bb6a', 'target-arrow-color': '#66bb6a', 'width': 2.2 },
+        },
+        {
             selector: 'edge[conditionRelation="alternative"]',
             style: { 'line-color': '#f9a825', 'target-arrow-color': '#f9a825' },
         },
@@ -267,8 +283,8 @@ let seedIds = new Set<string>();
 
 // ─── UI helpers ──────────────────────────────────────────────────────────────
 
-const primaryEdgeTypes = new Set<EventEdge['edgeType']>(['effect']);
-const implicitEdgeTypes = new Set<EventEdge['edgeType']>(['semantic', 'mtth_condition']);
+const primaryEdgeTypes = new Set<EventEdge['edgeType']>(['effect', 'definition_effect', 'sequence']);
+const implicitEdgeTypes = new Set<EventEdge['edgeType']>(['semantic', 'mtth_condition', 'definition', 'definition_trigger']);
 
 function escapeHtml(value: unknown): string {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -304,6 +320,10 @@ function edgeTypeLabel(edgeType: EventEdge['edgeType'] | string): string {
         case 'effect': return 'Effect';
         case 'semantic': return t('Typed relation', '类型关系');
         case 'mtth_condition': return t('MTTH trigger condition', 'MTTH 触发条件');
+        case 'definition': return t('Definition member', '定义成员');
+        case 'definition_effect': return t('Definition creation / activation', '定义创建/启用');
+        case 'definition_trigger': return t('Definition trigger dependency', '定义触发依赖');
+        case 'sequence': return t('Definition order', '定义顺序');
         default: return t('Unknown relation', '未知关系');
     }
 }

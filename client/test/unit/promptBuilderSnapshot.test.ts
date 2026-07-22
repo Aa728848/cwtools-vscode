@@ -67,6 +67,11 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('Reward Implementation Grounding');
         expect(prompt).to.include('ordinary software engineering or Paradox/CWTools work');
         expect(prompt).to.include('ordinary code');
+        expect(prompt).to.include('final design authority');
+        expect(prompt).to.include('Approval transitions directly to Write/Execute');
+        expect(prompt).to.include('Adaptive planning fan-out');
+        expect(prompt).to.include('Dispatch only `explore`, `plan`, and `review` roles');
+        expect(prompt).to.include('main Agent alone author the final Implementation Plan');
     });
 
     it('keeps changing Stellaris facts out of domain-neutral plan prompts', () => {
@@ -139,6 +144,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('plannedFiles');
         expect(prompt).to.include('utility');
         expect(prompt).to.include('discovery wave');
+        expect(prompt).to.include('Approved Implementation Plan is design-complete');
         expect(prompt).to.not.include('mandatory user-facing approval');
         expect(prompt).to.not.include('LocWriter');
     });
@@ -191,6 +197,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('executable `taskPlan`');
         expect(prompt).to.include('produces/consumes');
         expect(prompt).to.include('STOP and wait for user approval');
+        expect(prompt).to.include('Do not defer any design work until after approval');
     });
 
     it('describes script mode as a dynamic PDXScript workflow coordinator', () => {
@@ -205,6 +212,9 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('plannedFiles');
         expect(prompt).to.include('approved `blueprintFile`');
         expect(prompt).to.include('write_design_blueprint');
+        expect(prompt).to.include('Approved Implementation Plan');
+        expect(prompt).to.include('dispatch immediately');
+        expect(prompt).to.include('Do not call `write_design_blueprint`');
     });
 
     it('keeps slim localisation writers on write_localisation and concise completion', () => {

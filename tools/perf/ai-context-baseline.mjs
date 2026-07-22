@@ -65,7 +65,7 @@ const { estimateTokenCount } = loadTs('client/extension/ai/agentRunner.ts');
 // ─── Measurement ─────────────────────────────────────────────────────────────
 const GAME_ID = 'stellaris';
 const MODES = ['build', 'plan', 'explore', 'review'];
-const BUILD_STAGES = ['discovery', 'design', 'validation', 'write', 'finalize'];
+const BUILD_STAGES = ['discovery', 'evidence', 'validation', 'write', 'finalize'];
 const READ_ONLY_MODE_STAGES = {
   plan: ['discovery', 'design', 'validation', 'finalize'],
   explore: ['discovery', 'validation', 'finalize'],

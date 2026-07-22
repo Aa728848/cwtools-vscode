@@ -1190,9 +1190,11 @@ describe('Orchestrator runtime safety', () => {
 
     it('executeSubAgent: records successful write targets when tool results omit filePath', async () => {
         const workspaceRoot = process.cwd();
+        let capturedOptions: any;
         const runner = {
             toolExecutor: { workspaceRoot },
             run: async (_prompt: string, _context: any, _history: any[], options: any) => {
+                capturedOptions = options;
                 options.onStep({
                     type: 'tool_call',
                     content: 'call edit_file',
@@ -1242,6 +1244,9 @@ describe('Orchestrator runtime safety', () => {
         );
 
         expect(result.success).to.equal(true);
+        expect(capturedOptions.initialToolStage).to.equal('write');
+        expect(capturedOptions.useSlimPrompt).to.equal(true);
+        expect(capturedOptions.forceAutoApplyWrites).to.equal(true);
         expect(result.writtenFiles).to.deep.equal([
             require('path').resolve(workspaceRoot, 'events/subagent_target.txt'),
         ]);
@@ -1289,6 +1294,9 @@ describe('Orchestrator runtime safety', () => {
 
         expect(result.success).to.equal(true);
         expect(capturedOptions.domain).to.equal('general');
+        expect(capturedOptions.initialToolStage).to.equal('write');
+        expect(capturedOptions.useSlimPrompt).to.equal(true);
+        expect(capturedOptions.forceAutoApplyWrites).to.equal(true);
         expect(capturedOptions.excludeTools).to.not.include('run_command');
         expect(capturedOptions.excludeTools).to.include('git_ops');
     });

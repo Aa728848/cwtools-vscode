@@ -72,6 +72,7 @@ import {
 } from './agentProfile';
 import { computeLineDiff } from './diffEngine';
 import { budgetToolResult } from './contextBudget';
+import { shouldRenderInteractivePlan } from './executePlanHandoff';
 import {
     getSlashCommandDescriptors,
     resolveSlashCommand,
@@ -168,6 +169,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private readonly lastRunSnapshotSentAt = new Map<string, number>();
     private readonly queuedSlashCommands: string[] = [];
     private flushingSlashCommands = false;
+    /** One-shot main-Agent continuation set only by approving an interactive plan card. */
+    private approvedPlanExecutionPending = false;
     public topicManager!: ChatTopicManager;
     public settingsManager!: ChatSettingsManager;
     public contextReferences: ContextReferenceManager;
@@ -178,6 +181,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private set currentMode(mode: AgentMode) {
         this.session.currentMode = mode;
+    }
+
+    public beginApprovedPlanExecution(): void {
+        this.approvedPlanExecutionPending = true;
     }
 
     private get previousMode(): AgentMode {
@@ -1086,12 +1093,18 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         };
 
         try {
+            const approvedPlanExecution = this.approvedPlanExecutionPending;
+            this.approvedPlanExecutionPending = false;
             const runPromise = this.agentRuntime.startTurn({
                 userMessage: text,
                 context: { ...context, topicId: this.topicManager.currentTopic?.id },
                 conversationHistory: this.conversationMessages,
                 options: {
                     mode: turnMode,
+                    approvedPlanExecution,
+                    initialToolStage: approvedPlanExecution && (turnMode === 'build' || turnMode === 'utility')
+                        ? 'write'
+                        : undefined,
                     domain: turnDomain,
                     providerId: config.provider,
                     model: this.aiService.getConfig().model || undefined,
@@ -1159,7 +1172,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // or heuristic question detection), it shouldn't lock into an Implementation Plan yet.
             // Treat it as a conversational turn.
             const isJustAskingQuestions = this.detectClarificationPhase(result);
-            const usedDispatchAgents = result.steps.some(s => s.toolName === 'dispatch_agents');
+            const hasInteractivePlan = shouldRenderInteractivePlan(result);
             const uiSteps = this.compactStepsForUi(result.steps);
             const uiResult = { ...result, steps: uiSteps };
             const durableRunId = result.runId ?? this.currentRunId;
@@ -1168,12 +1181,23 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 .find(message => message.role === 'user' && !message.runId);
             if (latestUserHistory && durableRunId) latestUserHistory.runId = durableRunId;
             const topicId = this.topicManager.currentTopic?.id || 'default';
+            const generatedPlanPath = this.findGeneratedTopicFile(topicId, 'Implementation_Plan.md');
+            let interactivePlanText = result.explanation;
+            if (generatedPlanPath) {
+                try {
+                    interactivePlanText = (await fs.promises.readFile(generatedPlanPath, 'utf-8')).replace(/^\uFEFF/, '');
+                } catch (error) {
+                    ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to read the generated Implementation_Plan.md; using the response text', error);
+                }
+            }
             const wtPath = this.findGeneratedTopicFile(topicId, 'walkthrough.md');
             if (wtPath) {
                 await this.renderWalkthroughUI(wtPath, topicId, uiSteps);
             }
 
-            if ((turnMode === 'plan' || ((turnMode === 'orchestrator' || turnMode === 'script') && !usedDispatchAgents)) && result.explanation && !isJustAskingQuestions) {
+            if (hasInteractivePlan
+                && interactivePlanText
+                && !isJustAskingQuestions) {
                 // Chat shows only tool-call steps (no full plan text)
                 this.postMessage({ type: 'generationComplete', result: { ...uiResult, explanation: '', code: '' } });
                 this.topicManager.addHistoryMessage({
@@ -1183,7 +1207,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     steps: uiSteps,
                     runId: durableRunId,
                 });
-                void this.savePlanFile(result.explanation, text, uiSteps, turnMode);
+                await this.savePlanFile(interactivePlanText, text, uiSteps, turnMode);
             } else {
                 this.postMessage({ type: 'generationComplete', result: uiResult });
                 this.topicManager.addHistoryMessage({
@@ -1199,8 +1223,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.topicManager.saveTopics();
 
             const bpPath = this.findGeneratedTopicFile(topicId, 'design_blueprint.md');
-            if (bpPath && turnMode !== 'orchestrator' && turnMode !== 'script') {
-                void this.renderBlueprintUI(bpPath, topicId, uiSteps);
+            if (bpPath) {
+                await this.renderBlueprintUI(bpPath, topicId, uiSteps);
             }
 
             this.collectArtifactsFromResult(uiResult);

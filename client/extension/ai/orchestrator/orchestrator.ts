@@ -446,6 +446,10 @@ export class Orchestrator {
             model,
             reasoningEffort: orchestratorOptions.reasoningEffort,
             mode: profile.mode,
+            // The parent already approved and decomposed this Execute task.
+            // Staged writer roles start with write tools visible and never reopen
+            // the main-Agent design/approval lifecycle.
+            initialToolStage: profile.mode === 'build' || profile.mode === 'utility' ? 'write' : undefined,
             domain: childDomain,
             onStep,
             abortSignal, // Replaced below by the child controller with parent/idle guards.

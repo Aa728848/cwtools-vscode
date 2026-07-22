@@ -1,6 +1,6 @@
 import { expect } from 'chai';
-import { buildImplicitEdges, parseEventFile } from '../../extension/eventChainParser';
-import type { PdxSemanticCatalog } from '../../shared/pdxSemanticCatalog';
+import { buildDefinitionReferenceEdges, buildImplicitEdges, extractConnectedSubgraph, mergeGraphs, parseCommonFile, parseEventFile } from '../../extension/eventChainParser';
+import { parsePdxSemanticCatalog, type PdxSemanticCatalog } from '../../shared/pdxSemanticCatalog';
 
 const CATALOG: PdxSemanticCatalog = {
     status: 'ready',
@@ -159,6 +159,184 @@ realm_event = {
         expect(edges.some(edge => edge.source === 'realm_test.nested_writer'
             && edge.target === 'realm_test.mtth'
             && edge.edgeType === 'mtth_condition')).to.equal(false);
+    });
+
+    it('connects CWT-declared definition event sets and preserves provable order', () => {
+        const catalog: PdxSemanticCatalog = {
+            ...CATALOG,
+            definitionTypes: [
+                ...CATALOG.definitionTypes,
+                {
+                    name: 'story_arc',
+                    paths: ['common/story_arcs'],
+                    typeKeyFilters: [],
+                    valueReferences: [
+                        { argumentPath: 'stage.event', access: 'type', typeName: 'event.realm' },
+                        { argumentPath: 'pulse.events.$value', access: 'type', typeName: 'event.realm' },
+                        { argumentPath: 'pulse.random_events.*', access: 'type', typeName: 'event.realm' },
+                        { argumentPath: 'entry', access: 'type', typeName: 'event.realm' },
+                    ],
+                },
+            ],
+        };
+        const result = parseCommonFile(`
+story_arc = {
+    stage = { event = realm_test.1 }
+    stage = { event = realm_test.2 }
+    entry = realm_test.7
+    entry = realm_test.8
+    pulse = {
+        events = {
+            realm_test.3
+            realm_test.4
+        }
+        random_events = {
+            10 = realm_test.5
+            20 = realm_test.6
+        }
+    }
+}
+`, 'common/story_arcs/test.txt', catalog);
+
+        expect(result.externalSources.map(source => source.id)).to.deep.equal(['[story_arc] story_arc']);
+        for (const target of ['realm_test.1', 'realm_test.2', 'realm_test.3', 'realm_test.4', 'realm_test.5', 'realm_test.6', 'realm_test.7', 'realm_test.8']) {
+            expect(result.edges.some(edge => edge.source === '[story_arc] story_arc'
+                && edge.target === target
+                && edge.edgeType === 'definition')).to.equal(true);
+        }
+        expect(result.edges).to.deep.include({
+            source: 'realm_test.1',
+            target: 'realm_test.2',
+            edgeType: 'sequence',
+            label: 'story_arc.stage.event',
+        });
+        expect(result.edges).to.deep.include({
+            source: 'realm_test.3',
+            target: 'realm_test.4',
+            edgeType: 'sequence',
+            label: 'story_arc.pulse.events.$value',
+        });
+        expect(result.edges.some(edge => edge.source === 'realm_test.5'
+            && edge.target === 'realm_test.6'
+            && edge.edgeType === 'sequence')).to.equal(false);
+        expect(result.edges.some(edge => edge.source === 'realm_test.7'
+            && edge.target === 'realm_test.8'
+            && edge.edgeType === 'sequence')).to.equal(false);
+    });
+
+    it('validates TypeDef value references at the LSP boundary', () => {
+        const parsed = parsePdxSemanticCatalog({
+            ok: true,
+            status: 'ready',
+            rules: [],
+            definitionTypes: [{
+                name: 'Story_Arc',
+                paths: ['game/common/story_arcs'],
+                typeKeyFilters: [],
+                valueReferences: [
+                    { argumentPath: 'Stage.Event', access: 'type', typeName: 'Event.Realm' },
+                    { argumentPath: 42, access: 'type', typeName: 'event.realm' },
+                ],
+            }],
+        });
+
+        expect(parsed?.definitionTypes[0]?.valueReferences).to.deep.equal([
+            { argumentPath: 'stage.event', access: 'type', typeName: 'event.realm' },
+        ]);
+    });
+
+    it('connects events and definitions through catalog-typed references without game-specific type lists', () => {
+        const catalog: PdxSemanticCatalog = {
+            ...CATALOG,
+            rules: [
+                ...CATALOG.rules,
+                { name: 'enable_project', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'type', typeName: 'project.special' }] },
+                { name: 'create_site', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'type', typeName: 'site' }] },
+                { name: 'has_site', category: 'trigger', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'type', typeName: 'site' }] },
+            ],
+            definitionTypes: [
+                ...CATALOG.definitionTypes,
+                { name: 'project', paths: ['common/projects'], typeKeyFilters: [] },
+                { name: 'site', paths: ['common/sites'], typeKeyFilters: [] },
+            ],
+        };
+        const events = parseEventFile(`
+realm_event = {
+    event_key = realm_test.start
+    enable_project = project_x
+}
+realm_event = {
+    event_key = realm_test.finish
+    trigger = { has_site = site_x }
+}
+`, 'events/definitions.txt', catalog);
+        const project = parseCommonFile('project_x = { create_site = site_x }', 'common/projects/test.txt', catalog);
+        const site = parseCommonFile('site_x = { }', 'common/sites/test.txt', catalog);
+        const graph = mergeGraphs([
+            events,
+            ...[project, site].map(result => ({
+                nodes: result.externalSources.map(source => ({
+                    id: source.id,
+                    type: source.sourceType,
+                    title: source.name,
+                    file: source.file,
+                    line: source.line,
+                    endLine: source.line,
+                    namespace: `__${source.sourceType}__`,
+                    semanticReferences: source.semanticReferences,
+                    definitionIdentity: source.definitionIdentity,
+                })),
+                edges: result.edges,
+            })),
+        ]);
+
+        const definitionEdges = buildDefinitionReferenceEdges(graph);
+        expect(definitionEdges).to.deep.include.members([
+            {
+                source: 'realm_test.start',
+                target: '[project] project_x',
+                edgeType: 'definition_effect',
+                label: 'enable_project = project_x',
+            },
+            {
+                source: '[project] project_x',
+                target: '[site] site_x',
+                edgeType: 'definition_effect',
+                label: 'create_site = site_x',
+            },
+            {
+                source: '[site] site_x',
+                target: 'realm_test.finish',
+                edgeType: 'definition_trigger',
+                label: 'has_site = site_x',
+            },
+        ]);
+        graph.edges.push(...definitionEdges);
+        const visible = extractConnectedSubgraph(graph, new Set(['realm_test.start']), 4);
+        expect(visible.nodes.map(node => node.id)).to.include.members([
+            '[project] project_x',
+            '[site] site_x',
+            'realm_test.finish',
+        ]);
+    });
+
+    it('uses CWT type-key filters to distinguish definition identities sharing a directory', () => {
+        const result = parseCommonFile(`
+alpha_kind = { }
+beta_kind = { }
+`, 'common/shared/test.txt', {
+            ...CATALOG,
+            definitionTypes: [
+                ...CATALOG.definitionTypes,
+                { name: 'alpha', paths: ['common/shared'], typeKeyFilters: ['alpha_kind'] },
+                { name: 'beta', paths: ['common/shared'], typeKeyFilters: ['beta_kind'] },
+            ],
+        });
+
+        expect(result.externalSources.map(source => source.definitionIdentity)).to.deep.equal([
+            { typeName: 'alpha', value: 'alpha_kind' },
+            { typeName: 'beta', value: 'beta_kind' },
+        ]);
     });
 
     it('does not infer event types when the active CWT catalog lacks them', () => {

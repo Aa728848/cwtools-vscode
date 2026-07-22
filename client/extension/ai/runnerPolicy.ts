@@ -11,14 +11,14 @@ export interface ToolFilterOptions {
 
 export type { AgentToolStage } from './types';
 
-const BUILD_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
+const BUILD_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
     discovery: new Set([
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
         'glob_files', 'workspace_symbols', 'document_symbols',
         'get_lsp_status', 'todo_write', 'run_skill', 'mcp_call',
     ]),
-    design: new Set([
+    evidence: new Set([
         'query_project_knowledge', 'query_rules', 'query_cwt_schema', 'query_scope',
         'search_rule_capabilities', 'get_file_context', 'read_file', 'get_pdx_block',
         'get_design_blueprint_contract', 'write_design_blueprint', 'todo_write',
@@ -43,30 +43,36 @@ const BUILD_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
     ]),
 };
 
-const PLAN_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
+const PLAN_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
     discovery: new Set([
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
         'glob_files', 'workspace_symbols', 'document_symbols', 'get_lsp_status',
         'web_search', 'web_open', 'web_find', 'mcp_call',
+        'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
-    design: BUILD_STAGE_TOOLS.design,
+    design: new Set([
+        ...BUILD_STAGE_TOOLS.evidence!,
+        'dispatch_agents', 'query_blackboard', 'merge_results',
+    ]),
     validation: new Set([
         'query_rules', 'query_cwt_schema', 'query_scope',
         'parse_pdx_fragment', 'query_references', 'query_definition_by_name',
         'verify_pdx_identifier', 'get_diagnostics',
         'get_file_context', 'read_file', 'get_design_blueprint_contract',
         'write_design_blueprint', 'todo_write', 'grep', 'document_symbols',
+        'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
     write: new Set(),
     finalize: new Set([
         'get_diagnostics', 'query_references', 'verify_pdx_identifier',
         'get_pdx_block', 'get_file_context', 'read_file',
         'get_design_blueprint_contract', 'write_design_blueprint', 'todo_write',
+        'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
 };
 
-const EXPLORE_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
+const EXPLORE_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
     discovery: new Set([
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
@@ -88,7 +94,7 @@ const EXPLORE_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
     ]),
 };
 
-const REVIEW_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
+const REVIEW_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
     discovery: new Set([
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
@@ -113,7 +119,7 @@ const REVIEW_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
 };
 
 /** General coding stages deliberately skip the PDX design/evidence pipeline. */
-const UTILITY_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
+const UTILITY_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
     discovery: new Set([
         'read_file', 'list_directory', 'glob_files', 'grep', 'get_file_context',
         'document_symbols', 'workspace_symbols', 'get_diagnostics', 'get_lsp_status',
@@ -137,7 +143,7 @@ const UTILITY_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
     ]),
 };
 
-const MODE_STAGE_TOOLS: Partial<Record<AgentMode, Record<AgentToolStage, ReadonlySet<string>>>> = {
+const MODE_STAGE_TOOLS: Partial<Record<AgentMode, Partial<Record<AgentToolStage, ReadonlySet<string>>>>> = {
     build: BUILD_STAGE_TOOLS,
     plan: PLAN_STAGE_TOOLS,
     explore: EXPLORE_STAGE_TOOLS,
@@ -148,16 +154,16 @@ const MODE_STAGE_TOOLS: Partial<Record<AgentMode, Record<AgentToolStage, Readonl
 const DISCOVERY_PROGRESS_TOOLS = new Set([
     'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
     'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
-    'workspace_symbols', 'document_symbols',
+    'workspace_symbols', 'document_symbols', 'dispatch_agents',
 ]);
-const DESIGN_PROGRESS_TOOLS = new Set([
+const EVIDENCE_PROGRESS_TOOLS = new Set([
     'query_rules', 'query_cwt_schema', 'query_scope', 'query_override_modes',
     'search_rule_capabilities', 'query_scripted_effects', 'query_scripted_triggers',
-    'write_design_blueprint',
+    'write_design_blueprint', 'read_file', 'get_file_context', 'get_pdx_block',
 ]);
 const VALIDATION_PROGRESS_TOOLS = new Set([
     'parse_pdx_fragment', 'verify_pdx_identifier', 'get_diagnostics',
-    'query_definition_by_name', 'query_references', 'explain_scope',
+    'query_definition_by_name', 'query_references', 'explain_scope', 'todo_write',
 ]);
 const STAGED_WRITE_TOOLS = new Set([
     'write_file', 'edit_file', 'replace_lines', 'edit_pdx_block', 'write_localisation',
@@ -170,6 +176,14 @@ export function initialToolStageForMode(mode: AgentMode): AgentToolStage | undef
     return MODE_STAGE_TOOLS[mode] ? 'discovery' : undefined;
 }
 
+/** V2 resume compatibility: Build's former design checkpoint is now evidence preparation. */
+export function normalizeToolStageForMode(
+    mode: AgentMode,
+    stage: AgentToolStage | undefined,
+): AgentToolStage | undefined {
+    return mode === 'build' && stage === 'design' ? 'evidence' : stage;
+}
+
 export function filterToolDefinitionsForStage(
     tools: readonly ToolDefinition[],
     mode: AgentMode,
@@ -177,8 +191,11 @@ export function filterToolDefinitionsForStage(
     legacyFullToolset = false,
 ): ToolDefinition[] {
     if (legacyFullToolset || !stage) return [...tools];
-    const allowed = MODE_STAGE_TOOLS[mode]?.[stage];
-    if (!allowed) return [...tools];
+    const normalizedStage = normalizeToolStageForMode(mode, stage);
+    const modeStages = MODE_STAGE_TOOLS[mode];
+    if (!modeStages) return [...tools];
+    const allowed = normalizedStage ? modeStages[normalizedStage] : undefined;
+    if (!allowed) return [];
     return tools.filter(tool =>
         allowed.has(tool.function.name)
         || (allowed.has('mcp_call') && tool.function.name.startsWith('mcp_')));
@@ -186,7 +203,8 @@ export function filterToolDefinitionsForStage(
 
 const STAGE_GUIDANCE: Record<AgentToolStage, string> = {
     discovery: 'Locate the relevant project area and evidence source; do not attempt writes yet.',
-    design: 'Obtain the applicable rules, scopes, and bounded archetype evidence.',
+    design: 'Resolve the architecture and implementation design before requesting approval.',
+    evidence: 'Obtain the applicable rules, scopes, and bounded archetype evidence without revisiting product design.',
     validation: 'Prove candidate syntax, scope, identifiers, and references before writing.',
     write: 'Apply the narrowest guarded edit; host-side semantic preflight remains authoritative.',
     finalize: 'Inspect fresh diagnostics and affected references; repair any post-write failure.',
@@ -199,20 +217,21 @@ export function buildToolStageReminder(
     tools: readonly ToolDefinition[],
     domain: AgentRuntimeDomain = defaultDomainForMode(mode),
 ): string {
-    if (!stage) return '';
+    const normalizedStage = normalizeToolStageForMode(mode, stage);
+    if (!normalizedStage) return '';
     const names = tools.map(tool => tool.function.name).sort();
     const guidance = domain === 'general'
-        ? stage === 'discovery'
+        ? normalizedStage === 'discovery'
             ? 'Inspect the repository and identify the exact implementation and verification surface; do not write yet.'
-            : stage === 'write'
+            : normalizedStage === 'write'
                 ? 'Implement the scoped change and run relevant commands through the policy engine.'
-                : stage === 'design'
+                : normalizedStage === 'design' || normalizedStage === 'evidence'
                     ? 'Map the concrete interfaces, dependencies, compatibility constraints, and tests using repository evidence.'
-                    : stage === 'validation'
+                    : normalizedStage === 'validation'
                         ? 'Cross-check the proposed or reviewed behavior against callers, diagnostics, tests, and current implementation.'
                         : 'Synthesize the evidence, review the diff when applicable, and report verification and remaining risks.'
-        : STAGE_GUIDANCE[stage];
-    return `<system-reminder>Current ${mode} tool stage: ${stage}. ${guidance} `
+        : STAGE_GUIDANCE[normalizedStage];
+    return `<system-reminder>Current ${mode} tool stage: ${normalizedStage}. ${guidance} `
         + `Only these stage tools are available: ${names.join(', ')}.</system-reminder>`;
 }
 
@@ -222,27 +241,30 @@ export function advanceToolStage(
     toolName: string,
     result: { success: boolean; hasValidationErrors?: boolean },
 ): AgentToolStage | undefined {
-    if (!stage) return undefined;
+    const normalizedStage = normalizeToolStageForMode(mode, stage);
+    if (!normalizedStage) return undefined;
     if (mode === 'utility' && STAGED_WRITE_TOOLS.has(toolName)) {
         return result.success && !result.hasValidationErrors ? 'finalize' : 'write';
     }
     if (mode === 'build' && STAGED_WRITE_TOOLS.has(toolName)) {
         return result.success && !result.hasValidationErrors ? 'finalize' : 'validation';
     }
-    switch (stage) {
+    switch (normalizedStage) {
         case 'discovery':
-            if (mode === 'utility' && result.success && UTILITY_STAGE_TOOLS.discovery.has(toolName)) return 'write';
-            if (!result.success || (!DISCOVERY_PROGRESS_TOOLS.has(toolName) && !VALIDATION_PROGRESS_TOOLS.has(toolName))) return stage;
-            return mode === 'build' || mode === 'plan' ? 'design' : 'validation';
+            if (mode === 'utility' && result.success && UTILITY_STAGE_TOOLS.discovery!.has(toolName)) return 'write';
+            if (!result.success || (!DISCOVERY_PROGRESS_TOOLS.has(toolName) && !VALIDATION_PROGRESS_TOOLS.has(toolName))) return normalizedStage;
+            return mode === 'build' ? 'evidence' : mode === 'plan' ? 'design' : 'validation';
         case 'design':
-            if (mode === 'plan' && result.success && PLAN_STAGE_TOOLS.design.has(toolName)) return 'validation';
-            return result.success && DESIGN_PROGRESS_TOOLS.has(toolName) ? 'validation' : stage;
+            if (mode === 'plan' && result.success && PLAN_STAGE_TOOLS.design!.has(toolName)) return 'validation';
+            return normalizedStage;
+        case 'evidence':
+            return mode === 'build' && result.success && EVIDENCE_PROGRESS_TOOLS.has(toolName) ? 'validation' : normalizedStage;
         case 'validation':
-            if (mode === 'plan' && result.success && PLAN_STAGE_TOOLS.validation.has(toolName)) return 'finalize';
-            if (!result.success || !VALIDATION_PROGRESS_TOOLS.has(toolName)) return stage;
+            if (mode === 'plan' && result.success && PLAN_STAGE_TOOLS.validation!.has(toolName)) return 'finalize';
+            if (!result.success || !VALIDATION_PROGRESS_TOOLS.has(toolName)) return normalizedStage;
             return mode === 'build' || mode === 'utility' ? 'write' : 'finalize';
-        case 'write': return stage;
-        case 'finalize': return result.hasValidationErrors ? 'validation' : stage;
+        case 'write': return normalizedStage;
+        case 'finalize': return result.hasValidationErrors ? 'validation' : normalizedStage;
     }
 }
 

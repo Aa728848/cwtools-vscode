@@ -38,7 +38,7 @@ This project makes deep use of the VS Code Webview isolation sandbox, utilizing 
 
 ##### 🤖 3. Autonomous AI Coprocessor
 This subsystem combines a general repository-coding Agent with a Paradox/CWTools specialist and a profile-aware multi-Agent runner.
-- **Three-Dimensional Agent Profile**: Select the **capability domain** (`Auto`, `Paradox / CWTools`, or `General Coding`), **task intent** (`Auto`, `Execute`, `Plan`, `Explore`, or `Review`), and **execution strategy** (`Auto`, `Single Agent`, or `Multi-Agent`) independently. `Auto` resolves the profile again for every turn from the request and active-file context, without an extra model-routing call.
+- **Automatic Agent Routing with an Explicit Domain Boundary**: The composer exposes only the **capability domain** (`Auto`, `Paradox / CWTools`, or `General Coding`). A lightweight model-routing call resolves task intent and the single/multi-Agent strategy on every turn from the request, recent conversation, and active-file context. Invalid or unavailable routing falls back to deterministic safe classification.
 - **Domain-Separated Execution**: General Coding receives only domain-neutral repository prompts, tools, diagnostics, memory, caches, resume state, and sub-Agent roles. It can inspect and edit ordinary repositories, run approved commands, and verify builds/tests, but cannot call CWT/CWTools/PDXScript, localisation, game-asset, or MCP capabilities. Paradox execution obtains mutable game facts on demand from active CWT rules, the CWTools LSP, and project indexes instead of embedding a small hard-coded rules table in prompts.
 - **Profile-Aware Parallel DAG Orchestration**: General Multi-Agent dispatches repository engineering roles; Paradox Multi-Agent adds CWT/LSP evidence, entity contracts, localisation specialists, and semantic quality gates. Both coordinate bounded parallel work through a shared Blackboard.
 - **Long-Run Reliability & Smart Context Windowing**: Structured context compression, recoverable checkpoints, progress-aware run budgets, activity-based child-Agent stall detection, and loop prevention allow long-running tasks to continue while still stopping genuinely stalled work.
@@ -107,7 +107,7 @@ Below is the overall module interaction and data flow topology:
 
 ##### 🤖 5. Autonomous AI Panel
 * **How to open**: Click the **AI Icon** in the Activity Bar or execute `AI: Open Chat Panel` in the Command Palette.
-* **Agent profile**: Use the composer profile menu to choose **Capability Domain**, **Task Intent**, and **Execution Strategy** independently. Leave all three on `Auto` for per-turn routing, or pin only the dimension that must not change.
+* **Agent profile**: Use the composer menu only when you need to pin the **Capability Domain**. Task intent and execution strategy remain automatic; choosing `Auto` also lets the runtime detect the domain for each turn.
 * **Operations**: Supports context memory compression (triggered at 70% threshold) and importing/exporting full JSON execution archives.
 * **Codex with ChatGPT quota**: Select **Codex (ChatGPT Subscription)** in AI Settings and sign in once through the browser PKCE flow compatible with [OpenCode's ChatGPT Plus/Pro integration](https://opencode.ai/docs/providers/). Access and refresh tokens are stored only in VS Code SecretStorage and refreshed automatically; **Sign out** removes only this extension's credentials. The provider calls the fixed ChatGPT Codex Responses backend, never accepts an API key or endpoint override, and never falls back to billable OpenAI Platform calls. It does not install, launch, inspect, or share login state with Codex CLI/Desktop. Account, plan, quota windows, and a compatibility model catalog are shown in settings. Chat turns use the extension's native Agent runtime, so the selected model and reasoning level, current Agent sandbox, permission policy, write scheduler, tools, and MCP configuration all follow the same path as other providers. This subscription endpoint is an internal compatibility surface rather than a public stable API and may require updates when the upstream flow changes. The provider remains excluded from inline completion, translation preview, and child-Agent model selectors.
 * **Architecture Diagrams**: When a design or analysis contains several connected components, the Agent can emit Mermaid flow/sequence/state diagrams. Chat messages, live process text, tool-result cards, plans, blueprints, and walkthrough cards render them locally with VS Code theme colors, source copy, fullscreen viewing, and safe source fallback.
@@ -289,7 +289,7 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
 
 ##### 🤖 3. 自主 AI 协处理器 (Advanced AI System)
 该子系统同时提供通用仓库编码 Agent、Paradox / CWTools 专用 Agent，以及能够按领域选择角色和质量门的多 Agent 运行器。
-- **三维 Agent Profile**：可以分别选择**能力领域**（`自动`、`Paradox / CWTools`、`通用编码`）、**任务意图**（`自动`、`执行`、`规划`、`探索`、`审查`）和**执行策略**（`自动`、`单 Agent`、`多 Agent`）。`自动`会依据每一轮的请求与活动文件重新解析，无需额外调用模型做路由。
+- **显式领域边界与自动 Agent 路由**：输入框只提供**能力领域**（`自动`、`Paradox / CWTools`、`通用编码`）选择；每一轮由轻量模型路由调用依据当前请求、近期对话和活动文件判断任务意图以及单/多 Agent 执行策略。路由不可用或结果无效时，使用确定性的安全回退。
 - **按领域分离执行链**：通用编码 Agent 只接收领域中立的仓库提示词、工具、诊断、记忆、缓存、恢复状态和子 Agent 角色；它可以调查普通仓库、修改代码/配置/测试/文档并运行获准的构建测试，但不能调用 CWT/CWTools/PDXScript、本地化、游戏资产或 MCP 能力。Paradox Agent 则按需从活动 CWT 规则、CWTools LSP 和项目索引获取动态游戏事实，不在提示词中维护少量易过时的硬编码规则表。
 - **Profile 感知的并行 DAG 编排**：通用多 Agent 使用领域中立的仓库工程角色；Paradox 多 Agent 额外使用 CWT/LSP 证据、实体契约、本地化专职角色和语义质量门。两者都通过共享黑板协调有界并行任务。
 - **长期运行可靠性与智能压缩**：结构化上下文压缩、可恢复检查点、按进展续期的运行预算、基于活动状态的子 Agent 卡死检测和循环防御，使长任务可以持续完成，同时仍会终止真正停滞的工作。
@@ -360,7 +360,7 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
 
 ##### 🤖 5. 自主 AI 开发面板 (Autonomous AI)
 * **如何打开**：点击侧边栏的 **AI 图标**，或按快捷键 `Ctrl+Shift+P` 搜索并执行 `AI: Open Chat Panel` 开启会话。
-* **Agent Profile**：通过输入框旁的 Profile 菜单分别选择**能力领域**、**任务意图**和**执行策略**。三个维度都保持“自动”即可逐轮智能路由；也可以只固定不希望变化的维度。
+* **Agent Profile**：输入框旁的菜单只用于选择或固定**能力领域**；任务意图和执行策略始终自动判断。选择“自动”时，运行时也会逐轮识别能力领域。
 * **特性操作**：会话支持完整的上下文压缩（超过 70% 时自动生成紧凑记忆）以及一键无损导入导出完整
 运行步骤的 JSON 归档。
 * **使用 ChatGPT 额度的 Codex Provider**：在 AI 设置中选择 **Codex（ChatGPT 订阅）**，通过与 [OpenCode 的 ChatGPT Plus / Pro 集成](https://opencode.ai/docs/providers/)兼容的浏览器 PKCE 流程登录一次即可。Access Token 和 Refresh Token 只保存在 VS Code SecretStorage，并会自动刷新；“退出账号”只删除本插件保存的凭据。Provider 固定调用 ChatGPT Codex Responses 后端，不接受 API Key 或自定义 Endpoint，也不会降级到按量计费的 OpenAI Platform API。它不安装、启动或探测 Codex CLI / Desktop，也不与这些程序共享登录状态。设置页会显示账户、套餐、额度窗口及兼容模型清单。对话统一使用插件原生 Agent 运行时，因此所选模型与思考等级、当前 Agent 沙盒、权限策略、写入调度、工具和 MCP 配置均与其他 Provider 走同一条链路。该订阅端点属于内部兼容接口，并非公开稳定 API；上游流程变化时可能需要同步适配。该 Provider 仍从内联补全、翻译预览和子 Agent 模型选择器中排除。

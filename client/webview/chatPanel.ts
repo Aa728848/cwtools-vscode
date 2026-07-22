@@ -268,16 +268,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     type ProfileIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
     type ProfileStrategy = 'auto' | 'single' | 'multi';
     type AgentProfileSelection = { domain: ProfileDomain; intent: ProfileIntent; strategy: ProfileStrategy };
-    type ResolvedAgentProfile = {
-        selection: AgentProfileSelection;
-        domain: Exclude<ProfileDomain, 'auto'>;
-        intent: Exclude<ProfileIntent, 'auto'>;
-        strategy: Exclude<ProfileStrategy, 'auto'>;
-        mode: string;
-        reason: string;
-    };
     let agentProfile: AgentProfileSelection = { domain: 'auto', intent: 'auto', strategy: 'auto' };
-    let resolvedAgentProfile: ResolvedAgentProfile | null = null;
 
     function isAgentProfileSelection(value: unknown): value is AgentProfileSelection {
         if (!value || typeof value !== 'object') return false;
@@ -287,25 +278,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             && ['auto', 'single', 'multi'].includes(candidate.strategy || '');
     }
 
-    function isResolvedAgentProfile(value: unknown): value is ResolvedAgentProfile {
-        if (!value || typeof value !== 'object') return false;
-        const candidate = value as Partial<ResolvedAgentProfile>;
-        return isAgentProfileSelection(candidate.selection)
-            && (candidate.domain === 'paradox' || candidate.domain === 'general')
-            && ['execute', 'plan', 'explore', 'review'].includes(candidate.intent || '')
-            && (candidate.strategy === 'single' || candidate.strategy === 'multi')
-            && typeof candidate.mode === 'string'
-            && typeof candidate.reason === 'string';
-    }
-
-    function applyAgentProfile(profile: unknown, resolved?: unknown): void {
+    function applyAgentProfile(profile: unknown): void {
         if (!isAgentProfileSelection(profile)) return;
         agentProfile = { ...profile };
-        resolvedAgentProfile = isResolvedAgentProfile(resolved) ? { ...resolved, selection: { ...resolved.selection } } : null;
         applyComposerModeLabels();
         renderComposerChips();
         const trigger = document.getElementById('quickModeTrigger');
-        if (trigger) trigger.title = tr(`Agent profile: ${getProfileSummary()}`, `Agent 配置：${getProfileSummary()}`);
+        if (trigger) trigger.title = tr(`Capability domain: ${getProfileSummary()}`, `能力领域：${getProfileSummary()}`);
     }
     const messageIndexMap = new Map<number, HTMLDivElement>();
     const userMessagePayloadMap = new Map<number, UserMessageInputPayload>();
@@ -2154,27 +2133,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function getProfileSummary(): string {
-        const domain = agentProfile.domain === 'auto'
+        return agentProfile.domain === 'auto'
             ? tr('Auto', '自动')
             : agentProfile.domain === 'paradox' ? 'Paradox' : tr('General', '通用');
-        const intent = agentProfile.intent === 'auto'
-            ? ''
-            : agentProfile.intent === 'execute' ? tr('Execute', '执行')
-                : agentProfile.intent === 'plan' ? tr('Plan', '规划')
-                    : agentProfile.intent === 'explore' ? tr('Explore', '探索') : tr('Review', '审查');
-        const strategy = agentProfile.strategy === 'auto'
-            ? ''
-            : agentProfile.strategy === 'single' ? tr('Single', '单 Agent') : tr('Multi', '多 Agent');
-        const selected = [domain, intent, strategy].filter(Boolean).join(' · ');
-        if (agentProfile.domain === 'auto' && agentProfile.intent === 'auto' && agentProfile.strategy === 'auto' && resolvedAgentProfile) {
-            const resolvedDomain = resolvedAgentProfile.domain === 'paradox' ? 'Paradox' : tr('General', '通用');
-            const resolvedIntent = resolvedAgentProfile.intent === 'execute' ? tr('Execute', '执行')
-                : resolvedAgentProfile.intent === 'plan' ? tr('Plan', '规划')
-                    : resolvedAgentProfile.intent === 'explore' ? tr('Explore', '探索') : tr('Review', '审查');
-            const resolvedStrategy = resolvedAgentProfile.strategy === 'multi' ? tr('Multi', '多 Agent') : tr('Single', '单 Agent');
-            return `${selected} → ${resolvedDomain} · ${resolvedIntent} · ${resolvedStrategy}`;
-        }
-        return selected;
     }
 
     function applyComposerModeLabels(): void {
@@ -2406,12 +2367,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
         document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-domain]').forEach(item => {
             item.classList.toggle('active', item.dataset.profileDomain === agentProfile.domain);
-        });
-        document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-intent]').forEach(item => {
-            item.classList.toggle('active', item.dataset.profileIntent === agentProfile.intent);
-        });
-        document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-strategy]').forEach(item => {
-            item.classList.toggle('active', item.dataset.profileStrategy === agentProfile.strategy);
         });
     }
 
@@ -2651,28 +2606,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const modeMenu = document.getElementById('modeMenu');
         setModeMenuOpen(!modeMenu?.classList.contains('show'));
     });
-    const updateAgentProfile = (next: Partial<AgentProfileSelection>) => {
-        agentProfile = { ...agentProfile, ...next };
-        resolvedAgentProfile = null;
+    const updateAgentDomain = (domain: ProfileDomain) => {
+        agentProfile = { domain, intent: 'auto', strategy: 'auto' };
         vscode.postMessage({ type: 'switchAgentProfile', profile: agentProfile });
         renderComposerChips();
     };
     document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-domain]').forEach(item => {
         item.addEventListener('click', () => {
             const domain = item.dataset.profileDomain as ProfileDomain | undefined;
-            if (domain) updateAgentProfile({ domain });
-        });
-    });
-    document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-intent]').forEach(item => {
-        item.addEventListener('click', () => {
-            const intent = item.dataset.profileIntent as ProfileIntent | undefined;
-            if (intent) updateAgentProfile({ intent });
-        });
-    });
-    document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-strategy]').forEach(item => {
-        item.addEventListener('click', () => {
-            const strategy = item.dataset.profileStrategy as ProfileStrategy | undefined;
-            if (strategy) updateAgentProfile({ strategy });
+            if (domain) {
+                updateAgentDomain(domain);
+                setModeMenuOpen(false);
+            }
         });
     });
     document.querySelectorAll<HTMLElement>('.composer-menu-item[data-composer-action]').forEach(item => {
@@ -5966,19 +5911,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 break;
 
             case 'setAgentProfile':
-                applyAgentProfile(msg.profile, msg.resolved);
+                applyAgentProfile(msg.profile);
                 break;
 
             case 'agentProfileChanged':
                 applyAgentProfile(msg.profile);
-                break;
-
-            case 'agentProfileResolved':
-                if (isResolvedAgentProfile(msg.resolved)) {
-                    resolvedAgentProfile = { ...msg.resolved, selection: { ...msg.resolved.selection } };
-                    applyComposerModeLabels();
-                    renderComposerChips();
-                }
                 break;
 
             case 'workflowList':

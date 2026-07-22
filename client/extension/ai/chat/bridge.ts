@@ -11,7 +11,7 @@ import type { WebViewMessage } from '../types';
 import type { AIChatPanelProvider } from '../chatPanel';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, aiText } from '../messages';
-import { isAgentMode, isAgentProfileSelection } from '../agentProfile';
+import { isAgentMode, isAgentProfileSelection, profileForUserDomain } from '../agentProfile';
 
 export async function routeWebviewMessage(
     provider: AIChatPanelProvider,
@@ -129,7 +129,7 @@ export async function routeWebviewMessage(
             else ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Rejected invalid Agent mode from Webview.');
             break;
         case 'switchAgentProfile':
-            if (isAgentProfileSelection(msg.profile)) provider.switchAgentProfile(msg.profile);
+            if (isAgentProfileSelection(msg.profile)) provider.switchAgentProfile(profileForUserDomain(msg.profile.domain));
             else ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Rejected invalid Agent profile from Webview.');
             break;
         case 'switchWorkflow':

@@ -1995,6 +1995,8 @@ export interface ChatTopic {
     agentProfile?: AgentProfileSelection;
     /** Last resolved internal mode, used only to restore topic chrome and resume compatibility. */
     agentMode?: AgentMode;
+    /** Last resolved capability domain, persisted because read-only modes do not encode it. */
+    resolvedAgentDomain?: AgentRuntimeDomain;
     /** Optional active workflow restored with this topic. */
     workflowId?: string;
     /** Profile to restore when the active workflow is disabled. */

@@ -162,20 +162,6 @@ ${stylesheetLinks}
             <button class="composer-menu-item" data-profile-domain="paradox">${svgIconNoMargin('code')}<span>${t('Paradox / CWTools', 'Paradox / CWTools')}</span></button>
             <button class="composer-menu-item" data-profile-domain="general">${svgIconNoMargin('zap')}<span>${t('General coding', '通用编码')}</span></button>
         </div>
-        <div class="composer-menu-section">
-            <div class="model-menu-title">${t('Task intent', '任务意图')}</div>
-            <button class="composer-menu-item" data-profile-intent="auto">${svgIconNoMargin('sparkles')}<span>${t('Auto intent', '自动判断')}</span></button>
-            <button class="composer-menu-item" data-profile-intent="execute">${svgIconNoMargin('code')}<span>${t('Execute changes', '执行修改')}</span></button>
-            <button class="composer-menu-item" data-profile-intent="plan">${svgIconNoMargin('clipboard')}<span>${t('Plan only', '仅规划')}</span></button>
-            <button class="composer-menu-item" data-profile-intent="explore">${svgIconNoMargin('telescope')}<span>${t('Explore / explain', '探索 / 解释')}</span></button>
-            <button class="composer-menu-item" data-profile-intent="review">${svgIconNoMargin('shield')}<span>${t('Review only', '仅审查')}</span></button>
-        </div>
-        <div class="composer-menu-section">
-            <div class="model-menu-title">${t('Execution strategy (advanced)', '执行策略（高级）')}</div>
-            <button class="composer-menu-item" data-profile-strategy="auto">${svgIconNoMargin('sparkles')}<span>${t('Auto strategy', '自动选择')}</span></button>
-            <button class="composer-menu-item" data-profile-strategy="single">${svgIconNoMargin('code')}<span>${t('Single Agent', '单 Agent')}</span></button>
-            <button class="composer-menu-item" data-profile-strategy="multi">${svgIconNoMargin('gitBranch')}<span>${t('Multi-Agent', '多 Agent')}</span></button>
-        </div>
     </div>
     <div id="modelMenu" class="model-menu" aria-hidden="true">
         <div class="model-menu-title">Model</div>
@@ -218,7 +204,7 @@ ${stylesheetLinks}
                     <span id="quickWriteModeLabel">${t('Auto write', '自动写入')}</span>
                     <span class="composer-chevron" aria-hidden="true">v</span>
                 </button>
-                <button class="composer-model-trigger composer-mode-trigger" id="quickModeTrigger" title="${t('Configure Agent profile', '配置 Agent Profile')}" aria-haspopup="listbox" aria-expanded="false">
+                <button class="composer-model-trigger composer-mode-trigger" id="quickModeTrigger" title="${t('Select capability domain', '选择能力领域')}" aria-haspopup="listbox" aria-expanded="false">
                     <span id="quickModeLabel">${t('Auto', '自动')}</span>
                     <span class="composer-chevron" aria-hidden="true">v</span>
                 </button>

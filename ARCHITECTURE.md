@@ -190,7 +190,7 @@ sequenceDiagram
 
 | File | Purpose |
 | --- | --- |
-| `agentProfile.ts` | Resolves the user-facing domain, intent, and strategy profile into an internal per-turn execution mode |
+| `agentProfile.ts` | Resolves the user-selected domain plus automatic intent and strategy into an internal per-turn execution mode |
 | `agentRunner.ts` | Reasoning loops, tool permissions, workflow execution, context compression, checkpointing, and model fallbacks |
 | `agentTools.ts` | Tool dispatching, execution timeouts, shared blackboard, and orchestrator tool entry |
 | `aiService.ts` | Multi-provider HTTP/SSE clients, request formatting, fallback policies, and custom wire formats (`customApiFormat`) |
@@ -275,15 +275,15 @@ sequenceDiagram
 
 ##### Agent Profiles, Internal Modes, and Workflows
 
-The user-facing selector is an `AgentProfileSelection` with three independent dimensions:
+The composer exposes only the capability-domain selector. `AgentProfileSelection` retains three fields for runtime and stored-data compatibility, but normal composer changes always set `intent=auto` and `strategy=auto`:
 
-| Dimension | Values | Meaning |
+| Runtime dimension | Values | Source |
 | --- | --- | --- |
-| Capability domain | `auto`, `paradox`, `general` | Select CWT/LSP-aware Paradox behavior or domain-neutral repository engineering |
-| Task intent | `auto`, `execute`, `plan`, `explore`, `review` | Select mutation, planning, investigation, or review behavior |
-| Execution strategy | `auto`, `single`, `multi` | Select one Agent or a domain-specific multi-Agent coordinator |
+| Capability domain | `auto`, `paradox`, `general` | User-selectable; chooses automatic detection, CWT/LSP-aware Paradox behavior, or domain-neutral repository engineering |
+| Task intent | `auto`, then resolved to `execute`, `plan`, `explore`, or `review` | Automatically inferred from the request |
+| Execution strategy | `auto`, then resolved to `single` or `multi` | Automatically inferred from task scope |
 
-`agentProfile.ts` resolves `auto` deterministically on every non-workflow turn from the selection, request semantics, and active-file path; it does not spend a separate model call on routing. Explicit dimensions always win. The resolved domain and `turnMode` are fixed for that turn and persisted in the V3 checkpoint; legacy V2 snapshots infer a compatible domain from their stored mode.
+On every non-Workflow turn, `chatPanel.ts` asks the configured model for a compact routing decision using the current request, recent conversation, active-file path, selected domain, and prior resolved domain. `agentProfile.ts` validates that decision and maps it to the internal mode; invalid or unavailable model routing uses its deterministic classifier as a safe fallback. Workflows and legacy restore paths may still provide explicit internal intent/strategy values. Multi-Agent is permitted only for execution intent. The resolved domain and `turnMode` are fixed for that turn and persisted in the V3 checkpoint; legacy V2 snapshots infer a compatible domain from their stored mode. Loading a normal topic migrates hidden legacy intent/strategy selections back to automatic routing. Routing usage participates in provider usage and cache accounting.
 
 `AgentMode` remains an internal execution and backward-compatibility adapter:
 
@@ -294,7 +294,7 @@ The user-facing selector is an `AgentProfileSelection` with three independent di
 | `strategy=single`, `intent=plan / explore / review` | `plan / explore / review` |
 | `strategy=single`, `intent=execute`, `domain=paradox / general` | `build / utility` |
 
-The legacy read-only `general` mode and specialist roles (`gui_expert`, `script_reviewer`, `loc_translator`, `loc_writer`) remain for old sessions and internal sub-Agent execution; they are not the primary UI model. A topic persists its selected Profile, internal mode, active Workflow, and pre-Workflow return state. Activating a Workflow temporarily owns the Profile/mode; switching directly between Workflows preserves the original return state, turning the Workflow off restores it, and a manual Profile change exits the Workflow.
+The legacy read-only `general` mode and specialist roles (`gui_expert`, `script_reviewer`, `loc_translator`, `loc_writer`) remain for old sessions and internal sub-Agent execution; they are not the primary UI model. A topic persists its selected domain Profile, internal mode, active Workflow, and pre-Workflow return state. Activating a Workflow temporarily owns the Profile/mode; switching directly between Workflows preserves the original return state, turning the Workflow off restores it, and a manual domain change exits the Workflow.
 
 `workflowRegistry.ts` contains:
 
@@ -634,7 +634,7 @@ sequenceDiagram
 
 | 文件 | 作用 |
 | --- | --- |
-| `agentProfile.ts` | 把用户选择的领域、意图和策略解析为本轮内部执行模式 |
+| `agentProfile.ts` | 把用户选择的领域及自动解析的意图、策略转换为本轮内部执行模式 |
 | `agentRunner.ts` | 推理循环、工具权限、workflow 应用、上下文压缩、检查点、回退 |
 | `agentTools.ts` | 工具分发、超时、共享黑板和 orchestrator 工具入口 |
 | `aiService.ts` | 各 AI Provider HTTP/SSE 客户端、请求适配、回退和 custom 线协议分发（`customApiFormat`） |
@@ -719,15 +719,15 @@ sequenceDiagram
 
 ##### Agent Profile、内部模式与 Workflow
 
-用户界面使用三维 `AgentProfileSelection`，三个维度彼此独立：
+输入框只向用户提供能力领域选择。`AgentProfileSelection` 为运行时与旧数据兼容继续保留三个字段，但普通输入框每次修改都会固定写入 `intent=auto` 和 `strategy=auto`：
 
-| 维度 | 可选值 | 含义 |
+| 运行时维度 | 可选值 | 来源 |
 | --- | --- | --- |
-| 能力领域 | `auto`、`paradox`、`general` | 选择 CWT/LSP 感知的 Paradox 能力或领域中立的仓库工程能力 |
-| 任务意图 | `auto`、`execute`、`plan`、`explore`、`review` | 选择修改、规划、调查或审查行为 |
-| 执行策略 | `auto`、`single`、`multi` | 选择单 Agent 或按领域区分的多 Agent 协调器 |
+| 能力领域 | `auto`、`paradox`、`general` | 用户可选；分别表示自动识别、CWT/LSP 感知的 Paradox 能力或领域中立的仓库工程能力 |
+| 任务意图 | `auto`，随后解析为 `execute`、`plan`、`explore` 或 `review` | 根据请求自动判断 |
+| 执行策略 | `auto`，随后解析为 `single` 或 `multi` | 根据任务规模自动判断 |
 
-`agentProfile.ts` 在每个非 Workflow 回合依据显式选择、请求语义和活动文件路径确定性地重新解析 `auto`，不额外消耗一次模型调用；用户固定的维度始终优先。本轮解析出的领域与 `turnMode` 在该回合内保持不变并写入 V3 checkpoint；旧 V2 快照则依据保存的 mode 推断兼容领域。
+每个非 Workflow 回合中，`chatPanel.ts` 会让当前配置的模型根据当前请求、近期对话、活动文件路径、用户选择的领域和上一轮解析领域返回紧凑的路由判断。`agentProfile.ts` 验证该判断并映射为内部模式；模型路由不可用或结果无效时，使用确定性分类器作为安全回退。Workflow 和旧数据恢复路径仍可在内部提供显式意图/策略；只有执行意图允许进入多 Agent。本轮解析出的领域与 `turnMode` 在该回合内保持不变并写入 V3 checkpoint；旧 V2 快照则依据保存的 mode 推断兼容领域。加载普通 Topic 时会把旧版隐藏的意图/策略选择迁移回自动路由。路由调用纳入 Provider 用量与缓存统计。
 
 `AgentMode` 继续作为内部执行与旧数据兼容层：
 
@@ -738,7 +738,7 @@ sequenceDiagram
 | `strategy=single`、`intent=plan / explore / review` | `plan / explore / review` |
 | `strategy=single`、`intent=execute`、`domain=paradox / general` | `build / utility` |
 
-旧的只读 `general` 以及 `gui_expert`、`script_reviewer`、`loc_translator`、`loc_writer` 等专职角色仅用于旧会话兼容或内部子 Agent，不再作为主要 UI 概念。Topic 会持久化所选 Profile、内部 Mode、活动 Workflow 以及进入 Workflow 前的返回状态。Workflow 激活后临时接管 Profile/Mode；直接切换 Workflow 会保留最初返回状态，关闭时恢复，而手动修改 Profile 会退出当前 Workflow。
+旧的只读 `general` 以及 `gui_expert`、`script_reviewer`、`loc_translator`、`loc_writer` 等专职角色仅用于旧会话兼容或内部子 Agent，不再作为主要 UI 概念。Topic 会持久化所选领域 Profile、内部 Mode、活动 Workflow 以及进入 Workflow 前的返回状态。Workflow 激活后临时接管 Profile/Mode；直接切换 Workflow 会保留最初返回状态，关闭时恢复，而手动修改能力领域会退出当前 Workflow。
 
 `workflowRegistry.ts` 当前注册：
 

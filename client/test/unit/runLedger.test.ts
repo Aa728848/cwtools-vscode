@@ -569,6 +569,32 @@ describe('RunLedger Unit Tests', () => {
         expect(stored[0].title).to.include('metadata topic');
         expect(stored[0].messages).to.deep.equal([]);
     });
+
+    it('persists, forks, and validates the resolved Agent domain on topics', async () => {
+        const { ChatTopicManager } = loadChatTopicsModule();
+        const storageRoot = path.join(workspaceRoot, '.chat-domain');
+        const storageUri = { fsPath: storageRoot } as ConstructorParameters<typeof ChatTopicManager>[0];
+        const manager = new ChatTopicManager(storageUri, () => {}, 'full');
+        manager.createNewTopic('Paradox follow-up');
+        if (!manager.currentTopic) throw new Error('Expected the topic to be created.');
+        manager.currentTopic.resolvedAgentDomain = 'paradox';
+        manager.addHistoryMessage({ role: 'user', content: 'change the next event id', timestamp: Date.now() });
+        manager.saveTopics();
+
+        const restored = new ChatTopicManager(storageUri, () => {}, 'full');
+        expect(restored.topics[0]?.resolvedAgentDomain).to.equal('paradox');
+        const restoredTopic = restored.topics[0];
+        if (!restoredTopic) throw new Error('Expected the topic to be restored.');
+        restored.forkTopic(restoredTopic.id, 0);
+        expect(restored.currentTopic?.resolvedAgentDomain).to.equal('paradox');
+
+        await restored.importTopicFromJson(JSON.stringify({
+            title: 'invalid domain',
+            messages: [{ role: 'user', content: 'continue', timestamp: Date.now() }],
+            resolvedAgentDomain: 'invalid',
+        }));
+        expect(restored.currentTopic?.resolvedAgentDomain).to.equal(undefined);
+    });
 });
 
 function loadRunLedgerModule() {
@@ -686,6 +712,8 @@ const vscodeStub = {
         workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
     },
     window: {
+        showInformationMessage: () => undefined,
+        showErrorMessage: () => undefined,
         createOutputChannel: () => ({
             appendLine: () => undefined,
             show: () => undefined,

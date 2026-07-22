@@ -904,7 +904,6 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 .composer-write-mode-trigger { max-width: 132px; flex: 0 1 auto; }
 .composer-mode-trigger { max-width: 116px; flex: 0 1 auto; }
 .composer-reasoning-trigger { width: 84px; max-width: 84px; flex: 0 0 84px; justify-content: space-between; }
-.composer-write-mode-trigger.write-mode-elevated { border-color: var(--accent); color: var(--accent); background: rgba(255,255,255,0.08); }
 .composer-write-mode-trigger.write-mode-danger { border-color: rgba(244,67,54,0.55); color: var(--error); background: rgba(244,67,54,0.12); }
 .write-mode-menu .model-menu-item-stacked { flex-direction: column; align-items: flex-start; gap: 2px; white-space: normal; }
 .write-mode-item-desc { font-weight: 400; font-size: 10.5px; opacity: 0.62; line-height: 1.35; }

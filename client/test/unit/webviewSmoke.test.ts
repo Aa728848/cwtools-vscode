@@ -30,11 +30,20 @@ describe('webview smoke checks', () => {
     it('chat webview source exposes expected bootstrap controls', () => {
         const html = fs.readFileSync(path.join(root, 'client/extension/ai/chatHtml.ts'), 'utf8');
         const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
 
         expect(html).to.include('id="chatArea"');
         expect(html).to.include('id="modeSel"');
         expect(html).to.include('id="composerAddBtn"');
         expect(html).to.include('id="quickModeTrigger"');
+        expect(html).to.include('data-profile-domain="auto"');
+        expect(html).to.include('data-profile-domain="paradox"');
+        expect(html).to.include('data-profile-domain="general"');
+        expect(html).not.to.include('data-profile-intent=');
+        expect(html).not.to.include('data-profile-strategy=');
+        expect(script).to.include("agentProfile = { domain, intent: 'auto', strategy: 'auto' }");
+        expect(script).to.include('updateAgentDomain(domain);\n                setModeMenuOpen(false);');
+        expect(css).not.to.include('.composer-write-mode-trigger.write-mode-elevated {');
         expect(html).to.include('id="quickModelTrigger"');
         expect(html).to.include('id="quickReasoningEffort"');
         expect(html).to.include('id="quickReasoningTrigger"');

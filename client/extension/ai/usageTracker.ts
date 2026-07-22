@@ -39,6 +39,8 @@ export interface UsageRecord {
     promptFingerprint?: string;
     /** Completed provider-call samples for request-accurate cache metrics. */
     cacheRequests?: CacheRequestUsage[];
+    /** Aggregated provider calls beyond the persisted per-call sample cap. */
+    cacheRequestOverflow?: CacheRequestUsage[];
 }
 
 export interface ProviderStats {
@@ -167,6 +169,7 @@ export class UsageTracker {
             agentMode: usage.agentMode,
             promptFingerprint: usage.promptFingerprint,
             cacheRequests: usage.cacheRequests?.slice(0, 256).map(request => ({ ...request })),
+            cacheRequestOverflow: usage.cacheRequestOverflow?.slice(0, 64).map(request => ({ ...request })),
         });
 
         // Auto-cleanup stale records
@@ -268,7 +271,7 @@ export class UsageTracker {
         // with observed hits would systematically inflate the rate.
         const cacheSamples = records.flatMap((record): CacheRequestUsage[] => {
             if (Array.isArray(record.cacheRequests) && record.cacheRequests.length > 0) {
-                return record.cacheRequests;
+                return [...record.cacheRequests, ...(record.cacheRequestOverflow ?? [])];
             }
             const cacheCapable = record.cacheCapable ?? isCacheCapableUsage(record.provider, record.cachedTokens);
             return [{
@@ -298,20 +301,23 @@ export class UsageTracker {
         const invalidationReasons = new Map<string, number>();
         const addBucket = (map: Map<string, MutableCacheBucket>, key: string, sample: CacheRequestUsage, hit: boolean) => {
             const bucket = map.get(key) ?? { requests: 0, hitRequests: 0, cachedTokens: 0, inputTokens: 0 };
-            bucket.requests += 1;
-            if (hit) bucket.hitRequests += 1;
+            const requestCount = sample.requestCount ?? 1;
+            bucket.requests += requestCount;
+            bucket.hitRequests += sample.hitRequestCount ?? (hit ? requestCount : 0);
             bucket.cachedTokens += sample.cachedTokens;
             bucket.inputTokens += sample.inputTokens;
             map.set(key, bucket);
         };
         for (const sample of cacheSamples) {
+            const requestCount = sample.requestCount ?? 1;
+            const hitRequestCount = sample.hitRequestCount ?? (sample.cachedTokens > 0 ? requestCount : 0);
             totalCachedTokens += sample.cachedTokens;
             totalInputTokens += sample.inputTokens;
             if (!sample.cacheCapable) continue;
             cacheCapableInputTokens += sample.inputTokens;
-            cacheCapableRequests += 1;
+            cacheCapableRequests += requestCount;
             const hit = sample.cachedTokens > 0;
-            if (hit) cacheHitRequests += 1;
+            cacheHitRequests += hitRequestCount;
             addBucket(byProviderMap, sample.provider || 'unknown', sample, hit);
             addBucket(byModelMap, sample.model || 'unknown', sample, hit);
             addBucket(byAgentModeMap, sample.agentMode ?? 'unspecified', sample, hit);
@@ -319,7 +325,7 @@ export class UsageTracker {
             addBucket(byPromptFingerprintMap, sample.promptFingerprint ?? 'unspecified', sample, hit);
             if (!hit) {
                 const reason = sample.invalidationReason ?? 'provider_miss';
-                invalidationReasons.set(reason, (invalidationReasons.get(reason) ?? 0) + 1);
+                invalidationReasons.set(reason, (invalidationReasons.get(reason) ?? 0) + requestCount);
             }
         }
         const cacheHitRate = cacheCapableInputTokens > 0

@@ -709,6 +709,23 @@ describe('EvidenceGate', () => {
         }
     });
 
+    it('parses the complete oversized file and marks bounded semantic coverage pending', async () => {
+        const lspCalls: Array<{ command: string; args: unknown[] }> = [];
+        const gate = new EvidenceGate(makeGateDeps({ workspaceRoot, lspCalls }));
+        const content = `${'x = 1\n'.repeat(20_000)}tail = yes\n`;
+        const decision = await gate.evaluate({
+            toolName: 'write_file',
+            targetFile: path.join(workspaceRoot, 'events', 'large.txt'),
+            text: content,
+            mode: 'enforce',
+            phase: 'post_write',
+        });
+        const parseCall = lspCalls.find(call => call.command === 'cwtools.ai.parseFragment');
+        expect(parseCall?.args[0]).to.equal(content);
+        expect(decision.claims.some(claim =>
+            claim.blocking && claim.status === 'unknown' && claim.claim.includes('complete written file'))).to.equal(true);
+    });
+
     it('normalizes untrusted mode values', () => {
         expect(normalizeEvidenceGateMode('off')).to.equal('off');
         expect(normalizeEvidenceGateMode('enforce')).to.equal('enforce');
@@ -1039,8 +1056,40 @@ describe('AgentToolExecutor evidence gate wiring', () => {
         expect(result.evidenceGateBlocked).to.not.equal(true);
         expect(result.evidenceGate?.degraded).to.equal(true);
         expect(result.evidenceGate?.advisoryEvidence).to.be.an('array').that.is.not.empty;
+        expect(result.postWriteValidation).to.deep.include({
+            verdict: 'pending',
+            evidencePassed: false,
+            diagnosticsPassed: false,
+        });
+        expect(result.requiresValidation).to.equal(true);
+        expect(result.requiresRepair).to.not.equal(true);
         expect(permissionAsked).to.equal(false);
         expect(fs.existsSync(target)).to.equal(true);
+    });
+
+    it('re-runs pending child evidence against the integrated file at finalization', async () => {
+        gateModeConfig = 'enforce';
+        const lspOptions: { throwAll?: boolean; definitions?: Set<string> } = {
+            throwAll: true,
+            definitions: new Set(['my_scripted_effect']),
+        };
+        const lsp = makeFakeLspClient(lspOptions);
+        const executor = makeExecutor(lsp);
+        const target = path.join(workspaceRoot, 'events', 'revalidate.txt');
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+
+        const write = await executor.execute('write_file', {
+            file: target,
+            content: 'effect = { my_scripted_effect = yes }',
+        }, makeContext([])) as any;
+        expect(write.postWriteValidation?.verdict).to.equal('pending');
+
+        lspOptions.throwAll = false;
+        const final = await executor.finalizePdxEvidence([target]);
+        expect(final.passed).to.equal(true);
+        expect(final.filesChecked).to.deep.equal([target]);
+        expect(final.pendingFiles).to.deep.equal([]);
+        expect(final.conflictFiles).to.deep.equal([]);
     });
 
     it('allows enforce-mode writes whose claims all verify', async () => {

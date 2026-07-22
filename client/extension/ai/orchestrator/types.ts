@@ -276,6 +276,10 @@ export interface QualityGateResult {
     /** Reviewer execution failed or timed out before producing a trustworthy verdict. */
     operationalFailure?: boolean;
     diagnosticErrors: number;
+    /** Files whose diagnostics were unavailable, stale, or still pending. */
+    validationPending?: number;
+    /** Integrated PDX files with confirmed EvidenceGate conflicts. */
+    evidenceConflicts?: number;
     logicIssues: number;
     semanticIssues: number;
     acceptanceFailures: string[];

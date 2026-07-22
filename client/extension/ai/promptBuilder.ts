@@ -220,6 +220,11 @@ export class PromptBuilder {
         this.memoryParser = new MemoryParser(workspaceRoot);
     }
 
+    /** Invalidate project-derived long-term memory after project/rule mutations. */
+    public markProjectMemoryStale(): number {
+        return MemoryParser.markWorkspaceProjectFactsStale(this.workspaceRoot);
+    }
+
     /**
      * Detect the active game languageId from the currently open editor.
      * Falls back to generic Paradox rules if nothing is detected.

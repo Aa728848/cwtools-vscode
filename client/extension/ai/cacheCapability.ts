@@ -35,6 +35,25 @@ export function isCacheCapableUsage(providerId: string, cachedTokens?: number, c
 }
 
 const MAX_CACHE_REQUEST_SAMPLES = 256;
+const MAX_CACHE_REQUEST_OVERFLOW_BUCKETS = 64;
+
+function normalizedRequestCount(value: number | undefined): number {
+    if (value === undefined || !Number.isFinite(value)) return 1;
+    return Math.max(1, Math.floor(value));
+}
+
+function overflowKey(sample: CacheRequestUsage): string {
+    return [
+        sample.provider,
+        sample.model,
+        sample.cacheCapable ? '1' : '0',
+        sample.agentMode ?? '',
+        sample.toolStage ?? '',
+        sample.promptFingerprint ?? '',
+        sample.purpose ?? '',
+        sample.invalidationReason ?? '',
+    ].join('\u0000');
+}
 
 /** Append one bounded, normalized provider-call sample to a run accumulator. */
 export function appendCacheRequestUsage(accumulator: TokenUsage | undefined, sample: CacheRequestUsage): void {
@@ -43,16 +62,42 @@ export function appendCacheRequestUsage(accumulator: TokenUsage | undefined, sam
     const cachedTokens = Number.isFinite(sample.cachedTokens)
         ? Math.min(inputTokens, Math.max(0, Math.floor(sample.cachedTokens)))
         : 0;
+    const requestCount = normalizedRequestCount(sample.requestCount);
+    const hitRequestCount = sample.hitRequestCount !== undefined && Number.isFinite(sample.hitRequestCount)
+        ? Math.min(requestCount, Math.max(0, Math.floor(sample.hitRequestCount)))
+        : cachedTokens > 0 ? requestCount : 0;
     const requests = accumulator.cacheRequests ?? [];
-    if (requests.length >= MAX_CACHE_REQUEST_SAMPLES) return;
-    requests.push({
+    const normalized: CacheRequestUsage = {
         ...sample,
         provider: sample.provider || 'unknown',
         model: sample.model || 'unknown',
         inputTokens,
         cachedTokens,
-    });
-    accumulator.cacheRequests = requests;
+        ...(sample.requestCount !== undefined || requestCount > 1 ? { requestCount } : {}),
+        ...(sample.hitRequestCount !== undefined || requestCount > 1 ? { hitRequestCount } : {}),
+    };
+    if (requests.length < MAX_CACHE_REQUEST_SAMPLES) {
+        requests.push(normalized);
+        accumulator.cacheRequests = requests;
+        return;
+    }
+
+    const overflow = accumulator.cacheRequestOverflow ?? [];
+    let bucket = overflow.find(item => overflowKey(item) === overflowKey(normalized));
+    if (!bucket && overflow.length < MAX_CACHE_REQUEST_OVERFLOW_BUCKETS) {
+        bucket = { ...normalized, inputTokens: 0, cachedTokens: 0, requestCount: 0, hitRequestCount: 0 };
+        overflow.push(bucket);
+    }
+    if (!bucket) {
+        bucket = overflow[MAX_CACHE_REQUEST_OVERFLOW_BUCKETS - 1];
+    }
+    if (bucket) {
+        bucket.inputTokens += inputTokens;
+        bucket.cachedTokens += cachedTokens;
+        bucket.requestCount = (bucket.requestCount ?? 0) + requestCount;
+        bucket.hitRequestCount = (bucket.hitRequestCount ?? 0) + hitRequestCount;
+    }
+    accumulator.cacheRequestOverflow = overflow;
 }
 
 /**
@@ -89,6 +134,9 @@ export function mergeTokenUsageTotals(target: TokenUsage | undefined, source: To
         target.fallbackCalls = (target.fallbackCalls ?? 0) + source.fallbackCalls;
     }
     for (const request of source.cacheRequests ?? []) {
+        appendCacheRequestUsage(target, request);
+    }
+    for (const request of source.cacheRequestOverflow ?? []) {
         appendCacheRequestUsage(target, request);
     }
 }

@@ -1675,6 +1675,10 @@ export interface CacheRequestUsage {
         | 'routing' | 'approval_review' | 'title';
     /** Why a cache-capable zero-hit request did not reuse the preceding prefix. */
     invalidationReason?: string;
+    /** Number of provider requests represented (greater than one for overflow rollups). */
+    requestCount?: number;
+    /** Requests in this rollup that observed cached tokens. */
+    hitRequestCount?: number;
 }
 
 export interface TokenUsage {
@@ -1710,6 +1714,8 @@ export interface TokenUsage {
     promptCacheMissReason?: string;
     /** Per-provider-call cache samples; bounded by the request path. */
     cacheRequests?: CacheRequestUsage[];
+    /** Bounded dimension-preserving rollups after the per-call sample cap is reached. */
+    cacheRequestOverflow?: CacheRequestUsage[];
 }
 
 export interface AgentRunMetrics {

@@ -6,6 +6,7 @@
 */
 
 import type { QualityGateResult, SubAgentResult, TaskGraph } from './types';
+import * as path from 'path';
 import type { AgentStep, GenerationResult, TokenUsage } from '../types';
 import { aiText } from '../messages';
 import type { RunEventSink } from '../runner/runContext';
@@ -181,6 +182,9 @@ export class QualityGate {
     ): Promise<QualityGateResult> {
         const taskGraph = reviewContext?.taskGraph;
         const workspaceRoot = reviewContext?.workspaceRoot ?? agentRunner.toolExecutor.workspaceRoot;
+        const finalEvidence = typeof agentRunner.toolExecutor.finalizePdxEvidence === 'function'
+            ? await agentRunner.toolExecutor.finalizePdxEvidence(writtenFiles)
+            : { passed: true, filesChecked: [], conflictFiles: [], pendingFiles: [], coveragePendingFiles: [], report: '' };
         const semantic = taskGraph
             ? await new SemanticVerifier().verify(workspaceRoot, writtenFiles, taskGraph, agentRunner.toolExecutor)
             : {
@@ -211,27 +215,52 @@ export class QualityGate {
 
         let preFetchedDiagnostics = '';
         let diagnosticErrorCount = 0;
+        let validationPendingCount = 0;
+        const freshDiagnosticFiles = new Set<string>();
         try {
             const diagResults: string[] = [];
             for (const file of writtenFiles) {
                 if (!isPdxDiagnosticFile(file)) continue;
                 const res = await agentRunner.toolExecutor.execute('get_diagnostics', { file, severity: 'error' });
                 if (res && typeof res === 'object') {
-                    const count = (res as any).totalDiagnosticCount || 0;
+                    const record = res as Record<string, unknown>;
+                    const count = typeof record.totalDiagnosticCount === 'number' ? record.totalDiagnosticCount : 0;
                     if (count > 0) {
                         diagnosticErrorCount += count;
-                        diagResults.push(`File: ${file}\n${JSON.stringify((res as any).diagnostics, null, 2)}`);
+                        diagResults.push(`File: ${file}\n${JSON.stringify(record.diagnostics, null, 2)}`);
                     }
+                    if (record.freshness !== 'fresh') {
+                        validationPendingCount++;
+                        diagResults.push(`File: ${file}\nFinal diagnostics are ${String(record.freshness ?? 'unavailable')}; do not report this file as validated yet.`);
+                    } else {
+                        freshDiagnosticFiles.add(path.isAbsolute(file) ? path.resolve(file) : path.resolve(workspaceRoot, file));
+                    }
+                } else {
+                    validationPendingCount++;
                 }
             }
             if (diagResults.length > 0) {
                 preFetchedDiagnostics = diagResults.join('\n\n');
             }
-        } catch {
-            // ignore
+        } catch (error) {
+            validationPendingCount++;
+            preFetchedDiagnostics = `Final diagnostics unavailable: ${error instanceof Error ? error.message : String(error)}`;
         }
 
-        const prompt = this.buildCombinedReviewPrompt(writtenFiles, preFetchedDiagnostics, reviewContext, semantic.report);
+        const coveragePending = new Set(finalEvidence.coveragePendingFiles.map(file => path.resolve(file)));
+        const unresolvedEvidencePending = finalEvidence.pendingFiles.filter(file =>
+            !coveragePending.has(path.resolve(file)) || !freshDiagnosticFiles.has(path.resolve(file)));
+        validationPendingCount += unresolvedEvidencePending.length;
+        const coverageResolved = finalEvidence.coveragePendingFiles.length - unresolvedEvidencePending
+            .filter(file => coveragePending.has(path.resolve(file))).length;
+        const deterministicReport = [
+            finalEvidence.report,
+            coverageResolved > 0
+                ? `Final fresh diagnostics covered ${coverageResolved} file(s) whose semantic extraction hit a safety bound.`
+                : '',
+            semantic.report,
+        ].filter(Boolean).join('\n\n');
+        const prompt = this.buildCombinedReviewPrompt(writtenFiles, preFetchedDiagnostics, reviewContext, deterministicReport);
         
         // Run the hidden post-dispatch reviewer as a real bounded child agent.
         // Previously it inherited the top-level 10,000-iteration allowance, so
@@ -346,6 +375,8 @@ export class QualityGate {
                 passed: false,
                 operationalFailure: true,
                 diagnosticErrors: diagnosticErrorCount,
+                validationPending: validationPendingCount,
+                evidenceConflicts: finalEvidence.conflictFiles.length,
                 logicIssues: 0,
                 semanticIssues: semantic.issues.length,
                 acceptanceFailures,
@@ -356,12 +387,14 @@ export class QualityGate {
                 passed: false,
                 operationalFailure: true,
                 diagnosticErrors: diagnosticErrorCount,
+                validationPending: validationPendingCount,
+                evidenceConflicts: finalEvidence.conflictFiles.length,
                 logicIssues: 0,
                 semanticIssues: semantic.issues.length,
                 acceptanceFailures,
                 filesChecked: writtenFiles,
-                reviewReport: [semantic.report, message].filter(Boolean).join('\n\n'),
-                semanticReport: semantic.report,
+                reviewReport: [deterministicReport, message].filter(Boolean).join('\n\n'),
+                semanticReport: deterministicReport,
                 fixSuggestions: semantic.issues.map(issue => issue.message),
             };
         } finally {
@@ -387,6 +420,8 @@ export class QualityGate {
             ...missingAcceptanceEvidence,
         ])];
         const passed = diagnosticErrorCount === 0
+            && validationPendingCount === 0
+            && finalEvidence.conflictFiles.length === 0
             && totalLogicIssues === 0
             && semantic.issues.length === 0
             && acceptanceFailures.length === 0;
@@ -394,6 +429,8 @@ export class QualityGate {
         this.eventSink?.appendSoon('quality_gate_decision', {
             passed,
             diagnosticErrors: diagnosticErrorCount,
+            validationPending: validationPendingCount,
+            evidenceConflicts: finalEvidence.conflictFiles.length,
             logicIssues: totalLogicIssues,
             semanticIssues: semantic.issues.length,
             acceptanceFailures,
@@ -404,13 +441,19 @@ export class QualityGate {
         return {
             passed,
             diagnosticErrors: diagnosticErrorCount,
+            validationPending: validationPendingCount,
+            evidenceConflicts: finalEvidence.conflictFiles.length,
             logicIssues: totalLogicIssues,
             semanticIssues: semantic.issues.length,
             acceptanceFailures,
             filesChecked: writtenFiles,
-            reviewReport: [semantic.report, reviewResult.explanation].filter(Boolean).join('\n\n'),
-            semanticReport: semantic.report,
-            fixSuggestions: [...new Set([...semantic.issues.map(issue => issue.message), ...parsed.fixSuggestions])],
+            reviewReport: [deterministicReport, reviewResult.explanation].filter(Boolean).join('\n\n'),
+            semanticReport: deterministicReport,
+            fixSuggestions: [...new Set([
+                ...finalEvidence.conflictFiles.map(file => `Resolve confirmed PDX evidence conflicts in ${file}.`),
+                ...semantic.issues.map(issue => issue.message),
+                ...parsed.fixSuggestions,
+            ])],
         };
     }
 

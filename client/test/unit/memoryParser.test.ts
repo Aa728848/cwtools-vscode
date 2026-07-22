@@ -232,6 +232,82 @@ describe('MemoryParser topic storage', () => {
         expect(prompt).to.not.include('stale=true');
     });
 
+    it('invalidates project facts across active topics without staling user facts', async () => {
+        const { MemoryParser } = loadMemoryParserModule();
+        const first = new MemoryParser(workspaceRoot, 'topic_project_a');
+        const second = new MemoryParser(workspaceRoot, 'topic_project_b');
+        await first.appendMemory({ key: 'project rule a', content: 'Old rule A.', priority: 'normal', source: 'project-docs' });
+        await first.appendMemory({ key: 'user preference a', content: 'Keep tabs.', priority: 'normal', source: 'user:instruction' });
+        await second.appendMemory({ key: 'project rule b', content: 'Old rule B.', priority: 'normal', source: 'project-profile' });
+
+        expect(MemoryParser.markWorkspaceProjectFactsStale(workspaceRoot)).to.equal(2);
+        expect(first.getMemoryPrompt()).to.not.include('project rule a');
+        expect(first.getMemoryPrompt()).to.include('user preference a');
+        expect(second.getMemoryPrompt()).to.not.include('project rule b');
+    });
+
+    it('queues stale project facts for metadata-only revalidation on a later task', async () => {
+        const { MemoryParser } = loadMemoryParserModule();
+        const parser = new MemoryParser(workspaceRoot, 'topic_revalidation_queue');
+        await parser.appendMemory({
+            key: 'stellaris event namespace',
+            content: 'The old namespace is obsolete and must never be injected.',
+            priority: 'high',
+            source: 'events/project_events.txt',
+            revision: 'sha256:old',
+        });
+
+        parser.markMemoryStale(undefined, undefined, 'events_file_changed');
+        const prompt = parser.getMemoryPrompt(undefined, {
+            taskText: 'update the stellaris event namespace',
+            gameId: 'stellaris',
+        });
+
+        expect(prompt).to.include('<stale-project-memory>');
+        expect(prompt).to.include('stellaris event namespace');
+        expect(prompt).to.include('events/project_events.txt');
+        expect(prompt).to.include('events_file_changed');
+        expect(prompt).to.not.include('The old namespace is obsolete');
+
+        const unrelatedPrompt = parser.getMemoryPrompt(undefined, {
+            taskText: 'translate a localisation tooltip',
+            gameId: 'stellaris',
+        });
+        expect(unrelatedPrompt).to.not.include('<stale-project-memory>');
+    });
+
+    it('preserves project provenance when a stale key is re-saved by a later run', async () => {
+        const { MemoryParser } = loadMemoryParserModule();
+        const parser = new MemoryParser(workspaceRoot, 'topic_project_rewrite');
+        await parser.appendMemory({
+            key: 'project namespace',
+            content: 'Use old namespace.',
+            priority: 'normal',
+            source: 'events/project_events.txt',
+            revision: 'sha256:old',
+        });
+        parser.markMemoryStale(undefined, undefined, 'events_file_changed');
+
+        const result = await parser.appendMemory({
+            key: 'project namespace',
+            content: 'Use new namespace.',
+            priority: 'normal',
+            source: 'run:revalidation-run',
+            revision: 'sha256:new',
+        });
+
+        expect(result.revalidatedProjectFact).to.equal(true);
+        const entries = JSON.parse(fs.readFileSync(parser.getStructuredMemoryFilePath(), 'utf8')).entries;
+        expect(entries[0]).to.include({
+            kind: 'project_fact',
+            source: 'events/project_events.txt',
+            revision: 'sha256:new',
+        });
+        expect(entries[0].stale).to.equal(undefined);
+        expect(parser.getMemoryPrompt(undefined, { taskText: 'project namespace' })).to.include('Use new namespace.');
+        expect(parser.getMemoryPrompt(undefined, { taskText: 'project namespace' })).to.not.include('<stale-project-memory>');
+    });
+
     it('reads version 1 memory files and infers kinds conservatively', () => {
         const { MemoryParser } = loadMemoryParserModule();
         const parser = new MemoryParser(workspaceRoot, 'topic_v1');

@@ -35,6 +35,9 @@ export interface MemoryEntry {
     revision?: string;
     /** Stale entries await re-validation and are excluded from prompts by default. */
     stale?: boolean;
+    /** When and why project evidence invalidated this entry. */
+    staleAt?: number;
+    staleReason?: string;
 }
 
 /** Optional retrieval context for top-k memory selection (plan §8). */
@@ -73,6 +76,8 @@ function sanitizeMemoryEntry(raw: unknown): MemoryEntry | null {
         kind: kind === 'user_fact' || kind === 'project_fact' || kind === 'inferred' || kind === 'ephemeral' ? kind : undefined,
         revision: typeof record.revision === 'string' ? record.revision : undefined,
         stale: record.stale === true ? true : undefined,
+        staleAt: num(record.staleAt),
+        staleReason: typeof record.staleReason === 'string' ? record.staleReason : undefined,
     };
 }
 
@@ -94,14 +99,20 @@ export class MemoryParser {
     static readonly MAX_MEMORY_CHARS = 12000;
     /** Max number of entries injected per prompt (top-k retrieval, plan §8). */
     static readonly TOP_K_MEMORY_ENTRIES = 10;
+    /** Small metadata-only queue exposed to a later relevant run for re-validation. */
+    static readonly TOP_K_STALE_PROJECT_FACTS = 5;
     /** Debounce window for usage-stat persistence. Writable for tests. */
     static usagePersistDebounceMs = 2000;
     static readonly MEMORY_FILE_NAME = '.cwtools-memory.md';
     static readonly STRUCTURED_MEMORY_FILE_NAME = 'memory.json';
     /** Structured file format version written by this build. Readers stay lenient. */
-    static readonly STRUCTURED_MEMORY_VERSION = 2;
+    static readonly STRUCTURED_MEMORY_VERSION = 3;
     /** Half-life scale for freshness/last-used decay in retrieval scoring. */
     private static readonly FRESHNESS_DECAY_MS = 30 * 24 * 60 * 60 * 1000;
+    private static readonly KNOWN_WORKSPACE_LIMIT = 16;
+    private static readonly KNOWN_TOPIC_LIMIT = 128;
+    /** Active topic ids only; bounded so invalidation never scans the workspace. */
+    private static knownTopics = new Map<string, Set<string>>();
 
     /**
      * Process-wide pending usage increments, keyed by workspace+topic so multiple
@@ -115,7 +126,51 @@ export class MemoryParser {
         timer?: NodeJS.Timeout;
     }>();
 
-    constructor(private workspaceRoot: string, private topicId?: string) {}
+    constructor(private workspaceRoot: string, private topicId?: string) {
+        if (topicId) MemoryParser.rememberTopic(workspaceRoot, topicId);
+    }
+
+    private static workspaceKey(workspaceRoot: string): string {
+        const resolved = path.resolve(workspaceRoot);
+        return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    }
+
+    private static rememberTopic(workspaceRoot: string, topicId: string): void {
+        const normalizedTopic = topicId.trim();
+        if (!normalizedTopic) return;
+        const key = MemoryParser.workspaceKey(workspaceRoot);
+        let topics = MemoryParser.knownTopics.get(key);
+        if (!topics) {
+            if (MemoryParser.knownTopics.size >= MemoryParser.KNOWN_WORKSPACE_LIMIT) {
+                const oldest = MemoryParser.knownTopics.keys().next().value;
+                if (oldest !== undefined) MemoryParser.knownTopics.delete(oldest);
+            }
+            topics = new Set<string>();
+            MemoryParser.knownTopics.set(key, topics);
+        }
+        if (topics.has(normalizedTopic)) return;
+        topics.add(normalizedTopic);
+        if (topics.size > MemoryParser.KNOWN_TOPIC_LIMIT) {
+            const oldest = topics.values().next().value;
+            if (oldest !== undefined) topics.delete(oldest);
+        }
+    }
+
+    /** Mark project-derived facts stale for every topic used in this process. */
+    public static markWorkspaceProjectFactsStale(
+        workspaceRoot: string,
+        reason = 'project_or_rules_changed',
+    ): number {
+        const topics = MemoryParser.knownTopics.get(MemoryParser.workspaceKey(workspaceRoot));
+        if (!topics) return 0;
+        let marked = 0;
+        for (const topicId of topics) {
+            const parser = new MemoryParser(workspaceRoot, topicId);
+            marked += parser.markMemoryStale(topicId, entry =>
+                (entry.kind ?? MemoryParser.inferKind(entry.source)) === 'project_fact', reason);
+        }
+        return marked;
+    }
 
     /** Get the full path to the topic-scoped memory file used for new writes. */
     public get memoryFilePath(): string {
@@ -185,6 +240,8 @@ export class MemoryParser {
                     kind: entry.kind,
                     revision: entry.revision,
                     stale: entry.stale,
+                    staleAt: entry.staleAt,
+                    staleReason: entry.staleReason,
                     usageCount: entry.usageCount,
                     expiresAt: entry.expiresAt,
                     scope: entry.scope,
@@ -279,6 +336,50 @@ export class MemoryParser {
         return `## ${entry.key} [priority=${entry.priority}; confidence=${entry.confidence ?? 0.8}; source=${entry.source ?? 'agent'}; kind=${entry.kind ?? MemoryParser.inferKind(entry.source)}${staleMarker}]\n${entry.content}`;
     }
 
+    private buildStaleProjectFactPrompt(
+        entries: MemoryEntry[],
+        context: MemoryRetrievalContext | undefined,
+        now: number,
+    ): string {
+        if (context?.includeStale === true || !context?.taskText?.trim()) return '';
+        const keywords = MemoryParser.tokenizeTaskText(context.taskText);
+        const gameId = context.gameId?.toLowerCase();
+        const pathHints = (context.pathScope ?? []).map(hint => hint.toLowerCase()).filter(Boolean);
+        const candidates = entries
+            .filter(entry => entry.stale === true
+                && (!entry.expiresAt || entry.expiresAt > now)
+                && (entry.kind ?? MemoryParser.inferKind(entry.source)) === 'project_fact')
+            .filter(entry => {
+                const haystack = `${entry.key}\n${entry.content}\n${entry.source ?? ''}`.toLowerCase();
+                const entryTerms = MemoryParser.tokenizeTaskText(haystack);
+                const keywordMatch = keywords.some(keyword => entryTerms.some(term =>
+                    term === keyword
+                    || (term.length >= 3 && keyword.length >= 3
+                        && (term.includes(keyword) || keyword.includes(term)))));
+                const source = entry.source?.toLowerCase();
+                const pathMatch = pathHints.some(hint => haystack.includes(hint) || (!!source && hint.includes(source)));
+                return keywordMatch || pathMatch;
+            })
+            .map(entry => ({ entry, score: this.scoreMemoryEntry(entry, keywords, gameId, pathHints, now) }))
+            .sort((a, b) =>
+                b.score - a.score
+                || (b.entry.staleAt ?? b.entry.updatedAt ?? 0) - (a.entry.staleAt ?? a.entry.updatedAt ?? 0)
+                || a.entry.key.localeCompare(b.entry.key))
+            .slice(0, MemoryParser.TOP_K_STALE_PROJECT_FACTS);
+        if (candidates.length === 0) return '';
+
+        const sanitizeMetadata = (value: string | undefined, fallback: string): string =>
+            (value?.replace(/[\r\n\t]+/g, ' ').trim() || fallback).slice(0, 240);
+        const lines = candidates.map(({ entry }) => {
+            const key = sanitizeMetadata(entry.key, 'unnamed');
+            const source = sanitizeMetadata(entry.source, 'project evidence');
+            const revision = entry.revision ? `; previous-revision=${sanitizeMetadata(entry.revision, 'unknown')}` : '';
+            const reason = entry.staleReason ? `; reason=${sanitizeMetadata(entry.staleReason, 'changed')}` : '';
+            return `- key=${JSON.stringify(key)}; source=${JSON.stringify(source)}${revision}${reason}`;
+        });
+        return `<stale-project-memory>\n# PROJECT FACTS AWAITING RE-VALIDATION\nThese prior project-memory keys were invalidated by project or rules changes. Their old values are intentionally omitted and must not be trusted. If a key is relevant to the current task, re-read its current authoritative source or equivalent CWT/LSP evidence, then call save_memory with the same key and corrected content. Re-saving preserves its project-fact provenance and removes it from this queue.\n${lines.join('\n')}\n</stale-project-memory>\n`;
+    }
+
     /**
      * Reads memory and builds the prompt block. Read-only: never updates usage
      * statistics and never rewrites memory files. With structured entries present,
@@ -290,14 +391,15 @@ export class MemoryParser {
     public getMemoryPrompt(topicId = this.topicId, context?: MemoryRetrievalContext): string {
         try {
             if (!this.workspaceRoot) return '';
+            if (topicId) MemoryParser.rememberTopic(this.workspaceRoot, topicId);
 
             const structured = this.readStructuredEntries(topicId);
             if (structured.length > 0) {
                 const now = Date.now();
+                const staleProjectFactPrompt = this.buildStaleProjectFactPrompt(structured, context, now);
                 const usable = structured.filter(entry =>
                     (!entry.expiresAt || entry.expiresAt > now)
                     && (context?.includeStale === true || entry.stale !== true));
-                if (usable.length === 0) return '';
                 const keywords = context?.taskText ? MemoryParser.tokenizeTaskText(context.taskText) : [];
                 const gameId = context?.gameId?.toLowerCase();
                 const pathHints = (context?.pathScope ?? []).map(hint => hint.toLowerCase()).filter(Boolean);
@@ -316,9 +418,10 @@ export class MemoryParser {
                     blocks.push(block);
                     budget -= block.length;
                 }
-                if (blocks.length === 0) return '';
-                const content = blocks.join('\n\n');
-                return `<workspace-memory>\n# LONG-TERM AGENT MEMORY\nThese are the ${blocks.length} most relevant private, structured hints with provenance (selected by task relevance, priority, confidence, freshness, and actual usage). They do not override current user instructions, safety policy, diagnostics, or verified project evidence.\n\n${content}\n</workspace-memory>\n`;
+                const activeMemoryPrompt = blocks.length > 0
+                    ? `<workspace-memory>\n# LONG-TERM AGENT MEMORY\nThese are the ${blocks.length} most relevant private, structured hints with provenance (selected by task relevance, priority, confidence, freshness, and actual usage). They do not override current user instructions, safety policy, diagnostics, or verified project evidence.\n\n${blocks.join('\n\n')}\n</workspace-memory>\n`
+                    : '';
+                return [activeMemoryPrompt, staleProjectFactPrompt].filter(Boolean).join('\n');
             }
 
             const candidates = this.getMemoryReadCandidates(topicId);
@@ -460,10 +563,14 @@ export class MemoryParser {
      * entries stay on disk but are excluded from prompts until re-validated
      * (re-saving the key via appendMemory clears the flag). Pass a predicate to
      * downgrade a subset, or omit it to downgrade all entries of the topic.
-     * Wiring to project/rule change events is a deliberate follow-up; this API is
-     * the hook for it. Returns how many entries were newly marked.
+     * Project/rule change watchers call this for active topics. Returns how many
+     * entries were newly marked.
      */
-    public markMemoryStale(topicId = this.topicId, predicate?: (entry: MemoryEntry) => boolean): number {
+    public markMemoryStale(
+        topicId = this.topicId,
+        predicate?: (entry: MemoryEntry) => boolean,
+        reason = 'project_or_rules_changed',
+    ): number {
         try {
             const entries = this.readStructuredEntries(topicId);
             let marked = 0;
@@ -471,6 +578,8 @@ export class MemoryParser {
                 if (entry.stale === true) continue;
                 if (predicate && !predicate(entry)) continue;
                 entry.stale = true;
+                entry.staleAt = Date.now();
+                entry.staleReason = reason;
                 marked++;
             }
             if (marked > 0) {
@@ -491,7 +600,7 @@ export class MemoryParser {
      * priority only affects which entries are kept first, it never exempts an
      * entry (not even a high-priority one) from the total budget.
      */
-    public async appendMemory(entry: MemoryEntry, topicId = this.topicId): Promise<{ success: boolean; message: string; existed?: boolean }> {
+    public async appendMemory(entry: MemoryEntry, topicId = this.topicId): Promise<{ success: boolean; message: string; existed?: boolean; revalidatedProjectFact?: boolean }> {
         try {
             if (!this.workspaceRoot) {
                 return { success: false, message: 'No workspace root' };
@@ -501,7 +610,14 @@ export class MemoryParser {
             const entries = this.readStructuredEntries(topicId);
             const normalizedKey = entry.key.trim().slice(0, 160);
             const existing = entries.find(candidate => candidate.key.toLowerCase() === normalizedKey.toLowerCase());
-            const source = entry.source ?? 'agent:save_memory';
+            const requestedSource = entry.source ?? 'agent:save_memory';
+            const existingKind = existing?.kind ?? MemoryParser.inferKind(existing?.source);
+            const genericAgentRewrite = requestedSource === 'agent:save_memory' || requestedSource.startsWith('run:');
+            const revalidatedProjectFact = existing?.stale === true
+                && existingKind === 'project_fact'
+                && entry.kind === undefined
+                && genericAgentRewrite;
+            const source = revalidatedProjectFact ? existing.source : requestedSource;
             // A single entry must fit the total budget on its own (with room for
             // the key and per-entry overhead), otherwise it could never be kept.
             const truncationMarker = '…[truncated]';
@@ -517,7 +633,11 @@ export class MemoryParser {
                 source,
                 // Re-saving a key revalidates it: stale/revision come from the new
                 // entry only, never carried over from the superseded one.
-                kind: entry.kind ?? MemoryParser.inferKind(source),
+                kind: revalidatedProjectFact ? 'project_fact' : entry.kind ?? MemoryParser.inferKind(source),
+                revision: entry.revision,
+                stale: undefined,
+                staleAt: undefined,
+                staleReason: undefined,
                 confidence: Math.max(0, Math.min(1, entry.confidence ?? 0.8)),
                 createdAt: existing?.createdAt ?? now,
                 updatedAt: now,
@@ -549,7 +669,14 @@ export class MemoryParser {
             // Invalidate cache
             this.cache.clear();
 
-            return { success: true, message: `Memory saved: "${entry.key}"`, existed: !!existing };
+            return {
+                success: true,
+                message: revalidatedProjectFact
+                    ? `Project memory revalidated and updated: "${entry.key}"`
+                    : `Memory saved: "${entry.key}"`,
+                existed: !!existing,
+                revalidatedProjectFact,
+            };
         } catch (e: any) {
             ErrorReporter.debug(SOURCE.MEMORY_PARSER, 'Error appending memory', e);
             return { success: false, message: `Failed to save memory: ${e?.message ?? e}` };

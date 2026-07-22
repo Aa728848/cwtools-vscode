@@ -26,6 +26,7 @@ import type {
     DiffSummaryFile,
     GenerationResult,
     ContextItem,
+    TokenUsage,
 } from './types';
 import { contentToString } from './types';
 import { AgentRunner } from './agentRunner';
@@ -2404,12 +2405,27 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.emitSlashCommandResult(raw, 'success', aiText('Started a new topic.', '已开始新话题。'));
                 return;
             case 'compact': {
+                const config = this.aiService.getConfig();
+                const compactionUsage: TokenUsage = {
+                    total: 0,
+                    input: 0,
+                    output: 0,
+                    estimatedCostCny: 0,
+                    agentMode: this.currentMode,
+                };
                 const result = await this.agentRunner.compactActiveHistory(this.conversationMessages, {
                     mode: this.currentMode,
-                    model: this.aiService.getConfig().model || undefined,
+                    model: config.model || undefined,
                 }, step => {
                     if (step.compactionInfo) this.postMessage({ type: 'contextCompactionStatus', step });
-                });
+                }, compactionUsage);
+                if (compactionUsage.total > 0) {
+                    this.usageTracker.addUsage(config.provider, config.model || 'unknown', compactionUsage, {
+                        topicId: this.topicManager.currentTopic?.id,
+                        cacheCapable: supportsOpenAiStylePrefixCache(config.provider, config.customApiFormat),
+                    });
+                    this.postMessage({ type: 'tokenUsage', usage: compactionUsage, model: config.model });
+                }
                 if (result.compacted && this.topicManager.currentTopic?.id) {
                     const topicId = this.topicManager.currentTopic.id;
                     const latestRun = this.currentRunId

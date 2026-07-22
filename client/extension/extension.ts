@@ -1570,6 +1570,11 @@ export async function activate(context: ExtensionContext) {
 		if (e.affectsConfiguration('stellarisLanguageServices.ai.agentFileWriteMode')) {
 			toolExecutor.fileWriteMode = workspace.getConfiguration('stellarisLanguageServices.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'auto');
 		}
+		if (e.affectsConfiguration('stellarisLanguageServices.rules_version')
+			|| e.affectsConfiguration('stellarisLanguageServices.rules_folder')
+			|| e.affectsConfiguration('stellarisLanguageServices.rules_remote_url')) {
+			scheduleProjectMemoryInvalidation();
+		}
 	}));
 	// Invalidate LSP read cache on document changes so AI doesn't base decisions on stale data
 	context.subscriptions.push(workspace.onDidChangeTextDocument(e => {
@@ -1579,18 +1584,36 @@ export async function activate(context: ExtensionContext) {
 	// commands without producing onDidChangeTextDocument. Keep query-only semantic
 	// graph caches coherent with those file-system mutations as well.
 	const aiSemanticWatcher = workspace.createFileSystemWatcher('**/*.{txt,gui,yml,gfx,asset,cwt,entity,shader,fxh}');
+	let aiMemoryInvalidationTimer: ReturnType<typeof setTimeout> | undefined;
+	const scheduleProjectMemoryInvalidation = () => {
+		if (aiMemoryInvalidationTimer) clearTimeout(aiMemoryInvalidationTimer);
+		aiMemoryInvalidationTimer = setTimeout(() => {
+			aiMemoryInvalidationTimer = undefined;
+			promptBuilder.markProjectMemoryStale();
+		}, 250);
+	};
+	const invalidateAiSemanticInputs = (uri: vs.Uri) => {
+		toolExecutor.invalidateCacheForFile(uri.fsPath);
+		scheduleProjectMemoryInvalidation();
+	};
 	context.subscriptions.push(
+		{ dispose: () => {
+			if (aiMemoryInvalidationTimer) clearTimeout(aiMemoryInvalidationTimer);
+		} },
 		aiSemanticWatcher,
-		aiSemanticWatcher.onDidChange(uri => toolExecutor.invalidateCacheForFile(uri.fsPath)),
-		aiSemanticWatcher.onDidCreate(uri => toolExecutor.invalidateCacheForFile(uri.fsPath)),
-		aiSemanticWatcher.onDidDelete(uri => toolExecutor.invalidateCacheForFile(uri.fsPath)),
+		aiSemanticWatcher.onDidChange(invalidateAiSemanticInputs),
+		aiSemanticWatcher.onDidCreate(invalidateAiSemanticInputs),
+		aiSemanticWatcher.onDidDelete(invalidateAiSemanticInputs),
 	);
 	// Frozen system prompts key on CWTOOLS.md / project profile content hashes,
 	// so they miss naturally on edit; this watcher proactively drops the parsed
 	// mtime caches so the next fingerprint reflects current content immediately
 	// (plan §7.1).
 	const aiPromptInputsWatcher = workspace.createFileSystemWatcher('{CWTOOLS.md,.cwtools/project/profile.json,.cwtools-ai/project/profile.json}');
-	const invalidatePromptInputs = () => promptBuilder.invalidateProjectPromptInputs();
+	const invalidatePromptInputs = () => {
+		promptBuilder.invalidateProjectPromptInputs();
+		scheduleProjectMemoryInvalidation();
+	};
 	context.subscriptions.push(
 		aiPromptInputsWatcher,
 		aiPromptInputsWatcher.onDidChange(invalidatePromptInputs),

@@ -1653,6 +1653,14 @@
                     "minimum": 1000,
                     "description": "%configuration.stellarisLanguageServices.ai.performance.uncachedInputTokenBudget.description%"
                 },
+                "stellarisLanguageServices.ai.performance.hardBudgetMultiplier": {
+                    "scope": "window",
+                    "type": "number",
+                    "default": 4,
+                    "minimum": 2,
+                    "maximum": 100,
+                    "description": "%configuration.stellarisLanguageServices.ai.performance.hardBudgetMultiplier.description%"
+                },
                 "stellarisLanguageServices.ai.performance.subAgentModelCallBudget": {
                     "scope": "window",
                     "type": "number",

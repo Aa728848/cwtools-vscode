@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import type { ExtensionContext } from 'vscode';
 import type { TokenUsage } from '../../extension/ai/types';
 import { buildProviderCallTokenUsage } from '../../extension/ai/providerCallUsage';
+import { appendCacheRequestUsage } from '../../extension/ai/cacheCapability';
 
 const STORAGE_KEY = 'cwtools.ai.usageStats.v2';
 
@@ -303,6 +304,35 @@ describe('UsageTracker request-level cache metrics (plan §7.3)', () => {
         expect(cache.cacheCapableInputTokens).to.equal(2000);
         expect(cache.requestHitRate).to.equal(0);
         expect(cache.invalidationReasons).to.deep.equal({ provider_miss: 2 });
+    });
+
+    it('rolls up cache calls beyond the per-request sample cap without losing totals', () => {
+        const { UsageTracker } = loadUsageTrackerModule();
+        const { context } = makeContext();
+        const tracker = new UsageTracker(context);
+        const usage = makeUsage(3000, 100, 1500);
+        for (let i = 0; i < 300; i++) {
+            appendCacheRequestUsage(usage, {
+                provider: 'deepseek',
+                model: 'deepseek-chat',
+                inputTokens: 10,
+                cachedTokens: i % 2 === 0 ? 5 : 0,
+                cacheCapable: true,
+                agentMode: 'script',
+                toolStage: 'write',
+                purpose: 'reasoning',
+                invalidationReason: i % 2 === 0 ? undefined : 'provider_miss',
+            });
+        }
+        tracker.addUsage('deepseek', 'deepseek-chat', usage);
+
+        const cache = tracker.getStats().cacheStats;
+        expect(usage.cacheRequests).to.have.lengthOf(256);
+        expect(usage.cacheRequestOverflow).to.not.be.empty;
+        expect(cache.byProvider.deepseek?.requests).to.equal(300);
+        expect(cache.byProvider.deepseek?.hitRequests).to.equal(150);
+        expect(cache.totalInputTokens).to.equal(3000);
+        expect(cache.totalCachedTokens).to.equal(750);
     });
 });
 

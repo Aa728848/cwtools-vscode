@@ -11,11 +11,11 @@
  *  - sources disagree, or an authoritative source contradicts the claim -> `conflict`
  *  - evidence revision older than the currently observable revision -> `stale`
  *
- * Aggregation: any blocking claim that is unknown/conflict/stale blocks the
- * write in enforce mode. The gate never lets model text promote a claim; a
- * retry re-runs collection. call_chain is only checked when the fragment
- * determines it deterministically — otherwise it stays a non-blocking
- * `unknown` with an explicit limitation note.
+ * Aggregation is two-phase: pre-write only a confirmed conflict blocks, while
+ * unknown/stale evidence remains visible for post-write and final validation.
+ * The gate never lets model text promote a claim; a retry re-runs collection.
+ * call_chain is only checked when the fragment determines it deterministically
+ * — otherwise it stays a non-blocking `unknown` with an explicit limitation.
  */
 
 import * as crypto from 'crypto';
@@ -33,6 +33,7 @@ import {
 import {
     extractClaimsFromText,
     extractLocalDefinitions,
+    MAX_CLAIM_CANDIDATES,
     MAX_EXTRACT_CHARS,
     scopePushedBy,
     type ExtractedClaimCandidate,
@@ -276,7 +277,17 @@ export class EvidenceGate {
             text: boundedText,
             truncated,
             gameProfile: this.deps.gameProfile,
-        });
+        }).map(candidate => candidate.subject.type === 'syntax'
+            ? {
+                ...candidate,
+                // Semantic extraction stays bounded, but syntax validation must
+                // cover the complete final file rather than a valid 100k prefix.
+                subject: { ...candidate.subject, code: input.text },
+                detail: truncated
+                    ? `Semantic extraction is bounded to ${MAX_EXTRACT_CHARS} chars; syntax verification covers the complete file.`
+                    : candidate.detail,
+            }
+            : candidate);
         const localDefinitions = extractLocalDefinitions({
             targetFile: input.targetFile,
             text: boundedText,
@@ -343,6 +354,19 @@ export class EvidenceGate {
                 // Verification must degrade to unknown, never crash the write path.
                 claims.push(this.unresolved(candidate, error instanceof Error ? error.message : String(error)));
             }
+        }
+
+        if (truncated || allCandidates.length >= MAX_CLAIM_CANDIDATES) {
+            claims.push({
+                kind: 'reference_exists',
+                claim: 'semantic evidence extraction covers the complete written file',
+                status: 'unknown',
+                blocking: true,
+                sources: [],
+                detail: truncated
+                    ? `Only the first ${MAX_EXTRACT_CHARS} characters were scanned for semantic references; final validation must cover the complete file.`
+                    : `The ${MAX_CLAIM_CANDIDATES}-claim extraction bound was reached; final validation must confirm no later references were omitted.`,
+            });
         }
 
         if (lspDown) degraded = true;

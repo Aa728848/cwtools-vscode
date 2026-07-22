@@ -77,7 +77,13 @@ import { activeTurnRegistry } from './runner/activeTurnRegistry';
 import { threadStore } from './runner/threadStore';
 import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 import { appendCacheRequestUsage, isCacheCapableUsage, supportsOpenAiStylePrefixCache } from './cacheCapability';
-import { RunBudgetTracker, shouldPersistResumeSnapshot, type RunBudgetEvaluation } from './runner/runBudget';
+import {
+    RunBudgetTracker,
+    shouldAutoExtendRunBudget,
+    shouldPersistResumeSnapshot,
+    shouldRetainResumeState,
+    type RunBudgetEvaluation,
+} from './runner/runBudget';
 import { buildModelRequestMessageArchive, type ModelRequestArchiveState } from './runner/requestArtifacts';
 
 export { isFallbackEligibleApiError } from './runner/fallbackPolicy';
@@ -408,6 +414,8 @@ export class AgentRunner {
     private readonly turnRunner = new TurnRunner();
     private readonly activeInputQueues = new Map<string, AgentInputQueue>();
     private readonly activeRunEventSinks = new Map<string, RunEventSink>();
+    /** Runs whose normal-looking return is actually a resumable budget/loop pause. */
+    private readonly retainedResumeRuns = new Set<string>();
     constructor(
         private aiService: AIService,
         public readonly toolExecutor: AgentToolExecutor,
@@ -416,8 +424,6 @@ export class AgentRunner {
         this.toolExecutor.parentAgentRunner = this;
     }
 
-    /** Usage accumulator of the in-flight or most recent run; manual compaction attributes its LLM cost here. */
-    private activeTokenAccumulator?: TokenUsage;
     /** Per-runner throttle state for automatic (non-forced) compaction. */
     private readonly autoCompactionThrottle: AutoCompactionThrottle = {
         lastAutoCompactionAt: 0,
@@ -773,12 +779,16 @@ export class AgentRunner {
         const updateRunStatus = (status: import('./types').AgentRunStatus) => {
             runRecordPromise.then(r => {
                 runLedger.appendEvent(r.runId, 'status_changed', { status }).catch(() => {});
-                if (status === 'completed' || status === 'failed') {
+                if (status === 'completed' || status === 'failed' || status === 'paused') {
                     runMetrics.modelCalls = tokenAccumulator.apiCalls ?? 0;
                     runMetrics.compactionCalls = tokenAccumulator.compactionCalls ?? 0;
                     runMetrics.fallbackCalls = tokenAccumulator.fallbackCalls ?? 0;
                     runMetrics.uncachedInputTokens = tokenAccumulator.netInput ?? 0;
-                    threadStore.markStatus(topicId, threadId, status === 'completed' ? 'completed' : 'failed').catch(() => {});
+                    threadStore.markStatus(
+                        topicId,
+                        threadId,
+                        status === 'completed' ? 'completed' : status === 'paused' ? 'interrupted' : 'failed',
+                    ).catch(() => {});
                     runLedger.appendEvent(r.runId, 'metrics_updated', {
                         metrics: {
                             totalTokens: tokenAccumulator.total,
@@ -812,9 +822,6 @@ export class AgentRunner {
             agentMode: mode,
             toolStage: initialToolStageForMode(mode),
         };
-        // Expose the run-level accumulator so manual compaction between turns
-        // still attributes its summarization cost to this run's totals.
-        this.activeTokenAccumulator = tokenAccumulator;
         const runMetrics: AgentRunMetrics = {
             iterations: 0,
             modelCalls: 0,
@@ -828,11 +835,11 @@ export class AgentRunner {
             maxToolResultChars: 0,
             finalPromptTokens: 0,
         };
-        const shouldKeepResumeState = () => steps.some(step =>
-            step.type === 'error' && String(step.content).startsWith('Max tool iterations reached')
-        );
+        const shouldKeepResumeState = () => shouldRetainResumeState(this.retainedResumeRuns.has(runId), steps);
         const clearResumeStateIfComplete = async () => {
-            if (context.topicId && !shouldKeepResumeState()) {
+            const keep = shouldKeepResumeState();
+            this.retainedResumeRuns.delete(runId);
+            if (context.topicId && !keep) {
                 await this.clearResumeState(context.topicId);
             }
         };
@@ -1224,11 +1231,34 @@ export class AgentRunner {
             const finalMessage = await this.reasoningLoop(messages, emitStep, mode, options, tokenAccumulator, options?.onBeforeFileWrite, runMetrics);
             runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0);
 
-            // Auto-mark remaining in-progress todos as done on successful completion
-            this.autoCompleteTodos();
+            // A budget/doom-loop pause returns a summary through the normal path,
+            // but it is not task completion and must retain todos + resume state.
+            if (!this.retainedResumeRuns.has(runId)) this.autoCompleteTodos();
 
             // Phase 2: Extract code from the response
             const code = this.extractCode(finalMessage);
+
+            if (this.retainedResumeRuns.has(runId)) {
+                updateRunStatus('paused');
+                await clearResumeStateIfComplete();
+                return {
+                    runId,
+                    code: code ?? '',
+                    explanation: finalMessage,
+                    validationErrors: [{
+                        code: 'RUN_PAUSED',
+                        severity: 'error',
+                        message: 'The run paused at a durable budget or safety boundary. Progress is checkpointed and can be resumed.',
+                        line: 0,
+                        column: 0,
+                    }],
+                    isValid: false,
+                    retryCount: 0,
+                    steps,
+                    tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
+                    runMetrics,
+                };
+            }
 
             // Plan / Explore / General / Review / Orchestrator mode — or no code generated — just an explanation
             if (!code || mode === 'plan' || mode === 'explore' || mode === 'general' || mode === 'utility' || mode === 'review' || mode === 'orchestrator' || mode === 'script') {
@@ -1320,6 +1350,7 @@ export class AgentRunner {
                 runMetrics,
             };
         } finally {
+            this.retainedResumeRuns.delete(runId);
             unregisterActiveTurn();
             parentAbortSignal?.removeEventListener('abort', forwardParentAbort);
             this.activeRunEventSinks.delete(runId);
@@ -1410,8 +1441,7 @@ export class AgentRunner {
                 onStep?.(manualStep);
             },
             options,
-            // Count the paid summarization call into the run-level usage totals.
-            tokenAccumulator ?? this.activeTokenAccumulator,
+            tokenAccumulator,
             {
                 force: true,
                 reservedTokens: estimateTokenCount(JSON.stringify(TOOL_DEFINITIONS)),
@@ -1811,20 +1841,30 @@ export class AgentRunner {
 
         const runBudgetConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
         const isSlimRun = options?.useSlimPrompt === true;
-        const budgetTracker = new RunBudgetTracker({
-            modelCalls: runBudgetConfig.get<number>(
-                isSlimRun ? 'subAgentModelCallBudget' : 'modelCallBudget',
-                isSlimRun ? 24 : 64,
-            ),
-            wallTimeMs: runBudgetConfig.get<number>(
-                isSlimRun ? 'subAgentWallTimeBudgetMinutes' : 'wallTimeBudgetMinutes',
-                isSlimRun ? 8 : 20,
-            ) * 60_000,
-            uncachedInputTokens: runBudgetConfig.get<number>(
-                isSlimRun ? 'subAgentUncachedInputTokenBudget' : 'uncachedInputTokenBudget',
-                isSlimRun ? 100_000 : 300_000,
-            ),
-        });
+        const budgetTracker = new RunBudgetTracker(
+            {
+                modelCalls: runBudgetConfig.get<number>(
+                    isSlimRun ? 'subAgentModelCallBudget' : 'modelCallBudget',
+                    isSlimRun ? 24 : 64,
+                ),
+                wallTimeMs: runBudgetConfig.get<number>(
+                    isSlimRun ? 'subAgentWallTimeBudgetMinutes' : 'wallTimeBudgetMinutes',
+                    isSlimRun ? 8 : 20,
+                ) * 60_000,
+                uncachedInputTokens: runBudgetConfig.get<number>(
+                    isSlimRun ? 'subAgentUncachedInputTokenBudget' : 'uncachedInputTokenBudget',
+                    isSlimRun ? 100_000 : 300_000,
+                ),
+            },
+            Date.now(),
+            runBudgetConfig.get<number>('hardBudgetMultiplier', 4),
+        );
+        let progressRevision = 0;
+        let lastExtendedProgressRevision = 0;
+        let completedTodoCount = this.toolExecutor.getTodos()
+            .filter(todo => todo.status === 'done').length;
+        const blockingValidationIssues = new Set<string>();
+        const diagnosticErrorsByTarget = new Map<string, number>();
         let lastResumeSnapshotAt = Date.now();
         let lastResumeSnapshotIteration = 0;
         const maybeSaveResumeSnapshot = async (force = false): Promise<void> => {
@@ -1843,10 +1883,15 @@ export class AgentRunner {
             lastResumeSnapshotAt = now;
             lastResumeSnapshotIteration = iteration;
         };
+        const saveRetainedResumeSnapshot = async (): Promise<void> => {
+            this.retainedResumeRuns.add(runRecord.runId);
+            await maybeSaveResumeSnapshot(true);
+        };
         const describeBudget = (evaluation: RunBudgetEvaluation): string => {
             const u = evaluation.usage;
             const l = evaluation.limits;
-            return `model calls ${u.modelCalls}/${l.modelCalls}, wall time ${Math.ceil(u.wallTimeMs / 60_000)}/${Math.ceil(l.wallTimeMs / 60_000)} min, uncached input ${u.uncachedInputTokens}/${l.uncachedInputTokens} tokens`;
+            const h = evaluation.hardLimits;
+            return `model calls ${u.modelCalls}/${l.modelCalls} (hard ${h.modelCalls}), wall time ${Math.ceil(u.wallTimeMs / 60_000)}/${Math.ceil(l.wallTimeMs / 60_000)} min (hard ${Math.ceil(h.wallTimeMs / 60_000)}), uncached input ${u.uncachedInputTokens}/${l.uncachedInputTokens} tokens (hard ${h.uncachedInputTokens})`;
         };
 
         // Global tool call counter for timeline step indexing (Phase 4)
@@ -1881,28 +1926,45 @@ export class AgentRunner {
                         content: `Emergency Agent runtime budget reached (${detail}).`,
                         timestamp: Date.now(),
                     });
-                    await maybeSaveResumeSnapshot(true);
+                    await saveRetainedResumeSnapshot();
                     return `The emergency runtime budget was reached (${detail}). Progress is checkpointed; review the current evidence before continuing.`;
                 }
-                emitStep({
-                    type: 'validation',
-                    content: `Agent runtime soft budget reached (${detail}). Waiting for explicit continuation approval.`,
-                    timestamp: Date.now(),
-                });
-                const approved = options?.onPermissionRequest
-                    ? await options.onPermissionRequest(
-                        `run_budget_${runRecord.runId}_${iteration}`,
-                        'continue_agent_run',
-                        `The Agent reached its soft runtime budget (${detail}). Continue for one additional budget window?\nAgent 已达到软运行预算（${detail}）。是否继续一个预算窗口？`,
-                        undefined,
-                        agentToolContext,
-                    )
-                    : false;
-                if (!approved) {
+                if (shouldAutoExtendRunBudget({
+                    progressRevision,
+                    lastExtendedProgressRevision,
+                    consecutiveErrors: consecutiveErrorCount,
+                    blockingValidationIssues: blockingValidationIssues.size,
+                })) {
                     await maybeSaveResumeSnapshot(true);
-                    return `The Agent paused at its soft runtime budget (${detail}). Progress is checkpointed; continue the task to resume.`;
+                    budgetTracker.extend();
+                    lastExtendedProgressRevision = progressRevision;
+                    emitStep({
+                        type: 'validation',
+                        content: `Agent runtime soft budget reached with healthy durable progress (${detail}). Checkpoint saved; continuing automatically for one additional budget window.`,
+                        timestamp: Date.now(),
+                    });
+                } else {
+                    emitStep({
+                        type: 'validation',
+                        content: `Agent runtime soft budget reached (${detail}). Waiting for explicit continuation approval.`,
+                        timestamp: Date.now(),
+                    });
+                    const approved = options?.onPermissionRequest
+                        ? await options.onPermissionRequest(
+                            `run_budget_${runRecord.runId}_${iteration}`,
+                            'continue_agent_run',
+                            `The Agent reached its soft runtime budget (${detail}). Continue for one additional budget window?\nAgent 已达到软运行预算（${detail}）。是否继续一个预算窗口？`,
+                            undefined,
+                            agentToolContext,
+                        )
+                        : false;
+                    if (!approved) {
+                        await saveRetainedResumeSnapshot();
+                        return `The Agent paused at its soft runtime budget (${detail}). Progress is checkpointed; continue the task to resume.`;
+                    }
+                    budgetTracker.extend();
+                    lastExtendedProgressRevision = progressRevision;
                 }
-                budgetTracker.extend();
             }
             if (options?.tokenBudget && tokenAccumulator && tokenAccumulator.total >= options.tokenBudget) {
                 emitStep({
@@ -1910,7 +1972,7 @@ export class AgentRunner {
                     content: `Durable goal token budget reached (${tokenAccumulator.total}/${options.tokenBudget}).`,
                     timestamp: Date.now(),
                 });
-                await maybeSaveResumeSnapshot(true);
+                await saveRetainedResumeSnapshot();
                 return `The durable goal token budget was reached (${tokenAccumulator.total}/${options.tokenBudget}). Progress is checkpointed; increase the goal budget or continue in a new turn.`;
             }
             iteration++;
@@ -3088,7 +3150,11 @@ export class AgentRunner {
                 const pc = parsedCalls[j]!;
                 const reg = TOOL_REGISTRY.get(pc.toolName as import('./tools/registry').AgentToolName);
                 if (!reg?.mutating) continue;
-                if (!toolResults[j] || (toolResults[j] as any).success === false) continue;
+                const mutationResult = toolResults[j] as Record<string, unknown> | undefined;
+                if (!mutationResult
+                    || mutationResult.success === false
+                    || mutationResult.error !== undefined
+                    || mutationResult.skipped === true) continue;
                 if (pc.targetPaths && pc.targetPaths.length > 0) {
                     for (const fp of pc.targetPaths) mutatedFilePaths.add(fp);
                 } else {
@@ -3103,6 +3169,9 @@ export class AgentRunner {
                 // Pure fileless mutation (e.g. memory / git): no path scoping possible,
                 // fall back to global clear so verify reads aren't suppressed.
                 doomLoop.clearAllPairs();
+            }
+            if (mutatedFilePaths.size > 0 || hasFilelessMutating) {
+                progressRevision++;
             }
 
             // ── Two-phase doom-loop detection: phase 2 (post-exec hash check) ──
@@ -3194,11 +3263,40 @@ export class AgentRunner {
                     ? result as Record<string, unknown>
                     : undefined;
                 const diagnostics = Array.isArray(record?.diagnostics) ? record.diagnostics : [];
-                const hasDiagnosticErrors = diagnostics.some(item => {
+                const diagnosticErrorCount = diagnostics.filter(item => {
                     if (!item || typeof item !== 'object') return false;
                     const severity = (item as Record<string, unknown>).severity;
                     return severity === 'error' || severity === 0;
-                });
+                }).length;
+                const hasDiagnosticErrors = diagnosticErrorCount > 0;
+                const targetKeys = parsedCalls[j]!.targetPaths.length > 0
+                    ? parsedCalls[j]!.targetPaths
+                    : [`tool:${parsedCalls[j]!.toolName}`];
+                const resultSucceeded = record?.success !== false && record?.error === undefined && record?.skipped !== true;
+                if (resultSucceeded && parsedCalls[j]!.toolName === 'todo_write') {
+                    const rawTodos: unknown = parsedCalls[j]!.toolArgs.todos;
+                    const todos: unknown[] = Array.isArray(rawTodos) ? rawTodos : [];
+                    const nextCompletedTodoCount = todos.filter(todo =>
+                        !!todo && typeof todo === 'object' && (todo as Record<string, unknown>).status === 'done').length;
+                    if (nextCompletedTodoCount > completedTodoCount) progressRevision++;
+                    completedTodoCount = nextCompletedTodoCount;
+                }
+                if (Array.isArray(record?.diagnostics)) {
+                    for (const targetKey of targetKeys) {
+                        const previousErrorCount = diagnosticErrorsByTarget.get(targetKey);
+                        if (previousErrorCount !== undefined && diagnosticErrorCount < previousErrorCount) {
+                            progressRevision++;
+                        }
+                        diagnosticErrorsByTarget.set(targetKey, diagnosticErrorCount);
+                        if (hasDiagnosticErrors) blockingValidationIssues.add(targetKey);
+                        else if (record?.freshness === 'fresh') blockingValidationIssues.delete(targetKey);
+                    }
+                }
+                if (record?.requiresRepair === true) {
+                    for (const targetKey of targetKeys) blockingValidationIssues.add(targetKey);
+                } else if (record?.postWriteValidationPassed === true) {
+                    for (const targetKey of targetKeys) blockingValidationIssues.delete(targetKey);
+                }
                 nextToolStage = advanceToolStage(mode, nextToolStage, parsedCalls[j]!.toolName, {
                     success: record?.success !== false && record?.error === undefined,
                     hasValidationErrors: hasDiagnosticErrors
@@ -3309,7 +3407,7 @@ export class AgentRunner {
         // assistant message were not fully appended, which would result in an API 400 error:
         // "No tool output found for function call...".
         if (forceStop) {
-            await maybeSaveResumeSnapshot(true);
+            await saveRetainedResumeSnapshot();
             updateFinalPromptMetric();
             return '[Agent Execution Terminated]: Tool execution failed consecutively or doom-loop detected.';
         }
@@ -3593,14 +3691,21 @@ export class AgentRunner {
                     );
                     const fallbackErrorCount = fallbackErrors.filter(e => e.severity === 'error').length;
                     if (fallbackErrorCount === 0) {
+                        const pendingError: ValidationError = {
+                            code: 'VALIDATION_PENDING',
+                            severity: 'error',
+                            message: `Local syntax passed, but CWTools diagnostics are still ${freshness}; final semantic validation is pending.`,
+                            line: 0,
+                            column: 0,
+                        };
                         emitStep({
                             type: 'validation',
-                            content: `CWTools LSP diagnostics are still ${freshness}; local syntax fallback passed.`,
+                            content: `CWTools LSP diagnostics are still ${freshness}; local syntax passed, but final semantic validation remains pending.`,
                             timestamp: Date.now(),
                         });
                         await appendValidationEnd({
-                            isValid: true,
-                            errorCount: 0,
+                            isValid: false,
+                            errorCount: 1,
                             warningCount: fallbackErrors.length,
                             validationMode: 'local-syntax-fallback',
                             diagnosticFreshness: freshness,
@@ -3608,11 +3713,11 @@ export class AgentRunner {
                             diagnosticService: diagnosticRead.diagnosticService?.status,
                             diagnosticEpochProgress: sawDiagnosticEpochProgress,
                             validationRuntime: this.compactValidationStatus(diagnosticRead.validationStatus),
-                        });
+                        }, 'failed');
                         return {
                             code: currentCode,
-                            validationErrors: fallbackErrors,
-                            isValid: true,
+                            validationErrors: [...fallbackErrors, pendingError],
+                            isValid: false,
                             retryCount,
                         };
                     }

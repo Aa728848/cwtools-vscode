@@ -6,6 +6,7 @@
 */
 
 import { expect } from 'chai';
+import * as path from 'path';
 
 const vscodeStub = {
     workspace: {
@@ -1276,6 +1277,26 @@ describe('Orchestrator quality propagation', () => {
         expect(result.qualityGate?.operationalFailure).to.equal(true);
         expect(counts()).to.deep.equal({ reviewCalls: 0, fixCalls: 0 });
     });
+
+    it('does not launch a code repair agent when only final validation is pending', async () => {
+        const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
+        const { orchestrator, counts } = makeOrchestrator(3, Number.POSITIVE_INFINITY);
+        (orchestrator as any).qualityGate.reviewOutput = async () => ({
+            ...gateResult(true),
+            passed: false,
+            validationPending: 1,
+            reviewReport: 'diagnostics pending',
+        });
+        const graph = TaskGraphEngine.createGraph('quality pending');
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        builder.status = 'done';
+
+        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+
+        expect(result.success).to.equal(false);
+        expect(result.qualityGate?.validationPending).to.equal(1);
+        expect(counts()).to.deep.equal({ reviewCalls: 0, fixCalls: 0 });
+    });
 });
 
 describe('QualityGate', () => {
@@ -1432,6 +1453,63 @@ describe('QualityGate', () => {
             apiCalls: 2,
         });
         expect(usage.cacheRequests?.[0]?.promptFingerprint).to.equal('review-fp');
+    });
+
+    it('reviewOutput keeps pending diagnostics distinct from a passed final check', async () => {
+        const runner = {
+            toolExecutor: {
+                workspaceRoot: process.cwd(),
+                execute: async () => ({ totalDiagnosticCount: 0, diagnostics: [], freshness: 'pending' }),
+            },
+            run: async () => ({
+                explanation: '```json\n{"logicIssuesCount":0,"logicIssues":[],"fixSuggestions":[],"acceptanceEvidence":[],"acceptanceFailures":[]}\n```',
+                isValid: true,
+                validationErrors: [],
+                retryCount: 0,
+                steps: [],
+            }),
+        };
+
+        const result = await new QualityGate().reviewOutput(
+            runner as any,
+            ['events/test.txt'],
+            {},
+        );
+
+        expect(result.passed).to.equal(false);
+        expect(result.diagnosticErrors).to.equal(0);
+        expect(result.validationPending).to.equal(1);
+    });
+
+    it('accepts bounded extraction coverage only after fresh full-file diagnostics', async () => {
+        const target = path.resolve('events/large.txt');
+        const runner = {
+            toolExecutor: {
+                workspaceRoot: process.cwd(),
+                finalizePdxEvidence: async () => ({
+                    passed: false,
+                    filesChecked: [target],
+                    conflictFiles: [],
+                    pendingFiles: [target],
+                    coveragePendingFiles: [target],
+                    report: 'coverage-pending',
+                }),
+                execute: async () => ({ totalDiagnosticCount: 0, diagnostics: [], freshness: 'fresh' }),
+            },
+            run: async () => ({
+                explanation: '```json\n{"logicIssuesCount":0,"logicIssues":[],"fixSuggestions":[],"acceptanceEvidence":[],"acceptanceFailures":[]}\n```',
+                isValid: true,
+                validationErrors: [],
+                retryCount: 0,
+                steps: [],
+            }),
+        };
+
+        const result = await new QualityGate().reviewOutput(runner as any, [target], {});
+
+        expect(result.passed).to.equal(true);
+        expect(result.validationPending).to.equal(0);
+        expect(result.semanticReport).to.include('fresh diagnostics covered 1 file');
     });
 
     it('reviewOutput stops promptly when the parent run is cancelled', async () => {

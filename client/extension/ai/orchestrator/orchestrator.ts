@@ -275,8 +275,13 @@ export class Orchestrator {
                 } else {
                     emitStep({ type: 'error', content: ORCHESTRATOR_MSG.QG_FAIL(reviewResult.logicIssues), timestamp: Date.now() });
                     const config = this.qualityGate.getConfig();
-                    
-                    if (config.autoFix && !reviewResult.operationalFailure) {
+                    const hasRepairableIssues = reviewResult.diagnosticErrors > 0
+                        || (reviewResult.evidenceConflicts ?? 0) > 0
+                        || reviewResult.semanticIssues > 0
+                        || reviewResult.logicIssues > 0
+                        || reviewResult.acceptanceFailures.length > 0;
+
+                    if (config.autoFix && !reviewResult.operationalFailure && hasRepairableIssues) {
                         for (let fixCycle = 0; fixCycle < config.maxFixCycles && !reviewResult.passed; fixCycle++) {
                         emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.AUTOFIX_START, timestamp: Date.now() });
                         
@@ -332,8 +337,8 @@ export class Orchestrator {
                         result.success = false;
                         if (!result.failedNodes.includes('quality_gate')) result.failedNodes.push('quality_gate');
                         result.summary += aiText(
-                            `\n- Quality gate: failed (${reviewResult.diagnosticErrors} diagnostics, ${reviewResult.semanticIssues} semantic issues, ${reviewResult.logicIssues} review issues)`,
-                            `\n- 质量门：未通过（${reviewResult.diagnosticErrors} 个诊断、${reviewResult.semanticIssues} 个语义问题、${reviewResult.logicIssues} 个审查问题）`,
+                            `\n- Quality gate: failed (${reviewResult.diagnosticErrors} diagnostics, ${reviewResult.evidenceConflicts ?? 0} evidence conflicts, ${reviewResult.validationPending ?? 0} pending validations, ${reviewResult.semanticIssues} semantic issues, ${reviewResult.logicIssues} review issues)`,
+                            `\n- 质量门：未通过（${reviewResult.diagnosticErrors} 个诊断、${reviewResult.evidenceConflicts ?? 0} 个证据冲突、${reviewResult.validationPending ?? 0} 个待确认验证、${reviewResult.semanticIssues} 个语义问题、${reviewResult.logicIssues} 个审查问题）`,
                         );
                     }
                 }

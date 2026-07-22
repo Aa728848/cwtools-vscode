@@ -49,11 +49,68 @@ import type { ApiKeyManager } from './aiService';
 import { normalizeLegacyWebToolCall, type WebSearchProvider } from './tools/webAccess';
 import { EvidenceGate } from './evidence/evidenceGate';
 import { normalizeEvidenceGateMode, type EvidenceGateDecision, type EvidenceGateMode } from './evidence/evidenceTypes';
+import { isPdxScriptTarget } from './evidence/claimExtractor';
 import { runLedger } from './runner/runLedger';
 import { ErrorReporter } from './errorReporter';
 import { mergeTokenUsageTotals } from './cacheCapability';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
+
+export type PostWriteValidationVerdict = 'allow' | 'pending' | 'repair';
+
+export interface PostWriteValidationClassification {
+    verdict: PostWriteValidationVerdict;
+    evidencePassed: boolean;
+    diagnosticsPassed: boolean;
+    diagnosticErrorCount?: number;
+    diagnosticsFreshness?: 'fresh' | 'pending' | 'stale';
+}
+
+export interface FinalPdxEvidenceValidation {
+    passed: boolean;
+    filesChecked: string[];
+    conflictFiles: string[];
+    pendingFiles: string[];
+    /** Pending only because bounded extraction needs a full-file fresh diagnostic pass. */
+    coveragePendingFiles: string[];
+    report: string;
+}
+
+/** Classify a completed PDX write without treating "not disproved" as verified. */
+export function classifyPostWriteValidation(
+    decision: EvidenceGateDecision | undefined,
+    result: Record<string, unknown>,
+    evidenceUnavailable = false,
+): PostWriteValidationClassification {
+    const diagnosticErrors = Array.isArray(result.diagnostics)
+        ? result.diagnostics.filter(item => {
+            if (!item || typeof item !== 'object') return false;
+            const severity = (item as Record<string, unknown>).severity;
+            return severity === 'error' || severity === 0;
+        })
+        : undefined;
+    const freshness = result.freshness === 'fresh' || result.freshness === 'pending' || result.freshness === 'stale'
+        ? result.freshness
+        : undefined;
+    const blockingClaims = decision?.claims.filter(claim => claim.blocking) ?? [];
+    const hasConflict = blockingClaims.some(claim => claim.status === 'conflict');
+    const evidencePassed = decision !== undefined
+        && decision.degraded !== true
+        && blockingClaims.every(claim => claim.status === 'verified');
+    const diagnosticsPassed = diagnosticErrors !== undefined
+        && diagnosticErrors.length === 0
+        && freshness === 'fresh';
+    const repair = hasConflict || (diagnosticErrors?.length ?? 0) > 0;
+    const pending = evidenceUnavailable || !evidencePassed || !diagnosticsPassed;
+    return {
+        verdict: repair ? 'repair' : pending ? 'pending' : 'allow',
+        evidencePassed,
+        diagnosticsPassed,
+        diagnosticErrorCount: diagnosticErrors?.length,
+        diagnosticsFreshness: freshness,
+    };
+}
+
 const TOOL_TIMEOUTS: Record<string, number> = {
     query_scope: 45_000,
     query_types: 45_000,
@@ -858,7 +915,7 @@ export class AgentToolExecutor {
     private async evaluatePostWriteEvidence(
         request: { toolName: string; filePath: string; content: string },
         context?: import('./types').AgentToolContext,
-    ): Promise<{ decision: EvidenceGateDecision; summary: Record<string, unknown> } | undefined> {
+    ): Promise<{ decision?: EvidenceGateDecision; summary: Record<string, unknown>; unavailable?: boolean } | undefined> {
         const mode = this.evidenceGateMode();
         if (mode === 'off') return undefined;
         try {
@@ -874,8 +931,89 @@ export class AgentToolExecutor {
             return { decision, summary };
         } catch (error) {
             ErrorReporter.warn('AgentTools', `Post-write evidence verification failed for ${request.filePath}`, error);
-            return undefined;
+            return {
+                unavailable: true,
+                summary: {
+                    verdict: 'allow',
+                    mode,
+                    phase: 'post_write',
+                    degraded: true,
+                    evidenceUnavailable: true,
+                    warning: error instanceof Error ? error.message : String(error),
+                },
+            };
         }
+    }
+
+    /** Re-run evidence against integrated on-disk files after all child writes merge. */
+    public async finalizePdxEvidence(
+        writtenFiles: readonly string[],
+        context?: import('./types').AgentToolContext,
+    ): Promise<FinalPdxEvidenceValidation> {
+        const mode = this.evidenceGateMode();
+        if (mode === 'off') {
+            return { passed: true, filesChecked: [], conflictFiles: [], pendingFiles: [], coveragePendingFiles: [], report: '' };
+        }
+        const filesChecked: string[] = [];
+        const conflictFiles: string[] = [];
+        const pendingFiles: string[] = [];
+        const coveragePendingFiles: string[] = [];
+        const details: string[] = [];
+        const targets = [...new Set([...new Set(writtenFiles)]
+            .map(file => path.isAbsolute(file) ? path.resolve(file) : path.resolve(this.workspaceRoot, file)))]
+            .filter(isPdxScriptTarget)
+            .sort((a, b) => a.localeCompare(b));
+
+        for (const target of targets) {
+            const relative = path.relative(this.workspaceRoot, target);
+            if (relative.startsWith('..') || path.isAbsolute(relative)) {
+                pendingFiles.push(target);
+                details.push(`- pending: ${target} is outside the workspace evidence boundary.`);
+                continue;
+            }
+            try {
+                const content = await fs.promises.readFile(target, 'utf8');
+                filesChecked.push(target);
+                const outcome = await this.evaluatePostWriteEvidence(
+                    { toolName: 'write_file', filePath: target, content },
+                    context,
+                );
+                const blocking = outcome?.decision?.claims.filter(claim => claim.blocking) ?? [];
+                if (blocking.some(claim => claim.status === 'conflict')) {
+                    conflictFiles.push(target);
+                    details.push(`- conflict: ${target}`);
+                } else if (outcome?.unavailable === true
+                    || outcome?.decision?.degraded === true
+                    || outcome?.decision === undefined
+                    || blocking.some(claim => claim.status !== 'verified')) {
+                    pendingFiles.push(target);
+                    const unresolved = blocking.filter(claim => claim.status !== 'verified');
+                    const coverageOnly = unresolved.length > 0 && unresolved.every(claim =>
+                        claim.claim === 'semantic evidence extraction covers the complete written file');
+                    if (coverageOnly) coveragePendingFiles.push(target);
+                    details.push(`- ${coverageOnly ? 'coverage-pending' : 'pending'}: ${target}`);
+                } else {
+                    details.push(`- verified: ${target}`);
+                }
+            } catch (error) {
+                pendingFiles.push(target);
+                details.push(`- pending: ${target} (${error instanceof Error ? error.message : String(error)})`);
+            }
+        }
+
+        const enforcedConflictFiles = mode === 'shadow' ? [] : conflictFiles;
+        const enforcedPendingFiles = mode === 'shadow' ? [] : pendingFiles;
+        const enforcedCoveragePendingFiles = mode === 'shadow' ? [] : coveragePendingFiles;
+        return {
+            passed: enforcedConflictFiles.length === 0 && enforcedPendingFiles.length === 0,
+            filesChecked,
+            conflictFiles: enforcedConflictFiles,
+            pendingFiles: enforcedPendingFiles,
+            coveragePendingFiles: enforcedCoveragePendingFiles,
+            report: targets.length > 0
+                ? [`## Final PDX Evidence Revalidation${mode === 'shadow' ? ' (shadow)' : ''}`, ...details].join('\n')
+                : '',
+        };
     }
 
     async execute(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
@@ -1130,29 +1268,24 @@ export class AgentToolExecutor {
                         resultRecord.evidenceGate = gateOutcome.summary;
                     }
                     if (postWriteEvidence) {
-                        const diagnosticErrors = Array.isArray(resultRecord.diagnostics)
-                            ? resultRecord.diagnostics.filter(item => {
-                                if (!item || typeof item !== 'object') return false;
-                                const severity = (item as Record<string, unknown>).severity;
-                                return severity === 'error' || severity === 0;
-                            })
-                            : undefined;
-                        const diagnosticsPassed = diagnosticErrors !== undefined && diagnosticErrors.length === 0;
-                        const evidencePassed = postWriteEvidence.decision.verdict === 'allow';
+                        const validation = classifyPostWriteValidation(
+                            postWriteEvidence.decision,
+                            resultRecord,
+                            postWriteEvidence.unavailable === true,
+                        );
                         resultRecord.postWriteEvidence = {
                             ...postWriteEvidence.summary,
-                            missingEvidence: postWriteEvidence.decision.missingEvidence,
+                            missingEvidence: postWriteEvidence.decision?.missingEvidence ?? [],
                         };
                         resultRecord.postWriteValidation = {
-                            verdict: evidencePassed && diagnosticsPassed ? 'allow' : 'repair',
-                            evidencePassed,
-                            diagnosticsPassed,
-                            diagnosticErrorCount: diagnosticErrors?.length,
-                            evidenceDecisionId: postWriteEvidence.decision.decisionId,
+                            ...validation,
+                            evidenceDecisionId: postWriteEvidence.decision?.decisionId,
                         };
-                        resultRecord.postWriteValidationPassed = evidencePassed && diagnosticsPassed;
-                        if (!evidencePassed || !diagnosticsPassed) {
+                        resultRecord.postWriteValidationPassed = validation.verdict === 'allow';
+                        if (validation.verdict === 'repair') {
                             resultRecord.requiresRepair = true;
+                        } else if (validation.verdict === 'pending') {
+                            resultRecord.requiresValidation = true;
                         }
                     }
                 }

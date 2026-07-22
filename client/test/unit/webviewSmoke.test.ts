@@ -164,6 +164,15 @@ describe('webview smoke checks', () => {
         expect(css).to.include('.md-mermaid-output svg .node rect');
         expect(css).to.include('.md-mermaid-output svg .flowchart-link');
         expect(css).to.include('.ap-section-text .md-mermaid-toolbar,');
+        expect(css).to.include('border-radius: 20px; overflow: visible;');
+        expect(css).to.include('.composer-menu-item.active::after, .model-menu-item.active::after');
+        expect(css).to.include('.reasoning-menu { width: max-content; min-width: max-content;');
+        expect(css).to.include('.send-btn, body.plan-mode .send-btn');
+        expect(css).to.include('border-radius: 13px; z-index: 240;');
+        expect(css).to.include('.ds-review-btn');
+        expect(script).to.include("el.className = 'slash-popup mention-popup'");
+        expect(script).to.include("card.querySelector<HTMLButtonElement>('.ds-review-btn')");
+        expect(script).to.include("positionMenu(reasoningMenu, quickReasoningTrigger, 'end')");
         expect(mermaidRenderer).to.include('htmlLabels: false');
         expect(mermaidRenderer).to.include('wrappingWidth: MERMAID_FLOWCHART_WRAP_WIDTH');
         expect(mermaidRenderer).to.include('--mermaid-natural-width');

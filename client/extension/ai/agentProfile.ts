@@ -28,7 +28,7 @@ const WRITE_INTENT_RE = /\b(fix|repair|implement|add|create|generate|update|edit
 const PLAN_INTENT_RE = /\b(plan|design|blueprint|proposal|architecture|roadmap)\b|计划|规划|方案|设计|蓝图|路线图|实施步骤/i;
 const REVIEW_INTENT_RE = /\b(review|audit|triage|inspect|diagnose|diagnostic report|check for (?:issues|problems|bugs))\b|审查|评审|巡检|诊断报告|检查|核查|排查|评估|找问题|找出问题|有没有问题|是否有问题|看看.*问题/i;
 const EXPLORE_INTENT_RE = /\b(explain|what is|how does|where is|find|search|locate|trace|analy[sz]e|investigate|understand|describe)\b|解释|说明|查找|搜索|定位|追踪|梳理|看看|了解|理解|分析|告诉我|是什么|为什么|怎么|如何|在哪里/i;
-const NO_WRITE_INTENT_RE = /\b(?:do not|don't|without|no need to)\s+(?:change|edit|modify|write|implement)|\b(?:read[ -]?only|analysis only|review only|plan only)\b|(?:不要|无需|不需要|请勿|禁止)(?:[^，。；\n]{0,12})?(?:修改|改动|更改|写入|执行|实现|动代码)|(?:只|仅)(?:做|进行|需要)?(?:分析|解释|说明|审查|评审|检查|核查|排查|规划|计划|给方案|查看)(?:即可|就好|就行|，|。|；|$)/i;
+const NO_WRITE_INTENT_RE = /\b(?:do not|don't|without|no need to)\s+(?:change|edit|modify|write|implement)|\b(?:read[ -]?only|analysis only|review only|plan only)\b|(?:不要|无需|不需要|请勿|禁止)(?:[^，。；\n]{0,12})?(?:修改|改动|更改|写入|执行|实现|动代码)|(?:只|仅)(?:做|进行|需要)?(?:分析|解释|说明|审查|评审|检查|核查|排查|规划|计划|给方案|查看)(?:即可|就好|就行|，|。|；|$)|(?:算了|不改了|取消修改|先不改)/i;
 const DIRECT_WRITE_OVERRIDE_RE = /\b(?:but|then)\s+(?:please\s+)?(?:change|edit|modify|write|implement)|\b(?:directly|immediately)\s+(?:change|edit|modify|write|implement)|(?:但|不过|然后|接着|之后|并且)[^，。；\n]{0,8}(?:修改|改动|更改|写入|执行|实现|修复)|(?:直接|马上|立即)(?:修改|改动|更改|写入|执行|实现|修复)/i;
 const MULTI_AGENT_RE = /\b(multi(?:ple)?[-\s]?agents?|sub[-\s]?agents?|dispatch_agents|parallel agents?|in parallel)\b|多\s*agent|子\s*agent|并行.*agent|并行处理/i;
 const BROAD_TASK_RE = /\b(all|every|entire|whole|across the (?:project|repository|workspace)|multi[-\s]?file|event chain|migration|large refactor)\b|全部|所有|整个项目|整个仓库|全项目|跨文件|多文件|事件链|批量|整套|大型重构|全面修复/i;
@@ -37,6 +37,7 @@ const PDX_PATH_RE = /(?:^|[\\/])(?:common|events?|interface|localisation|localiz
 export interface AgentProfileResolveHints {
     activeFile?: string;
     previousDomain?: AgentRuntimeDomain;
+    previousUserRequests?: readonly string[];
 }
 
 export interface ModelAgentProfileDecision {
@@ -159,7 +160,20 @@ export function resolveAgentProfileFromModelDecision(
     const selection = normalizeAgentProfile(profile);
     const fallback = resolveAgentProfile(text, selection, hints);
     const domain = selection.domain === 'auto' ? decision.domain : selection.domain;
-    const intent = selection.intent === 'auto' ? decision.intent : selection.intent;
+    const explicitNoWrite = NO_WRITE_INTENT_RE.test(text) && !DIRECT_WRITE_OVERRIDE_RE.test(text);
+    const directWriteRequested = DIRECT_WRITE_OVERRIDE_RE.test(text);
+    const terseModificationAnswer = text.trim().length <= 80
+        && (hints.previousUserRequests?.length ?? 0) > 0
+        && fallback.intent === 'execute'
+        && !PLAN_INTENT_RE.test(text);
+    const routedIntent = explicitNoWrite
+        ? fallback.intent
+        : directWriteRequested || terseModificationAnswer
+            ? 'execute'
+            : fallback.intent === 'execute' && (decision.intent === 'explore' || decision.intent === 'review')
+                ? 'execute'
+            : decision.intent;
+    const intent = selection.intent === 'auto' ? routedIntent : selection.intent;
     // Existing multi-Agent modes are execution coordinators. Keep read-only and
     // plan turns on their dedicated safety modes even if a router returns multi.
     const selectedStrategy = selection.strategy === 'auto' ? decision.strategy : selection.strategy;
@@ -191,7 +205,15 @@ export function resolveAgentProfile(
         : selection.domain;
 
     const explicitNoWrite = NO_WRITE_INTENT_RE.test(request) && !DIRECT_WRITE_OVERRIDE_RE.test(request);
-    const hasWriteIntent = !explicitNoWrite && WRITE_INTENT_RE.test(request);
+    const explicitReadOnlyIntent = PLAN_INTENT_RE.test(request) || REVIEW_INTENT_RE.test(request) || EXPLORE_INTENT_RE.test(request);
+    const inheritedWriteIntent = request.length <= 80
+        && !explicitNoWrite
+        && !explicitReadOnlyIntent
+        && (hints.previousUserRequests ?? []).slice(-3).some(previous => {
+            const previousNoWrite = NO_WRITE_INTENT_RE.test(previous) && !DIRECT_WRITE_OVERRIDE_RE.test(previous);
+            return !previousNoWrite && WRITE_INTENT_RE.test(previous);
+        });
+    const hasWriteIntent = !explicitNoWrite && (WRITE_INTENT_RE.test(request) || inheritedWriteIntent);
     let intent: ResolvedAgentProfile['intent'];
     if (selection.intent !== 'auto') {
         intent = selection.intent;

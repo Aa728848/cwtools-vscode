@@ -30,7 +30,7 @@ const ENV_VAR_SYNTAX_NOTE = IS_WINDOWS
     : 'use POSIX shell syntax such as `$CWT_AGENT_SCRATCH_DIR` and `$CWT_AGENT_HELPER_SCRIPT` (or `${CWT_AGENT_SCRATCH_DIR}`); do not use PowerShell `$env:` syntax';
 
 const SLIM_PROCESS_VISIBILITY_RULE = `## CRITICAL: Visible Process Updates
-Codex-style visible process narrative: what you will do next, how you will do it, and why. Avoid generic filler. Report after tool results. Do NOT expose chain-of-thought, tool parameters, stdout/stderr dumps, or payloads.`;
+Codex-style visible process narrative: what you will do next, how you will do it, and why. Avoid generic filler. Report after tool results. Do NOT expose chain-of-thought, tool parameters, stdout/stderr dumps, or payloads. Task modes are selected automatically per turn; never tell the user to switch modes manually. Permission profiles and approval policy are user-owned controls that you cannot change.`;
 
 const SLIM_SUB_AGENT_RULE = `## Sub-Agent Boundary
 Execute only the assigned sub-task/blueprint; check shared context for IDs/scopes. You cannot question the user. SUB-AGENT COMMAND BOUNDARY: NEVER use \`run_command\`. For bulk file changes, use structured tools. Do NOT create helper scripts. Otherwise return \`BLOCKED_FOR_ORCHESTRATOR\` with the missing input.`;

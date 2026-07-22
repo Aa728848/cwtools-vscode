@@ -913,8 +913,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const deletions = remaining.reduce((sum, fileEl) => sum + Number(fileEl.dataset.diffDeletions || 0), 0);
                 const stats = card.querySelector<HTMLElement>('.ds-stats');
                 if (stats) {
-                    stats.innerHTML = `<span class="ds-add">+${additions}</span> <span class="ds-del">-${deletions}</span> · ${remaining.length} ${uiText.filesCount}`;
+                    stats.innerHTML = `<span class="ds-add">+${additions}</span> <span class="ds-del">-${deletions}</span>`;
                 }
+                const title = card.querySelector<HTMLElement>('.ds-title-text');
+                if (title) title.textContent = chatI18n.locale === 'zh-cn'
+                    ? `已编辑 ${remaining.length} 个文件`
+                    : `Edited ${remaining.length} ${remaining.length === 1 ? 'file' : 'files'}`;
             }
         });
     }
@@ -2322,11 +2326,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const quickReasoningTrigger = document.getElementById('quickReasoningTrigger') as HTMLElement | null;
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger') as HTMLElement | null;
 
-        const positionMenu = (menu: HTMLElement | null, anchor: HTMLElement | null) => {
+        const positionMenu = (menu: HTMLElement | null, anchor: HTMLElement | null, alignment: 'start' | 'end' = 'start') => {
             if (!menu || !anchor) return;
             const anchorRect = anchor.getBoundingClientRect();
-            const preferredLeft = anchorRect.left - wrapperRect.left;
             const menuWidth = menu.offsetWidth || 260;
+            const preferredLeft = alignment === 'end'
+                ? anchorRect.right - wrapperRect.left - menuWidth
+                : anchorRect.left - wrapperRect.left;
             const maxLeft = Math.max(12, wrapperRect.width - menuWidth - 12);
             menu.style.left = `${Math.max(12, Math.min(preferredLeft, maxLeft))}px`;
         };
@@ -2334,7 +2340,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         positionMenu(composerMenu, composerAddBtn);
         positionMenu(modeMenu, quickModeTrigger);
         positionMenu(modelMenu, quickModelTrigger);
-        positionMenu(reasoningMenu, quickReasoningTrigger);
+        positionMenu(reasoningMenu, quickReasoningTrigger, 'end');
         positionMenu(writeModeMenu, quickWriteModeTrigger);
     }
 
@@ -2810,7 +2816,19 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let slashMatches: SlashCommandView[] = [];
     let slashSelectedIndex = 0;
 
+    function positionComposerSuggestionPopup(popup: HTMLElement): void {
+        const composer = document.querySelector<HTMLElement>('.input-container');
+        if (!composer) return;
+        const rect = composer.getBoundingClientRect();
+        popup.style.left = `${Math.max(12, rect.left)}px`;
+        popup.style.right = 'auto';
+        popup.style.width = `${Math.max(0, rect.width)}px`;
+        popup.style.top = 'auto';
+        popup.style.bottom = `${Math.max(12, window.innerHeight - rect.top + 8)}px`;
+    }
+
     function setSlashPopupOpen(open: boolean): void {
+        if (open && slashPopup) positionComposerSuggestionPopup(slashPopup);
         slashPopup?.classList.toggle('show', open);
         slashPopup?.setAttribute('aria-hidden', open ? 'false' : 'true');
         input.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -2908,7 +2926,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const atPopup = (() => {
         const el = document.createElement('div');
         el.id = 'atPopup';
-        el.className = 'slash-popup'; // reuse slash-popup styles
+        el.className = 'slash-popup mention-popup';
         document.body.appendChild(el);
         return el;
     })();
@@ -2990,6 +3008,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             });
         });
         atPopup.style.display = '';
+        positionComposerSuggestionPopup(atPopup);
         atPopup.classList.add('show');
         _atPopupVisible = true;
     }
@@ -3130,6 +3149,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             _mentionSelectedIndex = 0;
         }
     }
+
+    window.addEventListener('resize', () => {
+        if (slashPopup?.classList.contains('show')) positionComposerSuggestionPopup(slashPopup);
+        if (_atPopupVisible && atPopup) positionComposerSuggestionPopup(atPopup);
+    });
 
     // ── Image compression helper ───────────────────────────────────────────────
     // Unifies all image input (paste / drag / file picker) to a clean JPEG data URL.
@@ -6568,10 +6592,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 for (const f of summaryFiles) { totalAdd += f.additions || 0; totalDel += f.deletions || 0; }
                 const collapseSummaryLabel = chatI18n.locale === 'zh-cn' ? '收起文件变更摘要' : 'Collapse file-change summary';
                 const expandSummaryLabel = chatI18n.locale === 'zh-cn' ? '展开文件变更摘要' : 'Expand file-change summary';
+                const editedFilesLabel = chatI18n.locale === 'zh-cn'
+                    ? `已编辑 ${summaryFiles.length} 个文件`
+                    : `Edited ${summaryFiles.length} ${summaryFiles.length === 1 ? 'file' : 'files'}`;
+                const reviewLabel = chatI18n.locale === 'zh-cn' ? '审核' : 'Review';
                 const headerHtml = `<div class="ds-header">
                     <button class="ds-collapse-btn" type="button" aria-label="${escapeHtml(collapseSummaryLabel)}" aria-expanded="true">▾</button>
-                    <span class="ds-title">${svgIconNoMargin('edit')} ${escapeHtml(uiText.fileChanges)}</span>
-                    <span class="ds-stats"><span class="ds-add">+${totalAdd}</span> <span class="ds-del">-${totalDel}</span> · ${summaryFiles.length} ${uiText.filesCount}</span>
+                    <span class="ds-title">${svgIconNoMargin('edit')}<span class="ds-title-text">${escapeHtml(editedFilesLabel)}</span></span>
+                    <span class="ds-stats"><span class="ds-add">+${totalAdd}</span> <span class="ds-del">-${totalDel}</span></span>
+                    <button class="ds-review-btn" type="button">${escapeHtml(reviewLabel)}</button>
                 </div>`;
                 card.innerHTML = headerHtml;
 
@@ -6653,6 +6682,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         collapseBtn.setAttribute('aria-label', collapsed ? expandSummaryLabel : collapseSummaryLabel);
                     });
                 }
+                card.querySelector<HTMLButtonElement>('.ds-review-btn')?.addEventListener('click', event => {
+                    event.stopPropagation();
+                    openDiffInSideWorkspace(summaryFiles, uiText.fileChanges, { sourceKey: summarySourceKey });
+                });
                 chatArea.appendChild(card);
                 scrollBottom();
                 if (shouldUseSideWorkspace()) {

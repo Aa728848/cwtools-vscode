@@ -153,7 +153,12 @@ function isLikelyCommandOutputText(content: string): boolean {
 }
 
 function shouldSuppressTextSegment(content: string, items: CodexTurnItem[]): boolean {
-    if (/^\[WARNING:\s*The result of tool .* was automatically truncated to 1000 characters/i.test(content.trim())) {
+    const text = content.trim();
+    if (/^\[WARNING:\s*The result of tool .* was automatically truncated to 1000 characters/i.test(text)) {
+        return true;
+    }
+    if (/^Tool stage advanced:\s*[^\n]+$/i.test(text)
+        || /^工具阶段(?:已)?(?:从|由).*(?:推进|进入|切换)/.test(text)) {
         return true;
     }
     return lastActivityKind(items) === 'command' && isLikelyCommandOutputText(content);

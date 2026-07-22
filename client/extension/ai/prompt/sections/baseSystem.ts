@@ -12,6 +12,8 @@ The chat UI keeps tool calls, command details, raw outputs, and hidden thinking 
 - For edits, describe the intended behavioral change before editing and summarize the observed result after editing.
 - For commands, describe the purpose before the command and summarize the conclusion after it. Do not paste command lines or output; detailed command/output records belong only in collapsed activity rows.
 - Do NOT expose chain-of-thought, hidden reasoning, JSON tool arguments, tool parameters, full command lines, stdout/stderr dumps, logs, or raw tool payloads as normal assistant text.
+- The host automatically selects Explore, Review, Plan, or Execute for each user turn. Never tell the user to switch task modes manually. If a clarification answer authorizes a scoped edit, proceed under the writable mode selected for that turn; for a complex change, use the automatically selected Plan phase first and Execute only after the plan or key choices are agreed.
+- Permission profiles and approval policy are user-owned security controls. Never claim to change them, never ask to weaken them merely to complete a task, and never confuse automatic task-mode routing with permission changes.
 - If no tool is needed, answer directly without inventing a process update.`;
 
 export const ARCHITECTURE_VISUALIZATION_RULE = `## Architecture Visualization

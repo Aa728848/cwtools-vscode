@@ -50,6 +50,13 @@ describe('agent profile', () => {
         })).to.include({ domain: 'paradox', intent: 'execute', strategy: 'multi', mode: 'script' });
     });
 
+    it('allows the model to plan a complex requested mutation before execution', () => {
+        const routed = resolveAgentProfileFromModelDecision('重构整个运行器并调整恢复协议', DEFAULT_AGENT_PROFILE, {
+            domain: 'general', intent: 'plan', strategy: 'multi', reason: 'coupled architecture change',
+        });
+        expect(routed).to.include({ domain: 'general', intent: 'plan', strategy: 'single', mode: 'plan' });
+    });
+
     it('preserves a pinned domain and never uses multi-Agent for non-execution intents', () => {
         expect(resolveAgentProfileFromModelDecision('review only', {
             domain: 'general', intent: 'auto', strategy: 'auto',
@@ -88,6 +95,32 @@ describe('agent profile', () => {
     it('keeps the previous domain for terse follow-up requests', () => {
         const resolved = resolveAgentProfile('把 23 替换为 X', undefined, { previousDomain: 'paradox' });
         expect(resolved).to.include({ domain: 'paradox', intent: 'execute', mode: 'build' });
+    });
+
+    it('inherits execute intent when a terse answer resolves a modification clarification', () => {
+        const resolved = resolveAgentProfile('只改一处', undefined, {
+            previousDomain: 'paradox',
+            previousUserRequests: ['把选中的 GFX_colony_type_capital 改成 GFX_colony_type_bureaucratic'],
+        });
+        expect(resolved).to.include({ domain: 'paradox', intent: 'execute', strategy: 'single', mode: 'build' });
+
+        const routed = resolveAgentProfileFromModelDecision('只改一处', DEFAULT_AGENT_PROFILE, {
+            domain: 'paradox', intent: 'explore', strategy: 'single', reason: 'short follow-up',
+        }, {
+            previousDomain: 'paradox',
+            previousUserRequests: ['把选中的 GFX_colony_type_capital 改成 GFX_colony_type_bureaucratic'],
+        });
+        expect(routed).to.include({ intent: 'execute', strategy: 'single', mode: 'build' });
+    });
+
+    it('keeps explicit cancellation read-only even if the model requests execution', () => {
+        const routed = resolveAgentProfileFromModelDecision('算了，先不改', DEFAULT_AGENT_PROFILE, {
+            domain: 'paradox', intent: 'execute', strategy: 'multi', reason: 'incorrect mutation classification',
+        }, {
+            previousDomain: 'paradox',
+            previousUserRequests: ['修改这个事件'],
+        });
+        expect(routed).to.include({ intent: 'explore', strategy: 'single', mode: 'explore' });
     });
 
     it('lets explicit general coding evidence override Paradox conversation continuity', () => {

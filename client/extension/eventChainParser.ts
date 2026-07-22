@@ -637,6 +637,7 @@ export function extractConnectedSubgraph(
     fullGraph: EventGraph,
     seedIds: Set<string>,
     maxDepth = 10,
+    maxNodes = Number.POSITIVE_INFINITY,
 ): EventGraph {
     const knownNodeIds = new Set(fullGraph.nodes.map(node => node.id));
     const adjacentIds = new Map<string, Set<string>>();
@@ -653,20 +654,21 @@ export function extractConnectedSubgraph(
         connect(edge.target, edge.source);
     }
 
+    const nodeLimit = Number.isFinite(maxNodes) ? Math.max(1, Math.floor(maxNodes)) : Number.POSITIVE_INFINITY;
     const visited = new Set<string>();
-    let frontier = new Set(seedIds);
-    for (let depth = 0; depth < maxDepth && frontier.size > 0; depth++) {
+    let frontier = new Set([...seedIds].sort());
+    for (let depth = 0; depth <= maxDepth && frontier.size > 0 && visited.size < nodeLimit; depth++) {
         const next = new Set<string>();
-        for (const id of frontier) {
+        for (const id of [...frontier].sort()) {
             if (visited.has(id)) continue;
+            if (visited.size >= nodeLimit) break;
             visited.add(id);
-            for (const adjacentId of adjacentIds.get(id) ?? []) {
+            for (const adjacentId of [...(adjacentIds.get(id) ?? [])].sort()) {
                 if (!visited.has(adjacentId)) next.add(adjacentId);
             }
         }
         frontier = next;
     }
-    frontier.forEach(id => visited.add(id));
 
     const isVisibleNode = (id: string) => knownNodeIds.has(id) && visited.has(id);
     return {

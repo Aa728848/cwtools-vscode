@@ -372,6 +372,31 @@ realm_event = {
         ]);
     });
 
+    it('can traverse a complete long chain while enforcing a deterministic node limit', () => {
+        const nodes = Array.from({ length: 12 }, (_, index) => ({
+            id: `event.${index}`,
+            type: 'realm_event',
+            file: 'events/long.txt',
+            line: index + 1,
+            endLine: index + 1,
+            namespace: 'event',
+            semanticReferences: [],
+        }));
+        const edges = nodes.slice(1).map((node, index) => ({
+            source: nodes[index]!.id,
+            target: node.id,
+            edgeType: 'effect' as const,
+        }));
+        const graph = { nodes, edges };
+
+        const complete = extractConnectedSubgraph(graph, new Set(['event.0']), Number.POSITIVE_INFINITY, 100);
+        const limited = extractConnectedSubgraph(graph, new Set(['event.0']), Number.POSITIVE_INFINITY, 5);
+
+        expect(complete.nodes.map(node => node.id)).to.deep.equal(nodes.map(node => node.id));
+        expect(limited.nodes.map(node => node.id)).to.deep.equal(nodes.slice(0, 5).map(node => node.id));
+        expect(limited.edges).to.have.length(4);
+    });
+
     it('uses CWT type-key filters to distinguish definition identities sharing a directory', () => {
         const result = parseCommonFile(`
 alpha_kind = { }

@@ -45,6 +45,8 @@ interface EventGraphBuildResult {
     seedIds: string[];
 }
 
+const EVENT_CHAIN_NODE_LIMIT = 1_000;
+
 // ─── Panel ───────────────────────────────────────────────────────────────────
 
 export class EventChainPanel {
@@ -268,9 +270,15 @@ eventsOnlyGraph.edges.push(...buildDefinitionReferenceEdges(eventsOnlyGraph));
 this._panel.webview.postMessage({ command: 'loading', text: panelText('Building MTTH dependencies...', '构建 MTTH 条件依赖...') });
 eventsOnlyGraph.edges.push(...buildMtthConditionEdges(eventsOnlyGraph));
 
-// Keep multi-step event → definition → definition → event chains visible while
-// retaining a bounded neighborhood for large vanilla graphs.
-const subgraph = extractConnectedSubgraph(eventsOnlyGraph, seedIds, 4);
+// Traverse the complete high-confidence component. Generic typed read/write
+// edges are excluded earlier, so a node cap is sufficient protection against
+// malformed or unusually broad definition sets.
+const subgraph = extractConnectedSubgraph(
+eventsOnlyGraph,
+seedIds,
+Number.POSITIVE_INFINITY,
+EVENT_CHAIN_NODE_LIMIT,
+);
 
 return { graph: subgraph, seedIds: Array.from(seedIds) };
 }

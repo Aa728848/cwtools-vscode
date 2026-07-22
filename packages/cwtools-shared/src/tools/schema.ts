@@ -29,7 +29,7 @@ export interface SharedToolError {
 
 export interface SharedToolResult<T = unknown> {
   ok: boolean;
-  status: 'ready' | 'success' | 'denied' | 'loading' | 'stale' | 'unavailable' | 'error';
+  status: 'ready' | 'partial' | 'success' | 'denied' | 'loading' | 'stale' | 'unavailable' | 'error';
   source: string;
   data?: T;
   error?: SharedToolError;

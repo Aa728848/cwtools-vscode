@@ -29,7 +29,10 @@ const vscodeStub = {
         getConfiguration: () => ({
             get: <T>(_key: string, defaultValue?: T): T | undefined => defaultValue,
         }),
-        getWorkspaceFolder: () => activeWorkspaceRoot ? { uri: { fsPath: activeWorkspaceRoot } } : undefined,
+        getWorkspaceFolder: (uri: { fsPath: string }) => vscodeStub.workspace.workspaceFolders.find(folder => {
+            const relative = path.relative(folder.uri.fsPath, uri.fsPath);
+            return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+        }) ?? (activeWorkspaceRoot ? { uri: { fsPath: activeWorkspaceRoot } } : undefined),
         createFileSystemWatcher: () => {
             const watcher = {
                 change: undefined as ((uri: { fsPath: string }) => void) | undefined,
@@ -143,6 +146,7 @@ describe('project knowledge SQLite V2', () => {
         const manifest = await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile, {
             mode: 'incremental',
             domains: ['events'],
+            changedFiles: [path.join(workspaceRoot, 'events', 'changed.txt')],
         });
 
         expect(manifest.schemaVersion).to.equal(2);
@@ -159,6 +163,7 @@ describe('project knowledge SQLite V2', () => {
         expect(commandCalls[0]!.command).to.equal('cwtools.ai.exportProjectKnowledge');
         expect(commandCalls[0]!.args).to.deep.equal([{
             domains: ['events'],
+            changedFiles: [path.join(workspaceRoot, 'events', 'changed.txt')],
             maxDefinitions: 100000,
             maxTopologyFiles: 1200,
             maxEdges: 8000,
@@ -166,6 +171,34 @@ describe('project knowledge SQLite V2', () => {
             databasePath: path.join(root, 'knowledge.sqlite'),
             generationMode: 'incremental',
         }]);
+    });
+
+    it('rejects a manifest database path outside the knowledge directory', async () => {
+        const profile = { game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        nextSnapshot = {
+            ok: true,
+            status: 'ready',
+            game: 'stellaris',
+            generatedAtUnixMs: Date.now(),
+            projectRoots: [workspaceRoot],
+            generationMode: 'full',
+            domains: [],
+            counts: { definitions: 0, workspaceDefinitions: 0, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 0, topologyEdges: 0 },
+            warnings: [],
+        };
+        await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
+        const manifestPath = projectKnowledge.getProjectKnowledgeManifestPath(workspaceRoot);
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        manifest.database.path = '../../outside.sqlite';
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest), 'utf8');
+        fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'outside.sqlite'), 'sqlite', 'utf8');
+        commandCalls = [];
+
+        const result = await projectKnowledge.queryProjectKnowledge(workspaceRoot);
+
+        expect(result.status).to.equal('error');
+        expect(result.staleReasons).to.include('invalid_database_path');
+        expect(commandCalls).to.deep.equal([]);
     });
 
     it('moves a legacy knowledge pack to .cwtools and keeps subsequent writes there', async () => {
@@ -270,6 +303,35 @@ describe('project knowledge SQLite V2', () => {
         expect(commandCalls[1]!.command).to.equal('cwtools.ai.queryProjectKnowledgeDb');
     });
 
+    it('preserves partial completeness instead of reporting a bounded graph as ready', async () => {
+        const profile = { game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        nextSnapshot = {
+            ok: true,
+            status: 'partial',
+            game: 'stellaris',
+            generatedAtUnixMs: Date.now(),
+            projectRoots: [workspaceRoot],
+            generationMode: 'full',
+            domains: [{ id: 'events' }],
+            counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1200, topologyEdges: 8000 },
+            warnings: ['Topology and event relationships are partial because the configured export limits were reached.'],
+        };
+        await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
+        nextSnapshot = {
+            ok: true,
+            status: 'partial',
+            domains: ['events'],
+            evidence: [],
+            unresolved: [],
+            eventGraph: { nodes: [], edges: [], logic: [] },
+        };
+
+        const result = await projectKnowledge.queryProjectKnowledge(workspaceRoot);
+
+        expect(result.status).to.equal('partial');
+        expect(result._hint).to.include('export limits');
+    });
+
     it('keeps one-version V1 JSON query compatibility', async () => {
         const root = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
         fs.mkdirSync(path.join(root, 'capabilities'), { recursive: true });
@@ -347,5 +409,101 @@ describe('project knowledge SQLite V2', () => {
         const manifest = projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)!;
         expect(manifest.status).to.equal('ready');
         expect(manifest.staleReasons).to.deep.equal([]);
+    });
+
+    it('keeps pending file refreshes isolated per workspace root', async () => {
+        const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-project-knowledge-second-'));
+        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        nextSnapshot = {
+            ok: true,
+            status: 'ready',
+            game: 'stellaris',
+            generatedAtUnixMs: Date.now(),
+            generationMode: 'full',
+            domains: [{ id: 'event' }],
+            counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
+            warnings: [],
+        };
+        vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: workspaceRoot } }, { uri: { fsPath: secondRoot } }];
+        await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
+        await projectKnowledge.generateProjectKnowledge(secondRoot, profile);
+        for (const root of [workspaceRoot, secondRoot]) {
+            const projectRoot = path.join(root, '.cwtools', 'project');
+            fs.mkdirSync(projectRoot, { recursive: true });
+            fs.writeFileSync(path.join(projectRoot, 'profile.json'), JSON.stringify(profile), 'utf8');
+        }
+        commandCalls = [];
+        const context = {
+            globalStorageUri: { fsPath: path.join(workspaceRoot, 'global-storage') },
+            subscriptions: [] as Array<{ dispose(): void }>,
+        };
+        projectKnowledge.registerProjectKnowledgeWatcher(context as any);
+        const firstChanged = path.join(workspaceRoot, 'events', 'first.txt');
+        const secondChanged = path.join(secondRoot, 'common', 'scripted_effects', 'second.txt');
+
+        const clock = sinon.useFakeTimers();
+        try {
+            watcherStubs[0]!.change?.({ fsPath: firstChanged });
+            watcherStubs[0]!.change?.({ fsPath: secondChanged });
+            await clock.tickAsync(2000);
+            await clock.runAllAsync();
+        } finally {
+            clock.restore();
+            for (const disposable of context.subscriptions.reverse()) disposable.dispose();
+            fs.rmSync(secondRoot, { recursive: true, force: true });
+        }
+
+        const exports = commandCalls
+            .filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')
+            .map(call => call.args[0] as { databasePath: string; changedFiles: string[]; generationMode: string });
+        expect(exports).to.have.length(2);
+        expect(exports.find(item => item.databasePath.startsWith(workspaceRoot))?.changedFiles).to.deep.equal([firstChanged]);
+        expect(exports.find(item => item.databasePath.startsWith(secondRoot))?.changedFiles).to.deep.equal([secondChanged]);
+        expect(exports.every(item => item.generationMode === 'incremental')).to.equal(true);
+    });
+
+    it('routes secondary-root changes into the primary combined knowledge database', async () => {
+        const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-project-knowledge-combined-'));
+        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: workspaceRoot } }, { uri: { fsPath: secondRoot } }];
+        nextSnapshot = {
+            ok: true,
+            status: 'ready',
+            game: 'stellaris',
+            generatedAtUnixMs: Date.now(),
+            projectRoots: [workspaceRoot, secondRoot],
+            generationMode: 'full',
+            domains: [{ id: 'event' }],
+            counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
+            warnings: [],
+        };
+        await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
+        const projectRoot = path.join(workspaceRoot, '.cwtools', 'project');
+        fs.mkdirSync(projectRoot, { recursive: true });
+        fs.writeFileSync(path.join(projectRoot, 'profile.json'), JSON.stringify(profile), 'utf8');
+        commandCalls = [];
+        const context = {
+            globalStorageUri: { fsPath: path.join(workspaceRoot, 'global-storage') },
+            subscriptions: [] as Array<{ dispose(): void }>,
+        };
+        projectKnowledge.registerProjectKnowledgeWatcher(context as any);
+        const changedFile = path.join(secondRoot, 'events', 'secondary.txt');
+
+        const clock = sinon.useFakeTimers();
+        try {
+            watcherStubs[0]!.change?.({ fsPath: changedFile });
+            await clock.tickAsync(2000);
+            await clock.runAllAsync();
+        } finally {
+            clock.restore();
+            for (const disposable of context.subscriptions.reverse()) disposable.dispose();
+            fs.rmSync(secondRoot, { recursive: true, force: true });
+        }
+
+        const exports = commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge');
+        expect(exports).to.have.length(1);
+        const options = exports[0]!.args[0] as { databasePath: string; changedFiles: string[] };
+        expect(options.databasePath).to.equal(projectKnowledge.getProjectKnowledgeDatabasePath(workspaceRoot));
+        expect(options.changedFiles).to.deep.equal([changedFile]);
     });
 });

@@ -264,7 +264,7 @@ export const GENERATED_MCP_TOOLS = [
   {
     "tool": {
       "name": "get_diagnostics",
-      "description": "Get validation errors and warnings for workspace files DIRECTLY from the CWTools language server — the same diagnostics shown in the VSCode Problems panel. No file writing required. Returns a freshness field: `fresh` = all validations complete, `pending` = syntax OK but global checks (types/localisation) still running, `stale` = not yet validated. When freshness is pending, zero errors does NOT mean no errors — global validation is still in progress. Use this to: (1) count/list errors, (2) check file errors, (3) understand validator state before fixes.",
+      "description": "Get errors, warnings, information, and hints from the VS Code Problems diagnostics snapshot, optionally filtered by file and severity. Returns totals and truncation metadata; check truncated before treating the returned list as complete.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -722,7 +722,7 @@ export const GENERATED_MCP_TOOLS = [
   {
     "tool": {
       "name": "document_symbols",
-      "description": "Get all symbols defined in a file as a hierarchical tree with 0-based line ranges from VS Code/LSP. Use this FIRST to understand file structure without reading content. Combine with get_pdx_block/edit_pdx_block for zero-read workflows.",
+      "description": "Get symbols defined in a file as a hierarchical tree with 0-based line ranges from the active VS Code language provider. Use this first to understand file structure before choosing targeted reads.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -748,7 +748,7 @@ export const GENERATED_MCP_TOOLS = [
   {
     "tool": {
       "name": "workspace_symbols",
-      "description": "Search symbol definitions by name across workspace + vanilla cache. Use the most specific identifier available from active evidence. Empty results can mean the LSP index/type/file kind missed it; verify absence with verify_pdx_identifier before concluding missing.",
+      "description": "Search symbol definitions by name through active VS Code workspace symbol providers. Use a specific query. Empty results may reflect provider coverage or indexing state and are not proof that text is absent from the repository.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -758,7 +758,7 @@ export const GENERATED_MCP_TOOLS = [
           },
           "limit": {
             "type": "number",
-            "description": "Max results (default 20, keep low for vanilla searches to avoid token waste)"
+            "description": "Max results (default 20; keep low for broad searches to avoid token waste)."
           }
         },
         "required": [

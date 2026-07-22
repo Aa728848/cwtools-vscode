@@ -57,6 +57,7 @@ import {
 // ─── Index status ────────────────────────────────────────────────────────────
 
 export type IndexStatus = 'idle' | 'indexing' | 'ready' | 'error';
+export type WorkspaceSymbolIndexStatus = IndexStatus | 'partial';
 export type RefreshReason = 'initial' | 'file-change' | 'manual' | 'rules-sync';
 
 // ─── Query contracts ─────────────────────────────────────────────────────────
@@ -97,7 +98,7 @@ interface VanillaSymbolSource {
 
 export class IndexService implements vscode.Disposable {
 	private _status: IndexStatus = 'idle';
-	private _workspaceSymbolStatus: IndexStatus = 'idle';
+	private _workspaceSymbolStatus: WorkspaceSymbolIndexStatus = 'idle';
 	private _disposables: vscode.Disposable[] = [];
 	private _locIndex: Map<string, LocEntry[]> = new Map();
 	private _workspaceSymbolIndex: Map<string, WorkspaceSymbolEntry[]> = new Map();
@@ -115,6 +116,8 @@ export class IndexService implements vscode.Disposable {
 	private _semanticCatalogFingerprint = 'unavailable';
 	private _workspaceSymbolPhaseReady = false;
 	private _vanillaSymbolPhaseReady = false;
+	private _workspaceSymbolTruncated = false;
+	private _truncatedVanillaSources: Set<string> = new Set();
 	private _lastSymbolQueryAt = 0;
 	private _idleEvictionTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -142,7 +145,7 @@ export class IndexService implements vscode.Disposable {
 	}
 
 	/** Current status of the heavier PDX symbol/asset index. */
-	get workspaceSymbolStatus(): IndexStatus {
+	get workspaceSymbolStatus(): WorkspaceSymbolIndexStatus {
 		return this._workspaceSymbolStatus;
 	}
 
@@ -380,11 +383,13 @@ export class IndexService implements vscode.Disposable {
 			this._addWorkspaceSymbolEntries(snapshot.entries);
 		}
 
-		const files = await vscode.workspace.findFiles(
+		const discoveredFiles = await vscode.workspace.findFiles(
 			'**/*.{txt,gfx,asset,gui}',
 			'**/{node_modules,.git,.cwtools,.cwtools-ai,release,artifacts,dist,coverage,out}/**',
-			IndexService.WORKSPACE_SYMBOL_FILE_LIMIT,
+			IndexService.WORKSPACE_SYMBOL_FILE_LIMIT + 1,
 		);
+		this._workspaceSymbolTruncated = discoveredFiles.length > IndexService.WORKSPACE_SYMBOL_FILE_LIMIT;
+		const files = discoveredFiles.slice(0, IndexService.WORKSPACE_SYMBOL_FILE_LIMIT);
 		const current = new Map<string, { uri: vscode.Uri; stat: vscode.FileStat }>();
 		for (let i = 0; i < files.length; i += IndexService.INDEX_BATCH_SIZE) {
 			const batch = files.slice(i, i + IndexService.INDEX_BATCH_SIZE);
@@ -468,6 +473,7 @@ export class IndexService implements vscode.Disposable {
 		if (!requestedGames) {
 			this._removeOrigin('vanilla');
 			this._vanillaSourceFiles.clear();
+			this._truncatedVanillaSources.clear();
 		}
 		for (const source of sources) {
 			const sourceKey = IndexService._normalizeFilePath(source.root);
@@ -489,7 +495,11 @@ export class IndexService implements vscode.Disposable {
 
 			const uri = vscode.Uri.file(source.root);
 			const pattern = new vscode.RelativePattern(uri, '**/*.{txt,gfx,asset,gui}');
-			const files = await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,.cwtools,.cwtools-ai,release,artifacts,dist,coverage,out}/**', IndexService.VANILLA_SYMBOL_FILE_LIMIT);
+			const discoveredFiles = await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,.cwtools,.cwtools-ai,release,artifacts,dist,coverage,out}/**', IndexService.VANILLA_SYMBOL_FILE_LIMIT + 1);
+			const truncated = discoveredFiles.length > IndexService.VANILLA_SYMBOL_FILE_LIMIT;
+			if (truncated) this._truncatedVanillaSources.add(sourceKey);
+			else this._truncatedVanillaSources.delete(sourceKey);
+			const files = discoveredFiles.slice(0, IndexService.VANILLA_SYMBOL_FILE_LIMIT);
 			const current = new Map<string, { uri: vscode.Uri; stat: vscode.FileStat }>();
 			for (let i = 0; i < files.length; i += IndexService.INDEX_BATCH_SIZE) {
 				const batch = files.slice(i, i + IndexService.INDEX_BATCH_SIZE);
@@ -564,7 +574,7 @@ export class IndexService implements vscode.Disposable {
 		try {
 			await this._workspaceSymbolBuildPromise;
 			this._workspaceSymbolPhaseReady = true;
-			this._workspaceSymbolStatus = 'ready';
+			this._workspaceSymbolStatus = this._workspaceSymbolTruncated ? 'partial' : 'ready';
 		} catch (e) {
 			this._workspaceSymbolStatus = 'error';
 			throw e;
@@ -586,10 +596,12 @@ export class IndexService implements vscode.Disposable {
 				this._workspaceSymbolsIncludeVanilla = true;
 			}
 			this._lastWorkspaceSymbolRefreshAt = Date.now();
-			this._workspaceSymbolStatus = 'ready';
-			ErrorReporter.debug('IndexService', `Workspace symbol index ready: ${this._workspaceSymbolIndex.size} names` + (this._workspaceSymbolsIncludeVanilla ? ' (incl. vanilla)' : ''));
+			this._workspaceSymbolStatus = this._workspaceSymbolTruncated || this._truncatedVanillaSources.size > 0 ? 'partial' : 'ready';
+			ErrorReporter.debug('IndexService', `Workspace symbol index ${this._workspaceSymbolStatus}: ${this._workspaceSymbolIndex.size} names` + (this._workspaceSymbolsIncludeVanilla ? ' (incl. vanilla)' : ''));
 		} catch (e) {
-			this._workspaceSymbolStatus = this._workspaceSymbolPhaseReady ? 'ready' : 'error';
+			this._workspaceSymbolStatus = this._workspaceSymbolPhaseReady
+				? this._workspaceSymbolTruncated || this._truncatedVanillaSources.size > 0 ? 'partial' : 'ready'
+				: 'error';
 			throw e;
 		} finally {
 			this._vanillaSymbolBuildPromise = undefined;
@@ -856,7 +868,7 @@ export class IndexService implements vscode.Disposable {
 	 * The index will be lazily rebuilt on the next queryWorkspaceSymbols() call.
 	 */
 	private _evictWorkspaceSymbolsIfIdle(): void {
-		if (this._workspaceSymbolStatus !== 'ready') return;
+		if (this._workspaceSymbolStatus !== 'ready' && this._workspaceSymbolStatus !== 'partial') return;
 		const idleMs = Date.now() - this._lastSymbolQueryAt;
 		if (idleMs < IndexService.IDLE_EVICTION_MS) return;
 
@@ -872,6 +884,8 @@ export class IndexService implements vscode.Disposable {
 		this._workspaceSymbolsIncludeVanilla = false;
 		this._workspaceSymbolPhaseReady = false;
 		this._vanillaSymbolPhaseReady = false;
+		this._workspaceSymbolTruncated = false;
+		this._truncatedVanillaSources.clear();
 		this._semanticDefinitionTypes = [];
 		this._semanticCatalogFingerprint = 'unavailable';
 		this._disposeSymbolFileWatcher();
@@ -905,6 +919,8 @@ export class IndexService implements vscode.Disposable {
 		this._workspaceSymbolsIncludeVanilla = false;
 		this._workspaceSymbolPhaseReady = false;
 		this._vanillaSymbolPhaseReady = false;
+		this._workspaceSymbolTruncated = false;
+		this._truncatedVanillaSources.clear();
 		this._semanticDefinitionTypes = [];
 		this._semanticCatalogFingerprint = 'unavailable';
 		this._workspaceSymbolBuildPromise = undefined;

@@ -99,4 +99,65 @@ describe('/init artifact generation', () => {
             delete require.cache[modulePath];
         }
     });
+
+    it('reports degraded success when the LSP export stays partial after retries', async () => {
+        const manifestPath = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge', 'manifest.json');
+        const warnings: string[] = [];
+        let attempts = 0;
+        const vscodeStub = {
+            workspace: {
+                workspaceFolders: [{ uri: { fsPath: workspaceRoot } }],
+                openTextDocument: async (uri: unknown) => ({ uri }),
+            },
+            window: {
+                showWarningMessage: async (message: string) => { warnings.push(message); },
+                showInformationMessage: async () => undefined,
+                showTextDocument: async () => undefined,
+                withProgress: async (_options: unknown, task: (progress: { report(): void }) => Promise<unknown>) => task({ report: () => undefined }),
+            },
+            ProgressLocation: { Window: 10 },
+            Uri: { file: (filePath: string) => ({ fsPath: filePath }) },
+        };
+        const partialManifest = {
+            status: 'partial' as const,
+            game: 'stellaris',
+            counts: { vanillaDefinitions: 1 },
+        };
+        const projectKnowledgeStub = {
+            generateProjectKnowledge: async () => {
+                attempts += 1;
+                return partialManifest;
+            },
+            getProjectKnowledgeManifestPath: () => manifestPath,
+            writeUnavailableProjectKnowledge: () => { throw new Error('partial data must not be overwritten as unavailable'); },
+        };
+        const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+        const originalLoad = moduleLoader._load;
+        const modulePath = require.resolve('../../extension/ai/chatInit');
+        delete require.cache[modulePath];
+        moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
+            if (request === 'vscode') return vscodeStub;
+            if (request === './projectKnowledge') return projectKnowledgeStub;
+            if (request === './errorReporter') return { ErrorReporter: { warn: () => undefined } };
+            return originalLoad.apply(this, [request, ...args]);
+        };
+
+        const clock = sinon.useFakeTimers();
+        try {
+            const { generateInitFile } = require('../../extension/ai/chatInit') as typeof import('../../extension/ai/chatInit');
+            const pending = generateInitFile(() => undefined, () => undefined);
+            await clock.runAllAsync();
+            const result = await pending;
+
+            expect(attempts).to.equal(3);
+            expect(result.success).to.equal(true);
+            expect(result.degraded).to.equal(true);
+            expect(result.message).to.include('remained partial');
+            expect(warnings).to.have.length(1);
+        } finally {
+            clock.restore();
+            moduleLoader._load = originalLoad;
+            delete require.cache[modulePath];
+        }
+    });
 });

@@ -42,7 +42,7 @@ export interface LocalisationIndexEntry {
 }
 
 export interface IndexQueryResult<TEntry> {
-  status: 'ready' | 'indexing' | 'idle' | 'unavailable' | 'error';
+  status: 'ready' | 'partial' | 'indexing' | 'idle' | 'unavailable' | 'error';
   totalCount: number;
   entries: TEntry[];
   indexedSymbolNames?: number;

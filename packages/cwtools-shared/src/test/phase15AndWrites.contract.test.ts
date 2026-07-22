@@ -67,6 +67,22 @@ describe('phase 1.5 symbols and phase 2 write contracts', () => {
     expect(result.data!.symbols[0]!.name).to.equal('test_symbol');
   });
 
+  it('does not promote a partial workspace index fallback to ready', async () => {
+    const host = createFsHost(repoRoot);
+    host.indexing = {
+      async queryWorkspace() {
+        return { status: 'partial', totalCount: 0, entries: [], _hint: 'file limit reached' };
+      },
+      async queryLocalisation() {
+        return { status: 'ready', totalCount: 0, entries: [] };
+      },
+    };
+
+    const result = await workspaceSymbolsWithHost(host, { query: 'possibly_missing' });
+
+    expect(result.status).to.equal('partial');
+  });
+
   it('returns completion context with diagnostics freshness metadata', async () => {
     const workspaceRoot = fs.mkdtempSync(path.join(repoRoot, '.tmp-mcp-completion-'));
     try {

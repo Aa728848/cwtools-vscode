@@ -431,7 +431,7 @@ export interface QueryWorkspaceIndexArgs {
 }
 
 export interface QueryWorkspaceIndexResult {
-    status: 'ready' | 'indexing' | 'idle' | 'error' | 'unavailable';
+    status: 'ready' | 'partial' | 'indexing' | 'idle' | 'error' | 'unavailable';
     totalCount: number;
     entries: Array<{
         name: string;
@@ -510,7 +510,7 @@ export interface ProjectProfile {
     };
     validation: {
         lspReady: 'unknown' | 'ready' | 'not_ready';
-        indexStatus: 'unknown' | 'ready' | 'indexing' | 'idle' | 'unavailable';
+        indexStatus: 'unknown' | 'ready' | 'partial' | 'indexing' | 'idle' | 'unavailable';
         vanillaCache: 'unknown' | 'configured' | 'missing';
     };
     promptCards: Partial<Record<AgentMode | 'asset', string>>;
@@ -680,7 +680,7 @@ export interface QueryProjectKnowledgeArgs {
 }
 
 export interface QueryProjectKnowledgeResult {
-    status: 'ready' | 'stale' | 'missing' | 'error';
+    status: 'ready' | 'partial' | 'stale' | 'missing' | 'error';
     manifestPath: string;
     generatedAt?: string;
     game?: string;

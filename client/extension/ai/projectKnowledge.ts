@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as vs from 'vscode';
 import { getCacheSettingKey, getGameIdForVanillaCacheFile, getVanillaCacheFileName } from '../gameProfiles';
 import type { IndexService } from '../indexing/indexService';
+import { isPathInsideOrEqual } from '../pathScope';
 import { ErrorReporter } from './errorReporter';
 import { readProjectProfile } from './projectProfile';
 import { migrateLegacyAiStorageRoot } from './workspacePaths';
@@ -20,7 +21,7 @@ export interface ProjectKnowledgeManifest {
     schemaVersion: 1 | 2;
     generatedAt: string;
     generationMode: 'full' | 'incremental';
-    status: 'ready' | 'stale' | 'loading' | 'unavailable' | 'error';
+    status: 'ready' | 'partial' | 'stale' | 'loading' | 'unavailable' | 'error';
     game: string;
     graphVersion?: number;
     projectRoots: string[];
@@ -90,14 +91,50 @@ export interface GenerateProjectKnowledgeOptions {
 const RELEVANT_EXTENSIONS = new Set(['.txt', '.gfx', '.asset', '.gui', '.yml', '.cwt', '.mod']);
 const EXCLUDED_DIRECTORIES = new Set(['.git', '.cwtools', '.cwtools-ai', 'node_modules', 'release', 'artifacts', 'dist', 'out']);
 let watcherRegistration: vs.Disposable | undefined;
-let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-const pendingChangedFiles = new Set<string>();
-let refreshInFlight: Promise<void> | undefined;
-let pendingFullRefresh = false;
+interface PendingRootRefresh {
+    workspaceRoot: string;
+    changedFiles: Set<string>;
+    staleReasons: Set<string>;
+    fullRefresh: boolean;
+    timer?: ReturnType<typeof setTimeout>;
+    inFlight?: Promise<void>;
+}
+const pendingRootRefreshes = new Map<string, PendingRootRefresh>();
 let pendingVanillaIndexAll = false;
 const pendingVanillaIndexGames = new Set<string>();
-const pendingStaleReasons = new Set<string>();
 let vanillaCacheDirectory: string | undefined;
+
+function workspaceRootKey(workspaceRoot: string): string {
+    const resolved = path.resolve(workspaceRoot);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function pendingRootRefresh(workspaceRoot: string): PendingRootRefresh {
+    const key = workspaceRootKey(workspaceRoot);
+    let state = pendingRootRefreshes.get(key);
+    if (!state) {
+        state = {
+            workspaceRoot: path.resolve(workspaceRoot),
+            changedFiles: new Set<string>(),
+            staleReasons: new Set<string>(),
+            fullRefresh: false,
+        };
+        pendingRootRefreshes.set(key, state);
+    }
+    return state;
+}
+
+function findKnowledgeOwnerRoot(sourceWorkspaceRoot: string): string | undefined {
+    const sourceKey = workspaceRootKey(sourceWorkspaceRoot);
+    for (const folder of vs.workspace.workspaceFolders ?? []) {
+        const candidateRoot = folder.uri.fsPath;
+        const manifest = readProjectKnowledgeManifest(candidateRoot);
+        if (!manifest) continue;
+        const projectRoots = manifest.projectRoots?.length ? manifest.projectRoots : [candidateRoot];
+        if (projectRoots.some(root => workspaceRootKey(root) === sourceKey)) return candidateRoot;
+    }
+    return undefined;
+}
 
 function primaryKnowledgeRoot(workspaceRoot: string): string {
     return path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
@@ -180,8 +217,12 @@ function collectRelevantFileFacts(root: string, maxFiles = 10000): string[] {
     return facts.sort();
 }
 
-export function computeProjectKnowledgeFingerprint(workspaceRoot: string): string {
-    return hashParts(collectRelevantFileFacts(workspaceRoot));
+export function computeProjectKnowledgeFingerprint(workspaceRoot: string, projectRoots: string[] = [workspaceRoot]): string {
+    const roots = Array.from(new Set(projectRoots.map(root => path.resolve(root)))).sort((a, b) => a.localeCompare(b));
+    if (roots.length === 1 && workspaceRootKey(roots[0]!) === workspaceRootKey(workspaceRoot)) {
+        return hashParts(collectRelevantFileFacts(workspaceRoot));
+    }
+    return hashParts(roots.flatMap(root => [normalizePath(root), ...collectRelevantFileFacts(root)]));
 }
 
 function pathStatFact(target: string): string {
@@ -260,18 +301,6 @@ function stringField(record: Record<string, unknown>, key: string): string {
     return typeof record[key] === 'string' ? String(record[key]) : '';
 }
 
-function domainForPath(filePath: string): string {
-    const value = normalizePath(filePath).toLowerCase();
-    const segments = value.split('/').filter(Boolean);
-    const commonIndex = segments.indexOf('common');
-    if (commonIndex >= 0 && commonIndex + 1 < segments.length) return segments[commonIndex + 1]!.replace(/-/g, '_');
-    return (segments.length > 1 ? segments[0] : path.extname(value).replace(/^\./, '')) || 'other';
-}
-
-function domainsForChangedFiles(workspaceRoot: string, files: string[]): string[] {
-    return Array.from(new Set(files.map(file => domainForPath(path.relative(workspaceRoot, file))))).sort();
-}
-
 const LEGACY_KNOWLEDGE_ARTIFACTS = [
     'snapshot.json',
     'topology.json',
@@ -297,6 +326,7 @@ async function requestLspKnowledgeSnapshot(
         'cwtools.ai.exportProjectKnowledge',
         {
             domains: options.domains ?? [],
+            changedFiles: options.changedFiles ?? [],
             maxDefinitions: 100000,
             maxTopologyFiles: 1200,
             maxEdges: 8000,
@@ -339,6 +369,7 @@ export async function generateProjectKnowledge(
         eventLogic: 0,
     };
 
+    const projectRoots = snapshot.projectRoots ?? [workspaceRoot];
     const manifest: ProjectKnowledgeManifest = {
         schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
         generatedAt: new Date(snapshot.generatedAtUnixMs ?? Date.now()).toISOString(),
@@ -346,11 +377,11 @@ export async function generateProjectKnowledge(
         status: snapshot.status,
         game: gameId,
         graphVersion: snapshot.graphVersion,
-        projectRoots: snapshot.projectRoots ?? [workspaceRoot],
+        projectRoots,
         domains,
         counts,
         fingerprints: {
-            project: computeProjectKnowledgeFingerprint(workspaceRoot),
+            project: computeProjectKnowledgeFingerprint(workspaceRoot, projectRoots),
             vanilla: computeVanillaFingerprint(gameId),
             rules: computeRulesFingerprint(gameId, snapshot.graphVersion),
         },
@@ -425,7 +456,7 @@ export function readProjectKnowledgeManifest(workspaceRoot: string): ProjectKnow
 function currentStaleReasons(workspaceRoot: string, manifest: ProjectKnowledgeManifest): string[] {
     const reasons = [...(manifest.staleReasons ?? [])];
     if (manifest.schemaVersion !== PROJECT_KNOWLEDGE_SCHEMA_VERSION) reasons.push('schema_version_changed');
-    if (computeProjectKnowledgeFingerprint(workspaceRoot) !== manifest.fingerprints.project) reasons.push('workspace_files_changed');
+    if (computeProjectKnowledgeFingerprint(workspaceRoot, manifest.projectRoots) !== manifest.fingerprints.project) reasons.push('workspace_files_changed');
     if (computeVanillaFingerprint(manifest.game) !== manifest.fingerprints.vanilla) reasons.push('vanilla_changed');
     if (computeRulesFingerprint(manifest.game, manifest.graphVersion) !== manifest.fingerprints.rules) reasons.push('rules_changed');
     return Array.from(new Set(reasons));
@@ -535,7 +566,25 @@ export async function queryProjectKnowledge(
 
     const root = knowledgeRoot(workspaceRoot);
     const manifestPath = path.join(root, 'manifest.json');
-    const databasePath = path.resolve(root, manifest.database?.path ?? 'knowledge.sqlite');
+    const configuredDatabasePath = typeof manifest.database?.path === 'string' && manifest.database.path.trim()
+        ? manifest.database.path
+        : 'knowledge.sqlite';
+    const databasePath = path.resolve(root, configuredDatabasePath);
+    if (!isPathInsideOrEqual(databasePath, root)) {
+        return {
+            status: 'error',
+            manifestPath,
+            generatedAt: manifest.generatedAt,
+            game: manifest.game,
+            graphVersion: manifest.graphVersion,
+            staleReasons: ['invalid_database_path'],
+            domains: [],
+            evidence: [],
+            unresolved: [],
+            eventGraph: { nodes: [], edges: [], logic: [] },
+            error: 'Project knowledge database path escapes the knowledge directory.',
+        };
+    }
     if (!fs.existsSync(databasePath)) {
         return {
             status: 'error',
@@ -567,8 +616,15 @@ export async function queryProjectKnowledge(
             throw new Error(message);
         }
         const resultStatus = String(result.status ?? manifest.status);
+        const status: QueryProjectKnowledgeResult['status'] = staleReasons.length > 0
+            ? 'stale'
+            : resultStatus === 'partial' || manifest.status === 'partial'
+                ? 'partial'
+                : resultStatus === 'ready' && manifest.status === 'ready'
+                    ? 'ready'
+                    : 'stale';
         return {
-            status: staleReasons.length > 0 || resultStatus !== 'ready' ? 'stale' : 'ready',
+            status,
             manifestPath,
             generatedAt: typeof result.generatedAt === 'string' ? result.generatedAt : manifest.generatedAt,
             game: typeof result.game === 'string' ? result.game : manifest.game,
@@ -587,7 +643,9 @@ export async function queryProjectKnowledge(
             requiredNextChecks: Array.isArray(result.requiredNextChecks)
                 ? result.requiredNextChecks.filter((item): item is string => typeof item === 'string')
                 : [],
-            _hint: staleReasons.length > 0
+            _hint: status === 'partial'
+                ? 'Knowledge topology is partial because export limits were reached. Use targeted CWT/LSP queries before treating missing relationships as absent.'
+                : staleReasons.length > 0
                 ? 'Knowledge is stale. The background watcher will refresh it when the LSP is ready; rerun /init for an immediate rebuild.'
                 : 'The SQLite knowledge graph is retrieval evidence. Exact CWT/LSP legality checks remain authoritative.',
         };
@@ -616,19 +674,33 @@ export function buildProjectKnowledgePrompt(workspaceRoot: string): string {
     return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: ${manifest.schemaVersion >= 2 ? 'manifest + SQLite V2' : 'legacy JSON V1'}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace + ${manifest.counts.vanillaDefinitions ?? 0} vanilla; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; typed graph: ${manifest.counts.eventNodes ?? 0} entry nodes / ${manifest.counts.eventEdges ?? 0} structural edges / ${manifest.counts.eventLogic ?? 0} logic facts\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Enumerate the involved TypeDefs and dependency families from the current semantic catalog, then load their project/vanilla patterns, typed topology, unresolved facts, and relevant graph slices. A blueprint must cite exact evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
 }
 
+function hasPendingRefresh(state: PendingRootRefresh): boolean {
+    return state.changedFiles.size > 0 || state.fullRefresh;
+}
+
+function scheduleRootRefresh(workspaceRoot: string, indexService: IndexService | undefined, delayMs = 1800): void {
+    const state = pendingRootRefresh(workspaceRoot);
+    if (state.timer) clearTimeout(state.timer);
+    state.timer = setTimeout(() => {
+        state.timer = undefined;
+        void refreshFromWatcher(state.workspaceRoot, indexService);
+    }, delayMs);
+}
+
 async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexService): Promise<void> {
-    if (refreshInFlight) return refreshInFlight;
-    const files = Array.from(pendingChangedFiles);
-    pendingChangedFiles.clear();
-    const fullRefresh = pendingFullRefresh;
-    pendingFullRefresh = false;
+    const state = pendingRootRefresh(workspaceRoot);
+    if (state.inFlight) return state.inFlight;
+    const files = Array.from(state.changedFiles);
+    state.changedFiles.clear();
+    const fullRefresh = state.fullRefresh;
+    state.fullRefresh = false;
     const refreshAllVanilla = pendingVanillaIndexAll;
     pendingVanillaIndexAll = false;
     const vanillaGames = Array.from(pendingVanillaIndexGames);
     pendingVanillaIndexGames.clear();
-    const staleReasons = Array.from(pendingStaleReasons);
-    pendingStaleReasons.clear();
-    refreshInFlight = (async () => {
+    const staleReasons = Array.from(state.staleReasons);
+    state.staleReasons.clear();
+    state.inFlight = (async () => {
         if (indexService && (refreshAllVanilla || vanillaGames.length > 0)) {
             try {
                 await indexService.refreshVanillaSymbols(refreshAllVanilla ? undefined : vanillaGames);
@@ -646,22 +718,20 @@ async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexSer
             await generateProjectKnowledge(workspaceRoot, profile, {
                 mode: fullRefresh ? 'full' : 'incremental',
                 changedFiles: files,
-                domains: fullRefresh ? undefined : domainsForChangedFiles(workspaceRoot, files),
             });
         } catch (error) {
             markProjectKnowledgeStale(workspaceRoot, ['background_refresh_failed']);
             ErrorReporter.debug('ProjectKnowledge', 'Background knowledge refresh failed', error);
         }
     })().finally(() => {
-        refreshInFlight = undefined;
-        if ((pendingChangedFiles.size > 0 || pendingFullRefresh || pendingVanillaIndexAll || pendingVanillaIndexGames.size > 0) && !refreshTimer) {
-            refreshTimer = setTimeout(() => {
-                refreshTimer = undefined;
-                void refreshFromWatcher(workspaceRoot, indexService);
-            }, 500);
+        state.inFlight = undefined;
+        if (hasPendingRefresh(state) || pendingVanillaIndexAll || pendingVanillaIndexGames.size > 0) {
+            scheduleRootRefresh(state.workspaceRoot, indexService, 500);
+        } else if (!state.timer) {
+            pendingRootRefreshes.delete(workspaceRootKey(state.workspaceRoot));
         }
     });
-    return refreshInFlight;
+    return state.inFlight;
 }
 
 export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, indexService?: IndexService): void {
@@ -674,13 +744,12 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, in
         if (!workspaceFolder) return;
         const relative = normalizePath(path.relative(workspaceFolder.uri.fsPath, uri.fsPath));
         if (!relative || relative.startsWith('.cwtools/') || relative.startsWith('.cwtools-ai/') || relative.startsWith('.git/') || relative.startsWith('node_modules/')) return;
-        pendingChangedFiles.add(uri.fsPath);
-        pendingStaleReasons.add('workspace_files_changed');
-        if (refreshTimer) clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(() => {
-            refreshTimer = undefined;
-            void refreshFromWatcher(workspaceFolder.uri.fsPath, indexService);
-        }, 1800);
+        const ownerRoot = findKnowledgeOwnerRoot(workspaceFolder.uri.fsPath);
+        if (!ownerRoot) return;
+        const state = pendingRootRefresh(ownerRoot);
+        state.changedFiles.add(path.resolve(uri.fsPath));
+        state.staleReasons.add('workspace_files_changed');
+        scheduleRootRefresh(ownerRoot, indexService);
     };
     watcher.onDidChange(schedule);
     watcher.onDidCreate(schedule);
@@ -691,64 +760,62 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, in
             && !event.affectsConfiguration('stellarisLanguageServices.rules_version')
             && !event.affectsConfiguration('stellarisLanguageServices.rules_folder')
             && !event.affectsConfiguration('stellarisLanguageServices.rules_remote_url')) return;
-        const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!workspaceRoot || !readProjectKnowledgeManifest(workspaceRoot)) return;
-        pendingFullRefresh = true;
         pendingVanillaIndexAll = true;
-        pendingStaleReasons.add('rules_or_vanilla_configuration_changed');
-        markProjectKnowledgeStale(workspaceRoot, ['rules_or_vanilla_configuration_changed']);
-        if (refreshTimer) clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(() => {
-            refreshTimer = undefined;
-            void refreshFromWatcher(workspaceRoot, indexService);
-        }, 1800);
+        for (const folder of vs.workspace.workspaceFolders ?? []) {
+            const workspaceRoot = folder.uri.fsPath;
+            if (!readProjectKnowledgeManifest(workspaceRoot)) continue;
+            const state = pendingRootRefresh(workspaceRoot);
+            state.fullRefresh = true;
+            state.staleReasons.add('rules_or_vanilla_configuration_changed');
+            markProjectKnowledgeStale(workspaceRoot, ['rules_or_vanilla_configuration_changed']);
+            scheduleRootRefresh(workspaceRoot, indexService);
+        }
     });
     const cwbWatcher = vs.workspace.createFileSystemWatcher(new vs.RelativePattern(vs.Uri.file(vanillaCacheDirectory), '*.cwb'));
     const scheduleVanillaCacheRefresh = (uri: vs.Uri) => {
         const gameId = getGameIdForVanillaCacheFile(path.basename(uri.fsPath));
         if (!gameId) return;
         pendingVanillaIndexGames.add(gameId);
-        const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const manifest = workspaceRoot ? readProjectKnowledgeManifest(workspaceRoot) : undefined;
-        if (workspaceRoot && manifest?.game === gameId) {
-            pendingFullRefresh = true;
-            pendingStaleReasons.add('vanilla_cache_changed');
+        let scheduled = false;
+        for (const folder of vs.workspace.workspaceFolders ?? []) {
+            const workspaceRoot = folder.uri.fsPath;
+            const manifest = readProjectKnowledgeManifest(workspaceRoot);
+            if (manifest?.game !== gameId) continue;
+            const state = pendingRootRefresh(workspaceRoot);
+            state.fullRefresh = true;
+            state.staleReasons.add('vanilla_cache_changed');
             markProjectKnowledgeStale(workspaceRoot, ['vanilla_cache_changed']);
+            scheduleRootRefresh(workspaceRoot, indexService);
+            scheduled = true;
         }
-        if (!workspaceRoot) return;
-        if (refreshTimer) clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(() => {
-            refreshTimer = undefined;
-            void refreshFromWatcher(workspaceRoot, indexService);
-        }, 1800);
+        const fallbackRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!scheduled && fallbackRoot) scheduleRootRefresh(fallbackRoot, indexService);
     };
     cwbWatcher.onDidChange(scheduleVanillaCacheRefresh);
     cwbWatcher.onDidCreate(scheduleVanillaCacheRefresh);
     cwbWatcher.onDidDelete(scheduleVanillaCacheRefresh);
     const focusWatcher = vs.window.onDidChangeWindowState(state => {
         if (!state.focused) return;
-        const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const manifest = workspaceRoot ? readProjectKnowledgeManifest(workspaceRoot) : undefined;
-        const reasons = workspaceRoot && manifest ? currentStaleReasons(workspaceRoot, manifest) : [];
-        if (!workspaceRoot || !manifest || reasons.length === 0) return;
-        pendingFullRefresh = true;
-        for (const reason of reasons) pendingStaleReasons.add(reason);
-        if (reasons.includes('vanilla_changed')) pendingVanillaIndexAll = true;
-        if (refreshTimer) clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(() => {
-            refreshTimer = undefined;
-            void refreshFromWatcher(workspaceRoot, indexService);
-        }, 1800);
+        for (const folder of vs.workspace.workspaceFolders ?? []) {
+            const workspaceRoot = folder.uri.fsPath;
+            const manifest = readProjectKnowledgeManifest(workspaceRoot);
+            const reasons = manifest ? currentStaleReasons(workspaceRoot, manifest) : [];
+            if (!manifest || reasons.length === 0) continue;
+            const pending = pendingRootRefresh(workspaceRoot);
+            pending.fullRefresh = true;
+            for (const reason of reasons) pending.staleReasons.add(reason);
+            if (reasons.includes('vanilla_changed')) pendingVanillaIndexAll = true;
+            scheduleRootRefresh(workspaceRoot, indexService);
+        }
     });
     context.subscriptions.push(watcher, cwbWatcher, configWatcher, focusWatcher, new vs.Disposable(() => {
         watcherRegistration = undefined;
-        if (refreshTimer) clearTimeout(refreshTimer);
-        refreshTimer = undefined;
-        pendingChangedFiles.clear();
-        pendingFullRefresh = false;
+        for (const state of pendingRootRefreshes.values()) {
+            if (state.timer) clearTimeout(state.timer);
+        }
+        pendingRootRefreshes.clear();
         pendingVanillaIndexAll = false;
         pendingVanillaIndexGames.clear();
-        pendingStaleReasons.clear();
         vanillaCacheDirectory = undefined;
     }));
 }

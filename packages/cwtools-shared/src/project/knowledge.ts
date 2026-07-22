@@ -121,13 +121,15 @@ export async function queryProjectKnowledgeWithHost(
     const manifestStatus = String(manifest.status ?? 'stale');
     const staleReasons = stringArray(manifest.staleReasons);
     const ready = String(result.status ?? manifestStatus) === 'ready' && manifestStatus === 'ready' && staleReasons.length === 0;
+    const partial = staleReasons.length === 0
+      && (String(result.status ?? manifestStatus) === 'partial' || manifestStatus === 'partial');
     return {
       ok: true,
-      status: ready ? 'ready' : 'stale',
+      status: ready ? 'ready' : partial ? 'partial' : 'stale',
       source: 'cwtools-project-knowledge-sqlite',
       data: {
         ...result,
-        status: ready ? 'ready' : 'stale',
+        status: ready ? 'ready' : partial ? 'partial' : 'stale',
         manifestPath,
         staleReasons,
       },

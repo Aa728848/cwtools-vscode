@@ -116,6 +116,35 @@ describe('project knowledge contract', () => {
       fs.rmSync(workspaceRoot, { recursive: true, force: true });
     }
   });
+
+  it('preserves partial status from a bounded V2 knowledge graph', async () => {
+    const workspaceRoot = fs.mkdtempSync(`${tempBase}-`);
+    try {
+      const knowledgeRoot = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
+      fs.mkdirSync(knowledgeRoot, { recursive: true });
+      fs.writeFileSync(path.join(knowledgeRoot, 'manifest.json'), JSON.stringify({
+        schemaVersion: 2,
+        status: 'partial',
+        staleReasons: [],
+        database: { path: 'knowledge.sqlite', format: 'sqlite', schemaVersion: 2 },
+      }), 'utf8');
+      fs.writeFileSync(path.join(knowledgeRoot, 'knowledge.sqlite'), 'test');
+      const host = createFsHost(workspaceRoot);
+      host.lsp = {
+        async executeCommand() {
+          return { ok: true, status: 'partial', evidence: [], unresolved: [] };
+        },
+      };
+
+      const result = await queryProjectKnowledgeWithHost(host);
+
+      expect(result.ok).to.equal(true);
+      expect(result.status).to.equal('partial');
+      expect((result.data as Record<string, unknown>).status).to.equal('partial');
+    } finally {
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 function createFsHost(workspaceRoot: string): HostServices {

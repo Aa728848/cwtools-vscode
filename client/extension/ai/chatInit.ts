@@ -200,6 +200,9 @@ async function generateInitFileCore(
             profile.game.evidence = Array.from(new Set([...profile.game.evidence, 'active CWTools LSP game model']));
             profile.validation.lspReady = manifest.status === 'ready' ? 'ready' : 'not_ready';
             profile.validation.vanillaCache = manifest.counts.vanillaDefinitions > 0 ? 'configured' : 'missing';
+            if (manifest.status !== 'ready') {
+                deepKnowledgeError = `Deep project knowledge export remained ${manifest.status} after retries.`;
+            }
         } catch (error) {
             deepKnowledgeError = error instanceof Error ? error.message : String(error);
             ErrorReporter.warn('ChatInit', 'Deep project knowledge export was unavailable; wrote a recoverable knowledge pack.', error);

@@ -74,11 +74,21 @@ export const defaultSharedToolDispatcher: SharedToolDispatcher = async (host, na
           'Wire an LSP index command or a thin Node index before using this tool for semantic evidence.',
         ]);
       }
+      const data = await host.indexing.queryWorkspace(args);
+      const status: SharedToolResult['status'] = data.status === 'ready'
+        ? 'ready'
+        : data.status === 'partial'
+          ? 'partial'
+          : data.status === 'error'
+            ? 'error'
+            : data.status === 'unavailable'
+              ? 'unavailable'
+              : 'loading';
       return {
         ok: true,
-        status: 'ready',
+        status,
         source: 'cwtools-index',
-        data: await host.indexing.queryWorkspace(args),
+        data,
       };
     }
 

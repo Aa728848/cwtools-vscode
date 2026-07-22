@@ -202,9 +202,18 @@ export async function workspaceSymbolsWithHost(
 
   if (host.indexing) {
     const indexed = await host.indexing.queryWorkspace({ name: query, limit });
+    const status: SharedToolResult['status'] = indexed.status === 'ready'
+      ? 'ready'
+      : indexed.status === 'partial'
+        ? 'partial'
+        : indexed.status === 'error'
+          ? 'error'
+          : indexed.status === 'unavailable'
+            ? 'unavailable'
+            : 'loading';
     return {
       ok: true,
-      status: 'ready',
+      status,
       source: 'cwtools-index',
       data: {
         symbols: indexed.entries.map(entry => ({

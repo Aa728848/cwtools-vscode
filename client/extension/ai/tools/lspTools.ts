@@ -3938,7 +3938,9 @@ export class LspToolHandler {
             indexUpdatedAt: this.ctx.indexService.workspaceSymbolUpdatedAt,
             _hint: indexStatus === 'ready'
                 ? undefined
-                : 'Workspace/vanilla symbol indexing is still running. Partial indexed results were returned after an 8-second bounded wait; retry this targeted query shortly or use query_project_knowledge/explore_pdx_project for semantic lookup.',
+                : indexStatus === 'partial'
+                    ? 'The workspace/vanilla symbol file limit was reached. Presence results are usable, but an empty result cannot prove absence; use targeted CWT/LSP queries for confirmation.'
+                    : 'Workspace/vanilla symbol indexing is still running. Partial indexed results were returned after an 8-second bounded wait; retry this targeted query shortly or use query_project_knowledge/explore_pdx_project for semantic lookup.',
         };
     }
 

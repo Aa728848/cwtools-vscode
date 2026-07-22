@@ -12,6 +12,7 @@ open CWTools.Utilities.StringResource
 
 type ExportOptions =
     { domains: string list
+      changedFiles: string list
       maxDefinitions: int
       maxTopologyFiles: int
       maxEdges: int
@@ -125,11 +126,22 @@ type private EventGraphFacts =
 
 let private clamp minimum maximum value = max minimum (min maximum value)
 
+let private normalizePath (value: string) =
+    value.Replace('\\', '/').Trim()
+
+let private normalizeFileKey (value: string) =
+    let normalized = value |> Path.GetFullPath |> normalizePath
+    if OperatingSystem.IsWindows() then normalized.ToLowerInvariant() else normalized
+
 let normalizeOptions (options: ExportOptions) : ExportOptions =
     { domains =
         options.domains
         |> List.map (fun value -> value.Trim().ToLowerInvariant())
         |> List.filter (String.IsNullOrWhiteSpace >> not)
+        |> List.distinct
+      changedFiles =
+        options.changedFiles
+        |> List.map normalizeFileKey
         |> List.distinct
       maxDefinitions = clamp 100 250000 options.maxDefinitions
       maxTopologyFiles = clamp 10 3000 options.maxTopologyFiles
@@ -137,9 +149,6 @@ let normalizeOptions (options: ExportOptions) : ExportOptions =
       archetypesPerDomain = clamp 1 20 options.archetypesPerDomain
       databasePath = options.databasePath
       generationMode = if options.generationMode = "incremental" then "incremental" else "full" }
-
-let private normalizePath (value: string) =
-    value.Replace('\\', '/').Trim()
 
 let private comparison =
     if OperatingSystem.IsWindows() then StringComparison.OrdinalIgnoreCase
@@ -153,6 +162,10 @@ let private pathInside root candidate =
         || candidateFull.StartsWith(rootFull + string Path.DirectorySeparatorChar, comparison)
         || candidateFull.StartsWith(rootFull + string Path.AltDirectorySeparatorChar, comparison)
     with _ -> false
+
+let isKnowledgeDatabasePathAllowed (projectRoots: string list) (databasePath: string) =
+    let target = Path.GetFullPath databasePath
+    projectRoots |> List.exists (fun root -> pathInside root target)
 
 let private originForPath projectRoots filePath =
     if projectRoots |> List.exists (fun root -> pathInside root filePath) then "workspace"
@@ -232,6 +245,7 @@ let private definitionJson (definition: DefinitionFact) =
           definition.overrideStrategy |> Option.map (fun value -> "overrideStrategy", JsonValue.String value) ]
 
 let private collectDefinitions (game: IGame) (projectRoots: string list) (resources: IDictionary<string, ResourceFact>) (options: ExportOptions) : DefinitionFact list =
+    let changedFiles = options.changedFiles |> Set.ofList
     game.Types()
     |> Map.toSeq
     |> Seq.collect (fun (entityType, values) ->
@@ -255,7 +269,10 @@ let private collectDefinitions (game: IGame) (projectRoots: string list) (resour
               domain = domain
               overridePath = matchedMode |> Option.map (fun item -> item.path)
               overrideStrategy = matchedMode |> Option.map (fun item -> item.strategy) }))
-    |> Seq.filter (fun definition -> options.domains.IsEmpty || options.domains |> List.contains definition.domain)
+    |> Seq.filter (fun definition ->
+        (options.domains.IsEmpty && changedFiles.IsEmpty)
+        || options.domains |> List.contains definition.domain
+        || changedFiles.Contains(normalizeFileKey definition.file))
     |> Seq.distinctBy (fun definition -> definition.entityType.ToLowerInvariant(), definition.id.ToLowerInvariant(), normalizePath definition.file, definition.line)
     |> Seq.sortBy (fun definition -> definition.domain, definition.entityType, definition.id, definition.origin)
     |> Seq.toList
@@ -382,53 +399,63 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
     let files = ResizeArray<FileFact>()
     let edges = ResizeArray<ReferenceFact>()
     let mutable fileCount = 0
+    let mutable fileLimitExceeded = false
+    let mutable edgeLimitExceeded = false
+    let changedFiles = options.changedFiles |> Set.ofList
 
     for struct (entity, lazyData) in game.AllEntities() do
-        if fileCount < options.maxTopologyFiles && originForPath projectRoots entity.filepath = "workspace" then
+        if originForPath projectRoots entity.filepath = "workspace" then
             let domain = domainFor "" entity.logicalpath
-            if options.domains.IsEmpty || options.domains |> List.contains domain then
-                fileCount <- fileCount + 1
-                let data = lazyData.Force()
-                let references =
-                    data.Referencedtypes
-                    |> Option.map (fun groups ->
-                        groups
-                        |> Map.toSeq
-                        |> Seq.collect (fun (typeGroup, values) ->
-                            values
-                            |> Seq.map (fun reference ->
-                                let target = stringManager.GetStringForIDs reference.originalValue
-                                if edges.Count < options.maxEdges then
-                                    edges.Add(
-                                        { sourceFile = normalizePath entity.filepath
-                                          sourceLogicalPath = normalizePath entity.logicalpath
-                                          targetId = target
-                                          typeGroup = typeGroup
-                                          line = int reference.position.StartLine
-                                          isOutgoing = reference.isOutgoing
-                                          referenceType = reference.referenceType.ToString()
-                                          label = reference.referenceLabel
-                                          associatedType = reference.associatedType
-                                          domain = domain })
-                                target))
-                        |> Seq.filter (String.IsNullOrWhiteSpace >> not)
-                        |> Seq.distinct
-                        |> Seq.truncate 100
-                        |> Seq.toArray)
-                    |> Option.defaultValue [||]
-                files.Add(
-                    { file = normalizePath entity.filepath
-                      logicalPath = normalizePath entity.logicalpath
-                      domain = domain
-                      origin = originForPath projectRoots entity.filepath })
-                ignore references
+            if (options.domains.IsEmpty && changedFiles.IsEmpty)
+               || options.domains |> List.contains domain
+               || changedFiles.Contains(normalizeFileKey entity.filepath) then
+                if fileCount >= options.maxTopologyFiles then
+                    fileLimitExceeded <- true
+                else
+                    fileCount <- fileCount + 1
+                    let data = lazyData.Force()
+                    let references =
+                        data.Referencedtypes
+                        |> Option.map (fun groups ->
+                            groups
+                            |> Map.toSeq
+                            |> Seq.collect (fun (typeGroup, values) ->
+                                values
+                                |> Seq.map (fun reference ->
+                                    let target = stringManager.GetStringForIDs reference.originalValue
+                                    if edges.Count < options.maxEdges then
+                                        edges.Add(
+                                            { sourceFile = normalizePath entity.filepath
+                                              sourceLogicalPath = normalizePath entity.logicalpath
+                                              targetId = target
+                                              typeGroup = typeGroup
+                                              line = int reference.position.StartLine
+                                              isOutgoing = reference.isOutgoing
+                                              referenceType = reference.referenceType.ToString()
+                                              label = reference.referenceLabel
+                                              associatedType = reference.associatedType
+                                              domain = domain })
+                                    else
+                                        edgeLimitExceeded <- true
+                                    target))
+                            |> Seq.filter (String.IsNullOrWhiteSpace >> not)
+                            |> Seq.distinct
+                            |> Seq.truncate 100
+                            |> Seq.toArray)
+                        |> Option.defaultValue [||]
+                    files.Add(
+                        { file = normalizePath entity.filepath
+                          logicalPath = normalizePath entity.logicalpath
+                          domain = domain
+                          origin = originForPath projectRoots entity.filepath })
+                    ignore references
 
     { files = files |> Seq.distinctBy (fun item -> normalizePath item.file) |> Seq.toList
       edges =
         edges
         |> Seq.distinctBy (fun item -> normalizePath item.sourceFile, item.targetId, item.typeGroup, item.line, item.referenceType)
         |> Seq.toList
-      truncated = fileCount >= options.maxTopologyFiles || edges.Count >= options.maxEdges }
+      truncated = fileLimitExceeded || edgeLimitExceeded }
 
 let private topologyJson (topology: TopologyFacts) =
     jsonRecord
@@ -724,7 +751,7 @@ let private setPreparedCommandParameters (command: SqliteCommand) (values: (stri
 
 let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (projectRoots: string list) (options: ExportOptions) (runtime: RuntimeMetadata) (definitions: DefinitionFact list) (topology: TopologyFacts) (eventGraph: EventGraphFacts) (game: IGame) (warnings: seq<string>) =
     let target = Path.GetFullPath databasePath
-    let allowed = projectRoots |> List.exists (fun root -> pathInside root target)
+    let allowed = isKnowledgeDatabasePathAllowed projectRoots target
     if not allowed then invalidArg "databasePath" "Project knowledge database must be inside a project root."
     Directory.CreateDirectory(Path.GetDirectoryName target) |> ignore
     let temporary = target + ".tmp-" + Guid.NewGuid().ToString("N")
@@ -768,6 +795,7 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
     insertMetadata "loading_in_progress" ((string runtime.loadingInProgress).ToLowerInvariant())
     insertMetadata "pending_global_kinds" (JsonValue.Array(runtime.pendingGlobalKinds |> List.map JsonValue.String |> List.toArray).ToString(JsonSaveOptions.DisableFormatting))
     insertMetadata "last_global_refresh_at_unix_ms" (runtime.lastGlobalRefreshAtUnixMs.ToString())
+    insertMetadata "topology_truncated" ((string topology.truncated).ToLowerInvariant())
     insertMetadata "warnings" (JsonValue.Array(warnings |> Seq.map JsonValue.String |> Seq.toArray).ToString(JsonSaveOptions.DisableFormatting))
 
     use domainCommand = connection.CreateCommand()
@@ -948,14 +976,20 @@ let private readMetadata (connection: SqliteConnection) =
 let private stringOrNone (reader: SqliteDataReader) index =
     if reader.IsDBNull index then None else Some(reader.GetString index)
 
-let private readRetainedKnowledgeDatabase (databasePath: string) (excludedDomains: string list) =
+let private readRetainedKnowledgeDatabase (databasePath: string) (excludedDomains: string list) (excludedFiles: string list) =
     if not (File.Exists databasePath) then None
     else
         try
             let excluded = excludedDomains |> Seq.map (fun value -> value.ToLowerInvariant()) |> Set.ofSeq
+            let excludedPaths = excludedFiles |> Set.ofList
             let connectionString = SqliteConnectionStringBuilder(DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false).ToString()
             use connection = new SqliteConnection(connectionString)
             connection.Open()
+            let metadata = readMetadata connection
+            let retainedTopologyTruncated =
+                match metadata.TryGetValue "topology_truncated" with
+                | true, value -> String.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+                | _ -> false
 
             let subtypes = Dictionary<int64, ResizeArray<string>>()
             use subtypeCommand = connection.CreateCommand()
@@ -978,7 +1012,8 @@ let private readRetainedKnowledgeDatabase (databasePath: string) (excludedDomain
             use definitionReader = definitionCommand.ExecuteReader()
             while definitionReader.Read() do
                 let domain = definitionReader.GetString 11
-                if not (excluded.Contains(domain.ToLowerInvariant())) then
+                let file = normalizePath (definitionReader.GetString 3)
+                if not (excluded.Contains(domain.ToLowerInvariant()) || excludedPaths.Contains(normalizeFileKey file)) then
                     let definitionId = definitionReader.GetInt64 0
                     let definitionSubtypes =
                         match subtypes.TryGetValue definitionId with
@@ -987,7 +1022,7 @@ let private readRetainedKnowledgeDatabase (databasePath: string) (excludedDomain
                     definitions.Add
                         { id = definitionReader.GetString 1
                           entityType = definitionReader.GetString 2
-                          file = definitionReader.GetString 3
+                          file = file
                           logicalPath = definitionReader.GetString 4
                           line = int (definitionReader.GetInt64 5)
                           endLine = int (definitionReader.GetInt64 6)
@@ -1006,9 +1041,10 @@ let private readRetainedKnowledgeDatabase (databasePath: string) (excludedDomain
             use fileReader = fileCommand.ExecuteReader()
             while fileReader.Read() do
                 let domain = fileReader.GetString 2
-                if not (excluded.Contains(domain.ToLowerInvariant())) then
+                let file = normalizePath (fileReader.GetString 0)
+                if not (excluded.Contains(domain.ToLowerInvariant()) || excludedPaths.Contains(normalizeFileKey file)) then
                     files.Add
-                        { file = fileReader.GetString 0
+                        { file = file
                           logicalPath = fileReader.GetString 1
                           domain = domain
                           origin = fileReader.GetString 3 }
@@ -1019,9 +1055,10 @@ let private readRetainedKnowledgeDatabase (databasePath: string) (excludedDomain
             use edgeReader = edgeCommand.ExecuteReader()
             while edgeReader.Read() do
                 let domain = edgeReader.GetString 9
-                if not (excluded.Contains(domain.ToLowerInvariant())) then
+                let sourceFile = normalizePath (edgeReader.GetString 0)
+                if not (excluded.Contains(domain.ToLowerInvariant()) || excludedPaths.Contains(normalizeFileKey sourceFile)) then
                     edges.Add
-                        { sourceFile = edgeReader.GetString 0
+                        { sourceFile = sourceFile
                           sourceLogicalPath = edgeReader.GetString 1
                           targetId = edgeReader.GetString 2
                           typeGroup = edgeReader.GetString 3
@@ -1036,7 +1073,7 @@ let private readRetainedKnowledgeDatabase (databasePath: string) (excludedDomain
                 definitions |> Seq.toList,
                 { files = files |> Seq.toList
                   edges = edges |> Seq.toList
-                  truncated = false })
+                  truncated = retainedTopologyTruncated })
         with _ -> None
 
 let private queryTokens (options: QueryOptions) =
@@ -1251,7 +1288,13 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                 else
                     sqliteIndexedIdentifierPredicate referenceCommand "referenceTarget" identifiers [ "target_id" ]
             let referenceDomainPredicate = sqliteValueSetPredicate referenceCommand "referenceDomain" requestedDomains "domain"
-            let referenceWhere = combineSqlPredicates [ referenceSearchPredicate; referenceDomainPredicate ]
+            let referenceTypePredicate =
+                options.entityTypes
+                |> List.map (fun value -> value.Trim().ToLowerInvariant())
+                |> List.filter (String.IsNullOrWhiteSpace >> not)
+                |> List.distinct
+                |> fun values -> sqliteIndexedIdentifierPredicate referenceCommand "referenceType" values [ "type_group"; "associated_type" ]
+            let referenceWhere = combineSqlPredicates [ referenceSearchPredicate; referenceDomainPredicate; referenceTypePredicate ]
             referenceCommand.CommandText <- "SELECT source_file, source_logical_path, target_id, type_group, line, is_outgoing, reference_type, label, associated_type, domain FROM references_graph" + referenceWhere + " LIMIT $limit"
             addParameter referenceCommand "$limit" (box (max 500 (limit * 20)))
             use referenceReader = referenceCommand.ExecuteReader()
@@ -1457,15 +1500,18 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                   "Verify event scope bridges and state lifecycles before approving complex blueprints." ]) ]
 
 let exportProjectKnowledge (activeGame: string) (projectRoots: string list) (rawOptions: ExportOptions) (runtime: RuntimeMetadata) (game: IGame<'T>) =
-    let requestedOptions = normalizeOptions rawOptions
+    let normalizedOptions = normalizeOptions rawOptions
+    let requestedOptions =
+        { normalizedOptions with
+            changedFiles = normalizedOptions.changedFiles |> List.filter (fun file -> projectRoots |> List.exists (fun root -> pathInside root file)) }
     let incrementalBase =
         match requestedOptions.databasePath with
-        | Some databasePath when requestedOptions.generationMode = "incremental" && not requestedOptions.domains.IsEmpty ->
-            readRetainedKnowledgeDatabase databasePath requestedOptions.domains
+        | Some databasePath when requestedOptions.generationMode = "incremental" && (not requestedOptions.domains.IsEmpty || not requestedOptions.changedFiles.IsEmpty) ->
+            readRetainedKnowledgeDatabase databasePath requestedOptions.domains requestedOptions.changedFiles
         | _ -> None
     let collectionOptions =
         match requestedOptions.databasePath, incrementalBase with
-        | Some _, None -> { requestedOptions with domains = []; generationMode = "full" }
+        | Some _, None -> { requestedOptions with domains = []; changedFiles = []; generationMode = "full" }
         | _ -> requestedOptions
     let resources = resourceFacts (game :> IGame)
     let freshDefinitions = collectDefinitions (game :> IGame) projectRoots resources collectionOptions
@@ -1491,25 +1537,30 @@ let exportProjectKnowledge (activeGame: string) (projectRoots: string list) (raw
             mergedDefinitions, mergedTopology, "incremental"
         | None -> freshDefinitions, freshTopology, collectionOptions.generationMode
     // Even incremental refreshes publish a full normalized database atomically;
-    // only the changed domains are re-extracted, while retained rows are loaded
+    // only the changed files/domains are re-extracted, while retained rows are loaded
     // from the previous V2 database before stacks and event relationships rebuild.
-    let options = { collectionOptions with domains = []; generationMode = generationMode }
+    let options = { collectionOptions with domains = []; changedFiles = []; generationMode = generationMode }
     let definitions = selectDefinitions options availableDefinitions
     let domains = domainSummaries options definitions
     let eventGraph = collectEventGraph availableDefinitions topology
     let warnings = ResizeArray<string>()
     if runtime.status <> "ready" then warnings.Add("The knowledge snapshot was exported while CWTools was loading or stale.")
+    if topology.truncated then warnings.Add("Topology and event relationships are partial because the configured export limits were reached.")
     if definitions.Length < availableDefinitions.Length then
         warnings.Add("Definitions were sampled by maxDefinitions; workspace and event-core definitions were preserved.")
     if definitions |> List.exists (fun item -> item.origin = "vanilla") |> not then warnings.Add("No vanilla definitions were detected in the loaded game model.")
 
+    let publishedRuntime =
+        if runtime.status = "ready" && topology.truncated then { runtime with status = "partial" }
+        else runtime
+
     match options.databasePath with
     | Some databasePath ->
         let storedPath, generatedAt =
-            writeKnowledgeDatabase databasePath activeGame projectRoots options runtime definitions topology eventGraph (game :> IGame) warnings
+            writeKnowledgeDatabase databasePath activeGame projectRoots options publishedRuntime definitions topology eventGraph (game :> IGame) warnings
         jsonRecord
             [ Some("ok", JsonValue.Boolean true)
-              Some("status", JsonValue.String runtime.status)
+              Some("status", JsonValue.String publishedRuntime.status)
               Some("source", JsonValue.String "cwtools-project-knowledge-sqlite")
               Some("schemaVersion", JsonValue.Number 2m)
               Some("game", JsonValue.String activeGame)

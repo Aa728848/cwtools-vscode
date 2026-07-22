@@ -7140,25 +7140,35 @@ type Server(client: ILanguageClient) =
                 | None ->
                     JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "error"; "error", JsonValue.String "databasePath is required." |]
                 | Some databasePath ->
-                    let queryOptions: Main.ProjectKnowledge.QueryOptions =
-                        { databasePath = databasePath
-                          intent = stringProperty "intent"
-                          domains = stringArray "domains"
-                          identifiers = stringArray "identifiers"
-                          entityTypes = stringArray "entityTypes"
-                          includeProjectPatterns = boolProperty "includeProjectPatterns" true
-                          includeVanillaArchetypes = boolProperty "includeVanillaArchetypes" true
-                          includeTopology = boolProperty "includeTopology" true
-                          includeUnresolved = boolProperty "includeUnresolved" true
-                          includeEventGraph = boolProperty "includeEventGraph" true
-                          limit = intProperty "limit" 80 }
-                    try
-                        Main.ProjectKnowledge.queryProjectKnowledgeDatabase queryOptions
-                    with error ->
+                    let projectRoots =
+                        match workspaceFolders with
+                        | folders when not folders.IsEmpty -> folders |> List.map (fun folder -> folder.uri.LocalPath)
+                        | _ -> rootUri |> Option.map (fun uri -> uri.LocalPath) |> Option.toList
+                    if not (Main.ProjectKnowledge.isKnowledgeDatabasePathAllowed projectRoots databasePath) then
                         JsonValue.Record
                             [| "ok", JsonValue.Boolean false
                                "status", JsonValue.String "error"
-                               "error", JsonValue.String error.Message |]
+                               "error", JsonValue.String "Project knowledge database must be inside a project root." |]
+                    else
+                        let queryOptions: Main.ProjectKnowledge.QueryOptions =
+                            { databasePath = databasePath
+                              intent = stringProperty "intent"
+                              domains = stringArray "domains"
+                              identifiers = stringArray "identifiers"
+                              entityTypes = stringArray "entityTypes"
+                              includeProjectPatterns = boolProperty "includeProjectPatterns" true
+                              includeVanillaArchetypes = boolProperty "includeVanillaArchetypes" true
+                              includeTopology = boolProperty "includeTopology" true
+                              includeUnresolved = boolProperty "includeUnresolved" true
+                              includeEventGraph = boolProperty "includeEventGraph" true
+                              limit = intProperty "limit" 80 }
+                        try
+                            Main.ProjectKnowledge.queryProjectKnowledgeDatabase queryOptions
+                        with error ->
+                            JsonValue.Record
+                                [| "ok", JsonValue.Boolean false
+                                   "status", JsonValue.String "error"
+                                   "error", JsonValue.String error.Message |]
             async {
                 return
                     match gameObj with
@@ -8013,6 +8023,7 @@ type Server(client: ILanguageClient) =
                                 | _ -> None
                             let exportOptions: Main.ProjectKnowledge.ExportOptions =
                                 { domains = stringArray "domains"
+                                  changedFiles = stringArray "changedFiles"
                                   maxDefinitions = intProperty "maxDefinitions" 100000
                                   maxTopologyFiles = intProperty "maxTopologyFiles" 1200
                                   maxEdges = intProperty "maxEdges" 8000

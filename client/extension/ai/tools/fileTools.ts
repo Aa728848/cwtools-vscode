@@ -85,7 +85,7 @@ export class FileToolHandler {
      */
     private buildEditEscalationHint(filePath: string, failCount: number): string {
         const basename = path.basename(filePath);
-        if (matchesExt(filePath, '.yml')) {
+        if (matchesExt(filePath, '.yml') && this.isLocalisationPath(filePath)) {
             return `\n\nWarning: YML BLOCKED (failure #${failCount}): You MUST NOT use generic edit tools (edit_file/write_file/replace_lines) for .yml files. Use write_localisation(filePath, language, entries) instead - it handles encoding, formatting, and insertion correctly.`;
         }
         if (failCount >= 5) {
@@ -287,7 +287,7 @@ export class FileToolHandler {
     }
 
     private rejectGenericYmlWrite(toolName: string, filePath: string): import('../types').WriteFileResult | null {
-        if (!filePath.toLowerCase().endsWith('.yml')) return null;
+        if (!filePath.toLowerCase().endsWith('.yml') || !this.isLocalisationPath(filePath)) return null;
 
         return {
             success: false,
@@ -305,7 +305,8 @@ export class FileToolHandler {
         return null;
     }
 
-    private isPdxStructureGuardedPath(filePath: string): boolean {
+    private isPdxStructureGuardedPath(filePath: string, context?: import('../types').AgentToolContext): boolean {
+        if (context?.runnerOptions?.domain === 'general') return false;
         return ['.txt', '.gui', '.gfx', '.asset', '.entity'].includes(path.extname(filePath).toLowerCase());
     }
 
@@ -343,8 +344,8 @@ export class FileToolHandler {
         };
     }
 
-    private rejectUnsafePdxStructureWrite(toolName: string, filePath: string, originalContent: string, newContent: string): string | null {
-        if (!this.isPdxStructureGuardedPath(filePath) || originalContent === newContent) return null;
+    private rejectUnsafePdxStructureWrite(toolName: string, filePath: string, originalContent: string, newContent: string, context?: import('../types').AgentToolContext): string | null {
+        if (!this.isPdxStructureGuardedPath(filePath, context) || originalContent === newContent) return null;
 
         const originalStructure = this.inspectPdxBraceStructure(originalContent);
         if (!originalStructure.balanced) {
@@ -368,7 +369,7 @@ export class FileToolHandler {
         newContent: string,
         context?: import('../types').AgentToolContext,
     ): Promise<string | null> {
-        if (!this.isPdxStructureGuardedPath(filePath) || originalContent === newContent) return null;
+        if (!this.isPdxStructureGuardedPath(filePath, context) || originalContent === newContent) return null;
         const preflight = context?.onBeforePdxWrite;
         if (!preflight) return null;
         try {
@@ -401,7 +402,7 @@ export class FileToolHandler {
         let shouldAddBom = hasBom;
         if (requestedEncoding) {
             shouldAddBom = requestedEncoding === 'utf8bom';
-        } else if (matchesExt(filePath, '.yml')) {
+        } else if (matchesExt(filePath, '.yml') && this.isLocalisationPath(filePath)) {
             shouldAddBom = true;
         } else {
             shouldAddBom = false; // Fallback to no BOM for all other files if requestedEncoding is not set and hasBom is false for a new file.
@@ -424,6 +425,8 @@ export class FileToolHandler {
     async readFile(args: { file: string; startLine?: number; endLine?: number }, context?: import('../types').AgentToolContext): Promise<import('../types').ReadFileResult> {
         try {
             args.file = this.resolveAndAssertInWorkspace(args.file, context);
+            const paradoxDomain = context?.runnerOptions?.domain !== 'general';
+            const localisationFile = this.isLocalisationPath(args.file) && matchesExt(args.file, '.yml');
             const readTracker = (context?.agentRunner as any)?.readTracker;
             if (readTracker) { readTracker.markRead(args.file); }
 
@@ -439,7 +442,7 @@ export class FileToolHandler {
                     const lines = cached.split('\n');
                     const totalLines = lines.length;
                     let threshold = 150;
-                    if (matchesExt(args.file, '.yml')) {
+                    if (paradoxDomain && localisationFile) {
                         threshold = 50;
                     }
 
@@ -452,15 +455,17 @@ export class FileToolHandler {
                         let gapInfo = `\n... [${totalLines - 100} lines omitted - use document_symbols to locate, then read_file for specifics] ...\n`;
                         let hint = `The file has ${totalLines} lines in total. The first 100 lines and the last 20 lines are displayed. Suggestion: call document_symbols("${args.file}") to get the structure, then use read_file(startLine, endLine) to read precisely (each time up to ${threshold} lines).`;
 
-                        if (matchesExt(args.file, '.txt')) {
+                        if (paradoxDomain && matchesExt(args.file, '.txt')) {
                             gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! DO NOT READ FULL FILE! Use document_symbols + get_pdx_block] ...\n`;
                             hint = `Warning: FILE TOO LARGE. The first 100 lines and last 20 are displayed. For PDX scripts (.txt), you MUST call document_symbols("${args.file}") to get the structure, then use get_pdx_block("${args.file}", symbol) to extract the specific block you need. DO NOT use read_file for large PDX scripts.`;
-                        } else if (matchesExt(args.file, '.yml')) {
+                        } else if (paradoxDomain && localisationFile) {
                             gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! YML IS TOO LARGE. Use search_mod_files or grep] ...\n`;
                             hint = `Warning: YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
                         }
 
-                        hint += ' Do not conclude that a key/ID is missing from this truncated view; use grep/search_mod_files or verify_pdx_identifier for absence checks.';
+                        hint += paradoxDomain
+                            ? ' Do not conclude that a key/ID is missing from this truncated view; use an authoritative indexed lookup before claiming absence.'
+                            : ' Do not conclude that a symbol or file is absent from this truncated view; use grep or workspace symbols to verify.';
 
                         return {
                             content: headContent + gapInfo + tailContent,
@@ -476,7 +481,7 @@ export class FileToolHandler {
             // -
 
             let threshold = 150;
-            if (matchesExt(args.file, '.yml')) {
+            if (paradoxDomain && localisationFile) {
                 threshold = 50;
             }
 
@@ -532,15 +537,17 @@ export class FileToolHandler {
                 let gapInfo = `\n... [${totalLines - 100} lines omitted - use document_symbols to locate, then read_file for specifics (max ${threshold} lines at a time)] ...\n`;
                 let hint = `The file has ${totalLines} lines in total. The first 100 lines and the last 20 lines are displayed. Suggestion: call document_symbols("${args.file}") to get the structure, then use read_file(startLine, endLine) to read precisely (each time up to ${threshold} lines).`;
 
-                if (matchesExt(args.file, '.txt')) {
+                if (paradoxDomain && matchesExt(args.file, '.txt')) {
                     gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! DO NOT READ FULL FILE! Use document_symbols + get_pdx_block] ...\n`;
                     hint = `Warning: FILE TOO LARGE. The first 100 lines and last 20 are displayed. For PDX scripts (.txt), you MUST call document_symbols("${args.file}") to get the structure, then use get_pdx_block("${args.file}", symbol) to extract the specific block you need. DO NOT use read_file for large PDX scripts.`;
-                } else if (matchesExt(args.file, '.yml')) {
+                } else if (paradoxDomain && localisationFile) {
                     gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! YML IS TOO LARGE. Use search_mod_files or grep] ...\n`;
                     hint = `Warning: YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
                 }
 
-                hint += ' Do not conclude that a key/ID is missing from this truncated view; use grep/search_mod_files or verify_pdx_identifier for absence checks.';
+                hint += paradoxDomain
+                    ? ' Do not conclude that a key/ID is missing from this truncated view; use an authoritative indexed lookup before claiming absence.'
+                    : ' Do not conclude that a symbol or file is absent from this truncated view; use grep or workspace symbols to verify.';
 
                 return {
                     content: headContent + gapInfo + tailContent,
@@ -673,7 +680,7 @@ export class FileToolHandler {
                 const { content: originalContent, hasBom } = this.readTextFile(args.file, context);
                 (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(args.file, originalContent);
 
-                const pdxStructureReject = this.rejectUnsafePdxStructureWrite('write_file', args.file, originalContent, args.content);
+                const pdxStructureReject = this.rejectUnsafePdxStructureWrite('write_file', args.file, originalContent, args.content, context);
                 if (pdxStructureReject) {
                     return { success: false, message: pdxStructureReject };
                 }
@@ -696,9 +703,9 @@ export class FileToolHandler {
                     this.ctx.onAutoWritten(args.file, isNewFile);
                 }
 
-                const preWriteEpoch = (await this.queryDiagnosticsFresh(args.file))?.epoch ?? 0;
+                const preWriteEpoch = (await this.queryDiagnosticsFresh(args.file, context))?.epoch ?? 0;
                 this.writeTextFile(args.file, args.content, hasBom, args.encoding, context);
-                const freshResult = await this.getLspDiagnosticsForFileFresh(args.file, preWriteEpoch);
+                const freshResult = await this.getLspDiagnosticsForFileFresh(args.file, preWriteEpoch, context);
                 return {
                     success: true,
                     message: `File written: ${args.file}. Freshness: ${freshResult.freshness}`,
@@ -756,7 +763,7 @@ export class FileToolHandler {
                 return { success: true, message: `edit_file made no changes to ${path.basename(filePath)}.` };
             }
 
-            const pdxStructureReject = this.rejectUnsafePdxStructureWrite('edit_file', filePath, originalContent, newContent);
+            const pdxStructureReject = this.rejectUnsafePdxStructureWrite('edit_file', filePath, originalContent, newContent, context);
             if (pdxStructureReject) {
                 const hint = this.recordEditFailure(filePath);
                 return { success: false, message: pdxStructureReject + hint };
@@ -777,7 +784,7 @@ export class FileToolHandler {
                 this.ctx.onAutoWritten(filePath, !fileExists);
             }
 
-            const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath))?.epoch ?? 0;
+            const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath, context))?.epoch ?? 0;
             (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, fileExists ? originalContent : null);
             try {
                 this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
@@ -786,7 +793,7 @@ export class FileToolHandler {
             }
 
             this.editFailCount.delete(filePath);
-            const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch);
+            const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch, context);
             const diagnostics = freshResult.diagnostics;
             const oldLineCount = originalContent.length === 0 ? 0 : originalContent.split(/\r?\n/).length;
             const newLineCount = newContent.length === 0 ? 0 : newContent.split(/\r?\n/).length;
@@ -899,7 +906,7 @@ export class FileToolHandler {
         }
 
         const newContent = newLines.join('\n');
-        const pdxStructureReject = this.rejectUnsafePdxStructureWrite('ast_mutate', filePath, originalContent, newContent);
+        const pdxStructureReject = this.rejectUnsafePdxStructureWrite('ast_mutate', filePath, originalContent, newContent, context);
         if (pdxStructureReject) {
             return { success: false, message: pdxStructureReject };
         }
@@ -918,14 +925,14 @@ export class FileToolHandler {
             this.ctx.onAutoWritten(filePath, false);
         }
 
-        const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath))?.epoch ?? 0;
+        const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath, context))?.epoch ?? 0;
         try {
             this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
         } catch (e) {
             return { success: false, message: `Write failed: ${String(e)}` };
         }
 
-            const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch);
+            const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch, context);
             const diagnostics = freshResult.diagnostics;
             return {
                 success: true,
@@ -1025,7 +1032,7 @@ export class FileToolHandler {
             }
 
             content = lines.join(ending);
-            const pdxStructureReject = this.rejectUnsafePdxStructureWrite('multi_replace_file_content', filePath, originalContent, content);
+            const pdxStructureReject = this.rejectUnsafePdxStructureWrite('multi_replace_file_content', filePath, originalContent, content, context);
             if (pdxStructureReject) {
                 return { success: false, message: pdxStructureReject + this.recordEditFailure(filePath) } as any;
             }
@@ -1045,7 +1052,7 @@ export class FileToolHandler {
                 this.ctx.onAutoWritten(filePath, false);
             }
 
-            const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath))?.epoch ?? 0;
+            const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath, context))?.epoch ?? 0;
             try {
                 this.writeTextFile(filePath, content, hasBom, args.encoding, context);
             } catch (e) {
@@ -1053,7 +1060,7 @@ export class FileToolHandler {
             }
 
             this.editFailCount.delete(filePath);
-            const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch);
+            const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch, context);
             const diagnostics = freshResult.diagnostics;
             
             let message = `multi_replace_file_content: ${chunks.length} replacement(s) applied to ${path.basename(filePath)}`;
@@ -1154,7 +1161,7 @@ export class FileToolHandler {
                 return { success: true, message: `replace_lines made no changes to ${path.basename(filePath)}.` };
             }
 
-            const pdxStructureReject = this.rejectUnsafePdxStructureWrite('replace_lines', filePath, originalContent, newContent);
+            const pdxStructureReject = this.rejectUnsafePdxStructureWrite('replace_lines', filePath, originalContent, newContent, context);
             if (pdxStructureReject) {
                 return { success: false, message: pdxStructureReject + this.recordEditFailure(filePath) };
             }
@@ -1174,7 +1181,7 @@ export class FileToolHandler {
                 this.ctx.onAutoWritten(filePath, false);
             }
 
-            const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath))?.epoch ?? 0;
+            const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath, context))?.epoch ?? 0;
             (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContent || null);
             try {
                 this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
@@ -1183,7 +1190,7 @@ export class FileToolHandler {
             }
 
             this.editFailCount.delete(filePath);
-            const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch);
+            const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch, context);
             const diagnostics = freshResult.diagnostics;
             let message = `replace_lines: replaced lines ${startLine}-${endLine} in ${path.basename(filePath)}`;
             const errorsDiags = diagnostics.filter((d: any) => d.severity === 'error');
@@ -1331,7 +1338,7 @@ export class FileToolHandler {
 
         for (const { filePath, newContent } of pendingWrites) {
             const originalContent = byFile.get(filePath)?.content ?? '';
-            const pdxStructureReject = this.rejectUnsafePdxStructureWrite('apply_patch', filePath, originalContent, newContent);
+            const pdxStructureReject = this.rejectUnsafePdxStructureWrite('apply_patch', filePath, originalContent, newContent, context);
             if (pdxStructureReject) {
                 errors.push(pdxStructureReject);
                 continue;
@@ -1384,7 +1391,7 @@ export class FileToolHandler {
         }
         for (const { filePath, newContent, hasBom } of pendingWrites) {
             (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContents.get(filePath) ?? null);
-            preWriteEpochs.set(filePath, (await this.queryDiagnosticsFresh(filePath))?.epoch ?? 0);
+            preWriteEpochs.set(filePath, (await this.queryDiagnosticsFresh(filePath, context))?.epoch ?? 0);
             try {
                 this.writeTextFile(filePath, newContent, hasBom, undefined, context);
                 filesChanged.push(path.relative(this.ctx.workspaceRoot, filePath).replace(/\\/g, '/'));
@@ -1396,7 +1403,7 @@ export class FileToolHandler {
         const diagnostics: Array<{ file: string; diagnostics: ValidationError[]; freshness: 'fresh' | 'pending' | 'stale'; pendingGlobalKinds: string[] }> = [];
         for (const filePath of filesChanged) {
             const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(this.ctx.workspaceRoot, filePath);
-            const freshResult = await this.getLspDiagnosticsForFileFresh(absolutePath, preWriteEpochs.get(absolutePath) ?? 0);
+            const freshResult = await this.getLspDiagnosticsForFileFresh(absolutePath, preWriteEpochs.get(absolutePath) ?? 0, context);
             diagnostics.push({
                 file: filePath,
                 diagnostics: freshResult.diagnostics,
@@ -1478,8 +1485,10 @@ export class FileToolHandler {
 // - getLspDiagnosticsForFile -
 
     /** Extract diagnostics from Problems panel and format */
-    private static mapDiagnostics(uri: vs.Uri): ValidationError[] {
-        return vs.languages.getDiagnostics(uri).map(d => {
+    private static mapDiagnostics(uri: vs.Uri, excludeCwtools = false): ValidationError[] {
+        return vs.languages.getDiagnostics(uri)
+            .filter(d => !excludeCwtools || !/cwtools/i.test(d.source ?? ''))
+            .map(d => {
             const metadata = diagnosticMetadata(d);
             return {
                 code: diagnosticCodeString(d.code) ?? '',
@@ -1499,7 +1508,7 @@ export class FileToolHandler {
                 metadataSource: metadata.metadataSource,
                 data: metadata.data,
             } as ValidationError;
-        });
+            });
     }
 
 
@@ -1507,12 +1516,20 @@ export class FileToolHandler {
 * Query the LSP for the current diagnostic status of the file (return immediately, without blocking). 
 * Returning null indicates that the LSP is unavailable. 
 */
-    private async queryDiagnosticsFresh(filePath: string): Promise<{
+    private async queryDiagnosticsFresh(filePath: string, context?: import('../types').AgentToolContext): Promise<{
         freshness: 'fresh' | 'pending' | 'stale';
         epoch: number;
         pendingGlobalKinds: string[];
         diagnostics?: ValidationError[];
     } | null> {
+        if (context?.runnerOptions?.domain === 'general') {
+            return {
+                freshness: 'fresh',
+                epoch: Date.now(),
+                pendingGlobalKinds: [],
+                diagnostics: FileToolHandler.mapDiagnostics(vs.Uri.file(filePath), true),
+            };
+        }
         try {
             const client = (this.ctx as any).client;
             if (!client) return null;
@@ -1556,13 +1573,23 @@ export class FileToolHandler {
 * 
 * @param minEpoch epoch value before writing, waiting for epoch > minEpoch means lint has processed this write 
 */
-    async getLspDiagnosticsForFileFresh(filePath: string, minEpoch = 0): Promise<{
+    async getLspDiagnosticsForFileFresh(filePath: string, minEpoch = 0, context?: import('../types').AgentToolContext): Promise<{
         diagnostics: ValidationError[];
         freshness: 'fresh' | 'pending' | 'stale';
         pendingGlobalKinds: string[];
         epoch: number;
         timedOut?: boolean;
     }> {
+        if (context?.runnerOptions?.domain === 'general') {
+            const diagnostics = await this.getLspDiagnosticsForFile(filePath, context);
+            return {
+                diagnostics,
+                freshness: 'fresh',
+                pendingGlobalKinds: [],
+                epoch: Date.now(),
+                timedOut: false,
+            };
+        }
         const timeoutMs = 3000;
         const pollIntervalMs = 100;
         const uri = vs.Uri.file(filePath);
@@ -1573,9 +1600,14 @@ export class FileToolHandler {
 
         //Client-side polling getDiagnosticsFresh (returns immediately, does not hold a lock)
         let elapsed = 0;
-        let lastState: Awaited<ReturnType<typeof this.queryDiagnosticsFresh>> = null;
+        let lastState: {
+            freshness: 'fresh' | 'pending' | 'stale';
+            epoch: number;
+            pendingGlobalKinds: string[];
+            diagnostics?: ValidationError[];
+        } | null = null;
         while (elapsed < timeoutMs) {
-            lastState = await this.queryDiagnosticsFresh(filePath);
+            lastState = await this.queryDiagnosticsFresh(filePath, context);
             if (lastState) {
                 // Waiting conditions: epoch > minEpoch (indicating that the new lint has been completed), and freshness != stale
                 if (lastState.epoch > minEpoch && lastState.freshness !== 'stale') {
@@ -1616,7 +1648,7 @@ export class FileToolHandler {
     }
 
     /** Wait (up to 2s) for LSP to process a file, then return its diagnostics (fallback) */
-    async getLspDiagnosticsForFile(filePath: string): Promise<ValidationError[]> {
+    async getLspDiagnosticsForFile(filePath: string, context?: import('../types').AgentToolContext): Promise<ValidationError[]> {
         try {
             const uri = vs.Uri.file(filePath);
             try { await vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
@@ -1643,7 +1675,9 @@ export class FileToolHandler {
                     }
                 });
             });
-            return vs.languages.getDiagnostics(uri).map(d => {
+            return vs.languages.getDiagnostics(uri)
+                .filter(d => context?.runnerOptions?.domain !== 'general' || !/cwtools/i.test(d.source ?? ''))
+                .map(d => {
                 const metadata = diagnosticMetadata(d);
                 return {
                     code: diagnosticCodeString(d.code) ?? '',
@@ -1662,8 +1696,8 @@ export class FileToolHandler {
                     confidence: metadata.confidence,
                     metadataSource: metadata.metadataSource,
                     data: metadata.data,
-                } as ValidationError;
-            });
+                    } as ValidationError;
+                });
         } catch { return []; }
     }
 
@@ -1808,7 +1842,7 @@ export class FileToolHandler {
                     }
                 }
 
-                const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath))?.epoch ?? 0;
+                const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath, context))?.epoch ?? 0;
 
                 // Write
                 if (vfsOverlay) {
@@ -1827,7 +1861,7 @@ export class FileToolHandler {
                 const diff = this.buildUnifiedDiff(filePath, originalContent, withBom);
 
                 // Get the diagnostic freshness after localized writing
-                const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch);
+                const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch, context);
                 const diagnostics = freshResult.diagnostics;
                 const finalKeySet = new Set<string>();
                 for (const line of finalContent.split(/\r?\n/)) {

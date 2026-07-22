@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import type { ChatTopic, ChatHistoryMessage, HostMessage, ChatMessage } from './types';
 import { UI, aiText, getAiMessageLocale } from './messages';
 import { getAiStorageRoot, getProjectWorkspaceRoot } from './workspacePaths';
+import { cloneAgentProfile, isAgentMode, isAgentProfileSelection } from './agentProfile';
 
 /** Callback type for sending messages to the WebView */
 type PostMessageFn = (msg: HostMessage) => void;
@@ -153,6 +154,11 @@ export class ChatTopicManager {
             messages: forkedMessages,
             parentTopicId: topicId,
             forkedFromMessageIndex: messageIndex,
+            agentProfile: source.agentProfile ? cloneAgentProfile(source.agentProfile) : undefined,
+            agentMode: source.agentMode,
+            workflowId: source.workflowId,
+            workflowReturnProfile: source.workflowReturnProfile ? cloneAgentProfile(source.workflowReturnProfile) : undefined,
+            workflowReturnMode: source.workflowReturnMode,
         };
 
         this.topics.unshift(forked);
@@ -484,6 +490,11 @@ export class ChatTopicManager {
                 updatedAt: Date.now(),
                 messages: data.messages as ChatHistoryMessage[],
                 archived: false,
+                agentProfile: isAgentProfileSelection(data.agentProfile) ? cloneAgentProfile(data.agentProfile) : undefined,
+                agentMode: isAgentMode(data.agentMode) ? data.agentMode : undefined,
+                workflowId: typeof data.workflowId === 'string' ? data.workflowId : undefined,
+                workflowReturnProfile: isAgentProfileSelection(data.workflowReturnProfile) ? cloneAgentProfile(data.workflowReturnProfile) : undefined,
+                workflowReturnMode: isAgentMode(data.workflowReturnMode) ? data.workflowReturnMode : undefined,
             };
 
             // Validate messages

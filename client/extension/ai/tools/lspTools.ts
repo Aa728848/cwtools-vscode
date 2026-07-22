@@ -2226,7 +2226,8 @@ export class LspToolHandler {
         file?: string;
         severity?: 'error' | 'warning' | 'info' | 'hint' | 'all';
         limit?: number;
-    }): Promise<import('../types').GetDiagnosticsResult> {
+    }, context?: import('../types').AgentToolContext): Promise<import('../types').GetDiagnosticsResult> {
+        const generalDomain = context?.runnerOptions?.domain === 'general';
         const requestedLimit = typeof args.limit === 'number' && Number.isFinite(args.limit)
             ? args.limit
             : 500;
@@ -2235,7 +2236,9 @@ export class LspToolHandler {
 
         const allPairs = vs.languages.getDiagnostics();
         const activelyIgnoredKeys = new Set<string>();
-        const ignored = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string[]>('ignoredDiagnostics', []);
+        const ignored = generalDomain
+            ? []
+            : vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string[]>('ignoredDiagnostics', []);
 
         const entries: import('../types').DiagnosticEntry[] = [];
         const filesWithDiags = new Set<string>();
@@ -2265,6 +2268,7 @@ export class LspToolHandler {
             if (isAgentTempPath(fsPath)) continue;
 
             for (const d of diags) {
+                if (generalDomain && /cwtools/i.test(d.source ?? '')) continue;
                 const sev = diagnosticSeverity(d);
 
                 if (severityFilter && sev !== severityFilter) continue;
@@ -2317,6 +2321,26 @@ export class LspToolHandler {
                 column: 0,
                 code: 'SYSTEM_WHITELIST_INFO'
             });
+        }
+
+        if (generalDomain) {
+            return {
+                summary,
+                diagnostics: entries,
+                totalFiles: filesWithDiags.size,
+                totalDiagnosticCount: totalDiagCount,
+                truncated: totalDiagCount > limit,
+                ignoredDiagnosticCount: 0,
+                ignoredDiagnosticKeys: [],
+                freshness: 'fresh',
+                pendingGlobalKinds: [],
+                lastEpoch: 0,
+                diagnosticService: {
+                    status: 'available',
+                    responded: true,
+                    message: 'VS Code Problems diagnostics snapshot (CWTools diagnostics excluded).',
+                },
+            };
         }
 
         // Query the global diagnostic freshness status. This is metadata only:
@@ -2390,13 +2414,18 @@ export class LspToolHandler {
             const contextLines = lines.slice(startLine, endLine + 1);
 
             const relPath = path.relative(this.ctx.workspaceRoot, args.file).replace(/\\/g, '/');
-            let fileType = 'unknown';
-            if (relPath.startsWith('events/')) fileType = 'events';
-            else if (relPath.startsWith('common/')) {
-                const parts = relPath.split('/');
-                fileType = parts.length >= 2 ? `common/${parts[1]}` : 'common';
+            const generalDomain = context?.runnerOptions?.domain === 'general';
+            let fileType = generalDomain
+                ? path.extname(relPath).replace(/^\./, '').toLowerCase() || 'text'
+                : 'unknown';
+            if (!generalDomain) {
+                if (relPath.startsWith('events/')) fileType = 'events';
+                else if (relPath.startsWith('common/')) {
+                    const parts = relPath.split('/');
+                    fileType = parts.length >= 2 ? `common/${parts[1]}` : 'common';
+                }
+                else if (relPath.startsWith('localisation')) fileType = 'localisation';
             }
-            else if (relPath.startsWith('localisation')) fileType = 'localisation';
 
             return {
                 code: contextLines.map((line, idx) => `${startLine + idx + 1} | ${line}`).join('\n'),
@@ -3126,9 +3155,9 @@ export class LspToolHandler {
         return result;
     }
 
-    async grep(args: import('../types').GrepArgs): Promise<import('../types').GrepResult> {
+    async grep(args: import('../types').GrepArgs, context?: import('../types').AgentToolContext): Promise<import('../types').GrepResult> {
         try {
-            return await this.grepImpl(args);
+            return await this.grepImpl(args, context);
         } catch (e) {
             return {
                 matches: [],
@@ -3140,7 +3169,8 @@ export class LspToolHandler {
         }
     }
 
-    private async grepImpl(args: import('../types').GrepArgs): Promise<import('../types').GrepResult> {
+    private async grepImpl(args: import('../types').GrepArgs, context?: import('../types').AgentToolContext): Promise<import('../types').GrepResult> {
+        const generalDomain = context?.runnerOptions?.domain === 'general';
         const limit = Math.min(args.limit ?? 50, 200);
         const matches: Array<{ file: string; line: number; content: string }> = [];
         let totalMatches = 0;
@@ -3251,7 +3281,7 @@ export class LspToolHandler {
             } catch { /* skip */ }
         }
 
-        if (localisationSearch && matches.length < limit && this.ctx.indexService && !args.isRegex) {
+        if (!generalDomain && localisationSearch && matches.length < limit && this.ctx.indexService && !args.isRegex) {
             const entries = this.ctx.indexService.queryLocalisation({
                 key: args.query,
                 contains: true,
@@ -3275,15 +3305,24 @@ export class LspToolHandler {
             matches,
             totalMatches,
             truncated,
-            _hint: "If you found your target in a PDX Script (.txt), do not use read_file. Use document_symbols + get_pdx_block to read it, or edit_pdx_block to directly replace the node."
+            _hint: generalDomain
+                ? 'This is a bounded workspace text search. Use document_symbols or workspace_symbols when language-aware structure is more appropriate.'
+                : 'If you found your target in a PDX Script (.txt), do not use read_file. Use document_symbols + get_pdx_block to read it, or edit_pdx_block to directly replace the node.'
         };
         if (matches.length === 0) {
-            returnObj._warning = buildAbsenceWarning(args.query);
-            returnObj._nextSteps = [
-                'For a PDX ID or key, call verify_pdx_identifier(identifier=...) before treating it as missing.',
-                'If the key may be vanilla, use search_mod_files(searchContext="both") because grep only searches the workspace.',
-                'If the key may be in a large PDX file, use workspace_symbols/document_symbols instead of relying on line search.',
-            ];
+            returnObj._warning = generalDomain
+                ? `No workspace text matches were found for "${args.query}". This bounded search is not proof that a symbol is absent from generated files, dependencies, or language-provider indexes.`
+                : buildAbsenceWarning(args.query);
+            returnObj._nextSteps = generalDomain
+                ? [
+                    'Check the search path, include pattern, spelling, and case-sensitivity.',
+                    'Use workspace_symbols/document_symbols for indexed language symbols.',
+                ]
+                : [
+                    'For a PDX ID or key, call verify_pdx_identifier(identifier=...) before treating it as missing.',
+                    'If the key may be vanilla, use search_mod_files(searchContext="both") because grep only searches the workspace.',
+                    'If the key may be in a large PDX file, use workspace_symbols/document_symbols instead of relying on line search.',
+                ];
         }
         return returnObj as import('../types').GrepResult;
     }
@@ -3455,7 +3494,7 @@ export class LspToolHandler {
 
     // - workspaceSymbols -
 
-    async workspaceSymbols(args: { query: string; limit?: number }): Promise<WorkspaceSymbolsResult> {
+    async workspaceSymbols(args: { query: string; limit?: number }, context?: import('../types').AgentToolContext): Promise<WorkspaceSymbolsResult> {
         try {
             const limit = args.limit ?? 20;
             const symbols = await this.vsCommand<vs.SymbolInformation[]>(
@@ -3463,10 +3502,15 @@ export class LspToolHandler {
             );
 
             if (!symbols || symbols.length === 0) {
+                const generalDomain = context?.runnerOptions?.domain === 'general';
                 return {
                     symbols: [],
-                    _warning: buildAbsenceWarning(args.query),
-                    _hint: 'workspace_symbols depends on the current LSP index. If this was a PDX ID lookup, cross-check with verify_pdx_identifier, query_definition_by_name/query_types, or search_mod_files(searchContext="both") before deciding it is missing.',
+                    _warning: generalDomain
+                        ? `No indexed workspace symbols were found for "${args.query}". Provider coverage and indexing state may be incomplete.`
+                        : buildAbsenceWarning(args.query),
+                    _hint: generalDomain
+                        ? 'Cross-check with targeted grep or document_symbols before concluding the definition is absent.'
+                        : 'workspace_symbols depends on the current LSP index. If this was a PDX ID lookup, cross-check with verify_pdx_identifier, query_definition_by_name/query_types, or search_mod_files(searchContext="both") before deciding it is missing.',
                 };
             }
 

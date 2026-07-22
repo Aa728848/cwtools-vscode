@@ -264,6 +264,49 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let isGenerating = false;
     let currentAssistantDiv: HTMLDivElement | null = null;
     let currentMode = 'build';
+    type ProfileDomain = 'auto' | 'paradox' | 'general';
+    type ProfileIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
+    type ProfileStrategy = 'auto' | 'single' | 'multi';
+    type AgentProfileSelection = { domain: ProfileDomain; intent: ProfileIntent; strategy: ProfileStrategy };
+    type ResolvedAgentProfile = {
+        selection: AgentProfileSelection;
+        domain: Exclude<ProfileDomain, 'auto'>;
+        intent: Exclude<ProfileIntent, 'auto'>;
+        strategy: Exclude<ProfileStrategy, 'auto'>;
+        mode: string;
+        reason: string;
+    };
+    let agentProfile: AgentProfileSelection = { domain: 'auto', intent: 'auto', strategy: 'auto' };
+    let resolvedAgentProfile: ResolvedAgentProfile | null = null;
+
+    function isAgentProfileSelection(value: unknown): value is AgentProfileSelection {
+        if (!value || typeof value !== 'object') return false;
+        const candidate = value as Partial<AgentProfileSelection>;
+        return ['auto', 'paradox', 'general'].includes(candidate.domain || '')
+            && ['auto', 'execute', 'plan', 'explore', 'review'].includes(candidate.intent || '')
+            && ['auto', 'single', 'multi'].includes(candidate.strategy || '');
+    }
+
+    function isResolvedAgentProfile(value: unknown): value is ResolvedAgentProfile {
+        if (!value || typeof value !== 'object') return false;
+        const candidate = value as Partial<ResolvedAgentProfile>;
+        return isAgentProfileSelection(candidate.selection)
+            && (candidate.domain === 'paradox' || candidate.domain === 'general')
+            && ['execute', 'plan', 'explore', 'review'].includes(candidate.intent || '')
+            && (candidate.strategy === 'single' || candidate.strategy === 'multi')
+            && typeof candidate.mode === 'string'
+            && typeof candidate.reason === 'string';
+    }
+
+    function applyAgentProfile(profile: unknown, resolved?: unknown): void {
+        if (!isAgentProfileSelection(profile)) return;
+        agentProfile = { ...profile };
+        resolvedAgentProfile = isResolvedAgentProfile(resolved) ? { ...resolved, selection: { ...resolved.selection } } : null;
+        applyComposerModeLabels();
+        renderComposerChips();
+        const trigger = document.getElementById('quickModeTrigger');
+        if (trigger) trigger.title = tr(`Agent profile: ${getProfileSummary()}`, `Agent 配置：${getProfileSummary()}`);
+    }
     const messageIndexMap = new Map<number, HTMLDivElement>();
     const userMessagePayloadMap = new Map<number, UserMessageInputPayload>();
     let settingsProviders: any[] = [];
@@ -2050,13 +2093,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             if (!isGenerating || hasComposerPayload()) sendMessage();
-        } else if (e.key === 'Tab') {
-            e.preventDefault();
-            const modes = ['build', 'plan', 'explore', 'utility', 'review', 'orchestrator', 'script'];
-            const idx = modes.indexOf(currentMode);
-            const cycleDir = e.shiftKey ? -1 : 1;
-            const nextMode = modes[(idx + cycleDir + modes.length) % modes.length]!;
-            switchMode(nextMode, true);
         }
     });
     input.addEventListener('input', () => {
@@ -2102,8 +2138,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 explore: '探索模式',
                 utility: '工具模式',
                 review: '审查模式',
-                orchestrator: '协作模式',
-                script: '脚本模式',
+                orchestrator: '通用多 Agent',
+                script: 'Paradox 多 Agent',
             }
             : {
                 build: 'Build',
@@ -2111,28 +2147,43 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 explore: 'Explore',
                 utility: 'Utility',
                 review: 'Review',
-                orchestrator: 'Orchestrator',
-                script: 'Script',
+                orchestrator: 'General Multi-Agent',
+                script: 'Paradox Multi-Agent',
             };
         return labels[mode === 'general' ? 'utility' : mode] || mode;
     }
 
-    function applyComposerModeLabels(): void {
-        document.querySelectorAll<HTMLElement>('.composer-menu-item[data-mode]').forEach(item => {
-            const mode = item.dataset.mode;
-            if (!mode) return;
-            const label = getModeChipLabel(mode);
-            const text = item.querySelector('span:last-child');
-            if (text) text.textContent = label;
-            item.title = label;
-        });
+    function getProfileSummary(): string {
+        const domain = agentProfile.domain === 'auto'
+            ? tr('Auto', '自动')
+            : agentProfile.domain === 'paradox' ? 'Paradox' : tr('General', '通用');
+        const intent = agentProfile.intent === 'auto'
+            ? ''
+            : agentProfile.intent === 'execute' ? tr('Execute', '执行')
+                : agentProfile.intent === 'plan' ? tr('Plan', '规划')
+                    : agentProfile.intent === 'explore' ? tr('Explore', '探索') : tr('Review', '审查');
+        const strategy = agentProfile.strategy === 'auto'
+            ? ''
+            : agentProfile.strategy === 'single' ? tr('Single', '单 Agent') : tr('Multi', '多 Agent');
+        const selected = [domain, intent, strategy].filter(Boolean).join(' · ');
+        if (agentProfile.domain === 'auto' && agentProfile.intent === 'auto' && agentProfile.strategy === 'auto' && resolvedAgentProfile) {
+            const resolvedDomain = resolvedAgentProfile.domain === 'paradox' ? 'Paradox' : tr('General', '通用');
+            const resolvedIntent = resolvedAgentProfile.intent === 'execute' ? tr('Execute', '执行')
+                : resolvedAgentProfile.intent === 'plan' ? tr('Plan', '规划')
+                    : resolvedAgentProfile.intent === 'explore' ? tr('Explore', '探索') : tr('Review', '审查');
+            const resolvedStrategy = resolvedAgentProfile.strategy === 'multi' ? tr('Multi', '多 Agent') : tr('Single', '单 Agent');
+            return `${selected} → ${resolvedDomain} · ${resolvedIntent} · ${resolvedStrategy}`;
+        }
+        return selected;
+    }
 
+    function applyComposerModeLabels(): void {
         const modeSelector = document.getElementById('modeSel') as HTMLSelectElement | null;
         modeSelector?.querySelectorAll<HTMLOptionElement>('option').forEach(option => {
             option.textContent = getModeChipLabel(option.value);
         });
         const quickModeLabel = document.getElementById('quickModeLabel');
-        if (quickModeLabel) quickModeLabel.textContent = getModeChipLabel(currentMode);
+        if (quickModeLabel) quickModeLabel.textContent = getProfileSummary();
     }
 
     function closeComposerMenus() {
@@ -2331,7 +2382,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (!chipRow) return;
         chipRow.innerHTML = '';
         const quickModeLabel = document.getElementById('quickModeLabel');
-        if (quickModeLabel) quickModeLabel.textContent = getModeChipLabel(currentMode);
+        if (quickModeLabel) quickModeLabel.textContent = getProfileSummary();
 
         if (activeWorkflowId) {
             const activeWorkflow = workflows.find(workflow => workflow.id === activeWorkflowId);
@@ -2353,8 +2404,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             chipRow.appendChild(workflowChip);
         }
 
-        document.querySelectorAll<HTMLElement>('.composer-menu-item[data-mode]').forEach(item => {
-            item.classList.toggle('active', item.dataset.mode === currentMode);
+        document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-domain]').forEach(item => {
+            item.classList.toggle('active', item.dataset.profileDomain === agentProfile.domain);
+        });
+        document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-intent]').forEach(item => {
+            item.classList.toggle('active', item.dataset.profileIntent === agentProfile.intent);
+        });
+        document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-strategy]').forEach(item => {
+            item.classList.toggle('active', item.dataset.profileStrategy === agentProfile.strategy);
         });
     }
 
@@ -2594,11 +2651,28 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const modeMenu = document.getElementById('modeMenu');
         setModeMenuOpen(!modeMenu?.classList.contains('show'));
     });
-    document.querySelectorAll<HTMLElement>('.composer-menu-item[data-mode]').forEach(item => {
+    const updateAgentProfile = (next: Partial<AgentProfileSelection>) => {
+        agentProfile = { ...agentProfile, ...next };
+        resolvedAgentProfile = null;
+        vscode.postMessage({ type: 'switchAgentProfile', profile: agentProfile });
+        renderComposerChips();
+    };
+    document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-domain]').forEach(item => {
         item.addEventListener('click', () => {
-            const mode = item.dataset.mode;
-            if (mode) switchMode(mode, true);
-            setModeMenuOpen(false);
+            const domain = item.dataset.profileDomain as ProfileDomain | undefined;
+            if (domain) updateAgentProfile({ domain });
+        });
+    });
+    document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-intent]').forEach(item => {
+        item.addEventListener('click', () => {
+            const intent = item.dataset.profileIntent as ProfileIntent | undefined;
+            if (intent) updateAgentProfile({ intent });
+        });
+    });
+    document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-strategy]').forEach(item => {
+        item.addEventListener('click', () => {
+            const strategy = item.dataset.profileStrategy as ProfileStrategy | undefined;
+            if (strategy) updateAgentProfile({ strategy });
         });
     });
     document.querySelectorAll<HTMLElement>('.composer-menu-item[data-composer-action]').forEach(item => {
@@ -3038,7 +3112,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     pushUnique({
                         id: `restored:plan:${step.content}`,
                         kind: 'plan',
-                        title: step.mode === 'orchestrator' ? 'Orchestrator Plan' : step.mode === 'script' ? tr('Script Mode Plan', '脚本模式计划') : 'Implementation Plan',
+                        title: step.mode === 'orchestrator' ? tr('General Multi-Agent Plan', '通用多 Agent 计划') : step.mode === 'script' ? tr('Paradox Multi-Agent Plan', 'Paradox 多 Agent 计划') : 'Implementation Plan',
                         summary: 'Restored from chat history.',
                         filePath: step.content,
                         relPath: step.content,
@@ -3290,6 +3364,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 text,
                 contexts: contextsToSend || [],
                 images: imagesToSend,
+                agentProfile,
             });
             if (!slashHasAttachments) activeContexts = [];
         } else {
@@ -3298,6 +3373,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 text,
                 images: imagesToSend,
                 attachedFiles: pendingFiles.length > 0 ? [...pendingFiles] : undefined,
+                ...(!isGenerating ? { agentProfile } : {}),
             });
         }
 
@@ -5889,6 +5965,22 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 switchMode(msg.mode, /* fromUI */ false);
                 break;
 
+            case 'setAgentProfile':
+                applyAgentProfile(msg.profile, msg.resolved);
+                break;
+
+            case 'agentProfileChanged':
+                applyAgentProfile(msg.profile);
+                break;
+
+            case 'agentProfileResolved':
+                if (isResolvedAgentProfile(msg.resolved)) {
+                    resolvedAgentProfile = { ...msg.resolved, selection: { ...msg.resolved.selection } };
+                    applyComposerModeLabels();
+                    renderComposerChips();
+                }
+                break;
+
             case 'workflowList':
                 workflows = (msg.workflows || []) as WorkflowView[];
                 activeWorkflowId = msg.currentWorkflowId || null;
@@ -6325,7 +6417,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 card.innerHTML = `
                     <div class="plan-file-icon">${svgIconNoMargin(isOrchestratorPlan ? 'bot' : 'clipboard')}</div>
                     <div class="plan-file-info">
-                        <div class="plan-file-title">${isScriptPlan ? tr('Script pipeline plan exported', '脚本模式流水线计划已导出') : isOrchestratorPlan ? tr('Multi-agent execution plan exported', '多 Agent 执行计划已导出') : tr('Plan exported', '计划已导出')}</div>
+                        <div class="plan-file-title">${isScriptPlan ? tr('Paradox Multi-Agent plan exported', 'Paradox 多 Agent 计划已导出') : isOrchestratorPlan ? tr('General Multi-Agent plan exported', '通用多 Agent 计划已导出') : tr('Plan exported', '计划已导出')}</div>
                         <div class="plan-file-path">${escapeHtml(msg.relPath)}</div>
                         <div class="plan-file-hint">${isScriptPlan ? tr('After confirmation, dispatch_agents will run the dynamic pipeline in parallel.', '确认后将按动态流水线进入 dispatch_agents 并行执行。') : isOrchestratorPlan ? tr('After confirmation, dispatch_agents will run this in parallel.', '确认后将进入 dispatch_agents 并行执行。') : tr('After confirmation, execution will switch to build mode.', '确认后将切换到构建执行。')}</div>
                     </div>

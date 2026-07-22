@@ -70,8 +70,9 @@ describe('PromptBuilder context budgeting', () => {
         const prompt = builder.buildSystemPromptForMode('utility');
 
         expect(prompt).to.include('edit that script directly');
-        expect(prompt).to.include('execute it with `run_command` from the project root');
+        expect(prompt).to.include('execute it from the project root');
         expect(prompt).to.include('Prefer `python "relative/path/to/script.py"` over wrapper files');
+        expect(prompt).to.not.match(/\b(?:Paradox|PDXScript|CWTools|CWT)\b/i);
     });
 
     it('injects the /init project profile card instead of full CWTOOLS.md when available', () => {
@@ -228,11 +229,11 @@ describe('PromptBuilder context budgeting', () => {
         const prompt = builder.buildSystemPromptForMode('utility');
         const context = builder.buildContextMessages({ topicId: 'topic-123' });
 
-        expect(prompt).to.include('reuse and overwrite one script for the whole task');
-        expect(prompt).to.include('CWT_AGENT_HELPER_SCRIPT');
-        expect(prompt).to.include('agent_helper.py');
-        expect(prompt).to.include('Delete the helper only when it is a temporary execution/verification helper');
-        expect(prompt).to.include('preserve user-requested deliverable scripts');
+        expect(prompt).to.include('reuse one helper for the whole task');
+        expect(prompt).to.include('provided topic scratch directory');
+        expect(prompt).to.include('Delete it only when it was created solely for execution or verification');
+        expect(prompt).to.include('preserve existing scripts and user-requested deliverables');
+        expect(prompt).to.not.include('CWT_AGENT_HELPER_SCRIPT');
         expect(String(context[0]!.content)).to.include('Agent Helper Script');
         expect(String(context[0]!.content)).to.include('.cwtools/topic-123/scratch/agent_helper.py');
         expect(String(context[0]!.content)).to.include('never user-requested deliverables');
@@ -245,13 +246,10 @@ describe('PromptBuilder context budgeting', () => {
 
         if (process.platform === 'win32') {
             expect(prompt).to.include('PowerShell in every mode');
-            expect(prompt).to.include('$env:CWT_AGENT_SCRATCH_DIR');
-            expect(prompt).to.include('$env:CWT_AGENT_HELPER_SCRIPT');
         } else {
             expect(prompt).to.include('/bin/sh');
-            expect(prompt).to.include('$CWT_AGENT_SCRATCH_DIR');
         }
-        expect(prompt).to.not.include('%CWT_AGENT_SCRATCH_DIR%');
+        expect(prompt).to.not.match(/\b(?:Paradox|PDXScript|CWTools|CWT)\b/i);
         expect(prompt).to.not.include('cmd.exe');
         expect(prompt).to.not.include('%VAR%');
     });
@@ -275,5 +273,16 @@ describe('PromptBuilder context budgeting', () => {
         expect(prompt).to.include('BLOCKED_FOR_ORCHESTRATOR');
         expect(String(context[0]!.content)).to.not.include('run_command cwd');
         expect(String(context[0]!.content)).to.not.include('Agent Helper Script');
+    });
+
+    it('lets slim utility sub-agents run scoped repository verification commands', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const builder = new PromptBuilder(process.cwd());
+        const prompt = builder.buildSlimSystemPromptForMode('utility');
+
+        expect(prompt).to.include('general-coding sub-task');
+        expect(prompt).to.include('scoped repository inspection, formatting, builds, or tests');
+        expect(prompt).to.include('parent policy engine');
+        expect(prompt).to.not.include('NEVER use `run_command`');
     });
 });

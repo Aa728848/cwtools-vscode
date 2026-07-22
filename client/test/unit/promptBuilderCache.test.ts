@@ -179,6 +179,23 @@ describe('PromptBuilder frozen prompt fingerprint cache (plan §7.1)', () => {
         }
         expect(builder.getFrozenPromptCacheStats().size).to.be.at.most(32);
     });
+
+    it('uses separate frozen prompt identities for General and Paradox domains in a shared mode', () => {
+        const builder = makeBuilder();
+        const general = builder.buildFrozenSystemPrompt('plan', 'deepseek', undefined, {
+            toolsetHash: 'general-tools',
+            domain: 'general',
+        });
+        const paradox = builder.buildFrozenSystemPrompt('plan', 'deepseek', undefined, {
+            toolsetHash: 'paradox-tools',
+            domain: 'paradox',
+        });
+
+        expect(general).to.not.include('CWT/LSP');
+        expect(paradox).to.include('CWT/LSP');
+        expect(general).to.not.equal(paradox);
+        expect(builder.getFrozenPromptCacheStats().size).to.equal(2);
+    });
 });
 
 describe('orderMessagesForStablePrefix (plan §7.2)', () => {

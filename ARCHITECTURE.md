@@ -159,6 +159,7 @@ AI code is located in `client/extension/ai/`, consisting of the chat host, model
 sequenceDiagram
     participant User as User
     participant Chat as chatPanel.ts
+    participant Profile as agentProfile.ts
     participant Runner as agentRunner.ts
     participant Service as aiService.ts
     participant OAuth as ChatGPT OAuth
@@ -167,7 +168,9 @@ sequenceDiagram
     participant LSP as LSP
 
     User->>Chat: sendMessage
-    Chat->>Runner: runAgent(mode, workflowId, context)
+    Chat->>Profile: resolve selection + request + active file
+    Profile-->>Chat: immutable turn mode
+    Chat->>Runner: runAgent(turnMode, workflowId, context)
     Runner->>Service: chat/completion request
     opt Codex ChatGPT subscription provider
         Service->>OAuth: refresh OAuth token when needed
@@ -187,13 +190,14 @@ sequenceDiagram
 
 | File | Purpose |
 | --- | --- |
+| `agentProfile.ts` | Resolves the user-facing domain, intent, and strategy profile into an internal per-turn execution mode |
 | `agentRunner.ts` | Reasoning loops, tool permissions, workflow execution, context compression, checkpointing, and model fallbacks |
 | `agentTools.ts` | Tool dispatching, execution timeouts, shared blackboard, and orchestrator tool entry |
 | `aiService.ts` | Multi-provider HTTP/SSE clients, request formatting, fallback policies, and custom wire formats (`customApiFormat`) |
 | `codex/` | Browser PKCE OAuth, VS Code SecretStorage credentials, automatic token refresh, account status, compatibility models, and quota windows for the ChatGPT subscription provider |
 | `promptBuilder.ts` / `prompt/sections/` | Prompt builder facade, project context, and mode system instructions |
 | `providers.ts` / `providers/models/` | Provider registry, default models, capabilities, pricing, and prompt caching discounts |
-| `types.ts` | Messages, tools, modes, contexts, Artifacts, and setting schemas |
+| `types.ts` | Messages, tools, profiles, internal modes, contexts, Artifacts, and setting schemas |
 | `runnerPolicy.ts` | Mode-based tool exclusions, iteration limits, and sub-agent output token budgets |
 | `planModeGuard.ts` | Plan-mode write guards: limits writes to implementation plans and plan/blueprint/walkthrough output files; provides read-only `git_ops` checks (`validateGitOpsForMode`) |
 | `projectProfile.ts` | `/init` workspace scanning, project profile generation, and encoding/language detection |
@@ -214,7 +218,7 @@ sequenceDiagram
 | `contextBudget.ts` | Token budgets and tool output truncation rules |
 | `contextReferences.ts` | `@file`, `@folder`, `@symbol`, and `@blackboard` context reference resolvers |
 | `chat/bridge.ts` | Webview-to-extension IPC message handler |
-| `agentSessionCoordinator.ts` | Tracks state, modes, workflows, and live steps between Chat and Agent Manager UIs |
+| `agentSessionCoordinator.ts` | Tracks profiles, internal modes, workflow ownership/return state, and live steps between Chat and Agent Manager UIs |
 | `agentUiBroadcaster.ts` | Broadcasts state changes to multiple Webviews |
 | `artifactStore.ts` | Session-level storage, sorting, and lifecycle management for Artifacts |
 | `chatPanel.ts` / `chatHtml.ts` | Chat host panel and HTML injection template |
@@ -269,15 +273,28 @@ sequenceDiagram
 | `replacerSuite.ts` | Fuzzy string search & replace engine utilizing 10 progressive algorithms |
 | `schemaFlatten.ts` | Schema flattener and restorer (`nestArguments()`) for weak tools implementations |
 
-##### Agent Modes and Workflows
+##### Agent Profiles, Internal Modes, and Workflows
 
-`AgentMode` options are defined in `client/extension/ai/types.ts`:
-```text
-build | plan | explore | general | utility | review | script |
-gui_expert | script_reviewer | loc_translator | loc_writer | orchestrator
-```
+The user-facing selector is an `AgentProfileSelection` with three independent dimensions:
 
-`general` is retained for backwards compatibility; `utility` handles generic workspace tasks; `script` is the high-throughput Paradox script mode orchestrating up to 8 sub-agents concurrently.
+| Dimension | Values | Meaning |
+| --- | --- | --- |
+| Capability domain | `auto`, `paradox`, `general` | Select CWT/LSP-aware Paradox behavior or domain-neutral repository engineering |
+| Task intent | `auto`, `execute`, `plan`, `explore`, `review` | Select mutation, planning, investigation, or review behavior |
+| Execution strategy | `auto`, `single`, `multi` | Select one Agent or a domain-specific multi-Agent coordinator |
+
+`agentProfile.ts` resolves `auto` deterministically on every non-workflow turn from the selection, request semantics, and active-file path; it does not spend a separate model call on routing. Explicit dimensions always win. The resolved domain and `turnMode` are fixed for that turn and persisted in the V3 checkpoint; legacy V2 snapshots infer a compatible domain from their stored mode.
+
+`AgentMode` remains an internal execution and backward-compatibility adapter:
+
+| Resolved profile | Internal mode |
+| --- | --- |
+| `strategy=multi`, `domain=paradox` | `script` (Paradox Multi-Agent) |
+| `strategy=multi`, `domain=general` | `orchestrator` (General Multi-Agent) |
+| `strategy=single`, `intent=plan / explore / review` | `plan / explore / review` |
+| `strategy=single`, `intent=execute`, `domain=paradox / general` | `build / utility` |
+
+The legacy read-only `general` mode and specialist roles (`gui_expert`, `script_reviewer`, `loc_translator`, `loc_writer`) remain for old sessions and internal sub-Agent execution; they are not the primary UI model. A topic persists its selected Profile, internal mode, active Workflow, and pre-Workflow return state. Activating a Workflow temporarily owns the Profile/mode; switching directly between Workflows preserves the original return state, turning the Workflow off restores it, and a manual Profile change exits the Workflow.
 
 `workflowRegistry.ts` contains:
 
@@ -289,14 +306,16 @@ gui_expert | script_reviewer | loc_translator | loc_writer | orchestrator
 | `rules-sync-review` | `review` | Verify rules after synchronizations |
 | `asset-wiring` | `build` | Repair broken sprite and sound file links |
 
-The Runner restricts tools based on the active workflow and appends supplementary prompts.
+The Runner restricts tools based on the active Workflow and appends supplementary prompts. Newly saved Workflows expose only public modes; older files containing specialist roles are mapped to the closest public mode when loaded.
 
 ##### Tool Constraints
 
-- `tools/registry.ts` is the single source of truth for tool properties (`effect`, `riskLevel`, `concurrencyClass`).
+- `tools/registry.ts` is the single source of truth for tool properties (`effect`, `riskLevel`, `concurrencyClass`, and `domain`). Every tool must be classified as `shared` or `paradox`; the General boundary rejects Paradox tools both while building schemas and immediately before execution.
+- General Coding receives only ordinary repository tools and domain-safe schemas. It excludes CWTools/PDXScript queries, project/game indexes, localisation, media conversion, skills, EvidenceGate, CWTools diagnostics, and all MCP calls. MCP remains Paradox-only until server configuration carries enforceable capability metadata.
+- Legacy persistent-memory tools remain Paradox-only because their stored records predate domain metadata. General Multi-Agent uses its conversation/checkpoint context plus a domain-prefixed Blackboard view; `query_blackboard` and `merge_results` cannot read results from a previous Paradox run or another topic.
 - Writes to `.yml` localization files must call `write_localisation`, not generic text replacers.
 - `edit_file` leverages a 10-step fuzzy match pipeline.
-- `apply_patch`, `multi_replace_file_content`, and `ast_mutate` are retired. Internal execution routes them to `edit_file` or `replace_lines`.
+- `apply_patch`, `multi_replace_file_content`, and `ast_mutate` are retired and absent from every model-visible tool set, including legacy-full mode. Persisted histories receive migration guidance to use `edit_file` or `replace_lines`.
 - Reads of a file queue behind pending writes via `writeCoordinator.afterCurrentWrites`.
 - Multi-agent systems use `dispatch_agents`, `query_blackboard`, and `merge_results`. Sub-agents are sandboxed in `orchestrator/subAgentSandbox.ts`.
 - VS Code Workspace Trust is the outer execution gate: Restricted Mode keeps read/LSP features but blocks mutations, shell, network, media, git, and MCP tools.
@@ -305,17 +324,22 @@ The Runner restricts tools based on the active workflow and appends supplementar
 - The `codex-chatgpt` provider is a native Agent HTTP runtime backed by a browser PKCE OAuth flow compatible with [OpenCode's ChatGPT Plus/Pro integration](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/codex.ts). The extension owns a separate access/refresh token pair in VS Code SecretStorage, refreshes it automatically, and deletes only that secret on logout. It never reads or changes Codex CLI/Desktop credentials, never launches an App Server child process, rejects API keys and endpoint overrides, and does not fall back to OpenAI Platform billing. Requests go only to the fixed ChatGPT Codex Responses endpoint with `store: false`, encrypted reasoning continuation, streaming, parallel function tools, and a per-Agent session id. The selected model and effective reasoning effort are passed directly in the request. Because turns stay inside `agentRunner.ts`, every tool call crosses the same `policyEngine.ts`, mode guard, scheduler, write queue, permission flow, MCP registry, and effective sandbox profile as other providers; no external Codex MCP inventory is imported. Account, plan, and quota status are best-effort reads from the subscription usage endpoint. The model list and wire contract are compatibility data because this is an internal endpoint, not a public stable API. This provider does not participate in FIM, translation, title/routing utility calls, or child-Agent provider selection.
 - Private runs, checkpoints, goals, and learned memory use extension storage; only user-shareable plans, workflows, blueprints, and project rules remain in `.cwtools/`.
 
-##### Orchestrator
+##### Multi-Agent Coordinators
 
-The orchestrator structures DAG sub-tasks, schedules parallel processes, shares memory through blackboards, and reviews outputs.
+The same orchestration infrastructure serves two deliberately separate execution paths:
+
+- General Multi-Agent (`orchestrator`) is domain-neutral. It dispatches only `explore`, `plan`, `utility`, and `review`; each child inherits the General domain and cannot acquire Paradox tools or schemas. `utility` owns scoped writes plus approved formatting, build, and test commands. Its quality gate uses a general `review` Agent and does not run CWT semantics, entity contracts, localisation sweeps, EvidenceGate, or CWTools freshness polling.
+- Paradox Multi-Agent (`script`) dispatches `explore`, `plan`, `build`, `review`, `loc_writer`, and `gui_expert`. It retains CWT/LSP evidence, feature manifests, entity contracts, localisation rules, semantic checks, and the Paradox review/fix path.
+
+Both paths structure DAG sub-tasks, bound parallel execution, share results through blackboards, detect conflicting write intents, and run a domain-appropriate quality gate. Hidden review work is stopped only after 20 minutes without observable progress; active steps refresh that stall deadline.
 
 | File | Purpose |
 | --- | --- |
-| `agentRegistry.ts` | Configures sub-agent modes, systems, and tokens budgets |
+| `agentRegistry.ts` | Configures domain-specific sub-agent roles, prompts, and token budgets |
 | `blackboard.ts` | Shared thread-safe dictionary supporting regex queries |
 | `taskGraphEngine.ts` | DAG construction, cycle detection, and topological execution ordering |
 | `parallelExecutor.ts` | Schedules independent tasks concurrently |
-| `orchestrator.ts` | Entry point, context injectors, and review integration |
+| `orchestrator.ts` | Entry point, parent-domain routing, context injectors, and review integration |
 | `conflictDetector.ts` | Scans blackboards for overlapping write target intents |
 | `qualityGate.ts` | Auto-review pipeline feeding verification feedback back to agents |
 | `subAgentSandbox.ts` | Sets sandboxes to restrict paths and tools for sub-agents |
@@ -579,6 +603,7 @@ AI 代码位于 `client/extension/ai/`，由聊天宿主、模型提供商、提
 sequenceDiagram
     participant User as User
     participant Chat as chatPanel.ts
+    participant Profile as agentProfile.ts
     participant Runner as agentRunner.ts
     participant Service as aiService.ts
     participant OAuth as ChatGPT OAuth
@@ -587,7 +612,9 @@ sequenceDiagram
     participant LSP as LSP
 
     User->>Chat: sendMessage
-    Chat->>Runner: runAgent(mode, workflowId, context)
+    Chat->>Profile: 解析选择 + 请求 + 活动文件
+    Profile-->>Chat: 本轮不可变内部模式
+    Chat->>Runner: runAgent(turnMode, workflowId, context)
     Runner->>Service: chat/completion request
     opt Codex ChatGPT 订阅 Provider
         Service->>OAuth: 按需刷新 OAuth Token
@@ -607,13 +634,14 @@ sequenceDiagram
 
 | 文件 | 作用 |
 | --- | --- |
+| `agentProfile.ts` | 把用户选择的领域、意图和策略解析为本轮内部执行模式 |
 | `agentRunner.ts` | 推理循环、工具权限、workflow 应用、上下文压缩、检查点、回退 |
 | `agentTools.ts` | 工具分发、超时、共享黑板和 orchestrator 工具入口 |
 | `aiService.ts` | 各 AI Provider HTTP/SSE 客户端、请求适配、回退和 custom 线协议分发（`customApiFormat`） |
 | `codex/` | ChatGPT 订阅 Provider 的浏览器 PKCE OAuth、VS Code SecretStorage 凭据、Token 自动刷新、账户状态、兼容模型与额度窗口 |
 | `promptBuilder.ts` / `prompt/sections/` | Prompt facade、项目上下文和模式系统提示词 |
 | `providers.ts` / `providers/models/` | Provider facade、默认模型、能力、价格和缓存折扣 |
-| `types.ts` | 消息、工具、模式、上下文、Artifact、设置类型 |
+| `types.ts` | 消息、工具、Profile、内部模式、上下文、Artifact、设置类型 |
 | `runnerPolicy.ts` | 模式级工具过滤、迭代上限和 slim sub-agent 输出预算 |
 | `planModeGuard.ts` | 计划模式写入守卫：仅放行实现计划与 plan/blueprint/walkthrough 产物文件；并提供非写入模式的只读 `git_ops` 门控（`validateGitOpsForMode`） |
 | `projectProfile.ts` | `/init` 项目扫描、profile 构建/读写、语言/编码检测 |
@@ -634,7 +662,7 @@ sequenceDiagram
 | `contextBudget.ts` | Token 预算和工具结果裁剪 |
 | `contextReferences.ts` | `@file`、`@folder`、`@symbol`、`@blackboard` 引用解析 |
 | `chat/bridge.ts` | Webview 与 Extension Host 的通信桥接 |
-| `agentSessionCoordinator.ts` | chat / manager 共用会话状态、模式、workflow、live steps |
+| `agentSessionCoordinator.ts` | chat / manager 共用 Profile、内部模式、Workflow 所有权/返回状态和 live steps |
 | `agentUiBroadcaster.ts` | 多 Webview surface 广播与定向发送 |
 | `artifactStore.ts` | Agent Artifact 的会话级存储、排序和稳定 ID |
 | `chatPanel.ts` / `chatHtml.ts` | Extension 侧聊天宿主与 Webview HTML 模板 |
@@ -689,16 +717,28 @@ sequenceDiagram
 | `replacerSuite.ts` | 10 策略模糊替换引擎（Levenshtein、块锚定、Jaccard 相似度等） |
 | `schemaFlatten.ts` | 深层 schema 自动展平及 `nestArguments()` 反向还原 |
 
-##### Agent 模式与 Workflow
+##### Agent Profile、内部模式与 Workflow
 
-`AgentMode` 定义在 `client/extension/ai/types.ts`：
+用户界面使用三维 `AgentProfileSelection`，三个维度彼此独立：
 
-```text
-build | plan | explore | general | utility | review | script |
-gui_expert | script_reviewer | loc_translator | loc_writer | orchestrator
-```
+| 维度 | 可选值 | 含义 |
+| --- | --- | --- |
+| 能力领域 | `auto`、`paradox`、`general` | 选择 CWT/LSP 感知的 Paradox 能力或领域中立的仓库工程能力 |
+| 任务意图 | `auto`、`execute`、`plan`、`explore`、`review` | 选择修改、规划、调查或审查行为 |
+| 执行策略 | `auto`、`single`、`multi` | 选择单 Agent 或按领域区分的多 Agent 协调器 |
 
-`general` 为旧会话兼容保留；`utility` 是通用工作区任务模式；`script` 是当前面向 PDXScript 的高吞吐脚本模式（动态 workflow 协调器，单次 `dispatch_agents` 最多 8 个任务）。
+`agentProfile.ts` 在每个非 Workflow 回合依据显式选择、请求语义和活动文件路径确定性地重新解析 `auto`，不额外消耗一次模型调用；用户固定的维度始终优先。本轮解析出的领域与 `turnMode` 在该回合内保持不变并写入 V3 checkpoint；旧 V2 快照则依据保存的 mode 推断兼容领域。
+
+`AgentMode` 继续作为内部执行与旧数据兼容层：
+
+| 解析后的 Profile | 内部模式 |
+| --- | --- |
+| `strategy=multi`、`domain=paradox` | `script`（Paradox 多 Agent） |
+| `strategy=multi`、`domain=general` | `orchestrator`（通用多 Agent） |
+| `strategy=single`、`intent=plan / explore / review` | `plan / explore / review` |
+| `strategy=single`、`intent=execute`、`domain=paradox / general` | `build / utility` |
+
+旧的只读 `general` 以及 `gui_expert`、`script_reviewer`、`loc_translator`、`loc_writer` 等专职角色仅用于旧会话兼容或内部子 Agent，不再作为主要 UI 概念。Topic 会持久化所选 Profile、内部 Mode、活动 Workflow 以及进入 Workflow 前的返回状态。Workflow 激活后临时接管 Profile/Mode；直接切换 Workflow 会保留最初返回状态，关闭时恢复，而手动修改 Profile 会退出当前 Workflow。
 
 `workflowRegistry.ts` 当前注册：
 
@@ -710,7 +750,7 @@ gui_expert | script_reviewer | loc_translator | loc_writer | orchestrator
 | `rules-sync-review` | `review` | 规则同步后的诊断复核 |
 | `asset-wiring` | `build` | 修复 sprite / sound 资产引用 |
 
-Runner 会在模式工具集基础上应用 workflow tool policy，并把 workflow prompt supplement 注入系统提示词。聊天 UI 通过 `workflowViewModel.ts`、`workflowI18n.ts` 和 webview workflow 模块展示 workflow、阶段和验证要求。
+Runner 会在模式工具集基础上应用 Workflow tool policy，并把 Workflow prompt supplement 注入系统提示词。新保存的 Workflow 只暴露公开模式；包含旧专职角色的历史文件会在加载时映射到最接近的公开模式。聊天 UI 通过 `workflowViewModel.ts`、`workflowI18n.ts` 和 webview workflow 模块展示 Workflow、阶段和验证要求。
 
 ##### 工具系统
 
@@ -724,7 +764,9 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 
 当前约束：
 
-- `tools/registry.ts` 是工具读写分类和 mode gating 的事实来源；每个 entry 同时携带 `effect`、`riskLevel` 和 `concurrencyClass`。
+- `tools/registry.ts` 是工具读写分类和 mode gating 的事实来源；每个 entry 同时携带 `effect`、`riskLevel`、`concurrencyClass` 和 `domain`。每个工具必须显式分类为 `shared` 或 `paradox`；通用边界在构建 schema 和实际执行前都会拦截 Paradox 工具。
+- 通用编码只获得普通仓库工具和领域安全 schema；CWTools/PDXScript 查询、项目/游戏索引、本地化、媒体转换、Skill、EvidenceGate、CWTools 诊断以及所有 MCP 调用均不进入通用领域。只有 MCP Server 配置具备可强制执行的能力元数据后，才会考虑向通用领域开放 MCP。
+- 旧持久记忆中的记录早于领域元数据，因此相关 memory 工具暂时只向 Paradox 开放。通用多 Agent 使用当前对话/checkpoint 上下文和按领域加前缀的 Blackboard 视图；`query_blackboard` 与 `merge_results` 不能读取上一轮 Paradox 运行或其他 Topic 的结果。
 - `tools/permissions.ts` 从 registry 读取权限元数据，统一执行 mode/sub-agent 访问校验。
 - `tools/argRepair.ts` 在 Runner 执行工具前修复常见参数名和类型漂移。
 - `runner/toolInvocation.ts` 在执行前归一化 tool call，派生风险元数据，提取目标文件并生成稳定 `invocationId`。
@@ -734,29 +776,34 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 - `runner/permissionPolicy.ts` 的 `cwdScope` 判断使用 `path.relative`，避免前缀绕过。
 - 写工具经由 `PartitionedWriteQueue` 管理；`.yml` 本地化写入必须使用 `write_localisation`。
 - `edit_file(filePath, oldString, newString, replaceAll?)` 是单处模糊替换原语（registry `EDIT`、`per-file-write`），复用 `fuzzyReplace` 与既有写守卫。
-- `apply_patch`、`multi_replace_file_content`、`ast_mutate` 已从模型可见工具集退役：`agentTools.execute()` 拦截并引导改用 `edit_file`/`replace_lines`/`edit_pdx_block`/`write_localisation`，实现仅保留给内部调用。
+- `apply_patch`、`multi_replace_file_content`、`ast_mutate` 已从所有模型可见工具集退役，旧版完整工具集开关也不会重新暴露；历史会话调用会收到迁移提示，改用 `edit_file`/`replace_lines`/`edit_pdx_block`/`write_localisation`。
 - `read_file` 输出带 `N | ` 行号前缀；`write_file`/`edit_file` 会自动剥离误粘贴的前缀（`replacerSuite.ts` 的 `stripLineNumberPrefixes` 兼作 `fuzzyReplace` 的回退匹配策略）。
 - 对 PDXScript 优先使用 `query_workspace_index`、`document_symbols`、`get_pdx_block`、`get_file_context` 等结构化读取工具。`get_pdx_block`/`get_file_context` 现会 `markRead` 并返回 1 基行号，读/搜索工具出错时返回 `error` 字段区别于空结果。
 - 当前多 Agent 调度工具是 `dispatch_agents`，配套 `query_blackboard` 和 `merge_results`。
 - `run_skill` 工具按需加载 `SKILL.md` 正文；`skills.ts` 负责索引、`promptBuilder.ts` 只注入精简技能索引，正文不进入基础 prompt。
 
-##### Orchestrator
+##### 多 Agent 协调器
 
-`client/extension/ai/orchestrator/` 管理 DAG 子任务、多 Agent 并行、共享黑板、冲突检测和质量门。
+`client/extension/ai/orchestrator/` 复用同一套 DAG、并行执行、共享黑板和冲突检测基础设施，但保留两条明确分离的执行路径：
+
+- 通用多 Agent（`orchestrator`）保持领域中立，只分派 `explore`、`plan`、`utility`、`review`；每个子 Agent 都继承通用领域，不能取得 Paradox 工具或 schema。其中 `utility` 负责范围内写入以及获准的格式化、构建和测试命令；质量门使用通用 `review`，不运行 CWT 语义、实体契约、本地化 sweep、EvidenceGate 或 CWTools freshness 轮询。
+- Paradox 多 Agent（`script`）分派 `explore`、`plan`、`build`、`review`、`loc_writer`、`gui_expert`，继续要求 CWT/LSP 证据、feature manifest、实体契约、本地化规则、语义检查和 Paradox 专用审查/修复链。
+
+两条路径都会限制并行度、通过黑板共享结果、检测写入意图冲突，并执行与领域匹配的质量门。隐藏审查只有在连续 20 分钟没有可观察进展时才停止；活动步骤会刷新卡死计时。
 
 | 文件 | 作用 |
 | --- | --- |
-| `agentRegistry.ts` | 子 Agent 角色、模式、预算和默认配置 |
+| `agentRegistry.ts` | 分领域的子 Agent 角色、提示词、预算和默认配置 |
 | `blackboard.ts` | 跨 Agent 共享数据，支持 key/prefix/type 查询 |
 | `taskGraphEngine.ts` | DAG 构建、拓扑排序、就绪节点和循环检测 |
 | `parallelExecutor.ts` | 按依赖批次并行执行子任务 |
-| `orchestrator.ts` | 调度入口、上下文注入、质量门整合 |
+| `orchestrator.ts` | 调度入口、父级领域路由、上下文注入和质量门整合 |
 | `conflictDetector.ts` | 基于黑板的写意图和实体注册冲突检测 |
 | `qualityGate.ts` | 审查和自动修复流程 |
 | `subAgentSandbox.ts` | 由 `TaskNode` + agent profile 构造 `SubAgentSandbox`，并通过 `enforceSubAgentSafety` 拦截越权工具和越界写入 |
 | `worktreeManager.ts` | 可选的每 Agent git worktree 隔离：创建 / `--binary` diff / 应用 / 保留清理 |
 
-已注册角色包括 `explorer`、`architect`、`builder`、`locWriter`、`reviewer`、`assetGen`、`guiExpert` 和 `locTranslator`。
+旧角色别名仍可用于恢复历史任务；新分派使用与内部模式一致的 `explore`、`plan`、`utility`、`build`、`review`、`loc_writer` 和 `gui_expert` 角色集合，并由父级领域限制可选角色。
 
 ##### Run Ledger、Checkpoint 与 Compacted Memory
 
@@ -828,7 +875,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ##### Game Knowledge
 
-`gameKnowledge.ts` 只保存所有 profile 共用的稳定证据路由策略，不再保存 9 份游戏规则知识块。`promptBuilder.ts` 注入当前游戏名称和同一短策略；规则、scope、entity、目录、event、operator、localisation 与 override 事实按任务从活动 CWT/CWTools LSP、项目知识或精确 archetype 获取。这样动态事实与规则 revision 共用失效边界，也减少静态 prompt 和 prefix cache 的无效占用。
+`gameKnowledge.ts` 只保存 Paradox Profile 共用的稳定证据路由策略，不再保存 9 份游戏规则知识块。公开的领域中立模式不会注入静态游戏知识包，只保留必要的动态项目约定；Paradox 模式注入当前游戏名称和一段短证据策略。规则、scope、entity、目录、event、operator、localisation 与 override 事实按任务从活动 CWT/CWTools LSP、项目知识或精确 archetype 获取。这样动态事实与规则 revision 共用失效边界，也减少静态 prompt 和 prefix cache 的无效占用。
 
 ##### Skills
 

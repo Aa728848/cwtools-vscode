@@ -27,6 +27,8 @@ import type {
     GenerationResult,
     ContextItem,
     TokenUsage,
+    AgentProfileSelection,
+    ResolvedAgentProfile,
 } from './types';
 import { contentToString } from './types';
 import { AgentRunner } from './agentRunner';
@@ -56,7 +58,15 @@ import { ArtifactStore } from './artifactStore';
 import { getAllWorkflows, getWorkflow } from './workflowRegistry';
 import { toWorkflowViewModel } from './workflowViewModel';
 import { getWorkflowUiLabels } from './workflowI18n';
-import { buildModeRoutingPrompt, inferBuildModeRoute, parseModelRouteResponse } from './modeRouting';
+import {
+    cloneAgentProfile,
+    defaultDomainForMode,
+    isAgentMode,
+    normalizeAgentProfile,
+    profileForLegacyMode,
+    resolveAgentProfile,
+    sameAgentProfile,
+} from './agentProfile';
 import { computeLineDiff } from './diffEngine';
 import { budgetToolResult } from './contextBudget';
 import {
@@ -183,6 +193,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.session.currentWorkflowId = workflowId;
     }
 
+    private get agentProfile(): AgentProfileSelection {
+        return this.session.agentProfile;
+    }
+
+    private set agentProfile(profile: AgentProfileSelection) {
+        this.session.agentProfile = profile;
+    }
+
     private get _liveSteps(): AgentStep[] {
         return this.session.liveSteps;
     }
@@ -303,6 +321,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         // 2. Restore current mode
         send({ type: 'setMode', mode: this.currentMode });
+        send({ type: 'setAgentProfile', profile: this.agentProfile, resolved: this.session.lastResolvedProfile });
         send({ type: 'slashCommandList', commands: getSlashCommandDescriptors(vs.env.language) });
         // 3. If a generation was running when the panel was hidden, replay steps
         //    so the user can see what the AI has done so far and cancel if needed
@@ -501,6 +520,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }
         };
         send({ type: 'setMode', mode: this.currentMode });
+        send({ type: 'setAgentProfile', profile: this.agentProfile, resolved: this.session.lastResolvedProfile });
         send({ type: 'slashCommandList', commands: getSlashCommandDescriptors(vs.env.language) });
         if (this.artifactStore.size > 0) {
             send({ type: 'artifactList', artifacts: this.artifactStore.list() });
@@ -540,8 +560,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         await this.handleUserMessage(text);
     }
 
-    private ensureDispatchAgentFeedbackVisible(result: GenerationResult): GenerationResult {
-        if (this.currentMode !== 'orchestrator' && this.currentMode !== 'script') return result;
+    private ensureDispatchAgentFeedbackVisible(result: GenerationResult, mode: AgentMode = this.currentMode): GenerationResult {
+        if (mode !== 'orchestrator' && mode !== 'script') return result;
         if (!result.steps.some(s => s.toolName === 'dispatch_agents')) return result;
 
         const existing = (result.explanation || '').trim();
@@ -715,35 +735,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return text.slice(0, Math.max(0, maxLength - 3)).trimEnd() + '...';
     }
 
-    private async inferBuildModeRouteWithModel(text: string): Promise<AgentMode | undefined> {
-        try {
-            const messages: ChatMessage[] = [
-                {
-                    role: 'system',
-                    content: 'You are a fast request router for a VS Code coding agent. Return only the requested JSON.',
-                },
-                {
-                    role: 'user',
-                    content: buildModeRoutingPrompt(text),
-                },
-            ];
-            const startedAt = Date.now();
-            const response = await this.aiService.chatCompletion(messages, {
-                temperature: 0,
-                maxTokens: 80,
-                disableThinking: true,
-                requestTimeoutMs: 10_000,
-            });
-            this.recordAuxiliaryProviderUsage(response, messages, 'routing', 'routing', startedAt);
-            const content = response.choices?.[0]?.message?.content;
-            const raw = typeof content === 'string' ? content : JSON.stringify(content ?? '');
-            return parseModelRouteResponse(raw) ?? inferBuildModeRoute(text);
-        } catch (error) {
-            ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Mode auto-routing failed; using fallback router.', error);
-            return inferBuildModeRoute(text);
-        }
-    }
-
     private async resolveActiveRunId(): Promise<string | undefined> {
         if (this.currentRunId) return this.currentRunId;
         const activeRun = await this.agentRunner.getActiveRunRecordPromise()?.catch(() => undefined);
@@ -817,8 +808,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     public async handleComposerSubmission(
         text: string,
-        payload: { images?: string[]; attachedFiles?: string[]; contexts?: ContextItem[] } = {},
+        payload: { images?: string[]; attachedFiles?: string[]; contexts?: ContextItem[]; agentProfile?: AgentProfileSelection } = {},
     ): Promise<void> {
+        if (payload.agentProfile) {
+            const submittedProfile = normalizeAgentProfile(payload.agentProfile);
+            if (!sameAgentProfile(submittedProfile, this.agentProfile)) {
+                this.switchAgentProfile(submittedProfile);
+            }
+        }
         const trimmed = text.trim();
         if (trimmed.startsWith('/')) {
             const attachmentCount = (payload.images?.length ?? 0)
@@ -896,13 +893,21 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             return;
         }
 
-        if (!_skipAutoModeSwitch && text.trim() && this.currentMode === 'build' && !this.currentWorkflowId) {
-            const routedMode = config.provider === 'codex-chatgpt'
-                ? inferBuildModeRoute(text)
-                : await this.inferBuildModeRouteWithModel(text);
-            if (routedMode && routedMode !== this.currentMode) {
-                this.switchMode(routedMode);
-            }
+        let turnMode = this.currentMode;
+        let turnDomain = this.agentProfile.domain === 'auto'
+            ? defaultDomainForMode(turnMode)
+            : this.agentProfile.domain;
+        let resolvedProfile: ResolvedAgentProfile | undefined;
+        if (!_skipAutoModeSwitch && text.trim() && !this.currentWorkflowId) {
+            resolvedProfile = resolveAgentProfile(text, this.agentProfile, {
+                activeFile: vs.window.activeTextEditor?.document.uri.fsPath,
+            });
+            turnMode = resolvedProfile.mode;
+            turnDomain = resolvedProfile.domain;
+            this.session.lastResolvedProfile = resolvedProfile;
+            if (turnMode !== this.currentMode) this.currentMode = turnMode;
+            this.postMessage({ type: 'modeChanged', mode: turnMode });
+            this.postMessage({ type: 'agentProfileResolved', resolved: resolvedProfile });
         }
 
         // Ensure we have a topic
@@ -911,6 +916,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (!this.topicManager.currentTopic) {
             this.topicManager.createNewTopic(visibleUserText);
         }
+        if (this.topicManager.currentTopic) {
+            this.topicManager.currentTopic.agentProfile = cloneAgentProfile(this.agentProfile);
+            this.topicManager.currentTopic.agentMode = turnMode;
+        }
 
         const normalizedText = text.trim().toLowerCase();
         if (!resumeFromState
@@ -918,6 +927,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             && /^(continue|resume|继续|继续执行)$/.test(normalizedText)
             && await this.agentRunner.hasResumeState(this.topicManager.currentTopic.id)) {
             resumeFromState = true;
+        }
+        if (resumeFromState && this.topicManager.currentTopic?.id) {
+            const resumeState = await this.agentRunner.loadResumeState(this.topicManager.currentTopic.id);
+            if (resumeState?.mode) {
+                turnMode = resumeState.mode;
+                turnDomain = resumeState.domain ?? defaultDomainForMode(turnMode);
+            }
         }
 
         // Track message index for retract support
@@ -983,7 +999,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 context: { ...context, topicId: this.topicManager.currentTopic?.id },
                 conversationHistory: this.conversationMessages,
                 options: {
-                    mode: this.currentMode,
+                    mode: turnMode,
+                    domain: turnDomain,
                     providerId: config.provider,
                     model: this.aiService.getConfig().model || undefined,
                     reasoningEffort: config.reasoningEffort,
@@ -1016,10 +1033,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }).catch(() => {});
 
             const rawResult = await runPromise;
-            const result = this.ensureDispatchAgentFeedbackVisible(rawResult);
+            const result = this.ensureDispatchAgentFeedbackVisible(rawResult, turnMode);
 
             // ── Orchestrator 自动生成 Walkthrough 自愈机制 ──
-            if ((this.currentMode === 'orchestrator' || this.currentMode === 'script') && result.steps.some(s => s.toolName === 'dispatch_agents')) {
+            if ((turnMode === 'orchestrator' || turnMode === 'script') && result.steps.some(s => s.toolName === 'dispatch_agents')) {
                 await this.ensureOrchestratorWalkthrough(result);
             }
 
@@ -1045,7 +1062,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }
             this.conversationMessages.push({ role: 'assistant', content: assistantContent });
 
-            // ── Plan/Orchestrator mode: suppress explanation in chat, auto-open annotation panel ──
+            // ── Plan/multi-Agent mode: suppress explanation in chat, auto-open annotation panel ──
             // If the AI is just asking clarification questions (indicated by :::question syntax
             // or heuristic question detection), it shouldn't lock into an Implementation Plan yet.
             // Treat it as a conversational turn.
@@ -1064,7 +1081,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 await this.renderWalkthroughUI(wtPath, topicId, uiSteps);
             }
 
-            if ((this.currentMode === 'plan' || ((this.currentMode === 'orchestrator' || this.currentMode === 'script') && !usedDispatchAgents)) && result.explanation && !isJustAskingQuestions) {
+            if ((turnMode === 'plan' || ((turnMode === 'orchestrator' || turnMode === 'script') && !usedDispatchAgents)) && result.explanation && !isJustAskingQuestions) {
                 // Chat shows only tool-call steps (no full plan text)
                 this.postMessage({ type: 'generationComplete', result: { ...uiResult, explanation: '', code: '' } });
                 this.topicManager.addHistoryMessage({
@@ -1074,7 +1091,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     steps: uiSteps,
                     runId: durableRunId,
                 });
-                void this.savePlanFile(result.explanation, text, uiSteps);
+                void this.savePlanFile(result.explanation, text, uiSteps, turnMode);
             } else {
                 this.postMessage({ type: 'generationComplete', result: uiResult });
                 this.topicManager.addHistoryMessage({
@@ -1090,7 +1107,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.topicManager.saveTopics();
 
             const bpPath = this.findGeneratedTopicFile(topicId, 'design_blueprint.md');
-            if (bpPath && this.currentMode !== 'orchestrator' && this.currentMode !== 'script') {
+            if (bpPath && turnMode !== 'orchestrator' && turnMode !== 'script') {
                 void this.renderBlueprintUI(bpPath, topicId, uiSteps);
             }
 
@@ -1681,7 +1698,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
 
     /** 
-* Check whether the AI's reply in Plan/Orchestrator mode belongs to the "clarification/question stage". 
+* Check whether the AI's reply in Plan or multi-Agent mode belongs to the "clarification/question stage".
 * 
 * Only use deterministic signal judgment, no heuristic guessing: 
 * - Plan document already exists → Revision phase (not clarification) 
@@ -1714,7 +1731,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return false;
     }
 
-    private async savePlanFile(planText: string, userPrompt: string, steps?: any[]): Promise<void> {
+    private async savePlanFile(planText: string, userPrompt: string, steps?: any[], mode: AgentMode = this.currentMode): Promise<void> {
         // ── Persist .md export ──────────────────────────────────────────────
         let filePath = '';
         let relPath = '';
@@ -1736,12 +1753,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         if (filePath) {
             // Post plan file saved card and render interactive annotation UI
-            this.postMessage({ type: 'planFileSaved', filePath, relPath, mode: this.currentMode });
+            this.postMessage({ type: 'planFileSaved', filePath, relPath, mode });
             this.upsertArtifact({
                 id: this.artifactId('plan', path.basename(filePath)),
                 kind: 'plan',
-                title: this.currentMode === 'orchestrator' ? 'Orchestrator Plan' : this.currentMode === 'script' ? 'Script Mode Pipeline Plan' : 'Implementation Plan',
-                summary: (this.currentMode === 'orchestrator' || this.currentMode === 'script')
+                title: mode === 'orchestrator' ? 'General Multi-Agent Plan' : mode === 'script' ? 'Paradox Multi-Agent Plan' : 'Implementation Plan',
+                summary: (mode === 'orchestrator' || mode === 'script')
                     ? 'DAG dispatch plan awaiting approval.'
                     : 'Single-agent implementation plan awaiting approval.',
                 filePath,
@@ -1766,10 +1783,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (currentSection.trim()) sections.push(currentSection.trim());
             if (sections.length === 0 && planText.trim()) sections.push(planText.trim());
 
-            this.postMessage({ type: 'renderPlan', sections, planText, mode: this.currentMode });
+            this.postMessage({ type: 'renderPlan', sections, planText, mode });
 
             if (steps) {
-                steps.push({ type: 'plan_card', content: filePath, toolResult: sections, mode: this.currentMode, uiState: 'pending', timestamp: Date.now() });
+                steps.push({ type: 'plan_card', content: filePath, toolResult: sections, mode, uiState: 'pending', timestamp: Date.now() });
                 this.topicManager.saveTopics();
             }
 
@@ -2116,20 +2133,41 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     public startNewTopic(): void {
+        this.persistAgentProfileForCurrentTopic();
         this.topicManager.startNewTopic();
+        this.agentProfile = cloneAgentProfile();
+        this.session.previousAgentProfile = cloneAgentProfile();
+        this.currentMode = 'build';
+        this.previousMode = 'build';
+        this.currentWorkflowId = null;
+        this.session.lastResolvedProfile = undefined;
         this.conversationMessages = [];
         this._messageFileSnapshots.clear();
         this._currentMessageSnapshots = null;
         this.clearArtifacts();
+        this.postMessage({ type: 'setAgentProfile', profile: this.agentProfile });
+        this.postMessage({ type: 'modeChanged', mode: this.currentMode });
+        this.sendWorkflowState();
     }
 
     public async loadTopic(topicId: string): Promise<void> {
+        this.persistAgentProfileForCurrentTopic();
         this.clearArtifacts();
         const topic = this.topicManager.topics.find(t => t.id === topicId);
         this.conversationMessages = this.topicManager.loadTopic(
             topicId,
             topic ? this.compactMessagesForWebview(topic.messages) as any : undefined
         );
+        this.agentProfile = normalizeAgentProfile(topic?.agentProfile);
+        const restoredWorkflow = topic?.workflowId ? getWorkflow(topic.workflowId) : undefined;
+        this.currentWorkflowId = restoredWorkflow?.id ?? null;
+        this.currentMode = restoredWorkflow?.mode ?? (isAgentMode(topic?.agentMode) ? topic.agentMode : 'build');
+        this.session.previousAgentProfile = normalizeAgentProfile(topic?.workflowReturnProfile ?? topic?.agentProfile);
+        this.previousMode = isAgentMode(topic?.workflowReturnMode) ? topic.workflowReturnMode : this.currentMode;
+        this.session.lastResolvedProfile = undefined;
+        this.postMessage({ type: 'setAgentProfile', profile: this.agentProfile });
+        this.postMessage({ type: 'modeChanged', mode: this.currentMode });
+        this.sendWorkflowState();
         void this.agentRuntime.resumeThread(topicId, topicId).catch(() => undefined);
         const resumeState = await this.agentRunner.loadResumeState(topicId);
         if (resumeState) {
@@ -2962,16 +3000,61 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
-    public switchMode(mode: AgentMode): void {
-        if (this.currentMode !== mode) this.previousMode = this.currentMode;
+    private persistAgentProfileForCurrentTopic(): void {
+        const topic = this.topicManager.currentTopic;
+        if (!topic) return;
+        topic.agentProfile = cloneAgentProfile(this.agentProfile);
+        topic.agentMode = this.currentMode;
+        if (this.currentWorkflowId) topic.workflowId = this.currentWorkflowId;
+        else delete topic.workflowId;
+        if (this.currentWorkflowId) {
+            topic.workflowReturnProfile = cloneAgentProfile(this.session.previousAgentProfile);
+            topic.workflowReturnMode = this.previousMode;
+        } else {
+            delete topic.workflowReturnProfile;
+            delete topic.workflowReturnMode;
+        }
+        this.topicManager.saveTopics();
+    }
+
+    public switchAgentProfile(profile: AgentProfileSelection, preserveWorkflow = false): void {
+        const normalized = normalizeAgentProfile(profile);
+        if (sameAgentProfile(normalized, this.agentProfile) && (preserveWorkflow || !this.currentWorkflowId)) return;
+        if (!preserveWorkflow) this.session.previousAgentProfile = this.agentProfile;
+        this.agentProfile = normalized;
+        this.session.lastResolvedProfile = undefined;
+        if (!preserveWorkflow && this.currentWorkflowId) {
+            this.currentWorkflowId = null;
+            this.sendWorkflowState();
+        }
+        this.persistAgentProfileForCurrentTopic();
+        this.postMessage({ type: 'agentProfileChanged', profile: normalized });
+    }
+
+    public switchMode(mode: AgentMode, preserveWorkflow = false, syncProfile = true): void {
+        if (this.currentMode !== mode && !preserveWorkflow) this.previousMode = this.currentMode;
         this.currentMode = mode;
+        if (syncProfile) {
+            this.switchAgentProfile(profileForLegacyMode(mode), preserveWorkflow);
+        } else if (!preserveWorkflow && this.currentWorkflowId) {
+            this.currentWorkflowId = null;
+            this.sendWorkflowState();
+        }
+        this.persistAgentProfileForCurrentTopic();
         this.postMessage({ type: 'modeChanged', mode });
     }
 
     public switchWorkflow(workflowId?: string | null): void {
         const normalized = (workflowId || '').trim();
         if (!normalized) {
-            this.currentWorkflowId = null;
+            const previousMode = this.currentMode;
+            if (!this.session.deactivateWorkflow()) {
+                this.sendWorkflowState();
+                return;
+            }
+            this.persistAgentProfileForCurrentTopic();
+            this.postMessage({ type: 'agentProfileChanged', profile: this.agentProfile });
+            if (previousMode !== this.currentMode) this.postMessage({ type: 'modeChanged', mode: this.currentMode });
             this.sendWorkflowState();
             return;
         }
@@ -2983,8 +3066,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             return;
         }
 
-        this.currentWorkflowId = workflow.id;
-        this.switchMode(workflow.mode);
+        const previousProfile = this.agentProfile;
+        const previousMode = this.currentMode;
+        this.session.activateWorkflow(workflow.id, workflow.mode, profileForLegacyMode(workflow.mode));
+        this.persistAgentProfileForCurrentTopic();
+        if (!sameAgentProfile(previousProfile, this.agentProfile)) {
+            this.postMessage({ type: 'agentProfileChanged', profile: this.agentProfile });
+        }
+        if (previousMode !== this.currentMode) this.postMessage({ type: 'modeChanged', mode: this.currentMode });
         this.sendWorkflowState();
     }
 
@@ -3036,6 +3125,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             messages: [],
             messageCount: (this.topicManager.currentTopic?.messages ?? []).filter(message => !message.isHidden).length,
             mode: this.currentMode,
+            agentProfile: cloneAgentProfile(this.agentProfile),
+            resolvedAgentProfile: this.session.lastResolvedProfile,
             workflowId: this.currentWorkflowId,
             isGenerating: this._isGenerating,
             liveStepCount: this._liveSteps.length,

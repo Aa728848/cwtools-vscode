@@ -232,8 +232,8 @@ const EN: ChatI18nText = {
         review: { label: 'Review Mode - code review', bodyClass: 'review-mode' },
         loc_translator: { label: 'Translation Mode - localisation file translation', bodyClass: 'build-mode' },
         loc_writer: { label: 'Writing Mode - localisation content creation', bodyClass: 'build-mode' },
-        orchestrator: { label: 'Multi-Agent Execution - DAG dispatch and parallel collaboration', bodyClass: 'orchestrator-mode' },
-        script: { label: 'Script Mode - dynamic PDXScript workflow pipeline', bodyClass: 'script-mode' },
+        orchestrator: { label: 'General Multi-Agent - DAG dispatch for repository engineering', bodyClass: 'orchestrator-mode' },
+        script: { label: 'Paradox Multi-Agent - dynamic CWT/LSP workflow', bodyClass: 'script-mode' },
     },
     artifact: {
         emptyTitle: 'No Artifacts',
@@ -499,8 +499,8 @@ const ZH_CN: ChatI18nText = {
         review: { label: '审查模式 - 代码审查', bodyClass: 'review-mode' },
         loc_translator: { label: '翻译模式 - 本地化文件翻译', bodyClass: 'build-mode' },
         loc_writer: { label: '写作模式 - 本地化内容创作', bodyClass: 'build-mode' },
-        orchestrator: { label: '多 Agent 执行 - DAG 分派与并行协作', bodyClass: 'orchestrator-mode' },
-        script: { label: '脚本模式 - 动态流水线并行处理 PDXScript', bodyClass: 'script-mode' },
+        orchestrator: { label: '通用多 Agent - 面向仓库工程的 DAG 协作', bodyClass: 'orchestrator-mode' },
+        script: { label: 'Paradox 多 Agent - CWT/LSP 动态工作流', bodyClass: 'script-mode' },
     },
     artifact: {
         emptyTitle: '暂无 Artifacts',

@@ -28,7 +28,7 @@ const DEFAULT_CONFIG: QualityGateConfig = {
 };
 
 const QUALITY_GATE_REVIEW_AGENT_ID = 'quality_gate_review';
-const QUALITY_GATE_REVIEW_TIMEOUT_MS = 5 * 60 * 1000;
+const QUALITY_GATE_REVIEW_IDLE_TIMEOUT_MS = 20 * 60 * 1000;
 const QUALITY_GATE_REVIEW_MAX_ITERATIONS = 15;
 const QUALITY_GATE_PREFLIGHT_CONCURRENCY = 4;
 
@@ -42,6 +42,11 @@ export const PDX_DIAGNOSTIC_EXTENSIONS = ['.txt', '.gui', '.gfx', '.asset', '.en
 export function isPdxDiagnosticFile(file: string): boolean {
     const normalized = file.toLowerCase();
     return PDX_DIAGNOSTIC_EXTENSIONS.some(ext => normalized.endsWith(ext));
+}
+
+function isParadoxTaskGraph(graph: TaskGraph | undefined): boolean {
+    if (!graph) return true;
+    return [...graph.nodes.values()].some(node => ['build', 'loc_writer', 'gui_expert'].includes(node.agentType));
 }
 
 function qualityGateAbortError(signal: AbortSignal): Error {
@@ -179,6 +184,24 @@ export class QualityGate {
         const semanticSection = semanticReport
             ? ['## Deterministic Semantic Report', semanticReport, '']
             : [];
+        const paradoxReview = isParadoxTaskGraph(reviewContext?.taskGraph);
+        const reviewChecklist = paradoxReview
+            ? [
+                step1,
+                '2. Check logic contradictions and unintended behavior.',
+                '3. Check cross-file reference consistency using dynamic CWT/LSP evidence.',
+                '4. Verify scope chains and current-game rule constraints.',
+                '5. Check file structure integrity and functional completeness.',
+                diagnosticTargets.length > 0 ? `6. LSP diagnostic target files include: ${diagnosticTargets.join(', ')}` : '6. No PDX LSP diagnostic target files were written.',
+                '7. Check every required Feature Manifest edge and acceptance criterion with concrete evidence.',
+            ]
+            : [
+                '1. Read the changed files and relevant callers/tests; do not apply Paradox-specific assumptions.',
+                '2. Check correctness, regressions, error handling, security boundaries, cancellation/disposal, and deterministic behavior.',
+                '3. Check public contracts and cross-file integration against the original request.',
+                '4. Check whether tests and verification are sufficient for the change.',
+                '5. Check every required acceptance criterion with concrete file/line or test evidence.',
+            ];
 
         return [
             '## Quality Gate Review Task',
@@ -191,13 +214,7 @@ export class QualityGate {
             soundSection,
             ...semanticSection,
             'Review Checklist:',
-            step1,
-            '2. Check for logic conflict issues (e.g., an event has `option` but uses `hide_window = yes`, which is a contradiction). Such conflicts MUST be reported and fixed.',
-            '3. Check cross-file reference consistency (Event IDs, Modifier names, Localization keys, and sprite/asset references).',
-            '4. Verify the correctness of the scope chain.',
-            '5. Check file structure integrity and functional completeness (Refer to Rule 3b).',
-            diagnosticTargets.length > 0 ? `6. LSP diagnostic target files include: ${diagnosticTargets.join(', ')}` : '6. No LSP diagnostic target files were written.',
-            '7. Check every required Feature Manifest edge and acceptance criterion. Each passed criterion must cite concrete file/line or deterministic evidence; otherwise mark it failed.',
+            ...reviewChecklist,
             '',
             'Output Format (You MUST output EXACTLY this JSON format in a markdown code block):',
             '```json',
@@ -225,6 +242,7 @@ export class QualityGate {
         tokenAccumulator?: TokenUsage,
     ): Promise<QualityGateResult> {
         const taskGraph = reviewContext?.taskGraph;
+        const paradoxReview = isParadoxTaskGraph(taskGraph);
         const workspaceRoot = reviewContext?.workspaceRoot ?? agentRunner.toolExecutor.workspaceRoot;
         const parentAbortSignal = options.abortSignal;
         const reviewController = new AbortController();
@@ -234,14 +252,19 @@ export class QualityGate {
         } else {
             parentAbortSignal?.addEventListener('abort', forwardParentAbort, { once: true });
         }
-        const reviewTimeout = setTimeout(() => {
+        const abortIdleReview = () => {
             const error = new Error(aiText(
-                'Quality gate timed out after 5 minutes.',
-                '质量门在 5 分钟后超时，已终止。',
+                'Quality gate stopped after 20 minutes without observable progress.',
+                '质量门连续 20 分钟没有可观察进展，已终止。',
             ));
             error.name = 'TimeoutError';
             reviewController.abort(error);
-        }, QUALITY_GATE_REVIEW_TIMEOUT_MS);
+        };
+        let reviewTimeout = setTimeout(abortIdleReview, QUALITY_GATE_REVIEW_IDLE_TIMEOUT_MS);
+        const refreshReviewIdleTimeout = () => {
+            clearTimeout(reviewTimeout);
+            reviewTimeout = setTimeout(abortIdleReview, QUALITY_GATE_REVIEW_IDLE_TIMEOUT_MS);
+        };
         const cleanupReviewBudget = () => {
             clearTimeout(reviewTimeout);
             parentAbortSignal?.removeEventListener('abort', forwardParentAbort);
@@ -251,12 +274,12 @@ export class QualityGate {
         let semantic: Awaited<ReturnType<SemanticVerifier['verify']>>;
         try {
             [finalEvidence, semantic] = await qualityGateAwait(Promise.all([
-                typeof agentRunner.toolExecutor.finalizePdxEvidence === 'function'
+                paradoxReview && typeof agentRunner.toolExecutor.finalizePdxEvidence === 'function'
                     ? agentRunner.toolExecutor.finalizePdxEvidence(writtenFiles, {
                         runnerOptions: { abortSignal: reviewController.signal },
                     })
                     : Promise.resolve({ passed: true, filesChecked: [], conflictFiles: [], pendingFiles: [], coveragePendingFiles: [], report: '' }),
-                taskGraph
+                paradoxReview && taskGraph
                     ? new SemanticVerifier().verify(workspaceRoot, writtenFiles, taskGraph, agentRunner.toolExecutor)
                     : Promise.resolve({
                         passed: true,
@@ -272,7 +295,7 @@ export class QualityGate {
             throw error;
         }
         const expectedChanges = taskGraph?.metadata.featureManifest?.expectsFileChanges === true
-            || [...(taskGraph?.nodes.values() ?? [])].some(node => ['build', 'loc_writer', 'gui_expert'].includes(node.agentType)
+            || [...(taskGraph?.nodes.values() ?? [])].some(node => ['build', 'loc_writer', 'gui_expert', 'utility'].includes(node.agentType)
                 && ((node.plannedFiles?.length ?? 0) > 0 || (node.produces?.length ?? 0) > 0));
         if (writtenFiles.length === 0) {
             const acceptanceFailures = [...semantic.acceptanceFailures];
@@ -297,18 +320,20 @@ export class QualityGate {
         const freshDiagnosticFiles = new Set<string>();
         try {
             const diagResults: string[] = [];
-            const diagnosticTargets = [...new Set(writtenFiles.filter(isPdxDiagnosticFile))];
+            const diagnosticTargets = paradoxReview ? [...new Set(writtenFiles.filter(isPdxDiagnosticFile))] : [];
             const results = await mapQualityGateBounded(
                 diagnosticTargets,
                 reviewController.signal,
-                async file => ({
-                    file,
-                    result: await agentRunner.toolExecutor.execute(
+                async file => {
+                    refreshReviewIdleTimeout();
+                    const result = await agentRunner.toolExecutor.execute(
                         'get_diagnostics',
                         { file, severity: 'error' },
                         { runnerOptions: { abortSignal: reviewController.signal } },
-                    ),
-                }),
+                    );
+                    refreshReviewIdleTimeout();
+                    return { file, result };
+                },
             );
             for (const { file, result: res } of results) {
                 const resolvedFile = path.isAbsolute(file) ? path.resolve(file) : path.resolve(workspaceRoot, file);
@@ -359,10 +384,12 @@ export class QualityGate {
         
         // Run the hidden post-dispatch reviewer as a real bounded child agent.
         // Previously it inherited the top-level 10,000-iteration allowance, so
-        // Script Mode could appear stuck after every visible task had completed.
+        // Paradox Multi-Agent could appear stuck after every visible task had completed.
         const forwardStep = (step: AgentStep) => {
+            refreshReviewIdleTimeout();
             options.onStep?.({ ...step, agentId: QUALITY_GATE_REVIEW_AGENT_ID });
         };
+        const reviewerMode = paradoxReview ? 'script_reviewer' : 'review';
         let abortListener: (() => void) | undefined;
         const abortPromise = new Promise<never>((_, reject) => {
             abortListener = () => {
@@ -390,7 +417,7 @@ export class QualityGate {
             forwardStep({
                 type: 'subtask_start',
                 content: aiText('Starting bounded quality gate review', '启动有界质量门审查'),
-                subagentType: 'script_reviewer',
+                subagentType: reviewerMode,
                 timestamp: Date.now(),
             });
             const runPromise = agentRunner.run(
@@ -399,7 +426,7 @@ export class QualityGate {
                 [], // conversationHistory
                 {
                     ...options,
-                    mode: 'script_reviewer',
+                    mode: reviewerMode,
                     useSlimPrompt: true,
                     maxIterations: QUALITY_GATE_REVIEW_MAX_ITERATIONS,
                     skipValidation: true,
@@ -545,7 +572,7 @@ export class QualityGate {
 * Generate repair prompt. 
 * Based on Reviewer's review report, build repair instructions. 
 */
-    buildFixPrompt(reviewReport: string, writtenFiles: string[]): string {
+    buildFixPrompt(reviewReport: string, writtenFiles: string[], paradoxReview = true): string {
         const hasSpriteIssues = /Expected value of type sprite|type sprite|spriteType|picture|GFX_/i.test(reviewReport);
         const hasSoundIssues = /show_sound|Expected value of type sound|type sound|sound\s*=|music|\.asset/i.test(reviewReport);
         return [
@@ -561,11 +588,19 @@ export class QualityGate {
             ...writtenFiles.map(f => `- ${f}`),
             '',
             'Fix Requirements:',
-            '1. Only fix the specific issues listed in the review report. You MUST fix ALL LSP red errors and logic conflicts (e.g., `hide_window = yes` used with `option`).',
-            '2. Do not delete or simplify existing logic (Follow Rule 3b).',
-            '3. For sprite-type diagnostics, replace invalid values only with candidates returned by `find_sprite_candidates` or another verified `.gfx` definition; never invent a `GFX_*` name.',
-            '4. For sound diagnostics, replace invalid values only with candidates returned by `find_sound_candidates` or another verified `.asset` definition; never invent a sound asset name.',
-            '5. After fixing, call `get_diagnostics` for each modified file to verify that the errors are resolved.',
+            ...(paradoxReview
+                ? [
+                    '1. Only fix the specific issues listed in the review report. Fix all real LSP errors and logic conflicts.',
+                    '2. Do not delete or simplify required existing logic.',
+                    '3. For sprite issues, use dynamic indexed candidates; never invent a `GFX_*` name.',
+                    '4. For sound issues, use dynamic indexed candidates; never invent a sound asset name.',
+                    '5. After fixing, obtain fresh diagnostics for each modified PDX file.',
+                ]
+                : [
+                    '1. Fix only the specific issues listed in the review report and preserve unrelated behavior.',
+                    '2. Follow repository conventions and public contracts; add or update focused regression tests where appropriate.',
+                    '3. Run the narrowest relevant build, typecheck, lint, or tests and repair failures caused by the change.',
+                ]),
         ].join('\n');
     }
 

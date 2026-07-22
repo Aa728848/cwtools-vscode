@@ -157,13 +157,24 @@ ${stylesheetLinks}
     </div>
     <div id="modeMenu" class="composer-menu mode-menu" aria-hidden="true">
         <div class="composer-menu-section">
-            <button class="composer-menu-item" data-mode="build">${svgIconNoMargin('code')}<span>Build</span></button>
-            <button class="composer-menu-item" data-mode="plan">${svgIconNoMargin('clipboard')}<span>Plan</span></button>
-            <button class="composer-menu-item" data-mode="explore">${svgIconNoMargin('telescope')}<span>Explore</span></button>
-            <button class="composer-menu-item" data-mode="utility">${svgIconNoMargin('zap')}<span>Utility</span></button>
-            <button class="composer-menu-item" data-mode="review">${svgIconNoMargin('shield')}<span>Review</span></button>
-            <button class="composer-menu-item" data-mode="orchestrator">${svgIconNoMargin('gitBranch')}<span>Orchestrator</span></button>
-            <button class="composer-menu-item" data-mode="script">${svgIconNoMargin('code')}<span>Script</span></button>
+            <div class="model-menu-title">${t('Capability domain', '能力领域')}</div>
+            <button class="composer-menu-item" data-profile-domain="auto">${svgIconNoMargin('sparkles')}<span>${t('Auto detect', '自动识别')}</span></button>
+            <button class="composer-menu-item" data-profile-domain="paradox">${svgIconNoMargin('code')}<span>${t('Paradox / CWTools', 'Paradox / CWTools')}</span></button>
+            <button class="composer-menu-item" data-profile-domain="general">${svgIconNoMargin('zap')}<span>${t('General coding', '通用编码')}</span></button>
+        </div>
+        <div class="composer-menu-section">
+            <div class="model-menu-title">${t('Task intent', '任务意图')}</div>
+            <button class="composer-menu-item" data-profile-intent="auto">${svgIconNoMargin('sparkles')}<span>${t('Auto intent', '自动判断')}</span></button>
+            <button class="composer-menu-item" data-profile-intent="execute">${svgIconNoMargin('code')}<span>${t('Execute changes', '执行修改')}</span></button>
+            <button class="composer-menu-item" data-profile-intent="plan">${svgIconNoMargin('clipboard')}<span>${t('Plan only', '仅规划')}</span></button>
+            <button class="composer-menu-item" data-profile-intent="explore">${svgIconNoMargin('telescope')}<span>${t('Explore / explain', '探索 / 解释')}</span></button>
+            <button class="composer-menu-item" data-profile-intent="review">${svgIconNoMargin('shield')}<span>${t('Review only', '仅审查')}</span></button>
+        </div>
+        <div class="composer-menu-section">
+            <div class="model-menu-title">${t('Execution strategy (advanced)', '执行策略（高级）')}</div>
+            <button class="composer-menu-item" data-profile-strategy="auto">${svgIconNoMargin('sparkles')}<span>${t('Auto strategy', '自动选择')}</span></button>
+            <button class="composer-menu-item" data-profile-strategy="single">${svgIconNoMargin('code')}<span>${t('Single Agent', '单 Agent')}</span></button>
+            <button class="composer-menu-item" data-profile-strategy="multi">${svgIconNoMargin('gitBranch')}<span>${t('Multi-Agent', '多 Agent')}</span></button>
         </div>
     </div>
     <div id="modelMenu" class="model-menu" aria-hidden="true">
@@ -207,19 +218,19 @@ ${stylesheetLinks}
                     <span id="quickWriteModeLabel">${t('Auto write', '自动写入')}</span>
                     <span class="composer-chevron" aria-hidden="true">v</span>
                 </button>
-                <button class="composer-model-trigger composer-mode-trigger" id="quickModeTrigger" title="${t('Switch mode', '切换模式')}" aria-haspopup="listbox" aria-expanded="false">
-                    <span id="quickModeLabel">${t('Build', '构建')}</span>
+                <button class="composer-model-trigger composer-mode-trigger" id="quickModeTrigger" title="${t('Configure Agent profile', '配置 Agent Profile')}" aria-haspopup="listbox" aria-expanded="false">
+                    <span id="quickModeLabel">${t('Auto', '自动')}</span>
                     <span class="composer-chevron" aria-hidden="true">v</span>
                 </button>
                 <div class="composer-chip-row" id="composerChipRow"></div>
-                <select class="hidden-composer-select" id="modeSel" title="${t('Switch mode', '切换模式')}" aria-hidden="true" tabindex="-1">
+                <select class="hidden-composer-select" id="modeSel" title="${t('Legacy mode compatibility', '旧模式兼容')}" aria-hidden="true" tabindex="-1">
                     <option value="build">${t('Build mode', '构建模式')}</option>
                     <option value="plan">${t('Plan mode', '计划模式')}</option>
                     <option value="explore">${t('Explore mode', '分析模式')}</option>
                     <option value="utility">${t('Utility mode', '泛用模式')}</option>
                     <option value="review">${t('Review mode', '审查模式')}</option>
-                    <option value="orchestrator">${t('Orchestrator mode', '协作模式')}</option>
-                    <option value="script">${t('Script mode', '脚本模式')}</option>
+                    <option value="orchestrator">${t('General Multi-Agent', '通用多 Agent')}</option>
+                    <option value="script">${t('Paradox Multi-Agent', 'Paradox 多 Agent')}</option>
                 </select>
                 <select class="hidden-composer-select" id="quickModelSelect" title="${t('Current model', '当前模型')}" aria-hidden="true" tabindex="-1"></select>
                 <button class="hidden-composer-action" id="imgPickBtn" title="${t('Upload image', '上传图片')}" aria-hidden="true" tabindex="-1"></button>
@@ -504,7 +515,7 @@ ${stylesheetLinks}
                     <div id="installedSkillsList" style="margin-top: 10px; display: flex; flex-direction: column; gap: 6px;"></div>
                 </div>
                 <div class="settings-group" style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px; margin-top: 10px;">
-                    <label class="settings-label">${svgIcon('bot')} ${t('Orchestrator mode - sub-agent model settings', '协调模式 — 子 Agent 模型配置')}</label>
+                    <label class="settings-label">${svgIcon('bot')} ${t('Multi-Agent role model settings', '多 Agent 角色模型配置')}</label>
                     <div class="settings-hint" style="margin-bottom:8px;">${t('Set a provider/model per sub-agent role. Leave as "Inherit main settings" to use the main model configured above.', '为每个子 Agent 角色单独指定供应商/模型。留为"继承主设置"则使用上方配置的主模型。')}</div>
                     <div id="agentModelRows" style="display:flex;flex-direction:column;gap:8px;">
                         ${[

@@ -6,14 +6,16 @@
 
 import { TOOL_REGISTRY, WRITE_TOOLS, SUB_AGENT_EXCLUDES } from './registry';
 import type { AgentMode, AgentToolName } from '../types';
+import type { AgentRuntimeDomain } from '../types';
+import { defaultDomainForMode } from '../agentProfile';
 
 /**
  * Check if a tool is allowed under the current Agent operation mode.
  */
-export function isToolAllowedForMode(toolName: string, mode: AgentMode): boolean {
+export function isToolAllowedForMode(toolName: string, mode: AgentMode, domain: AgentRuntimeDomain = defaultDomainForMode(mode)): boolean {
     const entry = TOOL_REGISTRY.get(toolName as AgentToolName);
     if (!entry) return false;
-    return entry.allowedModes.has(mode);
+    return entry.allowedModes.has(mode) && !(domain === 'general' && entry.domain === 'paradox');
 }
 
 /**
@@ -41,6 +43,7 @@ export function validateToolAccess(
     toolName: string,
     options: {
         mode: AgentMode;
+        domain?: AgentRuntimeDomain;
         isSubAgent?: boolean;
     }
 ): { allowed: boolean; reason?: string } {
@@ -52,6 +55,14 @@ export function validateToolAccess(
     }
     if (!entry) {
         return { allowed: false, reason: `Unknown tool: ${toolName}` };
+    }
+
+    const domain = options.domain ?? defaultDomainForMode(options.mode);
+    if (domain === 'general' && entry.domain === 'paradox') {
+        return {
+            allowed: false,
+            reason: `Tool '${toolName}' is a Paradox-only capability and is unavailable in General Coding.`,
+        };
     }
 
     // 1. Mode check
@@ -66,7 +77,10 @@ export function validateToolAccess(
     }
 
     // 2. Sub-agent sandbox check
-    if (options.isSubAgent && !entry.allowSubAgent) {
+    const generalUtilityCommand = domain === 'general'
+        && options.mode === 'utility'
+        && entry.name === 'run_command';
+    if (options.isSubAgent && !entry.allowSubAgent && !generalUtilityCommand) {
         return {
             allowed: false,
             reason: `Tool '${toolName}' is disabled in sub-agent sandbox context to enforce safety bounds.`

@@ -7,6 +7,7 @@
 
 import { expect } from 'chai';
 import * as path from 'path';
+import sinon from 'sinon';
 
 const vscodeStub = {
     workspace: {
@@ -557,6 +558,24 @@ describe('dispatch_agents tool wiring', () => {
         expect(result.error).to.include('current mode limit of 4');
     });
 
+    it('separates general and Paradox writer roles at dispatch time', async () => {
+        const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
+        const executor = new AgentToolExecutor({
+            onNotification: () => undefined,
+            sendNotification: () => undefined,
+        } as any, process.cwd());
+
+        const result = await executor.execute('dispatch_agents', {
+            tasks: [{ id: 'wrong_writer', agentType: 'build', prompt: 'edit TypeScript' }],
+        }, {
+            runnerOptions: { mode: 'orchestrator', abortSignal: new AbortController().signal },
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include("Agent type 'build' is not allowed in General Multi-Agent mode");
+        expect(result.error).to.include('utility');
+    });
+
     it('allows script mode to dispatch up to eight tasks but rejects nine', async () => {
         const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
         const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
@@ -707,6 +726,8 @@ describe('dispatch_agents tool wiring', () => {
         });
         TaskGraphEngine.addNode(graph, 'B', 'build', 'B');
         (executor as any)._lastOrchestratorGraph = graph;
+        (executor as any)._lastOrchestratorDomain = 'paradox';
+        (executor as any)._lastOrchestratorTopicId = 'merge-topic';
         (executor as any)._lastOrchestratorResult = {
             success: true,
             summary: 'ok',
@@ -719,13 +740,21 @@ describe('dispatch_agents tool wiring', () => {
             cancelledNodes: [],
         };
 
-        const merged = await executor.execute('merge_results', { nodeIds: ['A'], strategy: 'structured' }) as any;
+        const merged = await executor.execute('merge_results', { nodeIds: ['A'], strategy: 'structured' }, {
+            runnerOptions: { mode: 'script', domain: 'paradox', topicId: 'merge-topic' },
+        } as any) as any;
 
         expect(merged.success).to.equal(true);
         expect(merged.selectedNodeIds).to.deep.equal(['A']);
         expect(merged.writtenFiles).to.deep.equal(['events/a.txt']);
         expect(merged.integration.entityContracts[0].produces[0].id).to.equal('foo.1');
         expect(merged.agentOutputs.map((entry: any) => entry.id)).to.deep.equal(['A']);
+
+        const crossDomain = await executor.execute('merge_results', { nodeIds: ['A'], strategy: 'structured' }, {
+            runnerOptions: { mode: 'orchestrator', domain: 'general', topicId: 'merge-topic' },
+        } as any) as any;
+        expect(crossDomain.success).to.equal(false);
+        expect(crossDomain.message).to.include('dispatch_agents first');
     });
 });
 
@@ -1072,6 +1101,93 @@ describe('Orchestrator runtime safety', () => {
         expect(result.error).to.include('manual abort');
     });
 
+    it('executeSubAgent: allows active work to continue beyond twenty minutes', async () => {
+        const clock = sinon.useFakeTimers({ now: 0 });
+        try {
+            let childOptions: any;
+            let finishRun!: (result: any) => void;
+            const runner = {
+                toolExecutor: { workspaceRoot: process.cwd() },
+                run: (_prompt: string, _context: any, _history: any[], options: any) => {
+                    childOptions = options;
+                    return new Promise(resolve => { finishRun = resolve; });
+                },
+            };
+            const orchestrator = new Orchestrator(runner as any);
+            const promise = (orchestrator as any).executeSubAgent(
+                {
+                    id: 'long-active', agentType: 'explore', prompt: 'scan', dependencies: [],
+                    priority: 'normal', status: 'pending', retryCount: 0, maxRetries: 0,
+                },
+                new Blackboard(),
+                { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                new AbortController().signal,
+                () => undefined,
+                { topicId: 'topic-long' },
+            );
+
+            await Promise.resolve();
+            for (let minute = 1; minute <= 21; minute++) {
+                await clock.tickAsync(60_000);
+                childOptions.onStep({
+                    type: 'thinking',
+                    content: `active minute ${minute}`,
+                    timestamp: Date.now(),
+                });
+            }
+            finishRun({
+                code: '', explanation: 'done', validationErrors: [], isValid: true,
+                retryCount: 0, steps: [],
+                tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+            });
+            await clock.tickAsync(0);
+
+            const result = await promise;
+            expect(result.success).to.equal(true);
+            expect(childOptions.renewableIterationLimit).to.equal(true);
+        } finally {
+            clock.restore();
+        }
+    });
+
+    it('executeSubAgent: aborts after twenty minutes without activity', async () => {
+        const clock = sinon.useFakeTimers({ now: 0 });
+        try {
+            const runner = {
+                toolExecutor: { workspaceRoot: process.cwd() },
+                run: (_prompt: string, _context: any, _history: any[], options: any) => {
+                    const heartbeatId = setInterval(() => options.onStep({
+                        type: 'orchestrator_progress',
+                        content: 'Waiting for model response...',
+                        timestamp: Date.now(),
+                    }), 30_000);
+                    options.abortSignal.addEventListener('abort', () => clearInterval(heartbeatId), { once: true });
+                    return new Promise(() => undefined);
+                },
+            };
+            const orchestrator = new Orchestrator(runner as any);
+            const promise = (orchestrator as any).executeSubAgent(
+                {
+                    id: 'stalled', agentType: 'explore', prompt: 'scan', dependencies: [],
+                    priority: 'normal', status: 'pending', retryCount: 0, maxRetries: 0,
+                },
+                new Blackboard(),
+                { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                new AbortController().signal,
+                () => undefined,
+                { topicId: 'topic-stalled' },
+            );
+
+            await clock.tickAsync(20 * 60_000);
+            const result = await promise;
+            expect(result.success).to.equal(false);
+            expect(result.error).to.include('idle timeout exceeded');
+            expect(result.error).to.include('20m');
+        } finally {
+            clock.restore();
+        }
+    });
+
     it('executeSubAgent: records successful write targets when tool results omit filePath', async () => {
         const workspaceRoot = process.cwd();
         const runner = {
@@ -1131,6 +1247,52 @@ describe('Orchestrator runtime safety', () => {
         ]);
     });
 
+    it('executeSubAgent: exposes run_command to General Multi-Agent utility writers', async () => {
+        const workspaceRoot = process.cwd();
+        let capturedOptions: any;
+        const runner = {
+            toolExecutor: { workspaceRoot },
+            run: async (_prompt: string, _context: any, _history: any[], options: any) => {
+                capturedOptions = options;
+                return {
+                    code: '',
+                    explanation: 'done',
+                    validationErrors: [],
+                    isValid: true,
+                    retryCount: 0,
+                    steps: [],
+                    tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                };
+            },
+        };
+        const orchestrator = new Orchestrator(runner as any);
+        const node = {
+            id: 'utility_writer',
+            agentType: 'utility',
+            prompt: 'update code and run focused tests',
+            plannedFiles: ['client/example.ts'],
+            dependencies: [],
+            priority: 'normal',
+            status: 'pending',
+            retryCount: 0,
+            maxRetries: 0,
+        };
+
+        const result = await (orchestrator as any).executeSubAgent(
+            node,
+            new Blackboard(),
+            { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+            new AbortController().signal,
+            () => undefined,
+            { topicId: 'topic-1', domain: 'general' },
+        );
+
+        expect(result.success).to.equal(true);
+        expect(capturedOptions.domain).to.equal('general');
+        expect(capturedOptions.excludeTools).to.not.include('run_command');
+        expect(capturedOptions.excludeTools).to.include('git_ops');
+    });
+
     it('executeSubAgent: removes generic write tools for pure localisation yml tasks', async () => {
         const workspaceRoot = process.cwd();
         let capturedOptions: any;
@@ -1168,10 +1330,11 @@ describe('Orchestrator runtime safety', () => {
             { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
             new AbortController().signal,
             () => undefined,
-            { topicId: 'topic-1' },
+            { topicId: 'topic-1', domain: 'paradox' },
         );
 
         expect(result.success).to.equal(true);
+        expect(capturedOptions.domain).to.equal('paradox');
         expect(capturedOptions.excludeTools).to.include.members([
             'write_file',
             'edit_file',
@@ -1276,6 +1439,42 @@ describe('Orchestrator quality propagation', () => {
         expect(result.success).to.equal(false);
         expect(result.qualityGate?.operationalFailure).to.equal(true);
         expect(counts()).to.deep.equal({ reviewCalls: 0, fixCalls: 0 });
+    });
+
+    it('uses utility repairs and skips Paradox localisation sweep for general code', async () => {
+        const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
+        const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
+        const orchestrator = new Orchestrator({ toolExecutor: { workspaceRoot: process.cwd() } } as any);
+        (orchestrator as any).executor.executeGraph = async () => ({
+            success: true,
+            summary: 'utility complete',
+            agentResults: new Map([['utility', {
+                nodeId: 'utility', success: true, output: 'done', writtenFiles: ['package.json'],
+                tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 }, stepCount: 1,
+            }]]),
+            totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+            failedNodes: [], cancelledNodes: [],
+        });
+        const repairRoles: string[] = [];
+        (orchestrator as any).executeSubAgent = async (node: any) => {
+            repairRoles.push(node.agentType);
+            return {
+                nodeId: node.id, success: true, output: '', writtenFiles: [],
+                tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 }, stepCount: 1,
+            };
+        };
+        let reviews = 0;
+        (orchestrator as any).qualityGate.reviewOutput = async () => gateResult(++reviews > 1);
+        (orchestrator as any).qualityGate.getConfig = () => ({ autoFix: true, maxFixCycles: 1 });
+        (orchestrator as any).qualityGate.buildFixPrompt = () => 'fix general code';
+        const graph = TaskGraphEngine.createGraph('general code');
+        const utility = TaskGraphEngine.addNode(graph, 'utility', 'utility', 'edit package', { plannedFiles: ['package.json'] });
+        utility.status = 'done';
+
+        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+
+        expect(result.success).to.equal(true);
+        expect(repairRoles).to.deep.equal(['utility']);
     });
 
     it('does not launch a code repair agent when only final validation is pending', async () => {
@@ -1436,7 +1635,7 @@ describe('QualityGate', () => {
 
         expect(result.passed).to.equal(false);
         expect(result.acceptanceFailures[0]).to.include('functional_chain');
-        expect(reviewerOptions.mode).to.equal('script_reviewer');
+        expect(reviewerOptions.mode).to.equal('review');
         expect(reviewerOptions.useSlimPrompt).to.equal(true);
         expect(reviewerOptions.maxIterations).to.equal(15);
         expect(reviewerOptions.skipValidation).to.equal(true);

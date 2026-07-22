@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as pathModule from 'path';
 import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from '../workspacePaths';
-import type { AgentResumeState, ChatMessage, AgentMode } from '../types';
+import type { AgentResumeState, ChatMessage, AgentMode, AgentRuntimeDomain } from '../types';
+import { defaultDomainForMode } from '../agentProfile';
 import type { AgentToolExecutor } from '../agentTools';
 import { isPathInsideOrEqual } from '../../pathScope';
 import { ErrorReporter } from '../errorReporter';
@@ -136,7 +137,8 @@ export async function saveResumeState(
     messages: ChatMessage[],
     toolExecutor: AgentToolExecutor,
     runId?: string,
-    pendingToolCalls?: any[]
+    pendingToolCalls?: any[],
+    domain: AgentRuntimeDomain = defaultDomainForMode(mode),
 ): Promise<void> {
     if (getHistoryPolicy().persistence !== 'full') return;
     try {
@@ -159,6 +161,7 @@ export async function saveResumeState(
             version: 3,
             timestamp: Date.now(),
             mode,
+            domain,
             messages: compactedMessages,
             todos: toolExecutor.getTodos(),
             topicId,
@@ -230,6 +233,7 @@ export async function loadResumeState(topicId: string): Promise<AgentResumeState
             }
         }
         raw.messages = prepareMessagesForResume(raw.messages);
+        raw.domain = raw.domain ?? defaultDomainForMode(raw.mode);
         raw.recoveredFromBackup = loaded.recoveredFromBackup;
         // A process restart ends the approval session. Only explicitly durable
         // rules may be restored; legacy V2 session-only approvals are ignored.

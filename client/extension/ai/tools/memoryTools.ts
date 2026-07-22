@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getPrivateTopicStorageDir } from '../workspacePaths';
 import { aiText } from '../messages';
+import { defaultDomainForMode } from '../agentProfile';
 
 // ─── Context type ────────────────────────────────────────────────────────────
 
@@ -17,6 +18,13 @@ export interface MemoryToolContext {
     readonly workspaceRoot: string;
     readonly blackboard: import('../orchestrator/blackboard').Blackboard;
     readonly parentRunnerOptions?: any;
+}
+
+export function blackboardDomainPrefix(context?: import('../types').AgentToolContext): string {
+    const mode = context?.runnerOptions?.mode ?? 'build';
+    const domain = context?.runnerOptions?.domain ?? defaultDomainForMode(mode);
+    const topicId = encodeURIComponent(context?.runnerOptions?.topicId ?? 'session');
+    return `domain:${domain}:topic:${topicId}:`;
 }
 
 // ─── Handler class ───────────────────────────────────────────────────────────
@@ -110,8 +118,15 @@ export class MemoryToolHandler {
     }
 
     /** query_blackboard tool execution */
-    async queryBlackboard(args: { key?: string; prefix?: string; type?: string }): Promise<unknown> {
+    async queryBlackboard(args: { key?: string; prefix?: string; type?: string }, context?: import('../types').AgentToolContext): Promise<unknown> {
         const { key: qbKey, prefix, type: qbType } = args;
+        const domainPrefix = blackboardDomainPrefix(context);
+        const domain = context?.runnerOptions?.domain
+            ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
+        const exposeEntry = <T extends { key: string }>(entry: T): T & { key: string } => ({
+            ...entry,
+            key: entry.key.startsWith(domainPrefix) ? entry.key.slice(domainPrefix.length) : entry.key,
+        });
         const resolveFileRef = async (entry: any) => {
             if (entry && typeof entry.value === 'string' && entry.value.startsWith('file://')) {
                 const filePath = entry.value.slice(7);
@@ -120,23 +135,33 @@ export class MemoryToolHandler {
                     const truncated = content.length > 3000 
                         ? content.substring(0, 3000) + `\n...[truncated, full ${content.length} chars at ${filePath}]`
                         : content;
-                    return { ...entry, value: truncated, _sourceFile: filePath, _fullLength: content.length };
+                    return exposeEntry({ ...entry, value: truncated, _sourceFile: filePath, _fullLength: content.length });
                 } catch {
-                    return entry;
+                    return exposeEntry(entry);
                 }
             }
-            return entry;
+            return exposeEntry(entry);
         };
 
         if (qbKey) {
-            const entry = this.ctx.blackboard.read(qbKey);
+            const entry = this.ctx.blackboard.read(`${domainPrefix}${qbKey}`)
+                ?? (domain === 'paradox' ? this.ctx.blackboard.read(qbKey) : undefined);
             return entry ? { found: true, entry: await resolveFileRef(entry) } : { found: false };
         } else if (prefix) {
-            const entries = this.ctx.blackboard.queryByPrefix(prefix);
+            const entries = this.ctx.blackboard.queryByPrefix(`${domainPrefix}${prefix}`);
+            if (domain === 'paradox') {
+                entries.push(...this.ctx.blackboard.queryByPrefix(prefix)
+                    .filter(entry => !entry.key.startsWith('domain:')));
+            }
             const resolved = await Promise.all(entries.slice(0, 50).map(resolveFileRef));
             return { found: resolved.length > 0, count: entries.length, entries: resolved };
         } else if (qbType) {
-            const entries = this.ctx.blackboard.queryByType(qbType as any);
+            const entries = this.ctx.blackboard.queryByPrefix(domainPrefix)
+                .filter(entry => entry.type === qbType);
+            if (domain === 'paradox') {
+                entries.push(...this.ctx.blackboard.queryByType(qbType as any)
+                    .filter(entry => !entry.key.startsWith('domain:')));
+            }
             const resolved = await Promise.all(entries.slice(0, 50).map(resolveFileRef));
             return { found: resolved.length > 0, count: entries.length, entries: resolved };
         } else {

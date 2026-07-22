@@ -156,6 +156,7 @@ describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
             const resumePath = path.join(tmpRoot, '.cwtools', topicId, 'resume_state.json');
             const saved = JSON.parse(fs.readFileSync(resumePath, 'utf-8'));
             expect(saved.version).to.equal(3);
+            expect(saved.domain).to.equal('paradox');
             expect(saved.compacted).to.equal(true);
             expect(saved.summaryRef).to.match(/summary\.md$/);
             expect(saved.fullTranscriptRef).to.match(/resume_transcript\.json$/);
@@ -304,10 +305,36 @@ describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
 
             const loaded = await loadResumeState(topicId);
             expect(loaded?.version).to.equal(2);
+            expect(loaded?.domain).to.equal('paradox');
             expect(loaded?.messages[0]?.content).to.equal('legacy context');
             expect(store.getRules()).to.deep.equal([]);
         } finally {
             store.clear();
+            fs.rmSync(tmpRoot, { recursive: true, force: true });
+            vscodeStub.workspace.workspaceFolders = [];
+        }
+    });
+
+    it('persists an explicit General Coding domain for shared read-only modes', async () => {
+        const { saveResumeState, loadResumeState } = loadCheckpointModule();
+        const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-resume-domain-'));
+        vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: tmpRoot } }];
+        try {
+            const topicId = 'topic_general_plan';
+            await saveResumeState(
+                topicId,
+                'plan',
+                [{ role: 'user', content: 'plan a TypeScript refactor' }],
+                { getTodos: () => [] } as any,
+                undefined,
+                undefined,
+                'general',
+            );
+
+            const loaded = await loadResumeState(topicId);
+            expect(loaded?.mode).to.equal('plan');
+            expect(loaded?.domain).to.equal('general');
+        } finally {
             fs.rmSync(tmpRoot, { recursive: true, force: true });
             vscodeStub.workspace.workspaceFolders = [];
         }

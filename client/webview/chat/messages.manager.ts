@@ -1,5 +1,11 @@
 import type { ChatHistoryMessageView, TopicListItem, TopicStats } from './messages.shared';
 
+export interface ManagerAgentProfileView {
+    domain: 'auto' | 'paradox' | 'general';
+    intent: 'auto' | 'execute' | 'plan' | 'explore' | 'review';
+    strategy: 'auto' | 'single' | 'multi';
+}
+
 export type ManagerWebviewMessage =
     | { type: 'ready' }
     | { type: 'requestManagerSnapshot' }
@@ -20,6 +26,8 @@ export interface ManagerSnapshotMessage {
     messages: ChatHistoryMessageView[];
     messageCount?: number;
     mode: string;
+    agentProfile: ManagerAgentProfileView;
+    resolvedAgentProfile?: ManagerAgentProfileView & { mode: string; reason?: string };
     workflowId?: string | null;
     isGenerating: boolean;
     liveStepCount: number;

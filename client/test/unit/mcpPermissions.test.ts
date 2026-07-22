@@ -20,20 +20,33 @@ describe('mcp tool name parsing', () => {
 
 describe('dynamic MCP access validation', () => {
     it('governs dynamic MCP names by the mcp_call registry policy', () => {
-        const generalAccess = validateToolAccess('mcp_filesystem_read_file', { mode: 'general' });
-        expect(generalAccess.allowed).to.equal(true);
+        const generalAccess = validateToolAccess('mcp_filesystem_read_file', {
+            mode: 'utility',
+            domain: 'general',
+        });
+        expect(generalAccess.allowed).to.equal(false);
+        expect(generalAccess.reason).to.include('Paradox-only capability');
 
-        const buildAccess = validateToolAccess('mcp_filesystem_read_file', { mode: 'build' });
-        expect(buildAccess.allowed).to.equal(false);
-        expect(buildAccess.reason).to.include('mcp_call');
-        expect(buildAccess.reason).to.include('Allowed modes:');
+        const paradoxAccess = validateToolAccess('mcp_filesystem_read_file', {
+            mode: 'build',
+            domain: 'paradox',
+        });
+        expect(paradoxAccess.allowed).to.equal(true);
     });
 
-    it('denies dynamic MCP names in non-writing modes', () => {
-        for (const mode of ['plan', 'explore', 'review', 'orchestrator', 'script'] as const) {
-            const access = validateToolAccess('mcp_filesystem_read_file', { mode });
-            expect(access.allowed, `mode ${mode}`).to.equal(false);
+    it('allows Paradox top-level modes and rejects modes outside the MCP surface', () => {
+        for (const mode of ['build', 'plan', 'explore', 'review', 'orchestrator', 'script'] as const) {
+            const access = validateToolAccess('mcp_filesystem_read_file', { mode, domain: 'paradox' });
+            expect(access.allowed, `mode ${mode}`).to.equal(true);
         }
+
+        const specialist = validateToolAccess('mcp_filesystem_read_file', {
+            mode: 'loc_writer',
+            domain: 'paradox',
+        });
+        expect(specialist.allowed).to.equal(false);
+        expect(specialist.reason).to.include('mcp_call');
+        expect(specialist.reason).to.include('Allowed modes:');
     });
 
     it('still reports truly unknown tools as unknown', () => {

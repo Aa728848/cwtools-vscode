@@ -30,6 +30,14 @@ export interface RunBudgetProgressState {
     blockingValidationIssues: number;
 }
 
+export interface SubAgentActivityBudgetState {
+    isSubAgent: boolean;
+    iteration: number;
+    lastExtendedIteration: number;
+    consecutiveErrors: number;
+    blockingValidationIssues: number;
+}
+
 export const DEFAULT_HARD_BUDGET_MULTIPLIER = 8;
 export const DEFAULT_GOAL_HARD_BUDGET_MULTIPLIER = 32;
 const MIN_HARD_BUDGET_MULTIPLIER = 2;
@@ -82,6 +90,14 @@ export function selectHardBudgetMultiplier(input: {
  */
 export function shouldAutoExtendRunBudget(state: RunBudgetProgressState): boolean {
     return state.progressRevision > state.lastExtendedProgressRevision
+        && state.consecutiveErrors === 0
+        && state.blockingValidationIssues === 0;
+}
+
+/** Read-only and analysis children may be healthy without producing durable writes. */
+export function shouldAutoExtendSubAgentBudget(state: SubAgentActivityBudgetState): boolean {
+    return state.isSubAgent
+        && state.iteration > state.lastExtendedIteration
         && state.consecutiveErrors === 0
         && state.blockingValidationIssues === 0;
 }

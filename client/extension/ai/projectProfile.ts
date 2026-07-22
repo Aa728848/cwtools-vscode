@@ -351,13 +351,13 @@ function buildPromptCards(profile: Omit<ProjectProfile, 'promptCards' | 'efficie
             '- Check interface, gfx, and sound directories from the profile before scanning everything.',
         ].join('\n'),
         orchestrator: [
-            'Orchestrator mode project card:',
+            'General Multi-Agent project card:',
             '- Dispatch sub-agents with plannedFiles when known.',
-            '- Put shared IDs, namespaces, and decisions on the blackboard.',
-            '- Keep sub-agents on structured read/edit tools; command/git work stays with the main agent.',
+            '- Put shared interfaces, file ownership, and decisions on the blackboard.',
+            '- Utility writers may run scoped formatting, build, and test commands through the parent policy engine; explore, plan, and review roles stay read-only.',
         ].join('\n'),
         script: [
-            'Script mode project card:',
+            'Paradox Multi-Agent project card:',
             '- Use dynamic workflow waves: preflight, read fanout, classify, write batches, verify, summarize.',
             '- Start with project profile, workspace index, diagnostics, scope/rule queries, and asset candidates.',
             '- Dispatch up to 8 concise read-heavy tasks, but keep write waves narrow and always set plannedFiles.',

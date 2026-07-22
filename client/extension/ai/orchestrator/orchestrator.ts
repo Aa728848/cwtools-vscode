@@ -34,13 +34,13 @@ import { SOURCE, ORCHESTRATOR_MSG, aiText } from '../messages';
 import { getAgentToolTargetFiles } from '../runner/toolScheduler';
 import { WRITE_TOOLS } from '../tools/registry';
 import { mergeTokenUsageTotals } from '../cacheCapability';
+import { defaultDomainForMode } from '../agentProfile';
 
 // Type references of AgentRunner and AgentToolExecutor (to avoid circular dependencies, use import type)
 import type { AgentRunner, AgentRunnerOptions } from '../agentRunner';
 
-const SUB_AGENT_ABSOLUTE_TIMEOUT_MS = 20 * 60 * 1000;
 const SUB_AGENT_IDLE_WARNING_MS = 60 * 1000;
-const SUB_AGENT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+const SUB_AGENT_IDLE_TIMEOUT_MS = 20 * 60 * 1000;
 const SUB_AGENT_IDLE_CHECK_MS = 30 * 1000;
 const SUB_AGENT_IDLE_NOTICE_INTERVAL_MS = 30 * 1000;
 const CLARIFICATION_PREFIX = 'BLOCKED_FOR_ORCHESTRATOR';
@@ -65,6 +65,11 @@ function formatDurationMs(ms: number): string {
     const minutes = Math.floor(ms / 60000);
     const seconds = Math.round((ms % 60000) / 1000);
     return `${minutes}m ${seconds}s`;
+}
+
+/** Timer-generated wait heartbeats are visibility signals, not proof that work advanced. */
+function isSubAgentActivityStep(step: AgentStep): boolean {
+    return step.type !== 'orchestrator_progress' && step.type !== 'error';
 }
 
 function normalizeClarificationText(text: string): string {
@@ -122,6 +127,13 @@ export class Orchestrator {
         taskGraph: TaskGraph,
         options: OrchestratorOptions,
     ): Promise<OrchestratorResult> {
+        options = {
+            ...options,
+            domain: options.domain ?? ([...taskGraph.nodes.values()].some(node =>
+                ['build', 'loc_writer', 'gui_expert', 'script_reviewer'].includes(node.agentType))
+                ? 'paradox'
+                : 'general'),
+        };
         const emitStep = options.onStep ?? (() => {});
         this.blackboard.setEventSink(options.runEventSink);
         this.executor.setEventSink(options.runEventSink);
@@ -174,7 +186,8 @@ export class Orchestrator {
                 allWrittenFiles.push(...agentResult.writtenFiles);
             }
             {
-                if (allWrittenFiles.length > 0) {
+                const paradoxWorkflow = [...taskGraph.nodes.values()].some(node => ['build', 'loc_writer', 'gui_expert'].includes(node.agentType));
+                if (paradoxWorkflow && allWrittenFiles.some(isPdxDiagnosticFile)) {
                 // --- Localization Sweep Phase (Loc Sweep Phase) ---
                 emitStep({
                     type: 'orchestrator_progress',
@@ -285,10 +298,10 @@ export class Orchestrator {
                         for (let fixCycle = 0; fixCycle < config.maxFixCycles && !reviewResult.passed; fixCycle++) {
                         emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.AUTOFIX_START, timestamp: Date.now() });
                         
-                        const fixPrompt = this.qualityGate.buildFixPrompt(reviewResult.reviewReport, allWrittenFiles);
+                        const fixPrompt = this.qualityGate.buildFixPrompt(reviewResult.reviewReport, allWrittenFiles, paradoxWorkflow);
                         const fixNode: TaskNode = {
                             id: `quality_gate_autofix_${fixCycle + 1}`,
-                            agentType: 'build',
+                            agentType: paradoxWorkflow ? 'build' : 'utility',
                             prompt: fixPrompt,
                             plannedFiles: [...new Set(allWrittenFiles)],
                             dependencies: [],
@@ -393,6 +406,7 @@ export class Orchestrator {
         orchestratorOptions: OrchestratorOptions,
     ): Promise<SubAgentResult> {
         const profile = getAgentProfile(taskNode.agentType);
+        const childDomain = orchestratorOptions.domain ?? defaultDomainForMode(profile.mode);
 
         // Model selection priority chain:
         // 1. TaskNode explicit override
@@ -412,6 +426,7 @@ export class Orchestrator {
             agentId: taskNode.id,
             role: taskNode.agentType,
             mode: profile.mode,
+            domain: childDomain,
             writeScope: sandbox.writeScope,
             rejectedScopes: sandbox.rejectedScopes,
         }, { agentId: taskNode.id });
@@ -419,8 +434,8 @@ export class Orchestrator {
         const onlyLocalisationYmlWrites = plannedFiles.length > 0 && plannedFiles.every(isLocalisationYmlPath);
         const excludedTools = [
             'web_search', 'web_open', 'web_find',
-            'run_command', 'git_ops',
-
+            ...(profile.mode === 'utility' ? [] : ['run_command']),
+            'git_ops',
             'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
             ...(onlyLocalisationYmlWrites ? LOCALISATION_GENERIC_WRITE_TOOLS : []),
         ];
@@ -431,8 +446,9 @@ export class Orchestrator {
             model,
             reasoningEffort: orchestratorOptions.reasoningEffort,
             mode: profile.mode,
+            domain: childDomain,
             onStep,
-            abortSignal, // Will be overwritten later by the child controller with timeout
+            abortSignal, // Replaced below by the child controller with parent/idle guards.
             streaming: true, // Enable streaming output to visualize the progress of deep thinking
             topicId: orchestratorOptions.topicId,
             parentRunId: orchestratorOptions.parentRunId,
@@ -443,6 +459,9 @@ export class Orchestrator {
             onTodoUpdate: orchestratorOptions.onTodoUpdate,
             useSlimPrompt: true,
             maxIterations: taskNode.maxIterations ?? profile.maxIterations,
+            // Role iteration limits are health-check windows. Only a task-level
+            // maxIterations override remains an absolute iteration ceiling.
+            renewableIterationLimit: taskNode.maxIterations === undefined,
             // The subagent skips the built-in validation loop - Orchestrator has an independent QualityGate mechanism,
             // No need for sub-agent to re-verify. At the same time, it prevents the validation loop from continuing to generate steps after the inference is completed.
             // Leading to an inconsistent UI state where the external judgment card is marked as completed but the internal one is still running.
@@ -451,8 +470,8 @@ export class Orchestrator {
             writeQueueWaitTimeoutMs: 60_000,
             // 🔴 Sub-Agent disables specific tools:
             // 1. Internet searches can easily lead to meaningless repetitive search loops (doom loops)
-            // 2. run_command / mmx_* / convert_* / deploy_mod_asset requires user permission approval or involves external creation.
-            // The child Agent should not pop up interactive cards to the user, and the assets should be selected from the original game files and project files.
+            // 2. Paradox children cannot use run_command; General Multi-Agent utility writers may run scoped checks through the parent policy engine.
+            // git/media/deployment tools remain disabled because they are privileged or create external side effects.
             // 3. If the subtask requires network information, it should be searched by Orchestrator and injected through contextFiles before dispatching.
             excludeTools: excludedTools,
         };
@@ -513,7 +532,7 @@ export class Orchestrator {
             }
             onStep(step);
         };
-        const wrappedOnStep = (step: AgentStep) => forwardStep(step, true);
+        const wrappedOnStep = (step: AgentStep) => forwardStep(step, isSubAgentActivityStep(step));
 
         runnerOptions.onStep = wrappedOnStep;
         runnerOptions.onPermissionRequest = async (id, tool, description, command, permissionContext) => {
@@ -638,7 +657,6 @@ export class Orchestrator {
             }
         }
 
-        let subAgentTimeoutId: NodeJS.Timeout | undefined;
         let subAgentIdleIntervalId: NodeJS.Timeout | undefined;
         const subAgentController = new AbortController();
         const parentAbortHandler = () => subAgentController.abort(abortSignal.reason);
@@ -649,10 +667,6 @@ export class Orchestrator {
         }
 
         const clearSubAgentTimers = () => {
-            if (subAgentTimeoutId) {
-                clearTimeout(subAgentTimeoutId);
-                subAgentTimeoutId = undefined;
-            }
             if (subAgentIdleIntervalId) {
                 clearInterval(subAgentIdleIntervalId);
                 subAgentIdleIntervalId = undefined;
@@ -687,13 +701,10 @@ export class Orchestrator {
             }
         };
 
-        // Set absolute timeout: 20 minutes (1,200,000 ms)
-        subAgentTimeoutId = setTimeout(() => {
-            const err = new Error('Sub-Agent execution absolute timeout exceeded (20 minutes).');
-            err.name = 'TimeoutError';
-            subAgentController.abort(err);
-        }, SUB_AGENT_ABSOLUTE_TIMEOUT_MS);  // W7 fix: actual values   consistent with comments/error messages (20 min)
-
+        // Activity renews the child indefinitely. Abort only after 20 minutes
+        // without model tokens, a completed/requested tool action, permission,
+        // validation, or another concrete step. Timer-only wait heartbeats do
+        // not count, otherwise a hung provider/tool could renew itself forever.
         subAgentIdleIntervalId = setInterval(() => {
             if (subAgentController.signal.aborted) return;
             const now = Date.now();
@@ -840,7 +851,7 @@ export class Orchestrator {
 */
     private shouldRunQualityGate(graph: TaskGraph): boolean {
         for (const node of graph.nodes.values()) {
-            if (node.agentType === 'build' && node.status === 'done') {
+            if ((node.agentType === 'build' || node.agentType === 'utility') && node.status === 'done') {
                 return true;
             }
         }

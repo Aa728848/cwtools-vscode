@@ -15,7 +15,7 @@ import { aiText } from '../messages';
  * Each role defines its responsibility boundaries and resource limits: 
  * - mode: AgentMode mapped to AgentRunner, which determines the system prompt words and tool set 
  * - suggestedModel/Provider: suggested model (undefined = inherit user settings) 
- * - maxIterations: the maximum number of iterations of the inference loop 
+ * - maxIterations: healthy-progress window; the Orchestrator renews it while the child remains healthy
  * - toolBudget: tool permission level 
  * - description: role description for Orchestrator to refer to when decomposing tasks 
  */
@@ -64,6 +64,19 @@ export const AGENT_REGISTRY: Record<string, AgentProfile> = {
             return aiText(
                 'Generate PDXScript from a blueprint or instruction, write files, and fix LSP errors. Full-capability agent.',
                 '根据蓝图或指令生成 PDXScript 代码、写入文件、修复 LSP 错误。全功能 Agent。',
+            );
+        },
+    },
+
+    /** General-purpose repository coder used by domain-neutral orchestration. */
+    utilityCoder: {
+        mode: 'utility',
+        maxIterations: 80,
+        toolBudget: 'full',
+        get description() {
+            return aiText(
+                'Implement ordinary repository code, tests, configuration, documentation, and tooling; run scoped builds or tests when needed.',
+                '实现通用仓库代码、测试、配置、文档和工具；按需运行范围明确的构建或测试。',
             );
         },
     },
@@ -156,6 +169,7 @@ export const AGENT_REGISTRY: Record<string, AgentProfile> = {
 const MODE_TO_ROLE_ALIAS: Record<string, string> = {
     'explore': 'explorer',
     'build': 'builder',
+    'utility': 'utilityCoder',
     'plan': 'architect',
     'review': 'reviewer',
     'loc_writer': 'locWriter',

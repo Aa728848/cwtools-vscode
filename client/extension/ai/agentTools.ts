@@ -29,7 +29,7 @@ import { DESIGN_BLUEPRINT_DETAILED_PARAMETERS } from './tools/definitions';
 import { FileToolHandler, findFiles } from './tools/fileTools';
 import { LspToolHandler } from './tools/lspTools';
 import { ExternalToolHandler } from './tools/externalTools';
-import { MemoryToolHandler } from './tools/memoryTools';
+import { MemoryToolHandler, blackboardDomainPrefix } from './tools/memoryTools';
 import type { IndexService } from '../indexing/indexService';
 import { validateToolAccess, evaluateMcpPermission } from './tools/permissions';
 import { readProjectProfile, queryProjectProfile } from './projectProfile';
@@ -55,6 +55,7 @@ import { runLedger } from './runner/runLedger';
 import { ErrorReporter } from './errorReporter';
 import { mergeTokenUsageTotals } from './cacheCapability';
 import { MemoryParser } from './memoryParser';
+import { defaultDomainForMode } from './agentProfile';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
 const FINAL_EVIDENCE_CONCURRENCY = 4;
@@ -208,7 +209,9 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     save_workflow: 30_000,
     todo_write: 5_000,
     run_skill: 30_000,
-    dispatch_agents: 3600_000,
+    // Child activity/idle guards and run budgets own orchestration lifetime.
+    // A fixed tool timeout would kill healthy long-running child graphs.
+    dispatch_agents: 0,
     merge_results: 30_000,
 };
 
@@ -1140,7 +1143,11 @@ export class AgentToolExecutor {
                 message: 'git_ops is disabled for orchestrator sub-agents. Report the issue to the main agent instead of running git commands.',
             };
         }
-        if (isSubAgent && toolName === 'run_command') {
+        const runtimeDomain = context?.runnerOptions?.domain;
+        const generalUtilityCommand = runtimeDomain === 'general'
+            && context?.runnerOptions?.mode === 'utility'
+            && toolName === 'run_command';
+        if (isSubAgent && toolName === 'run_command' && !generalUtilityCommand) {
             return {
                 success: false,
                 message: 'run_command is disabled for orchestrator sub-agents. Do not create or run helper scripts for it. Use structured edit tools for bulk file changes; if a terminal command is truly required, return BLOCKED_FOR_ORCHESTRATOR with the command and reason.',
@@ -1148,12 +1155,33 @@ export class AgentToolExecutor {
         }
         const mode = context?.runnerOptions?.mode ?? 
             ((['dispatch_agents', 'merge_results', 'query_blackboard'].includes(toolName)) ? 'orchestrator' : 'build');
-        const access = validateToolAccess(toolName, { mode, isSubAgent });
+        const access = validateToolAccess(toolName, { mode, domain: runtimeDomain, isSubAgent });
         if (!access.allowed) {
             return {
                 success: false,
                 error: access.reason
             };
+        }
+        if (runtimeDomain === 'general' && toolName === 'save_workflow') {
+            const workflowMode = typeof args.mode === 'string' ? args.mode : 'utility';
+            const generalWorkflowModes = new Set(['plan', 'explore', 'utility', 'review', 'orchestrator']);
+            if (!generalWorkflowModes.has(workflowMode)) {
+                return {
+                    success: false,
+                    error: `General Coding cannot save a workflow for domain-specific mode '${workflowMode}'.`,
+                };
+            }
+            const requestedTools = [args.allowedTools, args.blockedTools]
+                .flatMap(value => Array.isArray(value) ? value : [])
+                .filter((value): value is string => typeof value === 'string');
+            const domainSpecificTool = requestedTools.find(name =>
+                TOOL_REGISTRY.get(name as import('./types').AgentToolName)?.domain === 'paradox');
+            if (domainSpecificTool) {
+                return {
+                    success: false,
+                    error: `General Coding cannot save a workflow containing domain-specific tool '${domainSpecificTool}'.`,
+                };
+            }
         }
 
         const registryEntry = TOOL_REGISTRY.get(toolName as any);
@@ -1294,7 +1322,7 @@ export class AgentToolExecutor {
                     abortSignal,
                 },
             };
-            toolContext.onBeforePdxWrite = async request => {
+            if (toolContext.runnerOptions?.domain !== 'general') toolContext.onBeforePdxWrite = async request => {
                 if (inheritedPdxPreflight) {
                     const inherited = await inheritedPdxPreflight(request);
                     if (!inherited.allowed) return inherited;
@@ -1480,7 +1508,7 @@ export class AgentToolExecutor {
             case 'get_lsp_status':
                 result = await this.lspHandler.getLspStatus(args as any); break;
             case 'get_diagnostics':
-                result = await this.lspHandler.getDiagnostics(args as any); break;
+                result = await this.lspHandler.getDiagnostics(args as any, context); break;
             case 'get_file_context':
                 result = await this.lspHandler.getFileContext(args as any, context); break;
             case 'search_mod_files':
@@ -1490,13 +1518,13 @@ export class AgentToolExecutor {
             case 'find_sound_candidates':
                 result = await this.lspHandler.findSoundCandidates(args as any); break;
             case 'grep':
-                result = await this.lspHandler.grep(args as any); break;
+                result = await this.lspHandler.grep(args as any, context); break;
             case 'get_completion_at':
                 result = await this.lspHandler.getCompletionAt(args as any); break;
             case 'document_symbols':
                 result = await this.lspHandler.documentSymbols(args as any); break;
             case 'workspace_symbols':
-                result = await this.lspHandler.workspaceSymbols(args as any); break;
+                result = await this.lspHandler.workspaceSymbols(args as any, context); break;
             case 'verify_pdx_identifier':
                 result = await this.lspHandler.verifyPdxIdentifier(args as any); break;
             case 'get_pdx_block':
@@ -1626,10 +1654,10 @@ export class AgentToolExecutor {
                 break;
             }
             case 'query_blackboard':
-                result = await this.memoryHandler.queryBlackboard(args as any); break;
+                result = await this.memoryHandler.queryBlackboard(args as any, context); break;
             case 'query_blackboard_disabled': break;
             case 'merge_results': {
-                result = this.executeMergeResults(args);
+                result = this.executeMergeResults(args, context);
                 break;
             }
 
@@ -2222,11 +2250,14 @@ export class AgentToolExecutor {
     private static readonly MCP_TOOL_CACHE_TTL_MS = 300_000;
 
     /** List configured MCP servers' tools as mcp_<server>_<tool> definitions. Opt-in; metadata is untrusted. */
-    async getDynamicMcpToolDefinitions(mode: import('./types').AgentMode): Promise<import('./types').ToolDefinition[]> {
+    async getDynamicMcpToolDefinitions(
+        mode: import('./types').AgentMode,
+        domain?: import('./types').AgentRuntimeDomain,
+    ): Promise<import('./types').ToolDefinition[]> {
         const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         if (cfg.get<boolean>('mcp.registerDynamicTools', false) !== true) return [];
         const { isToolAllowedForMode } = require('./tools/permissions') as typeof import('./tools/permissions');
-        if (!isToolAllowedForMode('mcp_call', mode)) return [];
+        if (!isToolAllowedForMode('mcp_call', mode, domain)) return [];
 
         if (this.dynamicMcpToolCache && Date.now() - this.dynamicMcpToolCache.at < AgentToolExecutor.MCP_TOOL_CACHE_TTL_MS) {
             return this.dynamicMcpToolCache.defs;
@@ -2409,6 +2440,8 @@ export class AgentToolExecutor {
     /** The latest coordinator execution result (read by merge_results) */
     private _lastOrchestratorResult?: import('./orchestrator/types').OrchestratorResult;
     private _lastOrchestratorGraph?: import('./orchestrator/types').TaskGraph;
+    private _lastOrchestratorDomain?: import('./types').AgentRuntimeDomain;
+    private _lastOrchestratorTopicId?: string;
     private readonly _orchestratorValidationByRun = new Map<string, {
         success: boolean;
         summary: string;
@@ -2437,10 +2470,15 @@ export class AgentToolExecutor {
         }> | undefined;
 
         const runnerOptsForLimits = context?.runnerOptions ?? this.parentRunnerOptions;
-        const isScriptMode = runnerOptsForLimits?.mode === 'script';
-        const requiresStructuredWriteContract = isScriptMode || runnerOptsForLimits?.mode === 'orchestrator';
+        const runtimeDomain = runnerOptsForLimits?.domain
+            ?? (runnerOptsForLimits?.mode === 'orchestrator' ? 'general' : 'paradox');
+        const isScriptMode = runtimeDomain === 'paradox' && runnerOptsForLimits?.mode === 'script';
+        const requiresStructuredWriteContract = isScriptMode;
         let featureManifest = args.featureManifest as import('./types').FeatureManifest | undefined;
         const blueprintFile = typeof args.blueprintFile === 'string' ? args.blueprintFile.trim() : '';
+        if (runtimeDomain === 'general' && blueprintFile) {
+            return { success: false, error: 'General Multi-Agent does not accept domain-specific design blueprints.' };
+        }
         const maxTasksPerDispatch = blueprintFile ? 64 : isScriptMode ? 8 : 4;
         if (blueprintFile) {
             const resolvedBlueprint = path.isAbsolute(blueprintFile)
@@ -2496,8 +2534,26 @@ export class AgentToolExecutor {
             };
         }
         const normalizedTasks = tasks.map(task => normalizeDispatchTaskForLocalisationYml(task));
+        const parentMode = runnerOptsForLimits?.mode;
+        const allowedAgentTypes = new Set(runtimeDomain === 'general'
+            ? ['explore', 'plan', 'utility', 'review']
+            : parentMode === 'script'
+                ? ['explore', 'plan', 'build', 'review', 'loc_writer', 'gui_expert']
+            : parentMode === 'orchestrator'
+                ? ['explore', 'plan', 'utility', 'review']
+                // Compatibility for host-side callers created before the mode
+                // was carried in AgentToolContext. Model-visible calls always
+                // arrive with an explicit coordinator mode.
+                : ['explore', 'plan', 'utility', 'review', 'build', 'loc_writer', 'gui_expert']);
+        const invalidAgentType = normalizedTasks.find(task => !allowedAgentTypes.has(task.agentType));
+        if (invalidAgentType) {
+            return {
+                success: false,
+                error: `Agent type '${invalidAgentType.agentType}' is not allowed in ${isScriptMode ? 'Paradox Multi-Agent' : 'General Multi-Agent'} mode. Allowed roles: ${[...allowedAgentTypes].join(', ')}.`,
+            };
+        }
         const hasWriteTasks = normalizedTasks.some(task =>
-            ['build', 'loc_writer', 'gui_expert'].includes(task.agentType)
+            ['build', 'loc_writer', 'gui_expert', 'utility'].includes(task.agentType)
             || (task.plannedFiles?.length ?? 0) > 0
         );
         if (requiresStructuredWriteContract && hasWriteTasks) {
@@ -2515,8 +2571,8 @@ export class AgentToolExecutor {
                 return {
                     success: false,
                     error: aiText(
-                        'Orchestrator/Script write waves require featureManifest with objective and at least one acceptance criterion. Declare the required entities/edges before dispatching builders.',
-                        '协作/脚本模式写入批次必须提供 featureManifest，其中包含目标和至少一条验收条件。请先声明所需实体与关联边。',
+                        'Paradox Multi-Agent write waves require featureManifest with an objective and at least one acceptance criterion. Declare the required entities/edges before dispatching writers.',
+                        'Paradox 多 Agent 写入批次必须提供 featureManifest，其中包含目标和至少一条验收条件。请先声明所需实体与关联边。',
                     ),
                 };
             }
@@ -2524,8 +2580,8 @@ export class AgentToolExecutor {
                 return {
                     success: false,
                     error: aiText(
-                        `Orchestrator/Script writer '${invalidWriter.id}' must declare produces and/or consumes entity contracts.`,
-                        `协作/脚本模式写入节点“${invalidWriter.id}”必须声明 produces 和/或 consumes 实体契约。`,
+                        `Paradox Multi-Agent writer '${invalidWriter.id}' must declare produces and/or consumes entity contracts.`,
+                        `Paradox 多 Agent 写入节点“${invalidWriter.id}”必须声明 produces 和/或 consumes 实体契约。`,
                     ),
                 };
             }
@@ -2628,6 +2684,7 @@ export class AgentToolExecutor {
                 ?? this.onBeforeFileWrite;
 
             const options: import('./orchestrator/types').OrchestratorOptions = {
+                domain: runnerOpts?.domain ?? (parentMode === 'orchestrator' ? 'general' : 'paradox'),
                 providerId: runnerOpts?.providerId,
                 model: runnerOpts?.model,
                 reasoningEffort: runnerOpts?.reasoningEffort,
@@ -2674,6 +2731,8 @@ export class AgentToolExecutor {
             // Cache results for use by merge_results
             this._lastOrchestratorResult = result;
             this._lastOrchestratorGraph = graph;
+            this._lastOrchestratorDomain = runtimeDomain;
+            this._lastOrchestratorTopicId = runnerOpts?.topicId;
             const validationRunId = parentRun?.runId ?? parentRunSink?.runId;
             if (validationRunId && (hasWriteTasks || result.qualityGate !== undefined)) {
                 this._orchestratorValidationByRun.set(validationRunId, {
@@ -2699,7 +2758,7 @@ export class AgentToolExecutor {
 
             //Write execution results to Blackboard for subsequent query
             this.blackboard.write(
-                'orchestrator:lastResult',
+                `${blackboardDomainPrefix(context)}orchestrator:lastResult`,
                 JSON.stringify({
                     success: result.success,
                     summary: result.summary,
@@ -2805,10 +2864,19 @@ export class AgentToolExecutor {
     /** 
 * Execute the merge_results tool: extract a summary from the results of the most recent coordinator execution. 
 */
-    private executeMergeResults(args: Record<string, unknown>): unknown {
-        if (!this._lastOrchestratorResult) {
+    private executeMergeResults(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
+        const requestedDomain = context?.runnerOptions?.domain
+            ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
+        const requestedTopicId = context?.runnerOptions?.topicId;
+        const cachedResultMatchesScope = !!this._lastOrchestratorResult
+            && (this._lastOrchestratorDomain === undefined
+                || (this._lastOrchestratorDomain === requestedDomain
+                    && (this._lastOrchestratorTopicId === undefined
+                        || requestedTopicId === this._lastOrchestratorTopicId)));
+        if (!cachedResultMatchesScope) {
             //Try to read from Blackboard
-            const stored = this.blackboard.readValue('orchestrator:lastResult');
+            const stored = this.blackboard.readValue(`${blackboardDomainPrefix(context)}orchestrator:lastResult`)
+                ?? (requestedDomain === 'paradox' ? this.blackboard.readValue('orchestrator:lastResult') : undefined);
             if (stored) {
                 try {
                     const parsed = JSON.parse(stored);
@@ -2825,7 +2893,7 @@ export class AgentToolExecutor {
             return { success: false, message: 'Failed to find the most recent orchestrator execution result. Please use dispatch_agents first.' };
         }
 
-        const r = this._lastOrchestratorResult;
+        const r = this._lastOrchestratorResult!;
         const graph = this._lastOrchestratorGraph;
         const requestedNodeIds = Array.isArray(args.nodeIds)
             ? args.nodeIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)

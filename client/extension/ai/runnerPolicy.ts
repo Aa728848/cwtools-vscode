@@ -1,7 +1,9 @@
-import type { AgentMode, AgentToolStage, ToolDefinition } from './types';
+import type { AgentMode, AgentRuntimeDomain, AgentToolStage, ToolDefinition } from './types';
+import { defaultDomainForMode } from './agentProfile';
 import { TOOL_REGISTRY } from './tools/registry';
 
 export interface ToolFilterOptions {
+    domain?: AgentRuntimeDomain;
     useSlimPrompt?: boolean;
     excludeTools?: string[];
     legacyFullToolset?: boolean;
@@ -14,13 +16,13 @@ const BUILD_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
         'glob_files', 'workspace_symbols', 'document_symbols',
-        'get_lsp_status', 'todo_write', 'run_skill',
+        'get_lsp_status', 'todo_write', 'run_skill', 'mcp_call',
     ]),
     design: new Set([
-        'query_project_knowledge', 'explore_pdx_project',
-        'query_rules', 'query_cwt_schema', 'query_scope', 'query_override_modes',
+        'query_project_knowledge', 'query_rules', 'query_cwt_schema', 'query_scope',
         'search_rule_capabilities', 'get_file_context', 'read_file', 'get_pdx_block',
-        'query_scripted_effects', 'query_scripted_triggers', 'get_design_blueprint_contract', 'write_design_blueprint', 'todo_write',
+        'get_design_blueprint_contract', 'write_design_blueprint', 'todo_write',
+        'glob_files', 'grep', 'workspace_symbols', 'document_symbols',
     ]),
     validation: new Set([
         'query_rules', 'query_cwt_schema', 'query_scope', 'explain_scope',
@@ -46,15 +48,15 @@ const PLAN_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
         'glob_files', 'workspace_symbols', 'document_symbols', 'get_lsp_status',
-        'web_search', 'web_open', 'web_find', 'todo_write',
+        'web_search', 'web_open', 'web_find', 'mcp_call',
     ]),
     design: BUILD_STAGE_TOOLS.design,
     validation: new Set([
-        'query_rules', 'query_cwt_schema', 'query_scope', 'explain_scope',
+        'query_rules', 'query_cwt_schema', 'query_scope',
         'parse_pdx_fragment', 'query_references', 'query_definition_by_name',
-        'verify_pdx_identifier', 'get_diagnostics', 'get_pdx_block',
+        'verify_pdx_identifier', 'get_diagnostics',
         'get_file_context', 'read_file', 'get_design_blueprint_contract',
-        'write_design_blueprint', 'todo_write',
+        'write_design_blueprint', 'todo_write', 'grep', 'document_symbols',
     ]),
     write: new Set(),
     finalize: new Set([
@@ -69,7 +71,7 @@ const EXPLORE_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
         'glob_files', 'workspace_symbols', 'document_symbols', 'get_lsp_status',
-        'web_search', 'web_open', 'web_find',
+        'web_search', 'web_open', 'web_find', 'mcp_call',
     ]),
     design: new Set(),
     validation: new Set([
@@ -92,7 +94,7 @@ const REVIEW_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
         'glob_files', 'workspace_symbols', 'document_symbols', 'get_lsp_status',
         'get_diagnostics', 'analyze_diagnostic_error', 'find_sprite_candidates',
-        'query_localisation_index',
+        'query_localisation_index', 'mcp_call',
     ]),
     design: new Set(),
     validation: new Set([
@@ -110,11 +112,37 @@ const REVIEW_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
     ]),
 };
 
+/** General coding stages deliberately skip the PDX design/evidence pipeline. */
+const UTILITY_STAGE_TOOLS: Record<AgentToolStage, ReadonlySet<string>> = {
+    discovery: new Set([
+        'read_file', 'list_directory', 'glob_files', 'grep', 'get_file_context',
+        'document_symbols', 'workspace_symbols', 'get_diagnostics', 'get_lsp_status',
+        'query_workspace_index', 'query_project_profile', 'web_search', 'web_open',
+        'web_find', 'todo_write', 'run_skill',
+    ]),
+    design: new Set(),
+    validation: new Set(),
+    write: new Set([
+        'read_file', 'list_directory', 'glob_files', 'grep', 'get_file_context',
+        'document_symbols', 'workspace_symbols', 'get_diagnostics',
+        'write_file', 'edit_file', 'replace_lines',
+        'run_command', 'list_processes', 'read_process',
+        'write_process_stdin', 'terminate_process', 'git_ops', 'todo_write',
+    ]),
+    finalize: new Set([
+        'read_file', 'get_file_context', 'grep', 'document_symbols', 'workspace_symbols',
+        'get_diagnostics', 'write_file', 'edit_file', 'replace_lines',
+        'run_command', 'list_processes', 'read_process', 'write_process_stdin',
+        'terminate_process', 'git_ops', 'todo_write',
+    ]),
+};
+
 const MODE_STAGE_TOOLS: Partial<Record<AgentMode, Record<AgentToolStage, ReadonlySet<string>>>> = {
     build: BUILD_STAGE_TOOLS,
     plan: PLAN_STAGE_TOOLS,
     explore: EXPLORE_STAGE_TOOLS,
     review: REVIEW_STAGE_TOOLS,
+    utility: UTILITY_STAGE_TOOLS,
 };
 
 const DISCOVERY_PROGRESS_TOOLS = new Set([
@@ -135,6 +163,9 @@ const STAGED_WRITE_TOOLS = new Set([
     'write_file', 'edit_file', 'replace_lines', 'edit_pdx_block', 'write_localisation',
 ]);
 
+/** Kept executable only to return migration guidance for persisted histories. */
+const RETIRED_MODEL_TOOLS = new Set(['apply_patch', 'multi_replace_file_content']);
+
 export function initialToolStageForMode(mode: AgentMode): AgentToolStage | undefined {
     return MODE_STAGE_TOOLS[mode] ? 'discovery' : undefined;
 }
@@ -148,7 +179,9 @@ export function filterToolDefinitionsForStage(
     if (legacyFullToolset || !stage) return [...tools];
     const allowed = MODE_STAGE_TOOLS[mode]?.[stage];
     if (!allowed) return [...tools];
-    return tools.filter(tool => allowed.has(tool.function.name));
+    return tools.filter(tool =>
+        allowed.has(tool.function.name)
+        || (allowed.has('mcp_call') && tool.function.name.startsWith('mcp_')));
 }
 
 const STAGE_GUIDANCE: Record<AgentToolStage, string> = {
@@ -164,10 +197,22 @@ export function buildToolStageReminder(
     mode: AgentMode,
     stage: AgentToolStage | undefined,
     tools: readonly ToolDefinition[],
+    domain: AgentRuntimeDomain = defaultDomainForMode(mode),
 ): string {
     if (!stage) return '';
     const names = tools.map(tool => tool.function.name).sort();
-    return `<system-reminder>Current ${mode} tool stage: ${stage}. ${STAGE_GUIDANCE[stage]} `
+    const guidance = domain === 'general'
+        ? stage === 'discovery'
+            ? 'Inspect the repository and identify the exact implementation and verification surface; do not write yet.'
+            : stage === 'write'
+                ? 'Implement the scoped change and run relevant commands through the policy engine.'
+                : stage === 'design'
+                    ? 'Map the concrete interfaces, dependencies, compatibility constraints, and tests using repository evidence.'
+                    : stage === 'validation'
+                        ? 'Cross-check the proposed or reviewed behavior against callers, diagnostics, tests, and current implementation.'
+                        : 'Synthesize the evidence, review the diff when applicable, and report verification and remaining risks.'
+        : STAGE_GUIDANCE[stage];
+    return `<system-reminder>Current ${mode} tool stage: ${stage}. ${guidance} `
         + `Only these stage tools are available: ${names.join(', ')}.</system-reminder>`;
 }
 
@@ -178,17 +223,24 @@ export function advanceToolStage(
     result: { success: boolean; hasValidationErrors?: boolean },
 ): AgentToolStage | undefined {
     if (!stage) return undefined;
+    if (mode === 'utility' && STAGED_WRITE_TOOLS.has(toolName)) {
+        return result.success && !result.hasValidationErrors ? 'finalize' : 'write';
+    }
     if (mode === 'build' && STAGED_WRITE_TOOLS.has(toolName)) {
         return result.success && !result.hasValidationErrors ? 'finalize' : 'validation';
     }
     switch (stage) {
         case 'discovery':
+            if (mode === 'utility' && result.success && UTILITY_STAGE_TOOLS.discovery.has(toolName)) return 'write';
             if (!result.success || (!DISCOVERY_PROGRESS_TOOLS.has(toolName) && !VALIDATION_PROGRESS_TOOLS.has(toolName))) return stage;
             return mode === 'build' || mode === 'plan' ? 'design' : 'validation';
-        case 'design': return result.success && DESIGN_PROGRESS_TOOLS.has(toolName) ? 'validation' : stage;
+        case 'design':
+            if (mode === 'plan' && result.success && PLAN_STAGE_TOOLS.design.has(toolName)) return 'validation';
+            return result.success && DESIGN_PROGRESS_TOOLS.has(toolName) ? 'validation' : stage;
         case 'validation':
+            if (mode === 'plan' && result.success && PLAN_STAGE_TOOLS.validation.has(toolName)) return 'finalize';
             if (!result.success || !VALIDATION_PROGRESS_TOOLS.has(toolName)) return stage;
-            return mode === 'build' ? 'write' : 'finalize';
+            return mode === 'build' || mode === 'utility' ? 'write' : 'finalize';
         case 'write': return stage;
         case 'finalize': return result.hasValidationErrors ? 'validation' : stage;
     }
@@ -201,6 +253,19 @@ export interface IterationLimitOptions {
     override?: number;
     /** When true, apply the bounded role-specific sub-Agent limits. */
     isSubAgent?: boolean;
+}
+
+export function shouldRenewIterationLimit(input: {
+    renewable: boolean;
+    iteration: number;
+    limit: number;
+    consecutiveErrors: number;
+    blockingValidationIssues: number;
+}): boolean {
+    return input.renewable
+        && input.iteration >= input.limit
+        && input.consecutiveErrors === 0
+        && input.blockingValidationIssues === 0;
 }
 
 /** Practical loop guard above the largest configurable hard model-call budget. */
@@ -218,9 +283,12 @@ export function filterToolDefinitionsForMode(
     mode: AgentMode,
     options: ToolFilterOptions = {},
 ): ToolDefinition[] {
+    const domain = options.domain ?? defaultDomainForMode(mode);
     let filtered = tools.filter(t => {
         const entry = TOOL_REGISTRY.get(t.function.name as import('./types').AgentToolName);
         if (!entry) return false;
+        if (RETIRED_MODEL_TOOLS.has(entry.name)) return false;
+        if (domain === 'general' && entry.domain === 'paradox') return false;
         
         if (options.legacyFullToolset) {
             return !['dispatch_agents', 'query_blackboard', 'merge_results'].includes(entry.name);
@@ -232,13 +300,18 @@ export function filterToolDefinitionsForMode(
     if (options.useSlimPrompt) {
         filtered = filtered.filter(t => {
             const entry = TOOL_REGISTRY.get(t.function.name as import('./types').AgentToolName);
-            return entry?.allowSubAgent === true;
+            return entry?.allowSubAgent === true || (mode === 'utility' && entry?.name === 'run_command');
         });
     }
 
     if (options.excludeTools && options.excludeTools.length > 0) {
         const excluded = new Set(options.excludeTools);
         filtered = filtered.filter(t => !excluded.has(t.function.name));
+    }
+
+    if (domain === 'general') {
+        filtered = filtered.map(tool =>
+            TOOL_REGISTRY.get(tool.function.name as import('./types').AgentToolName)?.generalSchema ?? tool);
     }
 
     return filtered;

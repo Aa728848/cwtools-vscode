@@ -11,7 +11,8 @@ import * as vs from 'vscode';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { ChatMessage, AgentMode, ToolDefinition } from './types';
+import type { ChatMessage, AgentMode, AgentRuntimeDomain, ToolDefinition } from './types';
+import { defaultDomainForMode } from './agentProfile';
 import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
 import { MemoryParser } from './memoryParser';
 import { ErrorReporter } from './errorReporter';
@@ -40,6 +41,7 @@ interface ParsedProjectRules {
 
 interface RuntimePromptState {
     mode?: AgentMode;
+    domain?: AgentRuntimeDomain;
     /** Current user task used only for relevance-ranked memory retrieval. */
     taskText?: string;
     /** Active/recent files used as path-scope hints for memory retrieval. */
@@ -68,7 +70,13 @@ import {
     buildLocTranslatorSystemPrompt,
     buildLocWriterSystemPrompt,
     buildOrchestratorSystemPrompt,
-    buildScriptModeSystemPrompt
+    buildScriptModeSystemPrompt,
+    buildGeneralCodingSystemPrompt,
+    buildGeneralPlanSystemPrompt,
+    buildGeneralExploreSystemPrompt,
+    buildGeneralReviewSystemPrompt,
+    buildGeneralReadOnlySystemPrompt,
+    buildGeneralOrchestratorSystemPrompt,
 } from './prompt/sections/modePrompts';
 import { buildSkillIndexPrompt, listSkills } from './skills';
 
@@ -80,7 +88,7 @@ import { buildSkillIndexPrompt, listSkills } from './skills';
  * shared policy text edited) so prompts cached by older builds are never
  * reused across extension updates (plan §7.1).
  */
-export const PROMPT_TEMPLATE_VERSION = 2;
+export const PROMPT_TEMPLATE_VERSION = 3;
 
 /**
  * Why a frozen system prompt lookup missed. Process-local diagnostics only —
@@ -101,6 +109,7 @@ export type FrozenPromptMissReason =
 interface FrozenPromptFingerprintComponents {
     templateVersion: number;
     mode: AgentMode;
+    domain: AgentRuntimeDomain;
     providerId: string;
     gameId: string;
     locale: string;
@@ -172,13 +181,13 @@ export function orderMessagesForStablePrefix(parts: {
 /** Anthropic Claude: encourage parallel tool batching, leverage extended thinking */
 const ANTHROPIC_SUPPLEMENT = `
 <system-reminder>
-You are using Claude. Batch independent tool calls in a single response. Use extended thinking for complex scope chains.
+You are using Claude. Batch independent tool calls in a single response. Use extended thinking for complex dependency chains.
 </system-reminder>`;
 
 /** Gemini: prefer direct answers, avoid over-tooling */
 const GEMINI_SUPPLEMENT = `
 <system-reminder>
-You are using Gemini. Prefer direct answers for simple questions. Only call tools when you genuinely need external information. For PDXScript constructs, CWT/LSP verification counts as genuinely needed external information.
+You are using Gemini. Prefer direct answers for simple questions. Only call tools when you genuinely need external information or repository evidence.
 </system-reminder>`;
 
 /** GPT/OpenAI: parallel tool calls preferred */
@@ -267,14 +276,16 @@ export class PromptBuilder {
             decisions?: string[];
         },
         includeMemory = true,
-        includeProjectKnowledge = true
+        includeProjectKnowledge = true,
+        domain?: AgentRuntimeDomain,
     ): string {
-        const gameId = languageId ?? this.detectGameLanguageId();
-        const gameKnowledge = getGameKnowledge(gameId);
-        const gameName = getGameDisplayName(gameId);
-        const basePrompt = this.getModePrompt(mode, gameKnowledge, gameName);
+        const runtimeDomain = domain ?? defaultDomainForMode(mode);
+        const gameId = runtimeDomain === 'paradox' ? languageId ?? this.detectGameLanguageId() : 'general';
+        const gameKnowledge = runtimeDomain === 'paradox' ? getGameKnowledge(gameId) : '';
+        const gameName = runtimeDomain === 'paradox' ? getGameDisplayName(gameId) : 'repository';
+        const basePrompt = this.getModePrompt(mode, gameKnowledge, gameName, false, runtimeDomain);
         const supplement = this.getModelSupplement(providerId);
-        const projectRules = this.getProjectRulesPrompt(mode);
+        const projectRules = runtimeDomain === 'paradox' ? this.getProjectRulesPrompt(mode) : '';
         
         let finalPrompt = '';
 
@@ -355,12 +366,12 @@ export class PromptBuilder {
             }
         }
         if (projectRules) finalPrompt += projectRules + '\n';
-        if (includeProjectKnowledge) {
+        if (includeProjectKnowledge && runtimeDomain === 'paradox') {
             const projectKnowledge = buildProjectKnowledgePrompt(this.workspaceRoot);
             if (projectKnowledge) finalPrompt += projectKnowledge + '\n';
         }
 
-        if (includeMemory) {
+        if (includeMemory && runtimeDomain === 'paradox') {
             // Direct prompt-builder callers may not have a current user task.
             // AgentRunner keeps includeMemory=false here and supplies task/path
             // retrieval context through buildDynamicPromptBlock instead.
@@ -369,7 +380,7 @@ export class PromptBuilder {
         }
 
         // Inject approved design blueprint in Build mode
-        if (mode === 'build') {
+        if (runtimeDomain === 'paradox' && mode === 'build') {
             const blueprintPrompt = this.getDesignBlueprintPrompt(topicId);
             if (blueprintPrompt) finalPrompt += blueprintPrompt + '\n';
         }
@@ -377,7 +388,7 @@ export class PromptBuilder {
         finalPrompt += basePrompt;
         if (supplement) finalPrompt += '\n' + supplement;
         
-        const skillsPrompt = this.getAgentSkillsPrompt();
+        const skillsPrompt = runtimeDomain === 'paradox' ? this.getAgentSkillsPrompt() : '';
         if (skillsPrompt) finalPrompt += '\n' + skillsPrompt;
 
         return finalPrompt;
@@ -406,9 +417,9 @@ export class PromptBuilder {
         mode: AgentMode = 'build',
         providerId?: string,
         languageId?: string,
-        options?: { toolsetHash?: string; rebuild?: boolean }
+        options?: { toolsetHash?: string; rebuild?: boolean; domain?: AgentRuntimeDomain }
     ): string {
-        const fingerprint = this.computeFrozenPromptFingerprint(mode, providerId, languageId, options?.toolsetHash);
+        const fingerprint = this.computeFrozenPromptFingerprint(mode, providerId, languageId, options?.toolsetHash, options?.domain);
         if (options?.rebuild) {
             // Precise invalidation: only this fingerprint's entry is dropped;
             // other modes/providers keep their cached prompts.
@@ -435,7 +446,17 @@ export class PromptBuilder {
         // Force stable mode by leaving topicId, runId, pinned, and memory undefined.
         // The resolved gameId is passed explicitly so the built prompt and the
         // fingerprint always describe the same game.
-        const prompt = this.buildSystemPromptForMode(mode, providerId, fingerprint.gameId, undefined, undefined, undefined, false, false);
+        const prompt = this.buildSystemPromptForMode(
+            mode,
+            providerId,
+            fingerprint.gameId,
+            undefined,
+            undefined,
+            undefined,
+            false,
+            false,
+            fingerprint.components.domain,
+        );
         // LRU eviction: drop oldest entry once we exceed the cap (Map iterates in insertion order).
         if (this._frozenPromptCache.size >= PromptBuilder.FROZEN_PROMPT_CACHE_MAX) {
             const oldestKey = this._frozenPromptCache.keys().next().value;
@@ -477,7 +498,13 @@ export class PromptBuilder {
         return 'evicted';
     }
 
-    private computeFrozenPromptFingerprint(mode: AgentMode, providerId: string | undefined, languageId: string | undefined, toolsetHash?: string): FrozenPromptFingerprint {
+    private computeFrozenPromptFingerprint(
+        mode: AgentMode,
+        providerId: string | undefined,
+        languageId: string | undefined,
+        toolsetHash?: string,
+        domain: AgentRuntimeDomain = defaultDomainForMode(mode),
+    ): FrozenPromptFingerprint {
         let incomplete = false;
         let gameId = 'unknown';
         let locale = 'unknown';
@@ -485,21 +512,28 @@ export class PromptBuilder {
         let profileHash = 'unknown';
         let skillsHash = 'unknown';
         let flagsHash = 'unknown';
-        try { gameId = languageId ?? this.detectGameLanguageId(); } catch { incomplete = true; }
+        try { gameId = domain === 'paradox' ? languageId ?? this.detectGameLanguageId() : 'general'; } catch { incomplete = true; }
         try { locale = getAiMessageLocale(); } catch { incomplete = true; }
-        try {
-            const rules = this.parseProjectRules();
-            rulesHash = rules ? shortSha256(rules.raw) : 'none';
-        } catch { incomplete = true; }
-        try {
-            const profile = this.parseProjectProfile();
-            profileHash = profile ? shortSha256(JSON.stringify(profile)) : 'none';
-        } catch { incomplete = true; }
-        try { skillsHash = this.computeSkillsIndexHash(); } catch { incomplete = true; }
+        if (domain === 'paradox') {
+            try {
+                const rules = this.parseProjectRules();
+                rulesHash = rules ? shortSha256(rules.raw) : 'none';
+            } catch { incomplete = true; }
+            try {
+                const profile = this.parseProjectProfile();
+                profileHash = profile ? shortSha256(JSON.stringify(profile)) : 'none';
+            } catch { incomplete = true; }
+            try { skillsHash = this.computeSkillsIndexHash(); } catch { incomplete = true; }
+        } else {
+            rulesHash = 'none';
+            profileHash = 'none';
+            skillsHash = 'none';
+        }
         try { flagsHash = this.computePromptFlagsHash(); } catch { incomplete = true; }
         const components: FrozenPromptFingerprintComponents = {
             templateVersion: PROMPT_TEMPLATE_VERSION,
             mode,
+            domain,
             providerId: providerId ?? '',
             gameId,
             locale,
@@ -511,7 +545,7 @@ export class PromptBuilder {
         };
         return {
             hash: shortSha256(JSON.stringify(components), 24),
-            baseKey: `${mode}|${providerId ?? ''}|${gameId}|${locale}`,
+            baseKey: `${domain}|${mode}|${providerId ?? ''}|${gameId}|${locale}`,
             gameId,
             components,
             incomplete,
@@ -615,8 +649,11 @@ export class PromptBuilder {
         runtime?: RuntimePromptState
     ): ChatMessage[] {
         const dynamicParts: string[] = [];
-        const projectKnowledge = buildProjectKnowledgePrompt(this.workspaceRoot);
-        if (projectKnowledge) dynamicParts.push(projectKnowledge);
+        const runtimeDomain = runtime?.domain ?? defaultDomainForMode(runtime?.mode ?? 'build');
+        if (runtimeDomain === 'paradox') {
+            const projectKnowledge = buildProjectKnowledgePrompt(this.workspaceRoot);
+            if (projectKnowledge) dynamicParts.push(projectKnowledge);
+        }
         if (runtime?.mode || runtime?.workflow) {
             const lines: string[] = [];
             if (runtime.mode) {
@@ -634,17 +671,19 @@ export class PromptBuilder {
             dynamicParts.push(`<runtime-state>\n${lines.join('\n')}\n</runtime-state>`);
         }
 
-        if (runtime?.mode === 'build') {
+        if (runtimeDomain === 'paradox' && runtime?.mode === 'build') {
             const blueprintPrompt = this.getDesignBlueprintPrompt(topicId);
             if (blueprintPrompt) dynamicParts.push(blueprintPrompt);
         }
 
-        const memoryPrompt = this.memoryParser.getMemoryPrompt(topicId, {
-            taskText: runtime?.taskText,
-            gameId: this.detectGameLanguageId(),
-            pathScope: runtime?.pathScope,
-        });
-        if (memoryPrompt) dynamicParts.push(memoryPrompt);
+        if (runtimeDomain === 'paradox') {
+            const memoryPrompt = this.memoryParser.getMemoryPrompt(topicId, {
+                taskText: runtime?.taskText,
+                gameId: this.detectGameLanguageId(),
+                pathScope: runtime?.pathScope,
+            });
+            if (memoryPrompt) dynamicParts.push(memoryPrompt);
+        }
 
         // 1. Compacted Summary (来自历史会话看板的压缩)
         if (topicId && runId) {
@@ -738,29 +777,32 @@ export class PromptBuilder {
         this._projectProfileMtime = 0;
     }
 
-    /**
-     * Build a slim system prompt for sub-agents — includes only mod info + namespaces
-     * from CWTOOLS.md to avoid bloating narrow-scope sub-agent contexts.
-     */
-    buildSlimSystemPromptForMode(mode: AgentMode, providerId?: string, languageId?: string, topicId?: string): string {
-        const gameId = languageId ?? this.detectGameLanguageId();
-        const gameKnowledge = getGameKnowledge(gameId);
-        const gameName = getGameDisplayName(gameId);
-        const basePrompt = this.getModePrompt(mode, gameKnowledge, gameName, true);
+    /** Build a slim sub-agent prompt with only a compact project hint. */
+    buildSlimSystemPromptForMode(
+        mode: AgentMode,
+        providerId?: string,
+        languageId?: string,
+        topicId?: string,
+        domain: AgentRuntimeDomain = defaultDomainForMode(mode),
+    ): string {
+        const gameId = domain === 'paradox' ? languageId ?? this.detectGameLanguageId() : 'general';
+        const gameKnowledge = domain === 'paradox' ? getGameKnowledge(gameId) : '';
+        const gameName = domain === 'paradox' ? getGameDisplayName(gameId) : 'repository';
+        const basePrompt = this.getModePrompt(mode, gameKnowledge, gameName, true, domain);
         const supplement = this.getModelSupplement(providerId);
-        const slimRules = this.getSlimProjectRulesPrompt();
+        const slimRules = domain === 'paradox' ? this.getSlimProjectRulesPrompt() : '';
         
         let finalPrompt = '';
         if (slimRules) finalPrompt += slimRules + '\n';
-        if (mode === 'build') {
+        if (domain === 'paradox' && mode === 'build') {
             const blueprintPrompt = this.getDesignBlueprintPrompt(topicId);
             if (blueprintPrompt) finalPrompt += blueprintPrompt + '\n';
         }
         finalPrompt += basePrompt;
         if (supplement) finalPrompt += '\n' + supplement;
         
-        // Installed skills are invoked through run_command, which is intentionally
-        // unavailable to slim orchestrator sub-agents.
+        // Slim agents load optional capabilities on demand. Utility children may
+        // run approved scoped commands; Paradox children stay on structured tools.
 
         return finalPrompt;
     }
@@ -978,20 +1020,42 @@ ${trimmed}
         }
     }
 
-    private getModePrompt(mode: AgentMode, gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
+    private getModePrompt(
+        mode: AgentMode,
+        gameKnowledge: string,
+        gameName: string,
+        isSlim: boolean = false,
+        domain: AgentRuntimeDomain = defaultDomainForMode(mode),
+    ): string {
+        if (domain === 'general') {
+            switch (mode) {
+                case 'plan': return buildGeneralPlanSystemPrompt(isSlim);
+                case 'explore': return buildGeneralExploreSystemPrompt(isSlim);
+                case 'review': return buildGeneralReviewSystemPrompt(isSlim);
+                case 'general': return buildGeneralReadOnlySystemPrompt();
+                case 'orchestrator': return buildGeneralOrchestratorSystemPrompt();
+                default: return buildGeneralCodingSystemPrompt(isSlim);
+            }
+        }
+        // Public domain-neutral modes discover changing game facts through the
+        // active CWT/LSP/index tools. Avoid injecting a large static game pack
+        // into every ordinary coding, planning, exploration, or review turn.
+        const dynamicKnowledge = ['plan', 'explore', 'general', 'utility', 'review', 'orchestrator'].includes(mode)
+            ? ''
+            : gameKnowledge;
         switch (mode) {
-            case 'plan': return buildPlanModeSystemPrompt(gameKnowledge, gameName, isSlim);
-            case 'explore': return buildExploreModeSystemPrompt(gameKnowledge, gameName, isSlim);
-            case 'general': return buildGeneralModeSystemPrompt(gameKnowledge, gameName); // general never slim
-            case 'utility': return buildUtilityModeSystemPrompt(gameKnowledge, gameName); // utility never slim
-            case 'review': return buildReviewModeSystemPrompt(gameKnowledge, gameName, isSlim);
-            case 'gui_expert': return buildGuiExpertSystemPrompt(gameKnowledge, gameName);
-            case 'script_reviewer': return buildScriptReviewerSystemPrompt(gameKnowledge, gameName);
-            case 'loc_translator': return buildLocTranslatorSystemPrompt(gameKnowledge, gameName);
-            case 'loc_writer': return buildLocWriterSystemPrompt(gameKnowledge, gameName, isSlim);
-            case 'orchestrator': return buildOrchestratorSystemPrompt(gameKnowledge, gameName);
-            case 'script': return buildScriptModeSystemPrompt(gameKnowledge, gameName);
-            default: return buildBuildSystemPrompt(gameKnowledge, gameName, isSlim);
+            case 'plan': return buildPlanModeSystemPrompt(dynamicKnowledge, gameName, isSlim);
+            case 'explore': return buildExploreModeSystemPrompt(dynamicKnowledge, gameName, isSlim);
+            case 'general': return buildGeneralModeSystemPrompt(dynamicKnowledge, gameName); // general never slim
+            case 'utility': return buildUtilityModeSystemPrompt(dynamicKnowledge, gameName, isSlim);
+            case 'review': return buildReviewModeSystemPrompt(dynamicKnowledge, gameName, isSlim);
+            case 'gui_expert': return buildGuiExpertSystemPrompt(dynamicKnowledge, gameName);
+            case 'script_reviewer': return buildScriptReviewerSystemPrompt(dynamicKnowledge, gameName);
+            case 'loc_translator': return buildLocTranslatorSystemPrompt(dynamicKnowledge, gameName);
+            case 'loc_writer': return buildLocWriterSystemPrompt(dynamicKnowledge, gameName, isSlim);
+            case 'orchestrator': return buildOrchestratorSystemPrompt(dynamicKnowledge, gameName);
+            case 'script': return buildScriptModeSystemPrompt(dynamicKnowledge, gameName);
+            default: return buildBuildSystemPrompt(dynamicKnowledge, gameName, isSlim);
         }
     }
 
@@ -1090,8 +1154,11 @@ ${trimmed}
         fileContent?: string;
         topicId?: string;
         commandToolsAvailable?: boolean;
+        domain?: AgentRuntimeDomain;
     }): ChatMessage[] {
         const contextParts: string[] = [];
+        const paradoxDomain = options.domain !== 'general';
+        const codeFence = paradoxDomain ? 'pdx' : 'text';
         const workspaceRel = this.workspaceRoot.replace(/\\/g, '/');
         contextParts.push(`**Project Workspace Root**: \`${workspaceRel}\``);
         const commandToolsAvailable = options.commandToolsAvailable !== false;
@@ -1113,7 +1180,9 @@ ${trimmed}
             contextParts.push(`**Current file**: \`${relPath}\``);
 
             const directory = path.posix.dirname(relPath);
-            contextParts.push(`**File directory**: \`${directory}\` (routing hint only; obtain its TypeDef/schema from current CWT/LSP evidence)`);
+            contextParts.push(paradoxDomain
+                ? `**File directory**: \`${directory}\` (routing hint only; obtain its TypeDef/schema from current CWT/LSP evidence)`
+                : `**File directory**: \`${directory}\``);
         }
 
         if (options.cursorLine !== undefined) {
@@ -1129,14 +1198,14 @@ ${trimmed}
 
             if (totalLines <= 100 && includeFullSmallFiles) {
                 if (options.fileContent.trim().length > 0) {
-                    contextParts.push(`\n**Full file content** (${totalLines} lines):\n\`\`\`pdx\n${options.fileContent}\n\`\`\``);
+                    contextParts.push(`\n**Full file content** (${totalLines} lines):\n\`\`\`${codeFence}\n${options.fileContent}\n\`\`\``);
                 }
             } else {
                 if (totalLines <= 100) {
                     const headerEnd = Math.min(20, totalLines);
                     const headerCode = lines.slice(0, headerEnd).join('\n');
                     if (headerCode.trim().length > 0) {
-                        contextParts.push(`\n**File header excerpt** (lines 1-${headerEnd} of ${totalLines}):\n\`\`\`pdx\n${headerCode}\n\`\`\``);
+                        contextParts.push(`\n**File header excerpt** (lines 1-${headerEnd} of ${totalLines}):\n\`\`\`${codeFence}\n${headerCode}\n\`\`\``);
                     }
                 }
 
@@ -1151,13 +1220,13 @@ ${trimmed}
 
                 if (contextCode.trim().length > 0) {
                     const label = blockRange ? 'Enclosing block' : 'Surrounding code';
-                    contextParts.push(`\n**${label}** (lines ${startLine + 1}-${endLine + 1}):\n\`\`\`pdx\n${contextCode}\n\`\`\``);
+                    contextParts.push(`\n**${label}** (lines ${startLine + 1}-${endLine + 1}):\n\`\`\`${codeFence}\n${contextCode}\n\`\`\``);
                 }
             }
         }
 
         if (options.selectedText && options.selectedText.trim().length > 0) {
-            contextParts.push(`\n**Selected code**:\n\`\`\`pdx\n${options.selectedText}\n\`\`\``);
+            contextParts.push(`\n**Selected code**:\n\`\`\`${codeFence}\n${options.selectedText}\n\`\`\``);
         }
 
         if (contextParts.length === 0) {

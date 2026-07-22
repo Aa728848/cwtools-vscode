@@ -25,6 +25,7 @@ import type {
     ToolDefinition,
 } from './types';
 import { contentToString } from './types';
+import { defaultDomainForMode } from './agentProfile';
 import * as vs from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -53,6 +54,7 @@ import {
     buildToolStageReminder,
     resolveMaxToolIterations,
     resolveRunMaxOutputTokens,
+    shouldRenewIterationLimit,
     SLIM_SUB_AGENT_OUTPUT_BUDGET_RECOVERY_LIMIT,
     SLIM_SUB_AGENT_THINKING_CHAR_LIMIT,
 } from './runnerPolicy';
@@ -82,6 +84,7 @@ import {
     DEFAULT_HARD_BUDGET_MULTIPLIER,
     RunBudgetTracker,
     selectHardBudgetMultiplier,
+    shouldAutoExtendSubAgentBudget,
     shouldAutoExtendRunBudget,
     shouldPersistResumeSnapshot,
     shouldRetainResumeState,
@@ -231,8 +234,12 @@ export interface AgentRunnerOptions {
     durableGoal?: boolean;
     /** Override the reasoning-loop iteration limit. Used by orchestrator role budgets. */
     maxIterations?: number;
+    /** Treat maxIterations as a renewable healthy-progress window instead of an absolute ceiling. */
+    renewableIterationLimit?: boolean;
     /** Agent mode: build (default), plan (read-only), explore (parallel read), general (research) */
     mode?: AgentMode;
+    /** Resolved capability domain. General runs cannot access Paradox-only tools or prompts. */
+    domain?: import('./types').AgentRuntimeDomain;
     /** Callback for real-time step updates (for UI) */
     onStep?: (step: AgentStep) => void;
     /** Called when an external runtime has allocated a durable run id. */
@@ -395,7 +402,7 @@ const _LOC_WRITER_TOOLS: AgentToolName[] = [
     'write_localisation', 'git_ops', 'save_workflow',
 ];
 
-/** Orchestrator mode: read-only tools + coordinator-specific tools (dispatch_agents, query_blackboard, merge_results) */
+/** General Multi-Agent parent: read-only tools plus coordinator-specific dispatch/blackboard/merge tools. */
 const _ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
     'explore_pdx_project',
     //Read-only information collection
@@ -571,10 +578,11 @@ export class AgentRunner {
         topicId: string,
         messages: ChatMessage[],
         mode: AgentMode,
+        domain: import('./types').AgentRuntimeDomain,
         runId?: string,
         pendingToolCalls?: any[]
     ): Promise<void> {
-        await saveCheckpointResumeState(topicId, mode, messages, this.toolExecutor, runId, pendingToolCalls);
+        await saveCheckpointResumeState(topicId, mode, messages, this.toolExecutor, runId, pendingToolCalls, domain);
     }
 
     /** 
@@ -759,11 +767,15 @@ export class AgentRunner {
         } else {
             parentAbortSignal?.addEventListener('abort', forwardParentAbort, { once: true });
         }
-        let mode = options?.mode ?? 'build';
+        const restoredResumeState = options?.resumeFromState && context.topicId
+            ? await this.loadResumeState(context.topicId)
+            : null;
+        let mode = restoredResumeState?.mode ?? options?.mode ?? 'build';
+        let domain = restoredResumeState?.domain ?? options?.domain ?? defaultDomainForMode(mode);
         const topicId = context.topicId || 'default';
         const threadId = options?.threadId ?? topicId;
         const turnId = options?.turnId ?? `turn_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        options = { ...options, abortSignal: turnAbortController.signal, threadId, turnId };
+        options = { ...options, mode, domain, abortSignal: turnAbortController.signal, threadId, turnId };
         const userPromptPreview = userMessage.substring(0, 100);
         const turnRuntimePromise = this.turnRunner.startTurn({
             topicId,
@@ -1055,6 +1067,7 @@ export class AgentRunner {
         const promptPerformanceConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
         const promptLegacyFullToolset = promptPerformanceConfig.get<boolean>('legacyFullToolset') === true;
         const promptModeTools = filterWebToolsForConfiguredAccess(filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
+            domain,
             useSlimPrompt: options?.useSlimPrompt,
             excludeTools: options?.excludeTools,
             legacyFullToolset: promptLegacyFullToolset,
@@ -1069,11 +1082,12 @@ export class AgentRunner {
         // to ensure byte-level stability across API calls for cache hits.
         // rebuildSystemPrompt drops this fingerprint's cache entry before building (plan sec.7.1).
         const systemPrompt = options?.useSlimPrompt
-            ? this.promptBuilder.buildSlimSystemPromptForMode(mode, providerForPrompt, undefined, topicId)
+            ? this.promptBuilder.buildSlimSystemPromptForMode(mode, providerForPrompt, undefined, topicId, domain)
             : supportsPrefixCache
                 ? this.promptBuilder.buildFrozenSystemPrompt(mode, providerForPrompt, undefined, {
                     toolsetHash: hashToolDefinitionsForFingerprint(promptToolDefinitions),
                     rebuild: options?.rebuildSystemPrompt === true,
+                    domain,
                 })
                 : this.promptBuilder.buildSystemPromptForMode(
                     mode,
@@ -1084,6 +1098,7 @@ export class AgentRunner {
                     undefined,
                     false,
                     false,
+                    domain,
                 );
         tokenAccumulator.promptFingerprint = supportsPrefixCache && !options?.useSlimPrompt
             ? this.promptBuilder.getLastFrozenPromptFingerprintHash()
@@ -1112,6 +1127,7 @@ export class AgentRunner {
         // caching is unavailable.
         const promptDynamicBlock = this.promptBuilder.buildDynamicPromptBlock(pinnedData, topicId, runId, {
             mode,
+            domain,
             taskText: userMessage,
             pathScope: memoryPathScope,
             workflow: activeWorkflowForPrompt
@@ -1122,13 +1138,14 @@ export class AgentRunner {
                 }
                 : undefined,
         });
-        const initialStageReminder = buildToolStageReminder(mode, initialToolStageForMode(mode), promptToolDefinitions);
+        const initialStageReminder = buildToolStageReminder(mode, initialToolStageForMode(mode), promptToolDefinitions, domain);
         const dynamicBlock: ChatMessage[] = initialStageReminder
             ? [...promptDynamicBlock, { role: 'user', content: initialStageReminder }]
             : promptDynamicBlock;
 
         const contextMessages = this.promptBuilder.buildContextMessages({
             ...context,
+            domain,
             commandToolsAvailable: options?.useSlimPrompt !== true,
         });
         const fixedPromptMessages: ChatMessage[] = [
@@ -1172,11 +1189,12 @@ export class AgentRunner {
         let messages: ChatMessage[];
         
         if (options?.resumeFromState && context.topicId) {
-            const resumeState = await this.loadResumeState(context.topicId);
+            const resumeState = restoredResumeState;
             if (resumeState) {
                 messages = resumeState.messages;
                 mode = resumeState.mode ?? mode;
-                options = { ...options, mode };
+                domain = resumeState.domain ?? domain;
+                options = { ...options, mode, domain };
                 if (resumeState.todos && resumeState.todos.length > 0) {
                     void this.toolExecutor.getExternalToolHandler().todoWrite({ todos: resumeState.todos });
                 }
@@ -1211,8 +1229,8 @@ export class AgentRunner {
         tokenAccumulator.agentMode = mode;
 
         if (context.topicId) {
-            options = { ...options, topicId: context.topicId, mode };
-            await this.saveResumeState(context.topicId, messages, mode, runId);
+            options = { ...options, topicId: context.topicId, mode, domain };
+            await this.saveResumeState(context.topicId, messages, mode, domain, runId);
         }
 
         const modeLabel: Record<string, string> = {
@@ -1278,7 +1296,7 @@ export class AgentRunner {
                 };
             }
 
-            // Plan / Explore / General / Review / Orchestrator mode — or no code generated — just an explanation
+            // Plan / Explore / General / Review / multi-Agent parent — or no code generated — just an explanation
             if (!code || mode === 'plan' || mode === 'explore' || mode === 'general' || mode === 'utility' || mode === 'review' || mode === 'orchestrator' || mode === 'script') {
                 const orchestratorValidation = mode === 'script' || mode === 'orchestrator'
                     ? this.toolExecutor.getOrchestratorValidation(runId)
@@ -1294,7 +1312,7 @@ export class AgentRunner {
                 if (validationPending && !validationFailed) {
                     this.retainedResumeRuns.add(runId);
                     if (context.topicId) {
-                        await this.saveResumeState(context.topicId, messages, mode, runId);
+                        await this.saveResumeState(context.topicId, messages, mode, domain, runId);
                     }
                     updateRunStatus('paused');
                     await clearResumeStateIfComplete();
@@ -1392,7 +1410,7 @@ export class AgentRunner {
             if (validationPending) {
                 this.retainedResumeRuns.add(runId);
                 if (context.topicId) {
-                    await this.saveResumeState(context.topicId, messages, mode, runId);
+                    await this.saveResumeState(context.topicId, messages, mode, domain, runId);
                 }
                 updateRunStatus('paused');
             } else {
@@ -1420,7 +1438,7 @@ export class AgentRunner {
             }
 
             if (context.topicId) {
-                await this.saveResumeState(context.topicId, messages, mode, runId);
+                await this.saveResumeState(context.topicId, messages, mode, domain, runId);
             }
             runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0);
 
@@ -1859,6 +1877,7 @@ export class AgentRunner {
             return requestArtifact;
         };
         let availableTools = filterWebToolsForConfiguredAccess(filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
+            domain: options?.domain,
             useSlimPrompt: options?.useSlimPrompt,
             excludeTools: options?.excludeTools,
             legacyFullToolset,
@@ -1873,7 +1892,7 @@ export class AgentRunner {
         // Dynamic MCP tools (Phase 2): opt-in, share mcp_call mode gating, never offered to slim sub-agents.
         if (!options?.useSlimPrompt) {
             try {
-                const mcpDefs = await this.toolExecutor.getDynamicMcpToolDefinitions(mode);
+                const mcpDefs = await this.toolExecutor.getDynamicMcpToolDefinitions(mode, options?.domain);
                 if (mcpDefs.length > 0) availableTools = [...availableTools, ...mcpDefs];
             } catch { /* best effort */ }
         }
@@ -1917,13 +1936,14 @@ export class AgentRunner {
         const midLoopThreshold = Math.floor(contextLimit * MID_LOOP_COMPACTION_RATIO);
         const toolResultBudget = getToolResultBudget(baseContextLimit);
 
-        const maxToolIterations = resolveMaxToolIterations({
+        const iterationWindow = resolveMaxToolIterations({
             mode,
             baseContextLimit,
             bypassSandbox,
             override: options?.maxIterations,
             isSubAgent: options?.useSlimPrompt === true,
         });
+        let maxToolIterations = iterationWindow;
         if (runMetrics) runMetrics.maxIterations = maxToolIterations;
 
         const runBudgetConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
@@ -1958,6 +1978,7 @@ export class AgentRunner {
         );
         let progressRevision = 0;
         let lastExtendedProgressRevision = 0;
+        let lastExtendedActivityIteration = 0;
         let completedTodoCount = this.toolExecutor.getTodos()
             .filter(todo => todo.status === 'done').length;
         const blockingValidationIssues = new Set<string>();
@@ -1976,7 +1997,13 @@ export class AgentRunner {
                 lastSavedAt: lastResumeSnapshotAt,
                 minIntervalMs: RESUME_SNAPSHOT_MIN_INTERVAL_MS,
             })) return;
-            await this.saveResumeState(options.topicId, messages, mode, runRecord.runId);
+            await this.saveResumeState(
+                options.topicId,
+                messages,
+                mode,
+                options.domain ?? defaultDomainForMode(mode),
+                runRecord.runId,
+            );
             lastResumeSnapshotAt = now;
             lastResumeSnapshotIteration = iteration;
         };
@@ -2026,18 +2053,26 @@ export class AgentRunner {
                     await saveRetainedResumeSnapshot();
                     return `The emergency runtime budget was reached (${detail}). Progress is checkpointed; review the current evidence before continuing.`;
                 }
+                const hasHealthySubAgentActivity = shouldAutoExtendSubAgentBudget({
+                    isSubAgent: isSlimRun,
+                    iteration,
+                    lastExtendedIteration: lastExtendedActivityIteration,
+                    consecutiveErrors: consecutiveErrorCount,
+                    blockingValidationIssues: blockingValidationIssues.size,
+                });
                 if (shouldAutoExtendRunBudget({
                     progressRevision,
                     lastExtendedProgressRevision,
                     consecutiveErrors: consecutiveErrorCount,
                     blockingValidationIssues: blockingValidationIssues.size,
-                })) {
+                }) || hasHealthySubAgentActivity) {
                     await maybeSaveResumeSnapshot(true);
                     budgetTracker.extend();
                     lastExtendedProgressRevision = progressRevision;
+                    lastExtendedActivityIteration = iteration;
                     emitStep({
                         type: 'validation',
-                        content: `Agent runtime soft budget reached with healthy durable progress (${detail}). Checkpoint saved; continuing automatically for one additional budget window.`,
+                        content: `Agent runtime soft budget reached with healthy ${hasHealthySubAgentActivity ? 'sub-agent activity' : 'durable progress'} (${detail}). Checkpoint saved; continuing automatically for one additional budget window.`,
                         timestamp: Date.now(),
                     });
                 } else {
@@ -2061,6 +2096,7 @@ export class AgentRunner {
                     }
                     budgetTracker.extend();
                     lastExtendedProgressRevision = progressRevision;
+                    lastExtendedActivityIteration = iteration;
                 }
             }
             if (options?.tokenBudget && tokenAccumulator && tokenAccumulator.total >= options.tokenBudget) {
@@ -3409,7 +3445,7 @@ export class AgentRunner {
                 toolStage = nextToolStage;
                 if (tokenAccumulator) tokenAccumulator.toolStage = toolStage;
                 availableTools = filterToolDefinitionsForStage(stagedToolPool, mode, toolStage, legacyFullToolset);
-                const stageReminder = buildToolStageReminder(mode, toolStage, availableTools);
+                const stageReminder = buildToolStageReminder(mode, toolStage, availableTools, options?.domain);
                 if (stageReminder) {
                     messages.push({ role: 'user', content: stageReminder });
                 }
@@ -3491,6 +3527,23 @@ export class AgentRunner {
 
             if (options?.topicId && !forceStop) {
                 await maybeSaveResumeSnapshot();
+            }
+
+            if (!forceStop && shouldRenewIterationLimit({
+                renewable: options?.renewableIterationLimit === true,
+                iteration,
+                limit: maxToolIterations,
+                consecutiveErrors: consecutiveErrorCount,
+                blockingValidationIssues: blockingValidationIssues.size,
+            })) {
+                await maybeSaveResumeSnapshot(true);
+                maxToolIterations += iterationWindow;
+                if (runMetrics) runMetrics.maxIterations = maxToolIterations;
+                emitStep({
+                    type: 'validation',
+                    content: `Sub-agent iteration window completed with healthy activity; extending to ${maxToolIterations} iterations.`,
+                    timestamp: Date.now(),
+                });
             }
 
             // If forceStop was set in the emit-results loop, exit outer while now

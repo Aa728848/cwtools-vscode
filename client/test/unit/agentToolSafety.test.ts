@@ -118,6 +118,53 @@ describe('enforced central tool policy', () => {
         expect(result.content).to.include('ok');
         expect(events.some(event => event.type === 'policy_resolved' && event.payload.shadow === false && event.payload.action === 'allow')).to.equal(true);
     });
+
+    it('enforces the General Coding domain even for unadvertised direct tool calls', async () => {
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        const context = {
+            runnerOptions: {
+                mode: 'utility',
+                domain: 'general',
+                abortSignal: new AbortController().signal,
+            },
+        } as any;
+
+        const semanticCall = await executor.execute('query_cwt_schema', { query: 'anything' }, context) as any;
+        expect(semanticCall.success).to.equal(false);
+        expect(semanticCall.error).to.include('Paradox-only capability');
+
+        const mcpCall = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, context) as any;
+        expect(mcpCall.success).to.equal(false);
+        expect(mcpCall.error).to.include('Paradox-only capability');
+
+        const memoryCall = await executor.execute('set_memory', { key: 'secret', value: 'value' }, context) as any;
+        expect(memoryCall.success).to.equal(false);
+        expect(memoryCall.error).to.include('Paradox-only capability');
+
+        executor.blackboard.write('domain:paradox:topic:session:secret', 'paradox value', 'free_text', 'test');
+        const generalBlackboard = await executor.execute('query_blackboard', { key: 'secret' }, {
+            runnerOptions: { mode: 'orchestrator', domain: 'general' },
+        } as any) as any;
+        expect(generalBlackboard).to.deep.equal({ found: false });
+        const paradoxBlackboard = await executor.execute('query_blackboard', { key: 'secret' }, {
+            runnerOptions: { mode: 'script', domain: 'paradox' },
+        } as any) as any;
+        expect(paradoxBlackboard.found).to.equal(true);
+        expect(paradoxBlackboard.entry.value).to.equal('paradox value');
+        const otherTopicBlackboard = await executor.execute('query_blackboard', { key: 'secret' }, {
+            runnerOptions: { mode: 'script', domain: 'paradox', topicId: 'other-topic' },
+        } as any) as any;
+        expect(otherTopicBlackboard).to.deep.equal({ found: false });
+
+        const workflowCall = await executor.execute('save_workflow', {
+            title: 'bad domain switch',
+            description: 'should not save',
+            mode: 'build',
+            promptSupplement: 'do work',
+        }, context) as any;
+        expect(workflowCall.success).to.equal(false);
+        expect(workflowCall.error).to.include("domain-specific mode 'build'");
+    });
 });
 
 describe('HeadTailTextBuffer', () => {
@@ -313,6 +360,49 @@ describe('agent tool file path safety', () => {
         expect(patchResult.success).to.equal(false);
         expect(patchResult.errors.join('\n')).to.include('write_localisation');
         expect(fs.readFileSync(ymlAbs, 'utf8')).to.equal(original);
+    });
+
+    it('lets General Coding write ordinary YAML and text without Paradox file gates', async () => {
+        const handler = createFileHandler();
+        const ctx = makeContext();
+        ctx.runnerOptions.mode = 'utility';
+        ctx.runnerOptions.domain = 'general';
+
+        const yamlRel = '.github/workflows/verify.yml';
+        const yamlResult = await handler.writeFile({
+            file: yamlRel,
+            content: 'name: verify\non:\n  push:\n',
+        }, ctx);
+        expect(yamlResult.success).to.equal(true);
+        const yamlBytes = fs.readFileSync(path.join(workspaceRoot, '.github', 'workflows', 'verify.yml'));
+        expect(yamlBytes.subarray(0, 3).equals(Buffer.from([0xEF, 0xBB, 0xBF]))).to.equal(false);
+
+        const textRel = 'fixtures/unbalanced-template.txt';
+        const textResult = await handler.writeFile({
+            file: textRel,
+            content: 'literal template brace: {\n',
+        }, ctx);
+        expect(textResult.success).to.equal(true);
+        expect(fs.readFileSync(path.join(workspaceRoot, 'fixtures', 'unbalanced-template.txt'), 'utf8'))
+            .to.equal('literal template brace: {\n');
+    });
+
+    it('keeps General file context classification domain-neutral', async () => {
+        const eventDir = path.join(workspaceRoot, 'events');
+        fs.mkdirSync(eventDir, { recursive: true });
+        const target = path.join(eventDir, 'sample.txt');
+        fs.writeFileSync(target, 'sample = {\n}\n');
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+
+        const general = await executor.execute('get_file_context', { file: target, line: 0 }, {
+            runnerOptions: { mode: 'utility', domain: 'general' },
+        } as any) as any;
+        expect(general.fileType).to.equal('txt');
+
+        const paradox = await executor.execute('get_file_context', { file: target, line: 0 }, {
+            runnerOptions: { mode: 'build', domain: 'paradox' },
+        } as any) as any;
+        expect(paradox.fileType).to.equal('events');
     });
 
     it('applies edit_file replacements through the shared fuzzy replacer', async () => {
@@ -931,7 +1021,7 @@ describe('agent sprite candidate tool contract', () => {
 
         const taskProperties = (definition.function.parameters.properties as any).tasks.items.properties;
         expect((definition.function.parameters.properties as any).tasks.maxItems).to.equal(8);
-        expect(taskProperties.plannedFiles.description).to.include('Provide this for Builder tasks');
+        expect(taskProperties.plannedFiles.description).to.include('Expected project files this writer will modify');
     });
 
     it('queries the shared localisation index when IndexService is provided', async () => {
@@ -1965,6 +2055,14 @@ describe('agent tool progress and aborts', () => {
             expect(progress.length).to.be.greaterThan(0);
             expect(String(progress[0].content)).to.include('dispatch_agents');
 
+            let settled = false;
+            void promise.then(
+                () => { settled = true; },
+                () => { settled = true; },
+            );
+            await clock.tickAsync(61 * 60_000);
+            expect(settled).to.equal(false);
+
             const stepCountBeforeAbort = steps.length;
             abortController.abort(new Error('test abort'));
             const error = await promise.then(() => undefined, e => e);
@@ -2007,15 +2105,15 @@ describe('agent tool progress and aborts', () => {
         const executeInternal = sinon.stub(executor as any, 'executeInternal').resolves({ success: true, routed: true });
 
         const blocked = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
-            runnerOptions: { mode: 'build' },
+            runnerOptions: { mode: 'loc_writer', domain: 'paradox' },
         } as any) as any;
         expect(blocked.success).to.equal(false);
-        expect(blocked.error).to.include("not allowed in current mode 'build'");
+        expect(blocked.error).to.include("not allowed in current mode 'loc_writer'");
         expect(blocked.error).to.include('mcp_call');
         expect(executeInternal.called).to.equal(false);
 
         const routed = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
-            runnerOptions: { mode: 'general' },
+            runnerOptions: { mode: 'utility', domain: 'paradox' },
         } as any) as any;
         expect(routed).to.deep.include({ success: true, routed: true });
         expect(executeInternal.calledOnce).to.equal(true);
@@ -2025,7 +2123,7 @@ describe('agent tool progress and aborts', () => {
     it('denies MCP tools to orchestrator sub-agents by default at the execution chokepoint', async () => {
         const executor = createExecutor();
         const result = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
-            runnerOptions: { mode: 'general', useSlimPrompt: true },
+            runnerOptions: { mode: 'utility', domain: 'paradox', useSlimPrompt: true },
         } as any) as any;
 
         expect(result.success).to.equal(false);
@@ -2037,7 +2135,7 @@ describe('agent tool progress and aborts', () => {
         permissionsConfig = { mcp: { 'filesystem_read_*': 'allow' } };
         const executor = createExecutor();
         const result = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
-            runnerOptions: { mode: 'general', useSlimPrompt: true },
+            runnerOptions: { mode: 'utility', domain: 'paradox', useSlimPrompt: true },
         } as any) as any;
 
         // Permission gate passed; failure comes from the unconfigured server, not the sandbox.
@@ -2050,7 +2148,7 @@ describe('agent tool progress and aborts', () => {
         permissionsConfig = { mcp: { 'filesystem_*': 'ask' } };
         const executor = createExecutor();
         const result = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file' }, {
-            runnerOptions: { mode: 'general' },
+            runnerOptions: { mode: 'utility', domain: 'paradox' },
         } as any) as any;
 
         expect(result.success).to.equal(false);
@@ -2064,7 +2162,7 @@ describe('agent tool progress and aborts', () => {
         sinon.stub(executor as any, 'getMcpClient').resolves({ callTool });
 
         const result = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
-            runnerOptions: { mode: 'general' },
+            runnerOptions: { mode: 'utility', domain: 'paradox' },
         } as any) as any;
 
         expect(result.success).to.equal(true);
@@ -2079,7 +2177,7 @@ describe('agent tool progress and aborts', () => {
         sinon.stub(executor as any, 'getMcpClient').resolves({ callTool });
 
         const result = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file', arguments: { path: 'a.txt' } }, {
-            runnerOptions: { mode: 'general' },
+            runnerOptions: { mode: 'utility', domain: 'paradox' },
         } as any) as any;
 
         expect(result.success).to.equal(true);
@@ -2095,11 +2193,11 @@ describe('agent tool progress and aborts', () => {
             listTools: async () => ({ tools: [{ name: 'read_file', description: 'd', inputSchema: { type: 'object', properties: {} } }] }),
         });
 
-        const defs = await executor.getDynamicMcpToolDefinitions('general' as any);
+        const defs = await executor.getDynamicMcpToolDefinitions('utility' as any, 'paradox');
         expect(defs.map((d: any) => d.function.name)).to.include('mcp_my_server_read_file');
 
         const result = await executor.execute('mcp_my_server_read_file', { path: 'x' }, {
-            runnerOptions: { mode: 'general' },
+            runnerOptions: { mode: 'utility', domain: 'paradox' },
         } as any) as any;
 
         expect(result.success).to.equal(true);
@@ -2113,11 +2211,11 @@ describe('agent tool progress and aborts', () => {
         const executeInternal = sinon.stub(executor as any, 'executeInternal').resolves({ success: true });
 
         const result = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file' }, {
-            runnerOptions: { mode: 'build' },
+            runnerOptions: { mode: 'loc_writer', domain: 'paradox' },
         } as any) as any;
 
         expect(result.success).to.equal(false);
-        expect(result.error).to.include("Tool 'mcp_call' is not allowed in current mode 'build'");
+        expect(result.error).to.include("Tool 'mcp_call' is not allowed in current mode 'loc_writer'");
         expect(executeInternal.called).to.equal(false);
     });
 

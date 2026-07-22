@@ -215,6 +215,25 @@ describe('AI Workflow Registry', () => {
         }
     });
 
+    it('maps legacy internal workflow roles onto public modes when saving', () => {
+        const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-legacy-workflow-'));
+        try {
+            const loc = saveProjectWorkflow({
+                title: 'Legacy Loc', description: 'Legacy role compatibility.', mode: 'loc_writer',
+                promptSupplement: 'Write requested localisation.',
+            }, tempRoot);
+            expect(loc.workflow?.mode).to.equal('build');
+
+            const reviewer = saveProjectWorkflow({
+                title: 'Legacy Reviewer', description: 'Legacy reviewer compatibility.', mode: 'script_reviewer',
+                promptSupplement: 'Review the requested files.',
+            }, tempRoot);
+            expect(reviewer.workflow?.mode).to.equal('review');
+        } finally {
+            fs.rmSync(tempRoot, { recursive: true, force: true });
+        }
+    });
+
     it('all workflows have valid structure', () => {
         for (const wf of getAllWorkflows()) {
             expect(wf.id, `${wf.id}.id`).to.be.a('string').and.not.be.empty;

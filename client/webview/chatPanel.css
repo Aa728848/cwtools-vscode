@@ -921,6 +921,9 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 body.chat-empty .composer-menu, body.chat-empty .model-menu { top: calc(100% + 6px); bottom: auto; }
 .composer-menu.show, .model-menu.show { display: block; }
 .composer-menu-section { display: flex; flex-direction: column; gap: 2px; }
+.mode-menu { min-width: 250px; max-height: min(70vh, 520px); overflow-y: auto; }
+.mode-menu .composer-menu-section + .composer-menu-section { border-top: 1px solid rgba(255,255,255,0.08); margin-top: 6px; padding-top: 6px; }
+.mode-menu .model-menu-title { padding-top: 4px; padding-bottom: 4px; }
 .composer-menu-divider { height: 1px; background: rgba(255,255,255,0.08); margin: 5px 4px; }
 .composer-menu-item, .model-menu-item { width: 100%; min-height: 34px; border: 1px solid transparent; background: transparent; color: var(--fg); border-radius: 6px; font-family: inherit; font-size: 12px; cursor: pointer; text-align: left; display: flex; align-items: center; gap: 10px; padding: 7px 10px; opacity: 0.86; }
 .composer-menu-item:hover, .composer-menu-item.active, .model-menu-item:hover, .model-menu-item.active { opacity: 1; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.12); }

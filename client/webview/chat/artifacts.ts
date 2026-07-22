@@ -112,7 +112,7 @@ export function restoreArtifactsFromMessages(messages: any[], now = Date.now()):
                 pushUnique({
                     id: `restored:plan:${step.content}`,
                     kind: 'plan',
-                    title: step.mode === 'orchestrator' ? 'Orchestrator Plan' : step.mode === 'script' ? 'Script Mode Plan' : 'Implementation Plan',
+                    title: step.mode === 'orchestrator' ? 'General Multi-Agent Plan' : step.mode === 'script' ? 'Paradox Multi-Agent Plan' : 'Implementation Plan',
                     summary: 'Restored from chat history.',
                     filePath: step.content,
                     relPath: step.content,

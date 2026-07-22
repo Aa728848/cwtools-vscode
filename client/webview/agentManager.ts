@@ -6,6 +6,7 @@ import { getChatI18n, normalizeChatLocale } from './chat/i18n';
 import { getDiffArtifactFiles } from './chat/artifacts';
 import { svgIcon, svgIconNoMargin } from './svgIcons';
 import type { ManagerSnapshotMessage, OrchestratorProgressMessage } from './chat/messages.manager';
+import type { ManagerAgentProfileView } from './chat/messages.manager';
 import type { TopicListItem, TopicStats } from './chat/messages.shared';
 
 type ManagerTab = 'changes' | 'activity' | 'settings';
@@ -23,6 +24,8 @@ type ManagerEnhancementState = {
     artifacts: ManagerSnapshotMessage['artifacts'];
     todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'done' }>;
     mode: string;
+    agentProfile: ManagerAgentProfileView;
+    resolvedAgentProfile?: ManagerSnapshotMessage['resolvedAgentProfile'];
     workflowId: string | null;
     isGenerating: boolean;
     liveStepCount: number;
@@ -59,6 +62,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     artifacts: [],
     todos: [],
     mode: 'build',
+    agentProfile: { domain: 'auto', intent: 'auto', strategy: 'auto' },
+    resolvedAgentProfile: undefined,
     workflowId: null,
     isGenerating: false,
     liveStepCount: 0,
@@ -124,7 +129,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             topicsTitle: 'Agent 话题',
             tabs: { changes: '变更', activity: '活动' },
             actions: { workbench: '工作台', closeWorkbench: '关闭工作台', settings: '设置', showTopics: '显示话题', toggleTopics: '折叠话题栏', newTopic: '新话题', archived: '已归档', exportTopic: '导出', searchTopics: '搜索话题...', renameTopic: '重命名话题' },
-            workflow: { build: '构建工作流', plan: '计划工作流', review: '审查工作流', explore: '探索工作流', orchestrator: '多 Agent 工作流', script: '脚本模式工作流' },
+            workflow: { build: '构建工作流', plan: '计划工作流', review: '审查工作流', explore: '探索工作流', orchestrator: '通用多 Agent 工作流', script: 'Paradox 多 Agent 工作流' },
             status: { paused: '已暂停', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消', idle: '空闲' },
             metrics: { tokens: 'Token', cache: '缓存', filesChanged: '个文件变更', cost: '费用', in: '输入', out: '输出', cached: '缓存', calls: '调用', totalUsage: '总计消耗', estimatedCost: '预估成本', cacheHit: '缓存命中', providers: '按供应商', models: '模型分布' },
             run: {
@@ -188,7 +193,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             topicsTitle: 'Agent Topics',
             tabs: { changes: 'Changes', activity: 'Activity' },
             actions: { workbench: 'Workbench', closeWorkbench: 'Close Workbench', settings: 'Settings', showTopics: 'Show topics', toggleTopics: 'Toggle topics', newTopic: 'New topic', archived: 'Archived', exportTopic: 'Export', searchTopics: 'Search topics...', renameTopic: 'Rename topic' },
-            workflow: { build: 'Build Workflow', plan: 'Plan Workflow', review: 'Review Workflow', explore: 'Explore Workflow', orchestrator: 'Multi-Agent Workflow', script: 'Script Mode Workflow' },
+            workflow: { build: 'Build Workflow', plan: 'Plan Workflow', review: 'Review Workflow', explore: 'Explore Workflow', orchestrator: 'General Multi-Agent Workflow', script: 'Paradox Multi-Agent Workflow' },
             status: { paused: 'Paused', running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', idle: 'Idle' },
             metrics: { tokens: 'Tokens', cache: 'Cache', filesChanged: 'files changed', cost: 'Cost', in: 'in', out: 'out', cached: 'cached', calls: 'calls', totalUsage: 'Total Usage', estimatedCost: 'Estimated Cost', cacheHit: 'Cache Hit', providers: 'By Provider', models: 'Models' },
             run: {
@@ -991,6 +996,17 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         return n >= 1 ? n.toFixed(2) : n.toFixed(3);
     }
 
+    function profileLabel(profile: ManagerAgentProfileView, resolved?: ManagerSnapshotMessage['resolvedAgentProfile']): string {
+        const label = (value: string): string => {
+            if (locale !== 'zh-cn') return value === 'general' ? 'General' : value === 'paradox' ? 'Paradox' : value[0]!.toUpperCase() + value.slice(1);
+            return ({ auto: '自动', general: '通用', paradox: 'Paradox', execute: '执行', plan: '规划', explore: '探索', review: '审查', single: '单 Agent', multi: '多 Agent' } as Record<string, string>)[value] ?? value;
+        };
+        if (profile.domain === 'auto' && profile.intent === 'auto' && profile.strategy === 'auto' && resolved) {
+            return `${label('auto')} → ${label(resolved.domain)} · ${label(resolved.intent)} · ${label(resolved.strategy)}`;
+        }
+        return [profile.domain, profile.intent, profile.strategy].filter(value => value !== 'auto').map(label).join(' · ') || label('auto');
+    }
+
     function workflowLabel(mode: string, workflowId: string | null): string {
         if (workflowId) return workflowId;
         if (mode === 'orchestrator') return ui.workflow.orchestrator;
@@ -1083,7 +1099,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 <button type="button" class="manager-command-workflow" data-manager-jump="activity" title="${escapeHtml(state.workflowId || state.mode)}">
                     ${svgIconNoMargin('gitBranch')}
                     <span>${escapeHtml(isActive ? ui.run.currentRound : ui.run.previousRound)}</span>
-                    <small>${escapeHtml(workflowLabel(state.mode, state.workflowId))}</small>
+                    <small>${escapeHtml(state.workflowId || profileLabel(state.agentProfile, state.resolvedAgentProfile))}</small>
                 </button>
                 <span class="manager-command-status ${statusClass}">
                     ${svgIconNoMargin(isActive ? 'link' : 'check')}
@@ -1445,6 +1461,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         state.artifacts = snapshot.artifacts || [];
         lastWorkspaceRenderSignature = '';
         state.mode = snapshot.mode || state.mode;
+        state.agentProfile = snapshot.agentProfile || state.agentProfile;
+        state.resolvedAgentProfile = snapshot.resolvedAgentProfile;
         state.workflowId = snapshot.workflowId || null;
         state.isGenerating = !!snapshot.isGenerating;
         state.liveStepCount = snapshot.liveStepCount || 0;

@@ -36,14 +36,13 @@ This project makes deep use of the VS Code Webview isolation sandbox, utilizing 
 - **Three.js Entity & Animation Rendering**: Supports loading and debugging Paradox native `.asset` 3D meshes, textures, and skeletal animations within the Webview sandbox.
 - **Particle Effect Preview & Editor**: Provides a three-pane editor for `particle={...}` definitions in `gfx/particles/**/*.asset` files, featuring Three.js real-time simulation, curve editing, subsystem/force/property modification, texture decoding, and write-back to `.asset`.
 
-##### 🤖 3. Fully Autonomous Multi-Agent AI Coprocessor
-This is the most innovative subsystem of the plugin. Unlike generic single-round chat AIs, it embeds an advanced reasoning runner orchestrated by multi-agent collaboration.
-- **Dual Build / Review Modes**:
-  - **Build Mode**: Allows the AI to automatically generate code, write files, manipulate shared localization indexes, and run local validation packages.
-  - **Review Mode**: A secure read-only review environment that disables write permissions, designed to enforce code style rules, prevent logical flaws, and block out-of-scope write-overs.
-- **Sub-Agent Parallel DAG Orchestration**: The underlying reasoning flow is based on a topologically sorted task graph, scheduling specialized sub-agents (e.g., Explorer, Builder, LocWriter, Reviewer) in parallel via `Promise.allSettled` to write complex features on a **shared Blackboard**—speeding up execution several fold.
-- **Anti-Looping & Smart Context Windowing**: Built-in two-phase "Doom-Loop" prevention; when the dialogue tokens approach 70% of the maximum limit, it automatically triggers LLM-level structured memory compression and repairs orphan tool calls, ensuring high success rates for long-duration tasks.
-- **Bi-directional MCP Integration**: Serves as an **MCP Client** to consume external stdio/SSE tools; simultaneously, it **exports a read-only MCP Server** (`packages/cwtools-mcp`) bundled with the plugin, opening up its 27 semantic tools (project knowledge pack, bounded project graph, types, rules, scopes, diagnostics, etc.) for external agents like **Codex / Claude Code**—see Section 8 for details.
+##### 🤖 3. Autonomous AI Coprocessor
+This subsystem combines a general repository-coding Agent with a Paradox/CWTools specialist and a profile-aware multi-Agent runner.
+- **Three-Dimensional Agent Profile**: Select the **capability domain** (`Auto`, `Paradox / CWTools`, or `General Coding`), **task intent** (`Auto`, `Execute`, `Plan`, `Explore`, or `Review`), and **execution strategy** (`Auto`, `Single Agent`, or `Multi-Agent`) independently. `Auto` resolves the profile again for every turn from the request and active-file context, without an extra model-routing call.
+- **Domain-Separated Execution**: General Coding receives only domain-neutral repository prompts, tools, diagnostics, memory, caches, resume state, and sub-Agent roles. It can inspect and edit ordinary repositories, run approved commands, and verify builds/tests, but cannot call CWT/CWTools/PDXScript, localisation, game-asset, or MCP capabilities. Paradox execution obtains mutable game facts on demand from active CWT rules, the CWTools LSP, and project indexes instead of embedding a small hard-coded rules table in prompts.
+- **Profile-Aware Parallel DAG Orchestration**: General Multi-Agent dispatches repository engineering roles; Paradox Multi-Agent adds CWT/LSP evidence, entity contracts, localisation specialists, and semantic quality gates. Both coordinate bounded parallel work through a shared Blackboard.
+- **Long-Run Reliability & Smart Context Windowing**: Structured context compression, recoverable checkpoints, progress-aware run budgets, activity-based child-Agent stall detection, and loop prevention allow long-running tasks to continue while still stopping genuinely stalled work.
+- **Bi-directional MCP Integration**: The Paradox capability domain can consume configured stdio/SSE tools as an **MCP Client**; General Coding does not receive MCP tools because configured servers do not yet declare a trustworthy capability domain. The plugin simultaneously **exports a read-only MCP Server** (`packages/cwtools-mcp`) with 27 semantic tools for external agents like **Codex / Claude Code**—see Section 8 for details.
 - **Workspace-wide Localization Indexing**: An asynchronous incremental indexing system based on VS Code `FileSystemWatcher` feeds stable, accurate localization context to the large model.
 
 ##### 📂 4. Differences & Fast Migration Pipeline (Vanilla Compare)
@@ -106,10 +105,9 @@ Below is the overall module interaction and data flow topology:
   - Leverages Cytoscape.js to display pre-requisites and downstream effects.
   - Supports searching, filter constraints, and node highlighting. **Double-click any node** to navigate and jump to its declaration line in the source file.
 
-##### 🤖 5. Fully Autonomous Multi-Agent AI Panel
+##### 🤖 5. Autonomous AI Panel
 * **How to open**: Click the **AI Icon** in the Activity Bar or execute `AI: Open Chat Panel` in the Command Palette.
-* **Hotkeys**:
-  - `Tab`: Cycle through agent modes (Build, Plan, Analyze, Review, Orchestrate, General).
+* **Agent profile**: Use the composer profile menu to choose **Capability Domain**, **Task Intent**, and **Execution Strategy** independently. Leave all three on `Auto` for per-turn routing, or pin only the dimension that must not change.
 * **Operations**: Supports context memory compression (triggered at 70% threshold) and importing/exporting full JSON execution archives.
 * **Codex with ChatGPT quota**: Select **Codex (ChatGPT Subscription)** in AI Settings and sign in once through the browser PKCE flow compatible with [OpenCode's ChatGPT Plus/Pro integration](https://opencode.ai/docs/providers/). Access and refresh tokens are stored only in VS Code SecretStorage and refreshed automatically; **Sign out** removes only this extension's credentials. The provider calls the fixed ChatGPT Codex Responses backend, never accepts an API key or endpoint override, and never falls back to billable OpenAI Platform calls. It does not install, launch, inspect, or share login state with Codex CLI/Desktop. Account, plan, quota windows, and a compatibility model catalog are shown in settings. Chat turns use the extension's native Agent runtime, so the selected model and reasoning level, current Agent sandbox, permission policy, write scheduler, tools, and MCP configuration all follow the same path as other providers. This subscription endpoint is an internal compatibility surface rather than a public stable API and may require updates when the upstream flow changes. The provider remains excluded from inline completion, translation preview, and child-Agent model selectors.
 * **Architecture Diagrams**: When a design or analysis contains several connected components, the Agent can emit Mermaid flow/sequence/state diagrams. Chat messages, live process text, tool-result cards, plans, blueprints, and walkthrough cards render them locally with VS Code theme colors, source copy, fullscreen viewing, and safe source fallback.
@@ -289,14 +287,13 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
 - **Three.js 实体与动画渲染**：支持 Paradox 原生 `.asset` 三维网格、贴图及骨骼动画在 Webview 中的沙盒化加载与动作调试。
 - **粒子特效预览与编辑**：支持 Stellaris `gfx/particles/**/*.asset` 中 `particle={...}` 的三栏粒子编辑器，提供 Three.js 实时近似模拟、曲线编辑、子系统/力/属性编辑、贴图解码预览与 `.asset` 写回。
 
-##### 🤖 3. 全自主多 Agent AI 协处理器 (Advanced AI System)
-这是本插件最引以为傲的革新性子系统。不同于普通的单轮对话 AI，我们内置了一个由多 Agent 编排的高阶推理运行器。
-- **Build / Review 双工作模式**：
-  - **Build 模式**：允许 AI 自动生成代码、读写文件、操作共享本地化索引并运行本地验证套件。
-  - **Review 模式**：独立安全的只读审查环境，禁用任何写入特权，专为强制校验代码规范、防御逻辑漏洞和越界覆盖而设计。
-- **Sub-Agent 并行编排 (DAG)**：底层推理流基于拓扑排序任务图，通过 `Promise.allSettled` 并行调度多个专职子 Agent（如 Explorer, Builder, LocWriter, Reviewer），在**共享黑板 (Blackboard)** 上协同编写复杂的功能，速度相比单链 Agent 提升数倍。
-- **防循环与智能压缩 (Context Smart Windowing)**：内置两阶段 "Doom-Loop" 循环调用防御机制；当长对话 Token 消耗接近上限的 70% 时，将自动触发 LLM 级别的结构化记忆压缩，并对孤儿 Tool Call 智能补齐，确保长任务的高成功率。
-- **MCP 双向集成（消费 + 输出）**：作为 **MCP 客户端**集成 Model Context Protocol（stdio 与 SSE），让内置 Agent 调用外部 MCP 工具；同时**对外输出一个随插件分发的只读 MCP 服务**（`packages/cwtools-mcp`），把本项目的 PDX 语义能力（项目知识包、有界项目语义图、类型/规则/作用域/诊断/定义引用/补全/深层语义共 27 个只读工具）开放给 **Codex / Claude Code** 等外部 Agent 复用——详见下方功能指引第 8 节。
+##### 🤖 3. 自主 AI 协处理器 (Advanced AI System)
+该子系统同时提供通用仓库编码 Agent、Paradox / CWTools 专用 Agent，以及能够按领域选择角色和质量门的多 Agent 运行器。
+- **三维 Agent Profile**：可以分别选择**能力领域**（`自动`、`Paradox / CWTools`、`通用编码`）、**任务意图**（`自动`、`执行`、`规划`、`探索`、`审查`）和**执行策略**（`自动`、`单 Agent`、`多 Agent`）。`自动`会依据每一轮的请求与活动文件重新解析，无需额外调用模型做路由。
+- **按领域分离执行链**：通用编码 Agent 只接收领域中立的仓库提示词、工具、诊断、记忆、缓存、恢复状态和子 Agent 角色；它可以调查普通仓库、修改代码/配置/测试/文档并运行获准的构建测试，但不能调用 CWT/CWTools/PDXScript、本地化、游戏资产或 MCP 能力。Paradox Agent 则按需从活动 CWT 规则、CWTools LSP 和项目索引获取动态游戏事实，不在提示词中维护少量易过时的硬编码规则表。
+- **Profile 感知的并行 DAG 编排**：通用多 Agent 使用领域中立的仓库工程角色；Paradox 多 Agent 额外使用 CWT/LSP 证据、实体契约、本地化专职角色和语义质量门。两者都通过共享黑板协调有界并行任务。
+- **长期运行可靠性与智能压缩**：结构化上下文压缩、可恢复检查点、按进展续期的运行预算、基于活动状态的子 Agent 卡死检测和循环防御，使长任务可以持续完成，同时仍会终止真正停滞的工作。
+- **MCP 双向集成（消费 + 输出）**：Paradox 能力领域可作为 **MCP 客户端**调用已配置的 stdio/SSE 工具；由于现有 MCP Server 配置尚无可信的能力领域声明，通用编码不会获得 MCP 工具。插件同时**对外输出一个随包分发的只读 MCP 服务**（`packages/cwtools-mcp`），把 27 个 PDX 语义工具开放给 **Codex / Claude Code** 等外部 Agent 复用——详见下方功能指引第 8 节。
 - **全工作区本地化索引**：全工作区本地化 YML 文本基于后台 `FileSystemWatcher` 异步实时增量索引，为大模型源源不断地输送稳定、精准的项目上下文。
 
 ##### 📂 4. 原版对比与极速迁移通道 (Vanilla Compare & Sync)
@@ -361,10 +358,9 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
   - 底层基于 Cytoscape.js 渲染高表现力的连线节点拓扑，直观呈现复杂科技前置要求或事件的多级触发链。
   - 完美支持搜索框快速过滤、层级限制与节点高亮。**双击任意节点**，编辑器将自动跳转并精准高亮至其声明所在的源文件代码行。
 
-##### 🤖 5. 全自主多 Agent AI 开发面板 (Autonomous AI)
+##### 🤖 5. 自主 AI 开发面板 (Autonomous AI)
 * **如何打开**：点击侧边栏的 **AI 图标**，或按快捷键 `Ctrl+Shift+P` 搜索并执行 `AI: Open Chat Panel` 开启会话。
-* **全局快捷键**：
-  - `Tab`：快捷切换Agent模式，支持构建、计划、分析、审查、协调，通用，六大基础模式一键切换。
+* **Agent Profile**：通过输入框旁的 Profile 菜单分别选择**能力领域**、**任务意图**和**执行策略**。三个维度都保持“自动”即可逐轮智能路由；也可以只固定不希望变化的维度。
 * **特性操作**：会话支持完整的上下文压缩（超过 70% 时自动生成紧凑记忆）以及一键无损导入导出完整
 运行步骤的 JSON 归档。
 * **使用 ChatGPT 额度的 Codex Provider**：在 AI 设置中选择 **Codex（ChatGPT 订阅）**，通过与 [OpenCode 的 ChatGPT Plus / Pro 集成](https://opencode.ai/docs/providers/)兼容的浏览器 PKCE 流程登录一次即可。Access Token 和 Refresh Token 只保存在 VS Code SecretStorage，并会自动刷新；“退出账号”只删除本插件保存的凭据。Provider 固定调用 ChatGPT Codex Responses 后端，不接受 API Key 或自定义 Endpoint，也不会降级到按量计费的 OpenAI Platform API。它不安装、启动或探测 Codex CLI / Desktop，也不与这些程序共享登录状态。设置页会显示账户、套餐、额度窗口及兼容模型清单。对话统一使用插件原生 Agent 运行时，因此所选模型与思考等级、当前 Agent 沙盒、权限策略、写入调度、工具和 MCP 配置均与其他 Provider 走同一条链路。该订阅端点属于内部兼容接口，并非公开稳定 API；上游流程变化时可能需要同步适配。该 Provider 仍从内联补全、翻译预览和子 Agent 模型选择器中排除。

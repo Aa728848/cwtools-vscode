@@ -19,9 +19,30 @@ export type { CwtRuleValueReference, PdxRuleCategory, PdxSemanticCatalog } from 
  * - loc_translator: Specialized for translating YML localisation files between languages.
  * - loc_writer: Specialized for writing new YML localisation entries from scratch.
  * - orchestrator: Multi-Agent coordinator mode — decomposes tasks and dispatches sub-agents.
- * - script: Script Mode — dynamic PDXScript workflow coordination with higher read parallelism.
+ * - script: Paradox Multi-Agent — dynamic PDXScript workflow coordination with higher read parallelism.
  */
 export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'utility' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer' | 'orchestrator' | 'script';
+
+/** User-facing capability profile. AgentMode remains the internal execution adapter. */
+export type AgentDomain = 'auto' | 'paradox' | 'general';
+export type AgentRuntimeDomain = Exclude<AgentDomain, 'auto'>;
+export type AgentIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
+export type AgentExecutionStrategy = 'auto' | 'single' | 'multi';
+
+export interface AgentProfileSelection {
+    domain: AgentDomain;
+    intent: AgentIntent;
+    strategy: AgentExecutionStrategy;
+}
+
+export interface ResolvedAgentProfile {
+    selection: AgentProfileSelection;
+    domain: AgentRuntimeDomain;
+    intent: Exclude<AgentIntent, 'auto'>;
+    strategy: Exclude<AgentExecutionStrategy, 'auto'>;
+    mode: AgentMode;
+    reason: string;
+}
 
 /** Current-game entity/reference kind. Prefer exact names returned by TypeDefs/CWT. */
 export type TaskEntityKind = string;
@@ -1514,7 +1535,7 @@ export interface WriteDesignBlueprintArgs {
     dependencyOrder: string[];
     /** Executable entity/edge/acceptance contract approved by the user with this blueprint. */
     featureManifest: FeatureManifest;
-    /** Executable DAG slices. Script/Orchestrator modes hydrate dispatch_agents from this plan. */
+    /** Executable DAG slices. Paradox/General Multi-Agent modes hydrate dispatch_agents from this plan. */
     taskPlan: BlueprintTaskPlan[];
     riskRegister?: string[];
     /** Critical knowledge gaps remaining after query_project_knowledge and exact CWT/LSP checks. Must be empty before approving a complex blueprint. */
@@ -1788,6 +1809,8 @@ export interface AgentResumeState {
     version?: 2 | 3;
     timestamp: number;
     mode: AgentMode;
+    /** Resolved capability domain. Missing on older snapshots and inferred from mode. */
+    domain?: AgentRuntimeDomain;
     messages: ChatMessage[];
     todos: TodoItem[];
     topicId: string;
@@ -1968,6 +1991,16 @@ export interface ChatTopic {
     workspaceId?: string;
     /** Optional workspace display label */
     workspaceLabel?: string;
+    /** Per-topic user-facing Agent profile. Missing means the legacy Auto default. */
+    agentProfile?: AgentProfileSelection;
+    /** Last resolved internal mode, used only to restore topic chrome and resume compatibility. */
+    agentMode?: AgentMode;
+    /** Optional active workflow restored with this topic. */
+    workflowId?: string;
+    /** Profile to restore when the active workflow is disabled. */
+    workflowReturnProfile?: AgentProfileSelection;
+    /** Internal mode to restore when the active workflow is disabled. */
+    workflowReturnMode?: AgentMode;
 }
 
 export interface ChatHistoryMessage {
@@ -2078,9 +2111,9 @@ export interface PermissionRequestPreflight {
 }
 
 export type WebViewMessage =
-    | { type: 'sendMessage'; text: string; attachedFiles?: string[]; images?: string[] }
+    | { type: 'sendMessage'; text: string; attachedFiles?: string[]; images?: string[]; agentProfile?: AgentProfileSelection }
     | { type: 'steerGeneration'; text: string; images?: string[] }
-    | { type: 'sendMessageWithReference'; text: string; contexts: ContextItem[]; images?: string[] }
+    | { type: 'sendMessageWithReference'; text: string; contexts: ContextItem[]; images?: string[]; agentProfile?: AgentProfileSelection }
     | { type: 'editAndResendMessage'; messageIndex: number; text: string; contexts?: ContextItem[]; images?: string[] }
     | { type: 'openContextReference'; context: ContextItem }
     | { type: 'insertCode'; code: string }
@@ -2099,6 +2132,7 @@ export type WebViewMessage =
     | { type: 'configureProvider' }
     | { type: 'cancelGeneration' }
     | { type: 'switchMode'; mode: AgentMode }
+    | { type: 'switchAgentProfile'; profile: AgentProfileSelection }
     | { type: 'switchWorkflow'; workflowId?: string | null }
     | { type: 'openAgentManager' }
     | { type: 'openSettings' }
@@ -2170,6 +2204,8 @@ export type HostMessage =
     | { type: 'streamToken'; token: string }
     | { type: 'clearChat'; targetSurface?: 'chat' | 'manager' }
     | { type: 'modeChanged'; mode: AgentMode; label?: string }
+    | { type: 'agentProfileChanged'; profile: AgentProfileSelection }
+    | { type: 'agentProfileResolved'; resolved: ResolvedAgentProfile }
     | { type: 'workflowList'; workflows: Array<{ id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }>; currentWorkflowId?: string | null; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
     | { type: 'workflowChanged'; workflowId?: string | null; workflow?: { id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
@@ -2189,6 +2225,7 @@ export type HostMessage =
     | { type: 'floatingCardResolved'; card: 'permission' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
     /** Restore mode state after webview rebuild (panel visibility change) */
     | { type: 'setMode'; mode: AgentMode }
+    | { type: 'setAgentProfile'; profile: AgentProfileSelection; resolved?: ResolvedAgentProfile }
     /** Replay all AI steps accumulated while the panel was hidden; isGenerating=true means still running */
     | { type: 'replaySteps'; steps: AgentStep[]; isGenerating: boolean }
     /** Plan file saved to disk — tells webview to show the Open/Submit card */
@@ -2240,6 +2277,8 @@ export type HostMessage =
         messages: ChatHistoryMessage[];
         messageCount?: number;
         mode: AgentMode;
+        agentProfile: AgentProfileSelection;
+        resolvedAgentProfile?: ResolvedAgentProfile;
         workflowId?: string | null;
         isGenerating: boolean;
         liveStepCount: number;

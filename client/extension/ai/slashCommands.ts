@@ -100,43 +100,43 @@ const DEFINITIONS: readonly SlashCommandDefinition[] = [
     },
     {
         id: 'modeBuild', command: '/mode:build', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'mode',
-        description: { en: 'Switch to Build mode', zh: '切换到构建模式' },
+        description: { en: 'Use the Paradox Execute single-Agent preset', zh: '使用 Paradox 执行单 Agent 预设' },
     },
     {
         id: 'modePlan', command: '/mode:plan', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'mode',
-        description: { en: 'Switch to Plan mode', zh: '切换到计划模式' },
+        description: { en: 'Use the Plan-only profile preset', zh: '使用仅规划 Profile 预设' },
     },
     {
         id: 'modeExplore', command: '/mode:explore', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'mode',
-        description: { en: 'Switch to Explore mode', zh: '切换到分析模式' },
+        description: { en: 'Use the Explore-only profile preset', zh: '使用仅探索 Profile 预设' },
     },
     {
         id: 'modeUtility', command: '/mode:utility', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'mode',
-        description: { en: 'Switch to Utility mode', zh: '切换到泛用模式' },
+        description: { en: 'Use the General Coding single-Agent preset', zh: '使用通用编码单 Agent 预设' },
     },
     {
         id: 'modeReview', command: '/mode:review', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'mode',
-        description: { en: 'Switch to Review mode', zh: '切换到审查模式' },
+        description: { en: 'Use the Review-only profile preset', zh: '使用仅审查 Profile 预设' },
     },
     {
         id: 'modeOrchestrator', command: '/mode:orchestrator', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'mode',
-        description: { en: 'Switch to multi-agent Orchestrator mode', zh: '切换到多 Agent 执行模式' },
+        description: { en: 'Use the General Multi-Agent profile preset', zh: '使用通用多 Agent Profile 预设' },
     },
     {
         id: 'modeScript', command: '/mode:script', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'mode',
-        description: { en: 'Switch to Script mode', zh: '切换到脚本模式' },
+        description: { en: 'Use the Paradox Multi-Agent profile preset', zh: '使用 Paradox 多 Agent Profile 预设' },
     },
     {
         id: 'modePlan', command: '/plan', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'mode',
-        description: { en: 'Switch to Plan mode', zh: '切换到计划模式' },
+        description: { en: 'Use the Plan-only profile preset', zh: '使用仅规划 Profile 预设' },
     },
     {
         id: 'modeReview', command: '/review', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'mode',
-        description: { en: 'Switch to Review mode', zh: '切换到审查模式' },
+        description: { en: 'Use the Review-only profile preset', zh: '使用仅审查 Profile 预设' },
     },
     {
         id: 'status', command: '/status', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'configuration',
-        description: { en: 'Show the current model, mode, workflow, and permission profile', zh: '显示当前模型、模式、工作流与权限配置' },
+        description: { en: 'Show the current model, Agent profile, resolved mode, workflow, and permissions', zh: '显示当前模型、Agent Profile、解析模式、工作流与权限配置' },
     },
     {
         id: 'model', command: '/model', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'configuration',

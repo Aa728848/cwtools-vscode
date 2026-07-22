@@ -403,10 +403,10 @@ function isActivityLikeItem(item: CodexTurnItem): boolean {
 function isGenericProcessText(content: string): boolean {
     const text = content.trim().replace(/\s+/g, ' ');
     if (!text) return false;
-    return /^(?:Analyzing request|Analyzing|Processing request|Processing utility engineering task|Reviewing code|Exploring codebase|Coordinating multi-agent work|Running Script mode pipeline)\.{0,3}$/i.test(text)
+    return /^(?:Analyzing request|Analyzing|Processing request|Processing utility engineering task|Reviewing code|Exploring codebase|Coordinating multi-agent work|Running (?:Script mode|Paradox Multi-Agent) pipeline)\.{0,3}$/i.test(text)
         || /^(?:I am checking the result before answering|I am checking the request and gathering the context I need)\.{0,3}$/i.test(text)
         || /^(?:我正在检查结果后再回复|我正在分析需求，并收集需要的上下文)\.{0,3}$/.test(text)
-        || /^(?:分析需求中|分析中|探索代码库中|处理请求中|处理泛用工程任务中|代码审查中|多 Agent 协调中|脚本模式运行中)\.{0,3}$/.test(text);
+        || /^(?:分析需求中|分析中|探索代码库中|处理请求中|处理泛用工程任务中|代码审查中|多 Agent 协调中|脚本模式运行中|Paradox 多 Agent 流水线运行中)(?:（动态流水线并行）)?\.{0,3}$/.test(text);
 }
 
 function hasUsefulProcessTextImmediatelyBefore(items: CodexTurnItem[]): boolean {

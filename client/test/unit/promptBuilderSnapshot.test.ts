@@ -65,23 +65,19 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('Dynamic Coupling Assessment');
         expect(prompt).to.include('Common Directory Capability Review');
         expect(prompt).to.include('Reward Implementation Grounding');
-        expect(prompt).to.include('current-game common subsystems');
-        expect(prompt).to.include('bounded vanilla archetype evidence');
+        expect(prompt).to.include('ordinary software engineering or Paradox/CWTools work');
+        expect(prompt).to.include('ordinary code');
     });
 
-    it('injects Stellaris dynamic evidence guidance only when Stellaris is explicit', () => {
+    it('keeps changing Stellaris facts out of domain-neutral plan prompts', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
         const prompt = builder.buildSystemPromptForMode('plan', undefined, 'stellaris');
 
-        expect(prompt).to.include('Stellaris PDXScript modding');
-        expect(prompt).to.include('intentionally contains no game-version rule tables');
-        expect(prompt).to.include('Retrieve those facts from the active CWT rules and CWTools LSP model');
-        expect(prompt).to.include('query_scope');
-        expect(prompt).to.include('source/revision');
-        expect(prompt).to.include('query_cwt_schema');
-        expect(prompt).to.include('query_workspace_index');
+        expect(prompt).to.include('current workspace');
+        expect(prompt).to.include('query active CWT/LSP');
         expect(prompt).to.include('Common Directory Capability Review');
+        expect(prompt).to.not.include('intentionally contains no game-version rule tables');
         expect(prompt).to.not.include('Stellaris common/ Design Space Review');
         expect(prompt).to.not.include('common/pop_faction_types');
         expect(prompt).to.not.include('common/storm_types');
@@ -135,17 +131,55 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('Template Reference Methodology');
     });
 
-    it('tells orchestrators to declare known builder write targets', () => {
+    it('keeps general orchestrators on utility writers and explicit write targets', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
         const prompt = builder.buildSystemPromptForMode('orchestrator');
 
         expect(prompt).to.include('plannedFiles');
-        expect(prompt).to.include('Builder task');
-        expect(prompt).to.include('dispatch the Explorer batch first');
-        expect(prompt).to.include('featureManifest');
-        expect(prompt).to.include('taskPlan');
-        expect(prompt).to.include('dispatch_agents({ blueprintFile })');
+        expect(prompt).to.include('utility');
+        expect(prompt).to.include('discovery wave');
+        expect(prompt).to.not.include('mandatory user-facing approval');
+        expect(prompt).to.not.include('LocWriter');
+    });
+
+    it('keeps every General Coding intent free of Paradox prompts and repair protocols', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const builder = new PromptBuilder(process.cwd());
+        const generalDomainPrompt = (mode: 'plan' | 'explore' | 'review') =>
+            builder.buildSystemPromptForMode(
+                mode,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                true,
+                true,
+                'general',
+            );
+        const prompts = [
+            builder.buildSystemPromptForMode('utility'),
+            generalDomainPrompt('plan'),
+            generalDomainPrompt('explore'),
+            generalDomainPrompt('review'),
+            builder.buildSystemPromptForMode('orchestrator'),
+            builder.buildSlimSystemPromptForMode('utility', undefined, undefined, undefined, 'general'),
+        ];
+        const forbidden = [
+            'Paradox', 'PDXScript', 'CWTools', 'CWT/LSP', 'query_scope',
+            'write_design_blueprint', 'EvidenceGate', 'sprite repair',
+            'localisation sweep', 'vanilla cache',
+        ];
+
+        for (const prompt of prompts) {
+            for (const term of forbidden) expect(prompt, term).to.not.include(term);
+            expect(prompt).to.include('repository');
+        }
+
+        const paradoxPlan = builder.buildSystemPromptForMode('plan');
+        expect(paradoxPlan).to.include('query active CWT/LSP');
+        expect(paradoxPlan).to.include('write_design_blueprint');
     });
 
     it('requires plan mode to design executable entity relationships before approval', () => {
@@ -164,7 +198,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         const builder = new PromptBuilder(process.cwd());
         const prompt = builder.buildSystemPromptForMode('script');
 
-        expect(prompt).to.include('Script Mode');
+        expect(prompt).to.include('Paradox Multi-Agent Mode');
         expect(prompt).to.include('dynamic workflow coordinator');
         expect(prompt).to.include('dispatch_agents');
         expect(prompt).to.include('up to 8');

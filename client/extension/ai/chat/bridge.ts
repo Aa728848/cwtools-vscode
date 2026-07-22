@@ -11,6 +11,7 @@ import type { WebViewMessage } from '../types';
 import type { AIChatPanelProvider } from '../chatPanel';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, aiText } from '../messages';
+import { isAgentMode, isAgentProfileSelection } from '../agentProfile';
 
 export async function routeWebviewMessage(
     provider: AIChatPanelProvider,
@@ -22,6 +23,7 @@ export async function routeWebviewMessage(
             await provider.handleComposerSubmission(msg.text, {
                 images: msg.images,
                 attachedFiles: msg.attachedFiles,
+                agentProfile: isAgentProfileSelection(msg.agentProfile) ? msg.agentProfile : undefined,
             });
             break;
         case 'steerGeneration':
@@ -31,6 +33,7 @@ export async function routeWebviewMessage(
             await provider.handleComposerSubmission(msg.text, {
                 images: msg.images,
                 contexts: msg.contexts,
+                agentProfile: isAgentProfileSelection(msg.agentProfile) ? msg.agentProfile : undefined,
             });
             break;
         }
@@ -122,7 +125,12 @@ export async function routeWebviewMessage(
             provider.cancelGeneration();
             break;
         case 'switchMode':
-            provider.switchMode(msg.mode);
+            if (isAgentMode(msg.mode)) provider.switchMode(msg.mode);
+            else ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Rejected invalid Agent mode from Webview.');
+            break;
+        case 'switchAgentProfile':
+            if (isAgentProfileSelection(msg.profile)) provider.switchAgentProfile(msg.profile);
+            else ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Rejected invalid Agent profile from Webview.');
             break;
         case 'switchWorkflow':
             provider.switchWorkflow(msg.workflowId);

@@ -39,6 +39,8 @@ export type ToolConcurrencyClass =
     | 'global-exclusive'
     | 'interactive';
 
+export type ToolDomain = 'shared' | 'paradox';
+
 export interface ToolRegistryEntry {
     name: AgentToolName;
     schema: ToolDefinition;
@@ -49,13 +51,203 @@ export interface ToolRegistryEntry {
     effect: ToolEffect;
     riskLevel: 0 | 1 | 2 | 3;
     concurrencyClass: ToolConcurrencyClass;
+    /** Capability domain. Every tool is classified explicitly and exhaustively. */
+    domain: ToolDomain;
     mutating?: boolean;
     stormExempt?: boolean;
     noFlatten?: boolean;
     flatSchema?: ToolDefinition;
+    /** Domain-safe schema used when a shared tool has mixed-domain parameters. */
+    generalSchema?: ToolDefinition;
 }
 
 export const TOOL_REGISTRY = new Map<AgentToolName, ToolRegistryEntry>();
+
+/**
+ * Explicit classification is intentionally exhaustive: adding a tool without
+ * deciding whether General Coding may receive it is a compile error.
+ */
+const TOOL_DOMAINS = {
+    query_scope: 'paradox',
+    query_types: 'paradox',
+    query_rules: 'paradox',
+    query_cwt_schema: 'paradox',
+    query_override_modes: 'paradox',
+    search_rule_capabilities: 'paradox',
+    explain_scope: 'paradox',
+    parse_pdx_fragment: 'paradox',
+    remove_ignored_diagnostic: 'paradox',
+    query_localisation_index: 'paradox',
+    query_workspace_index: 'paradox',
+    explore_pdx_project: 'paradox',
+    query_project_profile: 'paradox',
+    query_project_knowledge: 'paradox',
+    run_skill: 'paradox',
+    get_ignored_diagnostics: 'paradox',
+    get_pdx_block: 'paradox',
+    edit_pdx_block: 'paradox',
+    query_references: 'paradox',
+    get_file_context: 'shared',
+    search_mod_files: 'paradox',
+    find_sprite_candidates: 'paradox',
+    find_sound_candidates: 'paradox',
+    grep: 'shared',
+    get_completion_at: 'paradox',
+    document_symbols: 'shared',
+    workspace_symbols: 'shared',
+    verify_pdx_identifier: 'paradox',
+    todo_write: 'shared',
+    read_file: 'shared',
+    write_file: 'shared',
+    edit_file: 'shared',
+    replace_lines: 'shared',
+    list_directory: 'shared',
+    get_lsp_status: 'paradox',
+    get_diagnostics: 'shared',
+    analyze_diagnostic_error: 'paradox',
+    glob_files: 'shared',
+    lsp_operation: 'paradox',
+    web_search: 'shared',
+    web_open: 'shared',
+    web_find: 'shared',
+    run_command: 'shared',
+    list_processes: 'shared',
+    read_process: 'shared',
+    write_process_stdin: 'shared',
+    terminate_process: 'shared',
+    apply_patch: 'shared',
+    multi_replace_file_content: 'shared',
+    query_definition: 'paradox',
+    query_definition_by_name: 'paradox',
+    query_scripted_effects: 'paradox',
+    query_scripted_triggers: 'paradox',
+    query_enums: 'paradox',
+    get_entity_info: 'paradox',
+    query_static_modifiers: 'paradox',
+    query_variables: 'paradox',
+    // These stores predate runtime domains and contain untyped historical
+    // entries. Keep them Paradox-only until persistence is domain-versioned.
+    set_memory: 'paradox',
+    get_memory: 'paradox',
+    search_memory: 'paradox',
+    save_memory: 'paradox',
+    convert_image_to_dds: 'paradox',
+    convert_audio: 'paradox',
+    deploy_mod_asset: 'paradox',
+    // Configured MCP servers are not capability-typed. Keep the entire MCP
+    // client surface out of General Coding so a server cannot re-introduce
+    // CWTools/Paradox semantics through a generic dynamic tool name.
+    mcp_call: 'paradox',
+    write_localisation: 'paradox',
+    write_design_blueprint: 'paradox',
+    save_workflow: 'shared',
+    git_ops: 'shared',
+    dispatch_agents: 'shared',
+    query_blackboard: 'shared',
+    merge_results: 'shared',
+    get_design_blueprint_contract: 'paradox',
+} satisfies Record<AgentToolName, ToolDomain>;
+
+const GENERAL_DISPATCH_SCHEMA: ToolDefinition = {
+    type: 'function',
+    function: {
+        name: 'dispatch_agents',
+        description: 'Dispatch up to four ordinary repository tasks as a bounded dependency graph. Declare dependencies and planned files so overlapping writes are serialized safely.',
+        parameters: {
+            type: 'object',
+            properties: {
+                tasks: {
+                    type: 'array',
+                    maxItems: 4,
+                    description: 'Repository sub-tasks ordered by dependencies. Split larger work into bounded waves.',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            id: { type: 'string', description: 'Unique sub-task ID.' },
+                            agentType: {
+                                type: 'string',
+                                enum: ['explore', 'plan', 'utility', 'review'],
+                                description: 'Repository role. Use utility for scoped implementation and verification commands.',
+                            },
+                            prompt: { type: 'string', description: 'Concise sub-task description.' },
+                            dependencies: {
+                                type: 'array',
+                                items: { type: 'string' },
+                                description: 'Prerequisite task IDs that must complete first.',
+                            },
+                            contextFiles: {
+                                type: 'array',
+                                items: { type: 'string' },
+                                description: 'Optional repository paths or Blackboard keys containing required context.',
+                            },
+                            plannedFiles: {
+                                type: 'array',
+                                items: { type: 'string' },
+                                description: 'Expected files this task may modify. Provide exact paths whenever known.',
+                            },
+                            priority: { type: 'string', enum: ['critical', 'normal', 'low'] },
+                            maxIterations: { type: 'integer', minimum: 1, maximum: 100 },
+                        },
+                        required: ['id', 'agentType', 'prompt'],
+                    },
+                },
+            },
+            required: ['tasks'],
+        },
+    },
+};
+
+const GENERAL_BLACKBOARD_SCHEMA: ToolDefinition = {
+    type: 'function',
+    function: {
+        name: 'query_blackboard',
+        description: 'Query the shared cross-agent store by exact key, prefix, or ordinary repository record type.',
+        parameters: {
+            type: 'object',
+            properties: {
+                key: { type: 'string', description: 'Exact key to look up.' },
+                prefix: { type: 'string', description: 'Key prefix for bounded range queries.' },
+                type: {
+                    type: 'string',
+                    enum: ['file_snapshot', 'diag_result', 'write_intent', 'free_text'],
+                    description: 'Optional repository record type filter.',
+                },
+            },
+            required: [],
+        },
+    },
+};
+
+const GENERAL_WORKFLOW_SCHEMA: ToolDefinition = {
+    type: 'function',
+    function: {
+        name: 'save_workflow',
+        description: 'Save a reusable ordinary repository workflow when the user asks to preserve the process.',
+        parameters: {
+            type: 'object',
+            properties: {
+                id: { type: 'string', description: 'Optional stable lowercase/kebab-case workflow id.' },
+                title: { type: 'string', description: 'User-facing workflow title.' },
+                description: { type: 'string', description: 'Short summary shown in the workflow picker.' },
+                mode: {
+                    type: 'string',
+                    enum: ['plan', 'explore', 'utility', 'review', 'orchestrator'],
+                    description: 'Ordinary repository Agent mode. Defaults to utility in General Coding.',
+                },
+                promptSupplement: { type: 'string', description: 'Reusable objective, phases, constraints, and verification steps.' },
+                allowedTools: { type: 'array', items: { type: 'string' } },
+                blockedTools: { type: 'array', items: { type: 'string' } },
+                requiredContext: {
+                    type: 'array',
+                    items: { type: 'string', enum: ['activeFile', 'activeFile!', 'diagnostics', 'diagnostics!', 'selection', 'selection!', 'workspace', 'workspace!'] },
+                },
+                verificationTool: { type: 'string' },
+                overwrite: { type: 'boolean' },
+            },
+            required: ['title', 'description', 'promptSupplement'],
+        },
+    },
+};
 
 // Categories to help assign modes
 const BASE_READ: AgentToolName[] = [
@@ -117,10 +309,10 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'query_blackboard',
 ]);
 
-const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, 'todo_write', 'write_file', 'edit_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
-const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, 'git_ops', 'save_workflow']);
-const REVIEW_MODES = new Set([...BASE_READ, ...NETWORK, 'git_ops', 'save_workflow']);
-const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY]);
+const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'todo_write', 'write_file', 'edit_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
+const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
+const REVIEW_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
+const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ..._MCP]);
 const LOC_MODES = new Set([
     'read_file', 'write_file',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
@@ -128,9 +320,11 @@ const LOC_MODES = new Set([
     'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'todo_write', 'write_localisation', 'git_ops',
     'analyze_diagnostic_error', 'save_workflow'
 ]);
-const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...NETWORK, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
-const SCRIPT_MODES = new Set([...BASE_READ, ...NETWORK, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
-const GENERAL_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, 'mcp_call']);
+const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
+const SCRIPT_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
+// Legacy General mode is intentionally read-only. Writable general coding work
+// belongs to Utility mode, whose staged surface and policy gates are explicit.
+const GENERAL_MODES = new Set([...BASE_READ, ...NETWORK]);
 const UTILITY_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, 'mcp_call']);
 
 for (const schema of SCHEMA_DEFINITIONS) {
@@ -233,10 +427,18 @@ for (const schema of SCHEMA_DEFINITIONS) {
         effect,
         riskLevel,
         concurrencyClass,
+        domain: TOOL_DOMAINS[name],
         mutating,
         stormExempt,
         noFlatten,
-        flatSchema
+        flatSchema,
+        generalSchema: name === 'dispatch_agents'
+            ? GENERAL_DISPATCH_SCHEMA
+            : name === 'query_blackboard'
+                ? GENERAL_BLACKBOARD_SCHEMA
+                : name === 'save_workflow'
+                    ? GENERAL_WORKFLOW_SCHEMA
+                    : undefined,
     });
 }
 

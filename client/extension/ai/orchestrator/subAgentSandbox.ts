@@ -151,6 +151,7 @@ export function enforceSubAgentSafety(
 
     if (excludedTools.has(toolName)) {
         if (toolName === 'run_command') {
+            if (sandbox.mode === 'utility') return { allowed: true };
             return {
                 allowed: false,
                 reason: 'run_command is disabled for orchestrator sub-agents. Use structured edit tools for bulk file changes; if a terminal command is truly required, return BLOCKED_FOR_ORCHESTRATOR with the command and reason.'

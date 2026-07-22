@@ -13,15 +13,17 @@
 // ─── Webview → Host messages (postMessage from webview) ──────────────────────
 
 export interface ReadyMessage { type: 'ready' }
-export interface SendMessagePayload { type: 'sendMessage'; text: string; mode: string; images?: string[] }
+export interface AgentProfileSelectionView { domain: 'auto' | 'paradox' | 'general'; intent: 'auto' | 'execute' | 'plan' | 'explore' | 'review'; strategy: 'auto' | 'single' | 'multi' }
+export interface SendMessagePayload { type: 'sendMessage'; text: string; agentProfile?: AgentProfileSelectionView; images?: string[] }
 export interface SteerGenerationMessage { type: 'steerGeneration'; text: string; images?: string[] }
-export interface SendMessageWithReferencePayload { type: 'sendMessageWithReference'; text: string; mode: string; reference: unknown; images?: string[] }
+export interface SendMessageWithReferencePayload { type: 'sendMessageWithReference'; text: string; contexts: unknown[]; agentProfile?: AgentProfileSelectionView; images?: string[] }
 export interface EditAndResendMessagePayload { type: 'editAndResendMessage'; messageIndex: number; text: string; contexts?: unknown[]; images?: string[] }
 export interface CancelGenerationMessage { type: 'cancelGeneration' }
 export interface ResumeGenerationMessage { type: 'resumeGeneration' }
 export interface NewTopicMessage { type: 'newTopic' }
 export interface OpenSettingsMessage { type: 'openSettings' }
 export interface SwitchModeMessage { type: 'switchMode'; mode: string }
+export interface SwitchAgentProfileMessage { type: 'switchAgentProfile'; profile: AgentProfileSelectionView }
 export interface SwitchWorkflowMessage { type: 'switchWorkflow'; workflowId?: string | null }
 export interface QuickChangeModelMessage { type: 'quickChangeModel'; model: string }
 export interface QuickChangeReasoningEffortMessage { type: 'quickChangeReasoningEffort'; effort: 'low' | 'medium' | 'high' | 'max' }
@@ -60,6 +62,7 @@ export type WebviewToHostMessage =
     | NewTopicMessage
     | OpenSettingsMessage
     | SwitchModeMessage
+    | SwitchAgentProfileMessage
     | SwitchWorkflowMessage
     | QuickChangeModelMessage
     | QuickChangeReasoningEffortMessage
@@ -94,6 +97,9 @@ export interface AgentStepMessage { type: 'agentStep'; step: unknown }
 export interface ContextCompactionStatusMessage { type: 'contextCompactionStatus'; step: unknown }
 export interface UpdateHistoryMessage { type: 'updateHistory'; messages: unknown[] }
 export interface SetModeMessage { type: 'setMode'; mode: string }
+export interface SetAgentProfileMessage { type: 'setAgentProfile'; profile: AgentProfileSelectionView; resolved?: unknown }
+export interface AgentProfileChangedMessage { type: 'agentProfileChanged'; profile: AgentProfileSelectionView }
+export interface AgentProfileResolvedMessage { type: 'agentProfileResolved'; resolved: unknown }
 export interface WorkflowListMessage { type: 'workflowList'; workflows: unknown[]; currentWorkflowId?: string | null; labels?: unknown }
 export interface WorkflowChangedMessage { type: 'workflowChanged'; workflowId?: string | null; workflow?: unknown; labels?: unknown }
 export interface SlashCommandListMessage { type: 'slashCommandList'; commands: unknown[] }
@@ -118,6 +124,9 @@ export type HostToWebviewMessage =
     | ContextCompactionStatusMessage
     | UpdateHistoryMessage
     | SetModeMessage
+    | SetAgentProfileMessage
+    | AgentProfileChangedMessage
+    | AgentProfileResolvedMessage
     | WorkflowListMessage
     | WorkflowChangedMessage
     | SlashCommandListMessage

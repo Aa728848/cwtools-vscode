@@ -111,7 +111,7 @@ export interface TaskNode {
     modelOverride?: string;
     /** Override supplier selection (leave blank to inherit user configuration) */
     providerOverride?: string;
-    /** Maximum number of inference loop iterations */
+    /** Explicit absolute maximum number of inference loop iterations. */
     maxIterations?: number;
     /** Retry count */
     retryCount: number;
@@ -212,7 +212,7 @@ export interface AgentProfile {
 * If undefined, the provider configured by the user in the settings panel will be inherited. 
 */
     suggestedProvider?: string;
-    /** Maximum number of inference loop iterations */
+    /** Healthy-progress iteration window used by this role. */
     maxIterations: number;
     /** Tool budget level */
     toolBudget: ToolBudget;
@@ -242,6 +242,8 @@ export interface OrchestratorResult {
 
 /** Orchestrator configuration options */
 export interface OrchestratorOptions {
+    /** Capability domain inherited by every child Agent in this graph. */
+    domain?: import('../types').AgentRuntimeDomain;
     /** Maximum number of concurrent Agents (default 4) */
     maxConcurrency?: number;
     /** Global Token budget upper limit (downgraded to serial after exceeding the limit) */

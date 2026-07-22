@@ -482,9 +482,14 @@ function splitCsv(value: string | undefined): string[] {
 }
 
 function parseMode(value: string | undefined): AgentMode {
-	const mode = (value || 'build').trim() as AgentMode;
-	const valid: AgentMode[] = ['build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script'];
-	return valid.includes(mode) ? mode : 'build';
+    const mode = (value || 'build').trim() as AgentMode;
+    if (['build', 'plan', 'explore', 'utility', 'review', 'orchestrator', 'script'].includes(mode)) return mode;
+    // Saved workflows from older releases may contain implementation-only
+    // roles. Preserve their intent while routing through a public profile.
+    if (mode === 'general') return 'explore';
+    if (mode === 'script_reviewer') return 'review';
+    if (mode === 'gui_expert' || mode === 'loc_translator' || mode === 'loc_writer') return 'build';
+    return 'build';
 }
 
 function parseToolList(value: string | undefined): AgentToolName[] {

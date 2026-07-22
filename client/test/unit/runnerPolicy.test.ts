@@ -7,10 +7,13 @@ import {
     buildToolStageReminder,
     resolveMaxToolIterations,
     resolveRunMaxOutputTokens,
+    shouldRenewIterationLimit,
     SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS,
     TOP_LEVEL_ITERATION_SAFETY_CAP,
 } from '../../extension/ai/runnerPolicy';
 import type { ToolDefinition } from '../../extension/ai/types';
+import { TOOL_DEFINITIONS as registeredTools, TOOL_REGISTRY } from '../../extension/ai/tools/registry';
+import { validateToolAccess } from '../../extension/ai/tools/permissions';
 
 const toolDefinitions = [
     'read_file',
@@ -37,7 +40,8 @@ describe('runnerPolicy', () => {
         expect(names).to.include('query_workspace_index');
         expect(names).to.include('replace_lines');
         expect(names).to.not.include('dispatch_agents');
-        expect(names).to.not.include('mcp_call');
+        expect(names).to.include('mcp_call');
+        expect(names).to.not.include.members(['apply_patch', 'multi_replace_file_content']);
 
     });
 
@@ -51,6 +55,21 @@ describe('runnerPolicy', () => {
         expect(names).to.not.include('write_file');
         expect(names).to.not.include('replace_lines');
         expect(filterToolDefinitionsForStage(toolDefinitions, 'build', stage, true)).to.have.lengthOf(toolDefinitions.length);
+    });
+
+    it('keeps Paradox MCP tools in discovery while General removes them before staging', () => {
+        const dynamicMcp = {
+            type: 'function',
+            function: { name: 'mcp_cwtools_query_rules', description: '', parameters: {} },
+        } as ToolDefinition;
+        const paradox = filterToolDefinitionsForMode(registeredTools, 'build', { domain: 'paradox' });
+        const staged = filterToolDefinitionsForStage([...paradox, dynamicMcp], 'build', 'discovery')
+            .map(tool => tool.function.name);
+        expect(staged).to.include.members(['mcp_call', 'mcp_cwtools_query_rules']);
+
+        const general = filterToolDefinitionsForMode(registeredTools, 'utility', { domain: 'general' })
+            .map(tool => tool.function.name);
+        expect(general).to.not.include('mcp_call');
     });
 
     it('advances build stages only after successful evidence and write steps', () => {
@@ -107,6 +126,104 @@ describe('runnerPolicy', () => {
         expect(names).to.not.include('run_command');
     });
 
+    it('keeps legacy general mode read-only and gives utility an explicit coding surface', () => {
+        const general = filterToolDefinitionsForMode(toolDefinitions, 'general').map(t => t.function.name);
+        expect(general).to.include('read_file');
+        expect(general).to.not.include.members(['write_file', 'run_command', 'mcp_call']);
+
+        const utility = filterToolDefinitionsForMode(toolDefinitions, 'utility').map(t => t.function.name);
+        expect(utility).to.include.members(['read_file', 'write_file', 'run_command']);
+        const utilityChild = filterToolDefinitionsForMode(toolDefinitions, 'utility', { useSlimPrompt: true }).map(t => t.function.name);
+        expect(utilityChild).to.include('run_command');
+    });
+
+    it('strictly removes every Paradox-only capability from all General Coding intents', () => {
+        for (const mode of ['utility', 'plan', 'explore', 'review', 'orchestrator'] as const) {
+            const filtered = filterToolDefinitionsForMode(registeredTools, mode, { domain: 'general' });
+            const leaked = filtered
+                .map(tool => TOOL_REGISTRY.get(tool.function.name as any))
+                .filter(entry => entry?.domain === 'paradox')
+                .map(entry => entry!.name);
+            expect(leaked, `${mode} leaked Paradox tools`).to.deep.equal([]);
+        }
+
+        const generalUtility = filterToolDefinitionsForMode(registeredTools, 'utility', { domain: 'general' })
+            .map(tool => tool.function.name);
+        expect(generalUtility).to.include.members([
+            'read_file', 'write_file', 'grep', 'document_symbols', 'workspace_symbols',
+            'get_diagnostics', 'run_command', 'git_ops',
+        ]);
+        expect(generalUtility).to.not.include.members([
+            'query_cwt_schema', 'query_scope', 'query_types', 'verify_pdx_identifier',
+            'query_localisation_index', 'find_sprite_candidates', 'find_sound_candidates',
+            'write_localisation', 'write_design_blueprint', 'get_pdx_block', 'edit_pdx_block',
+            'mcp_call', 'apply_patch', 'multi_replace_file_content',
+            'set_memory', 'get_memory', 'search_memory', 'save_memory',
+        ]);
+
+        const paradoxPlan = filterToolDefinitionsForMode(registeredTools, 'plan', { domain: 'paradox' })
+            .map(tool => tool.function.name);
+        expect(paradoxPlan).to.include.members(['query_cwt_schema', 'query_scope', 'query_types', 'mcp_call']);
+
+        const legacyGeneral = filterToolDefinitionsForMode(registeredTools, 'utility', {
+            domain: 'general',
+            legacyFullToolset: true,
+        }).map(tool => tool.function.name);
+        expect(legacyGeneral).to.not.include.members([
+            'query_cwt_schema', 'mcp_call', 'apply_patch', 'multi_replace_file_content',
+        ]);
+
+        for (const domain of ['general', 'paradox'] as const) {
+            for (const mode of ['utility', 'build', 'plan', 'explore', 'review', 'orchestrator', 'script'] as const) {
+                const visible = filterToolDefinitionsForMode(registeredTools, mode, {
+                    domain,
+                    legacyFullToolset: true,
+                }).map(tool => tool.function.name);
+                expect(visible, `${domain}/${mode} retired tool exposure`).to.not.include.members([
+                    'apply_patch', 'multi_replace_file_content',
+                ]);
+            }
+        }
+
+        const generalDispatch = filterToolDefinitionsForMode(registeredTools, 'orchestrator', { domain: 'general' })
+            .find(tool => tool.function.name === 'dispatch_agents');
+        const serializedDispatch = JSON.stringify(generalDispatch);
+        expect(serializedDispatch).to.not.include('Paradox');
+        expect(serializedDispatch).to.not.include('loc_writer');
+        expect(serializedDispatch).to.not.include('blueprintFile');
+        expect(serializedDispatch).to.not.include('CWT');
+    });
+
+    it('rejects hallucinated Paradox calls at the execution boundary for General Coding', () => {
+        expect(validateToolAccess('query_cwt_schema', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
+        expect(validateToolAccess('write_localisation', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
+        expect(validateToolAccess('mcp_call', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
+        expect(validateToolAccess('mcp_filesystem_read_file', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
+        expect(validateToolAccess('get_diagnostics', { mode: 'utility', domain: 'general' }).allowed).to.equal(true);
+        expect(validateToolAccess('run_command', {
+            mode: 'utility',
+            domain: 'general',
+            isSubAgent: true,
+        }).allowed).to.equal(true);
+        expect(validateToolAccess('run_command', {
+            mode: 'build',
+            domain: 'paradox',
+            isSubAgent: true,
+        }).allowed).to.equal(false);
+    });
+
+    it('uses discovery, write, and finalize stages for general coding', () => {
+        expect(initialToolStageForMode('utility')).to.equal('discovery');
+        const discovery = filterToolDefinitionsForStage(toolDefinitions, 'utility', 'discovery').map(t => t.function.name);
+        expect(discovery).to.include('read_file');
+        expect(discovery).to.not.include('write_file');
+        expect(advanceToolStage('utility', 'discovery', 'read_file', { success: true })).to.equal('write');
+        expect(advanceToolStage('utility', 'write', 'edit_file', { success: false })).to.equal('write');
+        expect(advanceToolStage('utility', 'write', 'edit_file', { success: true })).to.equal('finalize');
+        const finalize = filterToolDefinitionsForStage(toolDefinitions, 'utility', 'finalize').map(t => t.function.name);
+        expect(finalize).to.include.members(['read_file', 'run_command', 'write_file']);
+    });
+
     it('keeps localisation modes off generic yml patch paths', () => {
         const filtered = filterToolDefinitionsForMode(toolDefinitions, 'loc_writer', { useSlimPrompt: true });
         const names = filtered.map(t => t.function.name);
@@ -143,5 +260,29 @@ describe('runnerPolicy', () => {
         expect(resolveMaxToolIterations({ mode: 'build', baseContextLimit: 128000, override: 17 })).to.equal(17);
         expect(resolveMaxToolIterations({ mode: 'build', baseContextLimit: 128000, override: 10_000 })).to.equal(256);
         expect(resolveMaxToolIterations({ mode: 'build', baseContextLimit: 128000, bypassSandbox: true })).to.equal(TOP_LEVEL_ITERATION_SAFETY_CAP);
+    });
+
+    it('renews role iteration windows only for healthy default sub-agent runs', () => {
+        expect(shouldRenewIterationLimit({
+            renewable: true,
+            iteration: 40,
+            limit: 40,
+            consecutiveErrors: 0,
+            blockingValidationIssues: 0,
+        })).to.equal(true);
+        expect(shouldRenewIterationLimit({
+            renewable: false,
+            iteration: 40,
+            limit: 40,
+            consecutiveErrors: 0,
+            blockingValidationIssues: 0,
+        })).to.equal(false);
+        expect(shouldRenewIterationLimit({
+            renewable: true,
+            iteration: 40,
+            limit: 40,
+            consecutiveErrors: 1,
+            blockingValidationIssues: 0,
+        })).to.equal(false);
     });
 });

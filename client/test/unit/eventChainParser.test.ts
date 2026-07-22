@@ -75,6 +75,92 @@ realm_event = {
         });
     });
 
+    it('accepts an unfiltered event TypeDef and identifies definitions by its CWT name field', () => {
+        const graph = parseEventFile(`
+namespace = realm_test
+
+custom_event_kind = {
+    event_key = realm_test.10
+}
+
+metadata = { value = ignored }
+`, 'events/unfiltered.txt', {
+            ...CATALOG,
+            definitionTypes: [{ name: 'event', paths: ['events'], nameField: 'event_key', typeKeyFilters: [] }],
+        });
+
+        expect(graph.nodes.map(node => [node.id, node.type])).to.deep.equal([
+            ['realm_test.10', 'custom_event_kind'],
+        ]);
+    });
+
+    it('derives MTTH ordering only from the root trigger block and preserves boolean intent', () => {
+        const graph = parseEventFile(`
+realm_event = {
+    event_key = realm_test.required_writer
+    immediate = { set_realm_flag = required }
+}
+realm_event = {
+    event_key = realm_test.alternative_writer
+    immediate = { set_realm_flag = alternative }
+}
+realm_event = {
+    event_key = realm_test.blocking_writer
+    immediate = { set_realm_flag = blocked }
+}
+realm_event = {
+    event_key = realm_test.nested_writer
+    immediate = { set_realm_flag = nested_only }
+}
+realm_event = {
+    event_key = realm_test.mtth
+    mean_time_to_happen = { days = 10 }
+    trigger = {
+        has_realm_flag = required
+        OR = { has_realm_flag = alternative }
+        NOT = { has_realm_flag = blocked }
+    }
+    option = {
+        trigger = { has_realm_flag = nested_only }
+    }
+}
+`, 'events/realm_mtth.txt', CATALOG);
+
+        const target = graph.nodes.find(node => node.id === 'realm_test.mtth')!;
+        expect(target.meanTimeToHappen).to.equal(true);
+        expect(target.triggerConditions?.map(condition => [condition.value, condition.relation])).to.deep.equal([
+            ['required', 'requires'],
+            ['alternative', 'alternative'],
+            ['blocked', 'blocks'],
+        ]);
+
+        const edges = buildImplicitEdges(graph);
+        expect(edges).to.deep.include({
+            source: 'realm_test.required_writer',
+            target: 'realm_test.mtth',
+            edgeType: 'mtth_condition',
+            label: 'has_realm_flag = required',
+            conditionRelation: 'requires',
+        });
+        expect(edges).to.deep.include({
+            source: 'realm_test.alternative_writer',
+            target: 'realm_test.mtth',
+            edgeType: 'mtth_condition',
+            label: 'has_realm_flag = alternative',
+            conditionRelation: 'alternative',
+        });
+        expect(edges).to.deep.include({
+            source: 'realm_test.blocking_writer',
+            target: 'realm_test.mtth',
+            edgeType: 'mtth_condition',
+            label: 'has_realm_flag = blocked',
+            conditionRelation: 'blocks',
+        });
+        expect(edges.some(edge => edge.source === 'realm_test.nested_writer'
+            && edge.target === 'realm_test.mtth'
+            && edge.edgeType === 'mtth_condition')).to.equal(false);
+    });
+
     it('does not infer event types when the active CWT catalog lacks them', () => {
         const graph = parseEventFile(
             'country_event = { id = old.1 }',

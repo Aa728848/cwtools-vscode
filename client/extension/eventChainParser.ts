@@ -57,6 +57,13 @@ export interface SemanticReference {
     ruleName: string;
 }
 
+export type EventConditionRelation = 'requires' | 'alternative' | 'blocks' | 'complex';
+
+export interface EventTriggerCondition extends SemanticReference {
+    relation: EventConditionRelation;
+    operatorPath: string[];
+}
+
 export interface EventNode {
     id: string;
     type: string;
@@ -66,13 +73,16 @@ export interface EventNode {
     endLine: number;
     namespace: string;
     semanticReferences: SemanticReference[];
+    meanTimeToHappen?: boolean;
+    triggerConditions?: EventTriggerCondition[];
 }
 
 export interface EventEdge {
     source: string;
     target: string;
-    edgeType: 'effect' | 'semantic' | 'unknown';
+    edgeType: 'effect' | 'semantic' | 'mtth_condition' | 'unknown';
     label?: string;
+    conditionRelation?: EventConditionRelation;
 }
 
 export interface EventGraph {
@@ -175,15 +185,108 @@ function collectSemanticReferences(nodes: readonly PdxNode[], catalog: PdxSemant
     return result;
 }
 
+interface TriggerWalkContext {
+    negated: boolean;
+    alternative: boolean;
+    complex: boolean;
+    operatorPath: string[];
+}
+
+/**
+ * Paradox boolean blocks are language syntax, while the actual trigger names,
+ * argument paths, and typed values continue to come from the active CWT catalog.
+ */
+function nextTriggerContext(node: PdxNode, context: TriggerWalkContext): TriggerWalkContext {
+    const key = node.key.toLowerCase();
+    const operatorPath = [...context.operatorPath, key];
+    if (key === 'or') return { ...context, alternative: true, operatorPath };
+    if (key === 'nor') return { ...context, negated: !context.negated, alternative: true, operatorPath };
+    if (key === 'nand') return { ...context, negated: !context.negated, complex: true, operatorPath };
+    if (key === 'not') {
+        const hasCompoundBody = (node.children?.length ?? 0) > 1;
+        return {
+            ...context,
+            negated: !context.negated,
+            complex: context.complex || context.alternative || hasCompoundBody,
+            operatorPath,
+        };
+    }
+    return { ...context, operatorPath };
+}
+
+function collectTriggerConditions(nodes: readonly PdxNode[], catalog: PdxSemanticCatalog): EventTriggerCondition[] {
+    const collected: Array<SemanticReference & Omit<TriggerWalkContext, 'operatorPath'> & { operatorPath: string[] }> = [];
+    const byName = rulesByName(catalog);
+    const walk = (items: readonly PdxNode[], context: TriggerWalkContext) => {
+        for (const node of items) {
+            const next = nextTriggerContext(node, context);
+            for (const rule of byName.get(node.key.toLowerCase()) ?? []) {
+                if (rule.category !== 'trigger') continue;
+                for (const reference of rule.valueReferences) {
+                    const value = valueForReference(node, reference);
+                    if (!value) continue;
+                    collected.push({
+                        typeName: reference.typeName.toLowerCase(),
+                        value,
+                        access: reference.access,
+                        category: rule.category,
+                        ruleName: rule.name,
+                        negated: next.negated,
+                        alternative: next.alternative,
+                        complex: next.complex,
+                        operatorPath: next.operatorPath,
+                    });
+                }
+            }
+            if (node.children) walk(node.children, next);
+        }
+    };
+    walk(nodes, { negated: false, alternative: false, complex: false, operatorPath: [] });
+
+    const result: EventTriggerCondition[] = [];
+    for (const item of collected) {
+        const relation: EventConditionRelation = item.complex
+            ? 'complex'
+            : item.negated
+                ? 'blocks'
+                : item.alternative
+                    ? 'alternative'
+                    : 'requires';
+        const condition: EventTriggerCondition = {
+            typeName: item.typeName,
+            value: item.value,
+            access: item.access,
+            category: item.category,
+            ruleName: item.ruleName,
+            relation,
+            operatorPath: item.operatorPath,
+        };
+        if (!result.some(existing => existing.typeName === condition.typeName
+            && existing.value === condition.value
+            && existing.access === condition.access
+            && existing.ruleName === condition.ruleName
+            && existing.relation === condition.relation
+            && existing.operatorPath.join('.') === condition.operatorPath.join('.'))) result.push(condition);
+    }
+    return result;
+}
+
 function addEdgeDedup(
     edges: EventEdge[],
     source: string,
     target: string,
     edgeType: EventEdge['edgeType'],
     label?: string,
+    conditionRelation?: EventConditionRelation,
 ): void {
-    if (!edges.some(edge => edge.source === source && edge.target === target && edge.edgeType === edgeType && edge.label === label)) {
-        edges.push({ source, target, edgeType, label });
+    if (!edges.some(edge => edge.source === source
+        && edge.target === target
+        && edge.edgeType === edgeType
+        && edge.label === label
+        && edge.conditionRelation === conditionRelation)) {
+        const edge: EventEdge = { source, target, edgeType, label };
+        if (conditionRelation) edge.conditionRelation = conditionRelation;
+        edges.push(edge);
     }
 }
 
@@ -215,17 +318,23 @@ export function parseEventFile(content: string, filePath: string, catalog: PdxSe
     const definition = eventDefinition(catalog);
     const eventKeys = new Set(definition?.typeKeyFilters.map(key => key.toLowerCase()) ?? []);
     const nameField = definition?.nameField;
-    if (!nameField || eventKeys.size === 0) return { nodes: [], edges: [] };
+    if (!nameField) return { nodes: [], edges: [] };
 
     const lines = content.split(/\r?\n/);
     const nodes: EventNode[] = [];
     const edges: EventEdge[] = [];
     for (const root of parsePdx(content)) {
-        if (!root.children || !eventKeys.has(root.key.toLowerCase())) continue;
+        if (!root.children || (eventKeys.size > 0 && !eventKeys.has(root.key.toLowerCase()))) continue;
         const id = scalar(root.children.find(child => child.key.toLowerCase() === nameField));
         if (!id) continue;
         const endLine = Math.max(root.line, findBlockEndLine(lines, root.line - 1));
         const semanticReferences = collectSemanticReferences(root.children, catalog);
+        const meanTimeToHappen = root.children.some(child => child.key.toLowerCase() === 'mean_time_to_happen');
+        const triggerConditions = meanTimeToHappen
+            ? root.children
+                .filter(child => child.key.toLowerCase() === 'trigger' && child.children)
+                .flatMap(child => collectTriggerConditions(child.children ?? [], catalog))
+            : [];
         nodes.push({
             id,
             type: root.key,
@@ -234,6 +343,8 @@ export function parseEventFile(content: string, filePath: string, catalog: PdxSe
             endLine,
             namespace: id.includes('.') ? id.split('.')[0]! : definition.name,
             semanticReferences,
+            meanTimeToHappen,
+            triggerConditions,
         });
         addEventReferenceEdges(id, root.children, catalog, edges);
     }
@@ -291,9 +402,20 @@ export function mergeGraphs(graphs: EventGraph[]): EventGraph {
                         && item.access === reference.access
                         && item.ruleName === reference.ruleName)) existing.semanticReferences.push(reference);
                 }
+                existing.meanTimeToHappen ||= node.meanTimeToHappen;
+                for (const condition of node.triggerConditions ?? []) {
+                    existing.triggerConditions ??= [];
+                    if (!existing.triggerConditions.some(item => item.typeName === condition.typeName
+                        && item.value === condition.value
+                        && item.ruleName === condition.ruleName
+                        && item.relation === condition.relation
+                        && item.operatorPath.join('.') === condition.operatorPath.join('.'))) {
+                        existing.triggerConditions.push(condition);
+                    }
+                }
             }
         }
-        for (const edge of graph.edges) edgeMap.set(`${edge.source}\u0000${edge.target}\u0000${edge.edgeType}\u0000${edge.label ?? ''}`, edge);
+        for (const edge of graph.edges) edgeMap.set(`${edge.source}\u0000${edge.target}\u0000${edge.edgeType}\u0000${edge.label ?? ''}\u0000${edge.conditionRelation ?? ''}`, edge);
     }
     return { nodes: [...nodeMap.values()], edges: [...edgeMap.values()] };
 }
@@ -304,7 +426,12 @@ export function buildImplicitEdges(graph: EventGraph): EventEdge[] {
     const readers = new Map<string, string[]>();
     for (const node of graph.nodes) {
         for (const reference of node.semanticReferences) {
-            const key = `${reference.typeName}:${reference.value}`;
+            const key = `${reference.typeName.toLowerCase()}:${reference.value.toLowerCase()}`;
+            const isMtthTriggerCondition = node.meanTimeToHappen
+                && node.triggerConditions?.some(condition => condition.typeName.toLowerCase() === reference.typeName.toLowerCase()
+                    && condition.value.toLowerCase() === reference.value.toLowerCase()
+                    && condition.ruleName === reference.ruleName);
+            if (isMtthTriggerCondition && reference.access !== 'value_set') continue;
             const index = reference.access === 'value_set' ? writers : readers;
             const ids = index.get(key) ?? [];
             if (!ids.includes(node.id)) ids.push(node.id);
@@ -317,6 +444,24 @@ export function buildImplicitEdges(graph: EventGraph): EventEdge[] {
         for (const readerId of readers.get(key) ?? []) {
             for (const writerId of writerIds) {
                 if (writerId !== readerId) addEdgeDedup(edges, writerId, readerId, 'semantic', key);
+            }
+        }
+    }
+    for (const node of graph.nodes) {
+        if (!node.meanTimeToHappen) continue;
+        for (const condition of node.triggerConditions ?? []) {
+            if (condition.access === 'value_set') continue;
+            const key = `${condition.typeName.toLowerCase()}:${condition.value.toLowerCase()}`;
+            for (const writerId of writers.get(key) ?? []) {
+                if (writerId === node.id) continue;
+                addEdgeDedup(
+                    edges,
+                    writerId,
+                    node.id,
+                    'mtth_condition',
+                    `${condition.ruleName} = ${condition.value}`,
+                    condition.relation,
+                );
             }
         }
     }

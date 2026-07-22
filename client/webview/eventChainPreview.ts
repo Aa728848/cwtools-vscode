@@ -38,13 +38,17 @@ interface EventNode {
     line: number;
     endLine: number;
     namespace: string;
+    meanTimeToHappen?: boolean;
 }
+
+type EventConditionRelation = 'requires' | 'alternative' | 'blocks' | 'complex';
 
 interface EventEdge {
     source: string;
     target: string;
-    edgeType: 'effect' | 'semantic' | 'unknown';
+    edgeType: 'effect' | 'semantic' | 'mtth_condition' | 'unknown';
     label?: string;
+    conditionRelation?: EventConditionRelation;
 }
 
 interface EventGraph {
@@ -169,6 +173,22 @@ const cy = cytoscape({
             style: { 'line-color': '#ff7043', 'target-arrow-color': '#ff7043', 'line-style': 'dotted' as any, 'width': 1 },
         },
         {
+            selector: 'edge[edgeType="mtth_condition"]',
+            style: { 'line-color': '#42a5f5', 'target-arrow-color': '#42a5f5', 'line-style': 'dashed' as any, 'width': 1.5 },
+        },
+        {
+            selector: 'edge[conditionRelation="alternative"]',
+            style: { 'line-color': '#f9a825', 'target-arrow-color': '#f9a825' },
+        },
+        {
+            selector: 'edge[conditionRelation="blocks"]',
+            style: { 'line-color': '#ef5350', 'target-arrow-color': '#ef5350' },
+        },
+        {
+            selector: 'edge[conditionRelation="complex"]',
+            style: { 'line-color': '#ab47bc', 'target-arrow-color': '#ab47bc', 'line-style': 'dotted' as any },
+        },
+        {
             selector: 'node[?isExternal]',
             style: {
                 'shape': 'diamond',
@@ -248,7 +268,7 @@ let seedIds = new Set<string>();
 // ─── UI helpers ──────────────────────────────────────────────────────────────
 
 const primaryEdgeTypes = new Set<EventEdge['edgeType']>(['effect']);
-const implicitEdgeTypes = new Set<EventEdge['edgeType']>(['semantic']);
+const implicitEdgeTypes = new Set<EventEdge['edgeType']>(['semantic', 'mtth_condition']);
 
 function escapeHtml(value: unknown): string {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -283,8 +303,27 @@ function edgeTypeLabel(edgeType: EventEdge['edgeType'] | string): string {
     switch (edgeType) {
         case 'effect': return 'Effect';
         case 'semantic': return t('Typed relation', '类型关系');
+        case 'mtth_condition': return t('MTTH trigger condition', 'MTTH 触发条件');
         default: return t('Unknown relation', '未知关系');
     }
+}
+
+function conditionRelationLabel(relation: EventConditionRelation | undefined): string {
+    switch (relation) {
+        case 'requires': return t('requires', '需要');
+        case 'alternative': return t('one possible condition', '可选条件之一');
+        case 'blocks': return t('blocks when present', '存在时阻断');
+        case 'complex': return t('compound condition', '复合条件');
+        default: return '';
+    }
+}
+
+function edgeDisplayLabel(edge: EventEdge): string {
+    const evidence = edge.label || edgeTypeLabel(edge.edgeType);
+    const relation = edge.edgeType === 'mtth_condition'
+        ? conditionRelationLabel(edge.conditionRelation)
+        : '';
+    return relation ? `${relation}: ${evidence}` : evidence;
 }
 
 function clearFocusClasses() {
@@ -407,6 +446,7 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
     const badges = [
         data.isSeed ? t('Seed', '种子') : '',
         data.isEntry ? t('Entry', '入口') : '',
+        data.meanTimeToHappen ? 'MTTH' : '',
         data.isExternal || data.isOrphan ? t('External reference', '图外引用') : '',
     ].filter(Boolean);
 
@@ -672,6 +712,7 @@ function renderGraph() {
                 line: node.line,
                 endLine: node.endLine,
                 namespace: node.namespace,
+                meanTimeToHappen: node.meanTimeToHappen || undefined,
                 isSeed: seedIds.has(node.id) || undefined,
                 isEntry: isEntry || undefined,
                 isOrphan: false,
@@ -698,13 +739,14 @@ function renderGraph() {
     }
 
     edges.forEach((edge, index) => {
-        const label = edge.label || edgeTypeLabel(edge.edgeType);
+        const label = edgeDisplayLabel(edge);
         elements.push({
             data: {
                 id: `${edge.source}→${edge.target}:${edge.edgeType}:${index}`,
                 source: edge.source,
                 target: edge.target,
                 edgeType: edge.edgeType,
+                conditionRelation: edge.conditionRelation,
                 label,
                 shortLabel: truncateText(label, 32),
                 isPrimary: primaryEdgeTypes.has(edge.edgeType) || undefined,

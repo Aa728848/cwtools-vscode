@@ -8153,9 +8153,19 @@ type Server(client: ILanguageClient) =
                                                     |> Array.sort
                                                     |> Array.map JsonValue.String
                                                 let typeKeyFilters =
-                                                    match td.typeKeyFilter with
-                                                    | Some(values, _) -> values |> List.distinct |> List.sort |> List.map (fun value -> JsonValue.String(value.ToLowerInvariant())) |> List.toArray
-                                                    | None -> [||]
+                                                    let rootFilters =
+                                                        match td.typeKeyFilter with
+                                                        | Some(values, false) -> values
+                                                        | _ -> []
+                                                    let subtypeFilters =
+                                                        td.subtypes |> List.choose (fun subtype -> subtype.typeKeyField)
+                                                    rootFilters @ subtypeFilters
+                                                    |> List.map (fun value -> value.Trim().Trim('"').ToLowerInvariant())
+                                                    |> List.filter (String.IsNullOrWhiteSpace >> not)
+                                                    |> List.distinct
+                                                    |> List.sort
+                                                    |> List.map JsonValue.String
+                                                    |> List.toArray
                                                 let fields = ResizeArray<string * JsonValue>()
                                                 fields.Add("name", JsonValue.String(td.name.ToLowerInvariant()))
                                                 fields.Add("paths", JsonValue.Array paths)

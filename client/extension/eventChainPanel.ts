@@ -359,6 +359,7 @@ private async _findSemanticFiles(
             <div class="legend-item"><span class="legend-swatch" style="background:#4caf50;"></span> ${panelText('Entry definition', '入口定义')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#ab47bc;"></span> ${panelText('Effect edge', 'Effect 边')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#ff7043;border:1px dotted #ff7043;"></span> ${panelText('Typed semantic relation', '类型语义关系')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#42a5f5;border:1px dashed #42a5f5;"></span> ${panelText('MTTH trigger condition', 'MTTH 触发条件')}</div>
         </div>
         <aside id="details-panel" class="empty" aria-live="polite">
             <div class="details-empty">

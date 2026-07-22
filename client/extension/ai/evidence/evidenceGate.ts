@@ -21,6 +21,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { PdxSemanticCatalog } from '../types';
 import {
     createEvidenceDecisionId,
     type EvidenceClaim,
@@ -33,6 +34,7 @@ import {
 import {
     extractClaimsFromText,
     extractLocalDefinitions,
+    extractPdxStatementNames,
     MAX_CLAIM_CANDIDATES,
     MAX_EXTRACT_CHARS,
     scopePushedBy,
@@ -67,6 +69,8 @@ export interface EvidenceGateDeps {
     sendLspCommand?: (command: string, args: unknown[], timeoutMs?: number) => Promise<unknown>;
     /** CWT rule candidates for a name (may include fuzzy/non-exact rows; the gate exact-matches). */
     queryRules?: (category: 'trigger' | 'effect' | 'scope_change' | 'modifier', name: string) => Promise<GateRuleInfo[]>;
+    /** Full CWT-derived catalog used to extract game-specific keys, scopes, and typed references. */
+    querySemanticCatalog?: (targetFiles: readonly string[], ruleNames: readonly string[]) => Promise<PdxSemanticCatalog>;
     /** Workspace/vanilla symbol index lookup; undefined result means the index is unavailable. */
     indexLookup?: (name: string) => Promise<IndexLookupResult | undefined>;
     /** Bounded project/vanilla reference lookup used for explicit entry-point reachability. */
@@ -138,22 +142,48 @@ function statRevision(filePath: string): string {
     }
 }
 
-/** Fingerprint the on-disk CWT rules revision from file mtimes/sizes. */
-export function computeRulesFingerprint(roots: readonly string[]): string {
-    const parts: string[] = [];
+/** Fingerprint active rule aliases plus the schema directory relevant to the pending target. */
+export function computeRulesFingerprint(roots: readonly string[], targetFile?: string): string {
+    const parts = new Set<string>();
+    let schemaParent: string | undefined;
+    if (targetFile) {
+        const normalized = targetFile.replace(/\\/g, '/').toLowerCase();
+        const knownRoots = ['common/', 'events/', 'interface/', 'gfx/', 'sound/', 'map/', 'music/', 'history/', 'decisions/'];
+        const start = knownRoots.map(root => normalized.indexOf(root)).filter(index => index >= 0).sort((a, b) => a - b)[0];
+        if (start !== undefined) {
+            const relativeDirectory = normalized.slice(start).split('/').slice(0, -1).join('/');
+            schemaParent = relativeDirectory.split('/').slice(0, -1).join('/');
+        }
+    }
     for (const root of roots) {
         for (const rel of RULE_FILES) {
             try {
                 const full = path.join(root, rel);
                 const st = fs.statSync(full);
-                if (st.isFile()) parts.push(`${full}:${st.mtimeMs}:${st.size}`);
+                if (st.isFile()) parts.add(`${full}:${st.mtimeMs}:${st.size}`);
             } catch {
                 // Missing rule files are normal for candidate roots.
             }
         }
+        if (schemaParent !== undefined) {
+            try {
+                const directory = path.join(root, schemaParent);
+                const entries = fs.readdirSync(directory, { withFileTypes: true })
+                    .filter(entry => entry.isFile() && entry.name.toLowerCase().endsWith('.cwt'))
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .slice(0, 256);
+                for (const entry of entries) {
+                    const full = path.join(directory, entry.name);
+                    const st = fs.statSync(full);
+                    parts.add(`${full}:${st.mtimeMs}:${st.size}`);
+                }
+            } catch {
+                // Candidate roots need not contain the target's schema family.
+            }
+        }
     }
-    parts.sort();
-    return parts.length > 0 ? sha256Text(parts.join('|')).slice(0, 16) : 'none';
+    const sorted = [...parts].sort();
+    return sorted.length > 0 ? sha256Text(sorted.join('|')).slice(0, 16) : 'none';
 }
 
 interface ParseFragmentResult {
@@ -212,7 +242,7 @@ export class EvidenceGate {
 
     public async evaluate(input: EvidenceGateEvaluateInput): Promise<EvidenceGateDecision> {
         const startedAt = this.now();
-        const rulesFingerprint = computeRulesFingerprint(this.deps.rulesRoots ?? []);
+        const rulesFingerprint = computeRulesFingerprint(this.deps.rulesRoots ?? [], input.targetFile);
         const indexRevision = this.deps.getIndexRevision?.() ?? 'unavailable';
         const targetRevision = statRevision(input.targetFile);
         const evidenceRevision = `${rulesFingerprint}|index:${indexRevision}|target:${targetRevision}`;
@@ -272,12 +302,33 @@ export class EvidenceGate {
         const boundedText = input.text.length > MAX_EXTRACT_CHARS
             ? input.text.slice(0, MAX_EXTRACT_CHARS)
             : input.text;
+        let semanticCatalog: PdxSemanticCatalog | undefined;
+        let catalogDegraded = false;
+        if (this.deps.querySemanticCatalog) {
+            try {
+                const catalogPayload = {
+                    targetFile: input.targetFile,
+                    text: boundedText,
+                    truncated,
+                    gameProfile: this.deps.gameProfile,
+                };
+                semanticCatalog = await this.deps.querySemanticCatalog(
+                    [input.targetFile],
+                    extractPdxStatementNames(catalogPayload),
+                );
+                catalogDegraded = semanticCatalog.status !== 'ready' || semanticCatalog.source !== 'lsp';
+            } catch {
+                catalogDegraded = true;
+            }
+        } else {
+            catalogDegraded = true;
+        }
         const allCandidates = extractClaimsFromText({
             targetFile: input.targetFile,
             text: boundedText,
             truncated,
             gameProfile: this.deps.gameProfile,
-        }).map(candidate => candidate.subject.type === 'syntax'
+        }, semanticCatalog).map(candidate => candidate.subject.type === 'syntax'
             ? {
                 ...candidate,
                 // Semantic extraction stays bounded, but syntax validation must
@@ -293,12 +344,7 @@ export class EvidenceGate {
             text: boundedText,
             truncated,
             gameProfile: this.deps.gameProfile,
-        });
-        const locallyReferencedEvents = new Set(allCandidates.flatMap(candidate =>
-            candidate.subject.type === 'reference' && candidate.subject.refKind === 'event'
-                ? [candidate.subject.id.toLowerCase()]
-                : [],
-        ));
+        }, semanticCatalog);
         const previousText = input.previousText ?? '';
         const previousBoundedText = previousText.length > MAX_EXTRACT_CHARS
             ? previousText.slice(0, MAX_EXTRACT_CHARS)
@@ -310,7 +356,7 @@ export class EvidenceGate {
                 text: previousBoundedText,
                 truncated: previousText.length > MAX_EXTRACT_CHARS,
                 gameProfile: this.deps.gameProfile,
-            });
+            }, semanticCatalog);
             for (const candidate of previousCandidates) {
                 if (candidate.subject.type === 'syntax') continue;
                 const key = this.candidateIdentity(candidate);
@@ -327,7 +373,7 @@ export class EvidenceGate {
         });
 
         const claims: EvidenceClaim[] = [];
-        let degraded = false;
+        let degraded = catalogDegraded;
         let lspDown = false;
         const mtimeBefore = statMtime(input.targetFile);
 
@@ -345,7 +391,7 @@ export class EvidenceGate {
                     rulesFingerprint,
                     input,
                     localDefinitions,
-                    locallyReferencedEvents,
+                    semanticCatalog,
                     () => { lspDown = true; },
                 );
                 if (resolved.rulesError) degraded = true;
@@ -428,7 +474,7 @@ export class EvidenceGate {
         rulesFingerprint: string,
         input: EvidenceGateEvaluateInput,
         localDefinitions: readonly LocalDefinitionCandidate[],
-        locallyReferencedEvents: ReadonlySet<string>,
+        semanticCatalog: PdxSemanticCatalog | undefined,
         markLspDown: () => void,
     ): Promise<{ claims: EvidenceClaim[]; rulesError?: boolean }> {
         const subject = candidate.subject;
@@ -436,11 +482,9 @@ export class EvidenceGate {
             case 'syntax':
                 return { claims: [await this.resolveSyntax(candidate, subject.code, input, markLspDown)] };
             case 'rule':
-                return this.resolveRuleCandidate(candidate, subject, rulesFingerprint, input, localDefinitions, markLspDown);
+                return this.resolveRuleCandidate(candidate, subject, rulesFingerprint, input, localDefinitions, semanticCatalog, markLspDown);
             case 'reference':
                 return { claims: [await this.resolveReference(candidate, subject.id, subject.refKind, input, localDefinitions, markLspDown)] };
-            case 'call_chain':
-                return { claims: [await this.resolveCallChain(candidate, subject.entryId, subject.requiresCaller, input, locallyReferencedEvents)] };
         }
     }
 
@@ -487,8 +531,12 @@ export class EvidenceGate {
         }
     }
 
-    private ruleCategoriesFor(position: 'effect' | 'trigger' | 'modifier' | 'any', name: string): Array<'trigger' | 'effect' | 'scope_change' | 'modifier'> {
-        const scoped: Array<'trigger' | 'effect' | 'scope_change' | 'modifier'> = scopePushedBy(name) ? ['scope_change'] : [];
+    private ruleCategoriesFor(
+        position: 'effect' | 'trigger' | 'modifier' | 'any',
+        name: string,
+        semanticCatalog?: PdxSemanticCatalog,
+    ): Array<'trigger' | 'effect' | 'scope_change' | 'modifier'> {
+        const scoped: Array<'trigger' | 'effect' | 'scope_change' | 'modifier'> = scopePushedBy(name, semanticCatalog) ? ['scope_change'] : [];
         switch (position) {
             case 'effect': return [...scoped, 'effect'];
             case 'trigger': return [...scoped, 'trigger'];
@@ -500,7 +548,12 @@ export class EvidenceGate {
     private async findRule(
         categories: Array<'trigger' | 'effect' | 'scope_change' | 'modifier'>,
         name: string,
+        semanticCatalog?: PdxSemanticCatalog,
     ): Promise<{ category: 'trigger' | 'effect' | 'scope_change' | 'modifier'; rule: GateRuleInfo } | undefined> {
+        for (const category of categories) {
+            const exact = semanticCatalog?.rules.find(rule => rule.category === category && rule.name === name.toLowerCase());
+            if (exact) return { category, rule: { name: exact.name, scopes: exact.supportedScopes, pushScope: exact.pushScope } };
+        }
         if (!this.deps.queryRules) return undefined;
         for (const category of categories) {
             const rules = await this.deps.queryRules(category, name);
@@ -516,13 +569,14 @@ export class EvidenceGate {
         rulesFingerprint: string,
         input: EvidenceGateEvaluateInput,
         localDefinitions: readonly LocalDefinitionCandidate[],
+        semanticCatalog: PdxSemanticCatalog | undefined,
         markLspDown: () => void,
     ): Promise<{ claims: EvidenceClaim[]; rulesError?: boolean }> {
         let rulesError = false;
         let matched: { category: 'trigger' | 'effect' | 'scope_change' | 'modifier'; rule: GateRuleInfo } | undefined;
-        const categories = this.ruleCategoriesFor(subject.position, subject.name);
+        const categories = this.ruleCategoriesFor(subject.position, subject.name, semanticCatalog);
         try {
-            matched = await this.findRule(categories, subject.name);
+            matched = await this.findRule(categories, subject.name, semanticCatalog);
         } catch (error) {
             rulesError = true;
             return {
@@ -538,7 +592,15 @@ export class EvidenceGate {
             };
         }
 
-        const ruleSource = this.makeSource('cwt_rules', `${categories.join('/')}:${subject.name}`, `rules:${rulesFingerprint}`);
+        const catalogMatched = semanticCatalog?.rules.some(rule =>
+            categories.includes(rule.category) && rule.name === subject.name.toLowerCase()) === true;
+        const ruleSource = this.makeSource(
+            catalogMatched ? 'lsp.semanticCatalog' : 'cwt_rules',
+            `${categories.join('/')}:${subject.name}`,
+            catalogMatched
+                ? `rules:${semanticCatalog?.rulesContentHash ?? semanticCatalog?.rulesGeneration ?? rulesFingerprint}`
+                : `rules:${rulesFingerprint}`,
+        );
         if (!matched) {
             if (subject.position === 'modifier') {
                 // Names inside `modifier = { }` blocks must be engine modifiers;
@@ -554,24 +616,36 @@ export class EvidenceGate {
                     }],
                 };
             }
-            // Unknown effect/trigger name: fall back to scripted_effect /
-            // scripted_trigger call verification (the game treats those as an
-            // extension of the effect/trigger namespace).
-            const refKind = subject.position === 'trigger'
-                ? 'scripted_trigger'
-                : subject.position === 'effect'
-                    ? 'scripted_effect'
-                    : 'scripted_effect_or_trigger';
-            const refKindLabel = refKind === 'scripted_effect_or_trigger' ? 'effect/trigger' : refKind.replace('scripted_', '');
+            // CWT expresses extensible rule namespaces as aliases whose name
+            // is a TypeDef placeholder, for example alias[effect:<some_type>].
+            // Resolve those types dynamically instead of embedding a list of
+            // callable definition families in the gate.
+            const callableKinds = Array.from(new Set((semanticCatalog?.rules ?? [])
+                .filter(rule => categories.includes(rule.category) && /^<[^>]+>$/.test(rule.name))
+                .map(rule => rule.name.slice(1, -1).toLowerCase())
+                .filter(kind => semanticCatalog?.definitionTypes.some(type => type.name === kind))))
+                .sort();
+            if (callableKinds.length === 0) {
+                return {
+                    claims: [{
+                        kind: 'symbol_exists',
+                        claim: candidate.claim,
+                        status: 'unknown',
+                        blocking: false,
+                        sources: [ruleSource],
+                        detail: `No active CWT alias maps the ${categories.join('/')} namespace to a CWTools TypeDef. Final LSP diagnostics remain authoritative for this name.`,
+                    }],
+                };
+            }
             const refClaim = await this.resolveReference(
                 {
                     kind: 'reference_exists',
-                    claim: `scripted ${refKindLabel} '${subject.name}' is defined`,
+                    claim: `callable definition '${subject.name}' exists as one of [${callableKinds.join(', ')}]`,
                     blocking: candidate.blocking,
-                    subject: { type: 'reference', id: subject.name, refKind },
+                    subject: { type: 'reference', id: subject.name, refKind: callableKinds[0]! },
                 },
                 subject.name,
-                refKind,
+                callableKinds,
                 input,
                 localDefinitions,
                 markLspDown,
@@ -624,7 +698,7 @@ export class EvidenceGate {
     private async resolveReference(
         candidate: ExtractedClaimCandidate,
         id: string,
-        refKind: ReferenceKind,
+        refKind: ReferenceKind | readonly ReferenceKind[],
         input: EvidenceGateEvaluateInput,
         localDefinitions: readonly LocalDefinitionCandidate[],
         markLspDown: () => void,
@@ -678,8 +752,8 @@ export class EvidenceGate {
                     markLspDown();
                 } else if (lookup.found && (!lspType || !expectedTypes.includes(lspType))) {
                     // Old/untyped LSP results are not strong enough to prove a
-                    // semantic identifier kind. A same-named technology must
-                    // never validate a scripted effect/event reference.
+                    // semantic identifier kind. A same-named definition from
+                    // another active TypeDef must never validate this reference.
                     lspFound = undefined;
                     lspTypeConflict = lspType
                         ? `Definition '${id}' exists as type '${lspType}', not one of [${expectedTypes.join(', ')}].`
@@ -756,97 +830,10 @@ export class EvidenceGate {
     }
 
     private definitionTypesFor(
-        refKind: ReferenceKind,
+        refKind: ReferenceKind | readonly ReferenceKind[],
     ): string[] {
-        switch (refKind) {
-            case 'event': return ['event'];
-            case 'scripted_effect': return ['scripted_effect'];
-            case 'scripted_trigger': return ['scripted_trigger'];
-            case 'scripted_effect_or_trigger': return ['scripted_effect', 'scripted_trigger'];
-            case 'static_modifier': return ['static_modifier'];
-            case 'technology': return ['technology'];
-            case 'building': return ['building'];
-            case 'trait': return ['trait'];
-            case 'starbase_building': return ['starbase_building'];
-        }
-    }
-
-    private async resolveCallChain(
-        candidate: ExtractedClaimCandidate,
-        entryId: string,
-        requiresCaller: boolean,
-        input: EvidenceGateEvaluateInput,
-        locallyReferencedEvents: ReadonlySet<string>,
-    ): Promise<EvidenceClaim> {
-        const base: EvidenceClaim = {
-            kind: 'call_chain',
-            claim: candidate.claim,
-            status: 'unknown',
-            blocking: candidate.blocking,
-            sources: [],
-            detail: candidate.detail,
-        };
-        if (!requiresCaller) return { ...base, blocking: false };
-
-        if (locallyReferencedEvents.has(entryId.toLowerCase())) {
-            return {
-                ...base,
-                status: 'verified',
-                sources: [this.makeSource(
-                    'pending_write.localCallSite',
-                    entryId,
-                    `sha256:${sha256Text(input.text).slice(0, 16)}`,
-                )],
-                detail: this.joinDetail(base.detail, 'The exact pending final content contains an inbound event/on_action call site.'),
-            };
-        }
-        if (!this.deps.queryReferences) {
-            return { ...base, detail: this.joinDetail(base.detail, 'Project reference lookup is unavailable.') };
-        }
-        try {
-            const references = await this.deps.queryReferences(entryId);
-            if (!references) {
-                return { ...base, detail: this.joinDetail(base.detail, 'Project reference lookup returned no usable result.') };
-            }
-            const target = path.isAbsolute(input.targetFile)
-                ? path.resolve(input.targetFile)
-                : path.resolve(this.deps.workspaceRoot, input.targetFile);
-            const normalize = (value: string): string => {
-                const absolute = path.isAbsolute(value) ? path.resolve(value) : path.resolve(this.deps.workspaceRoot, value);
-                return process.platform === 'win32' ? absolute.toLowerCase() : absolute;
-            };
-            const inbound = references.find(reference => normalize(reference.file) !== normalize(target));
-            if (inbound) {
-                const sourceFile = path.isAbsolute(inbound.file)
-                    ? inbound.file
-                    : path.resolve(this.deps.workspaceRoot, inbound.file);
-                return {
-                    ...base,
-                    status: 'verified',
-                    sources: [this.makeSource(
-                        'project.queryReferences',
-                        `${inbound.file}:${inbound.line ?? -1}`,
-                        `file:${statRevision(sourceFile)};index:${this.deps.getIndexRevision?.() ?? 'unavailable'}`,
-                    )],
-                    detail: this.joinDetail(base.detail, `Inbound reference found at ${inbound.file}:${(inbound.line ?? -1) + 1}.`),
-                };
-            }
-            return {
-                ...base,
-                status: 'unknown',
-                sources: [this.makeSource(
-                    'project.queryReferences',
-                    entryId,
-                    `index:${this.deps.getIndexRevision?.() ?? 'unavailable'}`,
-                )],
-                detail: this.joinDetail(base.detail, `No inbound call site for triggered-only event '${entryId}' is indexed yet. A dependent Agent may create it later; final task validation must confirm the planned edge.`),
-            };
-        } catch (error) {
-            return {
-                ...base,
-                detail: this.joinDetail(base.detail, `Project reference lookup failed: ${error instanceof Error ? error.message : String(error)}`),
-            };
-        }
+        const kinds = Array.isArray(refKind) ? refKind : [refKind];
+        return Array.from(new Set(kinds.map(kind => kind.toLowerCase()))).sort();
     }
 
     private buildMissingEvidence(claims: EvidenceClaim[], input: EvidenceGateEvaluateInput): EvidenceMissingItem[] {

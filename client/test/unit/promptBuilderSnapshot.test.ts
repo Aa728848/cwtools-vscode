@@ -75,10 +75,10 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         const prompt = builder.buildSystemPromptForMode('plan', undefined, 'stellaris');
 
         expect(prompt).to.include('Stellaris PDXScript modding');
-        expect(prompt).to.include('Do not rely on static prompt knowledge for scopes');
-        expect(prompt).to.include('Static prompt text must not encode current-version CWT facts');
-        expect(prompt).to.include('subsystem directory capability');
-        expect(prompt).to.include('Do not copy scope, on_action, or subsystem facts from this prompt');
+        expect(prompt).to.include('intentionally contains no game-version rule tables');
+        expect(prompt).to.include('Retrieve those facts from the active CWT rules and CWTools LSP model');
+        expect(prompt).to.include('query_scope');
+        expect(prompt).to.include('source/revision');
         expect(prompt).to.include('query_cwt_schema');
         expect(prompt).to.include('query_workspace_index');
         expect(prompt).to.include('Common Directory Capability Review');

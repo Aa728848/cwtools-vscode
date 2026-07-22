@@ -88,7 +88,7 @@ Webviews communicate with the Extension Host exclusively via `postMessage`. They
 
 ##### GameProfile Platform
 
-`gameProfiles.ts` consolidates multi-game differences into profiles instead of scattering them in extensions, indexing, and AI modules. A profile describes language IDs, file extensions, vanilla cache configuration keys, localization directories and encodings, script/GUI/GFX directory structures, preview features, AI knowledge mapping, and Steam installation detection metadata.
+`gameProfiles.ts` consolidates stable platform differences instead of scattering them in extensions, indexing, and AI modules. A profile describes language IDs, file extensions, vanilla cache configuration keys, localization storage conventions, preview features, and Steam installation detection metadata. Mutable game semantics do not belong in profiles or prompts.
 
 The extension entry point, indexing layer, and AI game knowledge should prioritize game profile helper functions.
 
@@ -111,9 +111,15 @@ The core constraint of this layer is: if the shared index can answer the query, 
 
 Because the graph reads the existing game model, scripted-type refreshes and ordinary file updates become visible through the same cache/locking lifecycle as diagnostics and completion. User buffer changes are debounced into `UpdateFile`; agent writes and watched file-system changes force a disk-backed update; creates, changes, and deletes update or remove typed indexes; and graph reads hold the game-state read lock while incremental commits/full refreshes hold the write lock. Query-only graph caches are invalidated on every relevant workspace mutation. Standalone MCP uses a bounded Chokidar watcher to forward the same LSP watched-file events. Empty results from a loading or stale snapshot are explicitly non-authoritative.
 
+##### Dynamic Semantic Catalog
+
+`cwtools.ai.getSemanticCatalog` is the shared read-only boundary for deterministic consumers that need current-game structure. The LSP combines CWTools `TypeDefs()` with the active CWT alias rules and returns type paths, `name_field`, `type_key_filter`, rule categories, supported/pushed scopes, and typed `value`/`value_set`/`<type>` references together with a rule generation and content hash. Callers request only rule names present in the files they are checking; CWT aliases named with a `<TypeDef>` placeholder are retained as namespace-to-callable-type metadata. EvidenceGate and SemanticVerifier consume this catalog; they do not maintain event-key, flag-command, callable-type, entity-directory, or scope tables. Older or unavailable servers use a bounded Extension cache of the same active CWT source and mark the result degraded.
+
+This is a reusable platform boundary rather than an Agent-owned rule base. The workspace symbol index classifies script definitions from catalog TypeDef paths/name fields/type-key filters and includes the catalog hash in its persistent-cache fingerprint. Vanilla Compare uses the same metadata for block identity and rejects ambiguous generic matches; localisation navigation uses generic assignment structure plus the actual localisation index instead of field/keyword lists. Other editor, validation, visualization, or indexing features that need mutable game semantics should query the CWTools/LSP model or stable profile helpers, not add a parallel game table.
+
 ##### Project Knowledge Pack
 
-`/init` has a quick profile phase and a deep semantic phase. `chatInit.ts` keeps a `ProgressLocation.Window` indicator in VS Code's lower-left status area while it waits for CWTools, exports the database, and publishes the artifacts. The deep phase calls the internal `cwtools.ai.exportProjectKnowledge` command against one coherently locked `IGame` snapshot, then atomically writes a normalized SQLite V2 database. Workspace definitions, embedded vanilla definitions, definition stacks, reference topology, archetypes, resource overwrite state, active CWT override modes, unresolved facts, and event semantics therefore share one generation boundary. Event semantics include nodes, event-call/phase edges, `on_action` and typed entry edges, plus flag, technology, variable, `fire_on_action`, and scope-bridge logic facts.
+`/init` has a quick profile phase and a deep semantic phase. The quick profile discovers actual PDX content directories and stable registered game metadata; it does not manufacture a fixed list of entity families or inject samples from selected folders. `chatInit.ts` keeps a `ProgressLocation.Window` indicator in VS Code's lower-left status area while it waits for CWTools, exports the database, and publishes the artifacts. The deep phase calls the internal `cwtools.ai.exportProjectKnowledge` command against one coherently locked `IGame` snapshot, then atomically writes a normalized SQLite V2 database. Workspace definitions, embedded vanilla definitions, definition stacks, reference topology, archetypes, resource overwrite state, active CWT override modes, unresolved facts, and typed graph facts therefore share one generation boundary. Graph nodes and edges are derived from CWTools definition types and reference topology; the exporter and semantic graph use generic typed-reference edges instead of command-name or entity-name classifiers. Compatibility columns in the SQLite event tables remain readable for older manifests, but they are not populated by hard-coded gameplay inference.
 
 The persistent layout is intentionally compact:
 
@@ -125,7 +131,7 @@ The persistent layout is intentionally compact:
    └─ knowledge.sqlite
 ```
 
-`manifest.json` contains freshness, fingerprints, counts, domains, and the portable database reference; normalized facts live only once in `knowledge.sqlite`. When the definition budget is reached, selection preserves every workspace definition and the complete event/on_action core, then allocates the remaining vanilla budget across priority and other domains instead of truncating alphabetically. A successful V1 migration removes the old capability/archetype/snapshot JSON set only after the new database and manifest are published. File/config watchers mark knowledge stale and rebuild the database. The vanilla fingerprint also includes the active game's serialized `.cwb`; a `.cwb` change runs one coordinated refresh stage that rebuilds the matching global vanilla-symbol SQLite cache before performing a full `knowledge.sqlite` export. `cwtools.ai.queryProjectKnowledgeDb` is the read-only query command used by the extension and MCP. Explicit identifiers are resolved as indexed definition/event seeds, then expanded through incoming/outgoing references, event edges, and event logic; bounded token scanning is only the fallback for intent-only queries. Agents retrieve targeted evidence through `query_project_knowledge`; complex blueprints are gated on fresh project knowledge, project/vanilla evidence, event structure and logic evidence, active CWT/LSP legality evidence, and an empty critical-unresolved list.
+`manifest.json` contains freshness, fingerprints, counts, domains, and the portable database reference; normalized facts live only once in `knowledge.sqlite`. When the definition budget is reached, selection preserves every workspace definition and allocates the remaining vanilla budget across the definition types and reference topology reported by CWTools instead of privileging hard-coded game concepts or truncating alphabetically. A successful V1 migration removes the old capability/archetype/snapshot JSON set only after the new database and manifest are published. File/config watchers mark knowledge stale and rebuild the database. The vanilla fingerprint also includes the active game's serialized `.cwb`; a `.cwb` change runs one coordinated refresh stage that rebuilds the matching global vanilla-symbol SQLite cache before performing a full `knowledge.sqlite` export. `cwtools.ai.queryProjectKnowledgeDb` is the read-only query command used by the extension and MCP. Explicit identifiers are resolved as indexed definition seeds, then expanded through generic incoming/outgoing typed references; bounded token scanning is only the fallback for intent-only queries. Agents retrieve targeted evidence through `query_project_knowledge`; complex blueprints are gated on fresh project knowledge, project/vanilla reference evidence, active CWT/LSP legality evidence, and an empty critical-unresolved list.
 
 #### Submodules
 
@@ -191,7 +197,7 @@ sequenceDiagram
 | `projectProfile.ts` | `/init` workspace scanning, project profile generation, and encoding/language detection |
 | `projectKnowledge.ts` | Deep `/init` manifest + SQLite generation, V1 migration, fingerprints, retrieval, and background refresh |
 | `chatInit.ts` | Command handler for `/init`, triggers quick profile plus deep semantic generation and renders `CWTOOLS.md` |
-| `gameKnowledge.ts` | Paradox script rule-bases for 9 games mapped by language ID |
+| `gameKnowledge.ts` | Stable evidence-routing policy; mutable game facts are queried from CWT/CWTools LSP |
 | `skills.ts` | Skill index loader (`SKILL.md` for built-in, user, or project scopes) and `run_skill` execution |
 | `memoryParser.ts` | Private structured memory with provenance, confidence, usage, expiry, redaction, and bounded consolidation |
 | `workspacePaths.ts` | Separates project artifacts under `.cwtools/` from private runtime state under `ExtensionContext.storageUri`, with legacy migration |
@@ -501,7 +507,7 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 
 ##### GameProfile 平台
 
-`gameProfiles.ts` 把多游戏差异集中到 profile 中，而不是散落在 extension、索引和 AI 代码里。profile 描述语言 ID、扩展名、原版缓存配置键、本地化目录与编码、脚本/GUI/GFX 目录约定、预览能力、AI 知识块映射和 Steam 安装探测元数据。
+`gameProfiles.ts` 集中稳定的平台差异，而不是把差异散落在 extension、索引和 AI 代码里。profile 描述语言 ID、扩展名、原版缓存配置键、本地化存储约定、预览能力和 Steam 安装探测元数据；会随规则和游戏版本变化的语义不属于 profile 或 prompt。
 
 扩展入口、索引层和 AI 游戏知识都应优先消费 profile helper。
 
@@ -524,9 +530,15 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 
 语义图复用现有 game model，因此 scripted type 增量刷新和普通文件更新会沿诊断与补全相同的缓存/锁生命周期生效。用户未保存缓冲区经过防抖后进入 `UpdateFile`；Agent 写入和文件系统 watcher 事件强制从磁盘更新；创建、修改和删除会更新或移除 typed index；语义图读取持有 game-state 读锁，而增量提交和完整刷新持有写锁。任何相关工作区变更都会使纯 query 语义图缓存失效。Standalone MCP 通过有界 Chokidar watcher 转发相同的 LSP 文件事件。加载中或 stale snapshot 的空结果会被明确标记为非权威。
 
+##### 动态语义目录
+
+`cwtools.ai.getSemanticCatalog` 是确定性消费者获取当前游戏结构的共享只读边界。LSP 把 CWTools `TypeDefs()` 与活动 CWT alias 规则组合，返回 type path、`name_field`、`type_key_filter`、规则类别、supported/push scope、typed `value`/`value_set`/`<type>` 引用，以及规则 generation/content hash；调用方只请求待检查文件实际出现的规则名，同时保留以 `<TypeDef>` 命名的 CWT alias，作为规则命名空间到可调用类型的元数据。EvidenceGate 与 SemanticVerifier 消费该目录，不再维护 event key、flag 指令、可调用类型、entity 目录或 scope 表。旧版或不可用 LSP 仅回退到同一活动 CWT 源的有界 Extension cache，并标记 degraded。
+
+这是一条可复用的平台边界，而不是 Agent 私有规则库。工作区符号索引依据目录中的 TypeDef path、name field 和 type-key filter 分类脚本定义，并把目录 hash 纳入持久缓存指纹；Vanilla Compare 复用同一元数据确定块身份，对通用歧义匹配选择拒绝；本地化跳转使用通用赋值结构与真实本地化索引，不再维护字段/关键字名单。编辑器、验证、可视化或索引功能需要动态游戏语义时，也应查询 CWTools/LSP 模型或稳定 profile helper，不应建立平行的游戏常量表。
+
 ##### 项目知识包
 
-`/init` 现在分为快速画像阶段和深度语义阶段。`chatInit.ts` 在等待 CWTools、导出数据库和发布产物期间，通过 `ProgressLocation.Window` 在 VS Code 左下角持续显示构建进度。深度阶段通过内部命令 `cwtools.ai.exportProjectKnowledge` 从同一个一致加锁的 `IGame` 快照原子生成规范化 SQLite V2 数据库，因此工作区定义、原版缓存定义、定义栈、引用拓扑、范例、资源覆盖状态、活动 CWT 覆盖模式、未解决事实和事件语义共享同一代数据边界。事件语义包括事件节点、事件调用与阶段边、`on_action`/类型入口边，以及 Flag、科技、变量、`fire_on_action` 和作用域桥接逻辑。
+`/init` 现在分为快速画像阶段和深度语义阶段。快速画像只发现实际存在的 PDX 内容目录和稳定的注册游戏元数据，不再构造固定实体族清单，也不从指定目录注入类型样本。`chatInit.ts` 在等待 CWTools、导出数据库和发布产物期间，通过 `ProgressLocation.Window` 在 VS Code 左下角持续显示构建进度。深度阶段通过内部命令 `cwtools.ai.exportProjectKnowledge` 从同一个一致加锁的 `IGame` 快照原子生成规范化 SQLite V2 数据库，因此工作区定义、原版缓存定义、定义栈、引用拓扑、范例、资源覆盖状态、活动 CWT 覆盖模式、未解决事实和 typed graph facts 共享同一代数据边界。图节点和边由 CWTools definition type 与 reference topology 派生；导出器和语义图使用通用 typed-reference edge，不再为各游戏子系统维护指令名或实体名分类器。SQLite 事件表中的兼容字段继续供旧 manifest 读取，但不会由硬编码玩法推断填充。
 
 持久化结构保持为两个核心产物：
 
@@ -538,7 +550,7 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
    └─ knowledge.sqlite
 ```
 
-`manifest.json` 只保存 freshness、指纹、计数、领域和可移植数据库引用；规范化事实只在 `knowledge.sqlite` 中保存一次。达到定义预算时，选择器会完整保留工作区定义与事件/`on_action` 核心，再把剩余原版预算分配给优先领域和其他领域，不再按字母序直接截断。V1 迁移只有在新数据库和 manifest 都发布成功后才清理旧的 capability/archetype/snapshot JSON。文件与配置 watcher 会标记 stale 并重建数据库。原版指纹同时包含当前游戏的序列化 `.cwb`；当 `.cwb` 变化时，同一刷新阶段会先重建对应的全局原版符号 SQLite，再执行完整的 `knowledge.sqlite` 导出。`cwtools.ai.queryProjectKnowledgeDb` 是 Extension 与 MCP 共用的只读查询命令。显式标识符会先通过定义/事件索引解析为种子，再沿入站/出站引用、事件边和事件逻辑进行扩展；只有纯意图查询才退回有界文本检索。Agent 通过 `query_project_knowledge` 按任务检索项目/原版证据、事件结构和逻辑关系；复杂蓝图仍必须完成活动 CWT/LSP 合法性验证，并确保关键未解决列表为空。
+`manifest.json` 只保存 freshness、指纹、计数、领域和可移植数据库引用；规范化事实只在 `knowledge.sqlite` 中保存一次。达到定义预算时，选择器会完整保留工作区定义，并依据 CWTools 报告的定义类型与引用拓扑分配剩余原版预算，不再优待架构内写死的游戏概念，也不按字母序直接截断。V1 迁移只有在新数据库和 manifest 都发布成功后才清理旧的 capability/archetype/snapshot JSON。文件与配置 watcher 会标记 stale 并重建数据库。原版指纹同时包含当前游戏的序列化 `.cwb`；当 `.cwb` 变化时，同一刷新阶段会先重建对应的全局原版符号 SQLite，再执行完整的 `knowledge.sqlite` 导出。`cwtools.ai.queryProjectKnowledgeDb` 是 Extension 与 MCP 共用的只读查询命令。显式标识符会先通过定义索引解析为种子，再沿通用的入站/出站 typed reference 扩展；只有纯意图查询才退回有界文本检索。Agent 通过 `query_project_knowledge` 按任务检索项目/原版引用证据；复杂蓝图仍必须完成活动 CWT/LSP 合法性验证，并确保关键未解决列表为空。
 
 #### 子模块
 
@@ -603,7 +615,7 @@ sequenceDiagram
 | `projectProfile.ts` | `/init` 项目扫描、profile 构建/读写、语言/编码检测 |
 | `projectKnowledge.ts` | 深度 `/init` manifest + SQLite 生成、V1 迁移、指纹、检索与后台刷新 |
 | `chatInit.ts` | `/init` 命令处理器、快速画像、深度语义生成和 CWTOOLS.md 渲染 |
-| `gameKnowledge.ts` | 按 languageId 选择的 9 款游戏 PDXScript 知识块 |
+| `gameKnowledge.ts` | 稳定证据路由策略；动态游戏事实从 CWT/CWTools LSP 查询 |
 | `skills.ts` | `SKILL.md` 技能索引（built-in/user/project）+ `run_skill` 按需正文加载 |
 | `memoryParser.ts` | 带来源、置信度、使用次数、过期、脱敏和有界合并的私有结构化长期记忆 |
 | `workspacePaths.ts` | 分离 `.cwtools/` 项目产物与 `ExtensionContext.storageUri` 私有运行状态，并兼容迁移旧数据 |
@@ -812,7 +824,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ##### Game Knowledge
 
-`gameKnowledge.ts` 为 9 款 Paradox 游戏提供 PDXScript 知识块（Stellaris、HOI4、EU4、CK2、CK3、VIC2、VIC3、Imperator、EU5），外加一个通用 Paradox 回退。`promptBuilder.ts` 通过 `getGameKnowledge(languageId)` 动态选择注入。Stellaris 知识块包含 `common/` 各目录的覆盖/加载顺序规则（LIOS/FIOS/DUPL/NO/MERGE/UNKNOWN）和可选作用域操作符 `scope?` 的说明。覆盖模式的具体含义（谁默认胜出、如何覆盖原版）不再以静态文本硬编码在提示词中，而是定义在 CWT `override_modes_info` 块中，由 Agent 通过 `query_override_modes`（返回 `modeInfo` / `matchedModeInfo`）动态获取。
+`gameKnowledge.ts` 只保存所有 profile 共用的稳定证据路由策略，不再保存 9 份游戏规则知识块。`promptBuilder.ts` 注入当前游戏名称和同一短策略；规则、scope、entity、目录、event、operator、localisation 与 override 事实按任务从活动 CWT/CWTools LSP、项目知识或精确 archetype 获取。这样动态事实与规则 revision 共用失效边界，也减少静态 prompt 和 prefix cache 的无效占用。
 
 ##### Skills
 
@@ -956,7 +968,7 @@ Shader 支持覆盖 `.shader` 和 `.fxh`，涉及：
 
 ##### Vanilla Compare
 
-`client/extension/vanillaCompare.ts` 支持全文件 diff、光标所在块迁移（`migrateBlockFromVanilla`）和文件级批量迁移（`migrateChangedFromVanilla`）。块识别依赖 game profile 的目录和标识约定。应用多个 `WorkspaceEdit` 时应按起始行从后往前替换，避免前面的替换改变后续块的行号。
+`client/extension/vanillaCompare.ts` 支持全文件 diff、光标所在块迁移（`migrateBlockFromVanilla`）和文件级批量迁移（`migrateChangedFromVanilla`）。块识别复用活动 LSP 语义目录中的 TypeDef path、`name_field` 与 `type_key_filter`；语义目录不可用时只允许无歧义的通用顶层键匹配，不使用某个游戏的事件 key 回退表。应用多个 `WorkspaceEdit` 时应按起始行从后往前替换，避免前面的替换改变后续块的行号。
 
 #### 构建系统
 
@@ -1118,7 +1130,7 @@ cwtools-vscode/
         promptBuilder.ts      Prompt 构建门面
         projectProfile.ts     /init 项目扫描和 profile
         chatInit.ts           /init 命令处理器
-        gameKnowledge.ts      9 款游戏 PDXScript 知识块
+        gameKnowledge.ts      稳定证据路由策略（动态事实走 CWT/LSP）
         skills.ts             SKILL.md 索引 + run_skill 按需加载
         memoryParser.ts       长期工作区记忆
         workspacePaths.ts     AI 存储路径解析

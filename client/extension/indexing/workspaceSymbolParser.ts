@@ -1,3 +1,5 @@
+import { matchPdxDefinitionType, type PdxDefinitionType } from '../../shared/pdxSemanticCatalog';
+
 export type WorkspaceSymbolSource = 'script' | 'asset' | 'gui';
 export type WorkspaceSymbolOrigin = 'workspace' | 'vanilla';
 
@@ -39,6 +41,8 @@ export interface WorkspaceSymbolParseOptions {
     fileVersion?: number;
     origin?: WorkspaceSymbolOrigin;
     maxReferencesPerSymbol?: number;
+    /** Active CWTools TypeDefs supplied by the LSP semantic catalog. */
+    definitionTypes?: readonly PdxDefinitionType[];
 }
 
 interface OpenBlock {
@@ -47,6 +51,8 @@ interface OpenBlock {
     source: WorkspaceSymbolSource;
     references?: WorkspaceSymbolReference[];
     entry?: WorkspaceSymbolEntry;
+    nameField?: string;
+    category?: string;
 }
 
 const SCRIPT_EXTENSIONS = new Set(['.txt']);
@@ -65,7 +71,7 @@ export function parseWorkspaceSymbols(
     const ext = getExtension(filePath);
     let entries: WorkspaceSymbolEntry[];
     if (SCRIPT_EXTENSIONS.has(ext)) {
-        entries = parseScriptSymbols(content, filePath);
+        entries = parseScriptSymbols(content, filePath, options.definitionTypes ?? []);
     } else if (NAMED_BLOCK_EXTENSIONS.has(ext)) {
         entries = parseNamedBlockSymbols(
             content,
@@ -283,7 +289,11 @@ function lowerBound(values: readonly string[], target: string): number {
     return low;
 }
 
-function parseScriptSymbols(content: string, filePath: string): WorkspaceSymbolEntry[] {
+function parseScriptSymbols(
+    content: string,
+    filePath: string,
+    definitionTypes: readonly PdxDefinitionType[],
+): WorkspaceSymbolEntry[] {
     const entries: WorkspaceSymbolEntry[] = [];
     const lines = content.split(/\r?\n/);
     let depth = 0;
@@ -312,10 +322,16 @@ function parseScriptSymbols(content: string, filePath: string): WorkspaceSymbolE
             : null;
         if (topBlockMatch?.[1]) {
             const blockName = topBlockMatch[1];
-            const classification = inferScriptClassification(normalizedFile, blockName);
+            const classification = inferScriptClassification(normalizedFile, blockName, definitionTypes);
             const kind = classification.kind;
-            openBlock = { name: blockName, kind, source: 'script' };
-            if (kind !== 'event_block') {
+            openBlock = {
+                name: blockName,
+                kind,
+                source: 'script',
+                nameField: classification.nameField,
+                category: classification.category,
+            };
+            if (!classification.nameField) {
                 entries.push({
                     name: blockName,
                     kind,
@@ -325,17 +341,18 @@ function parseScriptSymbols(content: string, filePath: string): WorkspaceSymbolE
                     category: classification.category,
                 });
             }
-        } else if (openBlock?.kind === 'event_block') {
-            const eventIdMatch = line.match(/^\s*id\s*=\s*"?([A-Za-z0-9_.:-]+)"?/);
-            if (eventIdMatch?.[1]) {
+        } else if (openBlock?.nameField && beforeDepth === 1) {
+            const escapedField = openBlock.nameField.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const identityMatch = line.match(new RegExp(`^\\s*${escapedField}\\s*=\\s*"?([A-Za-z0-9_.:-]+)"?`, 'i'));
+            if (identityMatch?.[1]) {
                 entries.push({
-                    name: eventIdMatch[1],
-                    kind: 'event',
+                    name: identityMatch[1],
+                    kind: openBlock.kind,
                     file: filePath,
                     line: i + 1,
                     source: 'script',
                     container: openBlock.name,
-                    category: 'event',
+                    category: openBlock.category,
                 });
             }
         }
@@ -422,57 +439,17 @@ function toAssetPropertyReference(line: string, filePath: string, lineNumber: nu
     };
 }
 
-function inferScriptClassification(normalizedFile: string, blockName: string): { kind: string; category: string } {
-    const lower = normalizedFile.toLowerCase();
-    const blockLower = blockName.toLowerCase();
-    if (blockLower.endsWith('_event')) return { kind: 'event_block', category: 'event' };
-    if (lower.includes('/events/')) return { kind: 'event_block', category: 'event' };
-
-    const commonMatch = lower.match(/\/common\/([^/]+)\//);
-    const commonDir = commonMatch?.[1] ?? '';
-    const mapped = COMMON_DIR_KIND[commonDir];
-    if (mapped) return { kind: mapped, category: 'game_entity' };
-
+function inferScriptClassification(
+    normalizedFile: string,
+    blockName: string,
+    definitionTypes: readonly PdxDefinitionType[],
+): { kind: string; category: string; nameField?: string } {
+    const definition = matchPdxDefinitionType(definitionTypes, normalizedFile, blockName);
+    if (definition) {
+        return { kind: definition.name, category: 'game_entity', nameField: definition.nameField };
+    }
     return { kind: 'pdx_block', category: 'script' };
 }
-
-const COMMON_DIR_KIND: Record<string, string> = {
-    scripted_triggers: 'scripted_trigger',
-    scripted_effects: 'scripted_effect',
-    technology: 'technology',
-    technologies: 'technology',
-    buildings: 'building',
-    traits: 'trait',
-    static_modifiers: 'static_modifier',
-    deposits: 'deposit',
-    edicts: 'edict',
-    decisions: 'decision',
-    on_actions: 'on_action',
-    situations: 'situation_type',
-    relics: 'relic',
-    archaeological_site_types: 'archaeological_site_type',
-    special_projects: 'special_project',
-    event_chains: 'event_chain',
-    ascension_perks: 'ascension_perk',
-    traditions: 'tradition',
-    tradition_categories: 'tradition_category',
-    civics: 'civic',
-    governments: 'government',
-    authorities: 'authority',
-    ethics: 'ethic',
-    species_classes: 'species_class',
-    species_names: 'species_name',
-    solar_system_initializers: 'solar_system_initializer',
-    star_classes: 'star_class',
-    planet_classes: 'planet_class',
-    pop_jobs: 'pop_job',
-    districts: 'district',
-    ship_sizes: 'ship_size',
-    component_templates: 'component_template',
-    section_templates: 'section_template',
-    policies: 'policy',
-    agendas: 'agenda',
-};
 
 function inferAssetKind(blockName: string): string {
     switch (blockName) {

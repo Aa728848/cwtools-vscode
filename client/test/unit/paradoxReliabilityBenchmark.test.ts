@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { EvidenceGate, type GateRuleInfo } from '../../extension/ai/evidence/evidenceGate';
 import { getAllProfiles } from '../../extension/gameProfiles';
+import type { PdxSemanticCatalog } from '../../extension/ai/types';
 
 const RULES: Record<string, GateRuleInfo[]> = {
     effect: [{ name: 'set_variable', scopes: [] }],
@@ -17,7 +18,7 @@ interface GoldenCase {
     expected: 'allow' | 'block';
     definitions?: Map<string, string>;
     indexEntries?: Set<string>;
-    references?: Array<{ file: string; line: number; context: string }>;
+    targetFile?: string;
 }
 
 describe('Paradox semantic reliability golden benchmark', () => {
@@ -42,47 +43,48 @@ describe('Paradox semantic reliability golden benchmark', () => {
             },
             {
                 name: 'plausible but nonexistent effect',
-                text: 'effect = { set_planetary_memory = yes }',
+                text: 'golden_wrapper = { set_planetary_memory = yes }',
+                targetFile: path.join('common', 'behavior_macros', 'missing.txt'),
                 expected: 'block',
             },
             {
                 name: 'existing trigger in wrong scope',
-                text: 'country_event = { id = golden.1 trigger = { has_trait = leader_trait } }',
+                text: 'realm_event = { id = golden.1 trigger = { has_trait = leader_trait } }',
                 expected: 'block',
             },
             {
                 name: 'same name but wrong entity type',
-                text: 'effect = { shared_name = yes }',
+                text: 'golden_wrapper = { shared_name = yes }',
+                targetFile: path.join('common', 'behavior_macros', 'wrong_type.txt'),
                 definitions: new Map([['shared_name', 'technology']]),
                 expected: 'block',
             },
             {
                 name: 'missing referenced event id',
-                text: 'effect = { country_event = { id = missing_event.404 } }',
+                text: 'effect = { realm_event = { id = missing_event.404 } }',
                 expected: 'block',
             },
             {
                 name: 'LSP and workspace index refresh lag',
-                text: 'effect = { country_event = { id = stale_event.1 } }',
+                text: 'effect = { realm_event = { id = stale_event.1 } }',
                 indexEntries: new Set(['stale_event.1']),
                 expected: 'allow',
             },
             {
-                name: 'triggered event awaiting a future dependent caller',
-                text: 'country_event = { id = golden.2 is_triggered_only = yes }',
+                name: 'declaration awaiting a task graph edge',
+                text: 'realm_event = { id = golden.2 requires_dispatch = yes }',
                 expected: 'allow',
             },
             {
-                name: 'triggered event with indexed on_action caller',
-                text: 'country_event = { id = golden.3 is_triggered_only = yes }',
-                references: [{ file: 'common/on_actions/golden.txt', line: 3, context: 'events = { golden.3 }' }],
+                name: 'declaration whose typed topology is resolved later',
+                text: 'realm_event = { id = golden.3 requires_dispatch = yes }',
                 expected: 'allow',
             },
             {
                 name: 'same-write event definition and reference',
                 text: [
-                    'country_event = { id = golden.4 immediate = { country_event = { id = golden.5 } } }',
-                    'country_event = { id = golden.5 }',
+                    'realm_event = { id = golden.4 immediate = { realm_event = { id = golden.5 } } }',
+                    'realm_event = { id = golden.5 }',
                 ].join('\n'),
                 expected: 'allow',
             },
@@ -93,6 +95,23 @@ describe('Paradox semantic reliability golden benchmark', () => {
         const profileIds = getAllProfiles().map(profile => profile.id).sort();
         expect(profileIds).to.have.length.greaterThan(1);
         for (const gameProfile of profileIds) for (const benchmark of cases) {
+            const semanticCatalog: PdxSemanticCatalog = {
+                status: 'ready',
+                source: 'lsp',
+                gameProfile,
+                rules: [
+                    { name: 'realm_event', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: 'id', access: 'type', typeName: 'event.realm' }] },
+                    { name: 'set_variable', category: 'effect', supportedScopes: [], valueReferences: [] },
+                    { name: 'has_trait', category: 'trigger', supportedScopes: ['leader'], valueReferences: [{ argumentPath: '$value', access: 'value', typeName: 'trait' }] },
+                    { name: '<behavior_macro>', category: 'effect', supportedScopes: [], valueReferences: [] },
+                ],
+                definitionTypes: [
+                    { name: 'event', paths: ['events'], nameField: 'id', typeKeyFilters: ['realm_event'] },
+                    { name: 'trait', paths: ['common/traits'], typeKeyFilters: [] },
+                    { name: 'behavior_macro', paths: ['common/behavior_macros'], typeKeyFilters: [] },
+                ],
+                warnings: [],
+            };
             const gate = new EvidenceGate({
                 workspaceRoot,
                 gameProfile,
@@ -108,17 +127,17 @@ describe('Paradox semantic reliability golden benchmark', () => {
                     return undefined;
                 },
                 queryRules: async (category, name) => (RULES[category] ?? []).filter(rule => rule.name === name),
+                querySemanticCatalog: async () => semanticCatalog,
                 indexLookup: async name => ({
                     found: benchmark.indexEntries?.has(name) ?? false,
                     indexUpdatedAt: 1,
                 }),
                 getIndexRevision: () => 'golden:1:ready',
-                queryReferences: async () => benchmark.references ?? [],
                 rulesRoots: [],
             });
             const decision = await gate.evaluate({
                 toolName: 'write_file',
-                targetFile: path.join(workspaceRoot, 'events', `${benchmark.name.replace(/\W+/g, '_')}.txt`),
+                targetFile: path.join(workspaceRoot, benchmark.targetFile ?? path.join('events', `${benchmark.name.replace(/\W+/g, '_')}.txt`)),
                 text: benchmark.text,
                 mode: 'enforce',
             });

@@ -13,7 +13,7 @@
 | 阶段 | 状态 | 已落地结果 |
 | --- | --- | --- |
 | 0. 测量基线 | 完成 | 固定静态上下文测量脚本、全注册 profile 的结构化 synthetic golden matrix、仓库 sample mod 调用链用例、cache/usage/恢复指标与回归测试 |
-| 1. 可靠性门禁 | 完成 | 结构化 EvidenceClaim、四条模型可见 PDX 写路径的真实最终内容写前验证、写后诊断复验、同批定义、typed entity、on_action/triggered-only 入口、确定冲突阻断与低误杀告警策略 |
+| 1. 可靠性门禁 | 完成 | 结构化 EvidenceClaim、四条模型可见 PDX 写路径的真实最终内容写前验证、写后诊断复验、同批定义、由活动 CWT/CWTools 拓扑发现的 typed entity 与入口、确定冲突阻断与低误杀告警策略 |
 | 2. 消除重复工作 | 完成 | 移除每 turn 无条件后台摘要，统一 compaction 与取消/usage 统计 |
 | 3. 运行边界 | 完成 | 顶层与子 Agent 独立的调用、wall time、未缓存输入 token 软预算；进展感知自动续期、固定绝对硬上限、周期快照、增量事件与快照后 request artifact 重放 |
 | 4. Prompt/Tools | 完成 | build 五阶段及 plan/explore/review 只读阶段化工具面、短 build 契约、按需 blueprint contract |
@@ -25,14 +25,14 @@
 
 | 项目 | 实施前 | 当前 |
 | --- | ---: | ---: |
-| 主 build 首轮静态输入 | 约 26,500 | 7,263 |
-| slim build 首轮静态输入 | 约 23,900 | 5,503 |
-| 8 个并行 slim builder | 最差约 191,000 | 最差约 44,024 |
+| 主 build 首轮静态输入 | 约 26,500 | 5,377 |
+| slim build 首轮静态输入 | 约 23,900 | 3,589 |
+| 8 个并行 slim builder | 最差约 191,000 | 最差约 28,712 |
 | `write_design_blueprint` Schema | 约 2,900 | 146 |
 
-五个 build 阶段的主 Agent 静态输入均低于 8,000 token，slim 静态输入均在 4,000–6,000 token；最接近上限的是 write 阶段，分别为 7,714 和 5,954 token。预算测试覆盖所有阶段，避免只测 discovery 而遗漏后续阶段回退。
+五个 build 阶段的主 Agent 静态输入均低于 8,000 token，slim 静态输入均低于 4,000 token；最接近上限的是 write 阶段，分别为 5,660 和 3,872 token。预算测试覆盖所有阶段，避免只测 discovery 而遗漏后续阶段回退。
 
-build 的 discovery/design/validation/write/finalize 五阶段均满足主 Agent 约 8k、slim Agent 4k–6k 的静态预算。plan、explore、review 也已采用只读 discovery/design/validation/finalize 子集并全部低于 8k；它们不会进入 build 的 write 阶段。这里测量的是空 workspace 的静态 prompt + tool Schema，不包含用户输入、历史、项目证据和动态记忆。
+build 的 discovery/design/validation/write/finalize 五阶段均满足主 Agent ≤8k、slim Agent ≤4k 的静态预算。plan、explore、review 也已采用只读 discovery/design/validation/finalize 子集并全部低于 8k；它们不会进入 build 的 write 阶段。这里测量的是空 workspace 的静态 prompt + tool Schema，不包含用户输入、历史、项目证据和动态记忆。
 
 ### 2. 实施前基线与主要问题
 
@@ -174,6 +174,10 @@ interface EvidenceClaim {
 
 落实结果：当前模型可见的四条通用 PDX 写路径均在文件工具生成“完整最终内容”后调用同一个异步 preflight；`edit_pdx_block` 委托结构化替换时仍经过该 preflight。直接模型调用的旧 `apply_patch` 与 `multi_replace_file_content` 已退休。成功写入后重新收集 EvidenceGate 与 diagnostics，并使用三态结果：已确认的证据冲突或明确诊断错误返回 `repair`/`requiresRepair`；blocking 证据为 `unknown`/`stale`、证据服务降级、诊断不是 `fresh` 时返回 `pending`/`requiresValidation`，且 `postWriteValidationPassed` 必须为 `false`；只有 blocking 声明全部 verified 且 fresh diagnostics 无错误时才为 `allow`。子 Agent 可继续完成依赖写入，父级 QualityGate 在全部写入合并后从磁盘重读文件并重新执行 EvidenceGate，再结合 fresh diagnostics 与任务级 SemanticVerifier 收口；顶层仍 pending 时保留 TODO 与恢复快照并进入可恢复暂停，不会被完成路径清理。最终证据与 diagnostics 都使用固定并发上限并继承取消/五分钟总时限；`.txt`、`.gui`、`.gfx`、`.asset`、`.entity` 均进入 full-file diagnostics。超过语义提取上限的文件会用完整内容做语法解析并显式产生“覆盖待确认”声明；该声明只有在最终 full-file diagnostics 为 fresh 时才能收口，避免只验证前 100k 字符。
 
+游戏语义不再由 Extension/Agent 内的事件 key、flag 指令、scope、typed ID 或目录枚举表提供。只读 `cwtools.ai.getSemanticCatalog` 从当前 LSP 的 CWTools `TypeDefs()` 和活动 CWT alias 规则生成有 revision 的语义目录；EvidenceGate 与 SemanticVerifier 只请求本次文件出现的规则名，同时保留 CWT 声明的 `<TypeDef>` 可调用 alias，并从目录中的 type path、`name_field`、`type_key_filter`、supported/push scope 和 typed value/value_set 引用派生声明。未知 effect/trigger 名称因此按当前 CWT 映射到可调用 TypeDef，不再固定回退到 `scripted_effect/scripted_trigger`。旧版或暂不可用 LSP 才回退到同一活动 CWT 源的有界 Extension 缓存，并明确标记 `cwt_fallback`/degraded，绝不回退到某一游戏的常量表。
+
+同一边界也由非 Agent 模块复用：事件链预览从 TypeDefs 决定定义路径/名称字段，并从 CWT typed references 构造通用关系；快速 project profile 只发现实际内容目录，类型样本留给 LSP/项目知识；工作区符号索引与 Vanilla Compare 通过 TypeDef path/`name_field`/`type_key_filter` 分类定义和块身份，目录 hash 同时进入索引缓存指纹；本地化跳转以通用赋值结构和真实索引命中替代字段/关键字名单；项目知识导出与通用 semantic graph 从 CWTools definition/reference topology 生成 typed-reference edge，不再用指令名或实体名正则猜测玩法；MCP game knowledge 资源只返回动态目录元数据和稳定检索策略。跨模块共享的是有 revision 的语义事实，而不是复制后的常量。
+
 #### 4.3 不同结论的处理规则
 
 | 结论 | 只读回答或设计草案 | PDX 文件写入 |
@@ -226,8 +230,8 @@ interface EvidenceClaim {
 
 | Agent 类型 | system + tools 目标 |
 | --- | ---: |
-| 主 Build Agent | 约 8,000 token |
-| slim/专职子 Agent | 4,000–6,000 token |
+| 主 Build Agent | ≤8,000 token |
+| slim/专职子 Agent | ≤4,000 token |
 
 这是静态上下文目标，不包含用户输入、实际项目证据和必要历史。压缩优先删除重复说明、巨型示例和当前阶段无关 Schema，不删除安全策略和 Paradox 语义边界。
 
@@ -251,6 +255,8 @@ interface EvidenceClaim {
 - 将稳定且可执行的全局规则保留在 system；项目知识、CWT 摘要和记忆改为检索结果。
 - 对重复出现的工具使用规范生成单一短策略，不在多个 prompt section 重复。
 - 为主 Agent 和专职子 Agent 分别构建最小 prompt，而不是让 slim 继承大部分主 prompt。
+
+落实结果：`gameKnowledge.ts` 已收敛为所有 profile 共用的稳定“证据路由策略”。system prompt 不再保存各游戏的规则名、scope、entity、目录、事件、operator、localisation 或 override 表；当前游戏事实按任务通过 CWT/LSP、项目知识和精确 archetype 检索。自然语言 capability 搜索也不再用架构内的游戏 scope/实体翻译表，精确 scope 由 `query_scope`/`explain_scope` 返回后再参与排序。
 
 ### 7. P1：缓存正确性与可观测性
 
@@ -289,6 +295,8 @@ interface EvidenceClaim {
 - 缓存解析后的规则索引，而不是长期保存不受控的原始查询结果。
 - 对 vanilla 和 workspace 规模设置 LRU/容量上限。
 - 输出 cache generation，供 EvidenceGate 判断工具结果是否 `stale`。
+
+落实结果：LSP 缓存解析后的活动 CWT 语义目录，规则 reload/setup 会清空并推进 generation；目录返回 rules content hash。Extension 的旧 LSP 兼容回退复用有界、mtime/hash 失效的 CWT cache。EvidenceGate 的决策 key 继续绑定 game/profile、规则 revision、目标文件和项目索引 revision，避免跨游戏或跨规则版本复用。
 
 ### 8. P2：按需长期记忆
 
@@ -350,7 +358,7 @@ interface EvidenceClaim {
 3. `unknown`、`conflict` 和 `stale` 不能由模型文本自动改为 `verified`；其中只有 `conflict` 触发写前阻断。
 4. 写后 `unknown`、`stale`、验证服务降级或 diagnostics 非 `fresh` 必须为 `pending`，不能设置 `postWriteValidationPassed=true`；多 Agent 任务在父级合并后统一复验。
 5. compaction、fallback 和子 Agent 调用完整计入 usage 与取消链路。
-6. 主 Agent 静态上下文达到约 8k、slim Agent 达到 4k–6k，且可靠性 benchmark 不回退。
+6. 主 Agent 静态上下文不超过 8k、slim Agent 不超过 4k，且可靠性 benchmark 不回退。
 7. 缓存命中率按全部请求计算，规则或项目配置更新后不会复用旧证据。
 8. 恢复测试证明周期快照加增量事件可以替代高频完整 transcript 保存，预算暂停不会被完成路径立即删除。
 9. 有健康持久化进展的任务达到软预算后自动快照并续期；无进展、连续错误或验证冲突仍需批准，绝对硬预算不因续期移动。
@@ -359,8 +367,8 @@ interface EvidenceClaim {
 #### 10.3 当前 benchmark 与验证记录
 
 - Paradox 高风险 golden matrix 对所有注册 game/profile 运行同一组结构化 synthetic 用例：已确认冲突 0 false acceptance，告警场景 0 false block。它证明 profile 隔离与低误杀策略，不是假装每个游戏已有独立真实 corpus。
-- EvidenceGate 用例覆盖不存在名称、wrong scope、wrong entity type、缺失 ID、同批定义、索引刷新分歧、等待未来调用方的 triggered-only 事件、on_action 入口，以及 `write_file`、`edit_file`、`replace_lines`、`edit_pdx_block` 四条写入路径。
-- 当前保守 typed ID 覆盖为 event、scripted effect、scripted trigger、technology、trait、building、starbase building；modifier 由 CWT modifier 规则单独校验。未被 schema 明确识别的通用参数不会被文档伪称为已验证。
+- EvidenceGate 用例覆盖不存在名称、wrong scope、wrong entity type、缺失 ID、同批定义、索引刷新分歧、声明可达性保持 advisory、显式任务图入口，以及 `write_file`、`edit_file`、`replace_lines`、`edit_pdx_block` 四条写入路径。
+- typed ID 覆盖不再是固定类型清单：当前活动 CWT rule 中的 `<type>`/`value[type]` 引用，只要能对应 CWTools `TypeDefs()`，都会进入精确 typed definition 校验。未被活动 schema 明确识别的通用参数不会被文档伪称为已验证。
 - SemanticVerifier 对显式 `featureManifest.requiredEdges`、task `produces/consumes` 和 acceptance checks 生成文件/行证据；仓库 sample mod 的 `irm_faction.2 -> faction_set_leader` 调用链作为真实文件回归。该验证是“声明过的任务级边和生命周期验收”，不是任意动态玩法的形式化证明。
 - 请求归档按首个完整 transcript + 后续公共前缀/增量保存；工具 Schema 与大型工具结果按内容 hash 去重；恢复测试覆盖周期快照后的 request artifact 重放。
 - prompt 预算回归覆盖 build 五阶段的主/slim 上下文以及 plan/explore/review 只读阶段，而不是只覆盖首轮 discovery；生成报告同时记录基础 commit、工作树状态和测量输入 SHA-256，避免 dirty tree 的数字被误认成该 commit 的产物。
@@ -368,7 +376,7 @@ interface EvidenceClaim {
 - 2026-07-21 最终门禁通过：`npm run verify`（ESLint 零警告、TypeScript/Rollup、1,454 项 extension 单元测试、20 项 rules-sync、release gate）；`dotnet build src/Main/ --no-restore` 为 0 警告/0 错误；MCP schema/shared/MCP build 与 51+38 项 contract tests 通过；`npm run build:docs` 通过。
 - 本文或实现修改后必须重新运行 `npm run baseline:ai-context`、`npm run compile`、`npm run test:unit`、后端/MCP/contracts、`npm run build:docs`、release gate 和 `npm run verify`；最终一次执行结果以本次变更交付记录为准，避免在长期文档中保留会过期的测试总数。
 
-能力边界：静态证据门禁能证明已提取声明的语法、CWT rule、scope、上述 typed identifier/reference，以及明确 `is_triggered_only = yes` 事件的项目/on_action 入口。它不能证明未识别的所有通用 entity ID、脚本参数组合、跨 DLC/版本差异或游戏内动态玩法效果。复杂行为仍需真实 archetype 对照，必要时进行游戏内测试；CWT/LSP 零诊断绝不自动升级为“玩法一定正确”。
+能力边界：静态证据门禁能证明已提取声明的语法、当前 CWT rule/scope、CWT→CWTools type 可解析的 typed identifier/reference，以及任务 manifest/graph 明确要求的关系。普通事件声明本身不再根据某个游戏字段猜测必须存在调用方。它不能证明未被活动 schema 表达的参数组合、跨 DLC/版本差异或游戏内动态玩法效果。复杂行为仍需真实 archetype 对照，必要时进行游戏内测试；CWT/LSP 零诊断绝不自动升级为“玩法一定正确”。
 
 ### 11. 发布与风险控制
 

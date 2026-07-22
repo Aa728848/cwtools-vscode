@@ -51,6 +51,28 @@ describe('LspToolHandler CWT rules cache lifecycle (plan §7.4)', () => {
         fs.mkdirSync(rulesDir, { recursive: true });
         vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: workspaceRoot } }];
         writeTriggers(['alpha_trigger']);
+        fs.writeFileSync(path.join(rulesDir, 'effects.cwt'), [
+            'alias[effect:realm_event] = {',
+            '  id = <event.realm>',
+            '}',
+            'alias[effect:set_realm_flag] = value_set[realm_flag]',
+            'alias[effect:<behavior_macro>] = yes',
+            '',
+        ].join('\n'), 'utf8');
+        fs.writeFileSync(path.join(rulesDir, 'events.cwt'), [
+            'types = {',
+            '  type[event] = {',
+            '    name_field = "id"',
+            '    path = "events"',
+            '    ## type_key_filter = realm_event',
+            '    subtype[realm] = { }',
+            '  }',
+            '  type[behavior_macro] = {',
+            '    path = "common/behavior_macros"',
+            '  }',
+            '}',
+            '',
+        ].join('\n'), 'utf8');
     });
 
     afterEach(() => {
@@ -115,5 +137,27 @@ describe('LspToolHandler CWT rules cache lifecycle (plan §7.4)', () => {
         const result = await handler.searchRuleCapabilities({ intent: 'alpha', category: 'trigger' });
         expect(result.rulesGeneration).to.equal(1);
         expect(result.rulesContentHash).to.be.a('string').with.lengthOf(16);
+    });
+
+    it('derives typed values and type-key filters for the semantic catalog without game tables', async () => {
+        const handler = makeHandler();
+        const catalog = await handler.getPdxSemanticCatalog(
+            [path.join(workspaceRoot, 'events', 'test.txt')],
+            ['realm_event', 'set_realm_flag'],
+        );
+
+        expect(catalog.source).to.equal('cwt_fallback');
+        expect(catalog.rules.find(rule => rule.name === 'realm_event')?.valueReferences)
+            .to.deep.include({ argumentPath: 'id', access: 'type', typeName: 'event.realm' });
+        expect(catalog.rules.find(rule => rule.name === 'set_realm_flag')?.valueReferences)
+            .to.deep.include({ argumentPath: '$value', access: 'value_set', typeName: 'realm_flag' });
+        expect(catalog.rules.find(rule => rule.name === '<behavior_macro>')?.category).to.equal('effect');
+        expect(catalog.definitionTypes.find(type => type.name === 'behavior_macro')?.paths)
+            .to.deep.equal(['common/behavior_macros']);
+        expect(catalog.definitionTypes.find(type => type.name === 'event')).to.deep.include({
+            paths: ['events'],
+            nameField: 'id',
+            typeKeyFilters: ['realm_event'],
+        });
     });
 });

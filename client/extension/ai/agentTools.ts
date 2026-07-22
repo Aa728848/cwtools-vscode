@@ -18,6 +18,7 @@ import type {
     DiagnosticEntry,
     GetDiagnosticsResult,
     TodoItem,
+    PdxSemanticCatalog,
 } from './types';
 
 // Re-export the canonical tool definitions (unchanged public API)
@@ -472,6 +473,11 @@ export class AgentToolExecutor {
         this.lspHandler.invalidateCacheForFile(filePath);
     }
 
+    /** Host-only CWT semantic catalog used by the evidence and quality gates. */
+    getPdxSemanticCatalog(targetFiles: readonly string[], ruleNames: readonly string[] = []): Promise<PdxSemanticCatalog> {
+        return this.lspHandler.getPdxSemanticCatalog(targetFiles, ruleNames);
+    }
+
     private extractResultWrittenFiles(result: unknown): string[] {
         if (!result || typeof result !== 'object') return [];
         const record = result as Record<string, unknown>;
@@ -788,6 +794,7 @@ export class AgentToolExecutor {
                         context: reference.context,
                     }));
                 },
+                querySemanticCatalog: (targetFiles, ruleNames) => this.getPdxSemanticCatalog(targetFiles, ruleNames),
                 getIndexRevision: () => {
                     const index = this.indexService;
                     return index

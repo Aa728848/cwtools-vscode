@@ -30,6 +30,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { parsePdxSemanticCatalog, type PdxDefinitionType } from '../../shared/pdxSemanticCatalog';
 import { ErrorReporter } from '../ai/errorReporter';
 import { matchesExt } from '../fileExtensions';
 import { getAllProfiles, getLocalisationDirectoryGlob, getVanillaCacheFileName } from '../gameProfiles';
@@ -110,6 +111,8 @@ export class IndexService implements vscode.Disposable {
 	private _workspaceSymbolsIncludeVanilla = false;
 	private _workspaceSymbolBuildPromise: Promise<void> | undefined;
 	private _vanillaSymbolBuildPromise: Promise<void> | undefined;
+	private _semanticDefinitionTypes: PdxDefinitionType[] = [];
+	private _semanticCatalogFingerprint = 'unavailable';
 	private _workspaceSymbolPhaseReady = false;
 	private _vanillaSymbolPhaseReady = false;
 	private _lastSymbolQueryAt = 0;
@@ -220,7 +223,8 @@ export class IndexService implements vscode.Disposable {
 	 */
 	async ensureWorkspaceSymbolsReady(options: { includeVanilla?: boolean; force?: boolean; forceVanilla?: boolean } = {}): Promise<void> {
 		const includeVanilla = options.includeVanilla ?? true;
-		const force = !!options.force;
+		const semanticCatalogChanged = await this._refreshSemanticCatalog();
+		const force = !!options.force || semanticCatalogChanged;
 		this._ensureSymbolFileWatcher();
 		await this._ensureWorkspaceSymbolPhase(force);
 		if (includeVanilla) {
@@ -231,7 +235,8 @@ export class IndexService implements vscode.Disposable {
 	/** Rebuild the shared vanilla symbol cache after a serialized .cwb update. */
 	async refreshVanillaSymbols(gameIds?: readonly string[]): Promise<void> {
 		this._ensureSymbolFileWatcher();
-		await this._ensureWorkspaceSymbolPhase(false);
+		const semanticCatalogChanged = await this._refreshSemanticCatalog();
+		await this._ensureWorkspaceSymbolPhase(semanticCatalogChanged);
 		await this._ensureVanillaSymbolPhase(true, gameIds);
 	}
 
@@ -601,13 +606,14 @@ export class IndexService implements vscode.Disposable {
 			const raw = await vscode.workspace.fs.readFile(uri);
 			const fileVersion = previousVersion + 1;
 			const entries = raw.byteLength > IndexService.MAX_SYMBOL_FILE_BYTES
-				? []
-				: parseWorkspaceSymbols(Buffer.from(raw).toString('utf8'), uri.fsPath, {
-					updatedAt: stat.mtime,
-					fileVersion,
-					origin,
-					maxReferencesPerSymbol: 0,
-				});
+					? []
+					: parseWorkspaceSymbols(Buffer.from(raw).toString('utf8'), uri.fsPath, {
+						updatedAt: stat.mtime,
+						fileVersion,
+						origin,
+						maxReferencesPerSymbol: 0,
+						definitionTypes: this._semanticDefinitionTypes,
+					});
 			return {
 				path: IndexService._normalizeFilePath(uri.fsPath),
 				size: stat.size,
@@ -682,6 +688,27 @@ export class IndexService implements vscode.Disposable {
 		return this._sortedWorkspaceSymbolNames;
 	}
 
+	/** Refresh the shared TypeDef view before parsing or reopening persistent caches. */
+	private async _refreshSemanticCatalog(): Promise<boolean> {
+		try {
+			const raw = await vscode.commands.executeCommand<unknown>('cwtools.ai.getSemanticCatalog', [], []);
+			const catalog = parsePdxSemanticCatalog(raw);
+			if (!catalog || catalog.status === 'unavailable') return false;
+			const fingerprint = IndexService._hashParts([
+				catalog.gameProfile ?? 'unknown',
+				catalog.rulesContentHash ?? '',
+				JSON.stringify(catalog.definitionTypes),
+			]);
+			const changed = fingerprint !== this._semanticCatalogFingerprint;
+			this._semanticDefinitionTypes = catalog.definitionTypes;
+			this._semanticCatalogFingerprint = fingerprint;
+			return changed;
+		} catch (error) {
+			ErrorReporter.debug('IndexService', 'Active CWTools semantic catalog is unavailable for symbol classification', error);
+			return false;
+		}
+	}
+
 	private async _openWorkspaceSymbolCache(): Promise<WorkspaceSymbolSqliteCache | undefined> {
 		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 		if (!workspaceRoot || !this._options.extensionPath) return undefined;
@@ -690,7 +717,7 @@ export class IndexService implements vscode.Disposable {
 			getWorkspaceSymbolCachePath(workspaceRoot),
 			path.join(this._options.extensionPath, 'node_modules', 'sql.js', 'dist'),
 			workspaceRoot,
-			IndexService._hashParts(roots),
+			IndexService._hashParts([...roots, this._semanticCatalogFingerprint]),
 			[getLegacyWorkspaceSymbolCachePath(workspaceRoot)],
 		);
 		await cache.open();
@@ -704,7 +731,7 @@ export class IndexService implements vscode.Disposable {
 			path.join(this._options.globalStoragePath, 'symbol-index', `vanilla-${source.gameId}-${rootHash}.sqlite`),
 			path.join(this._options.extensionPath, 'node_modules', 'sql.js', 'dist'),
 			source.root,
-			IndexService._pathStatFact(source.cacheFile),
+			IndexService._hashParts([IndexService._pathStatFact(source.cacheFile), this._semanticCatalogFingerprint]),
 		);
 		await cache.open();
 		return cache;
@@ -845,6 +872,8 @@ export class IndexService implements vscode.Disposable {
 		this._workspaceSymbolsIncludeVanilla = false;
 		this._workspaceSymbolPhaseReady = false;
 		this._vanillaSymbolPhaseReady = false;
+		this._semanticDefinitionTypes = [];
+		this._semanticCatalogFingerprint = 'unavailable';
 		this._disposeSymbolFileWatcher();
 		ErrorReporter.debug(
 			'IndexService',
@@ -876,6 +905,8 @@ export class IndexService implements vscode.Disposable {
 		this._workspaceSymbolsIncludeVanilla = false;
 		this._workspaceSymbolPhaseReady = false;
 		this._vanillaSymbolPhaseReady = false;
+		this._semanticDefinitionTypes = [];
+		this._semanticCatalogFingerprint = 'unavailable';
 		this._workspaceSymbolBuildPromise = undefined;
 		this._vanillaSymbolBuildPromise = undefined;
 	}

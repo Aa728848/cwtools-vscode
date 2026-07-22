@@ -231,6 +231,6 @@ ${readOnlyStageTable}
 | Agent 类型 | 目标 | 当前基线 |
 | --- | ---: | ---: |
 | 主 Agent（build 静态合计） | 约 8,000 | ${fmt(build.total)} |
-| slim/专职子 Agent（slim build 静态合计） | 4,000–6,000 | ${fmt(slimBuild.total)} |
+| slim/专职子 Agent（slim build 静态合计） | ≤4,000 | ${fmt(slimBuild.total)} |
 `;
 }

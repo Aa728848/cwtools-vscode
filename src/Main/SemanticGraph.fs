@@ -159,13 +159,8 @@ let private nodeJson includeMetadata (item: GraphDataItem) =
          @ rangeFields item.location)
 
 let private edgeKindForTarget (targetType: string option) =
-    match targetType |> Option.map (fun value -> value.ToLowerInvariant()) with
-    | Some value when value.Contains("event") -> "fires_event"
-    | Some value when value.Contains("scripted_effect") -> "calls_scripted_effect"
-    | Some value when value.Contains("scripted_trigger") -> "calls_scripted_trigger"
-    | Some value when value.Contains("localisation") -> "uses_localisation"
-    | Some value when value.Contains("sprite") || value.Contains("asset") -> "uses_asset"
-    | _ -> "references"
+    if targetType |> Option.exists (String.IsNullOrWhiteSpace >> not) then "typed_reference"
+    else "reference"
 
 let private buildEdges maxEdges (nodes: GraphDataItem list) =
     let nodesById = Dictionary<string, GraphDataItem>(StringComparer.OrdinalIgnoreCase)
@@ -205,6 +200,7 @@ let private buildEdges maxEdges (nodes: GraphDataItem list) =
                               Some("sourceId", JsonValue.String sourceId)
                               Some("targetId", JsonValue.String targetEntityId)
                               Some("kind", JsonValue.String(edgeKindForTarget targetType))
+                              targetType |> Option.map (fun value -> "targetType", JsonValue.String value)
                               Some("isOutgoing", JsonValue.Boolean isOutgoing)
                               Some("resolved", JsonValue.Boolean resolved)
                               Some("provenance", JsonValue.String "cwtools-computed")

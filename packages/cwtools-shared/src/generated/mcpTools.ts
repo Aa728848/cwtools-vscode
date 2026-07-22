@@ -13,11 +13,11 @@ export const GENERATED_MCP_TOOLS = [
         "properties": {
           "typeName": {
             "type": "string",
-            "description": "Type name, e.g. \"technology\", \"building\", \"trait\", \"ethic\", \"authority\", \"pop_job\", \"static_modifier\", \"scripted_trigger\", \"scripted_effect\", \"event\", \"archaeological_site\""
+            "description": "Exact current-game type name returned by query_cwt_schema, completion, or another typed LSP result."
           },
           "filter": {
             "type": "string",
-            "description": "Prefix or substring filter, e.g. \"tech_\" to return only matching results. ALWAYS use when looking up a specific vanilla ID to avoid getting hundreds of unrelated results."
+            "description": "Prefix or substring filter. ALWAYS use when looking up a specific vanilla ID to avoid unrelated results."
           },
           "limit": {
             "type": "number",
@@ -65,7 +65,7 @@ export const GENERATED_MCP_TOOLS = [
           },
           "scope": {
             "type": "string",
-            "description": "Filter by supported scope (e.g. \"planet\", \"country\"). Optional, but heavily recommended. Use query_scope to find your current context first."
+            "description": "Filter by an exact supported scope returned by query_scope/explain_scope. Optional, but heavily recommended."
           }
         },
         "required": [
@@ -85,13 +85,13 @@ export const GENERATED_MCP_TOOLS = [
   {
     "tool": {
       "name": "query_cwt_schema",
-      "description": "CWT-FIRST schema lookup for common/entity definitions and other non-trigger/effect rules. Use BEFORE writing or planning new PDXScript under common/, events/, interface/, gfx/, sound/, map/, etc. Input a target file/directory such as \"common/buildings/00_x.txt\" or \"common/buildings\", plus optional field/rule name. Returns active CWT source snippets, line numbers, and parsed type/path/subtype entity summaries. If returned snippets include comments/semantic text, use that semantics first; if they are structural only, confirm intended usage from verified vanilla/project examples before writing.",
+      "description": "CWT-FIRST schema lookup for entity definitions and other non-trigger/effect rules. Use BEFORE writing or planning a PDXScript target. Pass the actual project file/directory plus an optional field/rule name. Returns active CWT source snippets, line numbers, and parsed type/path/subtype entity summaries. If snippets are structural only, confirm intent from verified current-version examples.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "target": {
             "type": "string",
-            "description": "Project file, directory, or CWT-relative path to inspect, e.g. \"common/buildings/00_my_building.txt\", \"common/technology\", \"events\", \"interface\"."
+            "description": "Actual project file/directory or a CWT-relative path returned by active schema metadata."
           },
           "file": {
             "type": "string",
@@ -99,11 +99,11 @@ export const GENERATED_MCP_TOOLS = [
           },
           "directory": {
             "type": "string",
-            "description": "Alias for target when you know the entity directory, e.g. \"common/jobs\"."
+            "description": "Alias for target when an active project/schema result supplied the entity directory."
           },
           "name": {
             "type": "string",
-            "description": "Optional field, type, alias, or rule name to locate inside the matched CWT files, e.g. \"resources\", \"potential\", \"planet_modifier\"."
+            "description": "Optional field, type, alias, or rule name to locate inside matched CWT files."
           },
           "includeContent": {
             "type": "boolean",
@@ -135,7 +135,7 @@ export const GENERATED_MCP_TOOLS = [
         "properties": {
           "intent": {
             "type": "string",
-            "description": "Natural-language intent, English or Chinese, e.g. \"iterate ships in fleet\" or \"查询舰队中的舰船\"."
+            "description": "Natural-language intent. Exact current-game terms from CWT docs improve ranking."
           },
           "category": {
             "type": "string",
@@ -146,15 +146,15 @@ export const GENERATED_MCP_TOOLS = [
               "modifier",
               "all"
             ],
-            "description": "Optional rule category filter. Use scope_change when searching for every_/random_/ordered_ scope iteration effects."
+            "description": "Optional CWT rule category filter."
           },
           "currentScope": {
             "type": "string",
-            "description": "Optional current CWT scope such as fleet, country, planet, ship. Use query_scope first when editing an existing file."
+            "description": "Optional exact current CWT scope returned by query_scope."
           },
           "desiredPushScope": {
             "type": "string",
-            "description": "Optional desired resulting scope, e.g. ship when looking for an iterator that enters ship scope."
+            "description": "Optional exact resulting scope returned by explain_scope/schema evidence."
           },
           "limit": {
             "type": "number",
@@ -176,13 +176,13 @@ export const GENERATED_MCP_TOOLS = [
   {
     "tool": {
       "name": "explain_scope",
-      "description": "Explain a CWT scope from scopes.cwt, including aliases, is_subscope_of, source location, and semantic hints. Use this to understand scopes like Carrier before deciding whether an event/effect rule applies. Scope descriptions are hints, not legality proof.",
+      "description": "Explain a current CWT scope from scopes.cwt, including aliases, is_subscope_of, source location, and semantic hints. Scope descriptions are hints, not legality proof.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "scope": {
             "type": "string",
-            "description": "Scope or alias to explain, e.g. Carrier, carrier, fleet, ship, planet."
+            "description": "Exact scope or alias observed in current CWT/LSP output."
           }
         },
         "required": [
@@ -228,7 +228,7 @@ export const GENERATED_MCP_TOOLS = [
   {
     "tool": {
       "name": "query_scope",
-      "description": "Query the scope context at a specific position in a file. Returns the current scope (Country, Planet, etc.), ROOT, THIS, PREV chain, FROM chain, event_target provenance, and Carrier host inference evidence when applicable. Use this to understand which triggers/effects are valid at a position.",
+      "description": "Query the scope context at a specific position in a file. Returns current/root/prior scope chains plus provenance and inference evidence reported by CWTools. Use it to determine which active CWT rules are valid at that position.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -408,7 +408,7 @@ export const GENERATED_MCP_TOOLS = [
   {
     "tool": {
       "name": "query_project_knowledge",
-      "description": "Query the /init-generated project + vanilla SQLite knowledge graph for complex cross-subsystem work. Returns project patterns, bounded vanilla archetypes, definition stacks, dependency edges, event structure (calls, phases, on_action/typed entries), event logic (flags, technologies, variables, scope bridges), freshness, and unresolved facts with source paths. Use this before write_design_blueprint or any plan spanning events, on_actions, special projects, situations, archaeology, technology, ships, assets, or localisation. CWT/LSP exact checks remain authoritative.",
+      "description": "Query the /init-generated project + vanilla SQLite knowledge graph for complex cross-subsystem work. Returns project patterns, bounded vanilla archetypes, definition stacks, dependency edges, typed relationship structure/logic, freshness, and unresolved facts with source paths. Use this before write_design_blueprint or any plan spanning multiple current-game entity families. CWT/LSP exact checks remain authoritative.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -421,7 +421,7 @@ export const GENERATED_MCP_TOOLS = [
             "items": {
               "type": "string"
             },
-            "description": "Subsystem domains to load, e.g. events, on_actions, special_projects, archaeology, situations, technology, ships, scripted_logic, assets, localisation."
+            "description": "Subsystem domains returned by the project knowledge manifest or an earlier query."
           },
           "identifiers": {
             "type": "array",
@@ -479,7 +479,7 @@ export const GENERATED_MCP_TOOLS = [
   {
     "tool": {
       "name": "query_workspace_index",
-      "description": "Query the shared incremental workspace index for PDXScript symbols and named .gfx/.asset/.gui assets without scanning files. Use this before broad grep/search when looking for event IDs, scripted triggers/effects, technologies, buildings, sprites, sounds, GUI elements, or other named project symbols. Results report indexedSymbolNames, indexUpdatedAt, fileVersion, and optional lightweight references for freshness/coverage awareness.",
+      "description": "Query the shared incremental workspace index for PDXScript symbols and named .gfx/.asset/.gui assets without scanning files. Use this before broad grep/search for any named project symbol. Results report indexedSymbolNames, indexUpdatedAt, fileVersion, and optional lightweight references for freshness/coverage awareness.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -489,11 +489,11 @@ export const GENERATED_MCP_TOOLS = [
           },
           "kind": {
             "type": "string",
-            "description": "Optional kind filter, e.g. event, namespace, scripted_trigger, scripted_effect, technology, building, sprite, sound, asset, gui."
+            "description": "Optional exact kind returned by the active index or CWT type metadata."
           },
           "category": {
             "type": "string",
-            "description": "Optional broad category filter, e.g. event, game_entity, asset, gui, script."
+            "description": "Optional broad category returned by an earlier index result."
           },
           "source": {
             "type": "string",
@@ -515,7 +515,7 @@ export const GENERATED_MCP_TOOLS = [
           },
           "directory": {
             "type": "string",
-            "description": "Optional path fragment filter, e.g. events, common/scripted_triggers, interface, gfx."
+            "description": "Optional project path fragment; prefer a path returned by project profile or CWT schema."
           },
           "prefix": {
             "type": "boolean",
@@ -563,7 +563,7 @@ export const GENERATED_MCP_TOOLS = [
           },
           "typeName": {
             "type": "string",
-            "description": "Optional exact CWTools type name, e.g. event, technology, scripted_effect, building."
+            "description": "Optional exact CWTools type name obtained from active schema/type evidence."
           },
           "exact": {
             "type": "boolean",
@@ -617,7 +617,7 @@ export const GENERATED_MCP_TOOLS = [
           },
           "language": {
             "type": "string",
-            "description": "Optional localisation language tag, e.g. l_english or l_simp_chinese."
+            "description": "Optional language tag returned by the active project/profile localisation metadata."
           },
           "prefix": {
             "type": "boolean",
@@ -661,7 +661,7 @@ export const GENERATED_MCP_TOOLS = [
           },
           "symbol": {
             "type": "string",
-            "description": "Symbol name varies by file type: events -> \"namespace.id\" (e.g. \"anomaly.1\"); common/scripted_triggers/effects/technology/buildings/ship_sizes/static_modifiers -> top-level identifier (e.g. \"tech_kuat_reactor\", \"kuat_is_crisis_faction\"); section_templates -> key value (e.g. \"X308_Titan_MID1\"); on_actions -> action name (e.g. \"on_entering_battle\", but may have duplicates!); .gui -> containerWindowType name (e.g. \"kuat_bossbar\"); .gfx -> pdxmesh name (e.g. \"sws_turbolaser_red_mesh\"). When unsure, call document_symbols first or just try - the error response lists all available symbols."
+            "description": "Exact symbol returned by document_symbols or another active typed lookup. If not found, the error lists available symbols and line ranges."
           }
         },
         "required": [
@@ -748,7 +748,7 @@ export const GENERATED_MCP_TOOLS = [
   {
     "tool": {
       "name": "workspace_symbols",
-      "description": "Search symbol definitions by name across workspace + vanilla cache. Use specific queries (e.g. \"tech_energy_grid\" not \"tech\") to avoid large result sets. Empty results can mean the LSP index/type/file kind missed it; verify absence with verify_pdx_identifier before concluding missing.",
+      "description": "Search symbol definitions by name across workspace + vanilla cache. Use the most specific identifier available from active evidence. Empty results can mean the LSP index/type/file kind missed it; verify absence with verify_pdx_identifier before concluding missing.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -932,7 +932,7 @@ export const GENERATED_MCP_TOOLS = [
         "properties": {
           "enumName": {
             "type": "string",
-            "description": "Enum name to query (e.g. \"anomaly_category\"). Leave empty to list all enum names."
+            "description": "Exact enum name discovered from CWT/schema evidence. Leave empty to list all enum names."
           },
           "limit": {
             "type": "number",
@@ -1006,7 +1006,7 @@ export const GENERATED_MCP_TOOLS = [
   {
     "tool": {
       "name": "get_entity_info",
-      "description": "Get deep structural info from CWTools cache: referenced types, scripted variables, effect/trigger blocks, and saved event_targets. Use to understand file dependencies before modification.",
+      "description": "Get deep structural info from the CWTools cache, including referenced types, variables, classified rule blocks, and saved scopes. Use it to understand file dependencies before modification.",
       "inputSchema": {
         "type": "object",
         "properties": {

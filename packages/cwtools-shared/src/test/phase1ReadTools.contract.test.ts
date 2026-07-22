@@ -27,6 +27,17 @@ describe('phase 1 read tool contracts', () => {
     expect(result.data!.warnings?.[0]).to.include('Phase 1 fallback');
   });
 
+  it('preserves CWT TypeDef placeholders used for callable rule namespaces', async () => {
+    const result = await queryRulesWithHost(createFsHost(repoRoot), {
+      category: 'effect',
+      name: '<scripted_effect>',
+    });
+
+    expect(result.ok).to.equal(true);
+    const rule = result.data!.rules.find(item => item.name === '<scripted_effect>');
+    expect(rule?.hardFacts?.category).to.equal('effect');
+  });
+
   it('queries CWT schema snippets and type summaries from the configured rules source', async () => {
     const rulesRoot = fs.mkdtempSync(path.join(repoRoot, '.tmp-cwt-schema-'));
     try {
@@ -36,7 +47,9 @@ describe('phase 1 read tool contracts', () => {
       fs.writeFileSync(schemaFile, [
         'types = {',
         '  type[special_project] = {',
+        '    name_field = "key"',
         '    path = "common/special_projects"',
+        '    ## type_key_filter = ship_special_project',
         '    graph_related_types = { ship country }',
         '    subtype[ship] = {',
         '      type_per_file = yes',
@@ -72,6 +85,8 @@ describe('phase 1 read tool contracts', () => {
       expect(result.data!.matches[0]!.snippet).to.include('type[special_project]');
       expect(result.data!.entities[0]!.name).to.equal('special_project');
       expect(result.data!.entities[0]!.path).to.equal('common/special_projects');
+      expect(result.data!.entities[0]!.nameField).to.equal('key');
+      expect(result.data!.entities[0]!.typeKeyFilters).to.include('ship_special_project');
       expect(result.data!.entities[0]!.subtypes).to.include('ship');
       expect(result.data!.entities[0]!.schemaKeys).to.include('path');
     } finally {
@@ -110,6 +125,7 @@ describe('phase 1 read tool contracts', () => {
     expect(rule!.syntax).to.include('id = <id>');
     expect(rule!.semanticHints?.some(hint => hint.source === 'trigger_docs.log' && hint.text.includes('carrier event'))).to.equal(true);
     expect(rule!.semanticHints?.some(hint => hint.source === 'scopes.cwt' && hint.text.includes('Scope Carrier'))).to.equal(true);
+    expect(rule!.hardFacts?.valueReferences).to.deep.include({ argumentPath: 'id', access: 'type', typeName: 'event.carrier' });
   });
 
   it('searches rule capabilities from Chinese intent and scope facts', async () => {

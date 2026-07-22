@@ -5,9 +5,17 @@ import { queryWorkflowHints } from '../knowledge/workflowHints';
 
 describe('knowledge contract', () => {
   it('returns structured game knowledge without VS Code dependencies', () => {
-    const result = queryGameKnowledge('stellaris');
+    const result = queryGameKnowledge('synthetic', {
+      gameProfile: 'synthetic',
+      rulesGeneration: 4,
+      rulesContentHash: 'abcd1234',
+      rules: [{ name: 'realm_rule' }],
+      definitionTypes: [{ name: 'realm_type' }],
+    });
     expect(result.status).to.equal('ready');
-    expect(result.cards.length).to.be.greaterThan(1);
+    expect(result.source).to.equal('lsp-semantic-catalog');
+    expect(result.game).to.equal('synthetic');
+    expect(result.cards.length).to.equal(2);
     expect(result.cards[0]).to.have.keys(['id', 'title', 'facts']);
   });
 

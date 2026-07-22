@@ -6,23 +6,9 @@ import type {
     QueryProjectProfileArgs,
     QueryProjectProfileResult,
 } from './types';
+import { getAllProfiles } from '../gameProfiles';
 
 export const PROJECT_PROFILE_RELATIVE_PATH = path.join('.cwtools', 'project', 'profile.json');
-
-const SCRIPT_DIR_KEYS = [
-    ['events', 'events'],
-    ['common', 'common'],
-    ['scripted_triggers', path.join('common', 'scripted_triggers')],
-    ['scripted_effects', path.join('common', 'scripted_effects')],
-    ['scripted_variables', path.join('common', 'scripted_variables')],
-    ['on_actions', path.join('common', 'on_actions')],
-    ['static_modifiers', path.join('common', 'static_modifiers')],
-    ['interface', 'interface'],
-    ['gfx', 'gfx'],
-    ['sound', 'sound'],
-    ['localisation', 'localisation'],
-    ['localization', 'localization'],
-] as const;
 
 export function getProjectProfilePath(workspaceRoot: string): string {
     return path.join(workspaceRoot, PROJECT_PROFILE_RELATIVE_PATH);
@@ -70,24 +56,13 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
                 ? 'paradox_mod'
                 : 'generic';
 
-    const keyDirectories = SCRIPT_DIR_KEYS.map(([key, relPath]) => {
-        const abs = path.join(root, relPath);
-        const exists = fs.existsSync(abs) && fs.statSync(abs).isDirectory();
-        return {
-            key,
-            path: relPath.replace(/\\/g, '/'),
-            exists,
-            fileCount: exists ? collectFiles(abs, 400).length : 0,
-        };
-    });
-
-    const eventFiles = collectFiles(path.join(root, 'events'), 80, ['.txt']);
-    const namespaces = collectNamespaces(eventFiles);
-    const variableIds = sampleIds(path.join(root, 'common', 'scripted_variables'), 30);
-    const variablePrefixes = Array.from(new Set(variableIds
-        .map(id => id.replace(/^@/, '').split('_')[0])
-        .filter((prefix): prefix is string => !!prefix && prefix.length > 1)
-        .map(prefix => `@${prefix}_`)));
+    const keyDirectories = hasModSignals ? discoverKeyDirectories(root) : [];
+    const scriptFiles = keyDirectories
+        .flatMap(directory => collectFiles(path.join(root, directory.path), 120, ['.txt']))
+        .filter((file, index, files) => files.indexOf(file) === index)
+        .slice(0, 400);
+    const namespaces = collectNamespaces(scriptFiles);
+    const variablePrefixes = collectVariablePrefixes(scriptFiles);
     const localisation = detectLocalisation(root);
     const game = detectGame(root, descriptor, keyDirectories.map(d => d.path));
     const preferredReadTools = [
@@ -120,11 +95,7 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
         identifiers: {
             namespaces,
             variablePrefixes,
-            scriptedTriggers: sampleIds(path.join(root, 'common', 'scripted_triggers'), 30),
-            scriptedEffects: sampleIds(path.join(root, 'common', 'scripted_effects'), 30),
-            events: sampleEventIds(eventFiles, 25),
-            onActions: sampleIds(path.join(root, 'common', 'on_actions'), 15),
-            staticModifiers: sampleIds(path.join(root, 'common', 'static_modifiers'), 15),
+            byType: {},
         },
         routing: {
             recommendedWorkflowByIntent: [
@@ -345,8 +316,8 @@ function buildPromptCards(profile: Omit<ProjectProfile, 'promptCards' | 'efficie
             'Plan mode project card:',
             '- For complex pipelines, query_project_knowledge must establish project patterns, vanilla archetypes, topology, override evidence, and unresolved facts before blueprint approval.',
             `- Study existing patterns in: ${keyDirs}.`,
-            '- Inventory common/ directories before designing complex event chains; record selected and rejected subsystem candidates in the blueprint.',
-            '- Use vanilla archetypes before inventing event chains or scope flows.',
+            '- Enumerate current TypeDefs and project-graph dependency families before designing a complex pipeline; record selected and rejected families in the blueprint.',
+            '- Use exact vanilla archetypes before inventing cross-type calls or scope flows.',
             `- Existing namespaces: ${namespaces}. Allocate IDs deliberately and record them in the blueprint.`,
             '- Prefer write_design_blueprint for implementation-ready plans.',
         ].join('\n'),
@@ -422,20 +393,33 @@ function detectGame(
     descriptor: { tags?: string[] },
     directoryEvidence: string[],
 ): ProjectProfile['game'] {
-    const evidence: string[] = [];
     const tagText = (descriptor.tags ?? []).join(' ').toLowerCase();
     const rootLower = root.toLowerCase();
-    if (tagText.includes('stellaris') || rootLower.includes('stellaris') || fs.existsSync(path.join(root, 'submodules', 'cwtools-stellaris-config'))) {
-        evidence.push('stellaris tag/path/config detected');
-        return { id: 'stellaris', displayName: 'Stellaris', confidence: 'high', evidence };
+    for (const profile of getAllProfiles()) {
+        const markers = [profile.id, profile.displayName, profile.install.steamFolderName]
+            .map(value => value.trim().toLowerCase())
+            .filter(value => value.length > 2);
+        const tagMarker = markers.find(marker => tagText.includes(marker));
+        if (tagMarker) {
+            return {
+                id: profile.id,
+                displayName: profile.displayName,
+                confidence: 'high',
+                evidence: [`registered profile marker '${tagMarker}' found in descriptor tags`],
+            };
+        }
+        const pathMarker = markers.find(marker => rootLower.includes(marker));
+        if (pathMarker) {
+            return {
+                id: profile.id,
+                displayName: profile.displayName,
+                confidence: 'medium',
+                evidence: [`registered profile marker '${pathMarker}' found in workspace path`],
+            };
+        }
     }
-    if (directoryEvidence.some(dir => /solar_system|technology|megastructure|pop/i.test(dir))) {
-        evidence.push('Stellaris-like directories detected');
-        return { id: 'stellaris', displayName: 'Stellaris', confidence: 'medium', evidence };
-    }
-    if (directoryEvidence.some(dir => ['events', 'common', 'localisation', 'localization'].includes(dir))) {
-        evidence.push('Paradox script directories detected');
-        return { id: 'paradox', displayName: 'Paradox Script', confidence: 'low', evidence };
+    if (directoryEvidence.length > 0) {
+        return { id: 'paradox', displayName: 'Paradox Script', confidence: 'low', evidence: ['PDX content directories detected; exact game remains an LSP/profile fact'] };
     }
     return { id: 'unknown', displayName: 'Unknown', confidence: 'low', evidence: ['No Paradox game marker detected'] };
 }
@@ -478,9 +462,50 @@ function detectVanillaCache(root: string): ProjectProfile['validation']['vanilla
     const candidates = [
         path.join(root, '.cwtools'),
         path.join(root, '.cwtools-ai'),
-        path.join(root, 'submodules', 'cwtools-stellaris-config'),
     ];
     return candidates.some(candidate => fs.existsSync(candidate)) ? 'configured' : 'unknown';
+}
+
+function discoverKeyDirectories(root: string): ProjectProfile['keyDirectories'] {
+    const supportedExtensions = ['.txt', '.gui', '.gfx', '.asset', '.entity', '.yml'];
+    const excluded = new Set(['node_modules', 'bin', 'obj', 'release', 'out', 'dist', 'artifacts', 'submodules']);
+    const relativePaths = new Set<string>();
+    let entries: fs.Dirent[] = [];
+    try {
+        entries = fs.readdirSync(root, { withFileTypes: true })
+            .filter(entry => entry.isDirectory() && !entry.name.startsWith('.') && !excluded.has(entry.name.toLowerCase()))
+            .sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+        return [];
+    }
+    for (const entry of entries) {
+        const absolute = path.join(root, entry.name);
+        if (collectFiles(absolute, 1, supportedExtensions).length === 0) continue;
+        relativePaths.add(entry.name);
+        if (entry.name.toLowerCase() !== 'common') continue;
+        try {
+            for (const child of fs.readdirSync(absolute, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+                if (!child.isDirectory() || child.name.startsWith('.')) continue;
+                const childPath = path.join(absolute, child.name);
+                if (collectFiles(childPath, 1, supportedExtensions).length > 0) {
+                    relativePaths.add(path.join(entry.name, child.name));
+                }
+            }
+        } catch {
+            // A concurrently removed directory is simply absent from the quick profile.
+        }
+    }
+    return [...relativePaths]
+        .sort((a, b) => a.localeCompare(b))
+        .map(relativePath => {
+            const absolute = path.join(root, relativePath);
+            return {
+                key: relativePath.replace(/\\/g, '/'),
+                path: relativePath.replace(/\\/g, '/'),
+                exists: true,
+                fileCount: collectFiles(absolute, 400, supportedExtensions).length,
+            };
+        });
 }
 
 function collectFiles(dir: string, maxCount: number, extensions?: string[]): string[] {
@@ -492,7 +517,8 @@ function collectFiles(dir: string, maxCount: number, extensions?: string[]): str
         const current = stack.pop()!;
         let entries: fs.Dirent[];
         try {
-            entries = fs.readdirSync(current, { withFileTypes: true });
+            entries = fs.readdirSync(current, { withFileTypes: true })
+                .sort((a, b) => a.name.localeCompare(b.name));
         } catch {
             continue;
         }
@@ -525,38 +551,21 @@ function collectNamespaces(files: string[]): string[] {
     return Array.from(namespaces).sort();
 }
 
-function sampleIds(dir: string, maxCount: number): string[] {
-    const ids: string[] = [];
-    for (const file of collectFiles(dir, 40, ['.txt'])) {
-        try {
-            const content = fs.readFileSync(file, 'utf8');
-            for (const match of content.matchAll(/^([@\w][\w.:-]*)\s*=/gm)) {
-                const id = match[1]?.trim();
-                if (id && id.length > 2 && !ids.includes(id)) ids.push(id);
-                if (ids.length >= maxCount) return ids;
-            }
-        } catch {
-            // Ignore unreadable samples.
-        }
-    }
-    return ids;
-}
-
-function sampleEventIds(files: string[], maxCount: number): string[] {
-    const ids: string[] = [];
+function collectVariablePrefixes(files: string[]): string[] {
+    const prefixes = new Set<string>();
     for (const file of files) {
         try {
             const content = fs.readFileSync(file, 'utf8');
-            for (const match of content.matchAll(/\bid\s*=\s*"?([\w.:-]+)"?/g)) {
-                const id = match[1]?.trim();
-                if (id && id.includes('.') && !ids.includes(id)) ids.push(id);
-                if (ids.length >= maxCount) return ids;
+            for (const match of content.matchAll(/@([A-Za-z_][\w]*)/g)) {
+                const prefix = match[1]?.split('_')[0];
+                if (prefix && prefix.length > 1) prefixes.add(`@${prefix}_`);
+                if (prefixes.size >= 30) return [...prefixes].sort();
             }
         } catch {
             // Ignore unreadable samples.
         }
     }
-    return ids;
+    return [...prefixes].sort();
 }
 
 function toRelative(root: string, file: string): string {

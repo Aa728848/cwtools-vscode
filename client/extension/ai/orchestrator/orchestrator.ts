@@ -886,18 +886,18 @@ export class Orchestrator {
 
     // ─── Convenience factory method ───────────────────────────────────────────────────
 
-    /** 
-* Quickly create a simple pipeline task diagram. 
-* 
-* Example usage (Explorer → Builder → LocWriter → Reviewer): 
-* ```typescript 
-* const graph = Orchestrator.createPipeline('Create archaeological site', [ 
-* { id: 'explore', agentType: 'explore', prompt: 'Scan project structure...' }, 
-* { id: 'build', agentType: 'build', prompt: 'Create archaeological site file...' }, 
-* { id: 'loc', agentType: 'loc_writer', prompt: 'Generate localization...' }, 
-* { id: 'review', agentType: 'review', prompt: 'Review code quality...' }, 
-* ]); 
-* ``` 
+     /**
+* Quickly create a simple pipeline task diagram.
+*
+* Example usage (Explorer → Builder → LocWriter → Reviewer):
+* ```typescript
+* const graph = Orchestrator.createPipeline('Create a typed content pipeline', [
+* { id: 'explore', agentType: 'explore', prompt: 'Scan project structure...' },
+* { id: 'build', agentType: 'build', prompt: 'Create the selected typed definition file...' },
+* { id: 'loc', agentType: 'loc_writer', prompt: 'Generate localization...' },
+* { id: 'review', agentType: 'review', prompt: 'Review code quality...' },
+* ]);
+* ```
 */
     static createPipeline(
         userPrompt: string,

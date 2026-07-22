@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { TokenType, tokenize, type Token } from '../../pdxTokenizer';
+import type { CwtRuleValueReference, PdxSemanticCatalog } from '../types';
 import type {
     AcceptanceCheck,
     TaskEntityContract,
@@ -43,20 +44,8 @@ export interface SemanticVerificationResult {
 
 export interface SemanticToolExecutor {
     execute(toolName: string, args: Record<string, unknown>): Promise<unknown>;
+    getPdxSemanticCatalog?(targetFiles: readonly string[], ruleNames?: readonly string[]): Promise<PdxSemanticCatalog>;
 }
-
-const EVENT_BLOCK_KEYS = new Set([
-    'event', 'country_event', 'planet_event', 'ship_event', 'fleet_event',
-    'pop_event', 'system_event', 'observer_event', 'first_contact_event',
-]);
-const FLAG_SET_KEYS = new Set(['set_global_flag', 'set_country_flag', 'set_planet_flag', 'set_fleet_flag', 'set_ship_flag', 'set_star_flag']);
-const FLAG_READ_KEYS = new Set(['has_global_flag', 'has_country_flag', 'has_planet_flag', 'has_fleet_flag', 'has_ship_flag', 'has_star_flag']);
-const FLAG_CLEAR_KEYS = new Set(['remove_global_flag', 'remove_country_flag', 'remove_planet_flag', 'remove_fleet_flag', 'remove_ship_flag', 'remove_star_flag']);
-const TARGET_SAVE_KEYS = new Set(['save_event_target_as', 'save_global_event_target_as']);
-const RESPONSIBILITY_PRIMITIVES = new Set([
-    'create_fleet', 'create_ship', 'create_country', 'create_pop', 'create_army',
-    'add_modifier', 'set_owner', 'set_location', 'destroy_fleet', 'kill_pop',
-]);
 const MAX_FILES = 200;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
@@ -136,6 +125,47 @@ function formatEvidence(evidence: SemanticEvidence): string {
     return `${evidence.kind}:${evidence.id} ${evidence.operation} at ${evidence.file}:${evidence.line}${evidence.container ? ` in ${evidence.container}` : ''}`;
 }
 
+function normalizeReferenceType(typeName: string): string {
+    return typeName.trim().toLowerCase();
+}
+
+function referenceDefinitionType(typeName: string): string {
+    const normalized = normalizeReferenceType(typeName);
+    const separator = normalized.indexOf('.');
+    return separator > 0 ? normalized.slice(0, separator) : normalized;
+}
+
+function definitionTypeForFile(
+    file: string,
+    catalog: PdxSemanticCatalog | undefined,
+): PdxSemanticCatalog['definitionTypes'][number] | undefined {
+    const normalized = file.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+    return catalog?.definitionTypes
+        .filter(type => type.paths.some(typePath => normalized.startsWith(`${typePath}/`) || normalized.includes(`/${typePath}/`)))
+        .sort((a, b) => Math.max(0, ...b.paths.map(value => value.length)) - Math.max(0, ...a.paths.map(value => value.length)))[0];
+}
+
+function definitionIdForNode(
+    node: PdxNode,
+    definitionType: PdxSemanticCatalog['definitionTypes'][number] | undefined,
+): string | undefined {
+    if (!definitionType || !node.children) return undefined;
+    const key = node.key.toLowerCase();
+    if (definitionType.typeKeyFilters.length > 0 && !definitionType.typeKeyFilters.includes(key)) return undefined;
+    return definitionType.nameField ? childValue(node, definitionType.nameField) : node.key;
+}
+
+function valueForReference(node: PdxNode, reference: CwtRuleValueReference): string | undefined {
+    if (reference.argumentPath === '$value') return node.value;
+    const segments = reference.argumentPath.split('.').filter(Boolean);
+    let current: PdxNode | undefined = node;
+    for (const segment of segments) {
+        current = current.children?.find(child => child.key.toLowerCase() === segment.toLowerCase());
+        if (!current) return undefined;
+    }
+    return current.value;
+}
+
 export class SemanticVerifier {
     async verify(
         workspaceRoot: string,
@@ -147,7 +177,8 @@ export class SemanticVerifier {
         const issues: SemanticIssue[] = [];
         const filesChecked: string[] = [];
         const roots: Array<{ file: string; nodes: PdxNode[] }> = [];
-        const localisationKeys: Array<{ id: string; file: string; line: number }> = [];
+        let catalog: PdxSemanticCatalog | undefined;
+        let catalogWarning: string | undefined;
 
         for (const input of [...new Set(writtenFiles)].slice(0, MAX_FILES)) {
             const file = path.isAbsolute(input) ? path.resolve(input) : path.resolve(workspaceRoot, input);
@@ -161,7 +192,6 @@ export class SemanticVerifier {
                     for (let i = 0; i < lines.length; i++) {
                         const match = lines[i]!.match(/^\s*([^\s:#][^:]*):\d*\s+/);
                         if (!match?.[1] || /^l_[a-z_]+$/i.test(match[1])) continue;
-                        localisationKeys.push({ id: match[1].trim(), file, line: i + 1 });
                         evidence.push({ kind: 'localisation', id: match[1].trim(), operation: 'define', file, line: i + 1 });
                     }
                     continue;
@@ -172,91 +202,104 @@ export class SemanticVerifier {
             }
         }
 
-        const effectDefinitions = new Set<string>();
-        const triggerDefinitions = new Set<string>();
-        const eventDefinitions = new Set<string>();
+        const ruleNames = new Set<string>();
+        const collectRuleNames = (nodes: readonly PdxNode[]) => {
+            for (const node of nodes) {
+                ruleNames.add(node.key.toLowerCase());
+                if (node.children) collectRuleNames(node.children);
+            }
+        };
+        roots.forEach(root => collectRuleNames(root.nodes));
+        if (toolExecutor?.getPdxSemanticCatalog) {
+            try {
+                catalog = await toolExecutor.getPdxSemanticCatalog(writtenFiles, [...ruleNames].sort());
+                if (catalog.source !== 'lsp') {
+                    catalogWarning = `LSP semantic catalog is unavailable; using ${catalog.source}.`;
+                } else if (catalog.status !== 'ready') {
+                    catalogWarning = `CWT semantic catalog is ${catalog.status}; unavailable rule families are advisory.`;
+                }
+            } catch (error) {
+                catalogWarning = `CWT semantic catalog could not be loaded: ${error instanceof Error ? error.message : String(error)}`;
+            }
+        } else {
+            catalogWarning = 'CWT semantic catalog is unavailable; catalog-dependent checks were skipped.';
+        }
+
+        const definitionKindsById = new Map<string, string>();
+        const rulesByName = new Map<string, PdxSemanticCatalog['rules']>();
+        for (const rule of catalog?.rules ?? []) {
+            const rules = rulesByName.get(rule.name) ?? [];
+            rules.push(rule);
+            rulesByName.set(rule.name, rules);
+        }
         for (const root of roots) {
-            const normalized = root.file.replace(/\\/g, '/').toLowerCase();
+            const definitionType = definitionTypeForFile(root.file, catalog);
             for (const node of root.nodes) {
-                if (EVENT_BLOCK_KEYS.has(node.key)) {
-                    const id = childValue(node, 'id');
-                    if (id) {
-                        eventDefinitions.add(id.toLowerCase());
-                        evidence.push({ kind: 'event', id, operation: 'define', file: root.file, line: node.line, container: id });
-                    }
-                }
-                if (normalized.includes('/common/scripted_effects/') && node.children) {
-                    effectDefinitions.add(node.key.toLowerCase());
-                    evidence.push({ kind: 'scripted_effect', id: node.key, operation: 'define', file: root.file, line: node.line, container: node.key });
-                }
-                if (normalized.includes('/common/scripted_triggers/') && node.children) {
-                    triggerDefinitions.add(node.key.toLowerCase());
-                    evidence.push({ kind: 'scripted_trigger', id: node.key, operation: 'define', file: root.file, line: node.line, container: node.key });
-                }
+                const id = definitionIdForNode(node, definitionType);
+                if (!id || !definitionType) continue;
+                definitionKindsById.set(id.toLowerCase(), definitionType.name);
+                evidence.push({ kind: definitionType.name, id, operation: 'define', file: root.file, line: node.line, container: id });
             }
         }
 
         const primitiveByContainer = new Map<string, Set<string>>();
-        const effectCallsByContainer = new Map<string, Set<string>>();
+        const definitionCallsByContainer = new Map<string, Set<string>>();
         const walk = (nodes: PdxNode[], file: string, inheritedContainer?: string, topLevel = false) => {
+            const fileDefinitionType = definitionTypeForFile(file, catalog);
             for (const node of nodes) {
                 let container = inheritedContainer;
-                if (EVENT_BLOCK_KEYS.has(node.key)) {
-                    const id = childValue(node, 'id');
-                    if (id) {
-                        if (!topLevel) evidence.push({ kind: 'event', id, operation: 'call', file, line: node.line, container: inheritedContainer });
-                        container = id;
+                const key = node.key.toLowerCase();
+                const topLevelDefinitionId = topLevel ? definitionIdForNode(node, fileDefinitionType) : undefined;
+                if (topLevelDefinitionId) container = topLevelDefinitionId;
+
+                const matchingRules = rulesByName.get(key) ?? [];
+                for (const rule of matchingRules) {
+                    for (const reference of rule.valueReferences) {
+                        const value = valueForReference(node, reference);
+                        if (!value) continue;
+                        const exactKind = normalizeReferenceType(reference.typeName);
+                        const definitionKind = referenceDefinitionType(reference.typeName);
+                        if (topLevelDefinitionId
+                            && fileDefinitionType?.name === definitionKind
+                            && value.toLowerCase() === topLevelDefinitionId.toLowerCase()) continue;
+                        const operation: TaskEntityOperation = reference.access === 'value_set' ? 'set' : 'reference';
+                        evidence.push({ kind: exactKind, id: value, operation, file, line: node.line, container });
+                        if (definitionKind !== exactKind) {
+                            evidence.push({ kind: definitionKind, id: value, operation, file, line: node.line, container });
+                        }
                     }
-                } else if (topLevel && (effectDefinitions.has(node.key.toLowerCase()) || triggerDefinitions.has(node.key.toLowerCase()))) {
-                    container = node.key;
                 }
 
-                if (node.value !== undefined) {
-                    const key = node.key.toLowerCase();
-                    const value = node.value;
-                    if (FLAG_SET_KEYS.has(key)) evidence.push({ kind: 'flag', id: value, operation: 'set', file, line: node.line, container });
-                    if (FLAG_READ_KEYS.has(key)) evidence.push({ kind: 'flag', id: value, operation: 'read', file, line: node.line, container });
-                    if (FLAG_CLEAR_KEYS.has(key)) evidence.push({ kind: 'flag', id: value, operation: 'clear', file, line: node.line, container });
-                    if (TARGET_SAVE_KEYS.has(key)) evidence.push({ kind: 'event_target', id: value, operation: 'save', file, line: node.line, container });
-                    const targetMatches = `${node.key} ${value}`.matchAll(/event_target:([A-Za-z0-9_.-]+)/g);
-                    for (const match of targetMatches) {
-                        if (match[1]) evidence.push({ kind: 'event_target', id: match[1], operation: 'read', file, line: node.line, container });
-                    }
-                }
-
-                if (container && RESPONSIBILITY_PRIMITIVES.has(node.key.toLowerCase())) {
+                if (container && matchingRules.some(rule => rule.category === 'effect')) {
                     const primitives = primitiveByContainer.get(container.toLowerCase()) ?? new Set<string>();
-                    primitives.add(node.key.toLowerCase());
+                    primitives.add(key);
                     primitiveByContainer.set(container.toLowerCase(), primitives);
                 }
-                if (container && effectDefinitions.has(node.key.toLowerCase()) && node.key.toLowerCase() !== container.toLowerCase()) {
-                    evidence.push({ kind: 'scripted_effect', id: node.key, operation: 'call', file, line: node.line, container });
-                    const calls = effectCallsByContainer.get(container.toLowerCase()) ?? new Set<string>();
+                const calledDefinitionKind = definitionKindsById.get(key);
+                if (container && calledDefinitionKind && key !== container.toLowerCase()) {
+                    evidence.push({ kind: calledDefinitionKind, id: node.key, operation: 'call', file, line: node.line, container });
+                    const calls = definitionCallsByContainer.get(container.toLowerCase()) ?? new Set<string>();
                     calls.add(node.key.toLowerCase());
-                    effectCallsByContainer.set(container.toLowerCase(), calls);
-                }
-                if (container && triggerDefinitions.has(node.key.toLowerCase())) {
-                    evidence.push({ kind: 'scripted_trigger', id: node.key, operation: 'call', file, line: node.line, container });
+                    definitionCallsByContainer.set(container.toLowerCase(), calls);
                 }
 
-                if (node.children) {
-                    const targetAssignments = node.children.filter(child => child.key.toLowerCase() === 'target' && child.value !== undefined);
-                    if (targetAssignments.length > 1) {
-                        issues.push({
-                            code: 'duplicate_target_assignment',
-                            message: `Block '${node.key}' assigns target ${targetAssignments.length} times; keep one unambiguous target.`,
-                            file,
-                            line: targetAssignments[1]!.line,
-                        });
-                    }
-                    walk(node.children, file, container, false);
-                }
+                if (node.children) walk(node.children, file, container, false);
             }
         };
         for (const root of roots) walk(root.nodes, root.file, undefined, true);
 
         const evidenceKeys = new Set(evidence.map(item => contractKey(item.kind, item.id, normalizeOperation(item.operation))));
         const contracts = uniqueContracts(graph);
+        const skippedCatalogContracts: string[] = [];
+        const hasDefinitionType = (name: string) => catalog?.definitionTypes.some(type => type.name === name) === true;
+        const catalogCanVerify = (kind: TaskEntityKind): boolean => {
+            if (kind === 'localisation') return true;
+            if (hasDefinitionType(kind)) return true;
+            return catalog?.rules.some(rule => rule.valueReferences.some(reference => {
+                const exact = normalizeReferenceType(reference.typeName);
+                return exact === kind || referenceDefinitionType(exact) === kind;
+            })) === true;
+        };
         for (const contract of contracts) {
             if (contract.required === false) continue;
             const operation = normalizeOperation(contract.operation);
@@ -265,7 +308,7 @@ export class SemanticVerifier {
                 found = evidence.some(item => entityKey(item.kind, item.id) === entityKey(contract.kind, contract.id)
                     && ['call', 'read', 'reference'].includes(item.operation));
             }
-            if (!found && operation === 'define' && toolExecutor && contract.kind !== 'flag' && contract.kind !== 'event_target' && contract.kind !== 'localisation') {
+            if (!found && operation === 'define' && toolExecutor && contract.kind !== 'localisation') {
                 try {
                     found = positiveDefinitionResult(await toolExecutor.execute('query_definition_by_name', { symbolName: contract.id }));
                 } catch {
@@ -273,6 +316,10 @@ export class SemanticVerifier {
                 }
             }
             if (!found) {
+                if (!catalogCanVerify(contract.kind)) {
+                    skippedCatalogContracts.push(`${contract.kind}:${contract.id} ${contract.operation}`);
+                    continue;
+                }
                 issues.push({
                     code: 'missing_contract_evidence',
                     message: `Required contract has no evidence: ${contract.kind}:${contract.id} ${contract.operation}.`,
@@ -294,31 +341,7 @@ export class SemanticVerifier {
             }
         }
 
-        const flagSets = evidence.filter(item => item.kind === 'flag' && item.operation === 'set');
-        for (const set of flagSets) {
-            const read = evidence.some(item => item.kind === 'flag' && item.id.toLowerCase() === set.id.toLowerCase() && item.operation === 'read');
-            if (!read) {
-                issues.push({ code: 'unused_flag', message: `Flag '${set.id}' is set but never read in the integrated change.`, file: set.file, line: set.line });
-            }
-        }
-
-        const savedTargets = evidence.filter(item => item.kind === 'event_target' && item.operation === 'save');
-        for (const saved of savedTargets) {
-            let read = evidence.some(item => item.kind === 'event_target' && item.id.toLowerCase() === saved.id.toLowerCase() && item.operation === 'read');
-            if (!read && toolExecutor) {
-                try {
-                    const result = await toolExecutor.execute('query_references', { identifier: `event_target:${saved.id}` }) as any;
-                    read = Array.isArray(result?.references) && result.references.length > 0;
-                } catch {
-                    read = false;
-                }
-            }
-            if (!read) {
-                issues.push({ code: 'unused_event_target', message: `Event target '${saved.id}' is saved but never consumed.`, file: saved.file, line: saved.line });
-            }
-        }
-
-        for (const [container, calls] of effectCallsByContainer) {
+        for (const [container, calls] of definitionCallsByContainer) {
             const direct = primitiveByContainer.get(container) ?? new Set<string>();
             for (const effect of calls) {
                 const insideEffect = primitiveByContainer.get(effect) ?? new Set<string>();
@@ -326,32 +349,9 @@ export class SemanticVerifier {
                 if (overlap.length > 0) {
                     issues.push({
                         code: 'duplicate_responsibility',
-                        message: `Entity '${container}' calls scripted effect '${effect}' but also implements the same operation(s) inline: ${overlap.join(', ')}.`,
+                        message: `Entity '${container}' calls definition '${effect}' but also implements the same CWT operation(s) inline: ${overlap.join(', ')}.`,
                     });
                 }
-            }
-        }
-
-        const knownEvents = new Set(eventDefinitions);
-        for (const key of localisationKeys) {
-            const match = key.id.match(/^(.+\.\d+)(?:\.|$)/);
-            if (!match?.[1]) continue;
-            const owner = match[1];
-            let exists = knownEvents.has(owner.toLowerCase());
-            if (!exists && toolExecutor) {
-                try {
-                    exists = positiveDefinitionResult(await toolExecutor.execute('query_definition_by_name', { symbolName: owner }));
-                } catch {
-                    exists = false;
-                }
-            }
-            if (!exists) {
-                issues.push({
-                    code: 'orphan_localisation',
-                    message: `Localisation key '${key.id}' appears to belong to missing event '${owner}'.`,
-                    file: key.file,
-                    line: key.line,
-                });
             }
         }
 
@@ -366,7 +366,7 @@ export class SemanticVerifier {
             ...(graph.metadata.featureManifest?.acceptanceCriteria ?? []),
             ...[...graph.nodes.values()].flatMap(node => node.acceptanceChecks ?? []),
         ];
-        const acceptanceFailures = this.evaluateAcceptanceChecks(acceptanceChecks, evidence, issues);
+        const acceptanceFailures = this.evaluateAcceptanceChecks(acceptanceChecks, evidence);
         for (const failure of acceptanceFailures) {
             issues.push({ code: 'acceptance_failed', message: failure });
         }
@@ -379,6 +379,10 @@ export class SemanticVerifier {
             `Files checked: ${filesChecked.length}`,
             `Evidence records: ${evidence.length}`,
             `Issues: ${issues.length}`,
+            ...(catalogWarning ? [`Catalog: ${catalogWarning}`] : []),
+            ...(skippedCatalogContracts.length > 0
+                ? [`Catalog-dependent contracts skipped: ${skippedCatalogContracts.slice(0, 20).join(', ')}`]
+                : []),
             '',
             ...issueLines,
             '',
@@ -399,7 +403,6 @@ export class SemanticVerifier {
     private evaluateAcceptanceChecks(
         checks: AcceptanceCheck[],
         evidence: SemanticEvidence[],
-        issues: SemanticIssue[],
     ): string[] {
         const failures: string[] = [];
         for (const check of checks) {
@@ -410,14 +413,36 @@ export class SemanticVerifier {
                 passed = evidence.some(item => item.id.toLowerCase() === subject.toLowerCase() && item.operation === 'define');
             } else if (check.type === 'entity_referenced' && subject) {
                 passed = evidence.some(item => item.id.toLowerCase() === subject.toLowerCase() && ['call', 'read', 'reference'].includes(item.operation));
-            } else if (check.type === 'flag_lifecycle' && subject) {
-                passed = evidence.some(item => item.kind === 'flag' && item.id.toLowerCase() === subject.toLowerCase() && item.operation === 'set')
-                    && evidence.some(item => item.kind === 'flag' && item.id.toLowerCase() === subject.toLowerCase() && item.operation === 'read');
-            } else if (check.type === 'target_lifecycle' && subject) {
-                passed = evidence.some(item => item.kind === 'event_target' && item.id.toLowerCase() === subject.toLowerCase() && item.operation === 'save')
-                    && evidence.some(item => item.kind === 'event_target' && item.id.toLowerCase() === subject.toLowerCase() && item.operation === 'read');
+            } else if (check.type === 'typed_lifecycle' && subject && check.entityKind) {
+                const kind = check.entityKind.toLowerCase();
+                passed = evidence.some(item => item.kind.toLowerCase() === kind
+                    && item.id.toLowerCase() === subject.toLowerCase()
+                    && ['set', 'save', 'define'].includes(item.operation))
+                    && evidence.some(item => item.kind.toLowerCase() === kind
+                        && item.id.toLowerCase() === subject.toLowerCase()
+                        && ['read', 'call', 'reference', 'clear'].includes(item.operation));
+            } else if ((check.type === 'flag_lifecycle' || check.type === 'target_lifecycle') && subject) {
+                // Resume compatibility for persisted plans created before
+                // typed_lifecycle existed. Infer the exact CWT kind from the
+                // evidence pair instead of recreating the retired game tables.
+                const byKind = new Map<string, SemanticEvidence[]>();
+                for (const item of evidence) {
+                    if (item.id.toLowerCase() !== subject.toLowerCase()) continue;
+                    const values = byKind.get(item.kind.toLowerCase()) ?? [];
+                    values.push(item);
+                    byKind.set(item.kind.toLowerCase(), values);
+                }
+                passed = [...byKind.values()].some(items =>
+                    items.some(item => ['set', 'save', 'define'].includes(item.operation))
+                    && items.some(item => ['read', 'call', 'reference', 'clear'].includes(item.operation)));
             } else if (check.type === 'localisation_owner' && subject) {
-                passed = !issues.some(issue => issue.code === 'orphan_localisation' && issue.message.includes(subject));
+                const normalized = subject.toLowerCase();
+                const ownerKind = check.entityKind?.toLowerCase();
+                passed = evidence.some(item => item.operation === 'define'
+                    && item.id.toLowerCase() === normalized
+                    && (!ownerKind || item.kind.toLowerCase() === ownerKind))
+                    && evidence.some(item => item.kind === 'localisation'
+                        && (item.id.toLowerCase() === normalized || item.id.toLowerCase().startsWith(`${normalized}.`)));
             }
             if (!passed) failures.push(`${check.id}: ${check.description}`);
         }

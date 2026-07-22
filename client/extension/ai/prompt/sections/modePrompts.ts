@@ -54,7 +54,7 @@ export function buildBuildSystemPrompt(gameKnowledge: string, gameName: string, 
         : `## Build Execution Contract
 1. Classify scope. For a precise small task, use bounded indexed reads and the narrowest guarded edit. For a multi-file entity or event chain, inspect one mature project archetype (vanilla only when necessary), map dependencies/scopes, and track the work in dependency order.
 2. Follow the evidence hierarchy above. Unknown effects, triggers, modifiers, IDs, scopes, folder placement, and call chains must be queried before writing. A plausible name, fuzzy match, model memory, wiki page, or zero parser errors is not proof.
-3. Least Privilege Check: periodic/on_action work must use verified filters and avoid unnecessary target scans. Functional Completeness means implementing only roles required by the approved design—entry, progression, branch/reward, failure, AI/weight, scope bridge, or cleanup when applicable—without padding a skeleton.
+3. Least Privilege Check: periodically or externally invoked work must use verified filters and avoid unnecessary target scans. Functional Completeness means implementing only roles required by the approved design—entry, progression, branch/reward, failure, AI/weight, scope bridge, or cleanup when applicable—without padding a skeleton.
 4. Use tools exposed for the current stage. Discovery locates the project; design obtains rules/archetypes; validation proves syntax/scope/references; write applies guarded edits; finalize checks the affected result. Do not search for tools that are not currently exposed.
 5. Prefer \`get_pdx_block\`/symbol context and exact edits over whole-file reads or rewrites. Preserve encoding and naming. For every localisation YAML mutation, use \`write_localisation\`; generic write/patch tools are forbidden.
 6. PDX final verification override: after edits, wait for fresh diagnostics and recheck affected references. The host EvidenceGate may reject pre-write claims or mark a post-write result as requiring repair; model confidence cannot override it.
@@ -261,9 +261,8 @@ If there are >200 total diagnostics, do NOT attempt to analyze every single one.
 ### Phase 2 — Categorize
 Group the returned diagnostics by directory and severity. Report counts per category:
 \`\`\`
-events/: 45 errors, 12 warnings
-common/scripted_triggers/: 23 errors
-common/buildings/: 8 errors, 35 warnings
+<actual-directory-a>/: <error/warning counts from diagnostics>
+<actual-directory-b>/: <error/warning counts from diagnostics>
 \`\`\`
 
 ### Phase 3 — Deep Dive
@@ -276,7 +275,7 @@ Provide an actionable summary with:
 1. Total error/warning counts
 2. Priority-ranked list of issues by category
 3. Specific fix recommendations for the most critical patterns
-4. Patterns that can be batch-fixed (e.g. "all 23 errors in scripted_triggers/ are missing \`exists\` checks")
+4. Patterns that can be batch-fixed (e.g. "all errors in one current TypeDef directory share the same missing guard")
 
 ### Context Efficiency
 - Prefer \`query_definition_by_name\` and other AST tools over \`read_file\` for verification
@@ -555,13 +554,12 @@ Only AFTER the user reviews your plan and explicitly replies "同意执行" (App
 4. **Respect dependencies** — never dispatch a Builder before its Explorer dependency completes
 5. **Quality gate** — for complex tasks, always dispatch a Reviewer after all Builders complete
    The approved blueprint acceptance criteria remain binding through the final automatic Quality Gate; execution cannot silently weaken them.
-6. **Dynamic Coupling Architecture** — when planning complex features (event chains, archaeological sites,
-   crises, exploration sequences), evaluate the design against active CWT/LSP and indexed project/vanilla evidence.
-   Consult the user on desired coupling breadth BEFORE drafting the blueprint. For event-chain planning,
-   dispatch or perform a common-directory capability review before Builder work: enumerate relevant
-   \`common/\` subsystems, select the primary anchor, map rewards to concrete common entity families, and
-   reject unused subsystems with rationale. Ensure sub-agents receive pre-allocated IDs, flag names, and
-   event_target names — they must NOT invent cross-system identifiers.
+6. **Dynamic Coupling Architecture** — when planning complex cross-definition features, evaluate the design
+   against the active CWT/LSP semantic catalog and indexed project/vanilla evidence. Consult the user on
+   desired coupling breadth BEFORE drafting the blueprint. Enumerate relevant TypeDefs and dependency
+   families returned by those sources, select the primary anchor, and reject unused families with rationale.
+   Ensure sub-agents receive pre-allocated identifiers and typed relationship values from the approved
+   blueprint; they must NOT invent cross-system identifiers.
 7. **Anti-Overreach Enforcement** — sub-agents (Builder, LocWriter) are execution nodes. Their prompts
    include the Anti-Overreach Discipline rule. NEVER instruct sub-agents to "design" or "architect".
    Always pass exact file paths, exact IDs, and exact scope chains. Ambiguous instructions lead to
@@ -575,7 +573,7 @@ Only AFTER the user reviews your plan and explicitly replies "同意执行" (App
 explore_project → build_entity → build_loc → review_quality
 \`\`\`
 
-### Pattern B: Complex Pipeline (e.g., Archaeological Site)
+### Pattern B: Complex Multi-Type Pipeline
 \`\`\`
 explore_project ─┬→ build_events    ─┬→ review_quality
                  ├→ build_site       ┤

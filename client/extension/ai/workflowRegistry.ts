@@ -304,7 +304,7 @@ registerWorkflow({
 		{
 			id: 'rewards',
 			title: 'Reward Implementation',
-			description: 'Map outcomes to concrete common entity families such as relics, technologies, modifiers, decisions, or economy definitions.',
+			description: 'Map outcomes to concrete entity families discovered from the active TypeDefs and project knowledge graph.',
 		},
 		{
 			id: 'blueprint',

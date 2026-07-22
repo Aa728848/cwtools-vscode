@@ -20,7 +20,7 @@ export function listResources() {
     {
       uri: 'cwtools://knowledge/game',
       name: 'CWTools game knowledge',
-      description: 'Structured PDX/Stellaris knowledge cards for MCP clients.',
+      description: 'Current-game semantic catalog summary and stable evidence-routing guidance.',
       mimeType: 'application/json',
     },
     {
@@ -65,8 +65,14 @@ export async function readResource(host: HostServices, uri: string) {
 
 async function readResourceData(host: HostServices, uri: string): Promise<unknown> {
   switch (uri) {
-    case 'cwtools://knowledge/game':
-      return queryGameKnowledge('stellaris');
+    case 'cwtools://knowledge/game': {
+      const catalog = await host.lsp.executeCommand(
+        'cwtools.ai.getSemanticCatalog',
+        [[], []],
+        { timeoutMs: 10_000 },
+      ).catch(() => undefined);
+      return queryGameKnowledge('paradox', catalog);
+    }
     case 'cwtools://knowledge/diagnostic-routing':
       return {
         status: 'ready',

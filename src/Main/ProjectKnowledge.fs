@@ -191,25 +191,16 @@ let private resourceFacts (game: IGame) =
                   overwrite = overwriteName item.overwrite }
     table :> IDictionary<string, ResourceFact>
 
-let private domainFor entityType logicalPath =
-    let value = (entityType + " " + logicalPath).ToLowerInvariant()
-    if value.Contains("on_action") then "on_actions"
-    elif value.Contains("special_project") then "special_projects"
-    elif value.Contains("archaeolog") || value.Contains("archaeological_site") then "archaeology"
-    elif value.Contains("situation") then "situations"
-    elif value.Contains("technology") || value.Contains("technolog") then "technology"
-    elif value.Contains("ship_") || value.Contains("component_template") || value.Contains("section_template") || value.Contains("starbase") then "ships"
-    elif value.Contains("scripted_effect") || value.Contains("scripted_trigger") || value.Contains("scripted_value") then "scripted_logic"
-    elif value.Contains("event") then "events"
-    elif value.Contains("sprite") || value.Contains("asset") || value.Contains("interface") || value.Contains("gfx/") || value.Contains("sound") || value.Contains("music") then "assets"
-    elif value.Contains("localisation") || value.Contains("localization") then "localisation"
+let private domainFor (entityType: string) (logicalPath: string) =
+    let normalizedType = entityType.Trim().ToLowerInvariant().Replace('-', '_')
+    if not (String.IsNullOrWhiteSpace normalizedType) then normalizedType
     else
         let normalized = (normalizePath (logicalPath.TrimStart('/'))).ToLowerInvariant()
         let segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries)
         let commonIndex = segments |> Array.tryFindIndex (fun segment -> segment = "common")
         match commonIndex with
         | Some index when index + 1 < segments.Length -> segments.[index + 1].Replace('-', '_')
-        | _ when segments |> Array.exists (fun segment -> segment = "map" || segment = "map_data") -> "map"
+        | _ when segments.Length > 0 -> segments.[0].Replace('-', '_')
         | _ -> "other"
 
 let private jsonStringArray values =
@@ -295,19 +286,9 @@ let private selectDefinitions (options: ExportOptions) (definitions: DefinitionF
     if definitions.Length <= options.maxDefinitions then definitions
     else
         let workspace, vanilla = definitions |> List.partition (fun item -> item.origin = "workspace")
-        let eventCoreDomains = set [ "events"; "on_actions" ]
-        let priorityDomains =
-            set [ "special_projects"; "archaeology"; "situations"; "technology"; "ships"; "scripted_logic" ]
-        let eventCore, remainingVanilla = vanilla |> List.partition (fun item -> eventCoreDomains.Contains item.domain)
-        let priority, other = remainingVanilla |> List.partition (fun item -> priorityDomains.Contains item.domain)
-        // Event and on_action definitions are mandatory for structural and logic
-        // graph completeness, even if an unusually large game exceeds the soft cap.
-        let selectedEventCore = eventCore
-        let mutable remaining = max 0 (options.maxDefinitions - workspace.Length - selectedEventCore.Length)
-        let selectedPriority = balancedTakeDefinitions remaining priority
-        remaining <- max 0 (remaining - selectedPriority.Length)
-        let selectedOther = balancedTakeDefinitions remaining other
-        Seq.concat [ workspace; selectedEventCore; selectedPriority; selectedOther ]
+        let remaining = max 0 (options.maxDefinitions - workspace.Length)
+        let selectedVanilla = balancedTakeDefinitions remaining vanilla
+        Seq.concat [ workspace; selectedVanilla ]
         |> Seq.distinctBy (fun item -> item.entityType.ToLowerInvariant(), item.id.ToLowerInvariant(), normalizePath item.file, item.line)
         |> Seq.sortBy (fun item -> item.domain, item.entityType, item.id, item.origin)
         |> Seq.toList
@@ -477,107 +458,11 @@ let private topologyJson (topology: TopologyFacts) =
             |> List.toArray))
           Some("truncated", JsonValue.Boolean topology.truncated) ]
 
-let private regexOptions = RegexOptions.Compiled ||| RegexOptions.IgnoreCase ||| RegexOptions.Multiline
-
-let private eventCallRegex =
-    Regex(@"\b(country_event|planet_event|colony_event|carrier_event|fleet_event|ship_event|pop_event|pop_faction_event|observer_event|situation_event|first_contact_event|espionage_operation_event|astral_rift_event|event)\s*=\s*(?:\{\s*id\s*=\s*)?([A-Za-z0-9_.-]+)", regexOptions)
-
-let private eventTitleRegex = Regex(@"\btitle\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
-let private triggeredOnlyRegex = Regex(@"\bis_triggered_only\s*=\s*yes\b", regexOptions)
-let private hiddenEventRegex = Regex(@"\b(?:hide_window|is_hidden)\s*=\s*yes\b", regexOptions)
-let private meanTimeToHappenRegex = Regex(@"\bmean_time_to_happen\s*=\s*\{", regexOptions)
-let private fireOnActionRegex = Regex(@"\bfire_on_action\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
-let private eventIdentifierRegex = Regex(@"(?<![A-Za-z0-9_.-])([A-Za-z_][A-Za-z0-9_-]*\.[A-Za-z0-9_.-]+)(?![A-Za-z0-9_.-])", regexOptions)
-
-let private eventPhaseRegexes =
-    [ "trigger", Regex(@"\btrigger\s*=\s*\{", regexOptions)
-      "immediate", Regex(@"\bimmediate\s*=\s*\{", regexOptions)
-      "option", Regex(@"\boption\s*=\s*\{", regexOptions)
-      "after", Regex(@"\bafter\s*=\s*\{", regexOptions) ]
-
-let private eventLogicRegexes =
-    [ "flag_set", "auto", Regex(@"\bset_(country|planet|carrier|fleet|ship|pop|leader|global)_flag\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
-      "flag_set", "auto", Regex(@"\bset_timed_(country|planet|carrier|fleet|ship|pop|leader|global)_flag\s*=\s*\{[^{}]*?\bflag\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
-      "flag_check", "trigger", Regex(@"\bhas_(country|planet|carrier|fleet|ship|pop|leader|global)_flag\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
-      "flag_remove", "auto", Regex(@"\bremove_(country|planet|carrier|fleet|ship|pop|leader|global)_flag\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
-      "technology_grant", "auto", Regex(@"\b(?:give_technology|add_research_option)\s*=\s*(?:\{[^{}]*?\btech\s*=\s*)?""?([A-Za-z0-9_.-]+)""?", regexOptions)
-      "technology_require", "trigger", Regex(@"\bhas_technology\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
-      "variable_write", "auto", Regex(@"\b(?:set_variable|change_variable|subtract_variable|multiply_variable|divide_variable)\s*=\s*\{[^{}]*?\bwhich\s*=\s*""?([A-Za-z0-9_.-]+)""?", regexOptions)
-      "variable_read", "trigger", Regex(@"\b(?:check_variable|is_variable_set|has_variable)\s*=\s*(?:\{[^{}]*?\bwhich\s*=\s*)?""?([A-Za-z0-9_.-]+)""?", regexOptions) ]
-
-let private firstMatch (pattern: Regex) (text: string) =
-    let matched = pattern.Match text
-    if matched.Success && matched.Groups.Count > 1 then Some matched.Groups.[1].Value else None
-
-let private hasMatch (pattern: Regex) (text: string) = pattern.IsMatch text
-
-let private lineAtOffset startLine (text: string) offset =
-    startLine + (text.AsSpan(0, min offset text.Length).Count('\n'))
-
-let private readDefinitionText (cache: Dictionary<string, string array>) (definition: DefinitionFact) =
-    try
-        let lines =
-            match cache.TryGetValue definition.file with
-            | true, cached -> cached
-            | false, _ ->
-                let loaded = File.ReadAllLines definition.file
-                if cache.Count >= 512 then cache.Clear()
-                cache.[definition.file] <- loaded
-                loaded
-        let startIndex = max 0 (definition.line - 1)
-        let endIndex = min (lines.Length - 1) (max startIndex (definition.endLine - 1))
-        if lines.Length = 0 || startIndex >= lines.Length then ""
-        else String.Join("\n", lines.[startIndex..endIndex])
-    with _ -> ""
-
-let private eventPhaseAt (text: string) offset =
-    let start = max 0 (offset - 1200)
-    let prefix = text.Substring(start, offset - start)
-    let lastIndex (pattern: Regex) =
-        pattern.Matches(prefix)
-        |> Seq.cast<Match>
-        |> Seq.tryLast
-        |> Option.map (fun matched -> matched.Index)
-        |> Option.defaultValue -1
-    eventPhaseRegexes
-    |> List.map (fun (phase, pattern) -> phase, lastIndex pattern)
-    |> List.maxBy snd
-    |> fun (phase, index) -> if index >= 0 then phase else "body"
-
-let private collectPatternLogic (eventId: string) (sourceFile: string) (startLine: int) (relationType: string) (phase: string) (pattern: Regex) (text: string) : EventLogicFact list =
-    pattern.Matches(text)
-    |> Seq.cast<Match>
-    |> Seq.choose (fun matched ->
-        if matched.Groups.Count < 2 then None
-        else
-            let scope = if matched.Groups.Count > 2 && matched.Groups.[1].Success then Some matched.Groups.[1].Value else None
-            let subjectGroup = if matched.Groups.Count > 2 then matched.Groups.[2] else matched.Groups.[1]
-            if not subjectGroup.Success || String.IsNullOrWhiteSpace subjectGroup.Value then None
-            else
-                Some
-                    { eventId = eventId
-                      relationType = relationType
-                      subject = subjectGroup.Value
-                      scope = scope
-                      phase = if phase = "auto" then eventPhaseAt text matched.Index else phase
-                      sourceFile = normalizePath sourceFile
-                      line = lineAtOffset startLine text matched.Index
-                      details = None })
-    |> Seq.toList
-
 let private collectEventGraph (definitions: DefinitionFact list) (topology: TopologyFacts) : EventGraphFacts =
-    let textCache = Dictionary<string, string array>(if OperatingSystem.IsWindows() then StringComparer.OrdinalIgnoreCase else StringComparer.Ordinal)
     let pathComparer = if OperatingSystem.IsWindows() then StringComparer.OrdinalIgnoreCase else StringComparer.Ordinal
     let eventDefinitions =
         definitions
-        |> List.filter (fun definition -> definition.domain = "events" && definition.id.Contains('.'))
-        |> List.distinctBy (fun definition -> normalizePath definition.file, definition.line, definition.id)
-        |> List.sortBy (fun definition -> normalizePath definition.file, definition.line, definition.id)
-    let onActionDefinitions =
-        definitions
-        |> List.filter (fun definition ->
-            definition.domain = "on_actions"
-            && definition.entityType.StartsWith("on_action", StringComparison.OrdinalIgnoreCase))
+        |> List.filter (fun definition -> definition.entityType.Equals("event", StringComparison.OrdinalIgnoreCase))
         |> List.distinctBy (fun definition -> normalizePath definition.file, definition.line, definition.id)
         |> List.sortBy (fun definition -> normalizePath definition.file, definition.line, definition.id)
     let eventIds = eventDefinitions |> Seq.map (fun item -> item.id.ToLowerInvariant()) |> Set.ofSeq
@@ -586,78 +471,26 @@ let private collectEventGraph (definitions: DefinitionFact list) (topology: Topo
     let logic = ResizeArray<EventLogicFact>()
 
     for definition in eventDefinitions do
-        let text = readDefinitionText textCache definition
-        if not (String.IsNullOrWhiteSpace text) then
-            let eventType = definition.subtypes |> List.tryHead |> Option.defaultValue definition.entityType
-            nodes.Add
-                { eventId = definition.id
-                  eventType = eventType
-                  title = firstMatch eventTitleRegex text
-                  file = normalizePath definition.file
-                  logicalPath = normalizePath definition.logicalPath
-                  line = definition.line
-                  endLine = definition.endLine
-                  origin = definition.origin
-                  isTriggeredOnly = hasMatch triggeredOnlyRegex text
-                  isHidden = hasMatch hiddenEventRegex text
-                  hasMeanTimeToHappen = hasMatch meanTimeToHappenRegex text }
-
-            for matched in eventCallRegex.Matches(text) |> Seq.cast<Match> do
-                let target = matched.Groups.[2].Value
-                if not (String.IsNullOrWhiteSpace target) && not (target.Equals(definition.id, StringComparison.OrdinalIgnoreCase)) then
-                    edges.Add
-                        { sourceKind = "event"
-                          sourceId = definition.id
-                          targetEventId = target
-                          edgeType = eventPhaseAt text matched.Index
-                          label = Some matched.Groups.[1].Value
-                          sourceFile = normalizePath definition.file
-                          line = lineAtOffset definition.line text matched.Index
-                          confidence = "parsed" }
-
-            for matched in fireOnActionRegex.Matches(text) |> Seq.cast<Match> do
-                logic.Add
-                    { eventId = definition.id
-                      relationType = "fire_on_action"
-                      subject = matched.Groups.[1].Value
-                      scope = None
-                      phase = eventPhaseAt text matched.Index
-                      sourceFile = normalizePath definition.file
-                      line = lineAtOffset definition.line text matched.Index
-                      details = None }
-
-            eventLogicRegexes
-            |> List.collect (fun (relationType, phase, pattern) ->
-                collectPatternLogic definition.id definition.file definition.line relationType phase pattern text)
-            |> logic.AddRange
-
-    // Vanilla on_actions are present in the typed definition cache even though
-    // the live topology snapshot intentionally scans workspace files only.
-    // Resolve event-like identifiers against known event IDs to add precise
-    // entry edges without treating unrelated dotted values as events.
-    for definition in onActionDefinitions do
-        let text = readDefinitionText textCache definition
-        if not (String.IsNullOrWhiteSpace text) then
-            for matched in eventIdentifierRegex.Matches(text) |> Seq.cast<Match> do
-                let target = matched.Groups.[1].Value
-                if eventIds.Contains(target.ToLowerInvariant()) then
-                    edges.Add
-                        { sourceKind = "on_action"
-                          sourceId = definition.id
-                          targetEventId = target
-                          edgeType = "on_action_entry"
-                          label = None
-                          sourceFile = normalizePath definition.file
-                          line = lineAtOffset definition.line text matched.Index
-                          confidence = "parsed" }
+        let eventType = definition.subtypes |> List.tryHead |> Option.defaultValue definition.entityType
+        nodes.Add
+            { eventId = definition.id
+              eventType = eventType
+              title = None
+              file = normalizePath definition.file
+              logicalPath = normalizePath definition.logicalPath
+              line = definition.line
+              endLine = definition.endLine
+              origin = definition.origin
+              isTriggeredOnly = false
+              isHidden = false
+              hasMeanTimeToHappen = false }
 
     let nodeByFile = Dictionary<string, EventNodeFact list>(pathComparer)
     for file, values in nodes |> Seq.groupBy (fun node -> normalizePath node.file) do
         nodeByFile.[file] <- values |> Seq.toList
 
-    // Topology edges frequently originate outside event blocks (especially from
-    // on_actions). Index definitions once instead of scanning the complete game
-    // model for every incoming event reference.
+    // Index source definitions once instead of rescanning the complete game
+    // model for every CWTools-typed incoming event reference.
     let definitionsByFile = Dictionary<string, DefinitionFact list>(pathComparer)
     for file, values in definitions |> Seq.groupBy (fun definition -> normalizePath definition.file) do
         definitionsByFile.[file] <- values |> Seq.toList
@@ -705,7 +538,7 @@ let private collectEventGraph (definitions: DefinitionFact list) (topology: Topo
                         { sourceKind = definition.entityType
                           sourceId = definition.id
                           targetEventId = reference.targetId
-                          edgeType = if definition.domain = "on_actions" then "on_action_entry" else "typed_entry"
+                          edgeType = "typed_entry"
                           label = reference.label
                           sourceFile = reference.sourceFile
                           line = reference.line

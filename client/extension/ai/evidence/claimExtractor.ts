@@ -15,6 +15,7 @@
 
 import * as path from 'path';
 import type { EvidenceClaimKind } from './evidenceTypes';
+import type { PdxSemanticCatalog, CwtRuleValueReference } from '../types';
 
 /** PDX script extensions the gate applies to (mirrors fileTools.isPdxStructureGuardedPath). */
 export const PDX_SCRIPT_EXTENSIONS: readonly string[] = ['.txt', '.gui', '.gfx', '.asset', '.entity'];
@@ -38,17 +39,10 @@ export interface WritePayload {
     gameProfile?: string;
 }
 
-export type LocalDefinitionKind =
-    | 'event'
-    | 'scripted_effect'
-    | 'scripted_trigger'
-    | 'static_modifier'
-    | 'technology'
-    | 'building'
-    | 'trait'
-    | 'starbase_building';
+/** CWT type name. Kept open because supported games define different entity families. */
+export type LocalDefinitionKind = string;
 
-export type ReferenceKind = LocalDefinitionKind | 'scripted_effect_or_trigger';
+export type ReferenceKind = LocalDefinitionKind;
 
 export type ExtractedSubject =
     | { type: 'syntax'; code: string }
@@ -64,8 +58,7 @@ export type ExtractedSubject =
         type: 'reference';
         id: string;
         refKind: ReferenceKind;
-      }
-    | { type: 'call_chain'; entryId: string; requiresCaller: boolean };
+      };
 
 export interface LocalDefinitionCandidate {
     id: string;
@@ -152,91 +145,6 @@ interface PdxStatement {
     chain: string[];
 }
 
-/** Generic containers whose direct children are effect/trigger/modifier positions. */
-const CONTAINER_POSITION: Readonly<Record<string, 'effect' | 'trigger' | 'modifier' | 'any'>> = {
-    modifier: 'modifier',
-    effect: 'effect',
-    immediate: 'effect',
-    hidden_effect: 'effect',
-    after: 'effect',
-    trigger: 'trigger',
-    limit: 'trigger',
-    not: 'trigger',
-    nor: 'trigger',
-    nand: 'trigger',
-    any_of: 'trigger',
-    all_of: 'trigger',
-    fail_trigger: 'trigger',
-    pre_triggers: 'trigger',
-    weight: 'trigger',
-    chance: 'trigger',
-    if: 'any',
-    else_if: 'any',
-    else: 'any',
-    while: 'any',
-    option: 'any',
-    allowed: 'any',
-    alternative: 'any',
-    events: 'any',
-};
-
-/** scope_change blocks follow strong naming conventions: every_X / random_X / any_X / ordered_X / each_X. */
-const SCOPE_CHANGE_PATTERN = /^(?:every|random|any|ordered|each)_(\w+)$/;
-
-/**
- * Universal argument keys that appear as direct children of option/event
- * containers. Everything else with a scalar value in script position is a
- * candidate effect/trigger call (triggers take scalar args: `has_trait = x`;
- * effects too: `add_energy = 100`).
- */
-const SCALAR_ARG_KEYS: ReadonlySet<string> = new Set([
-    'name', 'id', 'value', 'var', 'key', 'text', 'texture', 'icon', 'picture',
-    'sound', 'namespace', 'flag', 'target', 'days', 'months', 'years',
-    'duration', 'who', 'opinion', 'type', 'class', 'level', 'skill', 'amount',
-    'factor', 'add', 'mult', 'base', 'group', 'default', 'loc', 'title', 'desc',
-]);
-
-/**
- * Conservative typed entity references whose scalar value is an exact entity
- * id. These names are shared by multiple Paradox profiles and are only
- * applied in an already-established effect/trigger position. Free-form keys
- * such as `name`, `key`, localisation, variables, and arbitrary block fields
- * deliberately stay out of this table.
- */
-const DIRECT_TYPED_REFERENCES: Readonly<Record<string, LocalDefinitionKind>> = {
-    has_technology: 'technology',
-    can_research_technology: 'technology',
-    is_researching_technology: 'technology',
-    add_technology: 'technology',
-    give_technology: 'technology',
-    research_technology: 'technology',
-    has_trait: 'trait',
-    add_trait: 'trait',
-    remove_trait: 'trait',
-    has_building: 'building',
-    has_active_building: 'building',
-    has_building_construction: 'building',
-    add_building: 'building',
-    remove_building: 'building',
-    repair_building: 'building',
-    ruin_building: 'building',
-    disable_building: 'building',
-};
-
-/** Typed ids nested inside the block form of a known effect/trigger. */
-const BLOCK_ARGUMENT_TYPED_REFERENCES: Readonly<Record<string, Readonly<Record<string, LocalDefinitionKind>>>> = {
-    give_technology: { tech: 'technology', technology: 'technology' },
-    add_technology: { tech: 'technology', technology: 'technology' },
-    research_technology: { tech: 'technology', technology: 'technology' },
-    add_trait: { trait: 'trait' },
-    remove_trait: { trait: 'trait' },
-    add_building: { building: 'building' },
-    remove_building: { building: 'building' },
-    repair_building: { building: 'building' },
-    set_starbase_building: { building: 'starbase_building' },
-    remove_starbase_building: { building: 'starbase_building' },
-};
-
 const DYNAMIC_OR_SENTINEL_ENTITY_IDS: ReadonlySet<string> = new Set([
     'yes', 'no', 'all', 'any', 'none', 'random', 'random_common', 'random_negative',
     'all_negative', 'root', 'prev', 'from', 'fromfrom', 'this', 'owner',
@@ -252,80 +160,55 @@ function isConcreteEntityId(value: string): boolean {
 
 function typedReferenceForStatement(
     statement: PdxStatement,
+    catalog: PdxSemanticCatalog | undefined,
     targetFile: string,
 ): { id: string; kind: LocalDefinitionKind } | undefined {
-    if (statement.isBlock || !statement.scalarValue || !isConcreteEntityId(statement.scalarValue)) return undefined;
+    if (!catalog || statement.isBlock || !statement.scalarValue || !isConcreteEntityId(statement.scalarValue)) return undefined;
     const name = statement.name.toLowerCase();
     const parent = statement.chain[statement.chain.length - 1]?.toLowerCase();
-    if (parent) {
-        const nestedKind = BLOCK_ARGUMENT_TYPED_REFERENCES[parent]?.[name];
-        if (nestedKind) return { id: statement.scalarValue, kind: nestedKind };
-    }
-    if (containerPositionFor(statement.chain, targetFile) === undefined) return undefined;
-    const directKind = DIRECT_TYPED_REFERENCES[name];
-    return directKind ? { id: statement.scalarValue, kind: directKind } : undefined;
-}
-/** Explicit scope changes that do not follow the pattern. */
-const EXPLICIT_SCOPE_CHANGES: Readonly<Record<string, string>> = {
-    root: 'root',
-    prev: 'prev',
-    from: 'from',
-    fromfrom: 'from',
-    owner: 'country',
-    capital: 'planet',
-    overlord: 'country',
-    federation: 'federation',
-    sector: 'sector',
-    system: 'system',
-    planet: 'planet',
-    country: 'country',
-    fleet: 'fleet',
-    ship: 'ship',
-    leader: 'leader',
-    pop: 'pop',
-    army: 'army',
-    deposit: 'deposit',
-    megastructure: 'megastructure',
-    starbase: 'starbase',
-};
-
-/** Event declaration keys establish the root/current scope for their body. */
-const EVENT_ROOT_SCOPES: Readonly<Record<string, string>> = {
-    country_event: 'country',
-    observer_event: 'country',
-    pop_event: 'pop',
-    pop_group_event: 'pop_group',
-    pop_faction_event: 'pop_faction',
-    planet_event: 'planet',
-    first_contact_event: 'first_contact',
-    astral_rift_event: 'astral_rift',
-    bypass_event: 'bypass',
-    ship_event: 'ship',
-    fleet_event: 'fleet',
-    system_event: 'system',
-    starbase_event: 'starbase',
-    espionage_operation_event: 'espionage_operation',
-    leader_event: 'leader',
-    situation_event: 'situation',
-    agreement_event: 'agreement',
-    colony_event: 'colony',
-    carrier_event: 'carrier',
-};
-
-/** Derive the scope a scope_change block pushes, following PDX naming conventions. */
-export function scopePushedBy(blockName: string): string | undefined {
-    const explicit = EXPLICIT_SCOPE_CHANGES[blockName.toLowerCase()];
-    if (explicit) return explicit;
-    const match = SCOPE_CHANGE_PATTERN.exec(blockName.toLowerCase());
-    if (!match?.[1]) return undefined;
-    let scope = match[1];
-    // every_owned_planet / random_owned_fleet -> planet / fleet
-    scope = scope.replace(/^owned_/, '');
-    return scope || undefined;
+    const directReferences = catalog.rules
+        .filter(candidate => candidate.name === name)
+        .flatMap(candidate => candidate.valueReferences)
+        .filter(candidate => candidate.argumentPath.toLowerCase() === '$value' && candidate.access !== 'value_set');
+    const blockReferences = parent
+        ? catalog.rules
+            .filter(candidate => candidate.name === parent)
+            .flatMap(candidate => candidate.valueReferences)
+            .filter(candidate => candidate.argumentPath.toLowerCase() === name && candidate.access !== 'value_set')
+        : [];
+    // CWT aliases may define both scalar (`rule = <type>`) and block
+    // (`rule = { field = <type> }`) forms, sometimes in separate rules.
+    const reference = directReferences[0] ?? blockReferences[0];
+    const kind = reference ? definitionKindForReference(reference, catalog) : undefined;
+    const definitionType = definitionTypeForTarget(targetFile, catalog);
+    if (definitionType
+        && kind === definitionType.name
+        && statement.depth === 1
+        && parent
+        && definitionType.typeKeyFilters.includes(parent)
+        && statement.name.toLowerCase() === definitionType.nameField) return undefined;
+    return kind ? { id: statement.scalarValue, kind } : undefined;
 }
 
-function isScopeChangeLike(blockName: string): boolean {
-    return scopePushedBy(blockName) !== undefined;
+function definitionKindForReference(
+    reference: CwtRuleValueReference,
+    catalog: PdxSemanticCatalog,
+): LocalDefinitionKind | undefined {
+    const typeName = reference.typeName.trim().toLowerCase();
+    return catalog.definitionTypes
+        .map(type => type.name)
+        .sort((a, b) => b.length - a.length)
+        .find(name => typeName === name || typeName.startsWith(`${name}.`));
+}
+
+/** Derive the pushed scope only from the active CWT scope-change alias. */
+export function scopePushedBy(blockName: string, catalog?: PdxSemanticCatalog): string | undefined {
+    const fromRules = catalog?.rules.find(rule => rule.name === blockName.toLowerCase() && rule.pushScope)?.pushScope;
+    return fromRules?.toLowerCase();
+}
+
+function isScopeChangeLike(blockName: string, catalog?: PdxSemanticCatalog): boolean {
+    return scopePushedBy(blockName, catalog) !== undefined;
 }
 
 /**
@@ -421,15 +304,33 @@ function scanStatements(text: string): PdxStatement[] {
     return statements;
 }
 
-function currentScopeFor(chain: string[]): string | undefined {
+/** Syntax-only inventory used to request just the relevant semantic rules from LSP. */
+export function extractPdxStatementNames(payload: WritePayload): string[] {
+    return Array.from(new Set(scanStatements(payload.text).map(statement => statement.name.toLowerCase())))
+        .sort()
+        .slice(0, MAX_STATEMENTS);
+}
+
+function definitionScopeForKey(key: string, targetFile: string, catalog?: PdxSemanticCatalog): string | undefined {
+    const definitionType = definitionTypeForTarget(targetFile, catalog);
+    if (!definitionType) return undefined;
+    const prefix = `${definitionType.name}.`;
+    const reference = catalog?.rules
+        .filter(candidate => candidate.name === key.toLowerCase())
+        .flatMap(rule => rule.valueReferences)
+        .find(candidate => candidate.typeName.toLowerCase().startsWith(prefix));
+    return reference?.typeName.slice(prefix.length).toLowerCase() || undefined;
+}
+
+function currentScopeFor(chain: string[], targetFile: string, catalog?: PdxSemanticCatalog): string | undefined {
     let scope: string | undefined;
     let rootScope: string | undefined;
     for (const block of chain) {
         const normalized = block.toLowerCase();
-        const eventRoot = EVENT_ROOT_SCOPES[normalized];
-        if (eventRoot) {
-            rootScope = eventRoot;
-            scope = eventRoot;
+        const definitionRoot = definitionScopeForKey(normalized, targetFile, catalog);
+        if (definitionRoot) {
+            rootScope = definitionRoot;
+            scope = definitionRoot;
             continue;
         }
         if (normalized === 'root') {
@@ -442,19 +343,26 @@ function currentScopeFor(chain: string[]): string | undefined {
             scope = undefined;
             continue;
         }
-        const pushed = scopePushedBy(block);
+        const pushed = scopePushedBy(block, catalog);
         if (pushed) scope = pushed;
     }
     return scope;
 }
 
-function rootPositionForTarget(targetFile: string): 'effect' | 'trigger' | 'modifier' | undefined {
-    const normalized = `/${targetFile.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase()}`;
-    if (normalized.includes('/common/scripted_effects/')) return 'effect';
-    if (normalized.includes('/common/scripted_triggers/')) return 'trigger';
-    if (normalized.includes('/common/static_modifiers/')) return 'modifier';
-    if (normalized.includes('/common/on_actions/')) return 'effect';
-    return undefined;
+function definitionTypeForTarget(targetFile: string, catalog?: PdxSemanticCatalog): PdxSemanticCatalog['definitionTypes'][number] | undefined {
+    const normalized = targetFile.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+    return catalog?.definitionTypes
+        .filter(type => type.paths.some(typePath => normalized.startsWith(`${typePath}/`) || normalized.includes(`/${typePath}/`)))
+        .sort((a, b) => Math.max(0, ...b.paths.map(value => value.length)) - Math.max(0, ...a.paths.map(value => value.length)))[0];
+}
+
+function rootPositionForTarget(targetFile: string, catalog?: PdxSemanticCatalog): 'effect' | 'trigger' | 'modifier' | undefined {
+    const type = definitionTypeForTarget(targetFile, catalog)?.name;
+    if (!type) return undefined;
+    const category = catalog?.rules.find(rule => rule.name === `<${type}>`)?.category;
+    return category === 'effect' || category === 'trigger' || category === 'modifier'
+        ? category
+        : undefined;
 }
 
 function childrenOf(statements: readonly PdxStatement[], parentStmt: PdxStatement, parentIndex: number): PdxStatement[] {
@@ -473,32 +381,23 @@ function childrenOf(statements: readonly PdxStatement[], parentStmt: PdxStatemen
 }
 
 /** Definitions present in the exact pending final content (pre-write local proof). */
-export function extractLocalDefinitions(payload: WritePayload): LocalDefinitionCandidate[] {
-    const normalized = `/${payload.targetFile.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase()}`;
-    const definitionKind: Exclude<LocalDefinitionKind, 'event'> | undefined =
-        normalized.includes('/common/scripted_effects/') ? 'scripted_effect'
-            : normalized.includes('/common/scripted_triggers/') ? 'scripted_trigger'
-                : normalized.includes('/common/static_modifiers/') ? 'static_modifier'
-                    : normalized.includes('/common/technology/') || normalized.includes('/common/technologies/') ? 'technology'
-                        : normalized.includes('/common/buildings/') ? 'building'
-                            : normalized.includes('/common/traits/') ? 'trait'
-                                : normalized.includes('/common/starbase_buildings/') ? 'starbase_building'
-                                    : undefined;
+export function extractLocalDefinitions(payload: WritePayload, catalog?: PdxSemanticCatalog): LocalDefinitionCandidate[] {
+    const definitionType = definitionTypeForTarget(payload.targetFile, catalog);
     const statements = scanStatements(payload.text);
     const definitions: LocalDefinitionCandidate[] = [];
     const seen = new Set<string>();
     for (let index = 0; index < statements.length; index++) {
         const statement = statements[index]!;
         if (!statement.isBlock || statement.depth !== 0) continue;
+        if (!definitionType
+            || (definitionType.typeKeyFilters.length > 0 && !definitionType.typeKeyFilters.includes(statement.name.toLowerCase()))) continue;
         let definition: LocalDefinitionCandidate | undefined;
-        if (definitionKind) {
-            definition = { id: statement.name, kind: definitionKind };
-        } else if (normalized.includes('/events/') && /(^|_)event$/i.test(statement.name)) {
-            const id = childrenOf(statements, statement, index)
-                .find(child => !child.isBlock && child.name.toLowerCase() === 'id' && child.scalarValue)
-                ?.scalarValue;
-            if (id) definition = { id, kind: 'event' };
-        }
+        const id = definitionType.nameField
+            ? childrenOf(statements, statement, index)
+                .find(child => !child.isBlock && child.name.toLowerCase() === definitionType.nameField && child.scalarValue)
+                ?.scalarValue
+            : statement.name;
+        if (id) definition = { id, kind: definitionType.name };
         if (!definition) continue;
         const key = `${definition.kind}:${definition.id.toLowerCase()}`;
         if (!seen.has(key)) {
@@ -509,16 +408,14 @@ export function extractLocalDefinitions(payload: WritePayload): LocalDefinitionC
     return definitions;
 }
 
-function containerPositionFor(chain: string[], targetFile: string): 'effect' | 'trigger' | 'modifier' | 'any' | undefined {
+function containerPositionFor(chain: string[], targetFile: string, catalog?: PdxSemanticCatalog): 'effect' | 'trigger' | 'modifier' | 'any' | undefined {
     const parent = chain[chain.length - 1];
     if (parent === undefined) return undefined;
-    const mapped = CONTAINER_POSITION[parent.toLowerCase()];
-    if (mapped) return mapped;
-    // Children of a scope_change block are effect/trigger positions again.
-    if (isScopeChangeLike(parent)) return 'any';
-    // Top-level scripted definitions use the definition id as their parent,
-    // so the file family supplies the semantic position of direct children.
-    if (chain.length === 1) return rootPositionForTarget(targetFile);
+    // Children of a CWT-declared scope_change block are semantic calls again.
+    if (isScopeChangeLike(parent, catalog)) return 'any';
+    // Top-level callable definitions use the definition id as their parent;
+    // the CWT <TypeDef> alias supplies the direct-child category.
+    if (chain.length === 1) return rootPositionForTarget(targetFile, catalog);
     return undefined;
 }
 
@@ -527,7 +424,7 @@ function containerPositionFor(chain: string[], targetFile: string): 'effect' | '
  * MAX_CLAIM_CANDIDATES entries in deterministic source order. Design choices
  * never produce blocking claims (they are not claims we can verify).
  */
-export function extractClaimsFromText(payload: WritePayload): ExtractedClaimCandidate[] {
+export function extractClaimsFromText(payload: WritePayload, catalog?: PdxSemanticCatalog): ExtractedClaimCandidate[] {
     const claims: ExtractedClaimCandidate[] = [];
     const push = (candidate: ExtractedClaimCandidate): boolean => {
         if (claims.length >= MAX_CLAIM_CANDIDATES) return false;
@@ -553,71 +450,10 @@ export function extractClaimsFromText(payload: WritePayload): ExtractedClaimCand
         if (claims.length >= MAX_CLAIM_CANDIDATES) break;
         const lowerName = stmt.name.toLowerCase();
 
-        // Event definition (top-level `something_event = { id = X }`) or
-        // event invocation (nested). Definition -> call_chain note; nested -> reference.
-        if (stmt.isBlock && /(^|_)event$/.test(lowerName)) {
-            const eventChildren = childrenOf(statements, stmt, idx);
-            const idStmt = eventChildren.find(s => !s.isBlock && s.name.toLowerCase() === 'id' && s.scalarValue);
-            if (idStmt?.scalarValue) {
-                if (stmt.depth === 0) {
-                    const requiresCaller = eventChildren.some(s => !s.isBlock
-                        && s.name.toLowerCase() === 'is_triggered_only'
-                        && s.scalarValue?.toLowerCase() === 'yes');
-                    push({
-                        kind: 'call_chain',
-                        claim: `entry point '${idStmt.scalarValue}' is reachable from game systems`,
-                        blocking: requiresCaller,
-                        subject: { type: 'call_chain', entryId: idStmt.scalarValue, requiresCaller },
-                        detail: requiresCaller
-                            ? 'This event declares is_triggered_only = yes and therefore requires an inbound event/on_action call site.'
-                            : 'The definition may use an engine-managed entry mechanism; dynamic reachability remains advisory.',
-                    });
-                } else if (references < MAX_REFERENCE_CANDIDATES) {
-                    references++;
-                    push({
-                        kind: 'reference_exists',
-                        claim: `referenced event id '${idStmt.scalarValue}' exists`,
-                        blocking: true,
-                        subject: { type: 'reference', id: idStmt.scalarValue, refKind: 'event' },
-                    });
-                }
-            }
-            continue;
-        }
-
-        // Static modifier references: add_modifier/remove_modifier = { modifier = X }, has_modifier = X.
-        if (!stmt.isBlock && stmt.scalarValue) {
-            const parent = stmt.chain[stmt.chain.length - 1]?.toLowerCase();
-            if (lowerName === 'modifier' && (parent === 'add_modifier' || parent === 'remove_modifier')) {
-                if (references < MAX_REFERENCE_CANDIDATES) {
-                    references++;
-                    push({
-                        kind: 'reference_exists',
-                        claim: `referenced static modifier '${stmt.scalarValue}' exists`,
-                        blocking: true,
-                        subject: { type: 'reference', id: stmt.scalarValue, refKind: 'static_modifier' },
-                    });
-                }
-                continue;
-            }
-            if (lowerName === 'has_modifier' && containerPositionFor(stmt.chain, payload.targetFile) !== undefined) {
-                if (references < MAX_REFERENCE_CANDIDATES) {
-                    references++;
-                    push({
-                        kind: 'reference_exists',
-                        claim: `referenced static modifier '${stmt.scalarValue}' exists`,
-                        blocking: true,
-                        subject: { type: 'reference', id: stmt.scalarValue, refKind: 'static_modifier' },
-                    });
-                }
-                continue;
-            }
-        }
-
         // Explicit entity-id arguments are verified separately from the
-        // effect/trigger symbol itself. This prevents a legal rule name such
-        // as `has_technology` from lending credibility to a fabricated id.
-        const typedReference = typedReferenceForStatement(stmt, payload.targetFile);
+        // effect/trigger symbol itself. This prevents any legal rule name
+        // from lending credibility to a fabricated typed id.
+        const typedReference = typedReferenceForStatement(stmt, catalog, payload.targetFile);
         if (typedReference && references < MAX_REFERENCE_CANDIDATES) {
             references++;
             push({
@@ -632,21 +468,28 @@ export function extractClaimsFromText(payload: WritePayload): ExtractedClaimCand
         // or scope-change blocks. Block form: `name = { ... }`; scalar form
         // only for boolean-style calls (`name = yes/no`) so option args like
         // `name = my_loc_key` are not mistaken for scripted calls.
-        const position = containerPositionFor(stmt.chain, payload.targetFile);
+        const catalogCategories = new Set((catalog?.rules ?? [])
+            .filter(rule => rule.name === lowerName)
+            .map(rule => rule.category));
+        const catalogPosition = catalogCategories.has('scope_change')
+            || (catalogCategories.has('effect') && catalogCategories.has('trigger'))
+            ? 'any'
+            : catalogCategories.has('effect') ? 'effect'
+                : catalogCategories.has('trigger') ? 'trigger'
+                    : catalogCategories.has('modifier') ? 'modifier'
+                        : undefined;
+        const position = catalogPosition ?? containerPositionFor(stmt.chain, payload.targetFile, catalog);
         if (position === undefined) continue;
         if (stmt.name.length === 0 || !/^[A-Za-z_][\w.:-]*$/.test(stmt.name)) continue;
-        if (stmt.isBlock && CONTAINER_POSITION[lowerName] !== undefined) {
-            // Grammar containers such as `limit`, `trigger`, `immediate`, and
-            // `option` establish the position of their children; they are not
-            // themselves effect/trigger/modifier calls.
-            continue;
-        }
-        if (!stmt.isBlock && position !== 'modifier' && SCALAR_ARG_KEYS.has(lowerName)) {
-            // Option/event arguments (`name = my_loc_key`), not scripted calls.
+        const knownRule = catalogPosition !== undefined;
+        if (!knownRule && !stmt.isBlock && !/^(?:yes|no)$/i.test(stmt.scalarValue ?? '')) {
+            // Unknown scalar assignments are usually parameters. Dynamic
+            // callable TypeDefs are still recognized in their canonical
+            // boolean or block forms without maintaining argument-key lists.
             continue;
         }
 
-        const scope = currentScopeFor(stmt.chain);
+        const scope = currentScopeFor(stmt.chain, payload.targetFile, catalog);
         push({
             kind: 'symbol_exists',
             claim: `'${stmt.name}' is a known ${position === 'any' ? 'effect/trigger' : position} usable here`,
@@ -654,33 +497,12 @@ export function extractClaimsFromText(payload: WritePayload): ExtractedClaimCand
             subject: {
                 type: 'rule',
                 name: stmt.name,
-                position: stmt.isBlock && CONTAINER_POSITION[lowerName] ? 'any' : position,
+                position,
                 currentScope: scope,
             },
         });
         unknownNames++;
         if (unknownNames >= MAX_UNKNOWN_NAME_CANDIDATES) break;
-    }
-
-    // on_actions commonly use bare identifiers in `events = { id.1 id.2 }`.
-    // Strip comments and quoted text first so documentation cannot create proof.
-    const searchable = payload.text
-        .replace(/"(?:\\.|[^"\\])*"/g, ' ')
-        .replace(/#[^\r\n]*/g, ' ');
-    const eventLists = /\bevents\s*=\s*\{([^{}]{0,4000})\}/gi;
-    let listMatch: RegExpExecArray | null;
-    while (references < MAX_REFERENCE_CANDIDATES && (listMatch = eventLists.exec(searchable)) !== null) {
-        for (const token of listMatch[1]!.split(/\s+/)) {
-            if (references >= MAX_REFERENCE_CANDIDATES) break;
-            if (!/^[A-Za-z_][\w.-]*\.\d+$/.test(token)) continue;
-            references++;
-            push({
-                kind: 'reference_exists',
-                claim: `referenced event id '${token}' exists`,
-                blocking: true,
-                subject: { type: 'reference', id: token, refKind: 'event' },
-            });
-        }
     }
 
     return claims;

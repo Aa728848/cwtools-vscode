@@ -5,63 +5,63 @@ export interface GameKnowledgeCard {
 }
 
 export interface GameKnowledgeResult {
-  status: 'ready';
+  status: 'ready' | 'partial';
+  source: 'stable-policy' | 'lsp-semantic-catalog';
   game: string;
+  rulesGeneration?: number;
+  rulesContentHash?: string;
+  ruleCount?: number;
+  definitionTypeCount?: number;
   cards: GameKnowledgeCard[];
 }
 
-const COMMON_PDX_CARDS: GameKnowledgeCard[] = [
-  {
-    id: 'pdx-script-core',
-    title: 'PDXScript core syntax',
-    facts: [
-      'Use key = value pairs and key = { ... } blocks.',
-      'Boolean values are yes/no, not true/false.',
-      'Statements are separated by whitespace; semicolons are not valid PDXScript separators.',
-    ],
-  },
-  {
-    id: 'verification-first',
-    title: 'Verification first',
-    facts: [
-      'Verify game identifiers through LSP or indexed tools before writing them.',
-      'Use query_cwt_schema for common/entity schema and query_rules for trigger/effect syntax instead of inventing parameters.',
-      'Use search_rule_capabilities when intent is known but the exact rule name is not.',
-      'Treat semanticHints as retrieval guidance; legality comes from hardFacts and validation.',
-      'Use parse_pdx_fragment for syntax-only fragment checks before final diagnostics.',
-      'Use write_localisation for .yml localisation writes.',
-    ],
-  },
-];
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
 
-const STELLARIS_CARDS: GameKnowledgeCard[] = [
-  {
-    id: 'stellaris-localisation',
-    title: 'Stellaris localisation',
-    facts: [
-      'Localisation files live under localisation/ or localisation_synced/ in most Stellaris mods.',
-      'UTF-8 with BOM and an l_english: style header are expected.',
-      'Entries use the form key:0 "Displayed text" with one leading space.',
-    ],
-  },
-  {
-    id: 'stellaris-scope-caution',
-    title: 'Stellaris scope caution',
-    facts: [
-      'Scope chains, event contexts, and on_action payloads must be retrieved from active CWT/LSP tools before final edits.',
-      'Do not rely on static prompt knowledge for archaeological site, special project, or on_action scope facts.',
-      'Override behavior differs by common/ folder and should not be guessed from load order alone.',
-    ],
-  },
-];
-
-export function queryGameKnowledge(game = 'paradox'): GameKnowledgeResult {
-  const normalized = game.toLowerCase();
+/**
+ * Return stable routing policy plus current catalog metadata when supplied.
+ * Mutable game rules are deliberately not embedded in this package.
+ */
+export function queryGameKnowledge(game = 'paradox', semanticCatalog?: unknown): GameKnowledgeResult {
+  const catalog = asRecord(semanticCatalog);
+  const rules = Array.isArray(catalog?.rules) ? catalog.rules : [];
+  const definitionTypes = Array.isArray(catalog?.definitionTypes) ? catalog.definitionTypes : [];
+  const hasCatalog = rules.length > 0 || definitionTypes.length > 0;
+  const resolvedGame = typeof catalog?.gameProfile === 'string' && catalog.gameProfile.trim()
+    ? catalog.gameProfile.toLowerCase()
+    : game.toLowerCase();
+  const cards: GameKnowledgeCard[] = [
+    {
+      id: 'dynamic-evidence-routing',
+      title: 'Dynamic game evidence',
+      facts: [
+        'Obtain definition paths and identifier shapes from the active CWTools TypeDefs.',
+        'Obtain rule arguments, typed references, and scope constraints from active CWT/LSP queries.',
+        'Treat project and vanilla indexes as examples and dependency evidence; validate legality through current rules and diagnostics.',
+      ],
+    },
+  ];
+  if (hasCatalog) {
+    cards.push({
+      id: 'active-semantic-catalog',
+      title: 'Active semantic catalog',
+      facts: [
+        `${rules.length} rule aliases and ${definitionTypes.length} definition types are currently available.`,
+        'Use focused query_rules, query_types, query_cwt_schema, and query_scope calls to retrieve the exact facts needed for the current task.',
+      ],
+    });
+  }
   return {
-    status: 'ready',
-    game: normalized,
-    cards: normalized === 'stellaris'
-      ? [...COMMON_PDX_CARDS, ...STELLARIS_CARDS]
-      : COMMON_PDX_CARDS,
+    status: hasCatalog ? 'ready' : 'partial',
+    source: hasCatalog ? 'lsp-semantic-catalog' : 'stable-policy',
+    game: resolvedGame,
+    rulesGeneration: typeof catalog?.rulesGeneration === 'number' ? catalog.rulesGeneration : undefined,
+    rulesContentHash: typeof catalog?.rulesContentHash === 'string' ? catalog.rulesContentHash : undefined,
+    ruleCount: rules.length,
+    definitionTypeCount: definitionTypes.length,
+    cards,
   };
 }

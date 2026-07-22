@@ -3,6 +3,8 @@
  */
 
 import type { SlashCommandDescriptor } from './slashCommands';
+import type { CwtRuleValueReference } from '../../shared/pdxSemanticCatalog';
+export type { CwtRuleValueReference, PdxRuleCategory, PdxSemanticCatalog } from '../../shared/pdxSemanticCatalog';
 
 // ─── Agent Modes ─────────────────────────────────────────────────────────────
 
@@ -21,17 +23,8 @@ import type { SlashCommandDescriptor } from './slashCommands';
  */
 export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'utility' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer' | 'orchestrator' | 'script';
 
-/** Domain entity kinds used by planning, orchestration, and semantic verification. */
-export type TaskEntityKind =
-    | 'event'
-    | 'scripted_effect'
-    | 'scripted_trigger'
-    | 'event_target'
-    | 'flag'
-    | 'localisation'
-    | 'modifier'
-    | 'asset'
-    | 'other';
+/** Current-game entity/reference kind. Prefer exact names returned by TypeDefs/CWT. */
+export type TaskEntityKind = string;
 
 export type TaskEntityOperation =
     | 'define'
@@ -54,6 +47,8 @@ export interface TaskEntityContract {
 export type AcceptanceCheckType =
     | 'entity_exists'
     | 'entity_referenced'
+    | 'typed_lifecycle'
+    // Legacy persisted-plan values remain accepted for resume compatibility.
     | 'flag_lifecycle'
     | 'target_lifecycle'
     | 'localisation_owner'
@@ -64,6 +59,8 @@ export interface AcceptanceCheck {
     id: string;
     description: string;
     type: AcceptanceCheckType;
+    /** Exact TypeDef/CWT reference kind for typed lifecycle or localisation ownership checks. */
+    entityKind?: TaskEntityKind;
     subject?: string;
     required?: boolean;
 }
@@ -345,7 +342,7 @@ export interface QueryScopeResult {
     prevChain: string[];
     fromChain: string[];
     scopeInference?: {
-        kind: 'carrier_host' | string;
+        kind: string;
         candidates: string[];
         resolvedScope: string;
         certainty: 'exact' | 'union' | 'unresolved';
@@ -471,11 +468,14 @@ export interface ProjectProfile {
     identifiers: {
         namespaces: string[];
         variablePrefixes: string[];
-        scriptedTriggers: string[];
-        scriptedEffects: string[];
-        events: string[];
-        onActions: string[];
-        staticModifiers: string[];
+        /** Current TypeDef samples, populated only by typed LSP/project-knowledge sources. */
+        byType: Record<string, string[]>;
+        /** Legacy schemaVersion 1 fields accepted when reading older generated profiles. */
+        scriptedTriggers?: string[];
+        scriptedEffects?: string[];
+        events?: string[];
+        onActions?: string[];
+        staticModifiers?: string[];
     };
     routing: {
         recommendedWorkflowByIntent: Array<{
@@ -521,7 +521,7 @@ export interface QueryRulesArgs {
 }
 
 export interface QueryCwtSchemaArgs {
-    /** Target project file, directory, or CWT-relative path such as common/buildings. */
+    /** Target project file, directory, or CWT-relative path discovered from active semantic evidence. */
     target?: string;
     /** Optional alias for target when the caller has a concrete project file. */
     file?: string;
@@ -548,6 +548,8 @@ export interface RuleInfo {
         supportedScopes?: string[];
         pushScope?: string;
         typeKeyFilter?: string;
+        /** Typed values declared by the CWT rule body. `$value` is the rule RHS; other paths are block fields. */
+        valueReferences?: CwtRuleValueReference[];
         syntax?: string;
         cwtSource?: {
             file: string;
@@ -584,11 +586,14 @@ export interface CwtSchemaMatch {
 export interface CwtSchemaEntitySummary {
     name: string;
     path?: string;
+    nameField?: string;
     ruleFile: string;
     relativeRuleFile: string;
     sourceRoot: string;
     line: number;
     subtypes: string[];
+    /** Top-level script keys accepted for this type by `## type_key_filter`. */
+    typeKeyFilters?: string[];
     schemaKeys: string[];
     graphRelatedTypes?: string[];
     matchedBy: string[];
@@ -638,7 +643,7 @@ export interface ExplorePdxProjectResult {
 export interface QueryProjectKnowledgeArgs {
     /** Concise complex-flow intent used to rank definitions, topology edges, and archetypes. */
     intent?: string;
-    /** Knowledge domains to load, e.g. events, on_actions, special_projects, situations, assets. */
+    /** Knowledge domains returned by the current project knowledge index. */
     domains?: string[];
     /** Optional exact or partial identifiers to prioritize. */
     identifiers?: string[];
@@ -821,9 +826,9 @@ export interface SearchModFilesResult {
 }
 
 export interface FindSpriteCandidatesArgs {
-    /** Free-text search query such as "anomaly" or "force echo". */
+    /** Free-text search query derived from the surrounding content. */
     query?: string;
-    /** The invalid or desired sprite value, e.g. GFX_evt_analyzing_anomaly. */
+    /** The invalid or desired sprite value. */
     currentValue?: string;
     /** PDXScript field being repaired, e.g. picture, icon, spriteType. */
     fieldName?: string;

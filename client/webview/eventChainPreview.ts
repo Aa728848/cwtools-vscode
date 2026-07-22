@@ -34,20 +34,16 @@ interface EventNode {
     id: string;
     type: string;
     title?: string;
-    isTriggeredOnly: boolean;
     file: string;
     line: number;
     endLine: number;
     namespace: string;
-    isFireOnAction: boolean;
-    isHidden: boolean;
-    hasMTTH: boolean;
 }
 
 interface EventEdge {
     source: string;
     target: string;
-    edgeType: 'option' | 'immediate' | 'after' | 'effect' | 'on_action' | 'decision' | 'scripted' | 'flag' | 'on_action_implicit' | 'unknown';
+    edgeType: 'effect' | 'semantic' | 'unknown';
     label?: string;
 }
 
@@ -114,13 +110,6 @@ const cy = cytoscape({
             },
         },
         {
-            selector: 'node[?isTriggered]',
-            style: {
-                'background-color': '#07192a',
-                'border-color': '#42a5f5',
-            },
-        },
-        {
             selector: 'node[?isOrphan]',
             style: {
                 'background-color': '#6d4c41',
@@ -133,21 +122,6 @@ const cy = cytoscape({
                 'border-color': '#e8c840',
                 'border-width': 3,
                 'background-color': '#42506a',
-            },
-        },
-        {
-            selector: 'node[?isHidden]',
-            style: {
-                'opacity': 0.65,
-                'border-style': 'dashed' as any,
-            },
-        },
-        {
-            selector: 'node[?hasMTTH]',
-            style: {
-                'background-color': '#211707',
-                'border-color': '#e3a044',
-                'border-style': 'dashed' as any,
             },
         },
         {
@@ -187,40 +161,12 @@ const cy = cytoscape({
             },
         },
         {
-            selector: 'edge[edgeType="option"]',
-            style: { 'line-color': '#e8c840', 'target-arrow-color': '#e8c840' },
-        },
-        {
-            selector: 'edge[edgeType="immediate"]',
-            style: { 'line-color': '#4caf50', 'target-arrow-color': '#4caf50' },
-        },
-        {
-            selector: 'edge[edgeType="after"]',
-            style: { 'line-color': '#ff9800', 'target-arrow-color': '#ff9800' },
-        },
-        {
             selector: 'edge[edgeType="effect"]',
             style: { 'line-color': '#ab47bc', 'target-arrow-color': '#ab47bc' },
         },
         {
-            selector: 'edge[edgeType="on_action"]',
-            style: { 'line-color': '#e91e63', 'target-arrow-color': '#e91e63', 'line-style': 'dashed' as any },
-        },
-        {
-            selector: 'edge[edgeType="decision"]',
-            style: { 'line-color': '#00bcd4', 'target-arrow-color': '#00bcd4', 'line-style': 'dashed' as any },
-        },
-        {
-            selector: 'edge[edgeType="scripted"]',
-            style: { 'line-color': '#009688', 'target-arrow-color': '#009688', 'line-style': 'dashed' as any },
-        },
-        {
-            selector: 'edge[edgeType="flag"]',
+            selector: 'edge[edgeType="semantic"]',
             style: { 'line-color': '#ff7043', 'target-arrow-color': '#ff7043', 'line-style': 'dotted' as any, 'width': 1 },
-        },
-        {
-            selector: 'edge[edgeType="on_action_implicit"]',
-            style: { 'line-color': '#ec407a', 'target-arrow-color': '#ec407a', 'line-style': 'dotted' as any, 'width': 1 },
         },
         {
             selector: 'node[?isExternal]',
@@ -301,8 +247,8 @@ let seedIds = new Set<string>();
 
 // ─── UI helpers ──────────────────────────────────────────────────────────────
 
-const primaryEdgeTypes = new Set<EventEdge['edgeType']>(['option', 'immediate', 'after', 'effect']);
-const implicitEdgeTypes = new Set<EventEdge['edgeType']>(['flag', 'on_action_implicit']);
+const primaryEdgeTypes = new Set<EventEdge['edgeType']>(['effect']);
+const implicitEdgeTypes = new Set<EventEdge['edgeType']>(['semantic']);
 
 function escapeHtml(value: unknown): string {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -321,18 +267,11 @@ function truncateText(value: string | undefined, maxLength: number): string {
 
 function formatNodeLabel(node: EventNode): string {
     const id = truncateText(node.id, 34);
-    const kind = node.hasMTTH
-        ? 'MTTH'
-        : node.isFireOnAction
-            ? 'On action'
-            : node.isTriggeredOnly
-                ? t('Triggered', '触发型')
-                : t('Event', '事件');
-    const type = truncateText(node.type.replace(/_event$/, ''), 18);
-    if (!node.isHidden && node.title) {
-        return `${id}\n${kind} - ${type}\n${truncateText(node.title, 34)}`;
+    const type = truncateText(node.type, 24);
+    if (node.title) {
+        return `${id}\n${type}\n${truncateText(node.title, 34)}`;
     }
-    return `${id}\n${kind} - ${type}`;
+    return `${id}\n${type}`;
 }
 
 function formatExternalLabel(id: string): string {
@@ -342,15 +281,8 @@ function formatExternalLabel(id: string): string {
 
 function edgeTypeLabel(edgeType: EventEdge['edgeType'] | string): string {
     switch (edgeType) {
-        case 'option': return 'Option';
-        case 'immediate': return 'Immediate';
-        case 'after': return 'After';
         case 'effect': return 'Effect';
-        case 'on_action': return 'On action';
-        case 'decision': return 'Decision';
-        case 'scripted': return 'Scripted';
-        case 'flag': return t('Flag implicit', 'Flag 隐式');
-        case 'on_action_implicit': return t('On action implicit', 'On action 隐式');
+        case 'semantic': return t('Typed relation', '类型关系');
         default: return t('Unknown relation', '未知关系');
     }
 }
@@ -448,12 +380,10 @@ function clearSelection() {
 }
 
 function getNodeKind(data: Record<string, unknown>): string {
-    if (data.isExternal) return t('External entry', '外部入口');
+    if (data.isExternal) return t('External definition', '外部定义');
     if (data.isOrphan) return t('External reference', '外部引用');
-    if (data.hasMTTH) return t('MTTH event', 'MTTH 事件');
-    if (data.isEntry) return t('Entry event', '入口事件');
-    if (data.isTriggered) return t('Triggered event', '触发型事件');
-    return t('Event', '事件');
+    if (data.isEntry) return t('Entry definition', '入口定义');
+    return t('Definition', '定义');
 }
 
 function updateDetails(node: cytoscape.NodeSingular | null) {
@@ -477,9 +407,6 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
     const badges = [
         data.isSeed ? t('Seed', '种子') : '',
         data.isEntry ? t('Entry', '入口') : '',
-        data.isTriggered ? t('Triggered', '触发型') : '',
-        data.isHidden ? t('Hidden', '隐藏') : '',
-        data.hasMTTH ? 'MTTH' : '',
         data.isExternal || data.isOrphan ? t('External reference', '图外引用') : '',
     ].filter(Boolean);
 
@@ -734,7 +661,7 @@ function renderGraph() {
     const elements: cytoscape.ElementDefinition[] = [];
 
     for (const node of nodes) {
-        const isEntry = node.isFireOnAction || (!node.isTriggeredOnly && !hasIncoming.has(node.id));
+        const isEntry = !hasIncoming.has(node.id);
         elements.push({
             data: {
                 id: node.id,
@@ -747,9 +674,6 @@ function renderGraph() {
                 namespace: node.namespace,
                 isSeed: seedIds.has(node.id) || undefined,
                 isEntry: isEntry || undefined,
-                isTriggered: node.isTriggeredOnly || undefined,
-                isHidden: node.isHidden || undefined,
-                hasMTTH: node.hasMTTH || undefined,
                 isOrphan: false,
             },
         });

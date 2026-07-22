@@ -10,7 +10,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_scope',
-            description: 'Query the scope context at a specific position in a file. Returns the current scope (Country, Planet, etc.), ROOT, THIS, PREV chain, FROM chain, event_target provenance, and Carrier host inference evidence when applicable. Use this to understand which triggers/effects are valid at a position.',
+            description: 'Query the scope context at a specific position in a file. Returns current/root/prior scope chains plus provenance and inference evidence reported by CWTools. Use it to determine which active CWT rules are valid at that position.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -30,8 +30,8 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    typeName: { type: 'string', description: 'Type name, e.g. "technology", "building", "trait", "ethic", "authority", "pop_job", "static_modifier", "scripted_trigger", "scripted_effect", "event", "archaeological_site"' },
-                    filter: { type: 'string', description: 'Prefix or substring filter, e.g. "tech_" to return only matching results. ALWAYS use when looking up a specific vanilla ID to avoid getting hundreds of unrelated results.' },
+                    typeName: { type: 'string', description: 'Exact current-game type name returned by query_cwt_schema, completion, or another typed LSP result.' },
+                    filter: { type: 'string', description: 'Prefix or substring filter. ALWAYS use when looking up a specific vanilla ID to avoid unrelated results.' },
                     limit: { type: 'number', description: 'Max results to return (default 30, keep low for token efficiency)' },
                     vanilla: { type: 'boolean', description: 'If true, return ONLY vanilla game definitions. If false (default), return mod + vanilla combined.' },
                 },
@@ -48,7 +48,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 type: 'object',
                 properties: {
                     key: { type: 'string', description: 'Exact key, prefix, or substring to search for.' },
-                    language: { type: 'string', description: 'Optional localisation language tag, e.g. l_english or l_simp_chinese.' },
+                    language: { type: 'string', description: 'Optional language tag returned by the active project/profile localisation metadata.' },
                     prefix: { type: 'boolean', description: 'If true, key is treated as a prefix. Default false.' },
                     contains: { type: 'boolean', description: 'If true, key is treated as a case-insensitive substring. Useful when you only know part of a localisation key.' },
                     caseSensitive: { type: 'boolean', description: 'Only applies to prefix/contains searches. Default false.' },
@@ -62,16 +62,16 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_workspace_index',
-            description: 'Query the shared incremental workspace index for PDXScript symbols and named .gfx/.asset/.gui assets without scanning files. Use this before broad grep/search when looking for event IDs, scripted triggers/effects, technologies, buildings, sprites, sounds, GUI elements, or other named project symbols. Results report indexedSymbolNames, indexUpdatedAt, fileVersion, and optional lightweight references for freshness/coverage awareness.',
+            description: 'Query the shared incremental workspace index for PDXScript symbols and named .gfx/.asset/.gui assets without scanning files. Use this before broad grep/search for any named project symbol. Results report indexedSymbolNames, indexUpdatedAt, fileVersion, and optional lightweight references for freshness/coverage awareness.',
             parameters: {
                 type: 'object',
                 properties: {
                     name: { type: 'string', description: 'Exact, prefix, or substring symbol/asset name to search for.' },
-                    kind: { type: 'string', description: 'Optional kind filter, e.g. event, namespace, scripted_trigger, scripted_effect, technology, building, sprite, sound, asset, gui.' },
-                    category: { type: 'string', description: 'Optional broad category filter, e.g. event, game_entity, asset, gui, script.' },
+                    kind: { type: 'string', description: 'Optional exact kind returned by the active index or CWT type metadata.' },
+                    category: { type: 'string', description: 'Optional broad category returned by an earlier index result.' },
                     source: { type: 'string', enum: ['script', 'asset', 'gui'], description: 'Optional source filter. script=.txt, asset=.gfx/.asset, gui=.gui.' },
                     origin: { type: 'string', enum: ['workspace', 'vanilla', 'both'], description: 'Optional origin filter. workspace=mod files, vanilla=configured game cache, both/default=combined.' },
-                    directory: { type: 'string', description: 'Optional path fragment filter, e.g. events, common/scripted_triggers, interface, gfx.' },
+                    directory: { type: 'string', description: 'Optional project path fragment; prefer a path returned by project profile or CWT schema.' },
                     prefix: { type: 'boolean', description: 'If true, name is treated as a prefix. Default false.' },
                     exact: { type: 'boolean', description: 'If true, name must match exactly. Default false.' },
                     includeReferences: { type: 'boolean', description: 'If true, include lightweight cross-file reference contexts captured by the index. Default false.' },
@@ -108,7 +108,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_project_knowledge',
-            description: 'Query the /init-generated project + vanilla SQLite knowledge graph for complex cross-subsystem work. Returns project patterns, bounded vanilla archetypes, definition stacks, dependency edges, event structure (calls, phases, on_action/typed entries), event logic (flags, technologies, variables, scope bridges), freshness, and unresolved facts with source paths. Use this before write_design_blueprint or any plan spanning events, on_actions, special projects, situations, archaeology, technology, ships, assets, or localisation. CWT/LSP exact checks remain authoritative.',
+            description: 'Query the /init-generated project + vanilla SQLite knowledge graph for complex cross-subsystem work. Returns project patterns, bounded vanilla archetypes, definition stacks, dependency edges, typed relationship structure/logic, freshness, and unresolved facts with source paths. Use this before write_design_blueprint or any plan spanning multiple current-game entity families. CWT/LSP exact checks remain authoritative.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -116,7 +116,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     domains: {
                         type: 'array',
                         items: { type: 'string' },
-                        description: 'Subsystem domains to load, e.g. events, on_actions, special_projects, archaeology, situations, technology, ships, scripted_logic, assets, localisation.',
+                        description: 'Subsystem domains returned by the project knowledge manifest or an earlier query.',
                     },
                     identifiers: { type: 'array', items: { type: 'string' }, description: 'Known or proposed IDs used as indexed graph seeds. Exact IDs and stable prefixes give the fastest, most accurate retrieval.' },
                     entityTypes: { type: 'array', items: { type: 'string' }, description: 'CWTools entity types to prioritize.' },
@@ -141,7 +141,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 properties: {
                     query: { type: 'string', description: 'Identifier or concise semantic search text. Exact PDX IDs give the strongest results. Optional when file or typeName is supplied.' },
                     file: { type: 'string', description: 'Optional workspace-relative or absolute file path used to restrict entry points.' },
-                    typeName: { type: 'string', description: 'Optional exact CWTools type name, e.g. event, technology, scripted_effect, building.' },
+                    typeName: { type: 'string', description: 'Optional exact CWTools type name obtained from active schema/type evidence.' },
                     exact: { type: 'boolean', description: 'Require query to exactly match an entity ID. Default false.' },
                     depth: { type: 'number', minimum: 0, maximum: 3, description: 'Incoming/outgoing graph traversal depth. Default 1; use 2-3 only for focused IDs.' },
                     maxNodes: { type: 'number', minimum: 1, maximum: 100, description: 'Maximum graph nodes. Default 30.' },
@@ -181,7 +181,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 properties: {
                     category: { type: 'string', enum: ['trigger', 'effect', 'scope_change', 'modifier'], description: 'Rule category' },
                     name: { type: 'string', description: 'Specific rule name (optional, lists all if omitted or returns fuzzy matches if exact miss)' },
-                    scope: { type: 'string', description: 'Filter by supported scope (e.g. "planet", "country"). Optional, but heavily recommended. Use query_scope to find your current context first.' },
+                    scope: { type: 'string', description: 'Filter by an exact supported scope returned by query_scope/explain_scope. Optional, but heavily recommended.' },
                 },
                 required: ['category'],
             },
@@ -191,14 +191,14 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_cwt_schema',
-            description: 'CWT-FIRST schema lookup for common/entity definitions and other non-trigger/effect rules. Use BEFORE writing or planning new PDXScript under common/, events/, interface/, gfx/, sound/, map/, etc. Input a target file/directory such as "common/buildings/00_x.txt" or "common/buildings", plus optional field/rule name. Returns active CWT source snippets, line numbers, and parsed type/path/subtype entity summaries. If returned snippets include comments/semantic text, use that semantics first; if they are structural only, confirm intended usage from verified vanilla/project examples before writing.',
+            description: 'CWT-FIRST schema lookup for entity definitions and other non-trigger/effect rules. Use BEFORE writing or planning a PDXScript target. Pass the actual project file/directory plus an optional field/rule name. Returns active CWT source snippets, line numbers, and parsed type/path/subtype entity summaries. If snippets are structural only, confirm intent from verified current-version examples.',
             parameters: {
                 type: 'object',
                 properties: {
-                    target: { type: 'string', description: 'Project file, directory, or CWT-relative path to inspect, e.g. "common/buildings/00_my_building.txt", "common/technology", "events", "interface".' },
+                    target: { type: 'string', description: 'Actual project file/directory or a CWT-relative path returned by active schema metadata.' },
                     file: { type: 'string', description: 'Alias for target when you have a concrete project file path.' },
-                    directory: { type: 'string', description: 'Alias for target when you know the entity directory, e.g. "common/jobs".' },
-                    name: { type: 'string', description: 'Optional field, type, alias, or rule name to locate inside the matched CWT files, e.g. "resources", "potential", "planet_modifier".' },
+                    directory: { type: 'string', description: 'Alias for target when an active project/schema result supplied the entity directory.' },
+                    name: { type: 'string', description: 'Optional field, type, alias, or rule name to locate inside matched CWT files.' },
                     includeContent: { type: 'boolean', description: 'If true, return a larger excerpt from matched schema files. Default false.' },
                     limit: { type: 'number', description: 'Maximum CWT files to return. Default 5, max 20.' },
                 },
@@ -214,7 +214,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    path: { type: 'string', description: 'Optional file or directory path to match, e.g. "common/ship_sizes/00_ship_sizes.txt" or an absolute workspace path. The server uses longest configured path prefix.' },
+                    path: { type: 'string', description: 'Actual file or directory path to match. The server uses the longest active CWT path prefix.' },
                     limit: { type: 'number', description: 'Maximum modes to return when listing all active modes. Default 250.' },
                 },
                 required: [],
@@ -229,10 +229,10 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    intent: { type: 'string', description: 'Natural-language intent, English or Chinese, e.g. "iterate ships in fleet" or "查询舰队中的舰船".' },
-                    category: { type: 'string', enum: ['trigger', 'effect', 'scope_change', 'modifier', 'all'], description: 'Optional rule category filter. Use scope_change when searching for every_/random_/ordered_ scope iteration effects.' },
-                    currentScope: { type: 'string', description: 'Optional current CWT scope such as fleet, country, planet, ship. Use query_scope first when editing an existing file.' },
-                    desiredPushScope: { type: 'string', description: 'Optional desired resulting scope, e.g. ship when looking for an iterator that enters ship scope.' },
+                    intent: { type: 'string', description: 'Natural-language intent. Exact current-game terms from CWT docs improve ranking.' },
+                    category: { type: 'string', enum: ['trigger', 'effect', 'scope_change', 'modifier', 'all'], description: 'Optional CWT rule category filter.' },
+                    currentScope: { type: 'string', description: 'Optional exact current CWT scope returned by query_scope.' },
+                    desiredPushScope: { type: 'string', description: 'Optional exact resulting scope returned by explain_scope/schema evidence.' },
                     limit: { type: 'number', description: 'Maximum candidates to return. Default 10, max 50.' },
                 },
                 required: [],
@@ -243,11 +243,11 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'explain_scope',
-            description: 'Explain a CWT scope from scopes.cwt, including aliases, is_subscope_of, source location, and semantic hints. Use this to understand scopes like Carrier before deciding whether an event/effect rule applies. Scope descriptions are hints, not legality proof.',
+            description: 'Explain a current CWT scope from scopes.cwt, including aliases, is_subscope_of, source location, and semantic hints. Scope descriptions are hints, not legality proof.',
             parameters: {
                 type: 'object',
                 properties: {
-                    scope: { type: 'string', description: 'Scope or alias to explain, e.g. Carrier, carrier, fleet, ship, planet.' },
+                    scope: { type: 'string', description: 'Exact scope or alias observed in current CWT/LSP output.' },
                 },
                 required: ['scope'],
             },
@@ -304,7 +304,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 type: 'object',
                 properties: {
                     file: { type: 'string', description: 'Absolute file path' },
-                    symbol: { type: 'string', description: 'Symbol name varies by file type: events -> "namespace.id" (e.g. "anomaly.1"); common/scripted_triggers/effects/technology/buildings/ship_sizes/static_modifiers -> top-level identifier (e.g. "tech_kuat_reactor", "kuat_is_crisis_faction"); section_templates -> key value (e.g. "X308_Titan_MID1"); on_actions -> action name (e.g. "on_entering_battle", but may have duplicates!); .gui -> containerWindowType name (e.g. "kuat_bossbar"); .gfx -> pdxmesh name (e.g. "sws_turbolaser_red_mesh"). When unsure, call document_symbols first or just try - the error response lists all available symbols.' },
+                    symbol: { type: 'string', description: 'Exact symbol returned by document_symbols or another active typed lookup. If not found, the error lists available symbols and line ranges.' },
                 },
                 required: ['file', 'symbol'],
             },
@@ -314,12 +314,12 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'edit_pdx_block',
-            description: 'ZERO-READ EDIT: Replace a specific PDX AST block entirely by its symbol name, without needing to read the file first. Works with .txt (events, common), .gui (containerWindowType by name), and .gfx (pdxmesh by name). Uses LSP to find block boundaries automatically. newContent must keep the full outer block and PDX brace structure intact; unsafe brace-breaking writes are rejected before the file changes. If the symbol is not found, the error response includes a full list of available symbols so you can retry immediately. Warning: on_actions files may have DUPLICATE top-level names (e.g. multiple "on_entering_battle") - only the FIRST match will be edited. For duplicates, use replaceLines with explicit line ranges instead.',
+            description: 'ZERO-READ EDIT: Replace a specific PDX AST block entirely by its exact symbol name, without reading the file first. Uses LSP to find block boundaries across supported PDX text, GUI, and asset formats. newContent must keep the full outer block and brace structure intact; unsafe brace-breaking writes are rejected before the file changes. If a file contains duplicate top-level symbols, only the first match is edited; use replaceLines with explicit line ranges for duplicates.',
             parameters: {
                 type: 'object',
                 properties: {
                     file: { type: 'string', description: 'Absolute file path' },
-                    symbol: { type: 'string', description: 'Symbol name varies by file type: events -> "namespace.id" (e.g. "anomaly.1"); common types -> top-level identifier (e.g. "tech_kuat_reactor"); section_templates -> key value; .gui -> containerWindowType name; .gfx -> pdxmesh name. If unsure, just try - the error lists all available symbols.' },
+                    symbol: { type: 'string', description: 'Exact symbol identifier. Derive its shape from query_types/query_cwt_schema or current-file symbols; if no match is found, the error lists available symbols.' },
                     newContent: { type: 'string', description: 'The completely new code block to replace the old one. Must include the outer block definition (e.g. "my_trigger = { ... }", not just the inner content).' },
                 },
                 required: ['file', 'symbol', 'newContent'],
@@ -368,7 +368,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 type: 'object',
                 properties: {
                     query: { type: 'string', description: 'Text to search for' },
-                    directory: { type: 'string', description: 'Optional subdirectory to restrict search, e.g. "common/scripted_triggers" or "events"' },
+                    directory: { type: 'string', description: 'Optional subdirectory to restrict search; obtain the relevant path from the active TypeDef/project profile.' },
                     fileExtension: { type: 'string', description: 'File extension filter, default ".txt". Use ".yml" for localisation.' },
                     exactMatch: { type: 'boolean', description: 'If true, searches exactly matching complete words using RegEx boundaries. Default: false (wide .includes match)' },
                     searchContext: { type: 'string', enum: ['mod', 'vanilla', 'both'], description: 'Context to search. "mod" searches workspace. "vanilla" searches the base game directory cached by CWTools. Default "mod".' },
@@ -389,8 +389,8 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    query: { type: 'string', description: 'Semantic search terms, e.g. "anomaly", "archaeology", "force echo", or keywords from the invalid sprite name.' },
-                    currentValue: { type: 'string', description: 'The current invalid or desired sprite value, e.g. "GFX_evt_analyzing_anomaly". Used to derive fallback search terms.' },
+                    query: { type: 'string', description: 'Semantic search terms derived from the surrounding project content or invalid asset value.' },
+                    currentValue: { type: 'string', description: 'The current invalid or desired sprite value, used to derive fallback search terms.' },
                     fieldName: { type: 'string', description: 'Field being repaired, e.g. "picture", "icon", "spriteType". Helps rank event pictures vs icons.' },
                     file: { type: 'string', description: 'Optional file containing the diagnostic, for context only.' },
                     line: { type: 'number', description: 'Optional diagnostic line number, for context only.' },
@@ -409,7 +409,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    query: { type: 'string', description: 'Semantic search terms, e.g. "alien signal", "anomaly", "ui click", or keywords from the invalid sound name.' },
+                    query: { type: 'string', description: 'Semantic search terms derived from surrounding content or the invalid sound name.' },
                     currentValue: { type: 'string', description: 'The current invalid or desired sound asset value, e.g. "event_alien_signal". Used to derive fallback search terms.' },
                     fieldName: { type: 'string', description: 'Field being repaired, e.g. "show_sound", "sound", "music". Helps rank event sounds vs UI sounds.' },
                     file: { type: 'string', description: 'Optional file containing the diagnostic, for context only.' },
@@ -489,7 +489,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'workspace_symbols',
-            description: 'Search symbol definitions by name across workspace + vanilla cache. Use specific queries (e.g. "tech_energy_grid" not "tech") to avoid large result sets. Empty results can mean the LSP index/type/file kind missed it; verify absence with verify_pdx_identifier before concluding missing.',
+            description: 'Search symbol definitions by name across workspace + vanilla cache. Use the most specific identifier available from active evidence. Empty results can mean the LSP index/type/file kind missed it; verify absence with verify_pdx_identifier before concluding missing.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -508,9 +508,9 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    identifier: { type: 'string', description: 'Exact PDX identifier or localisation key to verify, e.g. "distar.001", "tech_energy_grid", "my_event.1.title".' },
-                    typeName: { type: 'string', description: 'Optional CWTools type to verify through query_types, e.g. "event", "technology", "scripted_trigger", "scripted_effect", "static_modifier", "building".' },
-                    directory: { type: 'string', description: 'Optional subdirectory for text search, e.g. "events", "common/scripted_triggers", "localisation".' },
+                    identifier: { type: 'string', description: 'Exact PDX identifier or localisation key to verify.' },
+                    typeName: { type: 'string', description: 'Optional exact CWTools type from active schema/type evidence.' },
+                    directory: { type: 'string', description: 'Optional project subdirectory returned by profile/schema evidence.' },
                     fileExtensions: { type: 'array', items: { type: 'string' }, description: 'File extensions for text search. Defaults to [".txt", ".yml", ".gui", ".gfx", ".asset"].' },
                     includeVanilla: { type: 'boolean', description: 'Whether to include vanilla cache in text search. Default true.' },
                     caseSensitive: { type: 'boolean', description: 'Case-sensitive exact matching for symbol/type checks. Default false.' },
@@ -676,11 +676,11 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'glob_files',
-            description: 'Find files in the workspace using glob patterns (e.g. "**/*.txt", "common/scripted_triggers/*.txt"). Faster than list_directory for targeted file discovery. Returns absolute paths.',
+            description: 'Find files in the workspace using glob patterns. Use paths returned by active TypeDefs/project evidence for targeted discovery. Faster than list_directory and returns absolute paths.',
             parameters: {
                 type: 'object',
                 properties: {
-                    pattern: { type: 'string', description: 'Glob pattern relative to workspace root, e.g. "events/**/*.txt" or "common/scripted_triggers/*.txt"' },
+                    pattern: { type: 'string', description: 'Glob pattern relative to workspace root, e.g. "<typed-directory>/**/*.txt"' },
                     limit: { type: 'number', description: 'Max files to return (default 200)' },
                 },
                 required: ['pattern'],
@@ -782,7 +782,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    query: { type: 'string', description: 'Search query. Be specific. Example: "Stellaris relic activation trigger conditions" or "HOI4 national focus completion reward syntax"' },
+                    query: { type: 'string', description: 'Specific search query including the active game/version and the exact concept or syntax being verified.' },
                     purpose: { type: 'string', enum: ['general', 'code'], description: 'Search intent. code prioritizes semantic code/documentation providers.' },
                     maxResults: { type: 'number', description: 'Maximum results to return (default 5, max 10).' },
                     allowedDomains: { type: 'array', items: { type: 'string' }, description: 'Optional domain restriction. This can only narrow the configured allowlist.' },
@@ -893,7 +893,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    enumName: { type: 'string', description: 'Enum name to query (e.g. "anomaly_category"). Leave empty to list all enum names.' },
+                    enumName: { type: 'string', description: 'Exact enum name discovered from CWT/schema evidence. Leave empty to list all enum names.' },
                     limit: { type: 'number', description: 'Max values to return (default 500)' },
                 },
                 required: [],
@@ -904,7 +904,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'get_entity_info',
-            description: 'Get deep structural info from CWTools cache: referenced types, scripted variables, effect/trigger blocks, and saved event_targets. Use to understand file dependencies before modification.',
+            description: 'Get deep structural info from the CWTools cache, including referenced types, variables, classified rule blocks, and saved scopes. Use it to understand file dependencies before modification.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1124,11 +1124,11 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                         items: {
                             type: 'object',
                             properties: {
-                                id: { type: 'string', description: 'Entity ID (e.g. "d_ancient_databank", "ns.100", "MY_PROJECT")' },
+                                id: { type: 'string', description: 'Entity ID. Use the identifier shape discovered from active project, vanilla, and CWT evidence.' },
                                 type: { type: 'string', description: 'Entity type. Must match the active CWT type system; query_cwt_schema/query_types before using a value from memory.' },
                                 file: { type: 'string', description: 'Target file path relative to workspace root' },
-                                triggeredBy: { type: 'string', description: 'What triggers this entity (e.g. "MTTH", "on_colonized", "stage 2 completion of d_ancient_databank")' },
-                                fires: { type: 'array', items: { type: 'string' }, description: 'IDs of downstream entities this one triggers, with scope transition notation. Format each entry as "targetId via scope_path" (e.g. "ns.100 via owner = { country_event }", "MY_PROJECT via fleet event_target"). Plain IDs are accepted but scope paths are STRONGLY recommended to catch scope chain errors early.' },
+                                triggeredBy: { type: 'string', description: 'What triggers this entity, using a mechanism verified from active project, vanilla, and CWT evidence.' },
+                                fires: { type: 'array', items: { type: 'string' }, description: 'IDs of downstream entities this one triggers, with a verified scope-transition path when applicable. Format each entry as "targetId via verified_scope_path". Plain IDs are accepted, but evidence-backed paths help catch scope-chain errors.' },
                                 scopeContext: { type: 'string', description: 'Scope context in CWT format, e.g. "this=X root=X from=Y fromfrom=Z". MUST be dynamically verified against active CWT/LSP rules and current archetype evidence; do not fill this from static prompt memory.' },
                             },
                             required: ['id', 'type', 'file'],
@@ -1140,7 +1140,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                         items: {
                             type: 'object',
                             properties: {
-                                directory: { type: 'string', description: 'common/ directory or entity family, e.g. common/situations, common/relics, common/technology, common/solar_system_initializers' },
+                                directory: { type: 'string', description: 'Entity directory or family discovered from active TypeDefs/CWT schema evidence.' },
                                 role: { type: 'string', description: 'Design role considered, e.g. entry trigger, progression anchor, reward, economy sink, map presence, cleanup support' },
                                 candidateTypes: { type: 'array', items: { type: 'string' }, description: 'Concrete CWT types or entity kinds found in this directory' },
                                 selected: { type: 'boolean', description: 'Whether this directory is used in the final blueprint' },
@@ -1202,7 +1202,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                             type: 'object',
                             properties: {
                                 rewardId: { type: 'string', description: 'Reward or outcome identifier' },
-                                directory: { type: 'string', description: 'Target common/ directory for this reward, e.g. common/relics, common/technology, common/static_modifiers' },
+                                directory: { type: 'string', description: 'Target entity directory discovered from active TypeDefs/CWT schema evidence.' },
                                 entityType: { type: 'string', description: 'CWT type or entity kind implementing the reward' },
                                 playerValue: { type: 'string', description: 'What the player gains or risks' },
                                 implementation: { type: 'string', description: 'How the reward is granted, unlocked, activated, or cleaned up' },
@@ -1213,7 +1213,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                     cleanupPlan: {
                         type: 'array',
-                        description: 'Lifecycle closure plan for flags, modifiers, spawned systems, situations, projects, event targets, and temporary state.',
+                        description: 'Lifecycle closure plan for catalog-declared typed state, created definitions, and temporary resources used by this design.',
                         items: {
                             type: 'object',
                             properties: {
@@ -1266,7 +1266,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                 items: {
                                     type: 'object',
                                     properties: {
-                                        kind: { type: 'string', enum: ['event', 'scripted_effect', 'scripted_trigger', 'event_target', 'flag', 'localisation', 'modifier', 'asset', 'other'] },
+                                        kind: { type: 'string', description: 'Exact TypeDef or CWT reference type from active semantic evidence.' },
                                         id: { type: 'string' },
                                         operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
                                         scope: { type: 'string' },
@@ -1296,7 +1296,8 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                     properties: {
                                         id: { type: 'string' },
                                         description: { type: 'string' },
-                                        type: { type: 'string', enum: ['entity_exists', 'entity_referenced', 'flag_lifecycle', 'target_lifecycle', 'localisation_owner', 'scope', 'custom'] },
+                                        type: { type: 'string', enum: ['entity_exists', 'entity_referenced', 'typed_lifecycle', 'localisation_owner', 'scope', 'custom'] },
+                                        entityKind: { type: 'string', description: 'Exact TypeDef/CWT reference kind for typed_lifecycle.' },
                                         subject: { type: 'string' },
                                         required: { type: 'boolean' },
                                     },
@@ -1323,7 +1324,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                     items: {
                                         type: 'object',
                                         properties: {
-                                            kind: { type: 'string', enum: ['event', 'scripted_effect', 'scripted_trigger', 'event_target', 'flag', 'localisation', 'modifier', 'asset', 'other'] },
+                                            kind: { type: 'string', description: 'Exact TypeDef or CWT reference type from active semantic evidence.' },
                                             id: { type: 'string' },
                                             operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
                                             scope: { type: 'string' },
@@ -1337,7 +1338,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                     items: {
                                         type: 'object',
                                         properties: {
-                                            kind: { type: 'string', enum: ['event', 'scripted_effect', 'scripted_trigger', 'event_target', 'flag', 'localisation', 'modifier', 'asset', 'other'] },
+                                            kind: { type: 'string', description: 'Exact TypeDef or CWT reference type from active semantic evidence.' },
                                             id: { type: 'string' },
                                             operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
                                             scope: { type: 'string' },
@@ -1354,7 +1355,8 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                         properties: {
                                             id: { type: 'string' },
                                             description: { type: 'string' },
-                                            type: { type: 'string', enum: ['entity_exists', 'entity_referenced', 'flag_lifecycle', 'target_lifecycle', 'localisation_owner', 'scope', 'custom'] },
+                                        type: { type: 'string', enum: ['entity_exists', 'entity_referenced', 'typed_lifecycle', 'localisation_owner', 'scope', 'custom'] },
+                                            entityKind: { type: 'string', description: 'Exact TypeDef/CWT reference kind for typed_lifecycle.' },
                                             subject: { type: 'string' },
                                             required: { type: 'boolean' },
                                         },
@@ -1496,7 +1498,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                     items: {
                                         type: 'object',
                                         properties: {
-                                            kind: { type: 'string', enum: ['event', 'scripted_effect', 'scripted_trigger', 'event_target', 'flag', 'localisation', 'modifier', 'asset', 'other'] },
+                                            kind: { type: 'string', description: 'Exact TypeDef or CWT reference type from active semantic evidence.' },
                                             id: { type: 'string' },
                                             operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
                                             scope: { type: 'string' },
@@ -1511,7 +1513,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                     items: {
                                         type: 'object',
                                         properties: {
-                                            kind: { type: 'string', enum: ['event', 'scripted_effect', 'scripted_trigger', 'event_target', 'flag', 'localisation', 'modifier', 'asset', 'other'] },
+                                            kind: { type: 'string', description: 'Exact TypeDef or CWT reference type from active semantic evidence.' },
                                             id: { type: 'string' },
                                             operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
                                             scope: { type: 'string' },
@@ -1528,7 +1530,8 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                         properties: {
                                             id: { type: 'string' },
                                             description: { type: 'string' },
-                                            type: { type: 'string', enum: ['entity_exists', 'entity_referenced', 'flag_lifecycle', 'target_lifecycle', 'localisation_owner', 'scope', 'custom'] },
+                                        type: { type: 'string', enum: ['entity_exists', 'entity_referenced', 'typed_lifecycle', 'localisation_owner', 'scope', 'custom'] },
+                                            entityKind: { type: 'string', description: 'Exact TypeDef/CWT reference kind for typed_lifecycle.' },
                                             subject: { type: 'string' },
                                             required: { type: 'boolean' },
                                         },
@@ -1551,7 +1554,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                 items: {
                                     type: 'object',
                                     properties: {
-                                        kind: { type: 'string', enum: ['event', 'scripted_effect', 'scripted_trigger', 'event_target', 'flag', 'localisation', 'modifier', 'asset', 'other'] },
+                                        kind: { type: 'string', description: 'Exact TypeDef or CWT reference type from active semantic evidence.' },
                                         id: { type: 'string' },
                                         operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
                                         scope: { type: 'string' },
@@ -1581,7 +1584,8 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                     properties: {
                                         id: { type: 'string' },
                                         description: { type: 'string' },
-                                        type: { type: 'string', enum: ['entity_exists', 'entity_referenced', 'flag_lifecycle', 'target_lifecycle', 'localisation_owner', 'scope', 'custom'] },
+                                        type: { type: 'string', enum: ['entity_exists', 'entity_referenced', 'typed_lifecycle', 'localisation_owner', 'scope', 'custom'] },
+                                        entityKind: { type: 'string', description: 'Exact TypeDef/CWT reference kind for typed_lifecycle.' },
                                         subject: { type: 'string' },
                                         required: { type: 'boolean' },
                                     },

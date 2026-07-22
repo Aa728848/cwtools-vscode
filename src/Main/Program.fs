@@ -43,6 +43,140 @@ let private inlineScriptParameterPattern =
         @"\$[A-Za-z0-9_.:-]+(?:\|[A-Za-z0-9_.:-]+)?\$|\|[A-Za-z0-9_.:-]+\|",
         System.Text.RegularExpressions.RegexOptions.Compiled)
 
+type private SemanticValueReference =
+    { argumentPath: string
+      access: string
+      typeName: string }
+
+type private SemanticRuleInfo =
+    { name: string
+      category: string
+      supportedScopes: string list
+      pushScope: string option
+      valueReferences: SemanticValueReference list }
+
+let private semanticAliasPattern =
+    System.Text.RegularExpressions.Regex(
+        @"^\s*alias\[(trigger|effect|modifier):([^\]]+)\]\s*=\s*(.*)$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private semanticDirectivePattern =
+    System.Text.RegularExpressions.Regex(
+        @"^\s*##\s*([A-Za-z_]+)\s*=\s*(.*)$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private semanticAssignmentPattern =
+    System.Text.RegularExpressions.Regex(
+        @"^\s*(alias\[(?:trigger|effect|modifier):[^\]]+\]|[A-Za-z_][\w.-]*)\s*=\s*(.*)$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private semanticTypedValuePattern =
+    System.Text.RegularExpressions.Regex(
+        @"^(value_set|value|scope)\[([^\]]+)\]",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private semanticEntityTypePattern =
+    System.Text.RegularExpressions.Regex(
+        @"^<([^>]+)>",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private splitSemanticDirectiveValues (value: string) =
+    value.Trim().TrimStart('{').TrimEnd('}')
+        .Split([| ' '; '\t'; '\r'; '\n' |], StringSplitOptions.RemoveEmptyEntries)
+    |> Array.map (fun item -> item.Trim().Trim('"').ToLowerInvariant())
+    |> Array.filter (String.IsNullOrWhiteSpace >> not)
+    |> Array.toList
+
+let private semanticRulesFromConfigs (requestedNames: string list) (configs: (string * string) list) =
+    let requested = System.Collections.Generic.HashSet<string>(requestedNames, StringComparer.OrdinalIgnoreCase)
+    let rules = ResizeArray<SemanticRuleInfo>()
+
+    for fileName, content in configs |> List.sortBy fst do
+        let lines = content.Replace("\r\n", "\n").Split('\n')
+        let scopeChangeFile =
+            fileName.Replace('\\', '/').Contains("scope_changes", StringComparison.OrdinalIgnoreCase)
+        let mutable supportedScopes: string list = []
+        let mutable pushScope: string option = None
+        let mutable index = 0
+
+        while index < lines.Length do
+            let line = lines.[index]
+            let directive = semanticDirectivePattern.Match(line)
+            if directive.Success then
+                match directive.Groups.[1].Value.ToLowerInvariant() with
+                | "scope"
+                | "supported_scopes" -> supportedScopes <- splitSemanticDirectiveValues directive.Groups.[2].Value
+                | "push_scope" -> pushScope <- splitSemanticDirectiveValues directive.Groups.[2].Value |> List.tryHead
+                | _ -> ()
+
+            let aliasMatch = semanticAliasPattern.Match(line)
+            if not aliasMatch.Success then
+                index <- index + 1
+            else
+                let name = aliasMatch.Groups.[2].Value.ToLowerInvariant()
+                let mutable endIndex = index
+                let mutable depth = 0
+                let mutable opened = false
+                let mutable scanning = true
+                while scanning && endIndex < lines.Length do
+                    let uncommented = lines.[endIndex].Split('#').[0]
+                    for char in uncommented do
+                        if char = '{' then
+                            opened <- true
+                            depth <- depth + 1
+                        elif char = '}' then
+                            depth <- depth - 1
+                    if (not opened) || depth <= 0 then scanning <- false
+                    else endIndex <- endIndex + 1
+
+                if requested.Count = 0 || requested.Contains name then
+                    let references = ResizeArray<SemanticValueReference>()
+                    for lineIndex in index .. min endIndex (lines.Length - 1) do
+                        let assignment = semanticAssignmentPattern.Match(lines.[lineIndex].Split('#').[0])
+                        if assignment.Success then
+                            let left = assignment.Groups.[1].Value
+                            let argumentPath =
+                                if left.StartsWith("alias[", StringComparison.OrdinalIgnoreCase) then "$value" else left
+                            let rhs = assignment.Groups.[2].Value.Trim()
+                            let typed = semanticTypedValuePattern.Match(rhs)
+                            if typed.Success then
+                                references.Add(
+                                    { argumentPath = argumentPath
+                                      access = typed.Groups.[1].Value.ToLowerInvariant()
+                                      typeName = typed.Groups.[2].Value.Trim().ToLowerInvariant() })
+                            else
+                                let entityType = semanticEntityTypePattern.Match(rhs)
+                                if entityType.Success then
+                                    references.Add(
+                                        { argumentPath = argumentPath
+                                          access = "type"
+                                          typeName = entityType.Groups.[1].Value.Trim().ToLowerInvariant() })
+
+                    let category =
+                        if scopeChangeFile then "scope_change" else aliasMatch.Groups.[1].Value.ToLowerInvariant()
+                    rules.Add(
+                        { name = name
+                          category = category
+                          supportedScopes = supportedScopes
+                          pushScope = pushScope
+                          valueReferences = references |> Seq.distinctBy (fun item -> item.argumentPath.ToLowerInvariant(), item.access, item.typeName) |> Seq.truncate 32 |> Seq.toList })
+
+                supportedScopes <- []
+                pushScope <- None
+                index <- max (index + 1) (endIndex + 1)
+
+    let contentForHash =
+        configs
+        |> List.sortBy fst
+        |> List.map (fun (fileName, content) -> fileName + "\u0000" + content)
+        |> String.concat "\u0001"
+    use sha = System.Security.Cryptography.SHA256.Create()
+    let hash =
+        sha.ComputeHash(Encoding.UTF8.GetBytes(contentForHash))
+        |> Convert.ToHexString
+        |> fun value -> value.Substring(0, 16).ToLowerInvariant()
+    rules |> Seq.toList, hash
+
 type private DefinitionInjectionKeyInfo =
     { mode: string
       target: string
@@ -1489,6 +1623,8 @@ type Server(client: ILanguageClient) =
     let mutable manualRulesFolder: string option = None
     let mutable useManualRules: bool = false
     let mutable preferBundledRules: bool = false
+    let mutable semanticCatalogCache: (SemanticRuleInfo list * string * bool) option = None
+    let mutable semanticCatalogGeneration = 0L
     let mutable validateVanilla: bool = false
     let mutable experimental: bool = false
     let mutable debugMode: bool = false
@@ -4207,6 +4343,7 @@ type Server(client: ILanguageClient) =
             loop Map.empty 0)
 
     let setupRulesCaches () =
+        semanticCatalogCache <- None
         let sw = Stopwatch.StartNew()
         preferBundledRules <- false
         let finishRules status error =
@@ -4948,6 +5085,7 @@ type Server(client: ILanguageClient) =
                                           "cwtools.ai.exploreProject"
                                           "cwtools.ai.exportProjectKnowledge"
                                           "cwtools.ai.queryProjectKnowledgeDb"
+                                          "cwtools.ai.getSemanticCatalog"
                                           "cwtools.ai.queryScriptedEffects"
                                           "cwtools.ai.queryScriptedTriggers"
                                           "cwtools.ai.queryEnums"
@@ -7153,6 +7291,7 @@ type Server(client: ILanguageClient) =
                             None
                         | { command = "reloadrulesconfig"
                             arguments = _ } ->
+                            semanticCatalogCache <- None
                             let configs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
                             game.ReplaceConfigRules configs
                             bumpGameModelEpoch ()
@@ -7654,8 +7793,8 @@ type Server(client: ILanguageClient) =
                             Some result
 
                         // - cwtools.ai.queryDefinitionByName -
-                        // Find where a named symbol (scripted_trigger, scripted_effect, event, type)
-                        // is defined, by searching AllEntities for a top-level key that matches.
+                        // Find where a named symbol is defined, preferring the active
+                        // CWTools TypeDef index before scanning untyped top-level keys.
                         // Much more practical than position-based GoToType for AI use.
                         //
                         // Optimization: Phase 1 uses g.Types() an already-indexed Map<typeName, TypeDefInfo[]>
@@ -7670,9 +7809,8 @@ type Server(client: ILanguageClient) =
                                     | JsonValue.String s when s.Trim() <> "" -> Some (s.Trim())
                                     | _ -> None)
                             // Optional second argument narrows the lookup to concrete CWT
-                            // entity types. This prevents a same-named technology (or any
-                            // unrelated definition) from being accepted as proof that a
-                            // scripted effect/trigger/event exists.
+                            // entity types. This prevents any same-named definition from
+                            // another active TypeDef being accepted as typed proof.
                             let expectedTypes =
                                 args
                                 |> List.tryItem 1
@@ -7693,7 +7831,7 @@ type Server(client: ILanguageClient) =
                                 | None ->
                                     JsonValue.Record
                                         [| "ok",    JsonValue.Boolean false
-                                           "error", JsonValue.String "symbolName is required. Provide the exact name of the symbol to find, e.g. \"my_scripted_trigger\" or \"distar.001\"." |]
+                                           "error", JsonValue.String "symbolName is required. Provide the exact identifier obtained from current project or TypeDef evidence." |]
                                 | Some name ->
                                     // Phase 1: Fast lookup via Types() index (O(1) per type category)
                                     let tryFindInTypes (g: IGame) =
@@ -7760,7 +7898,7 @@ type Server(client: ILanguageClient) =
                                                 else $" with expected type [{expectedTypeList}]"
                                             JsonValue.Record
                                                 [| "ok",    JsonValue.Boolean false
-                                                   "error", JsonValue.String $"Symbol '{name}' was not found{expectedHint}. Try query_scripted_effects or query_scripted_triggers with a filter instead." |]
+                                                   "error", JsonValue.String $"Symbol '{name}' was not found{expectedHint}. Enumerate the current TypeDef with query_types or inspect its CWT schema before retrying." |]
                             Some result
 
                         // - cwtools.ai.exploreProject -
@@ -7940,6 +8078,117 @@ type Server(client: ILanguageClient) =
                         | { command = "cwtools.ai.queryProjectKnowledgeDb"
                             arguments = args } ->
                             Some(queryProjectKnowledgeDbCommand args)
+
+                        // - cwtools.ai.getSemanticCatalog -
+                        // Returns only requested rule aliases plus all active CWTools type definitions.
+                        | { command = "cwtools.ai.getSemanticCatalog"
+                            arguments = rest } ->
+                            let requestedNames =
+                                rest
+                                |> List.tryItem 0
+                                |> Option.bind (function JsonValue.Array values -> Some values | _ -> None)
+                                |> Option.map (fun values ->
+                                    values
+                                    |> Array.choose (function JsonValue.String name when not (String.IsNullOrWhiteSpace name) -> Some(name.ToLowerInvariant()) | _ -> None)
+                                    |> Array.distinct
+                                    |> Array.truncate 4000
+                                    |> Array.toList)
+                                |> Option.defaultValue []
+                            let allRules, rulesHash, hasConfigs =
+                                match semanticCatalogCache with
+                                | Some cached -> cached
+                                | None ->
+                                    let configs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
+                                    let parsedRules, parsedHash = semanticRulesFromConfigs [] configs
+                                    semanticCatalogGeneration <- semanticCatalogGeneration + 1L
+                                    let cached = parsedRules, parsedHash, not configs.IsEmpty
+                                    semanticCatalogCache <- Some cached
+                                    cached
+                            let requested = System.Collections.Generic.HashSet<string>(requestedNames, StringComparer.OrdinalIgnoreCase)
+                            let rules =
+                                if requested.Count = 0 then allRules
+                                else
+                                    allRules
+                                    |> List.filter (fun rule ->
+                                        requested.Contains rule.name
+                                        || (rule.name.StartsWith("<", StringComparison.Ordinal)
+                                            && rule.name.EndsWith(">", StringComparison.Ordinal)))
+                            let gameName =
+                                match activeGame with
+                                | STL -> "stellaris"
+                                | HOI4 -> "hoi4"
+                                | EU4 -> "eu4"
+                                | EU5 -> "eu5"
+                                | CK2 -> "ck2"
+                                | CK3 -> "ck3"
+                                | IR -> "imperator"
+                                | VIC2 -> "vic2"
+                                | VIC3 -> "vic3"
+                                | Custom -> "paradox"
+                            let visitor =
+                                { new IGameVisitor<JsonValue> with
+                                    member _.Visit game =
+                                        let definitionTypes =
+                                            game.TypeDefs()
+                                            |> List.sortBy (fun td -> td.name)
+                                            |> List.truncate 4000
+                                            |> List.map (fun td ->
+                                                let paths =
+                                                    td.pathOptions.paths
+                                                    |> Array.map (fun value ->
+                                                        value.Replace('\\', '/').Trim().TrimStart('/').TrimEnd('/').Replace("game/", "", StringComparison.OrdinalIgnoreCase).ToLowerInvariant())
+                                                    |> Array.filter (String.IsNullOrWhiteSpace >> not)
+                                                    |> Array.distinct
+                                                    |> Array.sort
+                                                    |> Array.map JsonValue.String
+                                                let typeKeyFilters =
+                                                    match td.typeKeyFilter with
+                                                    | Some(values, _) -> values |> List.distinct |> List.sort |> List.map (fun value -> JsonValue.String(value.ToLowerInvariant())) |> List.toArray
+                                                    | None -> [||]
+                                                let fields = ResizeArray<string * JsonValue>()
+                                                fields.Add("name", JsonValue.String(td.name.ToLowerInvariant()))
+                                                fields.Add("paths", JsonValue.Array paths)
+                                                td.nameField |> Option.iter (fun nameField -> fields.Add("nameField", JsonValue.String(nameField.ToLowerInvariant())))
+                                                fields.Add("typeKeyFilters", JsonValue.Array typeKeyFilters)
+                                                JsonValue.Record(fields.ToArray()))
+                                            |> List.toArray
+                                        let ruleValues =
+                                            rules
+                                            |> List.map (fun rule ->
+                                                let references =
+                                                    rule.valueReferences
+                                                    |> List.map (fun reference ->
+                                                        JsonValue.Record
+                                                            [| "argumentPath", JsonValue.String reference.argumentPath
+                                                               "access", JsonValue.String reference.access
+                                                               "typeName", JsonValue.String reference.typeName |])
+                                                    |> List.toArray
+                                                let fields = ResizeArray<string * JsonValue>()
+                                                fields.Add("name", JsonValue.String rule.name)
+                                                fields.Add("category", JsonValue.String rule.category)
+                                                fields.Add("supportedScopes", rule.supportedScopes |> List.map JsonValue.String |> List.toArray |> JsonValue.Array)
+                                                rule.pushScope |> Option.iter (fun scope -> fields.Add("pushScope", JsonValue.String scope))
+                                                fields.Add("valueReferences", JsonValue.Array references)
+                                                JsonValue.Record(fields.ToArray()))
+                                            |> List.toArray
+                                        let hasRules = ruleValues.Length > 0
+                                        let hasTypes = definitionTypes.Length > 0
+                                        let status = if hasRules && hasTypes then "ready" elif hasRules || hasTypes then "partial" else "unavailable"
+                                        JsonValue.Record
+                                            [| "ok", JsonValue.Boolean true
+                                               "status", JsonValue.String status
+                                               "gameProfile", JsonValue.String gameName
+                                               "rulesGeneration", JsonValue.Number(decimal semanticCatalogGeneration)
+                                               "rulesContentHash", JsonValue.String rulesHash
+                                               "rules", JsonValue.Array ruleValues
+                                               "definitionTypes", JsonValue.Array definitionTypes
+                                               "warnings", JsonValue.Array(if not hasConfigs then [| JsonValue.String "No active CWT configuration files are loaded." |] else [||]) |] }
+                            try
+                                match gameDispatcher.Dispatch visitor with
+                                | Some result -> Some result
+                                | None -> Some(JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "unavailable"; "error", JsonValue.String "LSP server not ready" |])
+                            with error ->
+                                Some(JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "unavailable"; "error", JsonValue.String error.Message |])
 
                         // - cwtools.ai.queryScriptedEffects -
                         // Returns all scripted effects with name, scope constraints and type

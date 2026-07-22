@@ -9,6 +9,13 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { tokenize, TokenType, type Token } from './pdxTokenizer';
+import { ErrorReporter } from './ai/errorReporter';
+import { getAllProfiles } from './gameProfiles';
+import {
+    matchPdxDefinitionType,
+    parsePdxSemanticCatalog,
+    type PdxDefinitionType,
+} from '../shared/pdxSemanticCatalog';
 
 function tr(en: string, zh: string): string {
     return vs.env.language.toLowerCase().startsWith('zh') ? zh : en;
@@ -17,52 +24,24 @@ function tr(en: string, zh: string): string {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface PdxBlock {
-    key: string;         // syntactic key (e.g. "building_academy", "country_event")
-    id: string | null;   // event id only (e.g. "crisis.6052"), null for non-event blocks
-    name: string | null; // name field (e.g. for GUI elements or ship designs)
+    key: string;
+    declaredIdentity: string | null;
+    requiresDeclaredIdentity: boolean;
+    name: string | null;
     startLine: number;
     endLine: number;
     content: string;
 }
 
-// ─── CWT Config Parsing ──────────────────────────────────────────────────────
-
-function parseEventSubtypesFromCwt(configDir: string): Set<string> {
-    const result = new Set<string>();
+async function getSemanticDefinitionTypes(): Promise<readonly PdxDefinitionType[]> {
     try {
-        const eventsCwtPath = path.join(configDir, 'events.cwt');
-        if (!fs.existsSync(eventsCwtPath)) return result;
-        const content = fs.readFileSync(eventsCwtPath, 'utf-8');
-        for (const line of content.split('\n')) {
-            const match = line.match(/^##\s*type_key_filter\s*=\s*(\w+)/);
-            if (match) result.add(match[1]!);
-        }
-    } catch { /* ignore */ }
-    return result;
-}
-
-function resolveCwtConfigDir(languageId: string): string | null {
-    const langToGame: Record<string, string> = {
-        stellaris: 'stellaris', eu4: 'eu4', hoi4: 'hoi4',
-        ck2: 'ck2', imperator: 'imperator', vic2: 'vic2',
-        ck3: 'ck3', vic3: 'vic3', eu5: 'eu5',
-    };
-    const game = langToGame[languageId];
-    if (!game) return null;
-    const submodulePath = path.join(__dirname, '..', '..', '..', 'submodules', `cwtools-${game}-config`, 'config');
-    if (fs.existsSync(submodulePath)) return submodulePath;
-    return null;
-}
-
-let _eventLikeKeysCache: Set<string> | null = null;
-function getEventLikeKeys(languageId: string): Set<string> {
-    if (_eventLikeKeysCache) return _eventLikeKeysCache;
-    const configDir = resolveCwtConfigDir(languageId);
-    _eventLikeKeysCache = configDir ? parseEventSubtypesFromCwt(configDir) : new Set<string>();
-    if (_eventLikeKeysCache.size === 0) {
-        _eventLikeKeysCache = new Set(['country_event', 'event']);
+        const raw = await vs.commands.executeCommand<unknown>('cwtools.ai.getSemanticCatalog', [], []);
+        const catalog = parsePdxSemanticCatalog(raw);
+        return catalog?.status === 'unavailable' ? [] : catalog?.definitionTypes ?? [];
+    } catch (error) {
+        ErrorReporter.debug('VanillaCompare', 'Active CWTools semantic catalog is unavailable', error);
+        return [];
     }
-    return _eventLikeKeysCache;
 }
 
 // ─── LRU Cache ────────────────────────────────────────────────────────────────
@@ -92,70 +71,21 @@ class LRUCache<K, V> {
 
 // ─── Vanilla Path Resolution ──────────────────────────────────────────────────
 
-const LANG_TO_CACHE_KEY: Record<string, string> = {
-    stellaris: 'cache.stellaris', eu4: 'cache.eu4', hoi4: 'cache.hoi4',
-    ck2: 'cache.ck2', imperator: 'cache.imperator', vic2: 'cache.vic2',
-    ck3: 'cache.ck3', vic3: 'cache.vic3', eu5: 'cache.eu5',
-};
-
 function normalizeParadoxRelativeDir(fsPath: string): string {
-    const normalized = fsPath.replace(/\\/g, '/');
-    const parts = normalized.split('/');
-    const standardDirs = new Set([
-        'common', 'events', 'gfx', 'interface', 'localisation', 'localization',
-        'map', 'history', 'decisions', 'missions', 'flags', 'prescripted_countries'
-    ]);
-    for (let i = 0; i < parts.length; i++) {
-        if (standardDirs.has(parts[i]!.toLowerCase())) {
-            return parts.slice(i).join('/');
-        }
-    }
-    return '';
+    const uri = vs.Uri.file(fsPath);
+    const folder = vs.workspace.getWorkspaceFolder(uri);
+    return folder ? path.relative(folder.uri.fsPath, fsPath).replace(/\\/g, '/') : '';
 }
 
 function getGamePath(languageId: string): string | null {
-    let targetLang = languageId;
-    if (!LANG_TO_CACHE_KEY[targetLang]) {
-        const possibleGames = ['stellaris', 'hoi4', 'eu4', 'ck3', 'vic3', 'imperator', 'ck2', 'vic2', 'eu5'];
-
-        // 1. Try to infer from visible text editors with a known Paradox language ID
-        if (targetLang === languageId) {
-            for (const editor of vs.window.visibleTextEditors) {
-                const lang = editor.document.languageId;
-                if (lang && lang !== languageId && LANG_TO_CACHE_KEY[lang]) {
-                    targetLang = lang;
-                    break;
-                }
-            }
-        }
-
-        // 2. Try to locate the vanilla path that actually contains a 'gfx/FX' folder
-        if (targetLang === languageId) {
-            const config = vs.workspace.getConfiguration('stellarisLanguageServices');
-            for (const game of possibleGames) {
-                const cacheKey = LANG_TO_CACHE_KEY[game];
-                if (cacheKey) {
-                    const configPath = config.get<string>(cacheKey);
-                    if (configPath && fs.existsSync(configPath)) {
-                        if (fs.existsSync(path.join(configPath, 'gfx', 'FX'))) {
-                            targetLang = game;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Default fallback
-        if (targetLang === languageId) {
-            targetLang = 'stellaris';
-        }
-    }
-
-    const cacheKey = LANG_TO_CACHE_KEY[targetLang];
-    if (!cacheKey) return null;
+    const profiles = getAllProfiles();
+    const activeProfile = profiles.find(profile => profile.languageId === languageId || profile.id === languageId)
+        ?? vs.window.visibleTextEditors
+            .map(editor => profiles.find(profile => profile.languageId === editor.document.languageId))
+            .find((profile): profile is NonNullable<typeof profile> => !!profile);
+    if (!activeProfile) return null;
     const config = vs.workspace.getConfiguration('stellarisLanguageServices');
-    const configPath = config.get<string>(cacheKey);
+    const configPath = config.get<string>(activeProfile.cacheSettingKey.replace('stellarisLanguageServices.', ''));
     if (configPath && fs.existsSync(configPath)) return configPath;
     return null;
 }
@@ -195,7 +125,11 @@ function extractBlockField(tokens: Token[], lbraceIndex: number, fieldName: stri
     return null;
 }
 
-function findTopLevelBlocks(text: string, _idKeys: Set<string> = new Set()): PdxBlock[] {
+function findTopLevelBlocks(
+    text: string,
+    filePath: string,
+    definitionTypes: readonly PdxDefinitionType[],
+): PdxBlock[] {
     const tokens = tokenize(text, { comments: false, percent: false });
     const blocks: PdxBlock[] = [];
     const lines = text.split('\n');
@@ -231,9 +165,20 @@ function findTopLevelBlocks(text: string, _idKeys: Set<string> = new Set()): Pdx
                     const startIdx = blockStartLine;
                     const endIdx = Math.min(endLine, lines.length - 1);
                     const content = lines.slice(startIdx, endIdx + 1).join('\n');
-                    const blockId = extractBlockField(tokens, i, 'id');
+                    const definition = matchPdxDefinitionType(definitionTypes, filePath, resolvedKey);
+                    const declaredIdentity = definition?.nameField
+                        ? extractBlockField(tokens, i, definition.nameField)
+                        : null;
                     const blockName = extractBlockField(tokens, i, 'name');
-                    blocks.push({ key: resolvedKey, id: blockId, name: blockName, startLine: startIdx, endLine: endIdx, content });
+                    blocks.push({
+                        key: resolvedKey,
+                        declaredIdentity,
+                        requiresDeclaredIdentity: !!definition?.nameField,
+                        name: blockName,
+                        startLine: startIdx,
+                        endLine: endIdx,
+                        content,
+                    });
                 }
             }
             depth++;
@@ -250,21 +195,13 @@ function findEnclosingBlock(blocks: PdxBlock[], line: number): PdxBlock | null {
 
 /**
  * Get the match identity for a block:
- * - Events (have `id`): use `id` (e.g. "crisis.6052").
- * - GUI/Entities (have `name`): use `name`.
- * - Everything else: use syntactic key (e.g. "building_academy", "tech_corvettes").
- * Returns null if it's an event-like block but lacks an id/name, to prevent matching unrelated events.
+ * CWTools name_field is authoritative. Named assets use their structural name,
+ * while ordinary definitions use the top-level key.
  */
-function blockIdentity(block: PdxBlock, idKeys: Set<string>): string | null {
-    if (block.id) return block.id;
+function blockIdentity(block: PdxBlock): string | null {
+    if (block.declaredIdentity) return block.declaredIdentity;
+    if (block.requiresDeclaredIdentity) return null;
     if (block.name) return block.name;
-
-    // If it's explicitly an event type, or ends with _event, it MUST have an identity to be compared.
-    // Otherwise, all 'planet_event' blocks without an id would match each other.
-    if (idKeys.has(block.key) || block.key.endsWith('_event') || block.key === 'event') {
-        return null;
-    }
-
     return block.key;
 }
 
@@ -275,10 +212,11 @@ function blockIdentity(block: PdxBlock, idKeys: Set<string>): string | null {
 async function buildVanillaBlockIndex(
     vanillaRoot: string,
     relDir: string,
-    idKeys: Set<string>,
+    definitionTypes: readonly PdxDefinitionType[],
     ext: string = '.txt',
 ): Promise<Map<string, { block: PdxBlock; filePath: string }>> {
     const index = new Map<string, { block: PdxBlock; filePath: string }>();
+    const ambiguous = new Set<string>();
     const vanillaDir = path.join(vanillaRoot, relDir);
     if (!fs.existsSync(vanillaDir)) return index;
 
@@ -293,11 +231,15 @@ async function buildVanillaBlockIndex(
         const filePath = path.join(vanillaDir, entry);
         const content = await loadVanillaFile(filePath);
         if (!content) continue;
-        for (const block of findTopLevelBlocks(content, idKeys)) {
-            const identity = blockIdentity(block, idKeys);
-            if (identity && !index.has(identity)) {
-                index.set(identity, { block, filePath });
+        for (const block of findTopLevelBlocks(content, filePath, definitionTypes)) {
+            const identity = blockIdentity(block);
+            if (!identity || ambiguous.has(identity)) continue;
+            if (index.has(identity)) {
+                index.delete(identity);
+                ambiguous.add(identity);
+                continue;
             }
+            index.set(identity, { block, filePath });
         }
     }
     return index;
@@ -356,8 +298,8 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                         return;
                     }
 
-                    const idKeys = getEventLikeKeys(doc.languageId);
-                    const blocks = findTopLevelBlocks(doc.getText(), idKeys);
+                    const definitionTypes = await getSemanticDefinitionTypes();
+                    const blocks = findTopLevelBlocks(doc.getText(), doc.uri.fsPath, definitionTypes);
                     modBlock = findEnclosingBlock(blocks, editor.selection.active.line);
                     if (!modBlock) {
                         const relFilePath = normalizeParadoxRelativeDir(uri.fsPath);
@@ -401,10 +343,10 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     return;
                 }
 
-                const idKeys = getEventLikeKeys(langId);
+                const definitionTypes = await getSemanticDefinitionTypes();
 
                 if (!modBlock) {
-                    const blocks = findTopLevelBlocks(doc.getText(), idKeys);
+                    const blocks = findTopLevelBlocks(doc.getText(), doc.uri.fsPath, definitionTypes);
                     modBlock = blocks.find(b => b.startLine === startLine && b.key === key) ?? null;
                 }
                 if (!modBlock) return;
@@ -416,8 +358,8 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 }
 
                 // Build vanilla block index for the directory
-                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys, ext);
-                const identity = blockIdentity(modBlock, idKeys);
+                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, definitionTypes, ext);
+                const identity = blockIdentity(modBlock);
                 if (!identity) {
                     vs.window.showInformationMessage(tr('Could not determine a unique identifier for the current block (missing id or name).', '无法确定当前代码块的唯一标识（缺少 id 或 name）'));
                     return;
@@ -473,7 +415,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     return;
                 }
 
-                const idKeys = getEventLikeKeys(langId);
+                const definitionTypes = await getSemanticDefinitionTypes();
                 const relPath = vs.workspace.asRelativePath(doc.uri, false);
                 let relDir = normalizeParadoxRelativeDir(path.dirname(doc.uri.fsPath));
                 if (!relDir) {
@@ -495,10 +437,10 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 }
 
                 // 只有原版无同名物理文件时，才 Fallback 使用 block 对齐拼装对比
-                const modBlocks = findTopLevelBlocks(doc.getText(), idKeys);
+                const modBlocks = findTopLevelBlocks(doc.getText(), doc.uri.fsPath, definitionTypes);
 
                 // Build vanilla block index for the directory
-                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys, ext);
+                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, definitionTypes, ext);
 
                 // Build a vanilla-side file with only blocks that have matches in the mod
                 // Right side = real mod file (edits sync directly to the actual document)
@@ -513,7 +455,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 const allModLines = modText.split('\n');
 
                 for (const modBlock of modBlocks) {
-                    const identity = blockIdentity(modBlock, idKeys);
+                    const identity = blockIdentity(modBlock);
                     if (!identity) {
                         // For unmatched blocks, include mod content as-is to keep line alignment
                         vanillaLines.push(modBlock.content);
@@ -547,7 +489,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                         }
                     }
                     // Use matched vanilla content or original mod content
-                    const identity = blockIdentity(modBlock, idKeys);
+                    const identity = blockIdentity(modBlock);
                     const match = identity ? vanillaIndex.get(identity) : undefined;
                     if (match) {
                         vanillaFullLines.push(match.block.content);
@@ -597,8 +539,8 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     }
 
                     const doc = editor.document;
-                    const idKeys = getEventLikeKeys(doc.languageId);
-                    const blocks = findTopLevelBlocks(doc.getText(), idKeys);
+                    const definitionTypes = await getSemanticDefinitionTypes();
+                    const blocks = findTopLevelBlocks(doc.getText(), doc.uri.fsPath, definitionTypes);
                     modBlock = findEnclosingBlock(blocks, editor.selection.active.line);
                     if (!modBlock) {
                         vs.window.showInformationMessage(tr('The cursor is not inside any code block.', '光标不在任何代码块内'));
@@ -625,10 +567,10 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     return;
                 }
 
-                const idKeys = getEventLikeKeys(langId);
+                const definitionTypes = await getSemanticDefinitionTypes();
 
                 if (!modBlock) {
-                    const blocks = findTopLevelBlocks(doc.getText(), idKeys);
+                    const blocks = findTopLevelBlocks(doc.getText(), doc.uri.fsPath, definitionTypes);
                     modBlock = blocks.find(b => b.startLine === startLine && b.key === key) ?? null;
                 }
                 if (!modBlock) return;
@@ -639,8 +581,8 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     relDir = path.dirname(relPath);
                 }
 
-                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys, ext);
-                const identity = blockIdentity(modBlock, idKeys);
+                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, definitionTypes, ext);
+                const identity = blockIdentity(modBlock);
                 if (!identity) {
                     vs.window.showInformationMessage(tr('Could not determine a unique identifier for the current block (missing id or name).', '无法确定当前代码块的唯一标识（缺少 id 或 name）'));
                     return;
@@ -686,21 +628,21 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     return;
                 }
 
-                const idKeys = getEventLikeKeys(langId);
+                const definitionTypes = await getSemanticDefinitionTypes();
                 const relPath = vs.workspace.asRelativePath(doc.uri, false);
                 let relDir = normalizeParadoxRelativeDir(path.dirname(doc.uri.fsPath));
                 if (!relDir) {
                     relDir = path.dirname(relPath);
                 }
                 const ext = path.extname(doc.uri.fsPath).toLowerCase();
-                const modBlocks = findTopLevelBlocks(doc.getText(), idKeys);
+                const modBlocks = findTopLevelBlocks(doc.getText(), doc.uri.fsPath, definitionTypes);
 
-                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys, ext);
+                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, definitionTypes, ext);
 
                 const changedBlocks: { modBlock: PdxBlock; vanillaBlock: PdxBlock; identity: string }[] = [];
 
                 for (const modBlock of modBlocks) {
-                    const identity = blockIdentity(modBlock, idKeys);
+                    const identity = blockIdentity(modBlock);
                     if (!identity) continue;
 
                     const match = vanillaIndex.get(identity);
@@ -782,7 +724,6 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
         vs.workspace.onDidChangeConfiguration(e => {
             if (e.affectsConfiguration('stellarisLanguageServices.cache')) {
                 vanillaFileCache.clear();
-                _eventLikeKeysCache = null;
             }
         })
     );

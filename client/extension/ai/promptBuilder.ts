@@ -966,9 +966,9 @@ export class PromptBuilder {
 ## Current Topic Design Blueprint (MANDATORY - Follow This Architecture)
 This blueprint belongs to topic \`${topicId}\` and is stored at \`${relativePath}\`. You MUST:
 1. Create files in the exact dependency order listed
-2. Use the exact entity IDs, event IDs, and scope contexts specified
-3. Verify scope transitions at every subsystem boundary (especially site -> project -> reward)
-4. Preserve the selected common/ subsystem plan, reward plan, trigger plan, and cleanup plan
+2. Use the exact typed entity IDs and scope contexts specified
+3. Verify scope transitions at every TypeDef/dependency boundary
+4. Preserve the selected dependency families, behavior plan, and cleanup plan
 5. Reference this blueprint when making ANY architectural decision
 
 ${trimmed}
@@ -1043,11 +1043,11 @@ ${trimmed}
         if (profile.identifiers.namespaces.length) {
             parts.push(`Event namespaces: ${profile.identifiers.namespaces.join(', ')}`);
         }
-        const ids = [
-            ...profile.identifiers.scriptedTriggers,
-            ...profile.identifiers.scriptedEffects,
-            ...profile.identifiers.events,
-        ].filter(Boolean).slice(0, 20);
+        const ids = Object.keys(profile.identifiers.byType ?? {})
+            .sort()
+            .flatMap(type => profile.identifiers.byType?.[type] ?? [])
+            .filter(Boolean)
+            .slice(0, 20);
         if (ids.length) parts.push(`Key IDs: ${ids.join(', ')}`);
         if (parts.length === 0) return '';
         return `\n\nCRITICAL - These project-specific identifiers MUST be preserved verbatim in the summary (never omit or rephrase):\n${parts.join('\n')}`;
@@ -1112,20 +1112,8 @@ ${trimmed}
             const relPath = path.relative(this.workspaceRoot, options.activeFile).replace(/\\/g, '/');
             contextParts.push(`**Current file**: \`${relPath}\``);
 
-            // Determine file type (compare case-insensitively against lowercase Paradox dir conventions)
-            const relLower = relPath.toLowerCase();
-            if (relLower.startsWith('events/')) {
-                contextParts.push('**File type**: Event definitions');
-            } else if (relLower.includes('common/scripted_triggers')) {
-                contextParts.push('**File type**: Scripted triggers');
-            } else if (relLower.includes('common/scripted_effects')) {
-                contextParts.push('**File type**: Scripted effects');
-            } else if (relLower.startsWith('localisation/') || relLower.startsWith('localization/')) {
-                contextParts.push('**File type**: Localisation');
-            } else if (relLower.includes('common/')) {
-                const parts = relPath.split('/');
-                contextParts.push(`**File type**: ${parts[1] ?? 'common'}`);
-            }
+            const directory = path.posix.dirname(relPath);
+            contextParts.push(`**File directory**: \`${directory}\` (routing hint only; obtain its TypeDef/schema from current CWT/LSP evidence)`);
         }
 
         if (options.cursorLine !== undefined) {
@@ -1201,7 +1189,7 @@ ${trimmed}
                 if (line[c]! === '{') braceDepth--;
             }
             if (braceDepth <= 0 && i < cursorLine) {
-                // Check if this line looks like a block opener (e.g. "country_event = {")
+                // Check if this line looks like a Paradox block opener.
                  
                 const trimmed = lines[i]!.trim();
                 if (trimmed.match(/^[\w.]+\s*=\s*\{/) || trimmed.match(/^[\w.]+\s*=\s*$/)) {

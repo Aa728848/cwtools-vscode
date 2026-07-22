@@ -63,11 +63,13 @@ export interface CwtSchemaMatch {
 export interface CwtSchemaEntitySummary {
   name: string;
   path?: string;
+  nameField?: string;
   ruleFile: string;
   relativeRuleFile: string;
   sourceRoot: string;
   line: number;
   subtypes: string[];
+  typeKeyFilters?: string[];
   schemaKeys: string[];
   graphRelatedTypes?: string[];
   matchedBy: string[];
@@ -140,11 +142,18 @@ export interface RuleHardFacts {
   supportedScopes?: string[];
   pushScope?: string;
   typeKeyFilter?: string;
+  valueReferences?: CwtRuleValueReference[];
   syntax?: string;
   cwtSource?: {
     file: string;
     line: number;
   };
+}
+
+export interface CwtRuleValueReference {
+  argumentPath: string;
+  access: 'value' | 'value_set' | 'scope' | 'type';
+  typeName: string;
 }
 
 export interface RuleSemanticHint {
@@ -702,6 +711,7 @@ function summarizeCwtTypeBlock(args: {
 }): CwtSchemaEntitySummary {
   const pathMatch = args.block.match(/^\s*path\s*=\s*"([^"]+)"/mi)
     ?? args.block.match(/^\s*path\s*=\s*([^\s#]+)/mi);
+  const nameFieldMatch = args.block.match(/^\s*name_field\s*=\s*"?([^\s#"]+)"?/mi);
   const graphRelatedMatch = args.block.match(/^\s*graph_related_types\s*=\s*\{([^}]+)\}/mi);
   const schemaKeys: string[] = [];
   for (const line of args.blockLines) {
@@ -716,6 +726,10 @@ function summarizeCwtTypeBlock(args: {
     .map(match => match[1]?.trim() ?? '')
     .filter((value, index, all) => value.length > 0 && all.indexOf(value) === index)
     .slice(0, 40);
+  const typeKeyFilters = Array.from(args.block.matchAll(/^\s*##\s*type_key_filter\s*=\s*([^\s#}]+)/gmi))
+    .map(match => match[1]?.replace(/^"|"$/g, '').trim() ?? '')
+    .filter((value, index, all) => value.length > 0 && all.indexOf(value) === index)
+    .slice(0, 80);
   const graphRelatedText = graphRelatedMatch?.[1];
   const graphRelatedTypes = graphRelatedText
     ? graphRelatedText
@@ -728,11 +742,13 @@ function summarizeCwtTypeBlock(args: {
   return {
     name: args.name,
     path: pathMatch?.[1]?.trim(),
+    nameField: nameFieldMatch?.[1]?.trim(),
     ruleFile: args.filePath,
     relativeRuleFile: args.relativeRuleFile,
     sourceRoot: args.sourceRoot,
     line: args.startLine,
     subtypes,
+    typeKeyFilters,
     schemaKeys,
     graphRelatedTypes,
     matchedBy: [],
@@ -746,8 +762,10 @@ function cwtEntityMatches(summary: CwtSchemaEntitySummary, normalizedTarget: str
   const haystack = [
     summary.name,
     summary.path ?? '',
+    summary.nameField ?? '',
     summary.relativeRuleFile,
     ...summary.subtypes,
+    ...(summary.typeKeyFilters ?? []),
     ...summary.schemaKeys,
     ...(summary.graphRelatedTypes ?? []),
   ].join('\n').toLowerCase().replace(/\\/g, '/');
@@ -786,7 +804,7 @@ function scoreCwtSchemaEntity(summary: CwtSchemaEntitySummary, normalizedTarget:
 //
 // loadCwtRules used to re-read and re-parse every rule file on each query.
 // The memo keeps one parsed CwtRuleCache per host identity, invalidated by an
-// mtime/size signature over a bounded candidate file set (11 files per config
+// mtime/size signature over a bounded candidate file set (12 files per config
 // root). `generation` is a per-host monotonic reload counter; `contentHash` is
 // sha256 (16 hex chars) over the length-prefixed concatenation of every
 // candidate rule file's content — the same algorithm the extension-side
@@ -804,6 +822,7 @@ const CWT_RULE_FILE_CANDIDATES: readonly string[] = [
   'effects.cwt',
   'effect.cwt',
   path.join('generated', 'effects.generated.cwt'),
+  'modifier.cwt',
   'scope_changes.cwt',
   path.join('generated', 'scope_changes.generated.cwt'),
 ];
@@ -918,7 +937,13 @@ async function loadCwtRulesFromPaths(host: HostServices, configPaths: string[]):
     const triggers = await readRuleFiles(host, configPath, ['triggers.cwt', 'trigger.cwt', path.join('generated', 'triggers.generated.cwt')], 'trigger', docs, scopes);
     const effects = await readRuleFiles(host, configPath, ['effects.cwt', 'effect.cwt', path.join('generated', 'effects.generated.cwt')], 'effect', docs, scopes);
     const scopeChanges = await readRuleFiles(host, configPath, ['scope_changes.cwt', path.join('generated', 'scope_changes.generated.cwt')], 'scope_change', docs, scopes);
-    const modifiers = await readModifiersLog(host, path.join(configPath, 'logs', 'modifiers.log'));
+    const modifierAliases = await readRuleFiles(host, configPath, ['modifier.cwt'], 'modifier', docs, scopes);
+    const modifierLog = await readModifiersLog(host, path.join(configPath, 'logs', 'modifiers.log'));
+    const modifiers = [...modifierAliases];
+    const modifierNames = new Set(modifiers.map(rule => rule.name.toLowerCase()));
+    for (const rule of modifierLog) {
+      if (!modifierNames.has(rule.name.toLowerCase())) modifiers.push(rule);
+    }
     if (triggers.length > 0 || effects.length > 0 || scopeChanges.length > 0 || modifiers.length > 0) {
       return { triggers, effects, scopeChanges, modifiers, scopes };
     }
@@ -1184,7 +1209,7 @@ function parseCwtFile(
       if (comment && !/^(cardinality|replace_scope)/i.test(comment)) currentDesc = comment;
       continue;
     }
-    const nameMatch = line.match(/^alias\[(?:trigger|effect):([\w.-]+)\]\s*=\s*(.*)/);
+    const nameMatch = line.match(/^alias\[(?:trigger|effect|modifier):([^\]]+)\]\s*=\s*(.*)/);
     if (nameMatch?.[1]) {
       const name = nameMatch[1];
       const doc = docs.get(name);
@@ -1223,6 +1248,7 @@ function parseCwtFile(
           supportedScopes: scopesForRule,
           pushScope: currentPushScope,
           typeKeyFilter: currentTypeKeyFilter,
+          valueReferences: extractCwtValueReferences(cwtBlockText),
           syntax,
           cwtSource: { file: filePath, line: i + 1 },
         },
@@ -1433,9 +1459,37 @@ function collectCwtBlockText(lines: string[], startIndex: number): string {
       if (ch === '{') depth++;
       else if (ch === '}') depth--;
     }
-    if (i > startIndex && depth <= 0) break;
+    if ((i === startIndex && depth === 0) || (i > startIndex && depth <= 0)) break;
   }
   return collected.join('\n');
+}
+
+function extractCwtValueReferences(blockText: string): CwtRuleValueReference[] {
+  const references: CwtRuleValueReference[] = [];
+  const seen = new Set<string>();
+  const add = (argumentPath: string, access: CwtRuleValueReference['access'], typeName: string) => {
+    const normalizedType = typeName.trim().toLowerCase();
+    if (!normalizedType || references.length >= 32) return;
+    const key = `${argumentPath.toLowerCase()}|${access}|${normalizedType}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    references.push({ argumentPath, access, typeName: normalizedType });
+  };
+  for (const rawLine of blockText.split(/\r?\n/)) {
+    const line = rawLine.replace(/#.*$/, '');
+    const assignment = line.match(/^\s*(alias\[(?:trigger|effect|modifier):[^\]]+\]|[A-Za-z_][\w.-]*)\s*=\s*(.*)$/i);
+    if (!assignment?.[1] || assignment[2] === undefined) continue;
+    const argumentPath = assignment[1].toLowerCase().startsWith('alias[') ? '$value' : assignment[1];
+    const rhs = assignment[2].trim();
+    const typed = rhs.match(/^(value_set|value|scope)\[([^\]]+)\]/i);
+    if (typed?.[1] && typed[2]) {
+      add(argumentPath, typed[1].toLowerCase() as CwtRuleValueReference['access'], typed[2]);
+      continue;
+    }
+    const entityType = rhs.match(/^<([^>]+)>/);
+    if (entityType?.[1]) add(argumentPath, 'type', entityType[1]);
+  }
+  return references;
 }
 
 function normalizeInlineSyntax(name: string, raw: string): string {

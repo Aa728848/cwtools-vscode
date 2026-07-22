@@ -103,14 +103,11 @@ let private tryGetValueArgContext (textBeforeCursor: string) =
     with _ -> None
 
 let private tryFindScriptValueLikeType (game: IGame) (entityName: string) =
-    let types = game.Types()
-    let tryFind typeName =
-        types
-        |> Map.tryFind typeName
-        |> Option.bind (fun arr -> arr |> Array.tryFind (fun t -> t.id = entityName))
-
-    tryFind "script_value"
-    |> Option.orElseWith (fun () -> tryFind "scripted_effect")
+    game.Types()
+    |> Map.toSeq
+    |> Seq.sortBy fst
+    |> Seq.tryPick (fun (_, definitions) ->
+        definitions |> Array.tryFind (fun definition -> definition.id = entityName))
 
 let private tryReadTypeFileText (docs: DocumentStore) (filePath: string) =
     if String.IsNullOrEmpty(filePath) then None
@@ -238,14 +235,13 @@ let private tryFindParamDefinitionFile (game: IGame) (callKey: string) (text: st
     else
         let types = game.Types()
 
-        [ "scripted_effect"; "scripted_trigger"; "script_value" ]
-        |> List.tryPick (fun typeName ->
-            types
-            |> Map.tryFind typeName
-            |> Option.bind (fun defs ->
-                defs
-                |> Array.tryFind (fun t -> String.Equals(t.id, callKey, StringComparison.OrdinalIgnoreCase)))
-            |> Option.map (fun t -> t.range.FileName))
+        types
+        |> Map.toSeq
+        |> Seq.sortBy fst
+        |> Seq.tryPick (fun (_, definitions) ->
+            definitions
+            |> Array.tryFind (fun definition -> String.Equals(definition.id, callKey, StringComparison.OrdinalIgnoreCase))
+            |> Option.map (fun definition -> definition.range.FileName))
 
 let private trySliceNamedDefinitionBlock (text: string) (callKey: string) =
     let pattern =

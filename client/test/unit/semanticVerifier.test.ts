@@ -4,6 +4,36 @@ import * as os from 'os';
 import * as path from 'path';
 import { SemanticVerifier } from '../../extension/ai/orchestrator/semanticVerifier';
 import { TaskGraphEngine } from '../../extension/ai/orchestrator/taskGraphEngine';
+import type { PdxSemanticCatalog } from '../../extension/ai/types';
+
+const SEMANTIC_CATALOG: PdxSemanticCatalog = {
+    status: 'ready',
+    source: 'lsp',
+    gameProfile: 'test',
+    rules: [
+        { name: 'realm_event', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: 'id', access: 'type', typeName: 'event.realm' }] },
+        { name: 'set_realm_flag', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'value_set', typeName: 'realm_flag' }] },
+        { name: 'has_realm_flag', category: 'trigger', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'value', typeName: 'realm_flag' }] },
+        { name: 'store_anchor', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'value_set', typeName: 'anchor_handle' }] },
+        { name: 'uses_anchor', category: 'trigger', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'value', typeName: 'anchor_handle' }] },
+        { name: 'create_fleet', category: 'effect', supportedScopes: [], valueReferences: [] },
+        { name: 'set_owner', category: 'effect', supportedScopes: [], valueReferences: [] },
+        { name: 'set_location', category: 'effect', supportedScopes: [], valueReferences: [] },
+    ],
+    definitionTypes: [
+        { name: 'event', paths: ['events'], nameField: 'id', typeKeyFilters: ['realm_event'] },
+        { name: 'scripted_effect', paths: ['common/scripted_effects'], typeKeyFilters: [] },
+        { name: 'scripted_trigger', paths: ['common/scripted_triggers'], typeKeyFilters: [] },
+    ],
+    warnings: [],
+};
+
+function semanticTools(execute: (toolName: string, args: Record<string, unknown>) => Promise<unknown> = async () => ({ ok: false })) {
+    return {
+        execute,
+        getPdxSemanticCatalog: async () => SEMANTIC_CATALOG,
+    };
+}
 
 describe('SemanticVerifier', () => {
     let root = '';
@@ -16,18 +46,18 @@ describe('SemanticVerifier', () => {
         fs.rmSync(root, { recursive: true, force: true });
     });
 
-    it('rejects unused state, duplicate targets, and localisation for a missing event', async () => {
+    it('enforces explicitly declared typed lifecycles without game-specific heuristics', async () => {
         const eventFile = path.join(root, 'events', 'broken.txt');
         const locFile = path.join(root, 'localisation', 'broken_l_english.yml');
         fs.mkdirSync(path.dirname(eventFile), { recursive: true });
         fs.mkdirSync(path.dirname(locFile), { recursive: true });
         fs.writeFileSync(eventFile, [
             'namespace = broken',
-            'country_event = {',
+            'realm_event = {',
             '  id = broken.1',
             '  immediate = {',
-            '    set_global_flag = broken_unused_flag',
-            '    save_global_event_target_as = broken_unused_target',
+            '    set_realm_flag = broken_unused_flag',
+            '    store_anchor = broken_unused_target',
             '    set_location = { target = root target = prev }',
             '  }',
             '}',
@@ -37,20 +67,20 @@ describe('SemanticVerifier', () => {
         const graph = TaskGraphEngine.createGraph('build broken chain', {
             objective: 'Build a connected event chain',
             expectsFileChanges: true,
-            acceptanceCriteria: [],
+            acceptanceCriteria: [
+                { id: 'flag_lifecycle', description: 'Realm state is consumed', type: 'typed_lifecycle', entityKind: 'realm_flag', subject: 'broken_unused_flag' },
+                { id: 'target_lifecycle', description: 'Target is consumed', type: 'typed_lifecycle', entityKind: 'anchor_handle', subject: 'broken_unused_target' },
+            ],
         });
         const verifier = new SemanticVerifier();
-        const result = await verifier.verify(root, [eventFile, locFile], graph, {
-            execute: async (toolName) => toolName === 'query_references' ? { references: [] } : { ok: false },
-        });
+        const result = await verifier.verify(root, [eventFile, locFile], graph, semanticTools(
+            async (toolName) => toolName === 'query_references' ? { references: [] } : { ok: false },
+        ));
 
         expect(result.passed).to.equal(false);
-        expect(result.issues.map(issue => issue.code)).to.include.members([
-            'duplicate_target_assignment',
-            'unused_flag',
-            'unused_event_target',
-            'orphan_localisation',
-        ]);
+        expect(result.acceptanceFailures).to.have.length(2);
+        expect(result.issues.filter(issue => issue.code === 'acceptance_failed')).to.have.length(2);
+        expect(result.issues.some(issue => issue.code === 'duplicate_target_assignment' || issue.code === 'orphan_localisation')).to.equal(false);
     });
 
     it('proves producer-consumer edges for a connected event and scripted effect', async () => {
@@ -61,18 +91,18 @@ describe('SemanticVerifier', () => {
         fs.writeFileSync(effectFile, [
             'connected_create_fleet = {',
             '  create_fleet = { effect = { set_owner = root } }',
-            '  save_global_event_target_as = connected_fleet',
+            '  store_anchor = connected_fleet',
             '}',
         ].join('\n'));
         fs.writeFileSync(eventFile, [
             'namespace = connected',
-            'country_event = {',
+            'realm_event = {',
             '  id = connected.1',
-            '  trigger = { has_global_flag = connected_enabled }',
+            '  trigger = { has_realm_flag = connected_enabled }',
             '  immediate = {',
-            '    set_global_flag = connected_enabled',
+            '    set_realm_flag = connected_enabled',
             '    connected_create_fleet = { }',
-            '    exists = event_target:connected_fleet',
+            '    uses_anchor = connected_fleet',
             '  }',
             '}',
         ].join('\n'));
@@ -82,19 +112,19 @@ describe('SemanticVerifier', () => {
             expectsFileChanges: true,
             requiredEdges: [
                 { from: 'connected.1', relation: 'call', to: 'connected_create_fleet' },
-                { from: 'connected_create_fleet', relation: 'save', to: 'connected_fleet' },
-                { from: 'connected.1', relation: 'read', to: 'connected_fleet' },
+                { from: 'connected_create_fleet', relation: 'set', to: 'connected_fleet' },
+                { from: 'connected.1', relation: 'reference', to: 'connected_fleet' },
             ],
             acceptanceCriteria: [
                 { id: 'event_exists', description: 'Event exists', type: 'entity_exists', subject: 'connected.1' },
-                { id: 'target_lifecycle', description: 'Fleet target is saved and read', type: 'target_lifecycle', subject: 'connected_fleet' },
+                { id: 'target_lifecycle', description: 'Typed target is stored and referenced', type: 'typed_lifecycle', entityKind: 'anchor_handle', subject: 'connected_fleet' },
             ],
         });
         TaskGraphEngine.addNode(graph, 'effect', 'build', 'build effect', {
             plannedFiles: [effectFile],
             produces: [
                 { kind: 'scripted_effect', id: 'connected_create_fleet', operation: 'define' },
-                { kind: 'event_target', id: 'connected_fleet', operation: 'save' },
+                { kind: 'anchor_handle', id: 'connected_fleet', operation: 'set' },
             ],
         });
         TaskGraphEngine.addNode(graph, 'event', 'build', 'build event', {
@@ -102,11 +132,11 @@ describe('SemanticVerifier', () => {
             produces: [{ kind: 'event', id: 'connected.1', operation: 'define' }],
             consumes: [
                 { kind: 'scripted_effect', id: 'connected_create_fleet', operation: 'call' },
-                { kind: 'event_target', id: 'connected_fleet', operation: 'read' },
+                { kind: 'anchor_handle', id: 'connected_fleet', operation: 'reference' },
             ],
         });
 
-        const result = await new SemanticVerifier().verify(root, [eventFile, effectFile], graph);
+        const result = await new SemanticVerifier().verify(root, [eventFile, effectFile], graph, semanticTools());
         expect(result.passed).to.equal(true, result.report);
         expect(result.acceptanceFailures).to.deep.equal([]);
     });
@@ -126,7 +156,20 @@ describe('SemanticVerifier', () => {
             ],
         });
 
-        const result = await new SemanticVerifier().verify(sampleRoot, [eventFile, effectFile], graph);
+        const sampleCatalog: PdxSemanticCatalog = {
+            ...SEMANTIC_CATALOG,
+            definitionTypes: SEMANTIC_CATALOG.definitionTypes.map(type => type.name === 'event'
+                ? { ...type, typeKeyFilters: ['country_event'] }
+                : type),
+            rules: [
+                ...SEMANTIC_CATALOG.rules,
+                { name: 'country_event', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: 'id', access: 'type', typeName: 'event.country' }] },
+            ],
+        };
+        const result = await new SemanticVerifier().verify(sampleRoot, [eventFile, effectFile], graph, {
+            execute: async () => ({ ok: false }),
+            getPdxSemanticCatalog: async () => sampleCatalog,
+        });
         const edgeEvidence = result.evidence.filter(item =>
             (item.id === 'irm_faction.2' && item.operation === 'define')
             || (item.id === 'faction_set_leader' && (item.operation === 'define' || item.operation === 'call')));
@@ -144,10 +187,10 @@ describe('SemanticVerifier', () => {
         fs.mkdirSync(path.dirname(eventFile), { recursive: true });
         fs.mkdirSync(path.dirname(effectFile), { recursive: true });
         fs.writeFileSync(effectFile, 'duplicate_create = { create_fleet = { } }\n');
-        fs.writeFileSync(eventFile, 'country_event = { id = duplicate.1 immediate = { create_fleet = { } duplicate_create = { } } }\n');
+        fs.writeFileSync(eventFile, 'realm_event = { id = duplicate.1 immediate = { create_fleet = { } duplicate_create = { } } }\n');
         const graph = TaskGraphEngine.createGraph('duplicate', { objective: 'No duplicate work', acceptanceCriteria: [] });
 
-        const result = await new SemanticVerifier().verify(root, [eventFile, effectFile], graph);
+        const result = await new SemanticVerifier().verify(root, [eventFile, effectFile], graph, semanticTools());
         expect(result.issues.some(issue => issue.code === 'duplicate_responsibility')).to.equal(true);
     });
 });

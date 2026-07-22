@@ -8,10 +8,26 @@ import {
     removeFileFromSymbolIndex,
     type WorkspaceSymbolEntry,
 } from '../../extension/indexing/workspaceSymbolParser';
+import type { PdxDefinitionType } from '../../shared/pdxSemanticCatalog';
+
+const definitionTypes: PdxDefinitionType[] = [
+    { name: 'event', paths: ['events'], nameField: 'id', typeKeyFilters: ['country_event'] },
+    { name: 'scripted_trigger', paths: ['common/scripted_triggers'], typeKeyFilters: [] },
+    { name: 'scripted_effect', paths: ['common/scripted_effects'], typeKeyFilters: [] },
+    { name: 'technology', paths: ['common/technology'], typeKeyFilters: [] },
+    { name: 'special_project', paths: ['common/special_projects'], typeKeyFilters: [] },
+    { name: 'event_chain', paths: ['common/event_chains'], typeKeyFilters: [] },
+    { name: 'tradition', paths: ['common/traditions'], typeKeyFilters: [] },
+    { name: 'section_template', paths: ['common/section_templates'], typeKeyFilters: [] },
+];
+
+function parseScript(content: string, filePath: string, options: Parameters<typeof parseWorkspaceSymbols>[2] = {}) {
+    return parseWorkspaceSymbols(content, filePath, { ...options, definitionTypes });
+}
 
 describe('Workspace Symbol Parser (indexing)', () => {
-    it('parses event IDs and namespaces from event files', () => {
-        const entries = parseWorkspaceSymbols([
+    it('parses name_field identities and namespaces from typed files', () => {
+        const entries = parseScript([
             'namespace = kuat',
             'country_event = {',
             '    id = kuat.100',
@@ -26,13 +42,13 @@ describe('Workspace Symbol Parser (indexing)', () => {
             line: 3,
             source: 'script',
             container: 'country_event',
-            category: 'event',
+            category: 'game_entity',
         });
     });
 
     it('infers common scripted trigger and technology symbols', () => {
-        const trigger = parseWorkspaceSymbols('kuat_is_force_user = {\n}', '/mod/common/scripted_triggers/kuat.txt');
-        const tech = parseWorkspaceSymbols('tech_kuat_reactor = {\n}', '/mod/common/technology/kuat.txt');
+        const trigger = parseScript('kuat_is_force_user = {\n}', '/mod/common/scripted_triggers/kuat.txt');
+        const tech = parseScript('tech_kuat_reactor = {\n}', '/mod/common/technology/kuat.txt');
 
         expect(trigger[0]).to.deep.include({ name: 'kuat_is_force_user', kind: 'scripted_trigger', category: 'game_entity' });
         expect(tech[0]).to.deep.include({ name: 'tech_kuat_reactor', kind: 'technology', category: 'game_entity' });
@@ -40,10 +56,10 @@ describe('Workspace Symbol Parser (indexing)', () => {
 
     it('infers additional common entity kinds', () => {
         const entries = [
-            parseWorkspaceSymbols('kuat_project = {\n}', '/mod/common/special_projects/kuat.txt')[0],
-            parseWorkspaceSymbols('kuat_chain = {\n}', '/mod/common/event_chains/kuat.txt')[0],
-            parseWorkspaceSymbols('kuat_tradition = {\n}', '/mod/common/traditions/kuat.txt')[0],
-            parseWorkspaceSymbols('KUAT_SECTION = {\n}', '/mod/common/section_templates/kuat.txt')[0],
+            parseScript('kuat_project = {\n}', '/mod/common/special_projects/kuat.txt')[0],
+            parseScript('kuat_chain = {\n}', '/mod/common/event_chains/kuat.txt')[0],
+            parseScript('kuat_tradition = {\n}', '/mod/common/traditions/kuat.txt')[0],
+            parseScript('KUAT_SECTION = {\n}', '/mod/common/section_templates/kuat.txt')[0],
         ];
 
         expect(entries.map(entry => entry?.kind)).to.deep.equal([
@@ -58,7 +74,7 @@ describe('Workspace Symbol Parser (indexing)', () => {
     });
 
     it('parses named sprite and sound assets', () => {
-        const entries = parseWorkspaceSymbols([
+        const entries = parseScript([
             'spriteTypes = {',
             '    spriteType = {',
             '        name = "GFX_evt_kuat_echo"',
@@ -86,7 +102,7 @@ describe('Workspace Symbol Parser (indexing)', () => {
     });
 
     it('attaches metadata and lightweight same-file references', () => {
-        const entries = parseWorkspaceSymbols([
+        const entries = parseScript([
             'kuat_effect = {',
             '    add_modifier = kuat_effect',
             '}',
@@ -137,7 +153,7 @@ describe('Workspace Symbol Parser (indexing)', () => {
     });
 
     it('defers reference collection until matching files are supplied', () => {
-        const entries = parseWorkspaceSymbols([
+        const entries = parseScript([
             'kuat_effect = {',
             '    add_modifier = kuat_effect',
             '}',
@@ -191,5 +207,25 @@ describe('Workspace Symbol Parser (indexing)', () => {
 
         expect(index.has('kuat.100')).to.equal(false);
         expect(index.has('kuat.101')).to.equal(true);
+    });
+
+    it('uses arbitrary active TypeDefs and does not infer a game kind without them', () => {
+        const custom = parseWorkspaceSymbols('alpha = {\n    key = custom.1\n}', '/mod/common/ritual_definitions/a.txt', {
+            definitionTypes: [{
+                name: 'ritual_definition',
+                paths: ['common/ritual_definitions'],
+                nameField: 'key',
+                typeKeyFilters: [],
+            }],
+        });
+        expect(custom[0]).to.deep.include({
+            name: 'custom.1',
+            kind: 'ritual_definition',
+            container: 'alpha',
+            category: 'game_entity',
+        });
+
+        const fallback = parseWorkspaceSymbols('tech_alpha = {\n}', '/mod/common/technology/a.txt');
+        expect(fallback[0]).to.deep.include({ kind: 'pdx_block', category: 'script' });
     });
 });

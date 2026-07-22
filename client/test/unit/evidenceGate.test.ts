@@ -31,12 +31,13 @@ function cleanupWorkspace(workspaceRoot: string | undefined): void {
 // Pure modules under test (no 'vscode' imports at runtime).
 import {
     extractWritePayload,
-    extractClaimsFromText,
-    extractLocalDefinitions,
+    extractClaimsFromText as extractClaimsFromTextWithCatalog,
+    extractLocalDefinitions as extractLocalDefinitionsWithCatalog,
     isPdxScriptTarget,
     MAX_CLAIM_CANDIDATES,
     MAX_EXTRACT_CHARS,
 } from '../../extension/ai/evidence/claimExtractor';
+import type { PdxSemanticCatalog } from '../../extension/ai/types';
 import {
     EvidenceGate,
     computeRulesFingerprint,
@@ -48,6 +49,48 @@ import {
 } from '../../extension/ai/evidence/evidenceTypes';
 import { reducePolicyActivity } from '../../extension/ai/runner/runReducers';
 import type { AgentRunEvent } from '../../extension/ai/runner/runLedger';
+
+const TEST_SEMANTIC_CATALOG: PdxSemanticCatalog = {
+    status: 'ready',
+    source: 'lsp',
+    gameProfile: 'test',
+    rules: [
+        { name: 'country_event', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: 'id', access: 'type', typeName: 'event.country' }] },
+        { name: 'planet_event', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: 'id', access: 'type', typeName: 'event.planet' }] },
+        { name: 'every_country', category: 'scope_change', supportedScopes: [], pushScope: 'country', valueReferences: [] },
+        { name: 'add_opinion_modifier', category: 'effect', supportedScopes: ['country'], valueReferences: [{ argumentPath: 'modifier', access: 'type', typeName: 'static_modifier' }] },
+        { name: 'add_modifier', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: 'modifier', access: 'type', typeName: 'static_modifier' }] },
+        { name: 'has_modifier', category: 'trigger', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'type', typeName: 'static_modifier' }] },
+        { name: 'set_variable', category: 'effect', supportedScopes: [], valueReferences: [] },
+        { name: 'always', category: 'trigger', supportedScopes: ['all'], valueReferences: [] },
+        { name: 'has_technology', category: 'trigger', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'value', typeName: 'technology' }] },
+        { name: 'give_technology', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'value', typeName: 'technology' }, { argumentPath: 'tech', access: 'value', typeName: 'technology' }] },
+        { name: 'has_trait', category: 'trigger', supportedScopes: ['leader'], valueReferences: [{ argumentPath: '$value', access: 'value', typeName: 'trait' }] },
+        { name: 'add_trait', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'value', typeName: 'trait' }, { argumentPath: 'trait', access: 'value', typeName: 'trait' }] },
+        { name: 'has_building', category: 'trigger', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'value', typeName: 'building' }] },
+        { name: 'add_building', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'value', typeName: 'building' }, { argumentPath: 'building', access: 'value', typeName: 'building' }] },
+        { name: 'ship_hull_mult', category: 'modifier', supportedScopes: [], valueReferences: [] },
+        { name: '<scripted_effect>', category: 'effect', supportedScopes: [], valueReferences: [] },
+        { name: '<scripted_trigger>', category: 'trigger', supportedScopes: [], valueReferences: [] },
+    ],
+    definitionTypes: [
+        { name: 'event', paths: ['events'], nameField: 'id', typeKeyFilters: ['country_event', 'planet_event'] },
+        { name: 'on_action', paths: ['common/on_actions'], typeKeyFilters: [] },
+        { name: 'scripted_effect', paths: ['common/scripted_effects'], typeKeyFilters: [] },
+        { name: 'scripted_trigger', paths: ['common/scripted_triggers'], typeKeyFilters: [] },
+        { name: 'static_modifier', paths: ['common/static_modifiers'], typeKeyFilters: [] },
+        { name: 'technology', paths: ['common/technology', 'common/technologies'], typeKeyFilters: [] },
+        { name: 'building', paths: ['common/buildings'], typeKeyFilters: [] },
+        { name: 'trait', paths: ['common/traits'], typeKeyFilters: [] },
+        { name: 'starbase_building', paths: ['common/starbase_buildings'], typeKeyFilters: [] },
+    ],
+    warnings: [],
+};
+
+const extractClaimsFromText = (payload: Parameters<typeof extractClaimsFromTextWithCatalog>[0]) =>
+    extractClaimsFromTextWithCatalog(payload, TEST_SEMANTIC_CATALOG);
+const extractLocalDefinitions = (payload: Parameters<typeof extractLocalDefinitionsWithCatalog>[0]) =>
+    extractLocalDefinitionsWithCatalog(payload, TEST_SEMANTIC_CATALOG);
 
 describe('claimExtractor', () => {
     it('extracts write payloads per tool schema and skips non-PDX targets', () => {
@@ -98,11 +141,9 @@ describe('claimExtractor', () => {
         expect(addOpinion[0]!.blocking).to.equal(true);
         expect(addOpinion[0]!.subject).to.deep.include({ type: 'rule', name: 'add_opinion_modifier', currentScope: 'country' });
 
-        // Top-level event definition yields a non-blocking call_chain note only.
-        const entry = byName('my_event.1');
-        expect(entry).to.have.lengthOf(1);
-        expect(entry[0]!.kind).to.equal('call_chain');
-        expect(entry[0]!.blocking).to.equal(false);
+        // A declaration does not imply any generic reachability requirement.
+        // Task graph contracts and CWTools topology own those relationships.
+        expect(byName('my_event.1')).to.have.lengthOf(0);
     });
 
     it('derives event root scopes and never treats grammar containers as semantic calls', () => {
@@ -144,14 +185,12 @@ describe('claimExtractor', () => {
         expect(extractLocalDefinitions(triggerPayload)).to.deep.equal([{ id: 'my_trigger', kind: 'scripted_trigger' }]);
     });
 
-    it('extracts triggered-only reachability and bare on_action event references', () => {
+    it('extracts definitions without regex-inferred reachability or bare-list references', () => {
         const eventPayload = extractWritePayload('write_file', {
             file: 'events/my_events.txt',
             content: 'country_event = { id = my_event.10 is_triggered_only = yes }',
         })!;
-        const entry = extractClaimsFromText(eventPayload).find(claim => claim.kind === 'call_chain');
-        expect(entry?.blocking).to.equal(true);
-        expect(entry?.subject).to.deep.include({ entryId: 'my_event.10', requiresCaller: true });
+        expect(extractClaimsFromText(eventPayload).some(claim => claim.kind === 'call_chain')).to.equal(false);
         expect(extractLocalDefinitions(eventPayload)).to.deep.equal([{ id: 'my_event.10', kind: 'event' }]);
 
         const onActionPayload = extractWritePayload('write_file', {
@@ -161,7 +200,7 @@ describe('claimExtractor', () => {
         const references = extractClaimsFromText(onActionPayload)
             .filter(claim => claim.kind === 'reference_exists')
             .map(claim => claim.subject.type === 'reference' ? claim.subject.id : '');
-        expect(references).to.include.members(['my_event.10', 'my_event.11']);
+        expect(references).to.deep.equal([]);
     });
 
     it('treats nested event blocks as id references and modifier blocks as modifier usages', () => {
@@ -190,7 +229,7 @@ describe('claimExtractor', () => {
         expect(modRef!.subject).to.deep.include({ refKind: 'static_modifier' });
 
         const scriptedCall = claims.find(c => c.kind === 'symbol_exists' && c.claim.includes('my_scripted_effect'));
-        expect(scriptedCall, 'boolean-style scripted call candidate').to.not.equal(undefined);
+        expect(scriptedCall, 'untyped container must not manufacture a callable namespace').to.equal(undefined);
 
         // `name = my_loc_key` is an option argument, not a scripted call.
         expect(claims.some(c => c.claim.includes("'name'"))).to.equal(false);
@@ -331,7 +370,6 @@ function makeGateDeps(overrides: {
     indexRevision?: () => string;
     now?: () => number;
     totalTimeoutMs?: number;
-    references?: Array<{ file: string; line?: number; context?: string }>;
 }) {
     const lspCalls = overrides.lspCalls ?? [];
     const lsp = overrides.lsp ?? {};
@@ -373,12 +411,16 @@ function makeGateDeps(overrides: {
                 .filter(r => r.name.toLowerCase().startsWith(name.toLowerCase().slice(0, 4)))
                 .map(r => ({ ...r }));
         },
+        querySemanticCatalog: async () => {
+            return lsp.throwAll
+                ? { ...TEST_SEMANTIC_CATALOG, source: 'cwt_fallback' as const }
+                : TEST_SEMANTIC_CATALOG;
+        },
         indexLookup: async (name: string) => ({
             found: overrides.indexEntries?.has(name) ?? false,
             fileVersion: 7,
             indexUpdatedAt: 1000,
         }),
-        queryReferences: async () => overrides.references ?? [],
         getIndexRevision: overrides.indexRevision ?? (() => '1000:7:ready'),
         rulesRoots: [] as string[],
     };
@@ -389,11 +431,16 @@ describe('EvidenceGate', () => {
     beforeEach(() => { workspaceRoot = makeWorkspace(); });
     afterEach(() => { cleanupWorkspace(workspaceRoot); });
 
-    async function evaluate(content: string, deps: ReturnType<typeof makeGateDeps>, mode: 'shadow' | 'enforce' = 'shadow') {
+    async function evaluate(
+        content: string,
+        deps: ReturnType<typeof makeGateDeps>,
+        mode: 'shadow' | 'enforce' = 'shadow',
+        targetRelative = path.join('events', 'a.txt'),
+    ) {
         const gate = new EvidenceGate(deps);
         const decision = await gate.evaluate({
             toolName: 'write_file',
-            targetFile: path.join(workspaceRoot, 'events', 'a.txt'),
+            targetFile: path.join(workspaceRoot, targetRelative),
             text: content,
             mode,
         });
@@ -402,7 +449,13 @@ describe('EvidenceGate', () => {
     }
 
     it('verifies a fully legal write (syntax + rule + scope + scripted reference)', async () => {
-        const deps = makeGateDeps({ workspaceRoot, lsp: { definitions: new Set(['my_scripted_effect']) } });
+        const deps = makeGateDeps({
+            workspaceRoot,
+            lsp: {
+                definitions: new Set(['my_scripted_effect', 'x']),
+                definitionTypes: new Map([['x', 'static_modifier']]),
+            },
+        });
         const decision = await evaluate([
             'effect = {',
             '  every_country = {',
@@ -444,7 +497,12 @@ describe('EvidenceGate', () => {
 
     it('conflicts when neither CWT rules nor any index knows an effect name', async () => {
         const deps = makeGateDeps({ workspaceRoot });
-        const decision = await evaluate('effect = { totally_fake_effect = yes }', deps, 'enforce');
+        const decision = await evaluate(
+            'wrapper = { totally_fake_effect = yes }',
+            deps,
+            'enforce',
+            path.join('common', 'scripted_effects', 'a.txt'),
+        );
 
         expect(decision.verdict).to.equal('block');
         const ref = decision.claims.find(c => c.kind === 'reference_exists' && c.claim.includes('totally_fake_effect'));
@@ -453,9 +511,14 @@ describe('EvidenceGate', () => {
         expect(missing?.suggestedQueries.some(q => q.includes('verify_pdx_identifier'))).to.equal(true);
     });
 
-    it('verifies unknown effect names as scripted_effect definitions via the LSP', async () => {
+    it('verifies unknown rule names through the callable TypeDef declared by CWT', async () => {
         const deps = makeGateDeps({ workspaceRoot, lsp: { definitions: new Set(['my_custom_effect']) } });
-        const decision = await evaluate('effect = { my_custom_effect = yes }', deps, 'enforce');
+        const decision = await evaluate(
+            'wrapper = { my_custom_effect = yes }',
+            deps,
+            'enforce',
+            path.join('common', 'scripted_effects', 'a.txt'),
+        );
         expect(decision.verdict).to.equal('allow');
         const ref = decision.claims.find(c => c.kind === 'reference_exists' && c.claim.includes('my_custom_effect'));
         expect(ref?.status).to.equal('verified');
@@ -469,7 +532,12 @@ describe('EvidenceGate', () => {
                 definitionTypes: new Map([['my_custom_effect', 'technology']]),
             },
         });
-        const decision = await evaluate('effect = { my_custom_effect = yes }', deps, 'enforce');
+        const decision = await evaluate(
+            'wrapper = { my_custom_effect = yes }',
+            deps,
+            'enforce',
+            path.join('common', 'scripted_effects', 'a.txt'),
+        );
         const ref = decision.claims.find(c => c.kind === 'reference_exists' && c.claim.includes('my_custom_effect'));
         expect(ref?.status).to.equal('conflict');
         expect(ref?.detail).to.include("type 'technology'");
@@ -527,7 +595,12 @@ describe('EvidenceGate', () => {
     it('rejects fuzzy rule suggestions that are not exact matches', async () => {
         const deps = makeGateDeps({ workspaceRoot });
         // 'add_opinion' fuzzily suggests 'add_opinion_modifier' but must not verify.
-        const decision = await evaluate('effect = { add_opinion = yes }', deps, 'enforce');
+        const decision = await evaluate(
+            'wrapper = { add_opinion = yes }',
+            deps,
+            'enforce',
+            path.join('common', 'scripted_effects', 'fuzzy.txt'),
+        );
         expect(decision.verdict).to.equal('block');
         expect(decision.claims.some(c => c.kind === 'symbol_exists' && c.status === 'verified')).to.equal(false);
     });
@@ -601,21 +674,14 @@ describe('EvidenceGate', () => {
         expect(decision.verdict).to.equal('allow');
     });
 
-    it('allows a triggered-only event before a future caller and verifies an existing external caller', async () => {
+    it('leaves declaration reachability to the task graph and typed project topology', async () => {
         const content = 'country_event = { id = local_event.3 is_triggered_only = yes }';
         const unreachable = await evaluate(content, makeGateDeps({ workspaceRoot }), 'enforce');
-        const missingCall = unreachable.claims.find(claim => claim.kind === 'call_chain');
-        expect(missingCall?.status).to.equal('unknown');
-        expect(missingCall?.detail).to.include('dependent Agent');
+        expect(unreachable.claims.some(claim => claim.kind === 'call_chain')).to.equal(false);
         expect(unreachable.verdict).to.equal('allow');
 
-        const reachable = await evaluate(content, makeGateDeps({
-            workspaceRoot,
-            references: [{ file: 'common/on_actions/my_on_actions.txt', line: 8, context: 'events = { local_event.3 }' }],
-        }), 'enforce');
-        const call = reachable.claims.find(claim => claim.kind === 'call_chain');
-        expect(call?.status).to.equal('verified');
-        expect(call?.sources[0]?.tool).to.equal('project.queryReferences');
+        const reachable = await evaluate(content, makeGateDeps({ workspaceRoot }), 'enforce');
+        expect(reachable.claims.some(claim => claim.kind === 'call_chain')).to.equal(false);
         expect(reachable.verdict).to.equal('allow');
     });
 
@@ -701,7 +767,12 @@ describe('EvidenceGate', () => {
 
     it('produces machine-readable missing evidence with suggested queries', async () => {
         const deps = makeGateDeps({ workspaceRoot });
-        const decision = await evaluate('effect = { totally_fake_effect = yes }', deps, 'enforce');
+        const decision = await evaluate(
+            'wrapper = { totally_fake_effect = yes }',
+            deps,
+            'enforce',
+            path.join('common', 'scripted_effects', 'missing.txt'),
+        );
         expect(decision.missingEvidence.length).to.be.greaterThan(0);
         for (const item of decision.missingEvidence) {
             expect(item.status).to.be.oneOf(['unknown', 'conflict', 'stale']);
@@ -807,6 +878,11 @@ const vscodeStub = {
         getDiagnostics: () => [],
     },
     DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+    CancellationTokenSource: class {
+        readonly token = {};
+        cancel() { /* no-op */ }
+        dispose() { /* no-op */ }
+    },
     commands: {
         executeCommand: async (..._args: unknown[]): Promise<unknown> => undefined,
     },
@@ -865,6 +941,9 @@ function makeFakeLspClient(opts: { definitions?: Set<string>; throwAll?: boolean
         const command = params?.command as string | undefined;
         if (command === 'cwtools.ai.parseFragment') {
             return { ok: true, valid: opts.parseValid !== false, fragments: 1, errors: [] };
+        }
+        if (command === 'cwtools.ai.getSemanticCatalog') {
+            return { ok: true, ...TEST_SEMANTIC_CATALOG };
         }
         if (command === 'cwtools.ai.queryDefinitionByName') {
             const id = String(params?.arguments?.[0] ?? '');

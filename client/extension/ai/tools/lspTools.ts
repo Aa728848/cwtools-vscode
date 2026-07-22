@@ -23,12 +23,15 @@ import type {
     WorkspaceSymbolsResult,
     RuleInfo,
     QueryCwtSchemaResult,
+    CwtRuleValueReference,
+    PdxSemanticCatalog,
 } from '../types';
 import { isPathInsideOrEqual } from '../workspaceSandbox';
 import { diagnosticMetadata } from './diagnosticMetadata';
 import { stripLineNumberPrefixes } from './replacerSuite';
 import { diagnosticCodeString, diagnosticMatchesIgnoredKey } from '../../diagnosticI18n';
 import { readProjectProfile } from '../projectProfile';
+import { parsePdxSemanticCatalog } from '../../../shared/pdxSemanticCatalog';
 
 type CwtSchemaEntitySummary = NonNullable<QueryCwtSchemaResult['entities']>[number];
 
@@ -677,48 +680,41 @@ export class LspToolHandler {
             // Fallback: File-system scan of local mod files
             const instances: Array<{ id: string; file: string; vanilla?: boolean }> = [];
 
-            const typeToDir: Record<string, string> = {
-                technology: 'common/technology',
-                building: 'common/buildings',
-                trait: 'common/traits',
-                authority: 'common/governments/authorities',
-                ethic: 'common/ethics',
-                static_modifier: 'common/static_modifiers',
-                scripted_modifier: 'common/scripted_modifiers',
-                pop_job: 'common/pop_jobs',
-                scripted_trigger: 'common/scripted_triggers',
-                scripted_effect: 'common/scripted_effects',
-                event: 'events',
-                decision: 'common/decisions',
-                edict: 'common/edicts',
-                tradition: 'common/traditions',
-                ascension_perk: 'common/ascension_perks',
-                civic: 'common/governments/civics',
-                origin: 'common/governments/origins',
-                species_trait: 'common/species_classes',
-                component_template: 'common/component_templates',
-            };
-
-            const searchDir = typeToDir[args.typeName];
-            if (searchDir) {
+            const schema = await this.queryCwtSchema({ name: args.typeName, limit: 20 });
+            const entitySchemas = (schema.entities ?? [])
+                .filter(entity => entity.name.toLowerCase() === args.typeName.toLowerCase() && !!entity.path)
+                .sort((a, b) => (a.path ?? '').localeCompare(b.path ?? ''));
+            const seenDirectories = new Set<string>();
+            for (const entitySchema of entitySchemas) {
+                const searchDir = entitySchema.path!
+                    .replace(/\\/g, '/')
+                    .replace(/^game\//i, '')
+                    .replace(/^\/+|\/+$/g, '');
+                if (!searchDir || seenDirectories.has(searchDir.toLowerCase())) continue;
+                seenDirectories.add(searchDir.toLowerCase());
                 const fullDir = path.join(this.ctx.workspaceRoot, searchDir);
                 if (fs.existsSync(fullDir)) {
                     const files = this.findFilesFn(fullDir, '.txt');
                     for (const file of files) {
                         try {
                             const content = fs.readFileSync(file, 'utf-8');
-                            const keyPattern = /^(\w[\w.-]*)\s*=/gm;
+                            const nameField = entitySchema.nameField?.replace(/[^A-Za-z0-9_.-]/g, '');
+                            const escapedNameField = nameField?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                            const keyPattern = escapedNameField
+                                ? new RegExp(`^\\s*${escapedNameField}\\s*=\\s*([A-Za-z_][\\w.-]*)`, 'gm')
+                                : /^(\w[\w.-]*)\s*=/gm;
                             let match;
                             while ((match = keyPattern.exec(content)) !== null && instances.length < limit) {
-                                 
                                 const id = match[1]!;
-                                if (!args.filter || id.includes(args.filter)) {
-                                    instances.push({ id, file: path.relative(this.ctx.workspaceRoot, file) });
+                                if (!args.filter || id.toLowerCase().includes(args.filter.toLowerCase())) {
+                                    instances.push({ id, file: relativeWorkspacePath(this.ctx.workspaceRoot, file) });
                                 }
                             }
                         } catch { /* skip unreadable files */ }
+                        if (instances.length >= limit) break;
                     }
                 }
+                if (instances.length >= limit) break;
             }
 
             return {
@@ -895,6 +891,100 @@ export class LspToolHandler {
             entityCount: entities.length,
             warnings,
             _hint: 'CWT schema is the primary legality source. Use entities for active type/path/subtype evidence, and use snippets for exact schema keys and comments. schemaKeys are CWT metadata keys, not necessarily direct game-script fields. If the schema is structural only, confirm intended usage with a verified vanilla archetype or mature project example before writing, then validate with completions/diagnostics.',
+        };
+    }
+
+    /**
+     * Full host-only semantic catalog for deterministic verification. Unlike
+     * query_rules, this is not model-facing and is therefore not truncated to
+     * the best 80 matches.
+     */
+    async getPdxSemanticCatalog(
+        targetFiles: readonly string[],
+        ruleNames: readonly string[] = [],
+    ): Promise<PdxSemanticCatalog> {
+        try {
+            const raw = await this.lspRequest<unknown>(
+                'cwtools.ai.getSemanticCatalog',
+                [[...new Set(ruleNames.map(name => name.toLowerCase()))].sort().slice(0, 4_000), [...targetFiles].slice(0, 32)],
+                5_000,
+            );
+            const parsed = parsePdxSemanticCatalog(raw);
+            if (parsed) return parsed;
+        } catch {
+            // Older/unavailable LSP versions fall back to the same active CWT source.
+        }
+        return this.getPdxSemanticCatalogFallback(targetFiles, ruleNames);
+    }
+
+    private async getPdxSemanticCatalogFallback(
+        targetFiles: readonly string[],
+        ruleNames: readonly string[],
+    ): Promise<PdxSemanticCatalog> {
+        const cache = await this.getCwtRulesCache();
+        const requestedNames = new Set(ruleNames.map(name => name.toLowerCase()));
+        const allRules = [
+            ...cache.triggers,
+            ...cache.effects,
+            ...cache.scopeChanges,
+            ...cache.modifiers,
+        ];
+        const rules = allRules
+            .filter(rule => {
+                const name = rule.name.toLowerCase();
+                return requestedNames.size === 0
+                    || requestedNames.has(name)
+                    || (name.startsWith('<') && name.endsWith('>'));
+            })
+            .map(rule => ({
+                name: rule.name.toLowerCase(),
+                category: rule.hardFacts?.category ?? rule.category ?? 'effect',
+                supportedScopes: [...(rule.hardFacts?.supportedScopes ?? rule.scopes)].sort(),
+                pushScope: rule.hardFacts?.pushScope,
+                valueReferences: [...(rule.hardFacts?.valueReferences ?? [])],
+            }))
+            .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+
+        const targets = Array.from(new Set(targetFiles
+            .filter(file => typeof file === 'string' && file.trim().length > 0)
+            .map(file => path.resolve(this.ctx.workspaceRoot, file))))
+            .sort((a, b) => a.localeCompare(b))
+            .slice(0, 32);
+        const definitions = new Map<string, PdxSemanticCatalog['definitionTypes'][number]>();
+        const warnings: string[] = [];
+        for (const target of targets) {
+            const schema = await this.queryCwtSchema({ target, limit: 8 });
+            for (const warning of schema.warnings ?? []) {
+                if (!warnings.includes(warning)) warnings.push(warning);
+            }
+            for (const entity of schema.entities ?? []) {
+                const normalizedPath = entity.path?.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').toLowerCase();
+                const typeKeyFilters = [...(entity.typeKeyFilters ?? [])]
+                    .map(value => value.toLowerCase())
+                    .sort();
+                const key = entity.name.toLowerCase();
+                const existing = definitions.get(key);
+                definitions.set(key, {
+                    name: entity.name.toLowerCase(),
+                    paths: Array.from(new Set([...(existing?.paths ?? []), ...(normalizedPath ? [normalizedPath] : [])])).sort(),
+                    nameField: existing?.nameField ?? entity.nameField?.toLowerCase(),
+                    typeKeyFilters: Array.from(new Set([...(existing?.typeKeyFilters ?? []), ...typeKeyFilters])).sort(),
+                });
+            }
+        }
+        const definitionTypes = [...definitions.values()]
+            .sort((a, b) => a.name.localeCompare(b.name));
+        const hasRules = rules.length > 0;
+        const hasSchemas = definitionTypes.length > 0;
+        return {
+            status: hasRules && hasSchemas ? 'ready' : hasRules || hasSchemas ? 'partial' : 'unavailable',
+            source: 'cwt_fallback',
+            gameProfile: this.resolveRulesGameId(),
+            rulesGeneration: this.cwtRulesGeneration,
+            rulesContentHash: this.cwtRulesContentHash,
+            rules,
+            definitionTypes,
+            warnings: warnings.slice(0, 20),
         };
     }
 
@@ -1382,6 +1472,7 @@ export class LspToolHandler {
     }): CwtSchemaEntitySummary {
         const pathMatch = args.block.match(/^\s*path\s*=\s*"([^"]+)"/mi)
             ?? args.block.match(/^\s*path\s*=\s*([^\s#]+)/mi);
+        const nameFieldMatch = args.block.match(/^\s*name_field\s*=\s*"?([^\s#"]+)"?/mi);
         const graphRelatedMatch = args.block.match(/^\s*graph_related_types\s*=\s*\{([^}]+)\}/mi);
         const schemaKeys: string[] = [];
         for (const line of args.blockLines) {
@@ -1397,6 +1488,10 @@ export class LspToolHandler {
             .map(match => match[1]?.trim() ?? '')
             .filter((value, index, all) => value.length > 0 && all.indexOf(value) === index)
             .slice(0, 40);
+        const typeKeyFilters = Array.from(args.block.matchAll(/^\s*##\s*type_key_filter\s*=\s*([^\s#}]+)/gmi))
+            .map(match => match[1]?.replace(/^"|"$/g, '').trim() ?? '')
+            .filter((value, index, all) => value.length > 0 && all.indexOf(value) === index)
+            .slice(0, 80);
         const graphRelatedText = graphRelatedMatch?.[1];
         const graphRelatedTypes = graphRelatedText
             ? graphRelatedText
@@ -1410,11 +1505,13 @@ export class LspToolHandler {
         return {
             name: args.name,
             path: pathMatch?.[1]?.trim(),
+            nameField: nameFieldMatch?.[1]?.trim(),
             ruleFile: args.filePath,
             relativeRuleFile: args.relativeRuleFile,
             sourceRoot: args.sourceRoot,
             line: args.startLine,
             subtypes,
+            typeKeyFilters,
             schemaKeys,
             graphRelatedTypes,
             matchedBy: [],
@@ -1428,8 +1525,10 @@ export class LspToolHandler {
         const haystack = [
             summary.name,
             summary.path ?? '',
+            summary.nameField ?? '',
             summary.relativeRuleFile,
             ...summary.subtypes,
+            ...(summary.typeKeyFilters ?? []),
             ...summary.schemaKeys,
             ...(summary.graphRelatedTypes ?? []),
         ].join('\n').toLowerCase().replace(/\\/g, '/');
@@ -1472,7 +1571,7 @@ export class LspToolHandler {
     }
 
     /** Candidate rule files (per config root) feeding the CWT rule cache, in a
-     * fixed order so signatures/hashes are deterministic. Bounded: 11 files per root. */
+     * fixed order so signatures/hashes are deterministic. Bounded: 12 files per root. */
     private static readonly CWT_RULE_FILE_CANDIDATES: readonly string[] = [
         'scopes.cwt',
         path.join('logs', 'trigger_docs.log'),
@@ -1483,6 +1582,7 @@ export class LspToolHandler {
         'effects.cwt',
         'effect.cwt',
         path.join('generated', 'effects.generated.cwt'),
+        'modifier.cwt',
         'scope_changes.cwt',
         path.join('generated', 'scope_changes.generated.cwt'),
     ];
@@ -1490,7 +1590,7 @@ export class LspToolHandler {
     /**
      * Return the parsed CWT rule cache, reloading when any candidate rule
      * file's mtime/size changed (plan §7.4). The signature pass stats a small
-     * bounded file set (11 files per config root) on every call, which is far
+     * bounded file set (12 files per config root) on every call, which is far
      * cheaper than the previous choice of never invalidating at all.
      */
     private async getCwtRulesCache(): Promise<CwtRuleCache> {
@@ -1575,11 +1675,20 @@ export class LspToolHandler {
                 const fullPath = path.join(configPath, file);
                 if (fs.existsSync(fullPath)) this.parseCWTFile(fullPath, 'effect', effects, docs, scopes);
             }
+            const modifierRulesFile = path.join(configPath, 'modifier.cwt');
+            if (fs.existsSync(modifierRulesFile)) this.parseCWTFile(modifierRulesFile, 'modifier', modifiers, docs, scopes);
             for (const file of ['scope_changes.cwt', path.join('generated', 'scope_changes.generated.cwt')]) {
                 const fullPath = path.join(configPath, file);
                 if (fs.existsSync(fullPath)) this.parseCWTFile(fullPath, 'scope_change', scopeChanges, docs, scopes);
             }
-            if (fs.existsSync(modifiersLog)) { this.parseModifiersLog(modifiersLog, modifiers); }
+            if (fs.existsSync(modifiersLog)) {
+                const loggedModifiers: RuleInfo[] = [];
+                this.parseModifiersLog(modifiersLog, loggedModifiers);
+                const modifierNames = new Set(modifiers.map(rule => rule.name.toLowerCase()));
+                for (const rule of loggedModifiers) {
+                    if (!modifierNames.has(rule.name.toLowerCase())) modifiers.push(rule);
+                }
+            }
             if (triggers.length > 0 || effects.length > 0 || scopeChanges.length > 0 || modifiers.length > 0) {
                 return { triggers, effects, scopeChanges, modifiers, scopes };
             }
@@ -1725,7 +1834,7 @@ export class LspToolHandler {
             const content = fs.readFileSync(filePath, 'utf-8');
             const lines = content.split(/\r?\n/);
 
-            const namePattern = /^alias\[(?:trigger|effect):([\w.-]+)\]\s*=\s*(.*)/;
+            const namePattern = /^alias\[(?:trigger|effect|modifier):([^\]]+)\]\s*=\s*(.*)/;
 
             let currentScopes: string[] = [];
             let currentSupportedScopes: string[] = [];
@@ -1817,6 +1926,7 @@ export class LspToolHandler {
                             supportedScopes: scopesForRule,
                             pushScope: currentPushScope,
                             typeKeyFilter: currentTypeKeyFilter,
+                            valueReferences: this.extractCwtValueReferences(cwtBlockText),
                             syntax,
                             cwtSource: { file: filePath, line: i + 1 },
                         },
@@ -1942,33 +2052,6 @@ export class LspToolHandler {
             }
         }
 
-        const wantsEvery = intentTokens.some(token => token === 'iterate' || token === 'every' || token === 'all');
-        if (wantsEvery) {
-            if (ruleName.startsWith('every_')) {
-                score += 45;
-                reasons.push('matches every/all iteration intent');
-            } else if (/^(any|count|random|ordered)_/.test(ruleName)) {
-                score -= 15;
-            }
-        }
-        if (
-            wantsEvery
-            && currentScope === 'fleet'
-            && desiredPushScope === 'ship'
-            && ruleName.includes('_owned_ship')
-            && !intentTokens.includes('controlled')
-        ) {
-            score += 8;
-            reasons.push('preferred default fleet-to-ship iterator variant');
-        }
-        if (intentTokens.includes('random') && ruleName.startsWith('random_')) {
-            score += 20;
-            reasons.push('matches random selection intent');
-        }
-        if (intentTokens.includes('event') && ruleName.endsWith('_event')) {
-            score += 20;
-            reasons.push('matches event firing intent');
-        }
         if (rule.semanticHints?.some(hint => hint.source === 'trigger_docs.log')) {
             score += 3;
         }
@@ -1981,31 +2064,11 @@ export class LspToolHandler {
     }
 
     private expandIntentTokens(intent: string): string[] {
-        const lower = intent.toLowerCase();
-        const direct = lower
-            .split(/[^a-z0-9_.:-]+/i)
-            .map(token => token.trim())
-            .filter(Boolean);
-        const synonyms: Array<[RegExp, string[]]> = [
-            [/舰队|艦隊/g, ['fleet']],
-            [/舰船|艦船|飞船|飛船|船只|船\b/g, ['ship']],
-            [/国家|國家|帝国|帝國/g, ['country']],
-            [/行星|星球/g, ['planet']],
-            [/殖民地/g, ['colony']],
-            [/航母|载体|載體|承载|承載/g, ['carrier']],
-            [/事件/g, ['event']],
-            [/遍历|遍歷|每个|每個|所有/g, ['iterate', 'every']],
-            [/随机|隨機/g, ['random']],
-            [/作用域|范围|範圍/g, ['scope']],
-            [/触发器|觸發器/g, ['trigger']],
-            [/效果|效应|效應/g, ['effect']],
-        ];
-        const expanded = [...direct];
-        for (const [pattern, tokens] of synonyms) {
-            pattern.lastIndex = 0;
-            if (pattern.test(intent)) expanded.push(...tokens);
-        }
-        return Array.from(new Set(expanded));
+        // Keep retrieval language-neutral: game scope/entity translations are
+        // not architecture facts. Exact scope names come from explain_scope /
+        // query_scope, while free text is matched only against active CWT docs.
+        const direct = intent.toLowerCase().match(/[\p{L}\p{N}_.:-]+/gu) ?? [];
+        return Array.from(new Set(direct.map(token => token.trim()).filter(Boolean)));
     }
 
     private extractScopeNamesFromSyntax(syntax: string): string[] {
@@ -2026,9 +2089,37 @@ export class LspToolHandler {
                 if (ch === '{') depth++;
                 else if (ch === '}') depth--;
             }
-            if (i > startIndex && depth <= 0) break;
+            if ((i === startIndex && depth === 0) || (i > startIndex && depth <= 0)) break;
         }
         return collected.join('\n');
+    }
+
+    private extractCwtValueReferences(blockText: string): CwtRuleValueReference[] {
+        const references: CwtRuleValueReference[] = [];
+        const seen = new Set<string>();
+        const add = (argumentPath: string, access: CwtRuleValueReference['access'], typeName: string) => {
+            const normalizedType = typeName.trim().toLowerCase();
+            if (!normalizedType || references.length >= 32) return;
+            const key = `${argumentPath.toLowerCase()}|${access}|${normalizedType}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            references.push({ argumentPath, access, typeName: normalizedType });
+        };
+        for (const rawLine of blockText.split(/\r?\n/)) {
+            const line = rawLine.replace(/#.*$/, '');
+            const assignment = line.match(/^\s*(alias\[(?:trigger|effect|modifier):[^\]]+\]|[A-Za-z_][\w.-]*)\s*=\s*(.*)$/i);
+            if (!assignment?.[1] || assignment[2] === undefined) continue;
+            const argumentPath = assignment[1].toLowerCase().startsWith('alias[') ? '$value' : assignment[1];
+            const rhs = assignment[2].trim();
+            const typed = rhs.match(/^(value_set|value|scope)\[([^\]]+)\]/i);
+            if (typed?.[1] && typed[2]) {
+                add(argumentPath, typed[1].toLowerCase() as CwtRuleValueReference['access'], typed[2]);
+                continue;
+            }
+            const entityType = rhs.match(/^<([^>]+)>/);
+            if (entityType?.[1]) add(argumentPath, 'type', entityType[1]);
+        }
+        return references;
     }
 
     private normalizeInlineSyntax(name: string, raw: string): string {
@@ -2621,10 +2712,9 @@ export class LspToolHandler {
             ].join(' ');
             const normalized = raw
                 .replace(/\bGFX\b/gi, ' ')
-                .replace(/\bevt\b/gi, ' event ')
                 .replace(/[^A-Za-z0-9]+/g, ' ')
                 .toLowerCase();
-            const stop = new Set(['gfx', 'sprite', 'type', 'picture', 'icon', 'image', 'event', 'evt']);
+            const stop = new Set(['gfx', 'sprite', 'type', 'picture', 'icon', 'image']);
             return uniqStrings(normalized.split(/\s+/)
                 .map(t => t.trim())
                 .filter(t => t.length >= 3 && !stop.has(t)));
@@ -2632,7 +2722,6 @@ export class LspToolHandler {
 
         const terms = deriveTerms();
         const query = args.query?.trim() || args.currentValue?.trim() || terms.join(' ') || '';
-        const field = (args.fieldName ?? '').toLowerCase();
         const currentLower = (args.currentValue ?? '').toLowerCase();
         const directName = args.currentValue?.match(/\bGFX_[A-Za-z0-9_.-]+\b/)?.[0];
 
@@ -2661,12 +2750,6 @@ export class LspToolHandler {
                     score += 8;
                     matchedBy.push(`texture:${term}`);
                 }
-            }
-            if (field === 'picture') {
-                if (/\bGFX_evt_/i.test(name) || /event_pictures|event|anomal/i.test(textureFile ?? '')) score += 35;
-                if (/icons?\/|interface\/icons?|button|modifier/i.test(textureFile ?? '')) score -= 30;
-            } else if (field === 'icon') {
-                if (/icons?\/|interface\/icons?|modifier|technology|tradition/i.test(textureFile ?? '')) score += 25;
             }
             return { score, matchedBy: uniqStrings(matchedBy) };
         };
@@ -2819,10 +2902,10 @@ export class LspToolHandler {
             query,
             candidates: sorted,
             searchedRoots: uniqStrings(searchedRoots),
-            _hint: 'Use a returned name as the value for sprite-typed fields. For event `picture = ...`, prefer event-picture candidates such as GFX_evt_* and do not replace it with a raw .dds path.',
+            _hint: 'Use a returned indexed sprite name whose metadata matches the surrounding field and content; do not replace a sprite-typed value with a raw texture path unless the active rule explicitly expects one.',
         };
         if (sorted.length === 0) {
-            result._warning = `No sprite candidates found for "${query}". Retry with broader semantic terms (for example anomaly, archaeology, situation, relic, event) and searchContext="both" before creating or guessing a GFX name.`;
+            result._warning = `No sprite candidates found for "${query}". Retry with broader terms from surrounding project content and indexed metadata, using searchContext="both", before creating or guessing an asset name.`;
         }
         return result;
     }
@@ -3538,7 +3621,7 @@ export class LspToolHandler {
             }
         } else {
             addEvidence('query_types', 'not_found', 'Skipped because typeName was not provided.');
-            addNextStep('For game entities, pass typeName such as event, technology, scripted_trigger, scripted_effect, static_modifier, or building.');
+            addNextStep('For game entities, obtain an exact typeName from query_types or query_cwt_schema and retry.');
         }
 
         const searchExtensions = args.fileExtensions && args.fileExtensions.length > 0

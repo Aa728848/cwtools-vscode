@@ -94,8 +94,8 @@ export const SPRITE_REPAIR_PROTOCOL = [
     '1. Treat it as an asset reference error, not as a generic syntax error.',
     '2. The value for a sprite-typed field must be an existing sprite name (usually `GFX_*`), never a raw `.dds` file path.',
     '3. Before proposing or applying a replacement, call `find_sprite_candidates` with the invalid value, the field name, and `searchContext="both"` so both project and vanilla `.gfx` sprite definitions are available.',
-    '4. Prefer a project sprite candidate first, then a semantically close vanilla candidate. For event `picture = ...`, prefer event-picture sprites such as `GFX_evt_*` or candidates whose texture path indicates event/anomaly/archaeology art; avoid UI icon textures unless the field is actually an icon field.',
-    '5. If no candidate is returned, retry with broader keywords from the surrounding content (for example anomaly, archaeology, situation, relic, event) before declaring it blocked.',
+    '4. Prefer a project sprite candidate first, then a vanilla candidate whose indexed metadata and surrounding field context match the requested role. Do not infer asset families from hard-coded game prefixes.',
+    '5. If no candidate is returned, retry with broader keywords taken from surrounding project content and indexed asset metadata before declaring it blocked.',
     '6. Fix only the offending line with guarded `replace_lines` when line numbers are known, then run `get_diagnostics` on the file again.',
 ].join('\n');
 

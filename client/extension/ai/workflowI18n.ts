@@ -139,7 +139,7 @@ const WORKFLOW_TEXT: Record<string, Record<WorkflowLocale, LocalizedWorkflowText
                 },
                 rewards: {
                     title: 'Reward Implementation',
-                    description: 'Map outcomes to concrete common entity families such as relics, technologies, modifiers, or decisions.',
+                    description: 'Map outcomes to concrete entity families discovered from the active TypeDefs and project knowledge graph.',
                 },
                 blueprint: {
                     title: 'Blueprint',

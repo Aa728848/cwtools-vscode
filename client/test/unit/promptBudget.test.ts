@@ -56,7 +56,7 @@ describe('AI static prompt budgets', () => {
             const tools = runnerPolicy.filterToolDefinitionsForStage(modeTools, 'build', buildStage);
             expect(tools.length, `${buildStage} tool count`).to.be.within(8, 15);
             expect(measure(buildStage, false), `${buildStage} main system + tools`).to.be.at.most(8_000);
-            expect(measure(buildStage, true), `${buildStage} slim system + tools`).to.be.within(4_000, 6_000);
+            expect(measure(buildStage, true), `${buildStage} slim system + tools`).to.be.at.most(4_000);
         }
     });
 

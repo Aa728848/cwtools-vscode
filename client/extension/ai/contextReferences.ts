@@ -366,7 +366,7 @@ export class ContextReferenceManager {
             return [{
                 type: 'vanilla',
                 label: 'vanilla::<type>:<id>',
-                desc: 'Example: vanilla::technology:tech_mining_1',
+                desc: 'Format: vanilla::<type returned by query_types>::<identifier from active evidence>',
                 vanillaType: '',
                 vanillaId: '',
                 cacheStatus: 'cached',

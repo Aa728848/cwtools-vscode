@@ -330,6 +330,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 | "cwtools.ai.queryDefinitionByName"
                 | "cwtools.ai.exploreProject"
                 | "cwtools.ai.queryProjectKnowledgeDb"
+                | "cwtools.ai.getSemanticCatalog"
                 | "cwtools.ai.queryScriptedEffects"
                 | "cwtools.ai.queryScriptedTriggers"
                 | "cwtools.ai.queryEnums"

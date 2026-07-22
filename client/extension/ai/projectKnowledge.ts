@@ -89,7 +89,6 @@ export interface GenerateProjectKnowledgeOptions {
 
 const RELEVANT_EXTENSIONS = new Set(['.txt', '.gfx', '.asset', '.gui', '.yml', '.cwt', '.mod']);
 const EXCLUDED_DIRECTORIES = new Set(['.git', '.cwtools', '.cwtools-ai', 'node_modules', 'release', 'artifacts', 'dist', 'out']);
-const DOMAIN_NAMES = ['events', 'on_actions', 'special_projects', 'archaeology', 'situations', 'technology', 'ships', 'scripted_logic', 'assets', 'localisation', 'other'];
 let watcherRegistration: vs.Disposable | undefined;
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 const pendingChangedFiles = new Set<string>();
@@ -207,13 +206,23 @@ function computeVanillaFingerprint(gameId: string): string {
     return hashParts([
         normalizePath(vanillaPath),
         pathStatFact(vanillaPath),
-        pathStatFact(path.join(vanillaPath, 'common')),
-        pathStatFact(path.join(vanillaPath, 'events')),
+        ...collectVanillaRootFacts(vanillaPath),
         pathStatFact(path.join(vanillaPath, 'checksum_manifest.txt')),
         pathStatFact(path.join(parent, 'checksum_manifest.txt')),
         pathStatFact(path.join(vanillaPath, 'launcher-settings.json')),
         serializedCache ? pathStatFact(serializedCache) : 'cwb:unconfigured',
     ]);
+}
+
+function collectVanillaRootFacts(vanillaPath: string, limit = 256): string[] {
+    try {
+        return fs.readdirSync(vanillaPath, { withFileTypes: true })
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .slice(0, limit)
+            .map(entry => pathStatFact(path.join(vanillaPath, entry.name)));
+    } catch {
+        return ['vanilla-root:unreadable'];
+    }
 }
 
 function computeRulesFingerprint(gameId: string, graphVersion?: number): string {
@@ -253,25 +262,14 @@ function stringField(record: Record<string, unknown>, key: string): string {
 
 function domainForPath(filePath: string): string {
     const value = normalizePath(filePath).toLowerCase();
-    if (value.includes('/on_actions/')) return 'on_actions';
-    if (value.includes('/special_projects/')) return 'special_projects';
-    if (value.includes('archaeolog')) return 'archaeology';
-    if (value.includes('/situations/')) return 'situations';
-    if (value.includes('/technology/') || value.includes('/technologies/')) return 'technology';
-    if (/\/(ship_sizes|component_templates|section_templates|starbase_)/.test(value)) return 'ships';
-    if (/\/(scripted_effects|scripted_triggers|script_values|scripted_variables)\//.test(value)) return 'scripted_logic';
-    if (value.includes('/events/')) return 'events';
-    if (/\/(interface|gfx|sound|music)\//.test(value) || /\.(gfx|asset|gui)$/.test(value)) return 'assets';
-    if (/\/(localisation|localisation_synced|localization)\//.test(value) || value.endsWith('.yml')) return 'localisation';
     const segments = value.split('/').filter(Boolean);
     const commonIndex = segments.indexOf('common');
     if (commonIndex >= 0 && commonIndex + 1 < segments.length) return segments[commonIndex + 1]!.replace(/-/g, '_');
-    if (segments.includes('map') || segments.includes('map_data')) return 'map';
-    return 'other';
+    return (segments.length > 1 ? segments[0] : path.extname(value).replace(/^\./, '')) || 'other';
 }
 
-function domainsForChangedFiles(files: string[]): string[] {
-    return Array.from(new Set(files.map(domainForPath)));
+function domainsForChangedFiles(workspaceRoot: string, files: string[]): string[] {
+    return Array.from(new Set(files.map(file => domainForPath(path.relative(workspaceRoot, file))))).sort();
 }
 
 const LEGACY_KNOWLEDGE_ARTIFACTS = [
@@ -391,7 +389,7 @@ export function writeUnavailableProjectKnowledge(
         status: 'unavailable',
         game: gameId,
         projectRoots: [workspaceRoot],
-        domains: [...DOMAIN_NAMES],
+        domains: [],
         counts: {
             definitions: 0,
             workspaceDefinitions: 0,
@@ -615,7 +613,7 @@ export function buildProjectKnowledgePrompt(workspaceRoot: string): string {
     const manifest = readProjectKnowledgeManifest(workspaceRoot);
     if (!manifest) return '';
     const staleReasons = manifest.staleReasons ?? [];
-    return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: ${manifest.schemaVersion >= 2 ? 'manifest + SQLite V2' : 'legacy JSON V1'}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace + ${manifest.counts.vanillaDefinitions ?? 0} vanilla; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; events: ${manifest.counts.eventNodes ?? 0} nodes / ${manifest.counts.eventEdges ?? 0} structural edges / ${manifest.counts.eventLogic ?? 0} logic facts\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Load all involved domains, project/vanilla patterns, topology, unresolved facts, and the event graph. Verify event calls and entries together with flag, technology, variable, phase, and scope-bridge logic. A blueprint must cite exact evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
+    return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: ${manifest.schemaVersion >= 2 ? 'manifest + SQLite V2' : 'legacy JSON V1'}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace + ${manifest.counts.vanillaDefinitions ?? 0} vanilla; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; typed graph: ${manifest.counts.eventNodes ?? 0} entry nodes / ${manifest.counts.eventEdges ?? 0} structural edges / ${manifest.counts.eventLogic ?? 0} logic facts\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Enumerate the involved TypeDefs and dependency families from the current semantic catalog, then load their project/vanilla patterns, typed topology, unresolved facts, and relevant graph slices. A blueprint must cite exact evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
 }
 
 async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexService): Promise<void> {
@@ -648,7 +646,7 @@ async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexSer
             await generateProjectKnowledge(workspaceRoot, profile, {
                 mode: fullRefresh ? 'full' : 'incremental',
                 changedFiles: files,
-                domains: fullRefresh ? undefined : domainsForChangedFiles(files),
+                domains: fullRefresh ? undefined : domainsForChangedFiles(workspaceRoot, files),
             });
         } catch (error) {
             markProjectKnowledgeStale(workspaceRoot, ['background_refresh_failed']);

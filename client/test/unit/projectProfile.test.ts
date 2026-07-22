@@ -86,4 +86,21 @@ describe('ProjectProfile localisation detection', () => {
             cleanupWorkspace(workspaceRoot);
         }
     });
+
+    it('discovers current content directories without a fixed entity-family list', () => {
+        const workspaceRoot = makeWorkspace();
+        try {
+            const typedDir = path.join(workspaceRoot, 'common', 'ritual_definitions');
+            fs.mkdirSync(typedDir, { recursive: true });
+            fs.writeFileSync(path.join(typedDir, 'sample.txt'), 'sample_ritual = { }\n', 'utf8');
+
+            const profile = buildProjectProfile(workspaceRoot);
+
+            expect(profile.keyDirectories.map(directory => directory.path)).to.include('common/ritual_definitions');
+            expect(profile.identifiers.byType).to.deep.equal({});
+            expect(profile.identifiers.scriptedEffects).to.equal(undefined);
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
 });

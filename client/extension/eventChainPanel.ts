@@ -4,8 +4,8 @@
  * Behaviour:
  * 1. Seeds from the currently active event file
  * 2. Scans ALL events/ files to build the full event graph
- * 3. Scans common/ directories (on_actions, decisions, scripted_effects) for
- *    non-event triggers that reference events
+ * 3. Scans definition paths declared by the active semantic catalog for
+ *    typed relationships that reference events
  * 4. BFS-expands from seed events to show only the connected subgraph
  * 5. Click-to-navigate jumps to source file
  */
@@ -16,13 +16,12 @@ import { ErrorReporter } from './ai/errorReporter';
 import {
     parseEventFile,
     parseCommonFile,
-    parseTechFlagRequirements,
     mergeGraphs,
     buildImplicitEdges,
     extractConnectedSubgraph,
     type EventGraph,
-    type TechFlagMap,
 } from './eventChainParser';
+import { parsePdxSemanticCatalog } from '../shared/pdxSemanticCatalog';
 
 // ─── Nonce generator ─────────────────────────────────────────────────────────
 
@@ -159,13 +158,29 @@ export class EventChainPanel {
         }
 
         const wsRoot = workspaceFolders[0]!;
+        const seedPath = this._seedDocument ? vscode.workspace.asRelativePath(this._seedDocument.uri) : '';
+        const rawCatalog = await vscode.commands.executeCommand<unknown>(
+            'cwtools.ai.getSemanticCatalog',
+            [],
+            seedPath ? [seedPath] : [],
+        );
+        const catalog = parsePdxSemanticCatalog(rawCatalog);
+        if (!catalog || catalog.status === 'unavailable') {
+            this._panel.webview.postMessage({
+                command: 'loading',
+                text: panelText(
+                    'CWTools semantic data is not ready; reload rules and retry.',
+                    'CWTools 语义数据尚未就绪；请重新加载规则后重试。',
+                ),
+            });
+            return { graph: { nodes: [], edges: [] }, seedIds: [] };
+        }
 
         // ── Phase 0: Parse seed document first to get our target event IDs ────
         let seedIds = new Set<string>();
         if (this._seedDocument) {
             const seedContent = this._seedDocument.getText();
-            const seedPath = vscode.workspace.asRelativePath(this._seedDocument.uri);
-            const seedGraph = parseEventFile(seedContent, seedPath);
+            const seedGraph = parseEventFile(seedContent, seedPath, catalog);
             seedIds = new Set(seedGraph.nodes.map(n => n.id));
         }
 
@@ -181,8 +196,8 @@ export class EventChainPanel {
         // ── Phase 1: Parse ALL event files to build the full event graph ──────
         this._panel.webview.postMessage({ command: 'loading', text: panelText('Scanning events/ files...', '扫描 events/ 文件...') });
 
-        const eventPattern = new vscode.RelativePattern(wsRoot, '**/events/**/*.txt');
-        const eventFiles = await vscode.workspace.findFiles(eventPattern, '**/node_modules/**', 500);
+        const eventPaths = catalog.definitionTypes.find(type => type.name === 'event')?.paths ?? [];
+        const eventFiles = await this._findSemanticFiles(wsRoot, eventPaths, 500);
 const eventGraphs: EventGraph[] = [];
 
 for (const fileUri of eventFiles) {
@@ -190,7 +205,7 @@ try {
 const doc = await vscode.workspace.openTextDocument(fileUri);
 const content = doc.getText();
 const relativePath = vscode.workspace.asRelativePath(fileUri);
-const graph = parseEventFile(content, relativePath);
+const graph = parseEventFile(content, relativePath, catalog);
 if (graph.nodes.length > 0) {
 eventGraphs.push(graph);
 }
@@ -199,44 +214,18 @@ eventGraphs.push(graph);
 }
 }
 
-this._panel.webview.postMessage({ command: 'loading', text: panelText('Scanning common/ triggers...', '扫描 common/ 触发器...') });
+this._panel.webview.postMessage({ command: 'loading', text: panelText('Scanning catalog-declared definitions...', '扫描规则目录中声明的定义...') });
 
-const commonPatterns = [
-'**/common/on_actions/**/*.txt',
-            '**/common/decisions/**/*.txt',
-            '**/common/scripted_effects/**/*.txt',
-            '**/common/scripted_triggers/**/*.txt',
-            '**/common/special_projects/**/*.txt',
-            '**/common/anomalies/**/*.txt',
-            '**/common/archaeological_site_types/**/*.txt',
-            '**/common/situations/**/*.txt',
-            '**/common/technology/**/*.txt',
-            '**/common/tradition_categories/**/*.txt',
-            '**/common/traditions/**/*.txt',
-            '**/common/ascension_perks/**/*.txt',
-            '**/common/espionage_operation_types/**/*.txt',
-            '**/common/first_contact/**/*.txt',
-            '**/common/diplomatic_actions/**/*.txt',
-            '**/common/war_goals/**/*.txt',
-            '**/common/casus_belli/**/*.txt',
-            '**/common/policies/**/*.txt',
-            '**/common/edicts/**/*.txt',
-            '**/common/megastructures/**/*.txt',
-            '**/common/ship_sizes/**/*.txt',
-            '**/common/observation_station_missions/**/*.txt',
-            '**/common/colony_types/**/*.txt',
-            '**/common/resolutions/**/*.txt',
-        ];
-
-        for (const glob of commonPatterns) {
-            const pattern = new vscode.RelativePattern(wsRoot, glob);
-            const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 200);
-for (const fileUri of files) {
+const relatedPaths = catalog.definitionTypes
+.filter(type => type.name !== 'event')
+.flatMap(type => type.paths);
+const commonFiles = await this._findSemanticFiles(wsRoot, relatedPaths, 1_500);
+for (const fileUri of commonFiles) {
 try {
 const doc = await vscode.workspace.openTextDocument(fileUri);
 const content = doc.getText();
 const relativePath = vscode.workspace.asRelativePath(fileUri);
-const result = parseCommonFile(content, relativePath);
+const result = parseCommonFile(content, relativePath, catalog);
 
 const graph: EventGraph = { nodes: [], edges: result.edges };
 for (const src of result.externalSources) {
@@ -244,45 +233,15 @@ graph.nodes.push({
 id: src.id,
 type: src.sourceType,
 title: src.name,
-isTriggeredOnly: false,
 file: src.file,
 line: src.line,
 endLine: src.line,
 namespace: `__${src.sourceType}__`,
-isFireOnAction: src.sourceType === 'on_action',
-isHidden: false,
-hasMTTH: false,
-flagsSet: [],
-flagsChecked: [],
-techsGranted: [],
-techsRequired: [],
-techsLastIncreased: [],
-firedOnActions: [],
+semanticReferences: src.semanticReferences,
 });
 }
 if (graph.nodes.length > 0 || graph.edges.length > 0) {
 eventGraphs.push(graph);
-}
-} catch {
-// Skip
-}
-}
-}
-
-// ── Phase 1.5: Parse the flag preconditions in the technology definition file ─────────────────
-this._panel.webview.postMessage({ command: 'loading', text: panelText('Resolving technology flag prerequisites...', '解析科技 flag 前置条件...') });
-const techFlagMap: TechFlagMap = new Map();
-const techPattern = new vscode.RelativePattern(wsRoot, '**/common/technology/**/*.txt');
-        const techFiles = await vscode.workspace.findFiles(techPattern, '**/node_modules/**', 200);
-for (const fileUri of techFiles) {
-try {
-const doc = await vscode.workspace.openTextDocument(fileUri);
-const content = doc.getText();
-const fileMap = parseTechFlagRequirements(content);
-for (const [tech, flags] of fileMap) {
-if (flags.length > 0) {
-techFlagMap.set(tech, flags);
-}
 }
 } catch {
 // Skip
@@ -294,85 +253,36 @@ this._panel.webview.postMessage({ command: 'loading', text: panelText('Building 
 
 const eventsOnlyGraph = mergeGraphs(eventGraphs);
 
-// Build implicit connection edges (flag/technology/on_action + transitivity flag→tech→event)
+// Build implicit connections from catalog-declared typed reads and writes.
 this._panel.webview.postMessage({ command: 'loading', text: panelText('Building implicit connections...', '构建隐式连接关系...') });
-const implicitEdges = buildImplicitEdges(eventsOnlyGraph, techFlagMap);
+const implicitEdges = buildImplicitEdges(eventsOnlyGraph);
 eventsOnlyGraph.edges.push(...implicitEdges);
 
 // Depth 2: seed events → their direct targets → one more hop
 const subgraph = extractConnectedSubgraph(eventsOnlyGraph, seedIds, 2);
 
-// (Phase 3 removed: common/ scanning is now done in Phase 1 before BFS)
-
-// ── Phase 4: Resolve localization titles for non-hidden events ─────────
-this._panel.webview.postMessage({ command: 'loading', text: panelText('Resolving localisation text...', '解析本地化文本...') });
-await this._resolveLocTitles(subgraph);
-
 return { graph: subgraph, seedIds: Array.from(seedIds) };
 }
 
-// ── Resolve localization titles for non-hidden events ────────────────────
-
-private async _resolveLocTitles(graph: EventGraph) {
-const workspaceFolders = vscode.workspace.workspaceFolders;
-if (!workspaceFolders) return;
-
-// Collect title keys that need resolving (non-hidden events with a title key)
-const keysToResolve = new Set<string>();
-for (const node of graph.nodes) {
-if (!node.isHidden && node.title) {
-keysToResolve.add(node.title);
-}
-}
-if (keysToResolve.size === 0) return;
-
-const locMap = new Map<string, string>();
-
-// Get configured validation languages, prioritize Chinese if present
-const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
-const locLangs = config.get<string[]>('localisation.languages') || ['English'];
-
-let targetLangs = locLangs.map(l => l.toLowerCase());
-if (targetLangs.length >= 2 && targetLangs.includes('chinese')) {
-targetLangs = ['simp_chinese', 'chinese'];
-} else {
-targetLangs = targetLangs.map(l => l === 'english' ? 'english' : l === 'chinese' ? 'simp_chinese' : l);
-}
-
-// Only scan YML files that match the target languages (e.g. *l_english.yml)
-// This is significantly faster than parsing all loc files
-for (const lang of targetLangs) {
-const locPattern = new vscode.RelativePattern(
-workspaceFolders[0]!,
-`**/{localisation,localisation_synced,localization}/**/*l_${lang}.yml`,
-            );
-            const locFiles = await vscode.workspace.findFiles(locPattern, '**/node_modules/**', 200);
-            const linePattern = /^\s*([a-zA-Z0-9_.:-]+)\s*:\d*\s*"(.*)"\s*$/;
-
-            for (const fileUri of locFiles) {
-                try {
-                    const data = await vscode.workspace.fs.readFile(fileUri);
-                    const text = new TextDecoder('utf-8').decode(data);
-                    for (const line of text.split('\n')) {
-                        const m = linePattern.exec(line);
-                        if (m && keysToResolve.has(m[1]!)) {
-                            // Strip Paradox color codes for clean display
-                            locMap.set(m[1]!, m[2]!.replace(/§[RGBYWHETLMSPr!]/g, ''));
-                        }
-                    }
-                } catch {
-                    // Skip
-                }
-            }
-        }
-
-        // Apply resolved titles to nodes
-        for (const node of graph.nodes) {
-            if (!node.isHidden && node.title && locMap.has(node.title)) {
-                node.title = locMap.get(node.title)!;
-            }
-        }
+private async _findSemanticFiles(
+    workspaceFolder: vscode.WorkspaceFolder,
+    paths: readonly string[],
+    limit: number,
+): Promise<vscode.Uri[]> {
+    const found = new Map<string, vscode.Uri>();
+    for (const semanticPath of [...new Set(paths)].sort()) {
+        if (!semanticPath || found.size >= limit) break;
+        const normalized = semanticPath.replace(/\\/g, '/').replace(/^game\//i, '').replace(/^\/+|\/+$/g, '');
+        if (!normalized) continue;
+        const files = await vscode.workspace.findFiles(
+            new vscode.RelativePattern(workspaceFolder, `**/${normalized}/**/*.txt`),
+            '**/node_modules/**',
+            Math.max(1, limit - found.size),
+        );
+        for (const file of files) found.set(file.toString(), file);
     }
+    return [...found.values()].slice(0, limit);
+}
 
     // ── Navigate to event source ────────────────────────────────────────────
 
@@ -440,28 +350,20 @@ workspaceFolders[0]!,
         <div id="loading">${panelText('Scanning event files...', '扫描事件文件...')}</div>
         <div id="empty-state">
             <div style="font-size:24px; opacity:0.3;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg></div>
-            <div>${panelText('No event definitions found', '未发现事件定义')}</div>
-            <div style="font-size:10px;">${panelText('Make sure the workspace contains an events/ directory.', '请确保工作区包含 events/ 目录')}</div>
+            <div>${panelText('No catalog-declared event definitions found', '未发现规则声明的事件定义')}</div>
+            <div style="font-size:10px;">${panelText('Wait for CWTools rules to load and retry.', '请等待 CWTools 规则加载后重试。')}</div>
         </div>
         <div id="legend">
             <div class="legend-title">${panelText('Legend', '图例')}</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#fff176;"></span> ${panelText('Seed event', '种子事件')}</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#4caf50;"></span> ${panelText('Entry event', '入口事件')}</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#42a5f5;"></span> ${panelText('Triggered event', '触发型事件')}</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#5d4037;border:1px dashed #8d6e63;"></span> ${panelText('MTTH event', 'MTTH 事件')}</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#e8c840;"></span> ${panelText('Option edge', 'Option 边')}</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#4caf50;"></span> ${panelText('Immediate edge', 'Immediate 边')}</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#ff9800;"></span> ${panelText('After edge', 'After 边')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#fff176;"></span> ${panelText('Seed definition', '种子定义')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#4caf50;"></span> ${panelText('Entry definition', '入口定义')}</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#ab47bc;"></span> ${panelText('Effect edge', 'Effect 边')}</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#e91e63;"></span> On_action</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#00bcd4;"></span> Decision</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#ff7043;border:1px dotted #ff7043;"></span> ${panelText('Flag implicit connection', 'Flag 隐式连接')}</div>
-            <div class="legend-item"><span class="legend-swatch" style="background:#ec407a;border:1px dotted #ec407a;"></span> ${panelText('on_action implicit', 'on_action 隐式')}</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#ff7043;border:1px dotted #ff7043;"></span> ${panelText('Typed semantic relation', '类型语义关系')}</div>
         </div>
         <aside id="details-panel" class="empty" aria-live="polite">
             <div class="details-empty">
-                <div class="details-empty-title">${panelText('Select an event node', '选择事件节点')}</div>
-                <div class="details-empty-copy">${panelText('View its title, source location, and incoming/outgoing chain relationships.', '查看事件标题、来源位置，以及它在链路中的前后关系。')}</div>
+                <div class="details-empty-title">${panelText('Select a definition node', '选择定义节点')}</div>
+                <div class="details-empty-copy">${panelText('View its source location and catalog-derived relationships.', '查看来源位置及规则目录推导的关系。')}</div>
             </div>
         </aside>
     </div>

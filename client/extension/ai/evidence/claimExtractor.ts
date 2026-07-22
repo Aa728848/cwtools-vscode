@@ -482,10 +482,12 @@ export function extractClaimsFromText(payload: WritePayload, catalog?: PdxSemant
         if (position === undefined) continue;
         if (stmt.name.length === 0 || !/^[A-Za-z_][\w.:-]*$/.test(stmt.name)) continue;
         const knownRule = catalogPosition !== undefined;
-        if (!knownRule && !stmt.isBlock && !/^(?:yes|no)$/i.test(stmt.scalarValue ?? '')) {
+        if (!knownRule && !stmt.isBlock && position !== 'modifier' && !/^(?:yes|no)$/i.test(stmt.scalarValue ?? '')) {
             // Unknown scalar assignments are usually parameters. Dynamic
             // callable TypeDefs are still recognized in their canonical
             // boolean or block forms without maintaining argument-key lists.
+            // A CWT-declared modifier namespace is different: numeric child
+            // keys are the symbols being validated, not arbitrary parameters.
             continue;
         }
 

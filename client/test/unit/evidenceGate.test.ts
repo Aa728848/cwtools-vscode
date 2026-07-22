@@ -46,6 +46,7 @@ import {
 import {
     isEvidenceGateDecision,
     normalizeEvidenceGateMode,
+    type EvidenceGatePhase,
 } from '../../extension/ai/evidence/evidenceTypes';
 import { reducePolicyActivity } from '../../extension/ai/runner/runReducers';
 import type { AgentRunEvent } from '../../extension/ai/runner/runLedger';
@@ -60,6 +61,7 @@ const TEST_SEMANTIC_CATALOG: PdxSemanticCatalog = {
         { name: 'every_country', category: 'scope_change', supportedScopes: [], pushScope: 'country', valueReferences: [] },
         { name: 'add_opinion_modifier', category: 'effect', supportedScopes: ['country'], valueReferences: [{ argumentPath: 'modifier', access: 'type', typeName: 'static_modifier' }] },
         { name: 'add_modifier', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: 'modifier', access: 'type', typeName: 'static_modifier' }] },
+        { name: 'apply_scripted_modifier', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'type', typeName: 'scripted_modifier' }] },
         { name: 'has_modifier', category: 'trigger', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'type', typeName: 'static_modifier' }] },
         { name: 'set_variable', category: 'effect', supportedScopes: [], valueReferences: [] },
         { name: 'always', category: 'trigger', supportedScopes: ['all'], valueReferences: [] },
@@ -70,6 +72,7 @@ const TEST_SEMANTIC_CATALOG: PdxSemanticCatalog = {
         { name: 'has_building', category: 'trigger', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'value', typeName: 'building' }] },
         { name: 'add_building', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: '$value', access: 'value', typeName: 'building' }, { argumentPath: 'building', access: 'value', typeName: 'building' }] },
         { name: 'ship_hull_mult', category: 'modifier', supportedScopes: [], valueReferences: [] },
+        { name: '<static_modifier>', category: 'modifier', supportedScopes: [], valueReferences: [] },
         { name: '<scripted_effect>', category: 'effect', supportedScopes: [], valueReferences: [] },
         { name: '<scripted_trigger>', category: 'trigger', supportedScopes: [], valueReferences: [] },
     ],
@@ -79,6 +82,7 @@ const TEST_SEMANTIC_CATALOG: PdxSemanticCatalog = {
         { name: 'scripted_effect', paths: ['common/scripted_effects'], typeKeyFilters: [] },
         { name: 'scripted_trigger', paths: ['common/scripted_triggers'], typeKeyFilters: [] },
         { name: 'static_modifier', paths: ['common/static_modifiers'], typeKeyFilters: [] },
+        { name: 'scripted_modifier', paths: ['common/scripted_modifiers'], typeKeyFilters: [] },
         { name: 'technology', paths: ['common/technology', 'common/technologies'], typeKeyFilters: [] },
         { name: 'building', paths: ['common/buildings'], typeKeyFilters: [] },
         { name: 'trait', paths: ['common/traits'], typeKeyFilters: [] },
@@ -436,6 +440,7 @@ describe('EvidenceGate', () => {
         deps: ReturnType<typeof makeGateDeps>,
         mode: 'shadow' | 'enforce' = 'shadow',
         targetRelative = path.join('events', 'a.txt'),
+        phase: EvidenceGatePhase = 'pre_write',
     ) {
         const gate = new EvidenceGate(deps);
         const decision = await gate.evaluate({
@@ -443,6 +448,7 @@ describe('EvidenceGate', () => {
             targetFile: path.join(workspaceRoot, targetRelative),
             text: content,
             mode,
+            phase,
         });
         expect(isEvidenceGateDecision(decision)).to.equal(true);
         return decision;
@@ -495,20 +501,48 @@ describe('EvidenceGate', () => {
         expect(missing?.suggestedQueries.some(q => q.includes('query_rules'))).to.equal(true);
     });
 
-    it('conflicts when neither CWT rules nor any index knows an effect name', async () => {
+    it('keeps a missing project-defined callable pending until final integrated validation', async () => {
         const deps = makeGateDeps({ workspaceRoot });
-        const decision = await evaluate(
-            'wrapper = { totally_fake_effect = yes }',
-            deps,
-            'enforce',
-            path.join('common', 'scripted_effects', 'a.txt'),
-        );
+        const content = 'wrapper = { totally_fake_effect = yes }';
+        const target = path.join('common', 'scripted_effects', 'a.txt');
 
+        for (const phase of ['pre_write', 'post_write'] as const) {
+            const pending = await evaluate(content, deps, 'enforce', target, phase);
+            expect(pending.verdict, phase).to.equal('allow');
+            const ref = pending.claims.find(c => c.kind === 'reference_exists' && c.claim.includes('totally_fake_effect'));
+            expect(ref?.status, phase).to.equal('unknown');
+            expect(ref?.detail, phase).to.include('later planned write');
+        }
+
+        const decision = await evaluate(content, deps, 'enforce', target, 'final');
         expect(decision.verdict).to.equal('block');
         const ref = decision.claims.find(c => c.kind === 'reference_exists' && c.claim.includes('totally_fake_effect'));
         expect(ref?.status).to.equal('conflict');
         const missing = decision.missingEvidence.find(m => m.claim.includes('totally_fake_effect'));
         expect(missing?.suggestedQueries.some(q => q.includes('verify_pdx_identifier'))).to.equal(true);
+    });
+
+    it('allows static and scripted modifier references before their later definitions', async () => {
+        const deps = makeGateDeps({ workspaceRoot });
+        const content = [
+            'effect = {',
+            '  add_modifier = { modifier = my_future_static_modifier }',
+            '  apply_scripted_modifier = my_future_scripted_modifier',
+            '}',
+        ].join('\n');
+
+        for (const phase of ['pre_write', 'post_write'] as const) {
+            const decision = await evaluate(content, deps, 'enforce', path.join('events', 'future_modifiers.txt'), phase);
+            expect(decision.verdict, phase).to.equal('allow');
+            for (const id of ['my_future_static_modifier', 'my_future_scripted_modifier']) {
+                const ref = decision.claims.find(claim => claim.kind === 'reference_exists' && claim.claim.includes(id));
+                expect(ref?.status, `${phase}:${id}`).to.equal('unknown');
+            }
+        }
+
+        const final = await evaluate(content, deps, 'enforce', path.join('events', 'future_modifiers.txt'), 'final');
+        expect(final.verdict).to.equal('block');
+        expect(final.claims.filter(claim => claim.kind === 'reference_exists' && claim.status === 'conflict')).to.have.lengthOf(2);
     });
 
     it('verifies unknown rule names through the callable TypeDef declared by CWT', async () => {
@@ -524,7 +558,7 @@ describe('EvidenceGate', () => {
         expect(ref?.status).to.equal('verified');
     });
 
-    it('rejects a same-named definition of the wrong entity type', async () => {
+    it('keeps a wrong-type name pending until final integrated validation', async () => {
         const deps = makeGateDeps({
             workspaceRoot,
             lsp: {
@@ -532,11 +566,22 @@ describe('EvidenceGate', () => {
                 definitionTypes: new Map([['my_custom_effect', 'technology']]),
             },
         });
+        const pending = await evaluate(
+            'wrapper = { my_custom_effect = yes }',
+            deps,
+            'enforce',
+            path.join('common', 'scripted_effects', 'a.txt'),
+        );
+        const pendingRef = pending.claims.find(c => c.kind === 'reference_exists' && c.claim.includes('my_custom_effect'));
+        expect(pendingRef?.status).to.equal('unknown');
+        expect(pending.verdict).to.equal('allow');
+
         const decision = await evaluate(
             'wrapper = { my_custom_effect = yes }',
             deps,
             'enforce',
             path.join('common', 'scripted_effects', 'a.txt'),
+            'final',
         );
         const ref = decision.claims.find(c => c.kind === 'reference_exists' && c.claim.includes('my_custom_effect'));
         expect(ref?.status).to.equal('conflict');
@@ -585,7 +630,13 @@ describe('EvidenceGate', () => {
                 definitionTypes: new Map([['tech_that_looks_real', 'building']]),
             },
         });
-        const decision = await evaluate('limit = { has_technology = tech_that_looks_real }', deps, 'enforce');
+        const decision = await evaluate(
+            'limit = { has_technology = tech_that_looks_real }',
+            deps,
+            'enforce',
+            path.join('events', 'a.txt'),
+            'final',
+        );
         const ref = decision.claims.find(claim => claim.kind === 'reference_exists' && claim.claim.includes('tech_that_looks_real'));
         expect(ref?.status).to.equal('conflict');
         expect(ref?.detail).to.include("type 'building'");
@@ -600,9 +651,24 @@ describe('EvidenceGate', () => {
             deps,
             'enforce',
             path.join('common', 'scripted_effects', 'fuzzy.txt'),
+            'final',
         );
         expect(decision.verdict).to.equal('block');
         expect(decision.claims.some(c => c.kind === 'symbol_exists' && c.status === 'verified')).to.equal(false);
+    });
+
+    it('still conflicts immediately for an unknown engine modifier key', async () => {
+        const deps = makeGateDeps({ workspaceRoot });
+        const decision = await evaluate(
+            'my_static_modifier = { definitely_not_an_engine_modifier = 0.1 }',
+            deps,
+            'enforce',
+            path.join('common', 'static_modifiers', 'a.txt'),
+            'pre_write',
+        );
+        const modifier = decision.claims.find(claim => claim.claim.includes('definitely_not_an_engine_modifier'));
+        expect(modifier?.status).to.equal('conflict');
+        expect(decision.verdict).to.equal('block');
     });
 
     it('marks invalid syntax as conflict with the parse errors attached', async () => {
@@ -977,9 +1043,9 @@ describe('AgentToolExecutor evidence gate wiring', () => {
         cleanupWorkspace(workspaceRoot);
     });
 
-    function makeExecutor(lsp: { sendRequest: sinon.SinonStub }) {
+    function makeExecutor(lsp: { sendRequest: sinon.SinonStub }, indexService?: unknown) {
         const { AgentToolExecutor } = loadExecutorModule();
-        const executor = new AgentToolExecutor(lsp as any, workspaceRoot);
+        const executor = new AgentToolExecutor(lsp as any, workspaceRoot, indexService as any);
         executor.fileWriteMode = 'auto';
         return executor;
     }
@@ -1169,6 +1235,55 @@ describe('AgentToolExecutor evidence gate wiring', () => {
         expect(final.filesChecked).to.deep.equal([target]);
         expect(final.pendingFiles).to.deep.equal([]);
         expect(final.conflictFiles).to.deep.equal([]);
+    });
+
+    it('accepts a static modifier reference after a later write supplies its definition', async () => {
+        gateModeConfig = 'enforce';
+        const definitions = new Set<string>();
+        const lspOptions: { definitions: Set<string> } = { definitions };
+        const lsp = makeFakeLspClient(lspOptions);
+        const executor = makeExecutor(lsp);
+        const target = path.join(workspaceRoot, 'events', 'future_modifier.txt');
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+
+        const write = await executor.execute('write_file', {
+            file: target,
+            content: 'effect = { add_modifier = { modifier = my_future_static_modifier } }',
+        }, makeContext([])) as any;
+        expect(write.success, JSON.stringify(write)).to.equal(true);
+        expect(write.postWriteValidation?.verdict).to.equal('pending');
+
+        definitions.add('my_future_static_modifier');
+        const final = await executor.finalizePdxEvidence([target]);
+        expect(final.passed).to.equal(true);
+        expect(final.pendingFiles).to.deep.equal([]);
+        expect(final.conflictFiles).to.deep.equal([]);
+    });
+
+    it('does not treat a partial workspace index as proof that a later definition is absent', async () => {
+        gateModeConfig = 'enforce';
+        const lsp = makeFakeLspClient({ definitions: new Set() });
+        const indexService = {
+            ensureWorkspaceSymbolsReady: async () => undefined,
+            queryWorkspaceSymbols: () => [],
+            workspaceSymbolStatus: 'indexing',
+            workspaceSymbolUpdatedAt: 1,
+            workspaceSymbolCount: 0,
+        };
+        const executor = makeExecutor(lsp, indexService);
+        const target = path.join(workspaceRoot, 'events', 'partial_index.txt');
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+
+        const write = await executor.execute('write_file', {
+            file: target,
+            content: 'effect = { add_modifier = { modifier = my_future_static_modifier } }',
+        }, makeContext([])) as any;
+        expect(write.success, JSON.stringify(write)).to.equal(true);
+
+        const final = await executor.finalizePdxEvidence([target]);
+        expect(final.passed).to.equal(false);
+        expect(final.conflictFiles).to.deep.equal([]);
+        expect(final.pendingFiles).to.deep.equal([target]);
     });
 
     it('allows enforce-mode writes whose claims all verify', async () => {

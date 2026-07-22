@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import * as fs from 'fs';
 import * as path from 'path';
 import { EvidenceGate, type GateRuleInfo } from '../../extension/ai/evidence/evidenceGate';
+import type { EvidenceGatePhase } from '../../extension/ai/evidence/evidenceTypes';
 import { getAllProfiles } from '../../extension/gameProfiles';
 import type { PdxSemanticCatalog } from '../../extension/ai/types';
 
@@ -19,6 +20,7 @@ interface GoldenCase {
     definitions?: Map<string, string>;
     indexEntries?: Set<string>;
     targetFile?: string;
+    phase?: EvidenceGatePhase;
 }
 
 describe('Paradox semantic reliability golden benchmark', () => {
@@ -46,6 +48,7 @@ describe('Paradox semantic reliability golden benchmark', () => {
                 text: 'golden_wrapper = { set_planetary_memory = yes }',
                 targetFile: path.join('common', 'behavior_macros', 'missing.txt'),
                 expected: 'block',
+                phase: 'final',
             },
             {
                 name: 'existing trigger in wrong scope',
@@ -58,11 +61,19 @@ describe('Paradox semantic reliability golden benchmark', () => {
                 targetFile: path.join('common', 'behavior_macros', 'wrong_type.txt'),
                 definitions: new Map([['shared_name', 'technology']]),
                 expected: 'block',
+                phase: 'final',
             },
             {
                 name: 'missing referenced event id',
                 text: 'effect = { realm_event = { id = missing_event.404 } }',
                 expected: 'block',
+                phase: 'final',
+            },
+            {
+                name: 'reference before later static modifier definition',
+                text: 'effect = { add_modifier = { modifier = future_static_modifier } }',
+                expected: 'allow',
+                phase: 'pre_write',
             },
             {
                 name: 'LSP and workspace index refresh lag',
@@ -102,6 +113,7 @@ describe('Paradox semantic reliability golden benchmark', () => {
                 rules: [
                     { name: 'realm_event', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: 'id', access: 'type', typeName: 'event.realm' }] },
                     { name: 'set_variable', category: 'effect', supportedScopes: [], valueReferences: [] },
+                    { name: 'add_modifier', category: 'effect', supportedScopes: [], valueReferences: [{ argumentPath: 'modifier', access: 'type', typeName: 'static_modifier' }] },
                     { name: 'has_trait', category: 'trigger', supportedScopes: ['leader'], valueReferences: [{ argumentPath: '$value', access: 'value', typeName: 'trait' }] },
                     { name: '<behavior_macro>', category: 'effect', supportedScopes: [], valueReferences: [] },
                 ],
@@ -109,6 +121,7 @@ describe('Paradox semantic reliability golden benchmark', () => {
                     { name: 'event', paths: ['events'], nameField: 'id', typeKeyFilters: ['realm_event'] },
                     { name: 'trait', paths: ['common/traits'], typeKeyFilters: [] },
                     { name: 'behavior_macro', paths: ['common/behavior_macros'], typeKeyFilters: [] },
+                    { name: 'static_modifier', paths: ['common/static_modifiers'], typeKeyFilters: [] },
                 ],
                 warnings: [],
             };
@@ -140,6 +153,7 @@ describe('Paradox semantic reliability golden benchmark', () => {
                 targetFile: path.join(workspaceRoot, benchmark.targetFile ?? path.join('events', `${benchmark.name.replace(/\W+/g, '_')}.txt`)),
                 text: benchmark.text,
                 mode: 'enforce',
+                phase: benchmark.phase,
             });
             const caseName = `${gameProfile}:${benchmark.name}`;
             if (benchmark.expected === 'block' && decision.verdict === 'allow') falseAcceptances.push(caseName);

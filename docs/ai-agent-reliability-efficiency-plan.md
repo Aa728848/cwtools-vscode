@@ -174,6 +174,8 @@ interface EvidenceClaim {
 
 落实结果：当前模型可见的四条通用 PDX 写路径均在文件工具生成“完整最终内容”后调用同一个异步 preflight；`edit_pdx_block` 委托结构化替换时仍经过该 preflight。直接模型调用的旧 `apply_patch` 与 `multi_replace_file_content` 已退休。成功写入后重新收集 EvidenceGate 与 diagnostics，并使用三态结果：已确认的证据冲突或明确诊断错误返回 `repair`/`requiresRepair`；blocking 证据为 `unknown`/`stale`、证据服务降级、诊断不是 `fresh` 时返回 `pending`/`requiresValidation`，且 `postWriteValidationPassed` 必须为 `false`；只有 blocking 声明全部 verified 且 fresh diagnostics 无错误时才为 `allow`。子 Agent 可继续完成依赖写入，父级 QualityGate 在全部写入合并后从磁盘重读文件并重新执行 EvidenceGate，再结合 fresh diagnostics 与任务级 SemanticVerifier 收口；顶层仍 pending 时保留 TODO 与恢复快照并进入可恢复暂停，不会被完成路径清理。最终证据与 diagnostics 都使用固定并发上限并继承取消/五分钟总时限；`.txt`、`.gui`、`.gfx`、`.asset`、`.entity` 均进入 full-file diagnostics。超过语义提取上限的文件会用完整内容做语法解析并显式产生“覆盖待确认”声明；该声明只有在最终 full-file diagnostics 为 fresh 时才能收口，避免只验证前 100k 字符。
 
+项目可扩展的 CWT/CWTools TypeDef 引用采用三阶段结论：`pre_write` 和单文件 `post_write` 中，LSP 与工作区索引暂未找到定义或只找到同名错误类型时保持 `unknown`/pending，允许其它文件或子 Agent 随后补写 `static_modifier`、`scripted_modifier`、event、technology 等定义；父任务合并后的 `final` 复验若仍由完整索引确认缺失或类型不符，才升级为 `conflict`。该规则由活动语义目录中的 TypeDef 决定，不维护固定类型白名单；语法错误、确定的 scope 不兼容和活动 CWT modifier 规则明确否定的引擎数值键仍是即时冲突。
+
 游戏语义不再由 Extension/Agent 内的事件 key、flag 指令、scope、typed ID 或目录枚举表提供。只读 `cwtools.ai.getSemanticCatalog` 从当前 LSP 的 CWTools `TypeDefs()` 和活动 CWT alias 规则生成有 revision 的语义目录；EvidenceGate 与 SemanticVerifier 只请求本次文件出现的规则名，同时保留 CWT 声明的 `<TypeDef>` 可调用 alias，并从目录中的 type path、`name_field`、`type_key_filter`、supported/push scope 和 typed value/value_set 引用派生声明。未知 effect/trigger 名称因此按当前 CWT 映射到可调用 TypeDef，不再固定回退到 `scripted_effect/scripted_trigger`。旧版或暂不可用 LSP 才回退到同一活动 CWT 源的有界 Extension 缓存，并明确标记 `cwt_fallback`/degraded，绝不回退到某一游戏的常量表。
 
 同一边界也由非 Agent 模块复用：事件链预览从 TypeDefs 决定定义路径/名称字段，并从 CWT typed references 构造通用关系；快速 project profile 只发现实际内容目录，类型样本留给 LSP/项目知识；工作区符号索引与 Vanilla Compare 通过 TypeDef path/`name_field`/`type_key_filter` 分类定义和块身份，目录 hash 同时进入索引缓存指纹；本地化跳转以通用赋值结构和真实索引命中替代字段/关键字名单；项目知识导出与通用 semantic graph 从 CWTools definition/reference topology 生成 typed-reference edge，不再用指令名或实体名正则猜测玩法；MCP game knowledge 资源只返回动态目录元数据和稳定检索策略。跨模块共享的是有 revision 的语义事实，而不是复制后的常量。
@@ -356,7 +358,7 @@ interface EvidenceClaim {
 1. 固定高风险用例中，已确认的语法、scope、类型或引用冲突不得自动写入；仅证据不足不得中断写入。
 2. 所有语义敏感写入均产生结构化证据摘要。
 3. `unknown`、`conflict` 和 `stale` 不能由模型文本自动改为 `verified`；其中只有 `conflict` 触发写前阻断。
-4. 写后 `unknown`、`stale`、验证服务降级或 diagnostics 非 `fresh` 必须为 `pending`，不能设置 `postWriteValidationPassed=true`；多 Agent 任务在父级合并后统一复验。
+4. 写后 `unknown`、`stale`、验证服务降级或 diagnostics 非 `fresh` 必须为 `pending`，不能设置 `postWriteValidationPassed=true`；项目可扩展 TypeDef 的暂缺和同名错误类型只在父级合并后的 `final` 复验仍成立时升级为 `conflict`。
 5. compaction、fallback 和子 Agent 调用完整计入 usage 与取消链路。
 6. 主 Agent 静态上下文不超过 8k、slim Agent 不超过 4k，且可靠性 benchmark 不回退。
 7. 缓存命中率按全部请求计算，规则或项目配置更新后不会复用旧证据。
@@ -367,7 +369,7 @@ interface EvidenceClaim {
 #### 10.3 当前 benchmark 与验证记录
 
 - Paradox 高风险 golden matrix 对所有注册 game/profile 运行同一组结构化 synthetic 用例：已确认冲突 0 false acceptance，告警场景 0 false block。它证明 profile 隔离与低误杀策略，不是假装每个游戏已有独立真实 corpus。
-- EvidenceGate 用例覆盖不存在名称、wrong scope、wrong entity type、缺失 ID、同批定义、索引刷新分歧、声明可达性保持 advisory、显式任务图入口，以及 `write_file`、`edit_file`、`replace_lines`、`edit_pdx_block` 四条写入路径。
+- EvidenceGate 用例覆盖不存在名称、wrong scope、wrong entity type、缺失 ID、同批定义、先引用后定义的 static/scripted modifier、索引刷新分歧、声明可达性保持 advisory、显式任务图入口，以及 `write_file`、`edit_file`、`replace_lines`、`edit_pdx_block` 四条写入路径。
 - typed ID 覆盖不再是固定类型清单：当前活动 CWT rule 中的 `<type>`/`value[type]` 引用，只要能对应 CWTools `TypeDefs()`，都会进入精确 typed definition 校验。未被活动 schema 明确识别的通用参数不会被文档伪称为已验证。
 - SemanticVerifier 对显式 `featureManifest.requiredEdges`、task `produces/consumes` 和 acceptance checks 生成文件/行证据；仓库 sample mod 的 `irm_faction.2 -> faction_set_leader` 调用链作为真实文件回归。该验证是“声明过的任务级边和生命周期验收”，不是任意动态玩法的形式化证明。
 - 请求归档按首个完整 transcript + 后续公共前缀/增量保存；工具 Schema 与大型工具结果按内容 hash 去重；恢复测试覆盖周期快照后的 request artifact 重放。

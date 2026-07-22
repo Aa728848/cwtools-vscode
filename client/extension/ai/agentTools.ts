@@ -49,7 +49,7 @@ import { sessionFileWriteMode, sessionPolicyPreset } from './runner/sessionPermi
 import type { ApiKeyManager } from './aiService';
 import { normalizeLegacyWebToolCall, type WebSearchProvider } from './tools/webAccess';
 import { EvidenceGate } from './evidence/evidenceGate';
-import { normalizeEvidenceGateMode, type EvidenceGateDecision, type EvidenceGateMode } from './evidence/evidenceTypes';
+import { normalizeEvidenceGateMode, type EvidenceGateDecision, type EvidenceGateMode, type EvidenceGatePhase } from './evidence/evidenceTypes';
 import { isPdxScriptTarget } from './evidence/claimExtractor';
 import { runLedger } from './runner/runLedger';
 import { ErrorReporter } from './errorReporter';
@@ -777,6 +777,12 @@ export class AgentToolExecutor {
                             ]);
                         }
                         const entries = index.queryWorkspaceSymbols({ name, exact: true, limit: 3 });
+                        if (entries.length === 0 && index.workspaceSymbolStatus !== 'ready') {
+                            // A partial index can prove presence, but it cannot
+                            // prove absence. Keep the reference pending until a
+                            // complete index or the LSP can make that claim.
+                            return undefined;
+                        }
                         return {
                             found: entries.length > 0,
                             fileVersion: entries[0]?.fileVersion,
@@ -964,6 +970,7 @@ export class AgentToolExecutor {
     private async evaluatePostWriteEvidence(
         request: { toolName: string; filePath: string; content: string },
         context?: import('./types').AgentToolContext,
+        phase: Extract<EvidenceGatePhase, 'post_write' | 'final'> = 'post_write',
     ): Promise<{ decision?: EvidenceGateDecision; summary: Record<string, unknown>; unavailable?: boolean } | undefined> {
         const mode = this.evidenceGateMode();
         if (mode === 'off') return undefined;
@@ -974,18 +981,18 @@ export class AgentToolExecutor {
                 text: request.content,
                 previousText: '',
                 mode,
-                phase: 'post_write',
+                phase,
             });
             const summary = await this.recordEvidenceGateDecision(decision, context);
             return { decision, summary };
         } catch (error) {
-            ErrorReporter.warn('AgentTools', `Post-write evidence verification failed for ${request.filePath}`, error);
+            ErrorReporter.warn('AgentTools', `Evidence verification (${phase}) failed for ${request.filePath}`, error);
             return {
                 unavailable: true,
                 summary: {
                     verdict: 'allow',
                     mode,
-                    phase: 'post_write',
+                    phase,
                     degraded: true,
                     evidenceUnavailable: true,
                     warning: error instanceof Error ? error.message : String(error),
@@ -1034,6 +1041,7 @@ export class AgentToolExecutor {
                     this.evaluatePostWriteEvidence(
                         { toolName: 'write_file', filePath: target, content },
                         context,
+                        'final',
                     ),
                     abortSignal,
                 );

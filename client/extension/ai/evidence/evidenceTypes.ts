@@ -22,7 +22,7 @@ export type EvidenceClaimKind =
     | 'design_choice';
 
 export type EvidenceGateMode = 'off' | 'shadow' | 'enforce';
-export type EvidenceGatePhase = 'pre_write' | 'post_write';
+export type EvidenceGatePhase = 'pre_write' | 'post_write' | 'final';
 
 export type EvidenceGateVerdict = 'allow' | 'block' | 'override';
 
@@ -92,7 +92,7 @@ const EVIDENCE_CLAIM_KINDS: ReadonlySet<string> = new Set<EvidenceClaimKind>([
 ]);
 const EVIDENCE_GATE_MODES: ReadonlySet<string> = new Set<EvidenceGateMode>(['off', 'shadow', 'enforce']);
 const EVIDENCE_GATE_VERDICTS: ReadonlySet<string> = new Set<EvidenceGateVerdict>(['allow', 'block', 'override']);
-const EVIDENCE_GATE_PHASES: ReadonlySet<string> = new Set<EvidenceGatePhase>(['pre_write', 'post_write']);
+const EVIDENCE_GATE_PHASES: ReadonlySet<string> = new Set<EvidenceGatePhase>(['pre_write', 'post_write', 'final']);
 
 export function isEvidenceStatus(value: unknown): value is EvidenceStatus {
     return typeof value === 'string' && EVIDENCE_STATUSES.has(value);

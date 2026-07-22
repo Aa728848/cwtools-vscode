@@ -792,8 +792,14 @@ export class EvidenceGate {
             }
         }
 
+        const finalPhase = input.phase === 'final';
         if (lspTypeConflict) {
-            return finish('conflict', lspTypeConflict);
+            return finish(
+                finalPhase ? 'conflict' : 'unknown',
+                finalPhase
+                    ? lspTypeConflict
+                    : this.joinDetail(lspTypeConflict, `A later planned write may still provide '${id}' with the required TypeDef; final integrated validation will decide.`),
+            );
         }
         if (lspFound === true) {
             // The LSP AST index covers vanilla + workspace definitions and is authoritative.
@@ -807,8 +813,10 @@ export class EvidenceGate {
         }
         if (lspFound === false && indexFound === false) {
             return finish(
-                'conflict',
-                `No definition of '${id}' exists in the workspace or vanilla files. Do not reference ids that have not been verified to exist.`,
+                finalPhase ? 'conflict' : 'unknown',
+                finalPhase
+                    ? `No definition of '${id}' exists in the integrated workspace or vanilla files.`
+                    : `No current definition of '${id}' was found. A later planned write may provide this TypeDef; final integrated validation will decide.`,
             );
         }
         if (lspFound === false && indexFound === undefined) {

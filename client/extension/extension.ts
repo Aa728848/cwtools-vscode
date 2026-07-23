@@ -50,7 +50,7 @@ import type { GameProfile } from './gameProfiles';
 import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService';
 import { McpBridgeServer } from './ai/mcpBridgeServer';
 import { maybePromptForDefaultDarkModernTheme } from './themePrompt';
-import { registerProjectKnowledgeWatcher } from './ai/projectKnowledge';
+import { registerProjectKnowledgeWatcher, resumeStaleProjectKnowledgeRefreshes } from './ai/projectKnowledge';
 import { repairMovedAgentWorktrees } from './ai/orchestrator/worktreeManager';
 import { QuickPickSelectionGuard } from './quickPickSelectionGuard';
 import { getDefaultLocalisationLanguagesForUiLocale } from './localisationLanguagePreference';
@@ -2162,6 +2162,7 @@ export async function activate(context: ExtensionContext) {
 		const promptReload = new NotificationType<string>('promptReload')
 		const forceReload = new NotificationType<string>('forceReload')
 		const vanillaCacheGenerated = new NotificationType<unknown>('vanillaCacheGenerated')
+		const serverReady = new NotificationType<unknown>('cwtools/serverReady')
 		const promptVanillaPath = new NotificationType<string>('promptVanillaPath')
 		interface DidFocusFile { uri: string }
 		const didFocusFile = new NotificationType<DidFocusFile>('didFocusFile')
@@ -2383,6 +2384,9 @@ export async function activate(context: ExtensionContext) {
 				debug: message => ErrorReporter.debug('VanillaCache', message),
 				warn: (message, error) => ErrorReporter.warn('VanillaCache', message, error),
 			});
+		})
+		client.onNotification(serverReady, () => {
+			resumeStaleProjectKnowledgeRefreshes(indexService);
 		})
 		client.onNotification(promptVanillaPath, async (param: string) => {
 			await selectGameFolderFlow(param);

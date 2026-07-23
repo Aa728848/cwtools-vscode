@@ -65,6 +65,31 @@ describe('vanilla cache generation lifecycle', () => {
         ]);
     });
 
+    it('does not wait for the information message to be dismissed before reloading', async () => {
+        const events: string[] = [];
+        const pendingMessage = new Promise<never>(() => undefined);
+        const dependencies: VanillaCacheGeneratedDependencies = {
+            refreshVanillaSymbols: async () => { events.push('refresh'); },
+            showInformationMessage: () => { events.push('message'); return pendingMessage; },
+            reloadWindow: () => { events.push('reload'); },
+            debug: message => { events.push(`debug:${message}`); },
+            warn: message => { events.push(`warn:${message}`); },
+        };
+
+        const result = await handleVanillaCacheGenerated({
+            gameId: 'stellaris',
+            message: 'Cache updated',
+        }, dependencies);
+
+        expect(result).to.equal('refreshed');
+        expect(events).to.deep.equal([
+            'refresh',
+            'debug:Rebuilt vanilla symbol cache for stellaris',
+            'message',
+            'reload',
+        ]);
+    });
+
     it('does not refresh or reload for an invalid notification', async () => {
         const events: string[] = [];
         const dependencies: VanillaCacheGeneratedDependencies = {

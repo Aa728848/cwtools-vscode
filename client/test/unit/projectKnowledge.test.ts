@@ -416,6 +416,55 @@ describe('project knowledge SQLite V2', () => {
         expect(manifest.staleReasons).to.deep.equal([]);
     });
 
+    it('resumes a vanilla knowledge refresh after the required window reload', async () => {
+        nextSnapshot = {
+            ok: true,
+            status: 'ready',
+            game: 'stellaris',
+            generatedAtUnixMs: Date.now(),
+            projectRoots: [workspaceRoot],
+            generationMode: 'full',
+            completeExport: true,
+            domains: [{ id: 'events' }],
+            counts: { definitions: 2, workspaceDefinitions: 1, vanillaDefinitions: 1, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
+            warnings: [],
+        };
+        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile, { complete: true });
+        fs.mkdirSync(path.join(workspaceRoot, '.cwtools', 'project'), { recursive: true });
+        fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), JSON.stringify(profile), 'utf8');
+        projectKnowledge.markProjectKnowledgeStale(workspaceRoot, ['vanilla_cache_changed']);
+        commandCalls = [];
+        const refreshedGames: Array<readonly string[] | undefined> = [];
+        const context = {
+            globalStorageUri: { fsPath: path.join(workspaceRoot, 'global-storage') },
+            subscriptions: [] as Array<{ dispose(): void }>,
+        };
+        projectKnowledge.registerProjectKnowledgeWatcher(context as any, {
+            refreshVanillaSymbols: async (gameIds?: readonly string[]) => { refreshedGames.push(gameIds); },
+        } as any);
+
+        const clock = sinon.useFakeTimers();
+        try {
+            projectKnowledge.resumeStaleProjectKnowledgeRefreshes({
+                refreshVanillaSymbols: async (gameIds?: readonly string[]) => { refreshedGames.push(gameIds); },
+            } as any);
+            await clock.tickAsync(300);
+            await clock.runAllAsync();
+        } finally {
+            clock.restore();
+            for (const disposable of context.subscriptions.reverse()) disposable.dispose();
+        }
+
+        expect(refreshedGames).to.deep.equal([]);
+        expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(1);
+        const manifest = projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)!;
+        expect(manifest.status).to.equal('ready');
+        expect(manifest.completeExport).to.equal(true);
+        expect(manifest.counts.vanillaDefinitions).to.equal(1);
+        expect(manifest.staleReasons).to.deep.equal([]);
+    });
+
     it('keeps pending file refreshes isolated per workspace root', async () => {
         const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-project-knowledge-second-'));
         const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;

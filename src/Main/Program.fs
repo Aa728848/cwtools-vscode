@@ -4673,6 +4673,10 @@ type Server(client: ILanguageClient) =
                 lastElapsedMs = int64 (sw.Elapsed.TotalMilliseconds)
                 lastCacheStatus = cacheStatus
                 lastError = cacheError })
+        client.CustomNotification(
+            "loadingBar",
+            JsonValue.Record [| "value", JsonValue.String(""); "enable", JsonValue.Boolean(false) |]
+        )
 
     let processWorkspace (uri: option<Uri>) =
         let sw = Stopwatch.StartNew()

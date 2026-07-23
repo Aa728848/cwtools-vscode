@@ -46,7 +46,9 @@ export async function handleVanillaCacheGenerated(
 		dependencies.warn(`Failed to rebuild vanilla symbol cache for ${params.gameId}`, error);
 	}
 
-	await dependencies.showInformationMessage(params.message);
+	void Promise.resolve(dependencies.showInformationMessage(params.message)).catch(error => {
+		dependencies.warn('Failed to show the vanilla cache completion message', error);
+	});
 	await dependencies.reloadWindow();
 	return result;
 }

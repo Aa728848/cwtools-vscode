@@ -747,6 +747,25 @@ async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexSer
     return state.inFlight;
 }
 
+/** Resume durable knowledge refresh work that was interrupted by a required window reload. */
+export function resumeStaleProjectKnowledgeRefreshes(
+    indexService?: IndexService,
+    options: { refreshVanillaIndex?: boolean } = {},
+): void {
+    for (const folder of vs.workspace.workspaceFolders ?? []) {
+        const workspaceRoot = folder.uri.fsPath;
+        const manifest = readProjectKnowledgeManifest(workspaceRoot);
+        if (!manifest) continue;
+        const reasons = currentStaleReasons(workspaceRoot, manifest);
+        if (reasons.length === 0) continue;
+        const state = pendingRootRefresh(workspaceRoot);
+        state.fullRefresh = true;
+        for (const reason of reasons) state.staleReasons.add(reason);
+        if (options.refreshVanillaIndex && reasons.includes('vanilla_changed')) pendingVanillaIndexAll = true;
+        scheduleRootRefresh(workspaceRoot, indexService, 250);
+    }
+}
+
 export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, indexService?: IndexService): void {
     if (watcherRegistration) return;
     vanillaCacheDirectory = path.join(context.globalStorageUri.fsPath, '.cwtools');
@@ -809,17 +828,7 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, in
     cwbWatcher.onDidDelete(scheduleVanillaCacheRefresh);
     const focusWatcher = vs.window.onDidChangeWindowState(state => {
         if (!state.focused) return;
-        for (const folder of vs.workspace.workspaceFolders ?? []) {
-            const workspaceRoot = folder.uri.fsPath;
-            const manifest = readProjectKnowledgeManifest(workspaceRoot);
-            const reasons = manifest ? currentStaleReasons(workspaceRoot, manifest) : [];
-            if (!manifest || reasons.length === 0) continue;
-            const pending = pendingRootRefresh(workspaceRoot);
-            pending.fullRefresh = true;
-            for (const reason of reasons) pending.staleReasons.add(reason);
-            if (reasons.includes('vanilla_changed')) pendingVanillaIndexAll = true;
-            scheduleRootRefresh(workspaceRoot, indexService);
-        }
+        resumeStaleProjectKnowledgeRefreshes(indexService, { refreshVanillaIndex: true });
     });
     context.subscriptions.push(watcher, cwbWatcher, configWatcher, focusWatcher, new vs.Disposable(() => {
         watcherRegistration = undefined;

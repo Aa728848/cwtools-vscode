@@ -4643,7 +4643,12 @@ type Server(client: ILanguageClient) =
                             writeVanillaCacheMetadata cacheFilePath activeGame vp
                             cacheStatus <- "generated"
                             let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
-                            client.CustomNotification("forceReload", JsonValue.String(text))
+                            client.CustomNotification(
+                                "vanillaCacheGenerated",
+                                JsonValue.Record
+                                    [| "gameId", JsonValue.String(promptName)
+                                       "message", JsonValue.String(text) |]
+                            )
                         with e ->
                             cacheStatus <- "error"
                             let errorMsg = sprintf "Failed to generate vanilla cache for %A. Check permissions for %s. Error: %s" activeGame gameCachePath e.Message

@@ -112,6 +112,8 @@ export class IndexService implements vscode.Disposable {
 	private _workspaceSymbolsIncludeVanilla = false;
 	private _workspaceSymbolBuildPromise: Promise<void> | undefined;
 	private _vanillaSymbolBuildPromise: Promise<void> | undefined;
+	private _vanillaSymbolBuildForce = false;
+	private _vanillaSymbolBuildGames: ReadonlySet<string> | 'all' | undefined;
 	private _semanticDefinitionTypes: PdxDefinitionType[] = [];
 	private _semanticCatalogFingerprint = 'unavailable';
 	private _workspaceSymbolPhaseReady = false;
@@ -585,12 +587,26 @@ export class IndexService implements vscode.Disposable {
 
 	private async _ensureVanillaSymbolPhase(force: boolean, gameIds?: readonly string[]): Promise<void> {
 		if (!force && this._vanillaSymbolPhaseReady) return;
-		if (this._vanillaSymbolBuildPromise) await this._vanillaSymbolBuildPromise;
+		const requestedGames = gameIds?.length
+			? new Set(gameIds.map(value => value.trim().toLowerCase()))
+			: undefined;
+		if (this._vanillaSymbolBuildPromise) {
+			const activeGames = this._vanillaSymbolBuildGames;
+			const activeBuildCoversRequest = (!force || this._vanillaSymbolBuildForce)
+				&& (activeGames === 'all'
+					|| !!requestedGames && activeGames instanceof Set
+						&& Array.from(requestedGames).every(gameId => activeGames.has(gameId)));
+			await this._vanillaSymbolBuildPromise;
+			if (activeBuildCoversRequest) return;
+		}
 		if (!force && this._vanillaSymbolPhaseReady) return;
 		this._workspaceSymbolStatus = 'indexing';
-		this._vanillaSymbolBuildPromise = this._indexVanillaWorkspaceSymbolFiles(force, gameIds);
+		this._vanillaSymbolBuildForce = force;
+		this._vanillaSymbolBuildGames = requestedGames ?? 'all';
+		const buildPromise = this._indexVanillaWorkspaceSymbolFiles(force, requestedGames ? Array.from(requestedGames).sort() : undefined);
+		this._vanillaSymbolBuildPromise = buildPromise;
 		try {
-			await this._vanillaSymbolBuildPromise;
+			await buildPromise;
 			if (!gameIds?.length || this._vanillaSymbolPhaseReady) {
 				this._vanillaSymbolPhaseReady = true;
 				this._workspaceSymbolsIncludeVanilla = true;
@@ -604,7 +620,11 @@ export class IndexService implements vscode.Disposable {
 				: 'error';
 			throw e;
 		} finally {
-			this._vanillaSymbolBuildPromise = undefined;
+			if (this._vanillaSymbolBuildPromise === buildPromise) {
+				this._vanillaSymbolBuildPromise = undefined;
+				this._vanillaSymbolBuildForce = false;
+				this._vanillaSymbolBuildGames = undefined;
+			}
 		}
 	}
 
@@ -925,5 +945,7 @@ export class IndexService implements vscode.Disposable {
 		this._semanticCatalogFingerprint = 'unavailable';
 		this._workspaceSymbolBuildPromise = undefined;
 		this._vanillaSymbolBuildPromise = undefined;
+		this._vanillaSymbolBuildForce = false;
+		this._vanillaSymbolBuildGames = undefined;
 	}
 }

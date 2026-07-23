@@ -54,6 +54,7 @@ import { registerProjectKnowledgeWatcher } from './ai/projectKnowledge';
 import { repairMovedAgentWorktrees } from './ai/orchestrator/worktreeManager';
 import { QuickPickSelectionGuard } from './quickPickSelectionGuard';
 import { getDefaultLocalisationLanguagesForUiLocale } from './localisationLanguagePreference';
+import { handleVanillaCacheGenerated } from './vanillaCacheLifecycle';
 
 export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
@@ -2160,6 +2161,7 @@ export async function activate(context: ExtensionContext) {
 		const createVirtualFile = new NotificationType<CreateVirtualFile>('createVirtualFile');
 		const promptReload = new NotificationType<string>('promptReload')
 		const forceReload = new NotificationType<string>('forceReload')
+		const vanillaCacheGenerated = new NotificationType<unknown>('vanillaCacheGenerated')
 		const promptVanillaPath = new NotificationType<string>('promptVanillaPath')
 		interface DidFocusFile { uri: string }
 		const didFocusFile = new NotificationType<DidFocusFile>('didFocusFile')
@@ -2372,6 +2374,15 @@ export async function activate(context: ExtensionContext) {
 		client.onNotification(forceReload, async (param: string) => {
 			window.showInformationMessage(param);
 			await commands.executeCommand('workbench.action.reloadWindow');
+		})
+		client.onNotification(vanillaCacheGenerated, async (param: unknown) => {
+			await handleVanillaCacheGenerated(param, {
+				refreshVanillaSymbols: gameIds => indexService.refreshVanillaSymbols(gameIds),
+				showInformationMessage: message => window.showInformationMessage(message),
+				reloadWindow: () => commands.executeCommand('workbench.action.reloadWindow'),
+				debug: message => ErrorReporter.debug('VanillaCache', message),
+				warn: (message, error) => ErrorReporter.warn('VanillaCache', message, error),
+			});
 		})
 		client.onNotification(promptVanillaPath, async (param: string) => {
 			await selectGameFolderFlow(param);

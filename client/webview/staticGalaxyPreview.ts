@@ -7,8 +7,8 @@
  *
  * Rendering rules (docs/static-galaxy-preview-editor-plan.md §8):
  * - Canvas2D only, devicePixelRatio capped at 2.
- * - All world<->screen math goes through worldToScreen/screenToWorld; the Y
- *   flip lives in exactly those two functions.
+ * - All world<->screen math goes through worldToScreen/screenToWorld; axis
+ *   orientation is defined in exactly those two functions.
  * - On-demand rendering via scheduleRender(); no permanent RAF loop.
  */
 import type {
@@ -208,18 +208,18 @@ let canvasWidth = 0;
 let canvasHeight = 0;
 
 function worldToScreen(wx: number, wy: number): { x: number; y: number } {
-    // Stellaris' galactic axes are flipped on the in-game map: X grows to the
-    // left, Y grows upward. Both flips live only in these two transforms.
+    // Match the in-game map: X grows left, while Y grows down with the screen.
+    // Keep this orientation centralized so rendering and editing stay inverse.
     return {
         x: (state.viewport.cx - wx) * state.viewport.scale + canvasWidth / 2,
-        y: (wy - state.viewport.cy) * -state.viewport.scale + canvasHeight / 2,
+        y: (wy - state.viewport.cy) * state.viewport.scale + canvasHeight / 2,
     };
 }
 
 function screenToWorld(sx: number, sy: number): { x: number; y: number } {
     return {
         x: state.viewport.cx - (sx - canvasWidth / 2) / state.viewport.scale,
-        y: state.viewport.cy - (sy - canvasHeight / 2) / state.viewport.scale,
+        y: state.viewport.cy + (sy - canvasHeight / 2) / state.viewport.scale,
     };
 }
 
@@ -471,7 +471,7 @@ function drawPendingLink(theme: Theme): void {
 function drawGrid(theme: Theme): void {
     const steps = [5, 10, 25, 50, 100, 250, 500, 1000];
     const step = steps.find(s => s * state.viewport.scale >= 42) ?? 1000;
-    // Both axes are screen-flipped, so normalize world extents explicitly.
+    // X is screen-flipped; normalize both extents to keep grid iteration generic.
     const cornerA = screenToWorld(0, 0);
     const cornerB = screenToWorld(canvasWidth, canvasHeight);
     const minX = Math.min(cornerA.x, cornerB.x);
@@ -966,7 +966,7 @@ viewportEl.addEventListener('pointermove', (e: PointerEvent) => {
         state.pan.lastX = e.clientX;
         state.pan.lastY = e.clientY;
         state.viewport.cx += dx / state.viewport.scale;
-        state.viewport.cy += dy / state.viewport.scale;
+        state.viewport.cy -= dy / state.viewport.scale;
         scheduleRender();
         return;
     }

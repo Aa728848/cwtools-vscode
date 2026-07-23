@@ -429,11 +429,15 @@ describe('webview smoke checks', () => {
         expect(script).to.include("document.addEventListener('visibilitychange'");
         // DPR is capped at 2.
         expect(script).to.include('Math.min(2, window.devicePixelRatio || 1)');
-        // Y flip lives in the unified transforms.
+        // Axis orientation lives in the unified inverse transforms.
         expect(script).to.include('function worldToScreen');
         expect(script).to.include('function screenToWorld');
         // Stellaris' X axis grows to the left; the flip lives in the same transforms.
         expect(script).to.include('state.viewport.cx - wx');
+        // Stellaris' Y axis follows the screen, and panning uses the matching inverse sign.
+        expect(script).to.include('y: (wy - state.viewport.cy) * state.viewport.scale');
+        expect(script).to.include('y: state.viewport.cy + (sy - canvasHeight / 2) / state.viewport.scale');
+        expect(script).to.include('state.viewport.cy -= dy / state.viewport.scale');
         // Both node kinds can be moved, Z is editable, and lane actions use semantic requests.
         expect(script).to.include("type: 'moveNebula'");
         expect(script).to.include("readAxisUpdate('z'");

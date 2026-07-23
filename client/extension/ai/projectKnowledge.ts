@@ -24,6 +24,8 @@ export interface ProjectKnowledgeManifest {
     status: 'ready' | 'partial' | 'stale' | 'loading' | 'unavailable' | 'error';
     game: string;
     graphVersion?: number;
+    /** True when the database was produced without definition/topology snapshot caps. */
+    completeExport?: boolean;
     projectRoots: string[];
     domains: string[];
     counts: {
@@ -62,6 +64,7 @@ interface LspKnowledgeSnapshot {
     game?: string;
     generatedAtUnixMs?: number;
     graphVersion?: number;
+    completeExport?: boolean;
     projectRoots?: string[];
     databasePath?: string;
     generationMode?: 'full' | 'incremental';
@@ -86,6 +89,10 @@ export interface GenerateProjectKnowledgeOptions {
     mode?: 'full' | 'incremental';
     changedFiles?: string[];
     domains?: string[];
+    /** Export every definition and topology fact instead of applying bounded snapshot limits. */
+    complete?: boolean;
+    /** Refuse to scan/write while the LSP model still has transient refresh work. */
+    requireReady?: boolean;
 }
 
 const RELEVANT_EXTENSIONS = new Set(['.txt', '.gfx', '.asset', '.gui', '.yml', '.cwt', '.mod']);
@@ -331,6 +338,8 @@ async function requestLspKnowledgeSnapshot(
             maxTopologyFiles: 1200,
             maxEdges: 8000,
             archetypesPerDomain: 8,
+            completeExport: options.complete === true,
+            requireReady: options.requireReady === true,
             databasePath: getProjectKnowledgeDatabasePath(workspaceRoot),
             generationMode: options.mode ?? 'full',
         },
@@ -377,6 +386,7 @@ export async function generateProjectKnowledge(
         status: snapshot.status,
         game: gameId,
         graphVersion: snapshot.graphVersion,
+        completeExport: snapshot.completeExport === true,
         projectRoots,
         domains,
         counts,
@@ -455,6 +465,7 @@ export function readProjectKnowledgeManifest(workspaceRoot: string): ProjectKnow
 
 function currentStaleReasons(workspaceRoot: string, manifest: ProjectKnowledgeManifest): string[] {
     const reasons = [...(manifest.staleReasons ?? [])];
+    if (manifest.status !== 'ready' && manifest.status !== 'partial') reasons.push(`knowledge_${manifest.status}`);
     if (manifest.schemaVersion !== PROJECT_KNOWLEDGE_SCHEMA_VERSION) reasons.push('schema_version_changed');
     if (computeProjectKnowledgeFingerprint(workspaceRoot, manifest.projectRoots) !== manifest.fingerprints.project) reasons.push('workspace_files_changed');
     if (computeVanillaFingerprint(manifest.game) !== manifest.fingerprints.vanilla) reasons.push('vanilla_changed');
@@ -718,6 +729,8 @@ async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexSer
             await generateProjectKnowledge(workspaceRoot, profile, {
                 mode: fullRefresh ? 'full' : 'incremental',
                 changedFiles: files,
+                complete: manifest.completeExport === true || manifest.status === 'unavailable',
+                requireReady: true,
             });
         } catch (error) {
             markProjectKnowledgeStale(workspaceRoot, ['background_refresh_failed']);

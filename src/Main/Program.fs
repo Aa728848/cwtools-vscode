@@ -8085,6 +8085,10 @@ type Server(client: ILanguageClient) =
                                 match tryProperty name with
                                 | Some (JsonValue.String value) when not (String.IsNullOrWhiteSpace value) -> Some value
                                 | _ -> None
+                            let boolProperty name fallback =
+                                match tryProperty name with
+                                | Some (JsonValue.Boolean value) -> value
+                                | _ -> fallback
                             let exportOptions: Main.ProjectKnowledge.ExportOptions =
                                 { domains = stringArray "domains"
                                   changedFiles = stringArray "changedFiles"
@@ -8092,8 +8096,10 @@ type Server(client: ILanguageClient) =
                                   maxTopologyFiles = intProperty "maxTopologyFiles" 1200
                                   maxEdges = intProperty "maxEdges" 8000
                                   archetypesPerDomain = intProperty "archetypesPerDomain" 8
+                                  completeExport = boolProperty "completeExport" false
                                   databasePath = stringProperty "databasePath"
                                   generationMode = stringProperty "generationMode" |> Option.defaultValue "full" }
+                            let requireReady = boolProperty "requireReady" false
                             let projectRoots =
                                 match workspaceFolders with
                                 | folders when not folders.IsEmpty -> folders |> List.map (fun folder -> folder.uri.LocalPath)
@@ -8129,25 +8135,32 @@ type Server(client: ILanguageClient) =
                                   loadingInProgress = loading.inProgress
                                   pendingGlobalKinds = pendingKinds
                                   lastGlobalRefreshAtUnixMs = dateTimeToUnixMs lastGlobalRefreshAt }
-                            let visitor =
-                                { new IGameVisitor<JsonValue> with
-                                    member _.Visit game =
-                                        Main.ProjectKnowledge.exportProjectKnowledge gameName projectRoots exportOptions runtime game }
-                            try
-                                match gameDispatcher.Dispatch visitor with
-                                | Some result -> Some result
-                                | None ->
-                                    Some(
-                                        JsonValue.Record
-                                            [| "ok", JsonValue.Boolean false
-                                               "status", JsonValue.String "unavailable"
-                                               "error", JsonValue.String "LSP server has not loaded a game model yet." |])
-                            with error ->
+                            if requireReady && status <> "ready" then
                                 Some(
                                     JsonValue.Record
                                         [| "ok", JsonValue.Boolean false
-                                           "status", JsonValue.String "error"
-                                           "error", JsonValue.String error.Message |])
+                                           "status", JsonValue.String status
+                                           "error", JsonValue.String $"CWTools project knowledge export is waiting for the {status} model to become ready." |])
+                            else
+                                let visitor =
+                                    { new IGameVisitor<JsonValue> with
+                                        member _.Visit game =
+                                            Main.ProjectKnowledge.exportProjectKnowledge gameName projectRoots exportOptions runtime game }
+                                try
+                                    match gameDispatcher.Dispatch visitor with
+                                    | Some result -> Some result
+                                    | None ->
+                                        Some(
+                                            JsonValue.Record
+                                                [| "ok", JsonValue.Boolean false
+                                                   "status", JsonValue.String "unavailable"
+                                                   "error", JsonValue.String "LSP server has not loaded a game model yet." |])
+                                with error ->
+                                    Some(
+                                        JsonValue.Record
+                                            [| "ok", JsonValue.Boolean false
+                                               "status", JsonValue.String "error"
+                                               "error", JsonValue.String error.Message |])
 
                         // - cwtools.ai.queryProjectKnowledgeDb -
                         | { command = "cwtools.ai.queryProjectKnowledgeDb"
@@ -8837,8 +8850,9 @@ type Server(client: ILanguageClient) =
                                     || not (sameModelEpoch s.modelEpoch currentModelEpoch))
                                 |> Seq.length
                             let allPendingKinds =
-                                fileDiagnosticStates.Values
-                                |> Seq.collect (fun s -> s.pendingGlobalKinds)
+                                Seq.append
+                                    (fileDiagnosticStates.Values |> Seq.collect (fun s -> s.pendingGlobalKinds))
+                                    (pendingRefreshDomainList ())
                                 |> Seq.distinct
                                 |> Seq.toArray
                             let freshness =

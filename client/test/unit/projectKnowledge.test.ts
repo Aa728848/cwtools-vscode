@@ -125,6 +125,7 @@ describe('project knowledge SQLite V2', () => {
             schemaVersion: 2,
             game: 'stellaris',
             graphVersion: 1,
+            completeExport: true,
             generatedAtUnixMs: Date.now(),
             projectRoots: [workspaceRoot],
             generationMode: 'full',
@@ -147,11 +148,13 @@ describe('project knowledge SQLite V2', () => {
             mode: 'incremental',
             domains: ['events'],
             changedFiles: [path.join(workspaceRoot, 'events', 'changed.txt')],
+            complete: true,
         });
 
         expect(manifest.schemaVersion).to.equal(2);
         expect(manifest.artifacts).to.deep.equal(['knowledge.sqlite']);
         expect(manifest.counts.eventLogic).to.equal(9);
+        expect(manifest.completeExport).to.equal(true);
         expect(fs.existsSync(path.join(root, 'manifest.json'))).to.equal(true);
         expect(fs.existsSync(path.join(root, 'knowledge.sqlite'))).to.equal(true);
         expect(fs.existsSync(path.join(root, 'capabilities'))).to.equal(false);
@@ -168,6 +171,8 @@ describe('project knowledge SQLite V2', () => {
             maxTopologyFiles: 1200,
             maxEdges: 8000,
             archetypesPerDomain: 8,
+            completeExport: true,
+            requireReady: false,
             databasePath: path.join(root, 'knowledge.sqlite'),
             generationMode: 'incremental',
         }]);
@@ -455,11 +460,19 @@ describe('project knowledge SQLite V2', () => {
 
         const exports = commandCalls
             .filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')
-            .map(call => call.args[0] as { databasePath: string; changedFiles: string[]; generationMode: string });
+            .map(call => call.args[0] as {
+                databasePath: string;
+                changedFiles: string[];
+                generationMode: string;
+                completeExport: boolean;
+                requireReady: boolean;
+            });
         expect(exports).to.have.length(2);
         expect(exports.find(item => item.databasePath.startsWith(workspaceRoot))?.changedFiles).to.deep.equal([firstChanged]);
         expect(exports.find(item => item.databasePath.startsWith(secondRoot))?.changedFiles).to.deep.equal([secondChanged]);
         expect(exports.every(item => item.generationMode === 'incremental')).to.equal(true);
+        expect(exports.every(item => item.completeExport === false)).to.equal(true);
+        expect(exports.every(item => item.requireReady === true)).to.equal(true);
     });
 
     it('routes secondary-root changes into the primary combined knowledge database', async () => {

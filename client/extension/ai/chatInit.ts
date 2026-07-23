@@ -93,9 +93,17 @@ async function generateDeepKnowledgeWithRetry(root: string, profile: import('./t
             ),
         });
         try {
-            const manifest = await generateProjectKnowledge(root, profile, { mode: 'full' });
+            const manifest = await generateProjectKnowledge(root, profile, {
+                mode: 'full',
+                complete: true,
+                requireReady: true,
+            });
             lastManifest = manifest;
-            if (manifest.status === 'ready') return manifest;
+            // A partial snapshot is deterministic for a fixed model and export
+            // mode. Retrying it repeats the same full scan without any
+            // chance of improving coverage. Only transient loading/stale states
+            // should proceed to the next attempt.
+            if (manifest.status === 'ready' || manifest.status === 'partial') return manifest;
         } catch (error) {
             lastError = error;
         }
@@ -192,15 +200,18 @@ async function generateInitFileCore(
         });
 
         let deepKnowledgeError: string | undefined;
+        let deepKnowledgeWarning: string | undefined;
         try {
             const manifest = await generateDeepKnowledgeWithRetry(root, profile, progress);
             profile.game.id = manifest.game || profile.game.id;
             profile.game.displayName = getKnownProfileByLanguageId(manifest.game)?.displayName ?? profile.game.displayName;
             profile.game.confidence = manifest.game && manifest.game !== 'paradox' ? 'high' : profile.game.confidence;
             profile.game.evidence = Array.from(new Set([...profile.game.evidence, 'active CWTools LSP game model']));
-            profile.validation.lspReady = manifest.status === 'ready' ? 'ready' : 'not_ready';
+            profile.validation.lspReady = manifest.status === 'ready' || manifest.status === 'partial' ? 'ready' : 'not_ready';
             profile.validation.vanillaCache = manifest.counts.vanillaDefinitions > 0 ? 'configured' : 'missing';
-            if (manifest.status !== 'ready') {
+            if (manifest.status === 'partial') {
+                deepKnowledgeWarning = 'Deep project knowledge was exported with partial coverage.';
+            } else if (manifest.status !== 'ready') {
                 deepKnowledgeError = `Deep project knowledge export remained ${manifest.status} after retries.`;
             }
         } catch (error) {
@@ -231,6 +242,11 @@ async function generateInitFileCore(
                         `Generated CWTOOLS.md, Agent profile, and a recoverable knowledge pack. Deep LSP export is pending: ${deepKnowledgeError}`,
                         `已生成 CWTOOLS.md、Agent 项目画像和可恢复知识包。LSP 深层导出仍待完成：${deepKnowledgeError}`,
                     )
+                    : deepKnowledgeWarning
+                    ? aiText(
+                        `Generated CWTOOLS.md, Agent profile, workspace symbol index, and a partial semantic knowledge pack -> ${getProjectKnowledgeManifestPath(root)}`,
+                        `已生成 CWTOOLS.md、Agent 项目画像、工作区符号索引和部分覆盖的语义知识包 -> ${getProjectKnowledgeManifestPath(root)}`,
+                    )
                     : aiText(
                         `Generated CWTOOLS.md, Agent profile, workspace symbol index, and semantic knowledge pack -> ${getProjectKnowledgeManifestPath(root)}`,
                         `已生成 CWTOOLS.md、Agent 项目画像、工作区符号索引和语义知识包 -> ${getProjectKnowledgeManifestPath(root)}`,
@@ -244,6 +260,11 @@ async function generateInitFileCore(
                 `Eddy CWTool Code: base /init artifacts were generated for ${path.basename(root)}; deep LSP knowledge will retry when ready.`,
                 `Eddy CWTool Code：已为 ${path.basename(root)} 生成 /init 基础产物；LSP 就绪后将重试深层知识导出。`,
             ));
+        } else if (deepKnowledgeWarning) {
+            vs.window.showWarningMessage(aiText(
+                `Eddy CWTool Code: generated a partial project + vanilla knowledge pack for ${path.basename(root)}; see manifest warnings for coverage details.`,
+                `Eddy CWTool Code：已为 ${path.basename(root)} 生成部分覆盖的项目与原版知识包；覆盖详情请查看 manifest 警告。`,
+            ));
         } else {
             vs.window.showInformationMessage(aiText(
                 `Eddy CWTool Code: generated project + vanilla knowledge for ${path.basename(root)}`,
@@ -252,12 +273,12 @@ async function generateInitFileCore(
         }
         return {
             success: true,
-            degraded: !!deepKnowledgeError,
+            degraded: !!deepKnowledgeError || !!deepKnowledgeWarning,
             rulesPath,
             profilePath,
             knowledgeManifestPath: getProjectKnowledgeManifestPath(root),
             workspaceIndexPath: indexService ? workspaceIndexPath : undefined,
-            message: deepKnowledgeError,
+            message: deepKnowledgeError ?? deepKnowledgeWarning,
         };
     } catch (e) {
         const message = e instanceof Error ? e.message : String(e);

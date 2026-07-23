@@ -22,6 +22,8 @@ describe('/init artifact generation', () => {
         const progressMessages: string[] = [];
         let progressOptions: Record<string, unknown> | undefined;
         let workspaceIndexOptions: Record<string, unknown> | undefined;
+        let exportAttempts = 0;
+        let exportOptions: Record<string, unknown> | undefined;
         const vscodeStub = {
             workspace: {
                 workspaceFolders: [{ uri: { fsPath: workspaceRoot } }],
@@ -46,7 +48,9 @@ describe('/init artifact generation', () => {
             },
         };
         const projectKnowledgeStub = {
-            generateProjectKnowledge: async () => {
+            generateProjectKnowledge: async (_root: string, _profile: unknown, options: Record<string, unknown>) => {
+                exportAttempts += 1;
+                exportOptions = options;
                 throw new Error('LSP server has not loaded a game model yet.');
             },
             getProjectKnowledgeManifestPath: () => manifestPath,
@@ -93,6 +97,8 @@ describe('/init artifact generation', () => {
             expect(progressMessages.some(message => message.includes('persistent workspace symbol index'))).to.equal(true);
             expect(progressMessages.some(message => message.includes('Exporting project + vanilla knowledge'))).to.equal(true);
             expect(progressMessages.some(message => message.includes('Publishing the knowledge database'))).to.equal(true);
+            expect(exportAttempts).to.equal(3);
+            expect(exportOptions).to.deep.equal({ mode: 'full', complete: true, requireReady: true });
         } finally {
             clock.restore();
             moduleLoader._load = originalLoad;
@@ -100,7 +106,7 @@ describe('/init artifact generation', () => {
         }
     });
 
-    it('reports degraded success when the LSP export stays partial after retries', async () => {
+    it('publishes a partial export without repeating the same full scan', async () => {
         const manifestPath = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge', 'manifest.json');
         const warnings: string[] = [];
         let attempts = 0;
@@ -149,11 +155,12 @@ describe('/init artifact generation', () => {
             await clock.runAllAsync();
             const result = await pending;
 
-            expect(attempts).to.equal(3);
+            expect(attempts).to.equal(1);
             expect(result.success).to.equal(true);
             expect(result.degraded).to.equal(true);
-            expect(result.message).to.include('remained partial');
+            expect(result.message).to.include('partial coverage');
             expect(warnings).to.have.length(1);
+            expect(warnings[0]).to.include('generated a partial project + vanilla knowledge pack');
         } finally {
             clock.restore();
             moduleLoader._load = originalLoad;

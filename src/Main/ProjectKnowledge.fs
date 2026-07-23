@@ -17,6 +17,7 @@ type ExportOptions =
       maxTopologyFiles: int
       maxEdges: int
       archetypesPerDomain: int
+      completeExport: bool
       databasePath: string option
       generationMode: string }
 
@@ -147,6 +148,7 @@ let normalizeOptions (options: ExportOptions) : ExportOptions =
       maxTopologyFiles = clamp 10 3000 options.maxTopologyFiles
       maxEdges = clamp 100 20000 options.maxEdges
       archetypesPerDomain = clamp 1 20 options.archetypesPerDomain
+      completeExport = options.completeExport
       databasePath = options.databasePath
       generationMode = if options.generationMode = "incremental" then "incremental" else "full" }
 
@@ -300,7 +302,7 @@ let private balancedTakeDefinitions limit (definitions: DefinitionFact list) =
         selected |> Seq.toList
 
 let private selectDefinitions (options: ExportOptions) (definitions: DefinitionFact list) =
-    if definitions.Length <= options.maxDefinitions then definitions
+    if options.completeExport || definitions.Length <= options.maxDefinitions then definitions
     else
         let workspace, vanilla = definitions |> List.partition (fun item -> item.origin = "workspace")
         let remaining = max 0 (options.maxDefinitions - workspace.Length)
@@ -398,6 +400,9 @@ let private compactDomainSummaries (definitions: DefinitionFact seq) =
 let private collectTopology (projectRoots: string list) (options: ExportOptions) (game: IGame<'T>) : TopologyFacts =
     let files = ResizeArray<FileFact>()
     let edges = ResizeArray<ReferenceFact>()
+    let pathComparer = if OperatingSystem.IsWindows() then StringComparer.OrdinalIgnoreCase else StringComparer.Ordinal
+    let seenFiles = HashSet<string>(pathComparer)
+    let seenEdges = HashSet<struct (string * string * string * int * string)>()
     let mutable fileCount = 0
     let mutable fileLimitExceeded = false
     let mutable edgeLimitExceeded = false
@@ -409,51 +414,49 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
             if (options.domains.IsEmpty && changedFiles.IsEmpty)
                || options.domains |> List.contains domain
                || changedFiles.Contains(normalizeFileKey entity.filepath) then
-                if fileCount >= options.maxTopologyFiles then
+                let normalizedFile = normalizePath entity.filepath
+                if not (seenFiles.Add normalizedFile) then
+                    ()
+                elif not options.completeExport && fileCount >= options.maxTopologyFiles then
                     fileLimitExceeded <- true
                 else
                     fileCount <- fileCount + 1
                     let data = lazyData.Force()
-                    let references =
-                        data.Referencedtypes
-                        |> Option.map (fun groups ->
-                            groups
-                            |> Map.toSeq
-                            |> Seq.collect (fun (typeGroup, values) ->
-                                values
-                                |> Seq.map (fun reference ->
-                                    let target = stringManager.GetStringForIDs reference.originalValue
-                                    if edges.Count < options.maxEdges then
-                                        edges.Add(
-                                            { sourceFile = normalizePath entity.filepath
-                                              sourceLogicalPath = normalizePath entity.logicalpath
-                                              targetId = target
-                                              typeGroup = typeGroup
-                                              line = int reference.position.StartLine
-                                              isOutgoing = reference.isOutgoing
-                                              referenceType = reference.referenceType.ToString()
-                                              label = reference.referenceLabel
-                                              associatedType = reference.associatedType
-                                              domain = domain })
-                                    else
-                                        edgeLimitExceeded <- true
-                                    target))
-                            |> Seq.filter (String.IsNullOrWhiteSpace >> not)
-                            |> Seq.distinct
-                            |> Seq.truncate 100
-                            |> Seq.toArray)
-                        |> Option.defaultValue [||]
+                    data.Referencedtypes
+                    |> Option.iter (fun groups ->
+                        for typeGroup, values in groups |> Map.toSeq do
+                            for reference in values do
+                                let target = stringManager.GetStringForIDs reference.originalValue
+                                if not (String.IsNullOrWhiteSpace target) then
+                                    let referenceType = reference.referenceType.ToString()
+                                    let line = int reference.position.StartLine
+                                    let edgeKey = struct (normalizedFile, target, typeGroup, line, referenceType)
+                                    if not (seenEdges.Contains edgeKey) then
+                                        if options.completeExport || edges.Count < options.maxEdges then
+                                            seenEdges.Add edgeKey |> ignore
+                                            edges.Add(
+                                                { sourceFile = normalizedFile
+                                                  sourceLogicalPath = normalizePath entity.logicalpath
+                                                  targetId = target
+                                                  typeGroup = typeGroup
+                                                  line = line
+                                                  isOutgoing = reference.isOutgoing
+                                                  referenceType = referenceType
+                                                  label = reference.referenceLabel
+                                                  associatedType = reference.associatedType
+                                                  domain = domain })
+                                        else
+                                            edgeLimitExceeded <- true)
                     files.Add(
-                        { file = normalizePath entity.filepath
+                        { file = normalizedFile
                           logicalPath = normalizePath entity.logicalpath
                           domain = domain
                           origin = originForPath projectRoots entity.filepath })
-                    ignore references
 
-    { files = files |> Seq.distinctBy (fun item -> normalizePath item.file) |> Seq.toList
+    { files = files |> Seq.sortBy (fun item -> item.file, item.logicalPath) |> Seq.toList
       edges =
         edges
-        |> Seq.distinctBy (fun item -> normalizePath item.sourceFile, item.targetId, item.typeGroup, item.line, item.referenceType)
+        |> Seq.sortBy (fun item -> item.sourceFile, item.line, item.typeGroup, item.targetId, item.referenceType)
         |> Seq.toList
       truncated = fileLimitExceeded || edgeLimitExceeded }
 
@@ -485,7 +488,7 @@ let private topologyJson (topology: TopologyFacts) =
             |> List.toArray))
           Some("truncated", JsonValue.Boolean topology.truncated) ]
 
-let private collectEventGraph (definitions: DefinitionFact list) (topology: TopologyFacts) : EventGraphFacts =
+let private collectEventGraph (options: ExportOptions) (definitions: DefinitionFact list) (topology: TopologyFacts) : EventGraphFacts =
     let pathComparer = if OperatingSystem.IsWindows() then StringComparer.OrdinalIgnoreCase else StringComparer.Ordinal
     let eventDefinitions =
         definitions
@@ -571,9 +574,11 @@ let private collectEventGraph (definitions: DefinitionFact list) (topology: Topo
                           line = reference.line
                           confidence = "lsp" })
 
+    let distinctEdges = edges |> Seq.distinctBy (fun item -> item.sourceKind, item.sourceId, item.targetEventId, item.edgeType, item.line)
+    let distinctLogic = logic |> Seq.distinctBy (fun item -> item.eventId, item.relationType, item.subject, item.scope, item.line)
     { nodes = nodes |> Seq.distinctBy (fun item -> item.eventId, item.file, item.line) |> Seq.toList
-      edges = edges |> Seq.distinctBy (fun item -> item.sourceKind, item.sourceId, item.targetEventId, item.edgeType, item.line) |> Seq.truncate 30000 |> Seq.toList
-      logic = logic |> Seq.distinctBy (fun item -> item.eventId, item.relationType, item.subject, item.scope, item.line) |> Seq.truncate 30000 |> Seq.toList }
+      edges = (if options.completeExport then distinctEdges else distinctEdges |> Seq.truncate 30000) |> Seq.toList
+      logic = (if options.completeExport then distinctLogic else distinctLogic |> Seq.truncate 30000) |> Seq.toList }
 
 let private overrideModesJson (game: IGame) =
     game.OverrideModes()
@@ -791,6 +796,7 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
     insertMetadata "graph_version" (runtime.graphVersion.ToString())
     insertMetadata "project_roots" (JsonValue.Array(projectRoots |> List.map JsonValue.String |> List.toArray).ToString(JsonSaveOptions.DisableFormatting))
     insertMetadata "generation_mode" options.generationMode
+    insertMetadata "complete_export" (if options.completeExport then "true" else "false")
     insertMetadata "validation_in_progress" ((string runtime.validationInProgress).ToLowerInvariant())
     insertMetadata "loading_in_progress" ((string runtime.loadingInProgress).ToLowerInvariant())
     insertMetadata "pending_global_kinds" (JsonValue.Array(runtime.pendingGlobalKinds |> List.map JsonValue.String |> List.toArray).ToString(JsonSaveOptions.DisableFormatting))
@@ -1542,7 +1548,7 @@ let exportProjectKnowledge (activeGame: string) (projectRoots: string list) (raw
     let options = { collectionOptions with domains = []; changedFiles = []; generationMode = generationMode }
     let definitions = selectDefinitions options availableDefinitions
     let domains = domainSummaries options definitions
-    let eventGraph = collectEventGraph availableDefinitions topology
+    let eventGraph = collectEventGraph options availableDefinitions topology
     let warnings = ResizeArray<string>()
     if runtime.status <> "ready" then warnings.Add("The knowledge snapshot was exported while CWTools was loading or stale.")
     if topology.truncated then warnings.Add("Topology and event relationships are partial because the configured export limits were reached.")
@@ -1566,6 +1572,7 @@ let exportProjectKnowledge (activeGame: string) (projectRoots: string list) (raw
               Some("game", JsonValue.String activeGame)
               Some("generatedAtUnixMs", JsonValue.Number(decimal (generatedAt.ToUnixTimeMilliseconds())))
               Some("graphVersion", JsonValue.Number(decimal runtime.graphVersion))
+              Some("completeExport", JsonValue.Boolean options.completeExport)
               Some("projectRoots", jsonStringArray projectRoots)
               Some("databasePath", JsonValue.String(normalizePath storedPath))
               Some("generationMode", JsonValue.String generationMode)
@@ -1596,6 +1603,7 @@ let exportProjectKnowledge (activeGame: string) (projectRoots: string list) (raw
               Some("game", JsonValue.String activeGame)
               Some("generatedAtUnixMs", JsonValue.Number(decimal (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())))
               Some("graphVersion", JsonValue.Number(decimal runtime.graphVersion))
+              Some("completeExport", JsonValue.Boolean options.completeExport)
               Some("projectRoots", jsonStringArray projectRoots)
               Some("requestedDomains", jsonStringArray options.domains)
               Some("definitions", JsonValue.Array(definitions |> List.map definitionJson |> List.toArray))

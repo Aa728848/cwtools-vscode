@@ -391,7 +391,9 @@ The packages `packages/cwtools-shared` and `packages/cwtools-mcp` implement a **
 The backend runs on .NET 10.
 
 - **Completion locks**: Autocompletions call `TryEnterReadLock` with a 150ms timeout. Out-of-time runs fallback to stale caches.
-- **Incremental refreshes**: Saves under scripted definitions bypass full database indexing, updating only altered files and type dictionaries instantly (gated by `experimental`).
+- **Latest-wins validation**: Each editor mutation advances a per-file generation. Stellaris rule validation samples the generation between clauses and returns no partial result when superseded; diagnostic publication still requires the exact document version and model epoch. A completed interactive rule result is reused by save-time deep validation only for the same immutable entity and rule service.
+- **Incremental refreshes**: Saves under type-defining paths update only touched type keys (gated by `experimental`). `StagedTypeIndex.semanticChanged` compares validation/completion/localisation metadata while ignoring source ranges: range-only/body-only updates keep navigation current without advancing the global type epoch, rebuilding services, or scanning all localisation. Touched validation arrays and unchanged type tries are structurally shared; semantic changes and unknown cases retain the conservative full-refresh fallback.
+- **Staged full refreshes**: Heavy rule rebuilds run against a lookup clone under the read lock. A commit-guard miss discards the obsolete stage and retries after a quiet period instead of immediately allocating a second locked rebuild; exceptions or unsupported staging still fall back safely. Guard references and the stage are released before localisation recomputation/GC, and the type-localisation inverted map remains lazy until it is actually needed after commit.
 - **Shader parsing**: Renders tokens and declarations. Uses brace counts for nesting rather than simple regex.
 
 #### Build System
@@ -999,12 +1001,14 @@ Webview 维护规则：
 - **全工作区诊断聚合**：`cwtools.ai.getAllDiagnostics` 遍历 server 端 `fileDiagnosticStates`，按 severity 过滤 + limit 聚合返回整个工作区的真实诊断（供 MCP 的全项目 `get_diagnostics` 使用），区别于只返回 freshness 的 `getValidationStatus`。
 - **RevalidateRequest**：编辑 `inline_scripts/` 定义文件保存后，绕过防抖立即重新校验其调用方文件。
 - **自定义 scripted 类型增量刷新**：编辑/保存 `common/scripted_triggers/`、`common/scripted_effects/`、`common/script_values/` 下的定义文件时，绕开整库全量 `RefreshCaches`，改走增量类型补丁——`IGame.RefreshScriptedTypes` 经 `RulesManager.RefreshScriptedTypes` 按 `range.FileName` 滤除旧 `typeDefInfo` 条目、对改动实体单趟 `getTypesFromDefinitions`、仅对改动的 typeKey 增量重建 `tempTypeMap`（只重建这些类型的 `createStringSet` trie，其余类型复用已有 StringSet，不再整表 `typeMapFromTypeDefInfo`，逐键语义与全量一致），并复用 `buildServices` 重建补全/校验/Info 三服务——构建三服务的 `buildServices` 现按引用身份缓存复用 `varMap`、共享 `aliasKeyMap`（`RulesHelpers.computeAliasKeyMap`，经 `aliasKeyMapOverride` 传入三服务）与 `RulesWrapper`（全量 `refreshConfig` 替换源数据时失效）；`CompletionService` 类型值列表按需物化、`InfoService.invertedTypeMap` 惰性构建，保存路径不再逐次整表重建。；删除文件走 `IGame.RemoveScriptedTypes`（含 `ResourceManager.RemoveFile`）。调用方重校验复用类型引用反向索引（`TypeReferenceIndex` / `FindAllRefsByType`），并把当前打开的其它文件排入重校验队列。该路径由 `experimental` 开关门控、在 `gameStateLock` 写锁内执行，遇异常/非白名单类型/连续 25 次后回退全量；`inline_scripts`（非 `type[...]` 叶子类型）不进增量白名单，仍走全量 + 调用方重校验（见上一条）。
+- **latest-wins 与精确复用**：每次编辑/保存/文件 watcher 变更都会推进文件级验证代次。Stellaris 规则验证在子句之间检查代次，过期后返回 `None` 而不是部分诊断；最终发布仍同时校验文档版本和 game/rules/types/localisation model epoch。交互验证的完整规则结果只在“同一不可变 Entity + 同一 RuleValidationService”时供保存深度验证复用，实体或服务变化即失效。
+- **类型语义增量判定**：普通 type-defining 路径的 `StagedTypeIndex.semanticChanged` 只比较 `id`、`validate`、显式本地化和 subtype，忽略仅用于导航的位置范围。仅范围/正文变化仍提交新位置，但不推进全局 type epoch、不重建三服务、不排队全量 `RefreshCaches`，也不扫描全项目本地化；改动键的 validation array 与未变化的 type trie 继续结构共享。真实语义变化或无法证明等价时仍保守回退全量，因此不会用旧模型消除真实错误或产生假阳。
 
 ##### Shader 支持
 
 Shader 支持覆盖 `.shader` 和 `.fxh`，涉及：
 
-- **全量刷新分阶段提交**：`delayedAnalyze` 触发的全量 `RefreshCaches` 在 `experimental` 下改走分阶段路径——读锁内 `IGame.PrepareRefreshCaches`（`RulesManager.PrepareRefreshConfig` 将内部 lookup 暂指向 `Lookup.ShallowClone` 克隆体后运行完整 `refreshConfig`，temp 状态快照还原，STL hooks 全部作用于克隆体），写锁内 `CommitRefreshCaches` 以 `typeDefInfo`/`varDefInfo`/`configRules` 三重引用守卫校验后 `AbsorbFieldsFrom` 吸收字段并交换三服务；守卫失效或异常回退原有写锁内全量刷新。刷新期间读请求（补全/悬停）不再被长时间写锁阻塞。
+- **全量刷新分阶段提交**：`delayedAnalyze` 触发的全量 `RefreshCaches` 在 `experimental` 下改走分阶段路径——读锁内 `IGame.PrepareRefreshCaches`（`RulesManager.PrepareRefreshConfig` 将内部 lookup 暂指向 `Lookup.ShallowClone` 克隆体后运行完整 `refreshConfig`，temp 状态快照还原，STL hooks 全部作用于克隆体），写锁内 `CommitRefreshCaches` 以 `typeDefInfo`/`varDefInfo`/`configRules` 三重引用守卫校验后 `AbsorbFieldsFrom` 吸收字段并交换三服务。守卫失效表示阶段结果已过期，会丢弃并等下一静默期重试，避免立刻再分配一次锁内全量模型；仅 prepare/commit 异常或不支持 staged 时安全回退原有全量路径。提交后先释放 stage 及旧 lookup 守卫引用，再计算本地化/触发 GC；`InfoService.invertedTypeMap` 保持惰性到提交后实际需要时，降低新旧模型并存峰值。刷新期间读请求（补全/悬停）不再被长时间写锁阻塞。
 - `release/package.json` 的 `pdx-shader` language contribution。
 - `src/Main/Program.fs` 的语义 token、document symbol、document link 桥接。
 - `src/Main/GameLoader.fs` 的 vanilla fx source 加载。

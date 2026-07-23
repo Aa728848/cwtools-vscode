@@ -1317,6 +1317,28 @@ type Server(client: ILanguageClient) =
     do setupLogger client
     let docs = DocumentStore()
     let dirtyDocumentPaths = System.Collections.Concurrent.ConcurrentDictionary<string, byte>()
+    let latestLintGenerations = System.Collections.Concurrent.ConcurrentDictionary<string, int64>()
+    let committedInteractiveVersions =
+        System.Collections.Concurrent.ConcurrentDictionary<string, struct (int * IGame)>()
+
+    let lintGenerationKey filePath =
+        let fullPath =
+            try FileInfo(filePath).FullName.Replace('\\', '/')
+            with _ -> filePath.Replace('\\', '/')
+        if OperatingSystem.IsWindows() then fullPath.ToLowerInvariant() else fullPath
+
+    let advanceLintGeneration filePath =
+        latestLintGenerations.AddOrUpdate(lintGenerationKey filePath, 1L, fun _ current -> current + 1L)
+
+    let lintGeneration filePath =
+        match latestLintGenerations.TryGetValue(lintGenerationKey filePath) with
+        | true, generation -> generation
+        | false, _ -> 0L
+
+    let releaseLintGeneration filePath generation =
+        let entry =
+            System.Collections.Generic.KeyValuePair<string, int64>(lintGenerationKey filePath, generation)
+        (latestLintGenerations :> System.Collections.Generic.ICollection<_>).Remove(entry) |> ignore
 
     let mutable activeGame = STL
     let mutable isVanillaFolder = false
@@ -3085,7 +3107,7 @@ type Server(client: ILanguageClient) =
         issues |> Seq.toList
 
     /// isEditAction: true for DidChange/DidSave (content changed), false for DidOpen/DidFocus (content unchanged).
-    let lint (doc: Uri) (shallowAnalyze: bool) (forceDisk: bool) (isEditAction: bool) (validateCachedOnly: bool) (fastDefinitionIndex: bool) : Async<unit> =
+    let lint (doc: Uri) (shallowAnalyze: bool) (forceDisk: bool) (isEditAction: bool) (validateCachedOnly: bool) (fastDefinitionIndex: bool) (requestStillCurrent: unit -> bool) : Async<unit> =
         async {
             let name = getPathFromDoc doc
             // Invalidate codelens cache for THIS file only
@@ -3099,7 +3121,7 @@ type Server(client: ILanguageClient) =
                 if isEditAction then markFileStale name "localisation"
 
             let useInteractiveUpdate =
-                isEditAction && shallowAnalyze && not fastDefinitionIndex
+                isEditAction && shallowAnalyze
 
             let canTryIncrementalTypeRefresh =
                 isEditAction
@@ -3122,7 +3144,11 @@ type Server(client: ILanguageClient) =
                 addPendingRefreshDomains (if domains.IsEmpty then [ "types" ] else domains)
                 clearTypeCaches ()
                 markFileStale name "path"
-            elif isEditAction && shallowAnalyze && not (name.EndsWith(".yml")) && isTypeDefiningPath name then
+            elif isEditAction
+                 && shallowAnalyze
+                 && not (name.EndsWith(".yml"))
+                 && isTypeDefiningPath name
+                 && not canTryIncrementalTypeRefresh then
                 delayedScriptLocUpdate <- true
 
             // Capture text and document version atomically. Diagnostic publication
@@ -3145,6 +3171,9 @@ type Server(client: ILanguageClient) =
                 match validatedDocumentVersion with
                 | Some version -> docs.GetVersionByPath(name) = Some version
                 | None -> true
+
+            let lintSnapshotStillCurrent () =
+                requestStillCurrent () && documentVersionStillCurrent ()
 
             let getRange (start: Position) (endp: Position) =
                 mkRange
@@ -3192,9 +3221,21 @@ type Server(client: ILanguageClient) =
                     let updateErrors =
                         gameStateLock.EnterReadLock()
                         try
-                            let result = game.ValidateFile shallowAnalyze name
-                            validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
-                            result
+                            let result =
+                                match game with
+                                | :? ICancellableFileValidation as cancellable ->
+                                    cancellable.ValidateFileCancellable(shallowAnalyze, name, (fun () -> not (lintSnapshotStillCurrent ())))
+                                | _ when lintSnapshotStillCurrent () ->
+                                    Some(game.ValidateFile shallowAnalyze name)
+                                | _ -> None
+
+                            match result with
+                            | Some completed ->
+                                validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
+                                completed
+                            | None ->
+                                lintUpdateSuperseded <- true
+                                []
                         finally gameStateLock.ExitReadLock()
                     let astErrors =
                         updateErrors
@@ -3207,6 +3248,14 @@ type Server(client: ILanguageClient) =
                 | Some game ->
                     let allocBeforeUpdate = GC.GetTotalAllocatedBytes(false)
 
+                    let interactiveResourceAlreadyCurrent =
+                        fastDefinitionIndex
+                        && (match validatedDocumentVersion, committedInteractiveVersions.TryGetValue(normaliseCachePath name) with
+                            | Some version, (true, struct (committedVersion, committedGame)) ->
+                                version = committedVersion
+                                && Object.ReferenceEquals(game, committedGame)
+                            | _ -> false)
+
                     // In the incremental scripted pipeline the deep validation pass runs
                     // post-commit under the READ lock, so the write-locked first pass only
                     // needs the shallow update — this keeps save-time write locks short.
@@ -3214,7 +3263,9 @@ type Server(client: ILanguageClient) =
                         canTryIncrementalTypeRefresh && not fastDefinitionIndex && not useInteractiveUpdate
 
                     let stagedInteractiveUpdate =
-                        if useInteractiveUpdate && documentVersionStillCurrent () then
+                        if useInteractiveUpdate
+                           && not interactiveResourceAlreadyCurrent
+                           && lintSnapshotStillCurrent () then
                             let prepareSw = Stopwatch.StartNew()
                             try
                                 let staged = game.PrepareUpdateFileInteractive name filetext
@@ -3232,7 +3283,9 @@ type Server(client: ILanguageClient) =
                     // the service rebuild behind it only matter when a definition is added,
                     // removed, or renamed. Saves (deep lint) always run the full pipeline.
                     let newDefinitionSignature =
-                        if canTryIncrementalTypeRefresh && shallowAnalyze then
+                        if canTryIncrementalTypeRefresh
+                           && shallowAnalyze
+                           && not fastDefinitionIndex then
                             filetext |> Option.map topLevelDefinitionKeySignature
                         else
                             None
@@ -3268,7 +3321,7 @@ type Server(client: ILanguageClient) =
 
                             if not gameStillCurrent
                                || not indexSnapshotStillCurrent
-                               || not (documentVersionStillCurrent ()) then
+                               || not (lintSnapshotStillCurrent ()) then
                                 [], [], true, game, false, true
                             else
                                 let priorDefs = priorDefsSnapshot
@@ -3294,14 +3347,21 @@ type Server(client: ILanguageClient) =
                                     else
                                         []
 
-                                if useInteractiveUpdate then
+                                if interactiveResourceAlreadyCurrent then
+                                    [], prior, skip, game, false, false
+                                elif useInteractiveUpdate then
                                     match stagedInteractiveUpdate with
                                     | Some staged when game.CommitUpdateFileInteractive staged ->
                                         if staged.kind = LocalisationFile then bumpLocalisationModelEpoch ()
+                                        if isTypeDefiningPath name then
+                                            validatedDocumentVersion
+                                            |> Option.iter (fun version ->
+                                                committedInteractiveVersions.[normaliseCachePath name] <- struct (version, game))
                                         [], prior, skip, game, true, false
                                     | _ ->
                                         [], prior, skip, game, false, true
                                 else
+                                    committedInteractiveVersions.TryRemove(normaliseCachePath name) |> ignore
                                     let errs = game.UpdateFile (shallowAnalyze || deferDeepValidation) name filetext
                                     if name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) then
                                         bumpLocalisationModelEpoch ()
@@ -3322,7 +3382,9 @@ type Server(client: ILanguageClient) =
                         monitorLog Refresh $"RefreshIncrementalTypes skipped (definitions unchanged) file={name}"
 
                     let priorCallFiles =
-                        if updateSuperseded || priorDefsForRevalidation.IsEmpty then
+                        if updateSuperseded
+                           || not (lintSnapshotStillCurrent ())
+                           || priorDefsForRevalidation.IsEmpty then
                             []
                         else
                             gameStateLock.EnterReadLock()
@@ -3332,12 +3394,16 @@ type Server(client: ILanguageClient) =
                                 gameStateLock.ExitReadLock()
 
                     if useInteractiveUpdate
+                       && lintSnapshotStillCurrent ()
                        && skipIncrementalRefresh
                        && not priorCallFiles.IsEmpty then
                         scheduleDeferredDynamicRevalidation priorCallFiles
 
                     let staged =
-                        if not updateSuperseded && canTryIncrementalTypeRefresh && not skipIncrementalRefresh then
+                        if not updateSuperseded
+                           && lintSnapshotStillCurrent ()
+                           && canTryIncrementalTypeRefresh
+                           && not skipIncrementalRefresh then
                             gameStateLock.EnterReadLock()
                             try
                                 try
@@ -3360,6 +3426,7 @@ type Server(client: ILanguageClient) =
                             None
 
                     let mutable incrementalCommitSucceeded = false
+                    let mutable incrementalSemanticChanged = false
                     if not updateSuperseded && canTryIncrementalTypeRefresh && not skipIncrementalRefresh then
                         gameStateLock.EnterWriteLock()
                         try
@@ -3368,7 +3435,7 @@ type Server(client: ILanguageClient) =
                                 | Some g -> System.Object.ReferenceEquals(g, gameRefAtUpdate)
                                 | None -> false
                             let committed =
-                                if not gameStillCurrent || not (documentVersionStillCurrent ()) then false
+                                if not gameStillCurrent || not (lintSnapshotStillCurrent ()) then false
                                 else
                                     match staged with
                                     | Some (ScriptedServices s) ->
@@ -3385,20 +3452,38 @@ type Server(client: ILanguageClient) =
 
                             if committed then
                                 incrementalCommitSucceeded <- true
-                                bumpTypesModelEpoch ()
-                                incrementalScriptedPatchCount <- incrementalScriptedPatchCount + 1
+                                incrementalSemanticChanged <-
+                                    match staged with
+                                    | Some (TypeIndexOnly(_, typeStage)) -> typeStage.semanticChanged
+                                    | Some (ScriptedServices _) -> true
+                                    | None -> true
                                 clearTypeCaches ()
-                                markFileStale name "types"
 
-                                if isTypeIndexOnlyRefreshPath name then
-                                    needsTypeRefresh <- true
-                                    lastTypeRefreshRequestAt <- DateTime.UtcNow
-                                    addPendingRefreshDomains [ "types"; "rules" ]
-                                elif incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount then
-                                    needsTypeRefresh <- true
-                                    lastTypeRefreshRequestAt <- DateTime.UtcNow
-                                    addPendingRefreshDomains [ "types"; "rules" ]
-                                    incrementalScriptedPatchCount <- 0
+                                if incrementalSemanticChanged then
+                                    bumpTypesModelEpoch ()
+                                    incrementalScriptedPatchCount <- incrementalScriptedPatchCount + 1
+                                    markFileStale name "types"
+
+                                    match staged with
+                                    | Some (TypeIndexOnly _) ->
+                                        // Type-index-only commits update ranges and IDs, but
+                                        // services still require a full rebuild for real semantic changes.
+                                        needsTypeRefresh <- true
+                                        lastTypeRefreshRequestAt <- DateTime.UtcNow
+                                        addPendingRefreshDomains [ "types"; "rules" ]
+                                    | Some (ScriptedServices _) when incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount ->
+                                        needsTypeRefresh <- true
+                                        lastTypeRefreshRequestAt <- DateTime.UtcNow
+                                        addPendingRefreshDomains [ "types"; "rules" ]
+                                        incrementalScriptedPatchCount <- 0
+                                    | Some (ScriptedServices _) ->
+                                        // No full refresh is pending, so refresh global type-localisation
+                                        // diagnostics once during the next idle/deep analysis pass.
+                                        delayedScriptLocUpdate <- true
+                                        addPendingRefreshDomains [ "localisation" ]
+                                    | None -> ()
+                                else
+                                    monitorLog Refresh $"RefreshIncrementalTypes semantic-noop file={name}"
                             else
                                 needsTypeRefresh <- true
                                 lastTypeRefreshRequestAt <- DateTime.UtcNow
@@ -3417,20 +3502,13 @@ type Server(client: ILanguageClient) =
                         |> Array.iter markFilePendingGlobalRevalidation
 
                     if incrementalCommitSucceeded then
-                        // Loc-error recompute and call-site collection only read game state;
-                        // running them under the shared read lock keeps completion responsive
-                        // instead of blocking it behind a long write lock.
+                        // Cross-file call-site discovery only matters when validation-visible
+                        // type metadata changed. Localisation is handled exactly once by the
+                        // pending full/idle pass selected above.
                         gameStateLock.EnterReadLock()
                         try
-                            (try
-                                locCache.Clear()
-                                for fileName, errors in
-                                    game.LocalisationErrors(true, false) |> List.groupBy _.range.FileName do
-                                    locCache.[fileName] <- errors
-                                evictIfNeeded locCache
-                             with e -> logDiag $"Incremental loc-error refresh failed for {name}: {e.Message}")
                             let currentCallFiles =
-                                if shouldRevalidateReferencedCallSites then
+                                if incrementalSemanticChanged && shouldRevalidateReferencedCallSites then
                                     referenceFilesForChangedDefinitions game name (typeDefinitionsForFiles game [ name ])
                                 else
                                     []
@@ -3444,7 +3522,7 @@ type Server(client: ILanguageClient) =
                                     |> List.distinctBy normaliseCachePath
                                 else
                                     revalidateFiles
-                            if isDynamicDefinitionPath name then
+                            if incrementalSemanticChanged && isDynamicDefinitionPath name then
                                 let affectedFiles =
                                     name :: revalidateFiles
                                     |> List.map normaliseCachePath
@@ -3462,30 +3540,62 @@ type Server(client: ILanguageClient) =
                                     markDeferredRevalidationStale revalidateFiles
                                 else
                                     scheduleDeferredDynamicRevalidation revalidateFiles
-                            monitorLog Refresh $"RefreshIncrementalTypes file={name} patches={incrementalScriptedPatchCount} refs={revalidateFiles.Length}"
+                            monitorLog Refresh $"RefreshIncrementalTypes file={name} semantic={incrementalSemanticChanged} patches={incrementalScriptedPatchCount} refs={revalidateFiles.Length}"
                         finally
                             gameStateLock.ExitReadLock()
 
                     let updateErrors =
-                        if interactiveCommitted then
+                        if interactiveCommitted && not fastDefinitionIndex then
                             match stagedInteractiveUpdate with
                             | Some staged ->
                                 gameStateLock.EnterReadLock()
                                 try
-                                    let result = game.ValidateFileInteractive staged
-                                    validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
-                                    result
+                                    let result =
+                                        match game with
+                                        | :? ICancellableFileValidation as cancellable ->
+                                            cancellable.ValidateFileInteractiveCancellable(
+                                                staged,
+                                                (fun () -> not (lintSnapshotStillCurrent ()))
+                                            )
+                                        | _ when lintSnapshotStillCurrent () ->
+                                            Some(game.ValidateFileInteractive staged)
+                                        | _ -> None
+
+                                    match result with
+                                    | Some completed ->
+                                        validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
+                                        completed
+                                    | None ->
+                                        lintUpdateSuperseded <- true
+                                        []
                                 finally gameStateLock.ExitReadLock()
                             | None -> []
-                        elif deferDeepValidation && (incrementalCommitSucceeded || not shallowAnalyze) then
+                        elif fastDefinitionIndex
+                             || (deferDeepValidation && (incrementalCommitSucceeded || not shallowAnalyze)) then
                             // The VFS already holds the new text from the earlier UpdateFile, so
                             // the deep (re-)validation only reads; the shared read lock lets
                             // completion requests run alongside it.
                             gameStateLock.EnterReadLock()
                             try
-                                let result = game.ValidateFile false name
-                                validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
-                                result
+                                let result =
+                                    match game with
+                                    | :? ICancellableFileValidation as cancellable ->
+                                        cancellable.ValidateFileCancellable(
+                                            false,
+                                            name,
+                                            (fun () -> not (lintSnapshotStillCurrent ()))
+                                        )
+                                    | _ when lintSnapshotStillCurrent () ->
+                                        Some(game.ValidateFile false name)
+                                    | _ -> None
+
+                                match result with
+                                | Some completed ->
+                                    validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
+                                    completed
+                                | None ->
+                                    lintUpdateSuperseded <- true
+                                    []
                             finally gameStateLock.ExitReadLock()
                         else
                             updateErrors
@@ -3568,7 +3678,7 @@ type Server(client: ILanguageClient) =
                 let currentModelEpoch = modelEpochSnapshot ()
                 let canPublish =
                     not lintUpdateSuperseded
-                    && documentVersionStillCurrent ()
+                    && lintSnapshotStillCurrent ()
                     && sameModelEpoch validatedModelEpoch currentModelEpoch
 
                 if canPublish then
@@ -3609,6 +3719,8 @@ type Server(client: ILanguageClient) =
                         $"Skip stale diagnostic publish file={name} version={validatedDocumentVersion} currentVersion={docs.GetVersionByPath(name)} modelMatch={sameModelEpoch validatedModelEpoch currentModelEpoch}"
             finally
                 gameStateLock.ExitReadLock()
+            if fastDefinitionIndex then
+                committedInteractiveVersions.TryRemove(normaliseCachePath name) |> ignore
             perfLintCount <- perfLintCount + 1
             maybePerfReport "lint"
             if shallowAnalyze then
@@ -3893,8 +4005,9 @@ type Server(client: ILanguageClient) =
             // Staged full refresh (experimental): run the heavy rules rebuild under a read
             // lock against a lookup clone so completion/hover stay responsive, then commit
             // by swapping references under the write lock below. Falls back to the fully
-            // locked RefreshCaches when preparation fails or a commit guard trips.
-            let stagedRefresh =
+            // locked RefreshCaches when preparation itself is unavailable. A stale
+            // staged result is discarded and retried after the next quiet period.
+            let mutable stagedRefresh =
                 if doRefresh && experimental then
                     gameStateLock.EnterReadLock()
                     try
@@ -3908,43 +4021,59 @@ type Server(client: ILanguageClient) =
                 else
                     None
             let mutable didLocRefresh = false
+            let mutable didRefreshCaches = false
             gameStateLock.EnterWriteLock()
             try
                 if doRefresh then
+                    let hadStagedRefresh = stagedRefresh.IsSome
+                    let mutable stagedCommitErrored = false
                     let stagedCommitted =
                         match stagedRefresh with
                         | Some staged ->
                             try
                                 game.CommitRefreshCaches staged
                             with e ->
+                                stagedCommitErrored <- true
                                 logDiag $"CommitRefreshCaches failed, falling back to locked refresh: {e.Message}"
                                 false
                         | None -> false
 
-                    if not stagedCommitted then
-                        game.RefreshCaches()
-                    bumpGameModelEpoch ()
-                    bumpRulesModelEpoch ()
-                    bumpTypesModelEpoch ()
-                    let allocAfterRefresh = GC.GetTotalAllocatedBytes(false)
-                    refreshStatus <-
-                        if stagedCommitted then "refresh_caches_staged"
-                        elif forceGlobalRefresh then "refresh_caches_forced"
-                        else "refresh_caches"
-                    monitorLog Refresh $"RefreshCaches allocDeltaMB={(allocAfterRefresh - allocBefore) / 1048576L} staged={stagedCommitted} force={forceGlobalRefresh} skipLimit={skipLimitReached} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
-                    perfRefreshCachesCount <- perfRefreshCachesCount + 1
-                    didGlobalWork <- true
-                    // Non-blocking, non-compacting reclaim. The previous blocking compacting
-                    GC.Collect(2, GCCollectionMode.Optimized, false, false)
-                    needsTypeRefresh <- false
-                    lastTypeRefreshCompletedAt <- DateTime.UtcNow
-                    incrementalScriptedPatchCount <- 0
-                    refreshSkipCount <- 0
-                    let completed =
-                        pendingDomainsBeforeAnalyze
-                        |> List.filter (fun domain -> domain <> "localisation")
-                        |> fun domains -> if domains.IsEmpty then [ "types" ] else domains
-                    completeRefreshDomains completed refreshStatus
+                    // Drop guard references to the old lookup before localisation and GC.
+                    stagedRefresh <- None
+
+                    if stagedCommitted || not hadStagedRefresh || stagedCommitErrored then
+                        if not stagedCommitted then
+                            game.RefreshCaches()
+                        didRefreshCaches <- true
+                        bumpGameModelEpoch ()
+                        bumpRulesModelEpoch ()
+                        bumpTypesModelEpoch ()
+                        let allocAfterRefresh = GC.GetTotalAllocatedBytes(false)
+                        refreshStatus <-
+                            if stagedCommitted then "refresh_caches_staged"
+                            elif forceGlobalRefresh then "refresh_caches_forced"
+                            else "refresh_caches"
+                        monitorLog Refresh $"RefreshCaches allocDeltaMB={(allocAfterRefresh - allocBefore) / 1048576L} staged={stagedCommitted} force={forceGlobalRefresh} skipLimit={skipLimitReached} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
+                        perfRefreshCachesCount <- perfRefreshCachesCount + 1
+                        didGlobalWork <- true
+                        GC.Collect(2, GCCollectionMode.Optimized, false, false)
+                        needsTypeRefresh <- false
+                        lastTypeRefreshCompletedAt <- DateTime.UtcNow
+                        incrementalScriptedPatchCount <- 0
+                        refreshSkipCount <- 0
+                        let completed =
+                            pendingDomainsBeforeAnalyze
+                            |> List.filter (fun domain -> domain <> "localisation")
+                            |> fun domains -> if domains.IsEmpty then [ "types" ] else domains
+                        completeRefreshDomains completed refreshStatus
+                    else
+                        // An editor commit moved the guarded lookup while prepare ran.
+                        // Reusing the staged snapshot would be stale; rebuilding it again
+                        // under the write lock would double peak allocation.
+                        refreshStatus <- "staged_superseded"
+                        lastTypeRefreshRequestAt <- DateTime.UtcNow
+                        refreshSkipCount <- 0
+                        monitorLog Refresh $"RefreshCaches staged result superseded; retrying after quiet period{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                 elif needsTypeRefresh then
                     refreshSkipCount <- refreshSkipCount + 1
                     refreshStatus <- $"deferred:skip={refreshSkipCount};quiet={quietEnough};cooldown={cooldownElapsed};force={forceGlobalRefresh}"
@@ -3962,6 +4091,8 @@ type Server(client: ILanguageClient) =
                     cachedLocMap <- None  // invalidate cached loc entries
                     cachedLocMapCount <- 0
                     delayedLocUpdate <- false
+                    delayedScriptLocUpdate <- false
+                    lastScriptLocUpdateAt <- now
                     didLocRefresh <- true
                     didGlobalWork <- true
 
@@ -3970,12 +4101,14 @@ type Server(client: ILanguageClient) =
                     for fileName, errors in game.LocalisationErrors(true, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
                     completeRefreshDomains [ "localisation" ] "refresh_localisation"
-                elif doRefresh then
+                elif didRefreshCaches then
                     logDiag "delayedLocUpdate false"
 
                     locCache.Clear()
                     for fileName, errors in game.LocalisationErrors(true, false) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
+                    delayedScriptLocUpdate <- false
+                    lastScriptLocUpdateAt <- now
                     bumpLocalisationModelEpoch ()
                     didLocRefresh <- true
                     if pendingDomainsBeforeAnalyze |> List.contains "localisation" then
@@ -3990,6 +4123,7 @@ type Server(client: ILanguageClient) =
                     bumpLocalisationModelEpoch ()
                     didLocRefresh <- true
                     didGlobalWork <- true
+                    completeRefreshDomains [ "localisation" ] "refresh_script_localisation"
                 else
                     logDiag "LocErrors skipped: no localisation or type refresh"
                 if didLocRefresh then evictIfNeeded locCache
@@ -3999,11 +4133,11 @@ type Server(client: ILanguageClient) =
                     monitorLog Localisation $"LocErrors allocDeltaMB={(allocAfterLoc - allocBeforeLoc) / 1048576L} locFiles={locCache.Count} locErrors={locErrorCount} cachedLocKeys={cachedLocMapCount}"
                     perfRefreshLocCount <- perfRefreshLocCount + 1
                 else
-                    monitorLog Localisation $"LocErrors skipped delayedLocUpdate={delayedLocUpdate} doRefresh={doRefresh} locFiles={locCache.Count} cachedLocKeys={cachedLocMapCount}"
+                    monitorLog Localisation $"LocErrors skipped delayedLocUpdate={delayedLocUpdate} doRefresh={didRefreshCaches} locFiles={locCache.Count} cachedLocKeys={cachedLocMapCount}"
                 if allocAfterLoc - allocBeforeLoc > gcThresholdBytes then
                     GC.Collect(2, GCCollectionMode.Optimized, false, false)
 
-                if doRefresh then
+                if didRefreshCaches then
                     clearAllDerivedCaches ()
                 elif didLocRefresh then
                     inlayHintCache.Clear()
@@ -4027,7 +4161,7 @@ type Server(client: ILanguageClient) =
             finally
                 gameStateLock.ExitWriteLock()
 
-            if doRefresh then
+            if didRefreshCaches then
                 fileDiagnosticStates
                 |> Seq.map (fun kvp -> kvp.Key)
                 |> Seq.toArray
@@ -4036,7 +4170,7 @@ type Server(client: ILanguageClient) =
             // Localisation-only refreshes update just that diagnostic domain;
             // avoid another whole-file lint while still replacing stale loc
             // diagnostics with results from the new localisation epoch.
-            if didLocRefresh && not doRefresh then
+            if didLocRefresh && not didRefreshCaches then
                 let locPublishEpoch = nextDiagnosticEpoch ()
                 let locModelEpoch = modelEpochSnapshot ()
                 let filesWithOldLocDiagnostics =
@@ -4112,7 +4246,7 @@ type Server(client: ILanguageClient) =
                                     { kvp.Value.modelEpoch with
                                         localisation = locModelEpoch.localisation } }
 
-            if not doRefresh then
+            if not didRefreshCaches then
                 flushAllCompletionRefreshes ()
 
             let time = Stopwatch.GetElapsedTime(timestamp)
@@ -4129,7 +4263,7 @@ type Server(client: ILanguageClient) =
             // Regularly clean the cache of non-existing files to prevent memory leaks.
             // This scans all known files, so only do it after a real structural rebuild
             // (RefreshCaches); a loc-only recompute changes no file set.
-            if doRefresh then
+            if didRefreshCaches then
                 try
                     let existingFiles =
                         game.AllFiles() 
@@ -4154,14 +4288,14 @@ type Server(client: ILanguageClient) =
             // L6/L3 Fix: Use non-blocking Gen2 GC only after a full refresh to
             // reclaim large rule data; avoid frequent mid-stream GC in hot path.
             // A loc-only recompute does not warrant a gen2 collection.
-            if doRefresh then maybeCollectGarbage ()
+            if didRefreshCaches then maybeCollectGarbage ()
 
             // Memory diagnostics: track growth sources after each analyze pass.
             let allocTotal = GC.GetTotalAllocatedBytes(false)
             let sm = CWTools.Utilities.StringResource.stringManager
             monitorLog Memory $"AnalyzePass cycleAllocMB={(allocTotal - allocBefore) / 1048576L} strings={sm.StringCount} ints={sm.IntCount} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
             maybePerfReport "delayedAnalyze"
-            didGlobalWork, doRefresh
+            didGlobalWork, didRefreshCaches
         | None ->
             updateValidationRuntime (fun state ->
                 { state with
@@ -4183,6 +4317,7 @@ type Server(client: ILanguageClient) =
                     let mutable nextTime = nextAnalyseTime
                     let cycleSw = Stopwatch.StartNew()
                     let mutable errorMessage: string option = None
+                    let mutable ownedLintGeneration: (string * int64) option = None
 
                     try
                         try
@@ -4220,22 +4355,26 @@ type Server(client: ILanguageClient) =
                                         lastCycleEditAction = isEditAction
                                         lastError = None })
                                 logDiag $"lint forceDeep={options.forceDeepLint}, forceGlobal={options.forceGlobalRefresh}, fastDefinitionIndex={options.fastDefinitionIndex}, forceDisk={options.forceDisk}, shallow={useShallowAnalyze}"
+                                let requestGeneration = lintGeneration lintPath
+                                ownedLintGeneration <- Some(lintPath, requestGeneration)
+                                let requestStillCurrent () = lintGeneration lintPath = requestGeneration
                                 let priorDiagnostics =
                                     match fileDiagnosticStates.TryGetValue(lintPath) with
                                     | true, state -> state.diagnostics
                                     | _ -> []
                                 let validateCachedOnly = options.forceDeepLint && not isEditAction
-                                do! lint uri useShallowAnalyze options.forceDisk isEditAction validateCachedOnly options.fastDefinitionIndex
+                                do! lint uri useShallowAnalyze options.forceDisk isEditAction validateCachedOnly options.fastDefinitionIndex requestStillCurrent
                                 // Deep passes and the explicit fast-definition save path schedule
                                 // cross-file revalidation; ordinary shallow keystrokes still skip it.
-                                if not useShallowAnalyze || options.fastDefinitionIndex then
+                                if requestStillCurrent ()
+                                   && (not useShallowAnalyze || options.fastDefinitionIndex) then
                                     refreshDynamicCallSitesForDefinition lintPath priorDiagnostics isEditAction
 
-                                if not useShallowAnalyze then
+                                if requestStillCurrent () && not useShallowAnalyze then
                                     let _, requiresFileRelint = delayedAnalyze options.forceGlobalRefresh
                                     logDiag "lint after delayed"
                                     if requiresFileRelint then
-                                        do! lint uri true false false false false
+                                        do! lint uri true false false false false requestStillCurrent
                                     nextTime <- DateTime.Now.Add(delayTime)
                                     needsDeepAnalyse <- needsTypeRefresh || delayedLocUpdate || delayedScriptLocUpdate
                                 else
@@ -4245,6 +4384,9 @@ type Server(client: ILanguageClient) =
                             logError $"uri %A{uri.LocalPath} \n exception %A{e}"
                     finally
                         cycleSw.Stop()
+                        ownedLintGeneration
+                        |> Option.iter (fun (filePath, generation) ->
+                            releaseLintGeneration filePath generation)
                         updateValidationRuntime (fun state ->
                             { state with
                                 inProgress = false
@@ -4343,7 +4485,9 @@ type Server(client: ILanguageClient) =
                         if requiresFileRelint then
                             for doc in docs.OpenFiles() do
                                 let uri = filePathToUri(doc.FullName)
-                                do! lint uri true false false false false  // idle re-lint is never an edit
+                                let generation = lintGeneration doc.FullName
+                                let requestStillCurrent () = lintGeneration doc.FullName = generation
+                                do! lint uri true false false false false requestStillCurrent  // idle re-lint is never an edit
 
                         return! loop false state
                     | None, true ->
@@ -4744,6 +4888,8 @@ type Server(client: ILanguageClient) =
                     gameFieldClearers |> List.iter (fun f -> f())
                     gameObj <- None
                     fileDiagnosticStates.Clear()
+                    latestLintGenerations.Clear()
+                    committedInteractiveVersions.Clear()
                     locCache.Clear()
                     cachedLocMap <- None
                     cachedLocMapCount <- 0
@@ -5451,6 +5597,7 @@ type Server(client: ILanguageClient) =
             async {
                 docs.Change p
                 let path = getPathFromDoc p.textDocument.uri
+                advanceLintGeneration path |> ignore
                 dirtyDocumentPaths.[normaliseCachePath path] <- 0uy
                 if isCompletionHeavyEditPath path then
                     markCompletionHeavyTextEditActivity ()
@@ -5491,6 +5638,7 @@ type Server(client: ILanguageClient) =
                 let path = getPathFromDoc p.textDocument.uri
                 let wasDirty, _ = dirtyDocumentPaths.TryRemove(normaliseCachePath path)
                 if wasDirty then
+                    advanceLintGeneration path |> ignore
                     if isCompletionHeavyEditPath path then
                         markCompletionHeavySaveActivity ()
                     let requestOptions =
@@ -5522,7 +5670,11 @@ type Server(client: ILanguageClient) =
             dirtyDocumentPaths.TryRemove(normaliseCachePath fullPath) |> ignore
             pendingCompletionRefresh.TryRemove(normaliseCachePath localPath) |> ignore
             pendingCompletionRefresh.TryRemove(normaliseCachePath fullPath) |> ignore
+            committedInteractiveVersions.TryRemove(normaliseCachePath fullPath) |> ignore
             (locCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore
+            match gameObj with
+            | Some game -> game.InvalidateFileCache fullPath
+            | None -> ()
             clearRangeCache ()
         }
 
@@ -5533,6 +5685,7 @@ type Server(client: ILanguageClient) =
                     | FileChangeType.Created
                     | FileChangeType.Changed ->
                         let path = getPathFromDoc change.uri
+                        advanceLintGeneration path |> ignore
                         forgetFileCaches path
                         match gameObj with
                         | Some game -> game.InvalidateFileCache path
@@ -8918,6 +9071,7 @@ type Server(client: ILanguageClient) =
                                 |> List.map (fun raw ->
                                     let uri = Uri(raw)
                                     let filePath = getPathFromDoc uri
+                                    advanceLintGeneration filePath |> ignore
                                     let priorEpoch =
                                         match fileDiagnosticStates.TryGetValue(filePath) with
                                         | true, st -> decimal st.epoch

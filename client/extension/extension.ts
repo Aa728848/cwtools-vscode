@@ -41,6 +41,7 @@ import { registerLocalisationAiCommands } from './localisationAiCommands';
 import { registerTranslationPreviewCommands } from './translationPreview';
 import { registerSpecialPathCommands } from './specialPaths';
 import { registerInspectionOverviewCommand } from './inspectionOverview';
+import { formatMemDiagEntry } from './memDiagFormatter';
 import { configurePrivateAgentStorage, getProjectWorkspaceRoot, getPrivateAiStorageRoot, migrateLegacyAiStorageRoot, migrateLegacyPrivateAgentState } from './ai/workspacePaths';
 import { configureHistoryPolicy, enforceHistoryRetention } from './ai/runner/historyPolicy';
 import { sha256Text } from './ai/runner/durableStorage';
@@ -2299,9 +2300,19 @@ export async function activate(context: ExtensionContext) {
 			}
 		})
 		client.onNotification(monitorLogNotification, (param: MonitorLogParams) => {
-			const timestamp = param.timestamp ?? new Date().toLocaleTimeString('en-US', { hour12: false });
-			const category = param.category ? `[${param.category}] ` : '';
-			monitorLogChannel.appendLine(`[${timestamp}] ${category}${param.message}`);
+			if (!param || typeof param.message !== 'string') {
+				ErrorReporter.warn('MemDiag', 'Ignored invalid monitorLog notification');
+				return;
+			}
+			const timestamp = typeof param.timestamp === 'string'
+				? param.timestamp
+				: new Date().toLocaleTimeString('en-US', { hour12: false });
+			const entry = {
+				message: param.message,
+				category: typeof param.category === 'string' ? param.category : undefined,
+				timestamp,
+			};
+			for (const line of formatMemDiagEntry(entry, timestamp)) monitorLogChannel.appendLine(line);
 		})
 		client.onNotification(completionRefreshNotification, (param: CompletionRefreshParams) => {
 			setTimeout(() => {

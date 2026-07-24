@@ -37,15 +37,6 @@ function selectedMessageText(root: HTMLElement): { text: string; rect: DOMRect }
     return { text, rect };
 }
 
-export function formatSelectionForTask(text: string): string {
-    return text
-        .replace(/\r\n?/g, '\n')
-        .trim()
-        .split('\n')
-        .map(line => line ? `> ${line}` : '>')
-        .join('\n');
-}
-
 export function startMessageSelectionActions(options: MessageSelectionActionOptions): () => void {
     const toolbar = document.createElement('div');
     toolbar.className = 'message-selection-toolbar';

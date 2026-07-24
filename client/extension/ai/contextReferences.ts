@@ -20,6 +20,8 @@ function isAgentTempPath(filePath: string): boolean {
     return /(?:^|[\\/])\.(?:cwtools|cwtools-ai)[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
 }
 
+const QUOTED_TEXT_PROMPT_LIMIT = 8000;
+
 export interface MentionSearchResult {
     type?: ContextItemType;
     uri?: string;
@@ -128,6 +130,16 @@ export class ContextReferenceManager {
                 blocks.push(await this.formatReferencedVanilla(ref));
             } else if (ctx.type === 'blackboard') {
                 blocks.push(await this.formatReferencedBlackboard(ref.key));
+            } else if (ctx.type === 'quote' && typeof ref.text === 'string' && ref.text.trim()) {
+                const text = ref.text.length > QUOTED_TEXT_PROMPT_LIMIT
+                    ? `${ref.text.slice(0, QUOTED_TEXT_PROMPT_LIMIT)}\n... (truncated)`
+                    : ref.text;
+                blocks.push([
+                    'Quoted chat content selected by the user:',
+                    '```',
+                    text,
+                    '```',
+                ].join('\n'));
             }
         }
 
@@ -143,6 +155,7 @@ export class ContextReferenceManager {
 
     async openReference(ctx: ContextItem): Promise<void> {
         const ref = ctx as any;
+        if (ctx.type === 'quote') return;
         if (ctx.type === 'diagnostics') {
             await vs.commands.executeCommand('workbench.actions.view.problems');
             return;

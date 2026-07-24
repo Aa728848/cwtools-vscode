@@ -8,7 +8,8 @@ export type ActiveContextType =
     | 'scope'
     | 'symbol'
     | 'vanilla'
-    | 'blackboard';
+    | 'blackboard'
+    | 'quote';
 
 export interface ActiveContext {
     id: string;
@@ -25,6 +26,8 @@ export interface ActiveContext {
     vanillaType?: string;
     vanillaId?: string;
     key?: string;
+    /** Raw quoted text for `quote` contexts (chat message selection). */
+    text?: string;
     tokenEstimate?: number;
     cacheStatus?: 'live' | 'disk' | 'cached' | 'large' | 'missing' | 'external' | 'unknown';
 }
@@ -56,6 +59,7 @@ export const CONTEXT_TYPE_META: Record<ActiveContextType, { icon: keyof typeof I
     symbol: { icon: 'link', label: 'symbol' },
     vanilla: { icon: 'package', label: 'vanilla' },
     blackboard: { icon: 'clipboard', label: 'blackboard' },
+    quote: { icon: 'messageSquare', label: 'quote' },
 };
 
 export function generateContextId(now = Date.now(), random = Math.random()): string {

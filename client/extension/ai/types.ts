@@ -2028,7 +2028,7 @@ export interface ChatHistoryMessage {
 
 // ─── Context Tray Types ──────────────────────────────────────────────────────
 
-export type ContextItemType = 'code_selection' | 'image' | 'diagnostics' | 'file' | 'folder' | 'scope' | 'symbol' | 'vanilla' | 'blackboard';
+export type ContextItemType = 'code_selection' | 'image' | 'diagnostics' | 'file' | 'folder' | 'scope' | 'symbol' | 'vanilla' | 'blackboard' | 'quote';
 
 export interface BaseContextItem {
     id: string;
@@ -2089,7 +2089,13 @@ export interface BlackboardContext extends BaseContextItem {
     key: string;
 }
 
-export type ContextItem = CodeSelectionContext | FileContext | FolderContext | DiagnosticsContext | ScopeContext | SymbolContext | VanillaContext | BlackboardContext | BaseContextItem;
+export type ContextItem = CodeSelectionContext | FileContext | FolderContext | DiagnosticsContext | ScopeContext | SymbolContext | VanillaContext | BlackboardContext | QuoteContext | BaseContextItem;
+
+export interface QuoteContext extends BaseContextItem {
+    type: 'quote';
+    /** Raw text quoted from a chat message via "Add to task". */
+    text: string;
+}
 
 // ─── WebView Communication ───────────────────────────────────────────────────
 

@@ -54,7 +54,7 @@ import {
 import { type WorkflowView } from './chat/workflows';
 import { createMarkdownRenderer } from './chat/markdown';
 import { startMermaidRendering } from './chat/mermaidRenderer';
-import { formatSelectionForTask, startMessageSelectionActions } from './chat/messageSelectionActions';
+import { startMessageSelectionActions } from './chat/messageSelectionActions';
 import { createAnnotationCard, type AnnotationCardOptions } from './chat/annotations';
 import { renderAssistantTurnCodex } from './chat/codexConversation';
 import {
@@ -1293,7 +1293,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         },
         onAddToTask: text => {
             cancelInlineEdit();
-            appendInputText(formatSelectionForTask(text), '\n\n');
+            const quoted = text.trim();
+            if (!quoted) return;
+            insertReferenceAtCaret({
+                id: generateContextId(),
+                type: 'quote',
+                label: 'quote',
+                description: quoted.split('\n')[0]!.slice(0, 120),
+                text: quoted,
+                tokenEstimate: Math.max(1, Math.ceil(quoted.length / 4)),
+                cacheStatus: 'live',
+            });
+            updateSendButtonState();
         },
     });
 

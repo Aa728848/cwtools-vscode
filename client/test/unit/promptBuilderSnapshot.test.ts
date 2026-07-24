@@ -193,9 +193,15 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         const builder = new PromptBuilder(process.cwd());
         const prompt = builder.buildSystemPromptForMode('plan');
 
+        expect(prompt).to.include('Blueprint Self-check');
+        expect(prompt).to.include('get_design_blueprint_contract');
         expect(prompt).to.include('machine-checkable `featureManifest`');
         expect(prompt).to.include('executable `taskPlan`');
         expect(prompt).to.include('produces/consumes');
+        expect(prompt).to.include('at least one evidence-backed selection and rejection');
+        expect(prompt).to.include('Audit the manifest as one identity graph');
+        expect(prompt).to.include('dependencies must encode that producer-to-consumer order');
+        expect(prompt).to.include('before the first `write_design_blueprint` call');
         expect(prompt).to.include('STOP and wait for user approval');
         expect(prompt).to.include('Do not defer any design work until after approval');
     });
@@ -215,6 +221,11 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('Approved Implementation Plan');
         expect(prompt).to.include('dispatch immediately');
         expect(prompt).to.include('Do not call `write_design_blueprint`');
+        expect(prompt).to.include('Blueprint Self-check');
+        expect(prompt).to.include('Structured dispatch preflight for Paradox write waves');
+        expect(prompt).to.include('exact current-topic `design_blueprint.json`');
+        expect(prompt).to.include('schemaVersion 2 manifest and task DAG remain canonical');
+        expect(prompt).to.include('cross-check task IDs, files, entity contracts, dependencies, and acceptance checks');
     });
 
     it('keeps slim localisation writers on write_localisation and concise completion', () => {

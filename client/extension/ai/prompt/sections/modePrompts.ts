@@ -18,6 +18,7 @@ import {
 } from './baseSystem';
 import {
     EXECUTE_IMPLEMENTATION_PLAN_HANDOFF_CONTRACT,
+    IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE,
     IMPLEMENTATION_PLAN_HANDOFF_CONTRACT,
 } from '../../executePlanHandoff';
 
@@ -50,6 +51,19 @@ const GENERAL_REPOSITORY_RULE = `## Repository Engineering Boundary
 
 const GENERAL_ARCHITECTURE_RULE = `## Architecture Visualization
 Use a compact Mermaid diagram only when three or more connected components, branches, or state transitions are materially easier to understand visually. Keep it focused, quote complex labels, and omit diagrams for simple edits or facts.`;
+
+const DESIGN_BLUEPRINT_AUTHORING_GUIDANCE = `### Paradox Dynamic Coupling Assessment and Blueprint Self-check (only when applicable)
+- Require a blueprint only for genuinely connected Paradox work. Scale its entities and tasks to the approved feature instead of inventing optional subsystems, but make every section required by \`get_design_blueprint_contract\` substantively complete. Load that versioned contract first; its schema and the host validator remain authoritative.
+- Resolve the finalized intent against fresh project knowledge and keep \`unresolvedCritical\` explicit. It may be empty only after every design-changing fact is settled. Complex blueprints must cite the current project knowledge pack, a bounded vanilla archetype, and CWT/LSP legality; all blueprints must include typed-rule and common-directory evidence.
+- **Common Directory Capability Review**: compare real current-game \`common/\` candidates, include at least one evidence-backed selection and rejection, and record concrete findings. **Reward Implementation Grounding**: bind each reward to a verified directory, entity type, and implementation. Give every entity a scope context and every cleanup item an exact closure mechanism.
+- Emit a machine-checkable \`featureManifest\`. Audit the manifest as one identity graph: entity contracts are unique, every required edge endpoint is declared, and acceptance-criterion IDs are stable and unique. Allocate every required manifest contract to the task plan exactly where it is produced or consumed.
+- Emit an executable \`taskPlan\` and audit it as one DAG: task IDs are non-empty and unique, dependencies exist and are acyclic, writers declare produces/consumes contracts, and a localisation writer consumes its owning event or object. Whenever one task consumes another task's output, its dependencies must encode that producer-to-consumer order.
+- Trace scopes, call direction, IDs, files, dependencies, evidence, rewards, cleanup, and acceptance checks across the whole object immediately before the first \`write_design_blueprint\` call. Do not use repeated validator rejection as the blueprint-authoring loop.`;
+
+const PARADOX_DISPATCH_AUTHORING_GUIDANCE = `### Structured dispatch preflight for Paradox write waves
+- Prefer an approved blueprint when one exists: pass the exact current-topic \`design_blueprint.json\` emitted by the host as \`blueprintFile\` and let its schemaVersion 2 manifest and task DAG remain canonical. Do not guess another topic path, point at the Markdown companion, or reconstruct its tasks by hand. Plan and Explore fan-out never executes a \`blueprintFile\`.
+- Without a blueprint, dispatch writers only from the approved design. Supply a feature objective and stable acceptance criteria, give each writer exact in-workspace \`plannedFiles\` and the relevant \`produces\`/\`consumes\` contracts, make localisation consume its owner, and make dependencies reflect producer/consumer order and shared-file serialization.
+- Before each call, check the current mode's allowed roles and wave-size limit, then cross-check task IDs, files, entity contracts, dependencies, and acceptance checks as one payload. Read-only discovery waves stay free of writer roles and write intent.`;
 
 function generalRules(isSlim: boolean): string {
     return isSlim
@@ -107,6 +121,7 @@ Do not modify project files or execute mutating commands. Planning artifacts may
 
 ## Approval Handoff
 ${IMPLEMENTATION_PLAN_HANDOFF_CONTRACT}
+${IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE}
 
 ${boundary}`;
 }
@@ -274,20 +289,13 @@ Plan Mode is active. Do not implement or mutate project files. The only writes a
    - Re-run project knowledge for the finalized intent and keep critical unknowns in \`unresolvedCritical\`; approval requires an empty list.
    - Approval transitions directly to Write/Execute. There is no post-approval discovery/design stage, blueprint regeneration, architecture reinterpretation, or second approval round.
 
-### Paradox Dynamic Coupling Assessment (only when applicable)
-- **Common Directory Capability Review**: record considered current-game directories, selected/rejected status, and evidence-based rationale.
-- **Reward Implementation Grounding**: bind rewards to concrete entity families verified by CWT/LSP and real examples.
-- Trace every scope transition and call direction; never infer them from static prompt knowledge.
-- Allocate every entity/event/modifier/localisation key once and order files by dependency.
-- Include entry, progression, branches, rewards, failure/cleanup, AI/weight, and asset roles only when required by the approved design.
-- Emit a machine-checkable \`featureManifest\` containing entity operations, relationship edges, invariants, and stable acceptance criteria.
-- Emit an executable \`taskPlan\`; every task declares role, planned files, produces/consumes contracts, dependencies, and acceptance checks. Every manifest contract must have one owner.
-- Call \`write_design_blueprint\` only after the evidence matrix, topology, scope table, ID allocation, dependency order, and cleanup paths are complete.
+${DESIGN_BLUEPRINT_AUTHORING_GUIDANCE}
 
 ${approvalContract}
 
 ## Approval Handoff
 ${IMPLEMENTATION_PLAN_HANDOFF_CONTRACT}
+${IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE}
 
 4. **Deliverable**
    - Produce a self-contained, execution-ready plan with objective, exact operations and files in dependency order, ownership, verification, acceptance criteria, risks, and rollback.
@@ -633,6 +641,8 @@ Run the task as a bounded pipeline, not as an open-ended conversation:
    - If the continuation includes an Approved Implementation Plan, it is design-complete and canonical even when no \`blueprintFile\` exists. Read it, mechanically form the required dispatch payload from its exact task DAG, files, contracts, dependencies, and acceptance criteria, and dispatch immediately. Do not call \`write_design_blueprint\`, reopen discovery/design, reinterpret the architecture, or request approval again.
    - Only for a fresh, not-yet-approved connected event chain, cascading pipeline, or 2+ related entity-file write request without an approved blueprint, perform read-only design analysis, call \`write_design_blueprint\` with featureManifest + taskPlan, then STOP for user approval before any builder dispatch.
 
+${DESIGN_BLUEPRINT_AUTHORING_GUIDANCE}
+
 2. **Plan as Data**
    - Build a compact internal workflow plan with phases: \`scan\`, \`classify\`, \`repair\`, \`verify\`, \`summarize\`.
    - Do not generate or execute JavaScript workflow code. The executable representation is the bounded \`dispatch_agents\` task list.
@@ -640,6 +650,8 @@ Run the task as a bounded pipeline, not as an open-ended conversation:
    - Before every write wave, provide \`featureManifest\` with the objective, required entity edges, invariants, and stable acceptance criteria.
    - Every writer task must declare \`produces\` and/or \`consumes\`. Treat event IDs, scripted effects/triggers, flags, event targets, and localisation keys as linked entities rather than isolated files.
    - When an approved blueprint exists, load it with \`dispatch_agents({ blueprintFile })\`; never hand-copy or summarize its taskPlan into a new contract.
+
+${PARADOX_DISPATCH_AUTHORING_GUIDANCE}
 
 3. **Read Fanout**
    - Use up to 8 concise read-heavy tasks in a single Paradox Multi-Agent dispatch when the work naturally partitions by file, diagnostic category, entity type, or asset domain.

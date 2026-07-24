@@ -52,7 +52,18 @@ export const IMPLEMENTATION_PLAN_HANDOFF_CONTRACT = `Before requesting approval,
 \`\`\`
 The host renders an approval card only when this contract is present and valid. Every target must be an exact file path without globs and must be owned by exactly one operation, operation dependencies must reference valid operation IDs without cycles, and unresolvedCritical must be empty. Do not emit the block for preliminary analysis, exploration findings, clarification questions, drafts, or blocked plans.`;
 
+export const IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE = `Plan authoring guidance — keep the contract strict while adapting the prose to the task:
+- Scale the plan to the real work. A cohesive one-file change may have one concise operation; cross-file work should split only at meaningful ownership or dependency boundaries. Do not pad a small task or force every plan into the same large-task template.
+- Make the human-readable body execution-ready without relying on earlier chat. Organize it into multiple meaningful Markdown sections so objective/context, concrete operations and data flow, and verification/acceptance/risks/rollback are easy to find. Section names and depth should follow the task.
+- Build the contract from verified evidence before writing the artifact. targetFiles is the canonical manifest: use exact project file paths, no globs or placeholders, and make it equal the union of operation files with every file owned exactly once.
+- Give every operation a unique stable ID. dependsOn may reference only existing operation IDs and must contain no self-reference or cycle. Use an empty dependency list when no dependency exists.
+- Keep verification, acceptanceCriteria, risks with mitigations, and rollback concrete and non-empty. For a small change these may be brief, but they must still describe an observable check, a realistic regression risk, and a practical recovery action.
+- unresolvedCritical may be empty only after every decision that could change files, architecture, behavior, or acceptance has been resolved. If such a decision remains, ask the user or report the blocker; do not write a ready plan or emit the handoff block.
+- Append exactly one cwtools-plan fence containing strict JSON with no comments or trailing commas. The JSON is a machine-readable index of the prose, not a substitute for it.
+- When writing the plan artifact, use the exact Agent Workspace Dir from Current Editor Context and the filename Implementation_Plan.md. Never guess a topic path or write plan.md/project-root artifacts. Perform this self-check before the first write instead of relying on tool rejection to discover omissions.`;
+
 export const EXECUTE_IMPLEMENTATION_PLAN_HANDOFF_CONTRACT = `${IMPLEMENTATION_PLAN_HANDOFF_CONTRACT}
+${IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE}
 In a writable execution or coordinator mode, a separate approval stop is explicit only when you also successfully write this same complete document, including the cwtools-plan block, to Implementation_Plan.md in the exact current Agent Workspace Dir. Do not create that artifact for ordinary internal planning: continue through implementation and verification in the same turn.`;
 
 /** Runtime-only contract added after the cache-stable system prompt on approval continuations. */

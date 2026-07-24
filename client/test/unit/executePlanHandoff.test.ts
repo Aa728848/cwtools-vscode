@@ -4,7 +4,11 @@ import {
     shouldRenderInteractivePlan,
     validateImplementationPlan,
 } from '../../extension/ai/executePlanHandoff';
-import { buildBuildSystemPrompt } from '../../extension/ai/prompt/sections/modePrompts';
+import {
+    buildBuildSystemPrompt,
+    buildGeneralPlanSystemPrompt,
+    buildPlanModeSystemPrompt,
+} from '../../extension/ai/prompt/sections/modePrompts';
 import type { AgentStep } from '../../extension/ai/types';
 
 function toolCall(toolName: string, file?: string, invocationId = `${toolName}-1`): AgentStep {
@@ -205,6 +209,17 @@ describe('Execute-to-Plan handoff', () => {
         expect(mainPrompt).to.include('cwtools-plan');
         expect(childPrompt).to.not.include('cwtools-plan');
         expect(childPrompt).to.include('Slim Build Contract');
+    });
+
+    it('teaches both Plan domains to self-check the contract without imposing one prose template', () => {
+        for (const prompt of [buildGeneralPlanSystemPrompt(), buildPlanModeSystemPrompt('', 'Synthetic')]) {
+            expect(prompt).to.include('Plan authoring guidance');
+            expect(prompt).to.include('Scale the plan to the real work');
+            expect(prompt).to.include('Section names and depth should follow the task');
+            expect(prompt).to.include('equal the union of operation files');
+            expect(prompt).to.include('Perform this self-check before the first write');
+            expect(prompt).to.include('Implementation_Plan.md');
+        }
     });
 
     it('makes an approved plan a direct execute handoff without a second design pass', () => {

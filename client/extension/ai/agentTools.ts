@@ -1199,8 +1199,16 @@ export class AgentToolExecutor {
             }
         }
 
-        if (mode === 'plan') {
-            const guard = validatePlanModeToolUse(toolName, args, this.workspaceRoot, context?.runnerOptions?.topicId);
+        if (mode === 'plan'
+            || ((mode === 'orchestrator' || mode === 'script') && toolName === 'write_file')) {
+            const guard = validatePlanModeToolUse(
+                toolName,
+                args,
+                this.workspaceRoot,
+                context?.runnerOptions?.topicId,
+                undefined,
+                mode,
+            );
             if (!guard.allowed) {
                 return {
                     success: false,
@@ -2476,6 +2484,12 @@ export class AgentToolExecutor {
         const requiresStructuredWriteContract = isScriptMode;
         let featureManifest = args.featureManifest as import('./types').FeatureManifest | undefined;
         const blueprintFile = typeof args.blueprintFile === 'string' ? args.blueprintFile.trim() : '';
+        if ((runnerOptsForLimits?.mode === 'explore' || runnerOptsForLimits?.mode === 'plan') && blueprintFile) {
+            return {
+                success: false,
+                error: `${runnerOptsForLimits.mode === 'explore' ? 'Explore' : 'Plan'} mode fan-out is read-only and cannot execute a blueprintFile task graph. Dispatch at most four bounded evidence tasks directly.`,
+            };
+        }
         if (runtimeDomain === 'general' && blueprintFile) {
             return { success: false, error: 'General Multi-Agent does not accept domain-specific design blueprints.' };
         }
@@ -2535,7 +2549,8 @@ export class AgentToolExecutor {
         }
         const normalizedTasks = tasks.map(task => normalizeDispatchTaskForLocalisationYml(task));
         const parentMode = runnerOptsForLimits?.mode;
-        const allowedAgentTypes = new Set(parentMode === 'plan'
+        const readOnlyFanoutMode = parentMode === 'plan' || parentMode === 'explore';
+        const allowedAgentTypes = new Set(readOnlyFanoutMode
             ? ['explore', 'plan', 'review']
             : runtimeDomain === 'general'
             ? ['explore', 'plan', 'utility', 'review']
@@ -2551,8 +2566,17 @@ export class AgentToolExecutor {
         if (invalidAgentType) {
             return {
                 success: false,
-                error: `Agent type '${invalidAgentType.agentType}' is not allowed in ${parentMode === 'plan' ? 'Plan' : isScriptMode ? 'Paradox Multi-Agent' : 'General Multi-Agent'} mode. Allowed roles: ${[...allowedAgentTypes].join(', ')}.`,
+                error: `Agent type '${invalidAgentType.agentType}' is not allowed in ${parentMode === 'plan' ? 'Plan' : parentMode === 'explore' ? 'Explore' : isScriptMode ? 'Paradox Multi-Agent' : 'General Multi-Agent'} mode. Allowed roles: ${[...allowedAgentTypes].join(', ')}.`,
             };
+        }
+        if (parentMode === 'explore') {
+            const taskWithWriteIntent = normalizedTasks.find(task => (task.plannedFiles?.length ?? 0) > 0);
+            if (taskWithWriteIntent) {
+                return {
+                    success: false,
+                    error: `Explore mode fan-out is read-only. Task '${taskWithWriteIntent.id}' must not declare plannedFiles or any write intent.`,
+                };
+            }
         }
         const hasWriteTasks = normalizedTasks.some(task =>
             ['build', 'loc_writer', 'gui_expert', 'utility'].includes(task.agentType)
@@ -2694,6 +2718,7 @@ export class AgentToolExecutor {
                 topicId: runnerOpts?.topicId,
                 parentRunId: parentRun?.runId ?? parentRunSink?.runId,
                 durableGoal: runnerOpts?.durableGoal,
+                readOnlyFanout: parentMode === 'explore',
                 runEventSink: parentRunSink,
                 onStep: context?.onStep,
                 onBeforeFileWrite,

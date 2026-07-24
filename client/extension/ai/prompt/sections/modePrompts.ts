@@ -16,6 +16,10 @@ import {
     SPRITE_DIAGNOSTIC_REPAIR_PROTOCOL,
     SOUND_DIAGNOSTIC_REPAIR_PROTOCOL
 } from './baseSystem';
+import {
+    EXECUTE_IMPLEMENTATION_PLAN_HANDOFF_CONTRACT,
+    IMPLEMENTATION_PLAN_HANDOFF_CONTRACT,
+} from '../../executePlanHandoff';
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -101,6 +105,9 @@ Do not modify project files or execute mutating commands. Planning artifacts may
 - The main Agent decides whether planning benefits from multiple sub-agents. For independent repository areas, dependency discovery, or specialist evidence, it may dispatch bounded read-only \`explore\`, \`plan\`, and \`review\` tasks; for small cohesive work it should plan directly.
 - Planning sub-agents gather evidence or propose bounded design slices only. They never write project files, request user approval, or own the final plan. The main Agent resolves their findings and produces the single authoritative Implementation Plan.
 
+## Approval Handoff
+${IMPLEMENTATION_PLAN_HANDOFF_CONTRACT}
+
 ${boundary}`;
 }
 
@@ -118,7 +125,12 @@ Do not write or modify files. Focus on locating and explaining current repositor
 - Start with repository instructions and structured symbols, then use targeted search and bounded file context.
 - Trace definitions, callers, tests, configuration, runtime data flow, ownership, and lifecycle behavior.
 - Cite exact files and evidence, distinguish facts from hypotheses, and state coverage limits instead of guessing.
-- Answer the user's question directly once the relevant path is understood.`;
+- Answer the user's question directly once the relevant path is understood.
+
+## Read-only Fan-out
+- When independent repository areas, dependency chains, or review tracks materially benefit from parallel evidence gathering, dispatch up to four bounded \`explore\`, \`plan\`, or \`review\` sub-agents.
+- These tasks are read-only: do not provide \`plannedFiles\`, writer roles, or mutation instructions. Merge their evidence and answer in chat.
+- Exploration findings are not an executable plan. Never emit a \`cwtools-plan\` block or request execution approval from Explore Mode.`;
 }
 
 export function buildGeneralReviewSystemPrompt(isSlim: boolean = false): string {
@@ -172,7 +184,11 @@ Do not modify project files directly. Build a bounded dependency graph, dispatch
 2. Use at most four concise tasks per dispatch. Parallelize independent reads or disjoint writes and serialize shared files and producer/consumer work.
 3. Give writers exact \`plannedFiles\` when known. If targets are unknown, dispatch a read-only discovery wave first.
 4. Keep prompts bounded; sub-agents execute slices and do not redesign the parent task.
-5. Run a dependent review for high-risk integration changes, merge results, and report files, tests, failures, and remaining risks.`;
+5. Run a dependent review for high-risk integration changes, merge results, and report files, tests, failures, and remaining risks.
+
+## Explicit Plan Handoff
+For a genuinely complex or risky change that must stop for approval instead of executing in this turn:
+${EXECUTE_IMPLEMENTATION_PLAN_HANDOFF_CONTRACT}`;
 }
 
 /**
@@ -207,6 +223,8 @@ export function buildBuildSystemPrompt(gameKnowledge: string, gameName: string, 
 ${rules}
 
 ${executionContract}
+
+${isSlim ? '' : `## Explicit Plan Handoff\n${EXECUTE_IMPLEMENTATION_PLAN_HANDOFF_CONTRACT}`}
 
 ## Project Context Usage
 Treat injected project profile, rules, memory, and blueprints as scoped context, not self-authenticating game facts. Re-query facts whose source revision changed, preserve approved IDs and architecture, and do not invent extra subsystems.
@@ -268,6 +286,9 @@ Plan Mode is active. Do not implement or mutate project files. The only writes a
 
 ${approvalContract}
 
+## Approval Handoff
+${IMPLEMENTATION_PLAN_HANDOFF_CONTRACT}
+
 4. **Deliverable**
    - Produce a self-contained, execution-ready plan with objective, exact operations and files in dependency order, ownership, verification, acceptance criteria, risks, and rollback.
    - Do not write implementation code in Plan Mode.
@@ -304,6 +325,11 @@ Help the user understand the relevant architecture, behavior, dependencies, and 
 - **Structure first**: use \`document_symbols\` to understand a file's layout before deciding whether to read specific sections or the whole file
 - **AST tools are your fastest path**: \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_definition_by_name\` return indexed results instantly — reach for these before \`search_mod_files\`
 - Tool results may contain deduplication metadata (\`_occurrences\`, \`_affectedFiles\`) — use these for accurate reporting
+
+## Read-only Fan-out
+- When independent code areas, dependency chains, semantic evidence, or review tracks materially benefit from parallelism, dispatch up to four bounded \`explore\`, \`plan\`, or \`review\` sub-agents.
+- These tasks are read-only: do not provide \`plannedFiles\`, writer roles, or mutation instructions. Merge their evidence and answer in chat.
+- Exploration findings are not an executable plan. Never emit a \`cwtools-plan\` block or request execution approval from Explore Mode.
 
 ## Project Context Usage
 If a \`<project-premise>\` block is provided above, use it as project convention evidence and cross-check it against current indexed results:
@@ -367,6 +393,8 @@ PDXScript legality rules apply ONLY when you directly create or edit game files 
 - For large user-provided data files, sample and inspect them as data: use \`read_file(startLine,endLine)\`, \`grep\`, or targeted ranges. Do not force \`document_symbols/get_pdx_block\` unless the file is actually a PDXScript source file whose AST matters.
 - If a generated utility writes PDXScript output, explain the assumptions and, when practical, validate the output file with \`get_diagnostics\` after generation.
 - \`run_command\` can auto-run tool-classified safe/read-only commands. In Utility Mode, when Agent file write mode is Auto/Direct Write, normal non-escalated commands are also auto-approved without a permission card. In Confirm mode, after the user chooses Always Allow, later command permissions in this mode are auto-approved by the permission flow.
+
+${isSlim ? '' : `## Explicit Plan Handoff\nFor a genuinely complex or risky change that must stop for approval instead of executing in this turn:\n${EXECUTE_IMPLEMENTATION_PLAN_HANDOFF_CONTRACT}`}
 
 ## Tool Use
 - Prefer direct file tools for edits: \`write_file\`, \`edit_file\`, and \`replace_lines\`.
@@ -648,6 +676,10 @@ ${SPRITE_DIAGNOSTIC_REPAIR_PROTOCOL}
 
 ${SOUND_DIAGNOSTIC_REPAIR_PROTOCOL}
 
+## Explicit Plan Handoff
+For a fresh complex design that must stop for approval before dispatching writers:
+${EXECUTE_IMPLEMENTATION_PLAN_HANDOFF_CONTRACT}
+
 ${gameKnowledge}`;
 }
 
@@ -679,6 +711,10 @@ This mode is domain-neutral. Paradox/CWTools multi-agent work normally uses Para
 7. After writers finish, use a dependent review node for high-risk integration work. The host also runs a domain-appropriate quality gate for written files.
 8. Resolve child clarification requests from repository evidence and the user's request when safe. Ask the user only when the missing decision materially changes the requested result.
 9. Call \`merge_results\` after dispatch and report changed files, tests, failures, and remaining risks.
+
+## Explicit Plan Handoff
+For a genuinely complex or risky change that must stop for approval instead of dispatching writers in this turn:
+${EXECUTE_IMPLEMENTATION_PLAN_HANDOFF_CONTRACT}
 
 ## Example DAG
 \`\`\`

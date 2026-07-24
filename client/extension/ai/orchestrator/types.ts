@@ -262,6 +262,8 @@ export interface OrchestratorOptions {
     parentRunId?: string;
     /** Whether the parent run belongs to an active durable goal. */
     durableGoal?: boolean;
+    /** Force every child into a read-only tool surface for Explore-mode evidence fan-out. */
+    readOnlyFanout?: boolean;
     /** Explicit parent event sink for orchestration events. */
     runEventSink?: import('../runner/runContext').RunEventSink;
     /** Step callback */

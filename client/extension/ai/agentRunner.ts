@@ -354,6 +354,8 @@ const _EXPLORE_MODE_TOOLS: AgentToolName[] = [
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
     'query_definition', 'query_definition_by_name', 'web_find',
+    // Bounded read-only evidence fan-out. The dispatch boundary rejects writer roles and planned files.
+    'dispatch_agents', 'query_blackboard', 'merge_results',
     // Git operations for investigation
     'git_ops', 'save_workflow',
 ];
@@ -423,6 +425,8 @@ const _ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
     'query_definition', 'query_definition_by_name',
     // Blackboard and task management
     'set_memory', 'get_memory', 'search_memory', 'todo_write',
+    // Topic-scoped Implementation_Plan.md handoff only; runtime guard blocks project files.
+    'write_file',
     // Coordinator-specific
     'dispatch_agents', 'query_blackboard', 'merge_results',
     // Git
@@ -3064,8 +3068,16 @@ export class AgentRunner {
                     continue;
                 }
 
-                if (mode === 'plan') {
-                    const guard = validatePlanModeToolUse(toolName, toolArgs, this.toolExecutor.workspaceRoot, options?.topicId, ci.targetPaths);
+                if (mode === 'plan'
+                    || ((mode === 'orchestrator' || mode === 'script') && toolName === 'write_file')) {
+                    const guard = validatePlanModeToolUse(
+                        toolName,
+                        toolArgs,
+                        this.toolExecutor.workspaceRoot,
+                        options?.topicId,
+                        ci.targetPaths,
+                        mode,
+                    );
                     if (!guard.allowed) {
                         emitStep({
                             type: 'validation',

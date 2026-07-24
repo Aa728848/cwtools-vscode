@@ -72,7 +72,7 @@ import {
 } from './agentProfile';
 import { computeLineDiff } from './diffEngine';
 import { budgetToolResult } from './contextBudget';
-import { shouldRenderInteractivePlan } from './executePlanHandoff';
+import { hasImplementationPlanArtifact, shouldRenderInteractivePlan } from './executePlanHandoff';
 import {
     getSlashCommandDescriptors,
     resolveSlashCommand,
@@ -1172,7 +1172,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // or heuristic question detection), it shouldn't lock into an Implementation Plan yet.
             // Treat it as a conversational turn.
             const isJustAskingQuestions = this.detectClarificationPhase(result);
-            const hasInteractivePlan = shouldRenderInteractivePlan(result);
             const uiSteps = this.compactStepsForUi(result.steps);
             const uiResult = { ...result, steps: uiSteps };
             const durableRunId = result.runId ?? this.currentRunId;
@@ -1182,14 +1181,23 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (latestUserHistory && durableRunId) latestUserHistory.runId = durableRunId;
             const topicId = this.topicManager.currentTopic?.id || 'default';
             const generatedPlanPath = this.findGeneratedTopicFile(topicId, 'Implementation_Plan.md');
+            const hasCurrentPlanArtifact = !!generatedPlanPath && hasImplementationPlanArtifact(result.steps, {
+                expectedPath: generatedPlanPath,
+                workspaceRoot: getProjectWorkspaceRoot(),
+            });
             let interactivePlanText = result.explanation;
-            if (generatedPlanPath) {
+            if (generatedPlanPath && hasCurrentPlanArtifact) {
                 try {
                     interactivePlanText = (await fs.promises.readFile(generatedPlanPath, 'utf-8')).replace(/^\uFEFF/, '');
                 } catch (error) {
                     ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to read the generated Implementation_Plan.md; using the response text', error);
                 }
             }
+            const hasInteractivePlan = shouldRenderInteractivePlan(result, {
+                mode: turnMode,
+                planText: interactivePlanText,
+                hasCurrentPlanArtifact,
+            });
             const wtPath = this.findGeneratedTopicFile(topicId, 'walkthrough.md');
             if (wtPath) {
                 await this.renderWalkthroughUI(wtPath, topicId, uiSteps);

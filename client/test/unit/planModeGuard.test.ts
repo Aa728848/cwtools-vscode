@@ -33,6 +33,38 @@ describe('planModeGuard', () => {
         );
         expect(projectEdit.allowed).to.equal(false);
     });
+
+    it('lets coordinators write only the current topic Implementation_Plan.md', () => {
+        const { validatePlanModeToolUse } = loadPlanModeGuardModule();
+        const workspaceRoot = path.join(process.cwd(), '.tmp-plan-mode-workspace');
+        const currentPlan = path.join(workspaceRoot, '.cwtools', 'topic-123', 'Implementation_Plan.md');
+
+        expect(validatePlanModeToolUse(
+            'write_file',
+            { file: currentPlan, content: '# Plan' },
+            workspaceRoot,
+            'topic-123',
+            undefined,
+            'orchestrator',
+        ).allowed).to.equal(true);
+
+        for (const blockedPath of [
+            path.join(workspaceRoot, '.cwtools', 'other-topic', 'Implementation_Plan.md'),
+            path.join(workspaceRoot, '.cwtools', 'topic-123', 'annotations.md'),
+            path.join(workspaceRoot, 'client', 'extension.ts'),
+        ]) {
+            const blocked = validatePlanModeToolUse(
+                'write_file',
+                { file: blockedPath, content: '# Plan' },
+                workspaceRoot,
+                'topic-123',
+                undefined,
+                'script',
+            );
+            expect(blocked.allowed, blockedPath).to.equal(false);
+            expect(blocked.reason).to.include('script mode blocks direct workspace mutation');
+        }
+    });
 });
 
 function loadPlanModeGuardModule() {

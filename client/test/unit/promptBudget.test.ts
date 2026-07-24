@@ -76,7 +76,9 @@ describe('AI static prompt budgets', () => {
             for (const stage of stages[mode]) {
                 const tools = runnerPolicy.filterToolDefinitionsForStage(modeTools, mode, stage);
                 const total = promptTokens + estimateTokenCount(JSON.stringify(tools));
-                const maxToolCount = mode === 'plan' ? 18 : 15;
+                // Plan and Explore intentionally reserve three slots for bounded
+                // read-only fan-out: dispatch, blackboard query, and result merge.
+                const maxToolCount = mode === 'plan' || mode === 'explore' ? 18 : 15;
                 expect(tools.length, `${mode}/${stage} tool count`).to.be.within(8, maxToolCount);
                 expect(total, `${mode}/${stage} system + tools`).to.be.at.most(8_000);
                 expect(tools.some(tool => projectWriteTools.has(tool.function.name)), `${mode}/${stage} project writes`).to.equal(false);

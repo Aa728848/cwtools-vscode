@@ -138,6 +138,16 @@ describe('runnerPolicy', () => {
         expect(advanceToolStage('plan', 'discovery', 'dispatch_agents', { success: true })).to.equal('design');
     });
 
+    it('lets Explore mode fan out bounded read-only evidence work', () => {
+        const modeTools = filterToolDefinitionsForMode(registeredTools, 'explore');
+        const discoveryNames = filterToolDefinitionsForStage(modeTools, 'explore', 'discovery')
+            .map(tool => tool.function.name);
+        expect(discoveryNames).to.include.members(['dispatch_agents', 'query_blackboard', 'merge_results']);
+        expect(discoveryNames).to.not.include.members(['write_file', 'write_localisation', 'edit_pdx_block']);
+        expect(validateToolAccess('dispatch_agents', { mode: 'explore' }).allowed).to.equal(true);
+        expect(advanceToolStage('explore', 'discovery', 'dispatch_agents', { success: true })).to.equal('validation');
+    });
+
     it('keeps orchestration tools in coordinator modes', () => {
         const filtered = filterToolDefinitionsForMode(toolDefinitions, 'orchestrator');
         const names = filtered.map(t => t.function.name);
@@ -148,7 +158,7 @@ describe('runnerPolicy', () => {
         const scriptNames = scriptFiltered.map(t => t.function.name);
         expect(scriptNames).to.include('dispatch_agents');
         expect(scriptNames).to.include('query_blackboard');
-        expect(scriptNames).to.not.include('write_file');
+        expect(scriptNames).to.include('write_file');
     });
 
     it('hides command tools from slim sub-agent toolsets', () => {

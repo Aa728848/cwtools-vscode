@@ -35,6 +35,7 @@ export function validateGitOpsForMode(
 }
 
 const PLAN_FILE_RE = /^(implementation|implement)[ _-]?plan\.md$/i;
+const EXACT_HANDOFF_PLAN_FILE_RE = /^implementation_plan\.md$/i;
 const CARD_ARTIFACT_FILE_RE = /^(?:(?:implementation|implement)[ _-]?plan|design_blueprint|walkthrough|task|(?:plan|blueprint|walkthrough)?[ _-]?annotations?)\.(?:md|json)$/i;
 
 function normalize(filePath: string): string {
@@ -113,6 +114,14 @@ export function isPlanModeCardArtifactFile(filePath: string, workspaceRoot: stri
     return false;
 }
 
+function isCurrentTopicImplementationPlan(filePath: string, workspaceRoot: string, topicId: string | undefined): boolean {
+    if (!topicId || !EXACT_HANDOFF_PLAN_FILE_RE.test(path.basename(filePath))) return false;
+    const segments = getAiRelativeSegments(filePath, workspaceRoot);
+    if (!segments || segments.length < 2) return false;
+    const safeTopicId = topicId.replace(/[^a-zA-Z0-9_.-]/g, '_').toLowerCase();
+    return segments[0]!.toLowerCase() === safeTopicId;
+}
+
 function extractPatchTargets(args: Record<string, unknown>, workspaceRoot: string): string[] {
     const patch = typeof args.patch === 'string' ? args.patch : '';
     if (!patch) return [];
@@ -134,7 +143,8 @@ export function validatePlanModeToolUse(
     args: Record<string, unknown>,
     workspaceRoot: string,
     topicId?: string,
-    precomputedTargets?: string[]
+    precomputedTargets?: string[],
+    mode: 'plan' | 'orchestrator' | 'script' = 'plan',
 ): PlanModeGuardResult {
     if (!WRITE_TOOLS.has(toolName)) {
         return { allowed: true };
@@ -149,7 +159,7 @@ export function validatePlanModeToolUse(
     }
 
     if (toolName === 'git_ops') {
-        return validateGitOpsForMode('plan', args);
+        return validateGitOpsForMode(mode, args);
     }
 
     const targets = precomputedTargets && precomputedTargets.length > 0
@@ -159,7 +169,11 @@ export function validatePlanModeToolUse(
             : getAgentToolTargetFiles(toolName, args, workspaceRoot, topicId);
 
     const planFileWriteTools = new Set(['write_file', 'edit_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch']);
-    if (planFileWriteTools.has(toolName) && targets.length > 0 && targets.every(target => isPlanModeCardArtifactFile(target, workspaceRoot))) {
+    const allowedArtifactTargets = mode === 'plan'
+        ? targets.every(target => isPlanModeCardArtifactFile(target, workspaceRoot))
+        : toolName === 'write_file'
+            && targets.every(target => isCurrentTopicImplementationPlan(target, workspaceRoot, topicId));
+    if (planFileWriteTools.has(toolName) && targets.length > 0 && allowedArtifactTargets) {
         return { allowed: true, targetPaths: targets };
     }
 
@@ -167,6 +181,6 @@ export function validatePlanModeToolUse(
     return {
         allowed: false,
         targetPaths: targets,
-        reason: `Plan mode blocks workspace mutation except write_design_blueprint and topic-scoped plan/annotation card artifact edits.${targetList}`,
+        reason: `${mode} mode blocks direct workspace mutation except its explicitly permitted topic-scoped plan/card artifacts.${targetList}`,
     };
 }

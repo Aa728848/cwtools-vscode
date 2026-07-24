@@ -310,7 +310,7 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
 ]);
 
 const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'todo_write', 'write_file', 'edit_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
-const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
+const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'git_ops', 'save_workflow']);
 const REVIEW_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
 const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ..._MCP]);
 const LOC_MODES = new Set([
@@ -320,8 +320,8 @@ const LOC_MODES = new Set([
     'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'todo_write', 'write_localisation', 'git_ops',
     'analyze_diagnostic_error', 'save_workflow'
 ]);
-const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
-const SCRIPT_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
+const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
+const SCRIPT_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
 // Legacy General mode is intentionally read-only. Writable general coding work
 // belongs to Utility mode, whose staged surface and policy gates are explicit.
 const GENERAL_MODES = new Set([...BASE_READ, ...NETWORK]);

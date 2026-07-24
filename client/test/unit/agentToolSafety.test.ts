@@ -165,6 +165,29 @@ describe('enforced central tool policy', () => {
         expect(workflowCall.success).to.equal(false);
         expect(workflowCall.error).to.include("domain-specific mode 'build'");
     });
+
+    it('limits coordinator write_file calls to the current plan artifact', async () => {
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        executor.fileWriteMode = 'auto';
+        const context = { runnerOptions: { mode: 'orchestrator', domain: 'general', topicId: 'policy-test' } } as any;
+        const projectTarget = path.join(workspaceRoot, 'client', 'blocked.ts');
+
+        const blocked = await executor.execute('write_file', {
+            file: projectTarget,
+            content: 'blocked',
+        }, context) as any;
+        expect(blocked.success).to.equal(false);
+        expect(blocked.planModeBlocked).to.equal(true);
+        expect(fs.existsSync(projectTarget)).to.equal(false);
+
+        const artifactTarget = path.join(workspaceRoot, '.cwtools', 'policy-test', 'Implementation_Plan.md');
+        const allowed = await executor.execute('write_file', {
+            file: artifactTarget,
+            content: '# Complete plan',
+        }, context) as any;
+        expect(allowed.success).to.equal(true);
+        expect(fs.readFileSync(artifactTarget, 'utf8')).to.equal('# Complete plan');
+    });
 });
 
 describe('HeadTailTextBuffer', () => {
@@ -2049,6 +2072,50 @@ describe('agent tool progress and aborts', () => {
         expect(result.success).to.equal(false);
         expect(result.error).to.include("Agent type 'build' is not allowed in Plan mode");
         expect(result.error).to.include('explore, plan, review');
+    });
+
+    it('rejects writer sub-agents when Explore mode fans out evidence collection', async () => {
+        const executor = createExecutor();
+        const result = await executor.execute('dispatch_agents', {
+            tasks: [{ id: 'writer', agentType: 'utility', prompt: 'Modify a project file.' }],
+        }, {
+            runnerOptions: { mode: 'explore', domain: 'general' },
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include("Agent type 'utility' is not allowed in Explore mode");
+        expect(result.error).to.include('explore, plan, review');
+    });
+
+    it('rejects planned write targets in Explore-mode fan-out', async () => {
+        const executor = createExecutor();
+        const result = await executor.execute('dispatch_agents', {
+            tasks: [{
+                id: 'reader',
+                agentType: 'explore',
+                prompt: 'Inspect the target file.',
+                plannedFiles: ['client/extension/ai/chatPanel.ts'],
+            }],
+        }, {
+            runnerOptions: { mode: 'explore', domain: 'general' },
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include('Explore mode fan-out is read-only');
+        expect(result.error).to.include('must not declare plannedFiles');
+    });
+
+    it('rejects executable blueprints in Explore-mode fan-out', async () => {
+        const executor = createExecutor();
+        const result = await executor.execute('dispatch_agents', {
+            blueprintFile: '.cwtools/topic/design_blueprint.json',
+        }, {
+            runnerOptions: { mode: 'explore', domain: 'paradox' },
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include('Explore mode fan-out is read-only');
+        expect(result.error).to.include('at most four bounded evidence tasks');
     });
 
     it('emits heartbeat progress while a tool is still running and stops after abort', async () => {

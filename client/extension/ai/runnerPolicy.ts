@@ -78,6 +78,7 @@ const EXPLORE_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> 
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
         'glob_files', 'workspace_symbols', 'document_symbols', 'get_lsp_status',
         'web_search', 'web_open', 'web_find', 'mcp_call',
+        'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
     design: new Set(),
     validation: new Set([
@@ -85,12 +86,14 @@ const EXPLORE_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> 
         'query_references', 'query_definition_by_name', 'verify_pdx_identifier',
         'get_diagnostics', 'get_pdx_block', 'get_file_context', 'read_file',
         'search_mod_files', 'workspace_symbols', 'document_symbols', 'explore_pdx_project',
+        'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
     write: new Set(),
     finalize: new Set([
         'query_references', 'verify_pdx_identifier', 'get_diagnostics',
         'get_pdx_block', 'get_file_context', 'read_file',
         'search_mod_files', 'workspace_symbols', 'document_symbols',
+        'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
 };
 

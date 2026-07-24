@@ -1352,6 +1352,40 @@ describe('Orchestrator runtime safety', () => {
         ]);
         expect(capturedOptions.excludeTools).to.not.include('write_localisation');
     });
+
+    it('executeSubAgent: hides every mutating and nested-dispatch tool for read-only fan-out', async () => {
+        const workspaceRoot = process.cwd();
+        let capturedOptions: any;
+        const runner = {
+            toolExecutor: { workspaceRoot },
+            run: async (_prompt: string, _context: any, _history: any[], options: any) => {
+                capturedOptions = options;
+                return {
+                    code: '', explanation: 'done', validationErrors: [], isValid: true, retryCount: 0, steps: [],
+                    tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                };
+            },
+        };
+        const orchestrator = new Orchestrator(runner as any);
+        const node = {
+            id: 'reader', agentType: 'plan', prompt: 'Inspect dependencies.', dependencies: [],
+            priority: 'normal', status: 'pending', retryCount: 0, maxRetries: 0,
+        };
+
+        const result = await (orchestrator as any).executeSubAgent(
+            node,
+            new Blackboard(),
+            { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+            new AbortController().signal,
+            () => undefined,
+            { topicId: 'topic-1', domain: 'general', readOnlyFanout: true },
+        );
+
+        const { MUTATING_TOOLS } = require('../../extension/ai/tools/registry') as typeof import('../../extension/ai/tools/registry');
+        expect(result.success).to.equal(true);
+        expect(capturedOptions.excludeTools).to.include.members([...MUTATING_TOOLS]);
+        expect(capturedOptions.excludeTools).to.include.members(['dispatch_agents', 'merge_results']);
+    });
 });
 
 // ── QualityGate ───────────────────────────────────────────────────────────────

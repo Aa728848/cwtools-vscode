@@ -32,7 +32,7 @@ import { getAgentProfile } from './agentRegistry';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, ORCHESTRATOR_MSG, aiText } from '../messages';
 import { getAgentToolTargetFiles } from '../runner/toolScheduler';
-import { WRITE_TOOLS } from '../tools/registry';
+import { MUTATING_TOOLS, WRITE_TOOLS } from '../tools/registry';
 import { mergeTokenUsageTotals } from '../cacheCapability';
 import { defaultDomainForMode } from '../agentProfile';
 
@@ -438,6 +438,9 @@ export class Orchestrator {
             'git_ops',
             'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
             ...(onlyLocalisationYmlWrites ? LOCALISATION_GENERIC_WRITE_TOOLS : []),
+            ...(orchestratorOptions.readOnlyFanout
+                ? [...MUTATING_TOOLS, 'dispatch_agents', 'merge_results']
+                : []),
         ];
 
         const runnerOptions: AgentRunnerOptions = {

@@ -37,7 +37,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri, opti
     const stylesheetUris = [cssUri.toString(), ...(options?.extraStylesheets ?? [])];
     const stylesheetLinks = stylesheetUris.map(uri => `<link rel="stylesheet" href="${uri}">`).join('\n');
     const csp = webview.cspSource;
-    const title = options?.title ?? 'Eddy CWTool Code';
+    const title = options?.title ?? 'Cwtool Code';
     const surface = options?.surface ?? 'chat';
     const layout = options?.layout ?? 'sidebar';
     const enableCodexUi = options?.enableCodexUi ?? true;
@@ -62,10 +62,10 @@ ${stylesheetLinks}
 <div class="header" role="banner">
     <div class="header-title">
         <svg class="header-brand-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-            <path fill="#e8c840" d="M8 1L9.2 6.8 15 8l-5.8 1.2L8 15l-1.2-5.8L1 8l5.8-1.2z"/>
-            <circle fill="#e8c840" cx="13" cy="3" r="1"/>
+            <path fill="#e8c840" d="M12.5 1H3.5C2.121 1 1 2.121 1 3.5V12.5C1 13.879 2.121 15 3.5 15H12.5C13.879 15 15 13.879 15 12.5V3.5C15 2.121 13.879 1 12.5 1ZM6 6.5C6 6.775 5.775 7 5.5 7C5.225 7 5 6.775 5 6.5C5 6.225 5.225 6 5.5 6C5.775 6 6 6.225 6 6.5ZM12.5 14H6V11.5C6 11.225 6.225 11 6.5 11H9.092C9.299 11.581 9.849 12 10.5 12C11.327 12 12 11.327 12 10.5C12 9.673 11.327 9 10.5 9C9.849 9 9.299 9.419 9.092 10H6.5C5.673 10 5 10.673 5 11.5V14H3.5C2.673 14 2 13.327 2 12.5V3.5C2 2.673 2.673 2 3.5 2H5V5.092C4.419 5.299 4 5.849 4 6.5C4 7.327 4.673 8 5.5 8C6.327 8 7 7.327 7 6.5C7 5.849 6.581 5.299 6 5.092V2H12.5C13.327 2 14 2.673 14 3.5V6H10.908C10.701 5.419 10.151 5 9.5 5C8.673 5 8 5.673 8 6.5C8 7.327 8.673 8 9.5 8C10.151 8 10.701 7.581 10.908 7H14V12.5C14 13.327 13.327 14 12.5 14ZM10 10.5C10 10.225 10.225 10 10.5 10C10.775 10 11 10.225 11 10.5C11 10.775 10.775 11 10.5 11C10.225 11 10 10.775 10 10.5ZM10 6.5C10 6.775 9.775 7 9.5 7C9.225 7 9 6.775 9 6.5C9 6.225 9.225 6 9.5 6C9.775 6 10 6.225 10 6.5Z"/>
+
         </svg>
-        <span class="brand-text">Eddy CWTool Code</span>
+        <span class="brand-text">Cwtool Code</span>
         <div class="current-topic-chip" id="currentTopicChip" title="${t('Current topic', '当前话题')}">
             <button class="current-topic-title" id="currentTopicTitle" type="button">${t('New topic', '新话题')}</button>
             <button class="current-topic-rename" id="currentTopicRename" type="button" title="${t('Rename current topic', '重命名当前话题')}" aria-label="${t('Rename current topic', '重命名当前话题')}">${svgIconNoMargin('edit')}</button>

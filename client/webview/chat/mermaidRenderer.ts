@@ -200,10 +200,16 @@ function openFullscreen(container: HTMLElement): void {
     overlay.focus();
 }
 
+export function sanitizeMermaidSource(source: string): string {
+    // Models often wrap label identifiers in Markdown backticks, which the
+    // Mermaid lexer rejects. Backticks are never valid Mermaid syntax.
+    return source.replace(/`/g, '');
+}
+
 async function renderContainer(container: HTMLElement): Promise<void> {
     if (container.dataset.mermaidState !== 'pending') return;
     container.dataset.mermaidState = 'rendering';
-    const source = container.querySelector<HTMLElement>('.md-mermaid-source code')?.textContent?.trim() ?? '';
+    const source = sanitizeMermaidSource(container.querySelector<HTMLElement>('.md-mermaid-source code')?.textContent?.trim() ?? '');
     const output = container.querySelector<HTMLElement>('.md-mermaid-output');
     const loading = container.querySelector<HTMLElement>('.md-mermaid-loading');
     const id = `cwtools-mermaid-${Date.now()}-${diagramCounter++}`;

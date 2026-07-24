@@ -157,7 +157,7 @@ export function renderCodexTurnItem(item: CodexTurnItem, options: CodexRenderOpt
     if (item.type === 'activity') return renderActivityRow(item.event, options);
     const body = options.renderMarkdown ? options.renderMarkdown(item.text.content) : escapeHtml(item.text.content);
     const autoClass = item.text.source === 'auto' ? ' codex-auto-progress' : '';
-    return `<div class="codex-process-text${autoClass} markdown-body" data-text-source="${item.text.source}">${body}</div>`;
+    return `<div class="codex-process-text${autoClass} msg-bubble markdown-body" data-text-source="${item.text.source}">${body}</div>`;
 }
 
 export function renderCodexTurnItems(items: CodexTurnItem[], options: CodexRenderOptions): string {

@@ -332,4 +332,14 @@ describe('Codex activity view model', () => {
         const group = firstGroup(model, 'command');
         expect(group.label).to.include('2');
     });
+
+    it('styles streamed process text with msg-bubble like the final answer', () => {
+        const i18n = getChatI18n('en');
+        const model = build([
+            { type: 'text_delta', content: '# Title\n\n| a | b |\n| --- | --- |\n| 1 | 2 |', timestamp: 1000 },
+        ]);
+        const html = renderCodexTurnItems(model.items, { labels: i18n.codex });
+
+        expect(html).to.include('codex-process-text msg-bubble markdown-body');
+    });
 });

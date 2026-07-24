@@ -332,8 +332,8 @@ const EN: ChatI18nText = {
             stepsCount: 'Ran {count} steps',
         },
         details: {
-            arguments: 'Arguments',
-            result: 'Result',
+            arguments: 'IN',
+            result: 'OUT',
             command: 'Command',
             cwd: 'Working directory',
             exitCode: 'Exit code',
@@ -600,8 +600,8 @@ const ZH_CN: ChatI18nText = {
             stepsCount: '已执行 {count} 个步骤',
         },
         details: {
-            arguments: '参数',
-            result: '结果',
+            arguments: 'IN',
+            result: 'OUT',
             command: '命令',
             cwd: '工作目录',
             exitCode: '退出码',

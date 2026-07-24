@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [2.8.36] - 2026-07-24
+
+### 功能与优化 / Features & Optimizations
+- **[优化] 优化内存消耗和补全验证性能**
+  English: [Optimization] Optimize memory consumption and completion/validation performance.
 - **[修复] 静态银河预览的 Y 轴方向**：使 Y 坐标与游戏地图的屏幕方向一致，并同步修正节点拖拽、画布平移、鼠标锚点缩放和网格绘制的逆变换。
   English: [Fix] Static galaxy preview Y-axis orientation now matches the in-game map, with node dragging, canvas panning, cursor-anchored zoom, and grid rendering using the same inverse transform.
 

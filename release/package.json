@@ -91,7 +91,7 @@
                 {
                     "id": "cwtools-ai-panel",
                     "title": "%viewsContainers.stellarisAiPanel.title%",
-                    "icon": "$(hubot)"
+                    "icon": "$(circuit-board)"
                 }
             ]
         },

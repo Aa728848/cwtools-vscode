@@ -87,11 +87,11 @@
             ]
         },
         "viewsContainers": {
-            "secondarySidebar": [
+            "activitybar": [
                 {
                     "id": "cwtools-ai-panel",
                     "title": "%viewsContainers.stellarisAiPanel.title%",
-                    "icon": "$(sparkle)"
+                    "icon": "$(hubot)"
                 }
             ]
         },

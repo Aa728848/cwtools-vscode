@@ -1313,6 +1313,19 @@ type CompletionRuntimeState =
       lastIsIncomplete: bool
       lastError: string option }
 
+/// Validation/completion-visible contribution of a file change. Path routing
+/// identifies the candidate domains; exact type keys and semantic equality are
+/// supplied by the staged CWTools type index before a global refresh is queued.
+type private SemanticDelta =
+    { domains: Set<string>
+      requiresFullRefresh: bool
+      changedTypeKeys: Set<string>
+      localisationKeys: Set<string>
+      dynamicDefinitions: Set<string>
+      callSites: Set<string>
+      completionVisible: bool
+      validationVisible: bool }
+
 type Server(client: ILanguageClient) =
     do setupLogger client
     let docs = DocumentStore()
@@ -2043,9 +2056,10 @@ type Server(client: ILanguageClient) =
         codeLensCache.Clear()  // CodeLens depends on type index
         typeReferenceResultCache.Clear()
 
-    /// Clean localization related cache (called after .yml changes)
+    /// Invalidate the derived localisation-entry map after a .yml change. Keep
+    /// published per-file diagnostics until the incremental pass has complete
+    /// replacements, so an edit never creates a transient false-negative set.
     let clearLocalisationCaches () =
-        locCache.Clear()
         cachedLocMap <- None
         cachedLocMapCount <- 0
 
@@ -2174,6 +2188,11 @@ type Server(client: ILanguageClient) =
     let cachePut (cache: System.Collections.Concurrent.ConcurrentDictionary<string, 'V>) (key: string) (value: 'V) =
         cache.[key] <- value
         cacheWriteTimes.[key] <- DateTime.UtcNow.Ticks
+
+    let clearLocalisationDiagnosticCache () =
+        for key in locCache.Keys do
+            clearCacheWriteTimesForFile key
+        locCache.Clear()
 
     let forgetFileCaches filePath =
         clearFileCaches filePath
@@ -2699,6 +2718,7 @@ type Server(client: ILanguageClient) =
     let mutable delayedLocUpdate = false
 
     let mutable delayedScriptLocUpdate = false
+    let pendingScriptLocalisationFiles = System.Collections.Concurrent.ConcurrentDictionary<string, byte>()
     let mutable lastScriptLocUpdateAt = DateTime.MinValue
     /// Floor between idle script loc recomputes.
     let scriptLocUpdateCooldown = TimeSpan.FromSeconds(3.0)
@@ -2753,7 +2773,10 @@ type Server(client: ILanguageClient) =
         [| "common/inline_scripts/"
            "common/scripted_effects/"
            "common/scripted_triggers/"
-           "common/script_values/" |]
+           "common/script_values/"
+           "common/scripted_variables/"
+           "common/scripted_loc/"
+           "common/static_modifiers/" |]
 
     let scriptedDefinitionPathMarkers =
         [| "common/scripted_effects/"
@@ -2796,26 +2819,42 @@ type Server(client: ILanguageClient) =
     let scriptedTypeKeys =
         [ "scripted_trigger"; "scripted_effect"; "script_value" ]
 
-    let incrementalTypeRefreshEnabled () = experimental
+    let incrementalTypeRefreshEnabled () =
+        match gameObj with
+        | Some (:? IIncrementalTypeIndex) -> true
+        | _ -> false
     let maxIncrementalScriptedPatchCount = 25
     let mutable incrementalScriptedPatchCount = 0
 
-    let refreshDomainsForPath (path: string) =
+    let semanticDeltaForPath (path: string) =
         let lp = path.ToLowerInvariant().Replace('\\', '/')
-        [ if lp.EndsWith(".yml") then
-              yield "localisation"
-          if lp.Contains("/common/") then
-              yield "types"
-              yield "rules"
-          if lp.Contains("/events/") then
-              yield "types"
-              yield "rules"
-          if lp.Contains("/interface/") || lp.Contains("/gfx/") then
-              yield "sprites_sounds"
-              yield "types"
-          if lp.Contains("/map/") || lp.Contains("/prescripted_countries/") then
-              yield "types" ]
-        |> List.distinct
+        let domains =
+            seq {
+                if lp.EndsWith(".yml") then yield "localisation"
+                if lp.Contains("/interface/") || lp.Contains("/gfx/") then yield "sprites_sounds"
+            }
+            |> Set.ofSeq
+        { domains = domains
+          requiresFullRefresh = false
+          changedTypeKeys = Set.empty
+          localisationKeys = Set.empty
+          dynamicDefinitions = if isDynamicDefinitionPath path then Set.singleton path else Set.empty
+          callSites = Set.empty
+          completionVisible = isTypeDefiningPath path
+          validationVisible = true }
+
+    let semanticDeltaForTypeIndex path changedTypeKeys semanticChanged =
+        let routed = semanticDeltaForPath path
+        { routed with
+            domains =
+                if semanticChanged then Set.union routed.domains (Set.ofList [ "types"; "rules" ])
+                else routed.domains
+            requiresFullRefresh = semanticChanged
+            changedTypeKeys = changedTypeKeys |> Set.ofSeq
+            completionVisible = semanticChanged
+            validationVisible = semanticChanged || routed.validationVisible }
+
+    let refreshDomainsForPath path = (semanticDeltaForPath path).domains |> Set.toList
 
     /// When true, the next delayedAnalyze must run full RefreshCaches
     let mutable needsTypeRefresh = false
@@ -3140,16 +3179,20 @@ type Server(client: ILanguageClient) =
             if isEditAction && isTypeDefiningPath name && not shallowAnalyze && not canTryIncrementalTypeRefresh then
                 needsTypeRefresh <- true
                 lastTypeRefreshRequestAt <- DateTime.UtcNow
-                let domains = refreshDomainsForPath name |> List.filter (fun domain -> domain <> "localisation")
-                addPendingRefreshDomains (if domains.IsEmpty then [ "types" ] else domains)
+                let domains =
+                    refreshDomainsForPath name @ [ "types"; "rules" ]
+                    |> List.filter (fun domain -> domain <> "localisation")
+                    |> List.distinct
+                addPendingRefreshDomains domains
                 clearTypeCaches ()
-                markFileStale name "path"
+                markFileStale name "types"
             elif isEditAction
                  && shallowAnalyze
                  && not (name.EndsWith(".yml"))
                  && isTypeDefiningPath name
                  && not canTryIncrementalTypeRefresh then
                 delayedScriptLocUpdate <- true
+                pendingScriptLocalisationFiles.[name] <- 0uy
 
             // Capture text and document version atomically. Diagnostic publication
             // later verifies this exact version is still current.
@@ -3290,20 +3333,25 @@ type Server(client: ILanguageClient) =
                         else
                             None
 
-                    let priorDefsSnapshot, priorIndexEpoch =
+                    let priorDefsSnapshot, priorIndexEpoch, priorSemanticSignature =
                         if canTryIncrementalTypeRefresh then
                             gameStateLock.EnterReadLock()
                             try
-                                typeDefinitionsForFiles game [ name ], modelEpochSnapshot ()
+                                let semanticSignature =
+                                    match game with
+                                    | :? ISemanticDeltaProvider as provider -> provider.SemanticSignatureForFile name
+                                    | _ -> None
+                                typeDefinitionsForFiles game [ name ], modelEpochSnapshot (), semanticSignature
                             finally
                                 gameStateLock.ExitReadLock()
                         else
-                            [], modelEpochSnapshot ()
+                            [], modelEpochSnapshot (), None
 
                     let updateWriteWaitSw = Stopwatch.StartNew()
                     gameStateLock.EnterWriteLock()
                     updateWriteWaitSw.Stop()
                     let updateWriteHoldSw = Stopwatch.StartNew()
+                    let mutable nonTypeSemanticChanged = false
                     let (updateErrors,
                          priorDefsForRevalidation,
                          skipIncrementalRefresh,
@@ -3370,6 +3418,21 @@ type Server(client: ILanguageClient) =
                         finally
                             updateWriteHoldSw.Stop()
                             gameStateLock.ExitWriteLock()
+
+                    // Compare non-TypeDef global contributions outside the write
+                    // lock so completion/hover remain available during the fold.
+                    if canTryIncrementalTypeRefresh
+                       && not updateSuperseded
+                       && lintSnapshotStillCurrent () then
+                        gameStateLock.EnterReadLock()
+                        try
+                            let currentSignature =
+                                match game with
+                                | :? ISemanticDeltaProvider as provider -> provider.SemanticSignatureForFile name
+                                | _ -> None
+                            nonTypeSemanticChanged <- currentSignature <> priorSemanticSignature
+                        finally
+                            gameStateLock.ExitReadLock()
 
                     if useInteractiveUpdate then
                         monitorLog Lint
@@ -3454,12 +3517,18 @@ type Server(client: ILanguageClient) =
                                 incrementalCommitSucceeded <- true
                                 incrementalSemanticChanged <-
                                     match staged with
-                                    | Some (TypeIndexOnly(_, typeStage)) -> typeStage.semanticChanged
+                                    | Some (TypeIndexOnly(_, typeStage)) ->
+                                        typeStage.semanticChanged || nonTypeSemanticChanged
                                     | Some (ScriptedServices _) -> true
                                     | None -> true
+                                let semanticDelta =
+                                    semanticDeltaForTypeIndex
+                                        name
+                                        (priorDefsForRevalidation |> Seq.map fst)
+                                        incrementalSemanticChanged
                                 clearTypeCaches ()
 
-                                if incrementalSemanticChanged then
+                                if semanticDelta.requiresFullRefresh then
                                     bumpTypesModelEpoch ()
                                     incrementalScriptedPatchCount <- incrementalScriptedPatchCount + 1
                                     markFileStale name "types"
@@ -3470,7 +3539,7 @@ type Server(client: ILanguageClient) =
                                         // services still require a full rebuild for real semantic changes.
                                         needsTypeRefresh <- true
                                         lastTypeRefreshRequestAt <- DateTime.UtcNow
-                                        addPendingRefreshDomains [ "types"; "rules" ]
+                                        addPendingRefreshDomains (semanticDelta.domains |> Set.toList)
                                     | Some (ScriptedServices _) when incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount ->
                                         needsTypeRefresh <- true
                                         lastTypeRefreshRequestAt <- DateTime.UtcNow
@@ -3480,6 +3549,7 @@ type Server(client: ILanguageClient) =
                                         // No full refresh is pending, so refresh global type-localisation
                                         // diagnostics once during the next idle/deep analysis pass.
                                         delayedScriptLocUpdate <- true
+                                        pendingScriptLocalisationFiles.[name] <- 0uy
                                         addPendingRefreshDomains [ "localisation" ]
                                     | None -> ()
                                 else
@@ -3980,6 +4050,13 @@ type Server(client: ILanguageClient) =
 
     let mutable delayTime = TimeSpan(0, 0, 5)
 
+    let applyIncrementalLocalisationResult (result: IncrementalLocalisationResult) =
+        for fileName in result.affectedFiles do
+            locCache.TryRemove fileName |> ignore
+            clearCacheWriteTimesForFile fileName
+        for fileName, errors in result.errors |> List.groupBy _.range.FileName do
+            cachePut locCache fileName errors
+
 
     let delayedAnalyze (forceGlobalRefresh: bool) =
         match gameObj with
@@ -4086,28 +4163,45 @@ type Server(client: ILanguageClient) =
                 let allocBeforeLoc = GC.GetTotalAllocatedBytes(false)
                 if delayedLocUpdate then
                     logDiag "delayedLocUpdate true"
-                    game.RefreshLocalisationCaches()
+                    let incrementalResult =
+                        if didRefreshCaches then
+                            None
+                        else
+                            match game with
+                            | :? IIncrementalLocalisation as incremental ->
+                                incremental.TakeLocalisationDelta()
+                                |> Option.map incremental.ValidateLocalisationDelta
+                            | _ -> None
+
+                    match incrementalResult with
+                    | Some result ->
+                        applyIncrementalLocalisationResult result
+                        monitorLog Localisation
+                            $"LocErrors incremental keys/files affected={result.affectedFiles.Length} errors={result.errors.Length}"
+                    | None ->
+                        game.RefreshLocalisationCaches()
+                        clearLocalisationDiagnosticCache ()
+                        for fileName, errors in game.LocalisationErrors(true, true) |> List.groupBy _.range.FileName do
+                            cachePut locCache fileName errors
+
                     bumpLocalisationModelEpoch ()
-                    cachedLocMap <- None  // invalidate cached loc entries
+                    cachedLocMap <- None
                     cachedLocMapCount <- 0
                     delayedLocUpdate <- false
                     delayedScriptLocUpdate <- false
+                    pendingScriptLocalisationFiles.Clear()
                     lastScriptLocUpdateAt <- now
                     didLocRefresh <- true
                     didGlobalWork <- true
-
-                    // Use Dictionary: Clear and refill
-                    locCache.Clear()
-                    for fileName, errors in game.LocalisationErrors(true, true) |> List.groupBy _.range.FileName do
-                        locCache.[fileName] <- errors
                     completeRefreshDomains [ "localisation" ] "refresh_localisation"
                 elif didRefreshCaches then
                     logDiag "delayedLocUpdate false"
 
-                    locCache.Clear()
-                    for fileName, errors in game.LocalisationErrors(true, false) |> List.groupBy _.range.FileName do
-                        locCache.[fileName] <- errors
+                    clearLocalisationDiagnosticCache ()
+                    for fileName, errors in game.LocalisationErrors(true, true) |> List.groupBy _.range.FileName do
+                        cachePut locCache fileName errors
                     delayedScriptLocUpdate <- false
+                    pendingScriptLocalisationFiles.Clear()
                     lastScriptLocUpdateAt <- now
                     bumpLocalisationModelEpoch ()
                     didLocRefresh <- true
@@ -4115,10 +4209,17 @@ type Server(client: ILanguageClient) =
                         completeRefreshDomains [ "localisation" ] "refresh_localisation_after_global"
                 elif delayedScriptLocUpdate && now - lastScriptLocUpdateAt >= scriptLocUpdateCooldown then
                     logDiag "delayedScriptLocUpdate: recomputing mod loc errors"
-                    locCache.Clear()
-                    for fileName, errors in game.LocalisationErrors(true, false) |> List.groupBy _.range.FileName do
-                        locCache.[fileName] <- errors
+                    let pendingFiles = pendingScriptLocalisationFiles.Keys |> Seq.toArray
+                    match game, pendingFiles with
+                    | (:? IIncrementalLocalisation as incremental), files when files.Length > 0 ->
+                        incremental.ValidateLocalisationFiles files
+                        |> applyIncrementalLocalisationResult
+                    | _ ->
+                        clearLocalisationDiagnosticCache ()
+                        for fileName, errors in game.LocalisationErrors(true, false) |> List.groupBy _.range.FileName do
+                            cachePut locCache fileName errors
                     delayedScriptLocUpdate <- false
+                    pendingScriptLocalisationFiles.Clear()
                     lastScriptLocUpdateAt <- now
                     bumpLocalisationModelEpoch ()
                     didLocRefresh <- true
@@ -5023,11 +5124,11 @@ type Server(client: ILanguageClient) =
 
                 let locRaw = game.LocalisationErrors(true, true)
                 localisationErrorCount <- locRaw.Length
-                locCache.Clear()
+                clearLocalisationDiagnosticCache ()
                 cachedLocMap <- None
                 cachedLocMapCount <- 0
                 for fileName, errors in locRaw |> List.groupBy _.range.FileName do
-                    locCache.[fileName] <- errors
+                    cachePut locCache fileName errors
 
                 let locErrors =
                     locRaw
@@ -5690,13 +5791,19 @@ type Server(client: ILanguageClient) =
                         match gameObj with
                         | Some game -> game.InvalidateFileCache path
                         | None -> ()
-                        if isTypeDefiningPath path then
+                        // Creation is conservatively global because there is no old
+                        // semantic contribution to compare. Changed files are routed
+                        // through the staged SemanticDelta/type-index pipeline below.
+                        if change.``type`` = FileChangeType.Created && isTypeDefiningPath path then
                             needsTypeRefresh <- true
                             lastTypeRefreshRequestAt <- DateTime.UtcNow
-                            let domains = refreshDomainsForPath path |> List.filter (fun domain -> domain <> "localisation")
-                            addPendingRefreshDomains (if domains.IsEmpty then [ "types" ] else domains)
+                            let domains =
+                                refreshDomainsForPath path @ [ "types"; "rules" ]
+                                |> List.filter (fun domain -> domain <> "localisation")
+                                |> List.distinct
+                            addPendingRefreshDomains domains
                             clearTypeCaches ()
-                            markFileStale path "path"
+                            markFileStale path "types"
                         lintDebounceAgent.Post(UpdateRequest({ uri = change.uri; version = 0 }, diskRefreshRequest))
                     | FileChangeType.Deleted ->
                         let path = getPathFromDoc change.uri
@@ -5771,8 +5878,11 @@ type Server(client: ILanguageClient) =
                         elif isTypeDefiningPath path then
                             needsTypeRefresh <- true
                             lastTypeRefreshRequestAt <- DateTime.UtcNow
-                            let domains = refreshDomainsForPath path |> List.filter (fun domain -> domain <> "localisation")
-                            addPendingRefreshDomains (if domains.IsEmpty then [ "types" ] else domains)
+                            let domains =
+                                refreshDomainsForPath path @ [ "types"; "rules" ]
+                                |> List.filter (fun domain -> domain <> "localisation")
+                                |> List.distinct
+                            addPendingRefreshDomains domains
                             clearTypeCaches ()
                         client.PublishDiagnostics { uri = change.uri; diagnostics = [] }
                         forgetFileCaches path

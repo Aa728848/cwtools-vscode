@@ -423,6 +423,12 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                                     completionTimeoutFallback
                                     |> Option.bind (fun provider -> provider p)
                                     |> serializeCompletionListOption)
+                            | SemanticTokensFull _
+                            | SemanticTokensFullDelta _ ->
+                                // Never publish ranges from an older document version.
+                                // A prompt cancellation keeps VS Code's shifted tokens
+                                // visible and lets it retry after the writer drains.
+                                Some(fun () -> Some "[[CANCEL]]")
                             | _ -> None
                         let cancel = new CancellationTokenSource()
                         processQueue.Add(ProcessRequest(id, task, cancel, isReadOnly, lockFallback))
@@ -474,6 +480,9 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                     try
                         if not cancel.IsCancellationRequested then
                             match lockFallback |> Option.bind (fun fb -> fb ()) with
+                            | Some "[[CANCEL]]" ->
+                                let errText = $"""{{"id":%d{id},"error":{{"code":-32800,"message":"RequestCancelled"}}}}"""
+                                writeClient (send, errText)
                             | Some result -> respond (send, id, result)
                             | None -> respond (send, id, "null")
                     finally

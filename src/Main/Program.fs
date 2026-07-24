@@ -1331,6 +1331,11 @@ type Server(client: ILanguageClient) =
     let docs = DocumentStore()
     let dirtyDocumentPaths = System.Collections.Concurrent.ConcurrentDictionary<string, byte>()
     let latestLintGenerations = System.Collections.Concurrent.ConcurrentDictionary<string, int64>()
+    /// Exact document versions whose incremental type stage has committed. A
+    /// subsequent Ctrl+S for the same version can deep-validate without staging
+    /// the identical type/enum update a second time.
+    let committedTypeIndexVersions =
+        System.Collections.Concurrent.ConcurrentDictionary<string, struct (int * IGame)>()
     let committedInteractiveVersions =
         System.Collections.Concurrent.ConcurrentDictionary<string, struct (int * IGame)>()
 
@@ -2027,6 +2032,12 @@ type Server(client: ILanguageClient) =
 
     let clearTypeIndexCache () =
         typeDefinitionsByFileCache.Clear()
+
+    let clearTypeIndexCacheForFile (filePath: string) =
+        let normalised = normaliseCachePath filePath
+        typeDefinitionsByFileCache.TryRemove(normalised) |> ignore
+        let fullPath = try FileInfo(filePath).FullName with _ -> filePath
+        typeDefinitionsByFileCache.TryRemove(normaliseCachePath fullPath) |> ignore
 
     //- Cache partition cleaning function -
     // Precise invalidation strategy: avoid unnecessary performance overhead caused by global cleanup
@@ -3322,19 +3333,25 @@ type Server(client: ILanguageClient) =
                         else
                             None
 
-                    // Body-only edits keep the definition set identical; the type index and
-                    // the service rebuild behind it only matter when a definition is added,
-                    // removed, or renamed. Saves (deep lint) always run the full pipeline.
+                    // A stable definition identity lets dynamic files take the
+                    // type-index-only path when their richer semantic signature is
+                    // also unchanged. Exact-version saves can skip staging entirely.
                     let newDefinitionSignature =
-                        if canTryIncrementalTypeRefresh
-                           && shallowAnalyze
-                           && not fastDefinitionIndex then
+                        if canTryIncrementalTypeRefresh then
                             filetext |> Option.map topLevelDefinitionKeySignature
                         else
                             None
 
+                    let incrementalIndexAlreadyCurrent =
+                        canTryIncrementalTypeRefresh
+                        && (match validatedDocumentVersion, committedTypeIndexVersions.TryGetValue(normaliseCachePath name) with
+                            | Some version, (true, struct (committedVersion, committedGame)) ->
+                                version = committedVersion
+                                && Object.ReferenceEquals(game, committedGame)
+                            | _ -> false)
+
                     let priorDefsSnapshot, priorIndexEpoch, priorSemanticSignature =
-                        if canTryIncrementalTypeRefresh then
+                        if canTryIncrementalTypeRefresh && not incrementalIndexAlreadyCurrent then
                             gameStateLock.EnterReadLock()
                             try
                                 let semanticSignature =
@@ -3354,7 +3371,7 @@ type Server(client: ILanguageClient) =
                     let mutable nonTypeSemanticChanged = false
                     let (updateErrors,
                          priorDefsForRevalidation,
-                         skipIncrementalRefresh,
+                         definitionIdentityUnchanged,
                          gameRefAtUpdate,
                          interactiveCommitted,
                          updateSuperseded) =
@@ -3374,7 +3391,7 @@ type Server(client: ILanguageClient) =
                             else
                                 let priorDefs = priorDefsSnapshot
 
-                                let skip =
+                                let identityUnchanged =
                                     match newDefinitionSignature with
                                     | Some newSignature ->
                                         let priorSignature =
@@ -3389,14 +3406,13 @@ type Server(client: ILanguageClient) =
 
                                 let prior =
                                     if canTryIncrementalTypeRefresh
-                                       && shouldRevalidateReferencedCallSites
-                                       && (not skip || useInteractiveUpdate) then
+                                       && shouldRevalidateReferencedCallSites then
                                         priorDefs
                                     else
                                         []
 
                                 if interactiveResourceAlreadyCurrent then
-                                    [], prior, skip, game, false, false
+                                    [], prior, identityUnchanged, game, false, false
                                 elif useInteractiveUpdate then
                                     match stagedInteractiveUpdate with
                                     | Some staged when game.CommitUpdateFileInteractive staged ->
@@ -3405,16 +3421,16 @@ type Server(client: ILanguageClient) =
                                             validatedDocumentVersion
                                             |> Option.iter (fun version ->
                                                 committedInteractiveVersions.[normaliseCachePath name] <- struct (version, game))
-                                        [], prior, skip, game, true, false
+                                        [], prior, identityUnchanged, game, true, false
                                     | _ ->
-                                        [], prior, skip, game, false, true
+                                        [], prior, identityUnchanged, game, false, true
                                 else
                                     committedInteractiveVersions.TryRemove(normaliseCachePath name) |> ignore
                                     let errs = game.UpdateFile (shallowAnalyze || deferDeepValidation) name filetext
                                     if name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) then
                                         bumpLocalisationModelEpoch ()
                                     validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
-                                    errs, prior, skip, game, false, false
+                                    errs, prior, identityUnchanged, game, false, false
                         finally
                             updateWriteHoldSw.Stop()
                             gameStateLock.ExitWriteLock()
@@ -3422,6 +3438,7 @@ type Server(client: ILanguageClient) =
                     // Compare non-TypeDef global contributions outside the write
                     // lock so completion/hover remain available during the fold.
                     if canTryIncrementalTypeRefresh
+                       && not incrementalIndexAlreadyCurrent
                        && not updateSuperseded
                        && lintSnapshotStillCurrent () then
                         gameStateLock.EnterReadLock()
@@ -3430,9 +3447,14 @@ type Server(client: ILanguageClient) =
                                 match game with
                                 | :? ISemanticDeltaProvider as provider -> provider.SemanticSignatureForFile name
                                 | _ -> None
-                            nonTypeSemanticChanged <- currentSignature <> priorSemanticSignature
+                            nonTypeSemanticChanged <-
+                                currentSignature <> priorSemanticSignature
+                                || (isDynamicDefinitionPath name
+                                    && (currentSignature.IsNone || priorSemanticSignature.IsNone))
                         finally
                             gameStateLock.ExitReadLock()
+
+                    let skipIncrementalRefresh = incrementalIndexAlreadyCurrent
 
                     if useInteractiveUpdate then
                         monitorLog Lint
@@ -3442,10 +3464,11 @@ type Server(client: ILanguageClient) =
                         lintUpdateSuperseded <- true
                         logDiag $"Skip superseded prepared lint: {name} version={validatedDocumentVersion}"
                     elif skipIncrementalRefresh then
-                        monitorLog Refresh $"RefreshIncrementalTypes skipped (definitions unchanged) file={name}"
+                        monitorLog Refresh $"RefreshIncrementalTypes skipped (exact version already indexed) file={name}"
 
                     let priorCallFiles =
                         if updateSuperseded
+                           || skipIncrementalRefresh
                            || not (lintSnapshotStillCurrent ())
                            || priorDefsForRevalidation.IsEmpty then
                             []
@@ -3456,42 +3479,59 @@ type Server(client: ILanguageClient) =
                             finally
                                 gameStateLock.ExitReadLock()
 
-                    if useInteractiveUpdate
-                       && lintSnapshotStillCurrent ()
-                       && skipIncrementalRefresh
-                       && not priorCallFiles.IsEmpty then
-                        scheduleDeferredDynamicRevalidation priorCallFiles
-
                     let staged =
                         if not updateSuperseded
                            && lintSnapshotStillCurrent ()
                            && canTryIncrementalTypeRefresh
                            && not skipIncrementalRefresh then
+                            let prepareReadWaitSw = Stopwatch.StartNew()
                             gameStateLock.EnterReadLock()
-                            try
+                            prepareReadWaitSw.Stop()
+                            let prepareReadHoldSw = Stopwatch.StartNew()
+                            let prepared =
                                 try
-                                    if isDynamicDefinitionPath name then
-                                        game.PrepareScriptedTypes [ name ]
-                                        |> Option.map ScriptedServices
-                                    else
-                                        match game with
-                                        | :? IIncrementalTypeIndex as index ->
-                                            index.PrepareTypeIndex [ name ]
-                                            |> Option.map (fun stagedIndex -> TypeIndexOnly(index, stagedIndex))
-                                        | _ ->
-                                            None
-                                with e ->
-                                    logDiag $"Incremental type prepare failed for {name}: {e.Message}"
-                                    None
-                            finally
-                                gameStateLock.ExitReadLock()
+                                    try
+                                        let requiresScriptedServices =
+                                            isDynamicDefinitionPath name
+                                            && (not definitionIdentityUnchanged || nonTypeSemanticChanged)
+
+                                        if requiresScriptedServices then
+                                            game.PrepareScriptedTypes([ name ], true)
+                                            |> Option.map ScriptedServices
+                                        else
+                                            match game with
+                                            | :? IIncrementalTypeIndex as index ->
+                                                match index.PrepareTypeIndex [ name ] with
+                                                | Some stagedIndex when
+                                                    isDynamicDefinitionPath name
+                                                    && stagedIndex.semanticChanged ->
+                                                    // A subtype/localisation-property change is not
+                                                    // visible in the cheap identity signature.
+                                                    game.PrepareScriptedTypes([ name ], true)
+                                                    |> Option.map ScriptedServices
+                                                | Some stagedIndex ->
+                                                    Some(TypeIndexOnly(index, stagedIndex))
+                                                | None -> None
+                                            | _ -> None
+                                    with e ->
+                                        logDiag $"Incremental type prepare failed for {name}: {e.Message}"
+                                        None
+                                finally
+                                    prepareReadHoldSw.Stop()
+                                    gameStateLock.ExitReadLock()
+                            monitorLog Refresh
+                                $"PrepareIncrementalTypes file={name} wait={prepareReadWaitSw.ElapsedMilliseconds}ms hold={prepareReadHoldSw.ElapsedMilliseconds}ms staged={prepared.IsSome}"
+                            prepared
                         else
                             None
 
                     let mutable incrementalCommitSucceeded = false
                     let mutable incrementalSemanticChanged = false
                     if not updateSuperseded && canTryIncrementalTypeRefresh && not skipIncrementalRefresh then
+                        let commitWriteWaitSw = Stopwatch.StartNew()
                         gameStateLock.EnterWriteLock()
+                        commitWriteWaitSw.Stop()
+                        let commitWriteHoldSw = Stopwatch.StartNew()
                         try
                             let gameStillCurrent =
                                 match gameObj with
@@ -3519,16 +3559,20 @@ type Server(client: ILanguageClient) =
                                     match staged with
                                     | Some (TypeIndexOnly(_, typeStage)) ->
                                         typeStage.semanticChanged || nonTypeSemanticChanged
-                                    | Some (ScriptedServices _) -> true
+                                    | Some (ScriptedServices scriptedStage) ->
+                                        scriptedStage.semanticChanged || nonTypeSemanticChanged
                                     | None -> true
                                 let semanticDelta =
                                     semanticDeltaForTypeIndex
                                         name
                                         (priorDefsForRevalidation |> Seq.map fst)
                                         incrementalSemanticChanged
-                                clearTypeCaches ()
+                                validatedDocumentVersion
+                                |> Option.iter (fun version ->
+                                    committedTypeIndexVersions.[normaliseCachePath name] <- struct (version, game))
 
                                 if semanticDelta.requiresFullRefresh then
+                                    clearTypeCaches ()
                                     bumpTypesModelEpoch ()
                                     incrementalScriptedPatchCount <- incrementalScriptedPatchCount + 1
                                     markFileStale name "types"
@@ -3553,6 +3597,7 @@ type Server(client: ILanguageClient) =
                                         addPendingRefreshDomains [ "localisation" ]
                                     | None -> ()
                                 else
+                                    clearTypeIndexCacheForFile name
                                     monitorLog Refresh $"RefreshIncrementalTypes semantic-noop file={name}"
                             else
                                 needsTypeRefresh <- true
@@ -3562,7 +3607,10 @@ type Server(client: ILanguageClient) =
                                 markFileStale name "types"
                                 incrementalScriptedPatchCount <- 0
                         finally
+                            commitWriteHoldSw.Stop()
                             gameStateLock.ExitWriteLock()
+                        monitorLog Refresh
+                            $"CommitIncrementalTypes file={name} wait={commitWriteWaitSw.ElapsedMilliseconds}ms hold={commitWriteHoldSw.ElapsedMilliseconds}ms committed={incrementalCommitSucceeded} semantic={incrementalSemanticChanged}"
 
                     if useInteractiveUpdate
                        && not skipIncrementalRefresh
@@ -5762,6 +5810,8 @@ type Server(client: ILanguageClient) =
             docs.Close p 
             let localPath = p.textDocument.uri.LocalPath
             let fullPath = try FileInfo(localPath).FullName with _ -> localPath
+            committedTypeIndexVersions.TryRemove(normaliseCachePath localPath) |> ignore
+            committedTypeIndexVersions.TryRemove(normaliseCachePath fullPath) |> ignore
             // Clean all file-level caches to prevent memory leaks from closed files
             forgetFileCaches localPath
             forgetFileCaches fullPath
@@ -5807,6 +5857,7 @@ type Server(client: ILanguageClient) =
                         lintDebounceAgent.Post(UpdateRequest({ uri = change.uri; version = 0 }, diskRefreshRequest))
                     | FileChangeType.Deleted ->
                         let path = getPathFromDoc change.uri
+                        committedTypeIndexVersions.TryRemove(normaliseCachePath path) |> ignore
                         if incrementalTypeRefreshEnabled () && isTypeDefiningPath path then
                             match gameObj with
                             | Some game ->

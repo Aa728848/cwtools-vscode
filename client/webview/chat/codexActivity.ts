@@ -367,6 +367,7 @@ function labelForGroup(kind: CodexGroupKind, count: number, labels: CodexI18nTex
     if (kind === 'read') return count === 1 ? labels.activity.readFile : formatCount(labels.activity.readFiles, count);
     if (kind === 'subagent') return `${count} ${labels.activity.subtask}`;
     if (kind === 'thinking') return count === 1 ? labels.activity.thinking : `${labels.activity.thinking} (${count})`;
+    if (kind === 'steps') return formatCount(labels.activity.stepsCount, count);
     return formatCount(labels.activity.toolCallsCount, count);
 }
 
@@ -383,6 +384,11 @@ function itemProgressText(item: CodexTurnItem, labels: CodexI18nText): string {
         if (item.group.kind === 'command') return progress.command;
         if (item.group.kind === 'read') return progress.read;
         if (item.group.events.some(event => event.kind === 'validation')) return progress.validation;
+        if (item.group.kind === 'steps') {
+            const first = item.group.events[0];
+            if (first) return itemProgressText({ type: 'activity', event: first }, labels);
+            return progress.working;
+        }
         return item.group.kind === 'tool' || item.group.kind === 'subagent'
             ? progress.tool
             : progress.working;
@@ -454,11 +460,14 @@ function shouldGroup(kind: CodexGroupKind, count: number): boolean {
 function groupTurnItems(items: CodexTurnItem[], labels: CodexI18nText): CodexTurnItem[] {
     const output: CodexTurnItem[] = [];
     let pending: CodexActivityEvent[] = [];
-    let pendingKind: CodexGroupKind | undefined;
 
     const flush = () => {
         if (!pending.length) return;
-        if (pendingKind && shouldGroup(pendingKind, pending.length)) {
+        // Consecutive activity rows between text segments collapse into one group,
+        // even when their kinds differ (thinking, reads, edits, commands, tools).
+        const kinds = new Set(pending.map(event => event.groupKind));
+        const pendingKind: CodexGroupKind = kinds.size === 1 ? pending[0]!.groupKind! : 'steps';
+        if (shouldGroup(pendingKind, pending.length)) {
             const startedAt = pending[0]!.timestamp;
             const endedAt = Math.max(...pending.map(event => event.timestamp + (event.durationMs || 0)));
             const group: CodexActivityGroup = {
@@ -475,7 +484,6 @@ function groupTurnItems(items: CodexTurnItem[], labels: CodexI18nText): CodexTur
             for (const event of pending) output.push({ type: 'activity', event });
         }
         pending = [];
-        pendingKind = undefined;
     };
 
     for (const item of items) {
@@ -484,8 +492,6 @@ function groupTurnItems(items: CodexTurnItem[], labels: CodexI18nText): CodexTur
             output.push(item);
             continue;
         }
-        if (pendingKind && pendingKind !== item.event.groupKind) flush();
-        pendingKind = item.event.groupKind;
         pending.push(item.event);
     }
     flush();

@@ -97,6 +97,7 @@ export interface ChatI18nText {
             cacheStats: string;
             artifact: string;
             subtask: string;
+            stepsCount: string;
         };
         details: {
             arguments: string;
@@ -328,6 +329,7 @@ const EN: ChatI18nText = {
             cacheStats: 'Prefix cache',
             artifact: 'Artifact',
             subtask: 'Subtask',
+            stepsCount: 'Ran {count} steps',
         },
         details: {
             arguments: 'Arguments',
@@ -595,6 +597,7 @@ const ZH_CN: ChatI18nText = {
             cacheStats: 'Prefix Cache',
             artifact: '产物',
             subtask: '子任务',
+            stepsCount: '已执行 {count} 个步骤',
         },
         details: {
             arguments: '参数',

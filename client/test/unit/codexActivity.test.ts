@@ -60,10 +60,31 @@ describe('Codex activity view model', () => {
             { type: 'tool_result', toolName: 'read_file', invocationId: '2', toolResult: { success: true }, timestamp: 1300 },
         ]);
 
-        expect(model.items.map(item => item.type)).to.deep.equal(['text', 'group', 'group']);
+        expect(model.items.map(item => item.type)).to.deep.equal(['text', 'group']);
         expect(model.items[0]?.type === 'text' && model.items[0].text.source).to.equal('auto');
         expect(model.items[0]?.type === 'text' && model.items[0].text.content).to.include('running a command');
         expect(model.items.filter(item => item.type === 'text' && item.text.source === 'auto')).to.have.lengthOf(1);
+    });
+
+    it('collapses mixed consecutive activities into a single steps group', () => {
+        const model = build([
+            { type: 'thinking_content', content: 'Let me check the files.', timestamp: 1000 },
+            { type: 'tool_call', toolName: 'read_file', invocationId: '1', toolArgs: { filePath: 'a.txt' }, timestamp: 1100 },
+            { type: 'tool_result', toolName: 'read_file', invocationId: '1', toolResult: { success: true }, timestamp: 1200 },
+            { type: 'tool_call', toolName: 'write_file', invocationId: '2', toolArgs: { filePath: 'b.txt' }, timestamp: 1300 },
+            { type: 'tool_result', toolName: 'write_file', invocationId: '2', toolResult: { success: true }, timestamp: 1400 },
+            { type: 'tool_call', toolName: 'run_command', invocationId: '3', toolArgs: { command: 'npm test' }, timestamp: 1500 },
+            { type: 'tool_result', toolName: 'run_command', invocationId: '3', toolResult: { success: true, exitCode: 0 }, timestamp: 2000 },
+            { type: 'text_delta', content: 'All done.', timestamp: 2100 },
+        ]);
+
+        const groups = model.items.filter(item => item.type === 'group');
+        expect(groups).to.have.lengthOf(1);
+        const group = firstGroup(model, 'steps');
+        expect(group.label).to.equal('Ran 4 steps');
+        expect(group.events.map(event => event.groupKind)).to.deep.equal(['thinking', 'read', 'tool', 'command']);
+        expect(group.status).to.equal('success');
+        expect(model.items[model.items.length - 1]?.type).to.equal('text');
     });
 
     it('suppresses raw command output that would otherwise stream as transcript text', () => {
@@ -157,7 +178,9 @@ describe('Codex activity view model', () => {
             { type: 'thinking_content', content: 'Checking schema', timestamp: 1000 },
             { type: 'tool_call', toolName: 'query_cwt_schema', invocationId: '1', toolArgs: { target: 'common/buildings' }, timestamp: 1100 },
         ]);
-        expect(firstGroup(movedOn, 'thinking').events[0]?.status).to.equal('success');
+        const stepsGroup = firstGroup(movedOn, 'steps');
+        const thinkingEvent = stepsGroup.events.find(event => event.groupKind === 'thinking');
+        expect(thinkingEvent?.status).to.equal('success');
     });
 
     it('suppresses legacy tool truncation warnings from transcript text', () => {

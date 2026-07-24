@@ -14,7 +14,7 @@ export type CodexActivityKind =
     | 'artifact'
     | 'message';
 
-export type CodexGroupKind = 'command' | 'read' | 'subagent' | 'thinking' | 'tool';
+export type CodexGroupKind = 'command' | 'read' | 'subagent' | 'thinking' | 'tool' | 'steps';
 
 export interface CodexCommandDetail {
     command?: string;

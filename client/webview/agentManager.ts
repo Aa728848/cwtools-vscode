@@ -128,7 +128,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         ? {
             topicsTitle: 'Agent 话题',
             tabs: { changes: '变更', activity: '活动' },
-            actions: { workbench: '工作台', closeWorkbench: '关闭工作台', settings: '设置', showTopics: '显示话题', toggleTopics: '折叠话题栏', newTopic: '新话题', archived: '已归档', exportTopic: '导出', searchTopics: '搜索话题...', renameTopic: '重命名话题' },
+            actions: { workbench: '工作台', closeWorkbench: '关闭工作台', settings: '设置', showTopics: '显示话题', toggleTopics: '折叠话题栏', newTopic: '新话题', archived: '已归档', exportTopic: '导出', searchTopics: '搜索话题...', renameTopic: '重命名话题', review: '审核' },
             workflow: { build: '构建工作流', plan: '计划工作流', review: '审查工作流', explore: '探索工作流', orchestrator: '通用多 Agent 工作流', script: 'Paradox 多 Agent 工作流' },
             status: { paused: '已暂停', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消', idle: '空闲' },
             metrics: { tokens: 'Token', cache: '缓存', filesChanged: '个文件变更', cost: '费用', in: '输入', out: '输出', cached: '缓存', calls: '调用', totalUsage: '总计消耗', estimatedCost: '预估成本', cacheHit: '缓存命中', providers: '按供应商', models: '模型分布' },
@@ -192,7 +192,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         : {
             topicsTitle: 'Agent Topics',
             tabs: { changes: 'Changes', activity: 'Activity' },
-            actions: { workbench: 'Workbench', closeWorkbench: 'Close Workbench', settings: 'Settings', showTopics: 'Show topics', toggleTopics: 'Toggle topics', newTopic: 'New topic', archived: 'Archived', exportTopic: 'Export', searchTopics: 'Search topics...', renameTopic: 'Rename topic' },
+            actions: { workbench: 'Workbench', closeWorkbench: 'Close Workbench', settings: 'Settings', showTopics: 'Show topics', toggleTopics: 'Toggle topics', newTopic: 'New topic', archived: 'Archived', exportTopic: 'Export', searchTopics: 'Search topics...', renameTopic: 'Rename topic', review: 'Review' },
             workflow: { build: 'Build Workflow', plan: 'Plan Workflow', review: 'Review Workflow', explore: 'Explore Workflow', orchestrator: 'General Multi-Agent Workflow', script: 'Paradox Multi-Agent Workflow' },
             status: { paused: 'Paused', running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', idle: 'Idle' },
             metrics: { tokens: 'Tokens', cache: 'Cache', filesChanged: 'files changed', cost: 'Cost', in: 'in', out: 'out', cached: 'cached', calls: 'calls', totalUsage: 'Total Usage', estimatedCost: 'Estimated Cost', cacheHit: 'Cache Hit', providers: 'By Provider', models: 'Models' },
@@ -1064,10 +1064,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         const isActive = state.isGenerating || isRunActive(runStatus);
         const statusText = runStatusLabel(runStatus, state.isGenerating);
         const statusClass = isActive ? 'is-running' : 'is-idle';
-        const workspaceFiles = collectWorkspaceFiles(state.run);
-        const changedCount = workspaceFiles.length;
-        const additions = workspaceFiles.reduce((sum, file) => sum + Number(file.additions || 0), 0);
-        const deletions = workspaceFiles.reduce((sum, file) => sum + Number(file.deletions || 0), 0);
         const currentTopic = state.topics.find(topic => topic.id === state.stats.currentTopicId);
         const topicTitle = currentTopic?.title || state.stats.currentTopicTitle || ui.run.noActiveTopic;
         const drawerOpen = document.body.classList.contains('artifact-drawer-open');
@@ -1078,9 +1074,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             workflow: state.workflowId || state.mode,
             statusText,
             statusClass,
-            changedCount,
-            additions,
-            deletions,
             activeTab,
         });
         if (overviewSignature === lastOverviewSignature) return;
@@ -1108,8 +1101,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             </div>
             <div class="manager-command-actions">
                 <button type="button" class="manager-command-metric manager-command-change ${activeTab === 'changes' && drawerOpen ? 'active' : ''}" data-manager-jump="changes">
-                    <span class="manager-command-delta"><strong>+${additions}</strong><em>-${deletions}</em></span>
-                    <span>${changedCount} ${ui.metrics.filesChanged}</span>
+                    <span>${ui.actions.review}</span>
                 </button>
                 <button type="button" class="manager-command-settings manager-command-workbench" data-manager-action="workbench" title="${drawerOpen ? ui.actions.closeWorkbench : ui.actions.workbench}" aria-label="${drawerOpen ? ui.actions.closeWorkbench : ui.actions.workbench}">
                     ${svgIconNoMargin('layers')}

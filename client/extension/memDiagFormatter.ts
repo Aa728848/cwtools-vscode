@@ -4,6 +4,8 @@ export interface MemDiagLogEntry {
 	timestamp?: string;
 }
 
+export type MemDiagDisplayLanguage = 'zh' | 'en';
+
 interface ParsedField {
 	key: string;
 	value: string;
@@ -128,6 +130,20 @@ const FIELD_LABELS: Readonly<Record<string, string>> = {
 const MB_FIELDS = new Set(['allocDeltaMB', 'cycleAllocMB', 'heap', 'alloc', 'working', 'private', 'fragmented']);
 const MILLISECOND_FIELDS = new Set(['elapsedMs']);
 const PATH_FIELDS = new Set(['file', 'path']);
+const LABEL_SEPARATOR = ' / ';
+
+export function memDiagLanguageForLocale(locale: string): MemDiagDisplayLanguage {
+	const normalized = locale.trim().toLowerCase();
+	return normalized === 'zh' || normalized.startsWith('zh-') ? 'zh' : 'en';
+}
+
+function localized(label: string, language: MemDiagDisplayLanguage): string {
+	const separatorIndex = label.indexOf(LABEL_SEPARATOR);
+	if (separatorIndex < 0) return label;
+	return language === 'zh'
+		? label.slice(0, separatorIndex)
+		: label.slice(separatorIndex + LABEL_SEPARATOR.length);
+}
 
 function cleanText(value: string): string {
 	return value.replace(/[\r\n]+/g, ' ').trim();
@@ -161,42 +177,45 @@ function parseMessage(message: string): { lead: string; fields: ParsedField[]; g
 	return { ...parsed, groups };
 }
 
-function operationTitle(lead: string): string {
+function operationTitle(lead: string, language: MemDiagDisplayLanguage): string {
 	const operation = Object.keys(OPERATION_LABELS)
 		.sort((left, right) => right.length - left.length)
 		.find(candidate => lead === candidate || lead.startsWith(`${candidate} `));
-	if (!operation) return lead || '事件 / Event';
+	if (!operation) return lead || localized('事件 / Event', language);
 	const description = lead.slice(operation.length).trim();
-	const translatedDescription = DESCRIPTION_LABELS[description] ?? description;
-	const operationLabel = OPERATION_LABELS[operation] ?? operation;
+	const descriptionLabel = DESCRIPTION_LABELS[description];
+	const translatedDescription = descriptionLabel ? localized(descriptionLabel, language) : description;
+	const operationLabelValue = OPERATION_LABELS[operation];
+	const operationLabel = operationLabelValue ? localized(operationLabelValue, language) : operation;
 	return description
 		? `${operationLabel} · ${translatedDescription}`
 		: operationLabel;
 }
 
-function displayValue(field: ParsedField): string {
-	if (field.value === 'True' || field.value === 'true') return '是 / true';
-	if (field.value === 'False' || field.value === 'false') return '否 / false';
-	if (field.key === 'mode' && field.value === 'interactive') return '交互 / interactive';
-	if (field.key === 'mode' && field.value === 'full') return '完整 / full';
+function displayValue(field: ParsedField, language: MemDiagDisplayLanguage): string {
+	if (field.value === 'True' || field.value === 'true') return language === 'zh' ? '是' : 'true';
+	if (field.value === 'False' || field.value === 'false') return language === 'zh' ? '否' : 'false';
+	if (field.key === 'mode' && field.value === 'interactive') return language === 'zh' ? '交互' : 'interactive';
+	if (field.key === 'mode' && field.value === 'full') return language === 'zh' ? '完整' : 'full';
 	if (MB_FIELDS.has(field.key) && /^-?\d+(?:\.\d+)?$/.test(field.value)) return `${field.value} MB`;
 	if (MILLISECOND_FIELDS.has(field.key) && /^\d+(?:\.\d+)?$/.test(field.value)) return `${field.value} ms`;
 	return field.value;
 }
 
-function displayField(field: ParsedField): string {
-	const label = FIELD_LABELS[field.key] ?? field.key;
+function displayField(field: ParsedField, language: MemDiagDisplayLanguage): string {
+	const fieldLabel = FIELD_LABELS[field.key];
+	const label = fieldLabel ? localized(fieldLabel, language) : field.key;
 	if (PATH_FIELDS.has(field.key)) return `${label} [${field.key}]: ${field.value}`;
-	return `${label}: ${displayValue(field)} [${field.key}=${field.value}]`;
+	return `${label}: ${displayValue(field, language)} [${field.key}=${field.value}]`;
 }
 
-function appendFieldLines(lines: string[], label: string, fields: ParsedField[]): void {
+function appendFieldLines(lines: string[], label: string, fields: ParsedField[], language: MemDiagDisplayLanguage): void {
 	const pathFields = fields.filter(field => PATH_FIELDS.has(field.key));
 	const compactFields = fields.filter(field => !PATH_FIELDS.has(field.key));
-	for (const field of pathFields) lines.push(`  ${displayField(field)}`);
+	for (const field of pathFields) lines.push(`  ${displayField(field, language)}`);
 	for (let index = 0; index < compactFields.length; index += 4) {
 		const prefix = index === 0 ? `  ${label}: ` : '  ↳ ';
-		lines.push(prefix + compactFields.slice(index, index + 4).map(displayField).join(' | '));
+		lines.push(prefix + compactFields.slice(index, index + 4).map(field => displayField(field, language)).join(' | '));
 	}
 }
 
@@ -204,17 +223,26 @@ function appendFieldLines(lines: string[], label: string, fields: ParsedField[])
  * Convert one compact language-server monitor event into a bilingual, grouped block.
  * Stable operation and field names remain present for search and lightweight parsing.
  */
-export function formatMemDiagEntry(entry: MemDiagLogEntry, fallbackTimestamp: string): string[] {
+export function formatMemDiagEntry(
+	entry: MemDiagLogEntry,
+	fallbackTimestamp: string,
+	language: MemDiagDisplayLanguage = 'en',
+): string[] {
 	const message = cleanText(entry.message);
 	const timestamp = cleanText(entry.timestamp ?? fallbackTimestamp);
 	const category = cleanText(entry.category ?? '');
 	const parsed = parseMessage(message);
-	const categoryLabel = (CATEGORY_LABELS[category] ?? category) || '诊断 / Diagnostics';
-	const lines = [`[${timestamp}] [${categoryLabel}] ${operationTitle(parsed.lead)}`];
+	const knownCategoryLabel = CATEGORY_LABELS[category];
+	const categoryLabel = knownCategoryLabel
+		? localized(knownCategoryLabel, language)
+		: category || localized('诊断 / Diagnostics', language);
+	const lines = [`[${timestamp}] [${categoryLabel}] ${operationTitle(parsed.lead, language)}`];
 
-	appendFieldLines(lines, '详情 / Details', parsed.fields);
+	appendFieldLines(lines, localized('详情 / Details', language), parsed.fields, language);
 	for (const group of parsed.groups) {
-		appendFieldLines(lines, GROUP_LABELS[group.name] ?? group.name, group.fields);
+		const knownGroupLabel = GROUP_LABELS[group.name];
+		const groupLabel = knownGroupLabel ? localized(knownGroupLabel, language) : group.name;
+		appendFieldLines(lines, groupLabel, group.fields, language);
 	}
 	lines.push('');
 	return lines;

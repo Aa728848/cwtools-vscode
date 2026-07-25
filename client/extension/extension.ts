@@ -2849,7 +2849,8 @@ const FILE_ASSOCIATION_EXTENSIONS = ['*.txt', '*.gui', '*.gfx', '*.asset'];
 /**
  * Associates common Paradox file extensions with the detected game language so
  * editor themes and validation apply. This writes .vscode/settings.json into the
- * user's project, so ask once and remember the choice per workspace.
+ * user's project, so ask first; a granted choice is remembered per workspace,
+ * while skipping only applies to the current prompt and is asked again later.
  */
 async function syncWorkspaceFileAssociations(context: ExtensionContext, languageId: string): Promise<void> {
 	if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
@@ -2870,24 +2871,18 @@ async function syncWorkspaceFileAssociations(context: ExtensionContext, language
 	}
 
 	const consent = context.workspaceState.get<string>(FILE_ASSOCIATIONS_CONSENT_KEY);
-	if (consent === 'declined') {
-		return;
-	}
 	if (consent !== 'granted') {
 		const associate = localize('Associate', '关联');
-		const neverAsk = localize("Don't Ask Again", '不再提示');
+		const notNow = localize('Not Now', '暂不');
 		const choice = await window.showInformationMessage(
 			localize(
 				`Associate ${FILE_ASSOCIATION_EXTENSIONS.join(', ')} files with ${languageId} in this workspace? This creates .vscode/settings.json.`,
 				`是否将 ${FILE_ASSOCIATION_EXTENSIONS.join(', ')} 文件在此工作区关联为 ${languageId}？这会创建 .vscode/settings.json。`
 			),
 			associate,
-			neverAsk
+			notNow
 		);
-		if (choice === neverAsk) {
-			await context.workspaceState.update(FILE_ASSOCIATIONS_CONSENT_KEY, 'declined');
-			return;
-		}
+		// "Not now" and dismissal both skip this time only; ask again on next activation.
 		if (choice !== associate) {
 			return;
 		}

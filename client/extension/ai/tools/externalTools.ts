@@ -11,7 +11,7 @@ import { preflightCommand, type ConfiguredCommandPolicyRule } from '../runner/co
 import { PermissionPolicyStore } from '../runner/permissionPolicy';
 import { processRegistry } from '../runner/processRegistry';
 import { BrokeredSandboxRunner, DirectSandboxRunner, detectSandboxBackendAsync, type SandboxRunner } from '../runner/sandboxRunner';
-import { getAiStorageRoot, getAiStorageRootCandidates, getTopicScratchDir, getTopicStorageDir } from '../workspacePaths';
+import { getPrivateTopicRootCandidates, getPrivateTopicScratchDir, getPrivateTopicStorageDir } from '../workspacePaths';
 import {
     escapeRegExp,
     isPathInsideOrEqual,
@@ -290,14 +290,16 @@ export class ExternalToolHandler {
     }
 
     private normalizeAgentWorkspaceCommand(command: string, topicId: string): string {
-        const aiRoot = getAiStorageRoot(this.ctx.workspaceRoot);
-        const aiRoots = getAiStorageRootCandidates(this.ctx.workspaceRoot);
+        // Topic-scoped storage lives in the private root first; legacy project
+        // .cwtools roots remain as fallbacks for pre-migration files.
+        const topicRoots = getPrivateTopicRootCandidates(this.ctx.workspaceRoot);
+        const primaryTopicRoot = topicRoots[0] ?? '';
         const safeTopicId = (topicId || 'default').replace(/[^a-zA-Z0-9_.-]/g, '_');
         const safeTopicLower = safeTopicId.toLowerCase();
         const rewriteAgentPath = (rawPath: string): string => {
             const normalized = rawPath.replace(/\\/g, '/');
             const rest = normalized.replace(/^\.(?:cwtools|cwtools-ai)(?:[\\/]|$)/i, '').replace(/^\/+/, '');
-            if (!rest) return aiRoot || '.cwtools';
+            if (!rest) return primaryTopicRoot || '.cwtools';
 
             const restSegments = rest.split('/').filter(Boolean);
             const firstSegment = restSegments[0]?.toLowerCase() ?? '';
@@ -308,12 +310,12 @@ export class ExternalToolHandler {
                     ? restSegments
                     : [safeTopicId, ...restSegments];
 
-            if (!aiRoot) {
+            if (!primaryTopicRoot) {
                 return `.cwtools/${targetSegments.join('/')}`;
             }
 
             const candidates: string[] = [];
-            for (const root of aiRoots) {
+            for (const root of topicRoots) {
                 candidates.push(path.join(root, ...targetSegments));
                 if (!explicitlyScopedTopic && firstSegment !== 'scratch') {
                     candidates.push(path.join(root, safeTopicId, 'scratch', ...restSegments));
@@ -324,7 +326,7 @@ export class ExternalToolHandler {
                 return existingCandidate;
             }
 
-            return path.join(aiRoot, ...targetSegments);
+            return path.join(primaryTopicRoot, ...targetSegments);
         };
 
         const quotedAgentPathPattern = /(^|[\s(])\\?(["'])(\.(?:cwtools|cwtools-ai)(?:[\\/][^"']+?)?)\\?\2/g;
@@ -1149,8 +1151,8 @@ export class ExternalToolHandler {
         const shellArgs = isWindows && !useWslSandbox
             ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', commandText]
             : ['-c', commandText];
-        const agentWorkspaceDir = getTopicStorageDir(topicId, this.ctx.workspaceRoot);
-        const scratchDir = getTopicScratchDir(topicId, this.ctx.workspaceRoot);
+        const agentWorkspaceDir = getPrivateTopicStorageDir(topicId, this.ctx.workspaceRoot);
+        const scratchDir = getPrivateTopicScratchDir(topicId, this.ctx.workspaceRoot);
         const helperScript = scratchDir ? path.join(scratchDir, 'agent_helper.py') : '';
         const mediaDir = agentWorkspaceDir ? path.join(agentWorkspaceDir, 'media') : '';
         try {
@@ -1550,7 +1552,7 @@ export class ExternalToolHandler {
     /** Ensure the topic-scoped media output directory exists and return its path. */
     private async getMediaOutputDir(context?: import('../types').AgentToolContext): Promise<string> {
         const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId ?? 'session';
-        const mediaDir = path.join(getTopicStorageDir(topicId, this.ctx.workspaceRoot), 'media');
+        const mediaDir = path.join(getPrivateTopicStorageDir(topicId, this.ctx.workspaceRoot), 'media');
         if (!fs.existsSync(mediaDir)) {
             fs.mkdirSync(mediaDir, { recursive: true });
         }

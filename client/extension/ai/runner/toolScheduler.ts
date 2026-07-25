@@ -7,7 +7,7 @@
  */
 
 import * as path from 'path';
-import { getTopicStorageDir } from '../workspacePaths';
+import { getPrivateTopicStorageDir } from '../workspacePaths';
 import { ToolConcurrencyClass } from '../types';
 
 export const SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS = new Set<string>(['write_file']);
@@ -95,7 +95,7 @@ export function getAgentToolTargetFiles(
             break;
         case 'write_design_blueprint':
             if (workspaceRoot) {
-                const blueprintDir = getTopicStorageDir(topicId || 'default', workspaceRoot);
+                const blueprintDir = getPrivateTopicStorageDir(topicId || 'default', workspaceRoot);
                 paths.push(path.join(blueprintDir, 'design_blueprint.md'));
                 paths.push(path.join(blueprintDir, 'design_blueprint.json'));
             }

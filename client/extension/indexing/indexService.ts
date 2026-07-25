@@ -38,6 +38,7 @@ import { parseLocFile, addEntriesToIndex, removeFileFromIndex, queryLocIndex } f
 import {
 	WorkspaceSymbolSqliteCache,
 	getLegacyWorkspaceSymbolCachePath,
+	getProjectWorkspaceSymbolCachePath,
 	getWorkspaceSymbolCachePath,
 	type WorkspaceSymbolCachedFile,
 	type WorkspaceSymbolFileFact,
@@ -745,12 +746,17 @@ export class IndexService implements vscode.Disposable {
 		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 		if (!workspaceRoot || !this._options.extensionPath) return undefined;
 		const roots = (vscode.workspace.workspaceFolders ?? []).map(folder => IndexService._normalizeFilePath(folder.uri.fsPath)).sort();
+		const primaryPath = getWorkspaceSymbolCachePath(workspaceRoot);
+		const fallbackPaths = [
+			getProjectWorkspaceSymbolCachePath(workspaceRoot),
+			getLegacyWorkspaceSymbolCachePath(workspaceRoot),
+		].filter(candidate => path.resolve(candidate) !== path.resolve(primaryPath));
 		const cache = new WorkspaceSymbolSqliteCache(
-			getWorkspaceSymbolCachePath(workspaceRoot),
+			primaryPath,
 			path.join(this._options.extensionPath, 'node_modules', 'sql.js', 'dist'),
 			workspaceRoot,
 			IndexService._hashParts([...roots, this._semanticCatalogFingerprint]),
-			[getLegacyWorkspaceSymbolCachePath(workspaceRoot)],
+			fallbackPaths,
 		);
 		await cache.open();
 		return cache;

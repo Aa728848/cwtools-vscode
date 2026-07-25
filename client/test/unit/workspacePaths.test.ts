@@ -108,4 +108,43 @@ describe('workspace AI storage paths', () => {
         expect(result.migrated).to.equal(false);
         expect(fs.existsSync(path.join(projectRoot, '.cwtools-ai'))).to.equal(false);
     });
+
+    it('uses the configured workspace cache root and falls back to the project .cwtools directory', () => {
+        const workspacePaths = loadWorkspacePaths();
+        const projectCacheRoot = path.join(projectRoot, '.cwtools');
+        const configuredRoot = path.join(projectRoot, 'extension-storage');
+
+        expect(workspacePaths.getWorkspaceCacheRoot(projectRoot)).to.equal(projectCacheRoot);
+
+        workspacePaths.configureWorkspaceCacheStorage(configuredRoot);
+        expect(workspacePaths.getWorkspaceCacheRoot(projectRoot)).to.equal(path.resolve(configuredRoot));
+
+        workspacePaths.configureWorkspaceCacheStorage(undefined);
+        expect(workspacePaths.getWorkspaceCacheRoot(projectRoot)).to.equal(projectCacheRoot);
+    });
+
+    it('resolves private topic files private-first with legacy project fallbacks', () => {
+        const workspacePaths = loadWorkspacePaths();
+        const privateRoot = path.join(projectRoot, 'private-storage');
+        workspacePaths.configurePrivateAgentStorage(privateRoot);
+        try {
+            const candidates = workspacePaths.getPrivateTopicFileCandidates('topic_1', 'task.md', projectRoot);
+            expect(candidates[0]).to.equal(path.join(privateRoot, 'topics', 'topic_1', 'task.md'));
+            expect(candidates).to.include(path.join(projectRoot, '.cwtools', 'topic_1', 'task.md'));
+            expect(workspacePaths.getPrivateTopicScratchDir('topic_1', projectRoot))
+                .to.equal(path.join(privateRoot, 'topics', 'topic_1', 'scratch'));
+
+            const legacyFile = path.join(projectRoot, '.cwtools', 'topic_1', 'task.md');
+            fs.mkdirSync(path.dirname(legacyFile), { recursive: true });
+            fs.writeFileSync(legacyFile, 'legacy', 'utf8');
+            expect(workspacePaths.getExistingPrivateTopicFilePath('topic_1', 'task.md', projectRoot)).to.equal(legacyFile);
+
+            const privateFile = path.join(privateRoot, 'topics', 'topic_1', 'task.md');
+            fs.mkdirSync(path.dirname(privateFile), { recursive: true });
+            fs.writeFileSync(privateFile, 'private', 'utf8');
+            expect(workspacePaths.getExistingPrivateTopicFilePath('topic_1', 'task.md', projectRoot)).to.equal(privateFile);
+        } finally {
+            workspacePaths.configurePrivateAgentStorage(undefined);
+        }
+    });
 });

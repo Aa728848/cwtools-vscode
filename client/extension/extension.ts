@@ -42,7 +42,7 @@ import { registerTranslationPreviewCommands } from './translationPreview';
 import { registerSpecialPathCommands } from './specialPaths';
 import { registerInspectionOverviewCommand } from './inspectionOverview';
 import { formatMemDiagEntry, memDiagLanguageForLocale } from './memDiagFormatter';
-import { configurePrivateAgentStorage, getProjectWorkspaceRoot, getPrivateAiStorageRoot, migrateLegacyAiStorageRoot, migrateLegacyPrivateAgentState } from './ai/workspacePaths';
+import { configurePrivateAgentStorage, configureWorkspaceCacheStorage, getProjectWorkspaceRoot, getPrivateAiStorageRoot, migrateLegacyAiStorageRoot, migrateLegacyPrivateAgentState } from './ai/workspacePaths';
 import { configureHistoryPolicy, enforceHistoryRetention } from './ai/runner/historyPolicy';
 import { sha256Text } from './ai/runner/durableStorage';
 import { processRegistry } from './ai/runner/processRegistry';
@@ -738,7 +738,7 @@ function resolveSelectedGameFolder(selectedPath: string, preferredLanguageId?: s
 	return undefined;
 }
 
-async function selectGameFolderFlow(languageHint?: string): Promise<boolean> {
+async function selectGameFolderFlow(languageHint?: string, context?: ExtensionContext): Promise<boolean> {
 	let languageId = languageHint && getAllLanguageIds().includes(languageHint) ? languageHint : undefined;
 	if (!languageId) {
 		const picked = await window.showQuickPick(
@@ -782,7 +782,7 @@ async function selectGameFolderFlow(languageHint?: string): Promise<boolean> {
 				),
 				localize('Choose Again', '重新选择')
 			);
-			if (retry === localize('Choose Again', '重新选择')) return selectGameFolderFlow(languageId);
+			if (retry === localize('Choose Again', '重新选择')) return selectGameFolderFlow(languageId, context);
 			return false;
 		}
 		languageId = resolved.languageId;
@@ -792,22 +792,9 @@ async function selectGameFolderFlow(languageHint?: string): Promise<boolean> {
 	const finalProfile = getProfileByLanguageId(languageId);
 	await workspace.getConfiguration('stellarisLanguageServices').update(getCacheSettingKey(languageId), selectedPath, true);
 
-	// ── Automatically set workspace-level file associations to enable language themes/validation ──
-	if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
-		const filesConfig = workspace.getConfiguration('files');
-		const associations = filesConfig.get<Record<string, string>>('associations') || {};
-		const updatedAssociations = { ...associations };
-		const extensionsToAssociate = ['*.txt', '*.gui', '*.gfx', '*.asset'];
-		let updated = false;
-		for (const ext of extensionsToAssociate) {
-			if (updatedAssociations[ext] !== languageId) {
-				updatedAssociations[ext] = languageId;
-				updated = true;
-			}
-		}
-		if (updated) {
-			await filesConfig.update('associations', updatedAssociations, false);
-		}
+	// Offer workspace-level file associations to enable language themes/validation.
+	if (context) {
+		await syncWorkspaceFileAssociations(context, languageId);
 	}
 
 	await reloadExtension(
@@ -991,7 +978,7 @@ async function showSetupPanel(options: InstallHealthOptions): Promise<void> {
 	setupPanel.webview.onDidReceiveMessage(async message => {
 		switch (message?.command) {
 			case 'selectGameFolder':
-				await selectGameFolderFlow(options.languageId);
+				await selectGameFolderFlow(options.languageId, options.context);
 				break;
 			case 'rules':
 				await commands.executeCommand('cwtools.rules.manageConfigGroups');
@@ -1055,7 +1042,7 @@ async function maybeShowFirstRunExperience(options: InstallHealthOptions): Promi
 			localize('Later', '稍后')
 		);
 		if (choice === localize('Configure', '配置')) {
-			await selectGameFolderFlow(options.languageId);
+			await selectGameFolderFlow(options.languageId, options.context);
 		}
 	}
 }
@@ -1395,6 +1382,9 @@ export async function activate(context: ExtensionContext) {
 	const privateAgentRoot = context.storageUri?.fsPath
 		?? path.join(context.globalStorageUri.fsPath, 'agent-workspaces', sha256Text(workspaceRoot || 'empty-window').slice(0, 16));
 	configurePrivateAgentStorage(privateAgentRoot);
+	// Regenerable per-workspace caches (symbol index) live in extension storage,
+	// never in the project tree.
+	configureWorkspaceCacheStorage(privateAgentRoot);
 	migrateLegacyPrivateAgentState(workspaceRoot);
 	const historyConfig = workspace.getConfiguration('stellarisLanguageServices.ai.history');
 	const historyPersistence = historyConfig.get<'off' | 'metadata' | 'full'>('persistence', 'full');
@@ -2401,7 +2391,7 @@ export async function activate(context: ExtensionContext) {
 			resumeStaleProjectKnowledgeRefreshes(indexService);
 		})
 		client.onNotification(promptVanillaPath, async (param: string) => {
-			await selectGameFolderFlow(param);
+			await selectGameFolderFlow(param, context);
 		})
 		client.onNotification(updateFileList, (params: UpdateFileList) => {
 			fileList = params.fileList;
@@ -2433,7 +2423,7 @@ export async function activate(context: ExtensionContext) {
 		});
 
 		safeRegisterCommand(context, "cwtools.selectGameFolder", async () => {
-			await selectGameFolderFlow(language);
+			await selectGameFolderFlow(language, context);
 			updateRulesStatusBar();
 			if (setupPanel) {
 				setupPanel.webview.html = renderSetupHtml(healthOptions());
@@ -2707,27 +2697,14 @@ export async function activate(context: ExtensionContext) {
 					localize('Later', '稍后')
 				).then(async (choice) => {
 					if (choice === localize('Select Game', '选择游戏')) {
-						await selectGameFolderFlow();
+						await selectGameFolderFlow(undefined, context);
 					}
 				});
 			}
 		} else if (isKnownGameLanguageId(languageId)) {
 			// If the game type was successfully determined (either via scoring or fallback),
-			// automatically sync workspace-level file associations so that editor themes/syntax highlights instantly work.
-			const filesConfig = workspace.getConfiguration('files');
-			const associations = filesConfig.get<Record<string, string>>('associations') || {};
-			const extensionsToAssociate = ['*.txt', '*.gui', '*.gfx', '*.asset'];
-			let needsUpdate = false;
-			const updatedAssociations = { ...associations };
-			for (const ext of extensionsToAssociate) {
-				if (updatedAssociations[ext] !== languageId) {
-					updatedAssociations[ext] = languageId;
-					needsUpdate = true;
-				}
-			}
-			if (needsUpdate) {
-				void filesConfig.update('associations', updatedAssociations, false);
-			}
+			// offer to sync workspace-level file associations so editor themes/syntax highlights work.
+			await syncWorkspaceFileAssociations(context, languageId);
 		}
 	}
 
@@ -2800,67 +2777,60 @@ function defaultLocLanguagesForUi(): string[] {
 /**
  * Chooses the default validation language from the VS Code UI language.
  * Supported Stellaris languages follow the matching VS Code UI language.
- * User-configured values still win over this automatic default.
+ * The auto-managed value is written to user (Global) settings only — never to
+ * workspace settings — so opening a project never creates .vscode/settings.json.
+ * User-configured values (any scope) still win over this automatic default.
  */
 async function autoDetectLocLanguage(context: ExtensionContext): Promise<void> {
 	const config = workspace.getConfiguration('stellarisLanguageServices');
 	const inspected = config.inspect<string[]>('localisation.languages');
-	const trackedAuto = context.workspaceState.get<AutoDetectedLocLanguageState>(AUTO_DETECTED_LOC_LANGUAGE_KEY);
+	const trackedAuto = context.globalState.get<AutoDetectedLocLanguageState>(AUTO_DETECTED_LOC_LANGUAGE_KEY)
+		?? context.workspaceState.get<AutoDetectedLocLanguageState>(AUTO_DETECTED_LOC_LANGUAGE_KEY);
 	const trackedLanguages = trackedAuto?.languages;
 	const desiredLanguages = defaultLocLanguagesForUi();
+
+	const isTrackedValue = (value: readonly string[] | undefined): boolean =>
+		!!trackedLanguages?.length && sameLocLanguageSetting(value, trackedLanguages);
+
+	// Older builds wrote the auto-managed value into workspace settings, creating
+	// .vscode/settings.json. Remove our value; user-authored workspace values stay.
+	if (isTrackedValue(inspected?.workspaceValue)) {
+		await config.update('localisation.languages', undefined, vs.ConfigurationTarget.Workspace);
+		ErrorReporter.debug('Extension', 'Cleared legacy auto-managed workspace localisation language');
+	}
+	await context.workspaceState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, undefined);
+
+	const hasExplicitWorkspaceValue = hasLocLanguageSetting(inspected?.workspaceValue)
+		&& !isTrackedValue(inspected?.workspaceValue);
+	if (hasExplicitWorkspaceValue || hasLocLanguageSetting(inspected?.workspaceFolderValue)) {
+		// An explicit project-level setting wins; drop our global auto value.
+		if (isTrackedValue(inspected?.globalValue)) {
+			await config.update('localisation.languages', undefined, vs.ConfigurationTarget.Global);
+		}
+		await context.globalState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, { languages: [], disabled: true });
+		return;
+	}
 
 	if (trackedAuto?.disabled) {
 		return;
 	}
 
-	if (trackedLanguages && sameLocLanguageSetting(inspected?.workspaceValue, trackedLanguages)) {
-		if (hasLocLanguageSetting(inspected?.globalValue) || hasLocLanguageSetting(inspected?.workspaceFolderValue)) {
-			await config.update('localisation.languages', undefined, vs.ConfigurationTarget.Workspace);
-			await context.workspaceState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, undefined);
-			ErrorReporter.debug('Extension', 'Cleared auto-managed localisation language so explicit user settings can apply');
+	if (hasLocLanguageSetting(inspected?.globalValue)) {
+		if (isTrackedValue(inspected?.globalValue)) {
+			// Our auto-managed global value: keep it in sync with the UI language.
+			if (sameLocLanguageSetting(desiredLanguages, ['English'])) {
+				await config.update('localisation.languages', undefined, vs.ConfigurationTarget.Global);
+				await context.globalState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, undefined);
+				ErrorReporter.debug('Extension', 'Cleared auto-managed localisation language; English is the default for this UI language');
+			} else if (!sameLocLanguageSetting(inspected?.globalValue, desiredLanguages)) {
+				await config.update('localisation.languages', desiredLanguages, vs.ConfigurationTarget.Global);
+				await context.globalState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, { languages: desiredLanguages });
+				ErrorReporter.debug('Extension', `Auto-managed localisation language: ${desiredLanguages.join(', ')}`);
+			}
 			return;
 		}
-
-		if (sameLocLanguageSetting(inspected?.workspaceValue, desiredLanguages)) {
-			return;
-		}
-
-		if (sameLocLanguageSetting(desiredLanguages, ['English'])) {
-			await config.update('localisation.languages', undefined, vs.ConfigurationTarget.Workspace);
-			await context.workspaceState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, undefined);
-			ErrorReporter.debug('Extension', 'Cleared auto-managed localisation language; English is the default for non-Chinese UI');
-			return;
-		}
-
-		await config.update('localisation.languages', desiredLanguages, vs.ConfigurationTarget.Workspace);
-		await context.workspaceState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, { languages: desiredLanguages });
-		ErrorReporter.debug('Extension', `Auto-managed localisation language: ${desiredLanguages.join(', ')}`);
-		return;
-	}
-
-	if (trackedLanguages) {
-		await context.workspaceState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, { languages: [], disabled: true });
-		return;
-	}
-
-	if (
-		hasLocLanguageSetting(inspected?.workspaceValue)
-		&& hasLocLanguageSetting(inspected?.globalValue)
-		&& !sameLocLanguageSetting(inspected?.globalValue, inspected?.workspaceValue)
-	) {
-		await config.update('localisation.languages', undefined, vs.ConfigurationTarget.Workspace);
-		ErrorReporter.debug('Extension', 'Cleared workspace localisation language so the user setting can apply');
-		return;
-	}
-
-	if (
-		hasLocLanguageSetting(inspected?.globalValue)
-		|| hasLocLanguageSetting(inspected?.workspaceFolderValue)
-	) {
-		return;
-	}
-
-	if (hasLocLanguageSetting(inspected?.workspaceValue)) {
+		// A global value we did not write is user configuration; stop auto-managing.
+		await context.globalState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, { languages: [], disabled: true });
 		return;
 	}
 
@@ -2868,10 +2838,62 @@ async function autoDetectLocLanguage(context: ExtensionContext): Promise<void> {
 		return;
 	}
 
-	await config.update('localisation.languages', desiredLanguages, vs.ConfigurationTarget.Workspace);
-	await context.workspaceState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, { languages: desiredLanguages });
+	await config.update('localisation.languages', desiredLanguages, vs.ConfigurationTarget.Global);
+	await context.globalState.update(AUTO_DETECTED_LOC_LANGUAGE_KEY, { languages: desiredLanguages });
 	ErrorReporter.debug('Extension', `Auto-managed localisation language: ${desiredLanguages.join(', ')}`);
-	return;
+}
+
+const FILE_ASSOCIATIONS_CONSENT_KEY = 'stellarisLanguageServices.fileAssociations.consent';
+const FILE_ASSOCIATION_EXTENSIONS = ['*.txt', '*.gui', '*.gfx', '*.asset'];
+
+/**
+ * Associates common Paradox file extensions with the detected game language so
+ * editor themes and validation apply. This writes .vscode/settings.json into the
+ * user's project, so ask once and remember the choice per workspace.
+ */
+async function syncWorkspaceFileAssociations(context: ExtensionContext, languageId: string): Promise<void> {
+	if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
+		return;
+	}
+	const filesConfig = workspace.getConfiguration('files');
+	const associations = filesConfig.get<Record<string, string>>('associations') || {};
+	const updatedAssociations = { ...associations };
+	let needsUpdate = false;
+	for (const ext of FILE_ASSOCIATION_EXTENSIONS) {
+		if (updatedAssociations[ext] !== languageId) {
+			updatedAssociations[ext] = languageId;
+			needsUpdate = true;
+		}
+	}
+	if (!needsUpdate) {
+		return;
+	}
+
+	const consent = context.workspaceState.get<string>(FILE_ASSOCIATIONS_CONSENT_KEY);
+	if (consent === 'declined') {
+		return;
+	}
+	if (consent !== 'granted') {
+		const associate = localize('Associate', '关联');
+		const neverAsk = localize("Don't Ask Again", '不再提示');
+		const choice = await window.showInformationMessage(
+			localize(
+				`Associate ${FILE_ASSOCIATION_EXTENSIONS.join(', ')} files with ${languageId} in this workspace? This creates .vscode/settings.json.`,
+				`是否将 ${FILE_ASSOCIATION_EXTENSIONS.join(', ')} 文件在此工作区关联为 ${languageId}？这会创建 .vscode/settings.json。`
+			),
+			associate,
+			neverAsk
+		);
+		if (choice === neverAsk) {
+			await context.workspaceState.update(FILE_ASSOCIATIONS_CONSENT_KEY, 'declined');
+			return;
+		}
+		if (choice !== associate) {
+			return;
+		}
+		await context.workspaceState.update(FILE_ASSOCIATIONS_CONSENT_KEY, 'granted');
+	}
+	await filesConfig.update('associations', updatedAssociations, vs.ConfigurationTarget.Workspace);
 }
 
 export async function reloadExtension(prompt: string, buttonText?: string, force?: boolean) {

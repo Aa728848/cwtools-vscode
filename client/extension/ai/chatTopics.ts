@@ -10,7 +10,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import type { ChatTopic, ChatHistoryMessage, HostMessage, ChatMessage } from './types';
 import { UI, aiText, getAiMessageLocale } from './messages';
-import { getAiStorageRoot, getProjectWorkspaceRoot } from './workspacePaths';
+import { getPrivateAiStorageRoot, getProjectWorkspaceRoot } from './workspacePaths';
 import { cloneAgentProfile, isAgentMode, isAgentProfileSelection, isAgentRuntimeDomain } from './agentProfile';
 
 /** Callback type for sending messages to the WebView */
@@ -417,7 +417,7 @@ export class ChatTopicManager {
             .replace(/_+/g, '_')
             .replace(/^_|_$/g, '')
             .substring(0, 60);
-        const outPath = path.join(getAiStorageRoot(workspaceRoot), 'exports', `${safeName || 'chat'}.md`);
+        const outPath = path.join(getPrivateAiStorageRoot(workspaceRoot), 'exports', `${safeName || 'chat'}.md`);
         const outDir = path.dirname(outPath);
         if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
         fs.writeFileSync(outPath, content, 'utf-8');
@@ -454,7 +454,7 @@ export class ChatTopicManager {
             .substring(0, 60);
 
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
-        const outPath = path.join(getAiStorageRoot(workspaceRoot), 'exports', `${safeName || 'chat'}_${timestamp}.json`);
+        const outPath = path.join(getPrivateAiStorageRoot(workspaceRoot), 'exports', `${safeName || 'chat'}_${timestamp}.json`);
         const outDir = path.dirname(outPath);
 
         if (!fs.existsSync(outDir)) {

@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as vs from 'vscode';
-import { getAiStorageRoot, getAiStorageRootCandidates } from './workspacePaths';
+import { getAiStorageRoot, getAiStorageRootCandidates, getPrivateAiStorageRoot, getPrivateTopicRootCandidates } from './workspacePaths';
 import { isPathInsideOrEqual } from '../pathScope';
 import { getProjectWorkspaceRoot } from './workspacePaths';
 import { getSessionPermissionMode } from './runner/sessionPermissions';
@@ -53,12 +53,29 @@ export function sanitizePathInput(inputPath: string): string {
     return value.replace(/[.,;，。；]+$/g, '').trim();
 }
 
+// Shared artifacts (project profile, workflows) intentionally stay in the
+// project .cwtools directory; topic-scoped private data lives in the private
+// agent storage root. Mirrors the split in migrateLegacyPrivateAgentState.
+const SHARED_AI_STORAGE_SEGMENTS = new Set(['project', 'workflows']);
+
 function resolveAiStorageAlias(filePath: string, workspaceRoot: string, preferExisting = false): string | undefined {
     const normalized = filePath.trim().replace(/\\/g, '/');
     const match = normalized.match(/^\.(?:cwtools|cwtools-ai)(?:\/(.*))?$/i);
     if (!match) return undefined;
 
     const rest = (match[1] ?? '').split('/').filter(Boolean);
+    if (!SHARED_AI_STORAGE_SEGMENTS.has(rest[0]?.toLowerCase() ?? '')) {
+        const topicRoots = getPrivateTopicRootCandidates(workspaceRoot);
+        if (preferExisting) {
+            const existing = topicRoots
+                .map(root => path.join(root, ...rest))
+                .find(candidate => fs.existsSync(candidate));
+            if (existing) return existing;
+        }
+        const primary = topicRoots[0];
+        if (primary) return path.join(primary, ...rest);
+    }
+
     const roots = getAiStorageRootCandidates(workspaceRoot);
     if (preferExisting) {
         const existing = roots
@@ -104,8 +121,10 @@ export function resolveWorkspacePathInput(
         : path.join(workspaceRoot, workspacePath));
 
     const aiRoot = getAiStorageRoot(workspaceRoot);
+    const privateRoot = getPrivateAiStorageRoot(workspaceRoot);
     const projectMatch = !!workspaceRoot && isPathInsideOrEqual(resolved, workspaceRoot);
-    const aiMatch = !!aiRoot && isPathInsideOrEqual(resolved, aiRoot);
+    const aiMatch = (!!aiRoot && isPathInsideOrEqual(resolved, aiRoot))
+        || (!!privateRoot && isPathInsideOrEqual(resolved, privateRoot));
 
     let workspaceFolder: string | undefined;
     const workspaceMatch = (vs.workspace.workspaceFolders ?? []).some(folder => {

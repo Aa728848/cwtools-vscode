@@ -1,14 +1,21 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js';
+import { getWorkspaceCacheRoot } from '../ai/workspacePaths';
 import type { WorkspaceSymbolEntry, WorkspaceSymbolOrigin } from './workspaceSymbolParser';
 
 const SCHEMA_VERSION = 1;
 const PARSER_VERSION = 2;
-export const WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH = path.join('.cwtools', 'index', 'workspace-symbols.sqlite');
+export const WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH = path.join('index', 'workspace-symbols.sqlite');
 
+/** Primary cache location: per-workspace extension storage once configured. */
 export function getWorkspaceSymbolCachePath(workspaceRoot: string): string {
-    return path.join(workspaceRoot, WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH);
+    return path.join(getWorkspaceCacheRoot(workspaceRoot), WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH);
+}
+
+/** Previous in-project cache location, kept as a read-only migration fallback. */
+export function getProjectWorkspaceSymbolCachePath(workspaceRoot: string): string {
+    return path.join(workspaceRoot, '.cwtools', 'index', 'workspace-symbols.sqlite');
 }
 
 export function getLegacyWorkspaceSymbolCachePath(workspaceRoot: string): string {
@@ -49,15 +56,24 @@ function normalizePath(value: string): string {
 
 function removeMigratedFallback(sourcePath: string, sourceRoot: string): void {
     fs.rmSync(sourcePath, { force: true });
-    const legacyRoot = path.resolve(sourceRoot, '.cwtools-ai');
+    // Only directories that exclusively hold migrated cache files may be
+    // removed; other project .cwtools content is left untouched.
+    const removableRoots = [
+        path.resolve(sourceRoot, '.cwtools-ai'),
+        path.resolve(sourceRoot, '.cwtools', 'index'),
+    ];
+    const isInsideOrEqual = (target: string, root: string): boolean => {
+        const relative = path.relative(root, target);
+        return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    };
     let current = path.dirname(path.resolve(sourcePath));
-    while (current === legacyRoot || (!path.relative(legacyRoot, current).startsWith('..') && !path.isAbsolute(path.relative(legacyRoot, current)))) {
+    while (removableRoots.some(root => isInsideOrEqual(current, root))) {
         try {
             fs.rmdirSync(current);
         } catch {
             break;
         }
-        if (current === legacyRoot) break;
+        if (removableRoots.some(root => current === root)) break;
         current = path.dirname(current);
     }
 }

@@ -90,11 +90,10 @@ import {
     type ResolvedSlashCommand,
 } from './slashCommands';
 import {
-    getAiStorageRoot,
-    getProjectWorkspaceRoot,
+    getPrivateTopicFileCandidates,
+    getPrivateTopicStorageDir,
     getPrivateTopicStorageDirCandidates,
-    getTopicFileCandidates,
-    getTopicStorageDir,
+    getProjectWorkspaceRoot,
     getTopicStorageDirCandidates,
 } from './workspacePaths';
 
@@ -1602,7 +1601,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     private getArtifactDiffTempDir(): string {
-        const topicDir = getTopicStorageDir(this.topicManager.currentTopic?.id, getProjectWorkspaceRoot());
+        const topicDir = getPrivateTopicStorageDir(this.topicManager.currentTopic?.id, getProjectWorkspaceRoot());
         const fallbackDir = this.storageUri?.fsPath ?? path.join(path.dirname(this.extensionUri.fsPath), '.cwtools', 'default');
         return path.join(topicDir || fallbackDir, 'tmp', 'artifacts');
     }
@@ -1652,7 +1651,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // First try to search from all candidate directories of the current topic
         if (topicId) {
-            const candidates = getTopicFileCandidates(topicId, fileName, getProjectWorkspaceRoot());
+            const candidates = getPrivateTopicFileCandidates(topicId, fileName, getProjectWorkspaceRoot());
             const found = candidates.find(c => fs.existsSync(c));
             if (found) return found;
         }
@@ -1660,7 +1659,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // Finally try to infer the topicId from the path itself (which may be different from the current topic)
         const parentName = path.basename(path.dirname(filePath));
         if (parentName && parentName !== topicId) {
-            const candidates = getTopicFileCandidates(parentName, fileName, getProjectWorkspaceRoot());
+            const candidates = getPrivateTopicFileCandidates(parentName, fileName, getProjectWorkspaceRoot());
             const found = candidates.find(c => fs.existsSync(c));
             if (found) return found;
         }
@@ -1690,7 +1689,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     private findGeneratedTopicFile(topicId: string, fileName: string): string | null {
-        const candidates = getTopicFileCandidates(topicId, fileName, getProjectWorkspaceRoot());
+        const candidates = getPrivateTopicFileCandidates(topicId, fileName, getProjectWorkspaceRoot());
         const normalizedCandidates = new Set(candidates.map(candidate => path.normalize(candidate).toLowerCase()));
         const written = this._currentMessageSnapshots?.find(snapshot =>
             normalizedCandidates.has(path.normalize(snapshot.filePath).toLowerCase())
@@ -1703,7 +1702,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const topicId = this.topicManager.currentTopic?.id;
         if (!topicId) return '';
         const workspaceRoot = getProjectWorkspaceRoot();
-        const findExisting = (fileName: string) => getTopicFileCandidates(topicId, fileName, workspaceRoot)
+        const findExisting = (fileName: string) => getPrivateTopicFileCandidates(topicId, fileName, workspaceRoot)
             .find(candidate => fs.existsSync(candidate));
         const blueprintData = findExisting('design_blueprint.json');
         const blueprintMarkdown = findExisting('design_blueprint.md');
@@ -1747,7 +1746,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // This indicates that the user has already commented on the plan and the AI is revising it, so it should not be judged to be in the clarification stage.
         const topicId = this.topicManager.currentTopic?.id;
         if (topicId) {
-            const candidates = getTopicFileCandidates(topicId, 'Implementation_Plan.md', getProjectWorkspaceRoot());
+            const candidates = getPrivateTopicFileCandidates(topicId, 'Implementation_Plan.md', getProjectWorkspaceRoot());
             const planExists = candidates.some(c => fs.existsSync(c));
             if (planExists) return false;
         }
@@ -1766,20 +1765,29 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return false;
     }
 
+    /** Display path for topic artifacts; they may live in private storage outside the workspace. */
+    private toArtifactDisplayPath(filePath: string): string {
+        const workspaceRoot = getProjectWorkspaceRoot();
+        const relative = workspaceRoot ? path.relative(workspaceRoot, filePath) : '';
+        if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+            return relative.split(path.sep).join('/');
+        }
+        return filePath;
+    }
+
     private async savePlanFile(planText: string, userPrompt: string, steps?: any[], mode: AgentMode = this.currentMode): Promise<void> {
         // ── Persist .md export ──────────────────────────────────────────────
         let filePath = '';
         let relPath = '';
-        const baseDir = getAiStorageRoot(getProjectWorkspaceRoot());
-        if (baseDir) {
-            const topicId = this.topicManager.currentTopic?.id || 'default';
-            // Put under topic folder to scope "same conversation series" (same conversation series) while keeping exactly "Implementation_Plan.md"
-            const planDir = path.join(baseDir, topicId);
+        const topicId = this.topicManager.currentTopic?.id || 'default';
+        // Put under topic folder to scope "same conversation series" (same conversation series) while keeping exactly "Implementation_Plan.md"
+        const planDir = getPrivateTopicStorageDir(topicId, getProjectWorkspaceRoot());
+        if (planDir) {
             await fs.promises.mkdir(planDir, { recursive: true });
 
             const fileName = 'Implementation_Plan.md';
             filePath = path.join(planDir, fileName);
-            relPath = path.posix.join('.cwtools', topicId, fileName);
+            relPath = this.toArtifactDisplayPath(filePath);
 
             // Register plan file in the current message snapshot so retract can delete it
             this._recordFileSnapshot(filePath);
@@ -1876,7 +1884,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private async renderBlueprintUI(filePath: string, topicId: string, steps?: any[]) {
         try {
             const content = await fs.promises.readFile(filePath, 'utf-8');
-            const relPath = path.posix.join('.cwtools', topicId, 'design_blueprint.md');
+            const relPath = this.toArtifactDisplayPath(filePath);
 
             this.postMessage({ type: 'blueprintFileSaved', filePath, relPath });
             this.upsertArtifact({
@@ -1941,7 +1949,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
             // ── Open VSCode native diff editor ────────────────────────────────
             const topicId = this.topicManager.currentTopic?.id || 'default';
-            const tmpDir = path.join(getTopicStorageDir(topicId, getProjectWorkspaceRoot()), 'tmp');
+            const tmpDir = path.join(getPrivateTopicStorageDir(topicId, getProjectWorkspaceRoot()), 'tmp');
             const ext = path.extname(file) || '.txt';
             const tempPath = path.join(tmpDir, `__pending_${messageId}${ext}`);
             let diffPreview = isNewFile ? '+ file added' : 'Pending file change';
@@ -2056,7 +2064,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
                 // Natively save task.md in the topic folder
                 const topicId = this.topicManager.currentTopic?.id || 'default';
-                const topicDir = getTopicStorageDir(topicId, getProjectWorkspaceRoot());
+                const topicDir = getPrivateTopicStorageDir(topicId, getProjectWorkspaceRoot());
                 if (topicDir && currentTodos.length > 0) {
                     const taskPath = path.join(topicDir, 'task.md');
 
@@ -3495,7 +3503,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             .filter((toolResult): toolResult is Record<string, any> => !!toolResult && Array.isArray(toolResult.agents));
         if (dispatchResults.length > 0) {
             const topicId = this.topicManager.currentTopic?.id || 'default';
-            const candidates = getTopicFileCandidates(topicId, 'walkthrough.md', getProjectWorkspaceRoot());
+            const candidates = getPrivateTopicFileCandidates(topicId, 'walkthrough.md', getProjectWorkspaceRoot());
             const wtPath = candidates[0];
             if (wtPath) {
                 const runEvents = this.currentRunId

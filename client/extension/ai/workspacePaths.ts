@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as vs from 'vscode';
 
 let privateAgentStorageRoot = '';
+let workspaceCacheStorageRoot = '';
 
 export interface AiStorageMigrationResult {
     legacyRoot: string;
@@ -15,6 +16,20 @@ export interface AiStorageMigrationResult {
 /** Configure the extension-owned directory used for private Agent state. */
 export function configurePrivateAgentStorage(storageRoot: string | undefined): void {
     privateAgentStorageRoot = storageRoot ? path.resolve(storageRoot) : '';
+}
+
+/** Configure the extension-owned directory used for per-workspace caches. */
+export function configureWorkspaceCacheStorage(storageRoot: string | undefined): void {
+    workspaceCacheStorageRoot = storageRoot ? path.resolve(storageRoot) : '';
+}
+
+/**
+ * Per-workspace cache root (symbol index and similar regenerable caches).
+ * Falls back to the legacy project directory until activation supplies
+ * ExtensionContext.storageUri, which keeps unit tests deterministic.
+ */
+export function getWorkspaceCacheRoot(fallbackWorkspaceRoot = ''): string {
+    return workspaceCacheStorageRoot || getAiStorageRoot(fallbackWorkspaceRoot);
 }
 
 /**
@@ -288,8 +303,18 @@ export function getTopicFileCandidates(topicId: string | undefined, fileName: st
     return getTopicStorageDirCandidates(topicId, fallbackWorkspaceRoot).map(dir => path.join(dir, fileName));
 }
 
+/** Private topic file candidates, private location first then legacy project locations. */
+export function getPrivateTopicFileCandidates(topicId: string | undefined, fileName: string, fallbackWorkspaceRoot = ''): string[] {
+    return getPrivateTopicStorageDirCandidates(topicId, fallbackWorkspaceRoot).map(dir => path.join(dir, fileName));
+}
+
 export function getExistingTopicFilePath(topicId: string | undefined, fileName: string, fallbackWorkspaceRoot = ''): string {
     const candidates = getTopicFileCandidates(topicId, fileName, fallbackWorkspaceRoot);
+    return candidates.find(candidate => fs.existsSync(candidate)) ?? candidates[0] ?? '';
+}
+
+export function getExistingPrivateTopicFilePath(topicId: string | undefined, fileName: string, fallbackWorkspaceRoot = ''): string {
+    const candidates = getPrivateTopicFileCandidates(topicId, fileName, fallbackWorkspaceRoot);
     return candidates.find(candidate => fs.existsSync(candidate)) ?? candidates[0] ?? '';
 }
 
@@ -299,5 +324,10 @@ export function getScratchDir(fallbackWorkspaceRoot = ''): string {
 
 export function getTopicScratchDir(topicId: string | undefined, fallbackWorkspaceRoot = ''): string {
     const topicDir = getTopicStorageDir(topicId, fallbackWorkspaceRoot);
+    return topicDir ? path.join(topicDir, 'scratch') : '';
+}
+
+export function getPrivateTopicScratchDir(topicId: string | undefined, fallbackWorkspaceRoot = ''): string {
+    const topicDir = getPrivateTopicStorageDir(topicId, fallbackWorkspaceRoot);
     return topicDir ? path.join(topicDir, 'scratch') : '';
 }

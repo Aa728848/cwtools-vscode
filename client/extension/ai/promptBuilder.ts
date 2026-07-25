@@ -17,7 +17,7 @@ import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
 import { MemoryParser } from './memoryParser';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText, getAiMessageLocale } from './messages';
-import { getExistingTopicFilePath, getPrivateTopicStorageDir } from './workspacePaths';
+import { getExistingPrivateTopicFilePath, getPrivateTopicStorageDir } from './workspacePaths';
 import {
     buildProfileSummary,
     getProjectProfilePath,
@@ -994,7 +994,7 @@ export class PromptBuilder {
     private getDesignBlueprintPrompt(topicId?: string): string {
         try {
             if (!this.workspaceRoot || !topicId) return '';
-            const blueprintPath = getExistingTopicFilePath(topicId, 'design_blueprint.md', this.workspaceRoot);
+            const blueprintPath = getExistingPrivateTopicFilePath(topicId, 'design_blueprint.md', this.workspaceRoot);
             if (!blueprintPath || !fs.existsSync(blueprintPath)) return '';
             const content = fs.readFileSync(blueprintPath, 'utf-8').trim();
             if (!content) return '';

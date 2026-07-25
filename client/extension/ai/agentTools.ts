@@ -39,7 +39,8 @@ import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard'
 import { saveProjectWorkflow } from './workflowRegistry';
 import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
 import { aiText, EVIDENCE_GATE_MSG } from './messages';
-import { getTopicStorageDir } from './workspacePaths';
+import { getPrivateAiStorageRoot, getPrivateTopicStorageDirCandidates } from './workspacePaths';
+import { isPathInsideOrEqual } from '../pathScope';
 import { TOOL_REGISTRY, WRITE_TOOLS } from './tools/registry';
 import { runAgentHooks } from './runner/hookRunner';
 import { getAgentToolTargetFiles } from './runner/toolScheduler';
@@ -2503,17 +2504,22 @@ export class AgentToolExecutor {
                 && !relativeBlueprint.startsWith('..')
                 && !path.isAbsolute(relativeBlueprint);
             const normalizedRelative = relativeBlueprint.replace(/\\/g, '/').toLowerCase();
-            if (!insideWorkspace || (!normalizedRelative.includes('/.cwtools/') && !normalizedRelative.startsWith('.cwtools/') && !normalizedRelative.includes('/.cwtools-ai/') && !normalizedRelative.startsWith('.cwtools-ai/'))) {
-                return { success: false, error: 'blueprintFile must be a topic-scoped design_blueprint.json inside the workspace .cwtools directory.' };
+            const insideLegacyAiStorage = !!insideWorkspace
+                && (normalizedRelative.includes('/.cwtools/') || normalizedRelative.startsWith('.cwtools/')
+                    || normalizedRelative.includes('/.cwtools-ai/') || normalizedRelative.startsWith('.cwtools-ai/'));
+            const privateStorageRoot = getPrivateAiStorageRoot(this.workspaceRoot);
+            const insidePrivateStorage = !!privateStorageRoot && isPathInsideOrEqual(resolvedBlueprint, path.resolve(privateStorageRoot));
+            if (!insideLegacyAiStorage && !insidePrivateStorage) {
+                return { success: false, error: 'blueprintFile must be a topic-scoped design_blueprint.json inside the agent storage directory.' };
             }
             if (path.basename(resolvedBlueprint).toLowerCase() !== 'design_blueprint.json') {
                 return { success: false, error: 'blueprintFile must point to design_blueprint.json.' };
             }
             const approvedTopicId = runnerOptsForLimits?.topicId;
             if (approvedTopicId) {
-                const approvedTopicDir = path.resolve(getTopicStorageDir(approvedTopicId, this.workspaceRoot));
-                const topicRelative = path.relative(approvedTopicDir, resolvedBlueprint);
-                if (!topicRelative || topicRelative.startsWith('..') || path.isAbsolute(topicRelative)) {
+                const topicDirs = getPrivateTopicStorageDirCandidates(approvedTopicId, this.workspaceRoot)
+                    .map(dir => path.resolve(dir));
+                if (!topicDirs.some(dir => isPathInsideOrEqual(resolvedBlueprint, dir))) {
                     return { success: false, error: 'blueprintFile must belong to the current approved topic.' };
                 }
             }

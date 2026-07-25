@@ -18,7 +18,7 @@ import { getToolResultBudget } from '../contextBudget';
 import { fuzzyReplace, stripLineNumberPrefixes } from './replacerSuite';
 import { diagnosticMetadata } from './diagnosticMetadata';
 import { diagnosticCodeString } from '../../diagnosticI18n';
-import { getTopicStorageDir } from '../workspacePaths';
+import { getPrivateTopicStorageDir } from '../workspacePaths';
 import {
     isSecuritySandboxDisabled,
     resolveWorkspacePathInput,
@@ -2107,7 +2107,7 @@ export class FileToolHandler {
 
             // Save to topic-scoped folder (same as Implementation_Plan.md)
             const topicId = context?.runnerOptions?.topicId || 'default';
-            const blueprintDir = getTopicStorageDir(topicId, this.ctx.workspaceRoot);
+            const blueprintDir = getPrivateTopicStorageDir(topicId, this.ctx.workspaceRoot);
             if (!fs.existsSync(blueprintDir)) fs.mkdirSync(blueprintDir, { recursive: true });
             const blueprintPath = path.join(blueprintDir, 'design_blueprint.md');
             const blueprintDataPath = path.join(blueprintDir, 'design_blueprint.json');

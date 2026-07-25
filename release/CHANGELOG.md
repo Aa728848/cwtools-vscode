@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### 功能与优化 / Features & Optimizations
+- **[优化] Steam 创意工坊工作区默认不自动启用**：检测到工作区位于 `steamapps/workshop/content/` 时会先询问，用户确认后才启动 CWTools；同时改用工坊路径中的 Steam App ID 识别游戏，修复工坊 Mod 被误判为其他游戏（如 EU4/EU5）并写入设置的问题。
+  English: [Optimization] Steam Workshop workspaces no longer auto-activate: folders under `steamapps/workshop/content/` now require user confirmation before CWTools starts. The game is now identified from the Steam App ID in the workshop path, fixing workshop mods being misdetected as other games (e.g. EU4/EU5) and having settings written into them.
+
 ## [2.8.36] - 2026-07-24
 
 ### 功能与优化 / Features & Optimizations

@@ -56,6 +56,7 @@ import { repairMovedAgentWorktrees } from './ai/orchestrator/worktreeManager';
 import { QuickPickSelectionGuard } from './quickPickSelectionGuard';
 import { getDefaultLocalisationLanguagesForUiLocale } from './localisationLanguagePreference';
 import { handleVanillaCacheGenerated } from './vanillaCacheLifecycle';
+import { parseWorkshopContentAppId, getGameIdForWorkshopAppId } from './workshopDetection';
 
 export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
@@ -2673,15 +2674,56 @@ export async function activate(context: ExtensionContext) {
 		}
 	}
 
+	// ── Steam Workshop workspace gate ──
+	// Workshop mods live under steamapps/workshop/content/<appId>/<itemId>.
+	// The App ID is the most reliable identification signal, and users should
+	// opt in before CWTools starts (and potentially writes) inside a workshop
+	// folder that Steam manages and may overwrite.
+	const workspaceRootPath = workspace.workspaceFolders && workspace.workspaceFolders.length > 0
+		? workspace.workspaceFolders[0]!.uri.fsPath
+		: undefined;
+	const workshopAppId = workspaceRootPath ? parseWorkshopContentAppId(workspaceRootPath) : undefined;
+	if (workshopAppId) {
+		const workshopGameId = getGameIdForWorkshopAppId(workshopAppId);
+		if (workshopGameId && workshopGameId !== languageId) {
+			ErrorReporter.debug('Extension', `Workshop App ID ${workshopAppId} identifies workspace as ${workshopGameId} (was ${languageId})`);
+			languageId = workshopGameId;
+		}
+		const workshopConsent = context.workspaceState.get<string>(WORKSHOP_ACTIVATION_CONSENT_KEY);
+		if (workshopConsent !== 'granted') {
+			let proceed = false;
+			if (workshopConsent !== 'denied') {
+				const enable = localize('Enable', '启用');
+				const neverAsk = localize("Don't Ask Again", '不再询问');
+				const choice = await window.showInformationMessage(
+					localize(
+						`This workspace is inside the Steam Workshop folder (App ID ${workshopAppId}), which Steam manages and may overwrite. Enable CWTools for this workspace?`,
+						`当前工作区位于 Steam 创意工坊目录（App ID ${workshopAppId}），其内容由 Steam 管理且可能被覆盖。是否为此工作区启用 CWTools？`
+					),
+					enable,
+					localize('Not Now', '暂不'),
+					neverAsk
+				);
+				if (choice === enable) {
+					await context.workspaceState.update(WORKSHOP_ACTIVATION_CONSENT_KEY, 'granted');
+					proceed = true;
+				} else if (choice === neverAsk) {
+					await context.workspaceState.update(WORKSHOP_ACTIVATION_CONSENT_KEY, 'denied');
+				}
+			}
+			if (!proceed) {
+				ErrorReporter.debug('Extension', `Workshop workspace deferred (consent: ${workshopConsent ?? 'unset'})`);
+				return;
+			}
+		}
+	}
+
 	// ── Auto-default localization language from VS Code UI language ──
 	if (isKnownGameLanguageId(languageId)) {
 		await autoDetectLocLanguage(context);
 	}
 
 	// ── Mod folder target game selection guidance and auto-association ──
-	const workspaceRootPath = workspace.workspaceFolders && workspace.workspaceFolders.length > 0
-		? workspace.workspaceFolders[0]!.uri.fsPath
-		: undefined;
 	const hasModDescriptor = workspaceRootPath ? hasWorkspaceModDescriptor(workspaceRootPath) : false;
 	if (hasModDescriptor) {
 		if (languageId === "paradox") {
@@ -2844,6 +2886,7 @@ async function autoDetectLocLanguage(context: ExtensionContext): Promise<void> {
 }
 
 const FILE_ASSOCIATIONS_CONSENT_KEY = 'stellarisLanguageServices.fileAssociations.consent';
+const WORKSHOP_ACTIVATION_CONSENT_KEY = 'stellarisLanguageServices.workshopActivation.consent';
 const FILE_ASSOCIATION_EXTENSIONS = ['*.txt', '*.gui', '*.gfx', '*.asset'];
 
 /**

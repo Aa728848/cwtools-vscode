@@ -57,6 +57,7 @@ import { QuickPickSelectionGuard } from './quickPickSelectionGuard';
 import { getDefaultLocalisationLanguagesForUiLocale } from './localisationLanguagePreference';
 import { handleVanillaCacheGenerated } from './vanillaCacheLifecycle';
 import { parseWorkshopContentAppId, getGameIdForWorkshopAppId } from './workshopDetection';
+import { inferGameIdFromWorkspace, hasWorkspaceModDescriptor, workspaceHasParadoxStructure as workspaceHasParadoxStructureDetect } from './workspaceGameDetection';
 
 export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
@@ -299,50 +300,6 @@ function countRuleFiles(folder?: string): number {
 	return count;
 }
 
-const RULE_WORKSPACE_SCAN_IGNORED_DIRS = new Set([
-	'.git',
-	'.vscode',
-	'.vscode-test',
-	'.cwtools',
-	'.cwtools-ai',
-	'node_modules',
-	'bin',
-	'obj',
-	'out',
-	'output',
-	'release',
-	'runs',
-	'artifacts',
-	'.tmp-test',
-]);
-
-function hasAtLeastRuleFiles(folder: string, threshold: number): boolean {
-	if (threshold <= 0) return true;
-	if (!fs.existsSync(folder)) return false;
-	let count = 0;
-	const visit = (dir: string): boolean => {
-		let entries: fs.Dirent[];
-		try {
-			entries = fs.readdirSync(dir, { withFileTypes: true });
-		} catch {
-			return false;
-		}
-		for (const entry of entries) {
-			const fullPath = path.join(dir, entry.name);
-			if (entry.isDirectory()) {
-				if (RULE_WORKSPACE_SCAN_IGNORED_DIRS.has(entry.name)) continue;
-				if (visit(fullPath)) return true;
-			} else {
-				const ext = path.extname(entry.name).toLowerCase();
-				if ((ext === '.cwt' || ext === '.log') && ++count >= threshold) {
-					return true;
-				}
-			}
-		}
-		return false;
-	};
-	return visit(folder);
-}
 
 function firstWorkspacePath(): string | undefined {
 	return workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -453,241 +410,14 @@ function isValidGameDataPath(candidate?: string): boolean {
 	return !!candidate && fs.existsSync(path.join(candidate, 'common'));
 }
 
-const WORKSPACE_GAME_MARKERS: Record<string, string[]> = {
-	stellaris: [
-		'common/solar_system_initializers',
-		'common/megastructures',
-		'common/pop_faction_types',
-		'common/starbase_buildings',
-		'common/ship_sizes',
-		'common/planet_classes',
-		'map/star_classes',
-	],
-	hoi4: [
-		'common/national_focus',
-		'common/ideas',
-		'common/units',
-		'history/states',
-		'map/strategicregions',
-	],
-	eu4: [
-		'common/countries',
-		'common/country_tags',
-		'common/governments',
-		'common/religions',
-		'history/provinces',
-		'missions',
-	],
-	ck2: [
-		'common/dynasties',
-		'common/landed_titles',
-		'common/religions',
-		'history/characters',
-		'history/titles',
-	],
-	ck3: [
-		'common/dynasties',
-		'common/landed_titles',
-		'common/culture',
-		'common/religion',
-		'history/characters',
-		'history/titles',
-	],
-	vic2: [
-		'common/countries',
-		'history/countries',
-		'history/provinces',
-		'poptypes',
-		'units',
-	],
-	vic3: [
-		'common/country_definitions',
-		'common/interest_groups',
-		'common/laws',
-		'common/production_methods',
-		'common/pop_types',
-	],
-	imperator: [
-		'common/cultures',
-		'common/religions',
-		'common/governments',
-		'common/countries',
-		'setup/main',
-	],
-	eu5: [
-		'common/countries',
-		'common/country_tags',
-		'common/governments',
-		'common/laws',
-		'common/situations',
-	],
-};
-
-const WORKSPACE_GAME_TEXT_HINTS: Record<string, string[]> = {
-	stellaris: ['stellaris', 'solar system', 'megastructure', 'pop faction', 'starbase'],
-	hoi4: ['hoi4', 'hearts of iron', 'national focus', 'strategic region'],
-	eu4: ['eu4', 'europa universalis iv', 'europa universalis 4'],
-	ck2: ['ck2', 'crusader kings ii', 'crusader kings 2'],
-	ck3: ['ck3', 'crusader kings iii', 'crusader kings 3'],
-	vic2: ['vic2', 'victoria ii', 'victoria 2'],
-	vic3: ['vic3', 'victoria 3', 'victoria iii'],
-	imperator: ['imperator', 'imperator rome', 'imperator: rome'],
-	eu5: ['eu5', 'europa universalis v', 'europa universalis 5'],
-};
-
-function normalizeDetectionText(value: string): string {
-	return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function normalizedPath(value: string): string {
-	// Only fold case on Windows (case-insensitive FS); keep case on Linux/macOS (case-sensitive).
-	const fold = (s: string) => (os.platform() === 'win32' ? s.toLowerCase() : s);
-	try {
-		return fold(path.resolve(value));
-	} catch {
-		return fold(value);
-	}
-}
-
-function hasRelativePath(rootPath: string, relativePath: string): boolean {
-	return fs.existsSync(path.join(rootPath, ...relativePath.split('/')));
-}
-
-function hasWorkspaceModDescriptor(rootPath: string): boolean {
-	try {
-		for (const entry of fs.readdirSync(rootPath, { withFileTypes: true })) {
-			if (entry.isFile() && (entry.name.toLowerCase().endsWith('.mod') || entry.name === 'metadata.json')) {
-				return true;
-			}
-		}
-	} catch {
-		// Ignore unreadable workspaces
-	}
-	return false;
-}
-
-// Directories that mark a Paradox game/mod content root. Path-name text (e.g.
-// "stellaris" in the folder path) is deliberately not enough to start the
-// language server.
-const PARADOX_CONTENT_DIRS = new Set([
-	'common', 'events', 'history', 'map', 'map_data', 'prescripted_countries',
-	'localisation', 'localisation_synced', 'localization', 'interface', 'gfx',
-]);
-
 function workspaceHasParadoxStructure(rootPath: string): boolean {
-	try {
-		for (const entry of fs.readdirSync(rootPath, { withFileTypes: true })) {
-			if (entry.isDirectory() && PARADOX_CONTENT_DIRS.has(entry.name.toLowerCase())) {
-				return true;
-			}
-		}
-	} catch {
-		// Ignore unreadable workspaces
-	}
-	for (const profile of getAllProfiles()) {
-		const configuredPath = getConfiguredGamePath(profile.id);
-		if (!configuredPath) continue;
-		const root = normalizedPath(rootPath);
-		const configured = normalizedPath(configuredPath);
-		if (root === configured || root.startsWith(configured + path.sep) || configured.startsWith(root + path.sep)) {
-			return true;
-		}
-	}
-	return false;
-}
-
-function readWorkspaceGameDescriptor(rootPath: string): string {
-	const chunks: string[] = [];
-	const candidates = [
-		path.join(rootPath, 'descriptor.mod'),
-		path.join(rootPath, '.metadata', 'metadata.json'),
-	];
-	try {
-		for (const entry of fs.readdirSync(rootPath, { withFileTypes: true })) {
-			if (entry.isFile() && entry.name.toLowerCase().endsWith('.mod')) {
-				candidates.push(path.join(rootPath, entry.name));
-			}
-		}
-	} catch {
-		// Ignore unreadable workspaces.
-	}
-	for (const filePath of candidates) {
-		try {
-			if (fs.existsSync(filePath)) {
-				chunks.push(fs.readFileSync(filePath, 'utf8').slice(0, 12000));
-			}
-		} catch {
-			// Ignore unreadable descriptor files.
-		}
-	}
-	return normalizeDetectionText(chunks.join('\n'));
-}
-
-function scoreWorkspaceForGame(rootPath: string, descriptorText: string, profile: GameProfile): number {
-	let score = 0;
-	const rootText = normalizeDetectionText(rootPath);
-	const hints = WORKSPACE_GAME_TEXT_HINTS[profile.id] ?? [];
-	const profileTexts = [
-		profile.id,
-		profile.displayName,
-		profile.install.steamFolderName,
-		profile.install.exeName,
-		...profile.install.alternativeFolderNames,
-		...hints,
-	].map(normalizeDetectionText).filter(Boolean);
-
-	if (profileTexts.some(hint => rootText.includes(hint))) score += 70;
-	if (profileTexts.some(hint => descriptorText.includes(hint))) score += 90;
-
-	const configuredPath = getConfiguredGamePath(profile.id);
-	if (configuredPath) {
-		const root = normalizedPath(rootPath);
-		const configured = normalizedPath(configuredPath);
-		if (root === configured || root.startsWith(configured + path.sep) || configured.startsWith(root + path.sep)) {
-			score += 80;
-		}
-	}
-
-	for (const marker of WORKSPACE_GAME_MARKERS[profile.id] ?? []) {
-		if (hasRelativePath(rootPath, marker)) score += 25;
-	}
-
-	return score;
-}
-
-function isCwtRuleWorkspace(rootPath: string): boolean {
-	try {
-		if (fs.existsSync(path.join(rootPath, 'descriptor.mod'))) {
-			return false;
-		}
-		return hasAtLeastRuleFiles(rootPath, 6);
-	} catch {
-		return false;
-	}
+	return workspaceHasParadoxStructureDetect(rootPath, getConfiguredGamePath);
 }
 
 function inferLanguageIdFromWorkspace(): string | undefined {
 	const rootPath = firstWorkspacePath();
 	if (!rootPath) return undefined;
-	if (isCwtRuleWorkspace(rootPath)) return undefined;
-	// Structural evidence decides WHETHER this is a Paradox workspace; scoring
-	// below only decides WHICH game.
-	if (!hasWorkspaceModDescriptor(rootPath) && !workspaceHasParadoxStructure(rootPath)) {
-		return undefined;
-	}
-	const descriptorText = readWorkspaceGameDescriptor(rootPath);
-	const scores = getAllProfiles()
-		.map(profile => ({ id: profile.id, score: scoreWorkspaceForGame(rootPath, descriptorText, profile) }))
-		.sort((a, b) => b.score - a.score);
-	const best = scores[0];
-	const next = scores[1];
-	if (best && best.score >= 40 && best.score > (next?.score ?? 0)) {
-		return best.id;
-	}
-
-	const configuredProfiles = getAllProfiles()
-		.filter(profile => isValidGameDataPath(getConfiguredGamePath(profile.id)));
-	return configuredProfiles.length === 1 ? configuredProfiles[0]!.id : undefined;
+	return inferGameIdFromWorkspace(rootPath, getConfiguredGamePath);
 }
 
 function getRulesSourceStatus(languageId: string, cacheDir: string, _bundledRulesPath: string): RulesSourceStatus {
@@ -2723,31 +2453,33 @@ export async function activate(context: ExtensionContext) {
 		await autoDetectLocLanguage(context);
 	}
 
-	// ── Mod folder target game selection guidance and auto-association ──
+	// ── Mod folder target game selection and auto-association ──
 	const hasModDescriptor = workspaceRootPath ? hasWorkspaceModDescriptor(workspaceRootPath) : false;
-	if (hasModDescriptor) {
-		if (languageId === "paradox") {
-			const gamePromptKey = "stellarisLanguageServices.gamePathPrompted.paradox";
-			if (!context.globalState.get<boolean>(gamePromptKey)) {
-				void context.globalState.update(gamePromptKey, true);
-				void window.showInformationMessage(
-					localize(
-						'Detected a Mod descriptor in workspace, but the target game type is undetermined. Select your target game platform now?',
-						'检测到当前工作区包含 Mod 描述文件，但尚未确定目标游戏类型。是否现在指定你的目标游戏平台？'
-					),
-					localize('Select Game', '选择游戏'),
-					localize('Later', '稍后')
-				).then(async (choice) => {
-					if (choice === localize('Select Game', '选择游戏')) {
-						await selectGameFolderFlow(undefined, context);
-					}
-				});
+
+	// When the target game cannot be determined (workshop or not), ask the
+	// user to pick one instead of guessing. The choice is remembered per
+	// workspace; dismissal is remembered too and not re-asked.
+	if (!isKnownGameLanguageId(languageId) && workspaceRootPath
+		&& (hasModDescriptor || workspaceHasParadoxStructure(workspaceRootPath))) {
+		const savedGame = context.workspaceState.get<string>(WORKSPACE_GAME_SELECTION_KEY);
+		if (savedGame && isKnownGameLanguageId(savedGame)) {
+			languageId = savedGame;
+		} else if (savedGame !== 'dismissed') {
+			const pickedGame = await pickWorkspaceGame();
+			if (pickedGame) {
+				languageId = pickedGame;
+				await context.workspaceState.update(WORKSPACE_GAME_SELECTION_KEY, pickedGame);
+			} else {
+				await context.workspaceState.update(WORKSPACE_GAME_SELECTION_KEY, 'dismissed');
 			}
-		} else if (isKnownGameLanguageId(languageId)) {
-			// If the game type was successfully determined (either via scoring or fallback),
-			// offer to sync workspace-level file associations so editor themes/syntax highlights work.
-			await syncWorkspaceFileAssociations(context, languageId);
 		}
+	}
+
+	if (hasModDescriptor && isKnownGameLanguageId(languageId)) {
+		// If the game type was successfully determined (via scoring, App ID, or
+		// user selection), offer to sync workspace-level file associations so
+		// editor themes/syntax highlights work.
+		await syncWorkspaceFileAssociations(context, languageId);
 	}
 
 	// ── Gate the language server on actual Paradox evidence ──
@@ -2887,6 +2619,7 @@ async function autoDetectLocLanguage(context: ExtensionContext): Promise<void> {
 
 const FILE_ASSOCIATIONS_CONSENT_KEY = 'stellarisLanguageServices.fileAssociations.consent';
 const WORKSHOP_ACTIVATION_CONSENT_KEY = 'stellarisLanguageServices.workshopActivation.consent';
+const WORKSPACE_GAME_SELECTION_KEY = 'stellarisLanguageServices.workspaceGame.selection';
 const FILE_ASSOCIATION_EXTENSIONS = ['*.txt', '*.gui', '*.gfx', '*.asset'];
 
 /**
@@ -2895,6 +2628,19 @@ const FILE_ASSOCIATION_EXTENSIONS = ['*.txt', '*.gui', '*.gfx', '*.asset'];
  * user's project, so ask first; a granted choice is remembered per workspace,
  * while skipping only applies to the current prompt and is asked again later.
  */
+/**
+ * Lets the user pick the game a workspace belongs to when detection is
+ * inconclusive. Returns the picked game language id, or undefined when the
+ * user dismisses the picker.
+ */
+async function pickWorkspaceGame(): Promise<string | undefined> {
+	const picked = await window.showQuickPick(
+		getAllProfiles().map(profile => ({ label: profile.displayName, description: profile.id })),
+		{ placeHolder: localize('Select the game this workspace belongs to', '请选择当前工作区所属的游戏') }
+	);
+	return picked?.description;
+}
+
 async function syncWorkspaceFileAssociations(context: ExtensionContext, languageId: string): Promise<void> {
 	if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
 		return;

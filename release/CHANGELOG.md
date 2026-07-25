@@ -5,6 +5,8 @@
 ### 功能与优化 / Features & Optimizations
 - **[优化] Steam 创意工坊工作区默认不自动启用**：检测到工作区位于 `steamapps/workshop/content/` 时会先询问，用户确认后才启动 CWTools；同时改用工坊路径中的 Steam App ID 识别游戏，修复工坊 Mod 被误判为其他游戏（如 EU4/EU5）并写入设置的问题。
   English: [Optimization] Steam Workshop workspaces no longer auto-activate: folders under `steamapps/workshop/content/` now require user confirmation before CWTools starts. The game is now identified from the Steam App ID in the workshop path, fixing workshop mods being misdetected as other games (e.g. EU4/EU5) and having settings written into them.
+- **[修复] 游戏识别不再"猜测"**：当工作区证据不足时，不再回退为用户唯一配置过路径的游戏（会把其他游戏的 Mod 误判为该游戏并写入错误设置）；无法确定游戏时弹出列表让用户选择，并按工作区记住选择。
+  English: [Fix] Game detection no longer guesses: when workspace evidence is inconclusive, detection no longer falls back to the one game with a configured path (which mislabelled mods for other games and wrote wrong settings into them). Undetermined workspaces now ask the user to pick the game from a list, remembered per workspace.
 
 ## [2.8.36] - 2026-07-24
 

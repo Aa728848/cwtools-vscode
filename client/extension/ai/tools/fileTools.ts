@@ -310,6 +310,17 @@ export class FileToolHandler {
         return ['.txt', '.gui', '.gfx', '.asset', '.entity'].includes(path.extname(filePath).toLowerCase());
     }
 
+    /**
+     * Files whose writes require semantic preflight. Shader files deliberately do
+     * not use the PDX brace counter above: their mixed DSL/HLSL syntax is validated
+     * by the authoritative shader frontend in the language server instead.
+     */
+    private isPdxSemanticGuardedPath(filePath: string, context?: import('../types').AgentToolContext): boolean {
+        if (context?.runnerOptions?.domain === 'general') return false;
+        return ['.txt', '.gui', '.gfx', '.asset', '.entity', '.shader', '.fxh']
+            .includes(path.extname(filePath).toLowerCase());
+    }
+
     private inspectPdxBraceStructure(content: string): {
         balanced: boolean;
         openCount: number;
@@ -369,7 +380,7 @@ export class FileToolHandler {
         newContent: string,
         context?: import('../types').AgentToolContext,
     ): Promise<string | null> {
-        if (!this.isPdxStructureGuardedPath(filePath, context) || originalContent === newContent) return null;
+        if (!this.isPdxSemanticGuardedPath(filePath, context) || originalContent === newContent) return null;
         const preflight = context?.onBeforePdxWrite;
         if (!preflight) return null;
         try {

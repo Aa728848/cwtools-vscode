@@ -59,6 +59,17 @@ type private SemanticDefinitionReferenceInfo =
     { definitionName: string
       reference: SemanticValueReference }
 
+type private SemanticShaderReference =
+    { argumentPath: string
+      referenceKind: string
+      dynamicValuePolicy: string
+      pathPrefix: string option
+      extension: string option }
+
+type private SemanticDefinitionShaderReferenceInfo =
+    { definitionName: string
+      reference: SemanticShaderReference }
+
 let private semanticAliasPattern =
     System.Text.RegularExpressions.Regex(
         @"^\s*alias\[(trigger|effect|modifier):([^\]]+)\]\s*=\s*(.*)$",
@@ -83,6 +94,11 @@ let private semanticEntityTypePattern =
     System.Text.RegularExpressions.Regex(
         @"^<([^>]+)>",
         System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private semanticShaderFilePattern =
+    System.Text.RegularExpressions.Regex(
+        @"^filepath\[\s*([^,\]]*)\s*(?:,\s*([^\]]*)\s*)?\]$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
 
 let private semanticDynamicSchemaKeyPattern =
     System.Text.RegularExpressions.Regex(
@@ -188,12 +204,33 @@ let private semanticRulesFromConfigs (requestedNames: string list) (configs: (st
 
 let private semanticDefinitionReferencesFromConfigs (configs: (string * string) list) =
     let references = ResizeArray<SemanticDefinitionReferenceInfo>()
+    let shaderReferences = ResizeArray<SemanticDefinitionShaderReferenceInfo>()
     let normalizeKey (value: string) =
         let normalized = value.Trim().Trim('"').ToLowerInvariant()
         if semanticDynamicSchemaKeyPattern.IsMatch normalized then "*" else normalized
     let tryEntityType (rawValue: string) =
         let matched = semanticEntityTypePattern.Match(rawValue.Trim())
         if matched.Success then Some(matched.Groups.[1].Value.Trim().ToLowerInvariant()) else None
+    let tryShaderReference (rawValue: string) =
+        let normalized = rawValue.Trim()
+        if normalized.Equals("$shader_effect", StringComparison.OrdinalIgnoreCase) then
+            Some("shader_effect", "allow_expression", None, None)
+        else
+            let matched = semanticShaderFilePattern.Match normalized
+            if matched.Success then
+                let pathPrefix = matched.Groups.[1].Value.Trim()
+                let extension = matched.Groups.[2].Value.Trim()
+                if extension.Equals(".shader", StringComparison.OrdinalIgnoreCase) then
+                    Some(
+                        "shader_file",
+                        "literal_or_parameter",
+                        (if String.IsNullOrWhiteSpace pathPrefix then None else Some pathPrefix),
+                        Some extension
+                    )
+                else
+                    None
+            else
+                None
 
     for fileName, content in configs |> List.sortBy fst do
         match CKParser.parseString content fileName with
@@ -205,14 +242,28 @@ let private semanticDefinitionReferencesFromConfigs (configs: (string * string) 
                 let definitionName = schema.Key.Trim().Trim('"').ToLowerInvariant()
                 let rec walk (path: string list) (node: CWTools.Process.Node) =
                     for leaf in node.Leaves do
+                        let argumentPath = String.concat "." (path @ [ normalizeKey leaf.Key ])
                         match tryEntityType (leaf.Value.ToRawString()) with
                         | Some typeName ->
                             references.Add {
                                 definitionName = definitionName
                                 reference = {
-                                    argumentPath = String.concat "." (path @ [ normalizeKey leaf.Key ])
+                                    argumentPath = argumentPath
                                     access = "type"
                                     typeName = typeName
+                                }
+                            }
+                        | None -> ()
+                        match tryShaderReference (leaf.Value.ToRawString()) with
+                        | Some(referenceKind, dynamicValuePolicy, pathPrefix, extension) ->
+                            shaderReferences.Add {
+                                definitionName = definitionName
+                                reference = {
+                                    argumentPath = argumentPath
+                                    referenceKind = referenceKind
+                                    dynamicValuePolicy = dynamicValuePolicy
+                                    pathPrefix = pathPrefix
+                                    extension = extension
                                 }
                             }
                         | None -> ()
@@ -232,14 +283,27 @@ let private semanticDefinitionReferencesFromConfigs (configs: (string * string) 
                         walk (path @ [ normalizeKey child.Key ]) child
                 walk [] schema
 
-    references
-    |> Seq.distinctBy (fun item ->
-        item.definitionName,
-        item.reference.argumentPath,
-        item.reference.access,
-        item.reference.typeName)
-    |> Seq.truncate 100_000
-    |> Seq.toList
+    let valueReferences =
+        references
+        |> Seq.distinctBy (fun item ->
+            item.definitionName,
+            item.reference.argumentPath,
+            item.reference.access,
+            item.reference.typeName)
+        |> Seq.truncate 100_000
+        |> Seq.toList
+    let shaderReferences =
+        shaderReferences
+        |> Seq.distinctBy (fun item ->
+            item.definitionName,
+            item.reference.argumentPath,
+            item.reference.referenceKind,
+            item.reference.dynamicValuePolicy,
+            item.reference.pathPrefix,
+            item.reference.extension)
+        |> Seq.truncate 10_000
+        |> Seq.toList
+    valueReferences, shaderReferences
 
 type private DefinitionInjectionKeyInfo =
     { mode: string
@@ -976,82 +1040,58 @@ type private IncrementalTypeStage =
     | TypeIndexOnly of IIncrementalTypeIndex * StagedTypeIndex
 
 /// Shared token computation - walks AST, classifies tokens, encodes to delta int[].
-let computeShaderTokens (game: IGame<_>) (filePath: string) (fileText: string) =
-    let tokens = ResizeArray<struct (int * int * int * int * int)>()
-    let lines: string[] = fileText.Split('\n')
-    
-    let sources = CWTools.Games.PdxShaderFeatures.getShaderSources (game.AllFiles()) filePath fileText
-    
-    let globalVariables = System.Collections.Generic.HashSet<string>(CWTools.Games.PdxShaderFeatures.builtinVariablesSet.Value)
-    let globalFunctions = System.Collections.Generic.HashSet<string>(CWTools.Games.PdxShaderFeatures.builtinFunctionsSet.Value)
-    
-    let parsedGlobals = CWTools.Games.PdxShaderFeatures.parseGlobalVariables sources
-    for v in parsedGlobals do
-        globalVariables.Add(v) |> ignore
-        
-    let parsedFuncs = CWTools.Games.PdxShaderFeatures.parseGlobalFunctions sources
-    for f: CWTools.Games.CompletionResponse in parsedFuncs do
-        match f with
-        | CWTools.Games.CompletionResponse.Snippet(label, _, _, _, _) -> globalFunctions.Add(label) |> ignore
-        | CWTools.Games.CompletionResponse.Simple(label, _, _) -> globalFunctions.Add(label) |> ignore
-        | CWTools.Games.CompletionResponse.Detailed(label, _, _, _) -> globalFunctions.Add(label) |> ignore
-        
-    let wordRegex = System.Text.RegularExpressions.Regex(@"\b([A-Za-z_][A-Za-z0-9_]*)\b", System.Text.RegularExpressions.RegexOptions.Compiled)
-    
-    let verifyAndAdd (line: int) (col: int) (len: int) (tokenType: int) =
-        if line >= 0 && line < lines.Length then
-            let srcLine = lines.[line]
-            if col >= 0 && col + len <= srcLine.Length then
-                tokens.Add(struct (line, col, len, tokenType, 0))
-                
-    let getInsideStringIntervals (lineText: string) (limit: int) =
-        let stringIntervals = ResizeArray<int * int>()
-        let mutable inString = false
-        let mutable strStart = -1
-        let mutable i = 0
-        while i < limit do
-            if lineText.[i] = '"' && (i = 0 || lineText.[i - 1] <> '\\') then
-                if inString then
-                    stringIntervals.Add((strStart, i))
-                    inString <- false
-                else
-                    strStart <- i
-                    inString <- true
-            i <- i + 1
-        stringIntervals
+let computeShaderTokens (_game: IGame<_>) (filePath: string) (fileText: string) =
+    let tokenTypeIndex =
+        Map.ofList
+            [ "namespace", 0
+              "type", 1
+              "function", 2
+              "variable", 3
+              "parameter", 4
+              "property", 5
+              "enumMember", 6
+              "keyword", 7
+              "number", 8
+              "string", 9
+              "comment", 10
+              "operator", 11
+              "macro", 12
+              "decorator", 13 ]
+    let lineStarts = ResizeArray<int>()
+    lineStarts.Add 0
+    for offset = 0 to fileText.Length - 1 do
+        if fileText.[offset] = '\n' then lineStarts.Add(offset + 1)
 
-    let isInsideIntervals (intervals: ResizeArray<int * int>) (col: int) (len: int) =
-        let mutable found = false
-        let mutable idx = 0
-        while idx < intervals.Count && not found do
-            let sStart, sEnd = intervals.[idx]
-            if col >= sStart && (col + len - 1) <= sEnd then
-                found <- true
-            idx <- idx + 1
-        found
-                
-    lines |> Array.iteri (fun lineIdx (lineText: string) ->
-        let commentIdx = lineText.IndexOf("//")
-        let limit = if commentIdx >= 0 then commentIdx else lineText.Length
-        if commentIdx >= 0 then
-            verifyAndAdd lineIdx commentIdx (lineText.Length - commentIdx) 10
-            
-        let intervals = getInsideStringIntervals lineText limit
-        let subText = lineText.Substring(0, limit)
-        let matches = wordRegex.Matches(subText)
-        for i = 0 to matches.Count - 1 do
-            let m = matches.[i]
-            if m.Success && m.Groups.Count >= 2 then
-                let word = m.Groups.[1].Value
-                let col = m.Index
-                let len = word.Length
-                if not (isInsideIntervals intervals col len) then
-                    if globalVariables.Contains(word) then
-                        verifyAndAdd lineIdx col len 3
-                    elif globalFunctions.Contains(word) then
-                        verifyAndAdd lineIdx col len 2
-    )
-    
+    let lineAndColumn offset =
+        let bounded = max 0 (min fileText.Length offset)
+        let mutable low = 0
+        let mutable high = lineStarts.Count - 1
+        while low < high do
+            let middle = (low + high + 1) / 2
+            if lineStarts.[middle] <= bounded then low <- middle else high <- middle - 1
+        low, bounded - lineStarts.[low]
+
+    let tokens = ResizeArray<struct (int * int * int * int * int)>()
+    for token in PdxShaderFeatures.semanticTokens filePath fileText do
+        match Map.tryFind token.tokenType tokenTypeIndex with
+        | None -> ()
+        | Some tokenType ->
+            let modifiers =
+                (if token.declaration then 1 else 0)
+                ||| (if token.readonly then 4 else 0)
+                ||| (if token.inactive then 8 else 0)
+            let mutable startOffset = token.span.startOffset
+            let endOffset = min fileText.Length token.span.endOffset
+            while startOffset < endOffset do
+                let line, column = lineAndColumn startOffset
+                let nextLineStart = if line + 1 < lineStarts.Count then lineStarts.[line + 1] else fileText.Length
+                let segmentEnd = min endOffset nextLineStart
+                let mutable segmentLength = segmentEnd - startOffset
+                if segmentLength > 0 && fileText.[startOffset + segmentLength - 1] = '\n' then segmentLength <- segmentLength - 1
+                if segmentLength > 0 && fileText.[startOffset + segmentLength - 1] = '\r' then segmentLength <- segmentLength - 1
+                if segmentLength > 0 then tokens.Add(struct (line, column, segmentLength, tokenType, modifiers))
+                startOffset <- max (startOffset + 1) segmentEnd
+
     let sorted = tokens |> Seq.toArray |> Array.sortBy (fun struct (l, c, _, _, _) -> l, c)
     let data = ResizeArray<int>()
     let mutable prevLine = 0
@@ -1379,6 +1419,11 @@ type Server(client: ILanguageClient) =
     let mutable rulesModelEpoch = 0L
     let mutable typesModelEpoch = 0L
     let mutable localisationModelEpoch = 0L
+
+    // Cache for the read-only shader runtime model (cwtools.ai.shader.* commands).
+    // Rebuilt at most once per model epoch / open shader-script document version change.
+    let shaderRuntimeModelCacheLock = obj ()
+    let mutable shaderRuntimeModelCache: (ValidationModelEpoch * string * CWTools.Games.PdxShaderRuntime.ShaderRuntimeModel) option = None
 
     let modelEpochSnapshot () =
         { game = System.Threading.Interlocked.Read(&gameModelEpoch)
@@ -1727,7 +1772,7 @@ type Server(client: ILanguageClient) =
     let mutable manualRulesFolder: string option = None
     let mutable useManualRules: bool = false
     let mutable preferBundledRules: bool = false
-    let mutable semanticCatalogCache: (SemanticRuleInfo list * SemanticDefinitionReferenceInfo list * string * bool) option = None
+    let mutable semanticCatalogCache: (SemanticRuleInfo list * SemanticDefinitionReferenceInfo list * SemanticDefinitionShaderReferenceInfo list * string * bool) option = None
     let mutable semanticCatalogGeneration = 0L
     let mutable validateVanilla: bool = false
     let mutable experimental: bool = false
@@ -1775,10 +1820,10 @@ type Server(client: ILanguageClient) =
             cachedLocMapCount <- m.Length
             m
 
-    /// SemanticTokens cache: filePath -> (contentHash, encodedDataArray, resultId)
+    /// SemanticTokens cache: filePath -> (documentVersion, contentHash, encodedDataArray, resultId)
     /// Avoids full AST re-traversal when file content hasn't changed.
     /// resultId enables delta diff against the previous snapshot.
-    let semanticTokensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * int[] * string>()
+    let semanticTokensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int option * int * int[] * string>()
 
     /// CodeLens cache: filePath -> (contentHash, lenses).
     let codeLensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * CodeLens list>()
@@ -2340,22 +2385,28 @@ type Server(client: ILanguageClient) =
     /// Each token occupies 5 ints (deltaLine, deltaChar, length, tokenType, tokenModifiers).
     /// Walks stride-5 from both ends to find the changed region.
     let computeDelta (oldTokens: int[]) (newTokens: int[]) : SemanticTokensEdit =
-        let mutable startIndex = 0
-        while startIndex < oldTokens.Length
-              && startIndex < newTokens.Length
-              && oldTokens.[startIndex] = newTokens.[startIndex] do
-            startIndex <- startIndex + 5
+        let tokenWidth = 5
+        let tokenEquals oldIndex newIndex =
+            oldIndex + tokenWidth <= oldTokens.Length
+            && newIndex + tokenWidth <= newTokens.Length
+            && oldTokens.[oldIndex .. oldIndex + tokenWidth - 1] = newTokens.[newIndex .. newIndex + tokenWidth - 1]
 
-        let mutable oldEnd = oldTokens.Length - 5
-        let mutable newEnd = newTokens.Length - 5
+        let mutable startIndex = 0
+        while tokenEquals startIndex startIndex do
+            startIndex <- startIndex + tokenWidth
+
+        let mutable oldEnd = oldTokens.Length - tokenWidth
+        let mutable newEnd = newTokens.Length - tokenWidth
         while oldEnd >= startIndex
               && newEnd >= startIndex
-              && oldTokens.[oldEnd] = newTokens.[newEnd] do
-            oldEnd <- oldEnd - 5
-            newEnd <- newEnd - 5
+              && tokenEquals oldEnd newEnd do
+            oldEnd <- oldEnd - tokenWidth
+            newEnd <- newEnd - tokenWidth
 
-        let deleteCount = max 0 (oldEnd - startIndex + 5)
-        let inserted = newTokens.[startIndex .. newEnd + 4]
+        let deleteCount = max 0 (oldEnd - startIndex + tokenWidth)
+        let inserted =
+            if newEnd < startIndex then [||]
+            else newTokens.[startIndex .. newEnd + tokenWidth - 1]
         { start = startIndex
           deleteCount = deleteCount
           data = Array.toList inserted }
@@ -5282,7 +5333,10 @@ type Server(client: ILanguageClient) =
         async {
             try
                 return! a
-            with ex ->
+            with
+            | :? OperationCanceledException as cancellation ->
+                return raise cancellation
+            | ex ->
                 client.LogMessage
                     { ``type`` = MessageType.Error
                       message = $"%A{ex}" }
@@ -5410,8 +5464,10 @@ type Server(client: ILanguageClient) =
                     { capabilities =
                         { defaultServerCapabilities with
                             hoverProvider = true
+                            signatureHelpProvider = Some defaultSignatureHelpOptions
                             definitionProvider = true
                             referencesProvider = true
+                            documentHighlightProvider = true
                             documentFormattingProvider = true
                             textDocumentSync =
                                 { defaultTextDocumentSyncOptions with
@@ -5465,9 +5521,20 @@ type Server(client: ILanguageClient) =
                                           "cwtools.ai.waitDiagnosticsFresh"
                                           "cwtools.ai.getValidationStatus"
                                           "cwtools.ai.parseFragment"
+                                          "cwtools.ai.shader.symbols"
+                                          "cwtools.ai.shader.compileUnit"
+                                          "cwtools.ai.shader.variants"
+                                          "cwtools.ai.shader.callers"
+                                          "cwtools.ai.shader.reachability"
+                                          "cwtools.ai.shader.validate"
+                                          "cwtools.ai.shader.preflightEdit"
+                                          "cwtools.ai.shader.compareVanilla"
                                           "cwtools.exportTypes"
                                           "getFileTypes" ] }
                             inlayHintProvider = true
+                            foldingRangeProvider = true
+                            selectionRangeProvider = true
+                            callHierarchyProvider = true
                             renameProvider =
                                 JsonValue.Record [| "prepareProvider", JsonValue.Boolean true |]
                             semanticTokensProvider =
@@ -5477,7 +5544,7 @@ type Server(client: ILanguageClient) =
                                             [ "namespace"; "type"; "function"; "variable"; "parameter"
                                               "property"; "enumMember"; "keyword"; "number"; "string"
                                               "comment"; "operator"; "macro"; "decorator" ]
-                                          tokenModifiers = [ "declaration"; "definition"; "readonly" ] }
+                                          tokenModifiers = [ "declaration"; "definition"; "readonly"; "inactive" ] }
                                       full = true
                                       range = false
                                       delta = true } } }
@@ -6055,81 +6122,84 @@ type Server(client: ILanguageClient) =
                 return
                     match gameObj with
                     | Some game ->
-                        let allEffects = game.ScriptedEffects() @ game.ScriptedTriggers()
-                        let effectNames = allEffects |> Seq.map (fun e -> e.Name.GetString()) |> System.Collections.Generic.HashSet
+                        let shaderPath = getPathFromDoc p.textDocument.uri
+                        let shaderText = docs.GetText(FileInfo(shaderPath)) |> Option.defaultValue ""
+                        if PdxShaderFeatures.isShaderFile shaderPath then
+                            PdxShaderFeatures.signatureHelpAt
+                                (game.AllFiles())
+                                (PosHelper.fromZ p.position.line p.position.character)
+                                shaderPath
+                                shaderText
+                            |> Option.map (fun help ->
+                                { signatures =
+                                    help.signatures
+                                    |> List.map (fun signature ->
+                                        { label = signature.label
+                                          documentation = signature.documentation
+                                          parameters =
+                                            signature.parameters
+                                            |> List.map (fun parameter ->
+                                                { label = parameter.label
+                                                  documentation = parameter.documentation }) })
+                                  activeSignature = Some help.activeSignature
+                                  activeParameter = Some help.activeParameter })
+                        else
+                            let allEffects = game.ScriptedEffects() @ game.ScriptedTriggers()
+                            let effectNames = allEffects |> Seq.map (fun e -> e.Name.GetString()) |> System.Collections.Generic.HashSet
 
-                        // Try word under cursor first
-                        let word = docs.GetTextAtPosition(p.textDocument.uri, p.position)
-                        let directMatch =
-                            if String.IsNullOrWhiteSpace word then None
-                            else allEffects |> List.tryFind (fun e -> e.Name.GetString() = word)
+                            // Try word under cursor first
+                            let word = docs.GetTextAtPosition(p.textDocument.uri, p.position)
+                            let directMatch =
+                                if String.IsNullOrWhiteSpace word then None
+                                else allEffects |> List.tryFind (fun e -> e.Name.GetString() = word)
 
-                        // Walk source backwards to find enclosing effect block
-                        let findEnclosing () =
-                            let fileContent = docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue ""
-                            let lines = fileContent.Split('\n')
-                            let cursorLine = min p.position.line (lines.Length - 1)
-                            let mutable found: string option = None
-                            let mutable depth = 0
-                            for i in cursorLine .. -1 .. 0 do
-                                if found.IsNone then
-                                    for ch in lines.[i] do
-                                        if ch = '}' then depth <- depth + 1
-                                        elif ch = '{' then depth <- depth - 1
-                                    if depth < 0 then
-                                        let parts = lines.[i].TrimStart().Split([|' '; '='; '\t'|], StringSplitOptions.RemoveEmptyEntries)
-                                        if parts.Length > 0 && effectNames.Contains(parts.[0]) then
-                                            found <- Some parts.[0]
-                            found
+                            // Walk source backwards to find enclosing effect block.
+                            let findEnclosing () =
+                                let lines = shaderText.Split('\n')
+                                let cursorLine = min p.position.line (lines.Length - 1)
+                                let mutable found: string option = None
+                                let mutable depth = 0
+                                for i in cursorLine .. -1 .. 0 do
+                                    if found.IsNone then
+                                        for ch in lines.[i] do
+                                            if ch = '}' then depth <- depth + 1
+                                            elif ch = '{' then depth <- depth - 1
+                                        if depth < 0 then
+                                            let parts = lines.[i].TrimStart().Split([|' '; '='; '\t'|], StringSplitOptions.RemoveEmptyEntries)
+                                            if parts.Length > 0 && effectNames.Contains(parts.[0]) then
+                                                found <- Some parts.[0]
+                                found
 
-                        let effectName =
-                            match directMatch with
-                            | Some e -> Some(e.Name.GetString())
-                            | None -> findEnclosing ()
+                            let effectName =
+                                match directMatch with
+                                | Some e -> Some(e.Name.GetString())
+                                | None -> findEnclosing ()
 
-                        match effectName with
-                        | Some name ->
-                            let effect = allEffects |> List.tryFind (fun e -> e.Name.GetString() = name)
-                            match effect with
+                            match effectName |> Option.bind (fun name -> allEffects |> List.tryFind (fun e -> e.Name.GetString() = name)) with
                             | Some effect ->
-                                let paramRegex = scriptedParamRegex
-
-                                let comments =
+                                let paramMatches = scriptedParamRegex.Matches(
                                     match effect with
                                     | :? ScriptedEffect as se -> se.Comments
-                                    | _ -> ""
-
-                                let paramMatches = paramRegex.Matches(comments)
+                                    | _ -> "")
                                 let paramNames =
                                     [ for m in paramMatches -> m.Groups.[1].Value ]
                                     |> List.distinct
-
                                 if paramNames.IsEmpty then None
                                 else
                                     let parameters =
                                         paramNames
-                                        |> List.map (fun pname ->
-                                            { label = "$" + pname + "$"
-                                              documentation = Some(sprintf "Parameter: %s" pname) })
-
-
-                                    let scopes =
-                                        String.Join(", ", effect.Scopes |> List.map (fun s -> s.ToString()))
-
-                                    let label = name + "(" + String.Join(", ", paramNames) + ")"
-                                    let doc =
-                                        if String.IsNullOrWhiteSpace scopes then None
-                                        else Some(sprintf "Scopes: %s" scopes)
-
+                                        |> List.map (fun parameterName ->
+                                            { label = "$" + parameterName + "$"
+                                              documentation = Some(sprintf "Parameter: %s" parameterName) })
+                                    let scopes = String.Join(", ", effect.Scopes |> List.map string)
                                     Some
                                         { signatures =
-                                            [ { label = label
-                                                documentation = doc
+                                            [ { label = effect.Name.GetString() + "(" + String.Join(", ", paramNames) + ")"
+                                                documentation = if String.IsNullOrWhiteSpace scopes then None else Some(sprintf "Scopes: %s" scopes)
                                                 parameters = parameters } ]
                                           activeSignature = Some 0
                                           activeParameter = None }
                             | None -> None
-                        | None -> None
                     | None -> None
             }
             |> catchError None
@@ -6189,12 +6259,13 @@ type Server(client: ILanguageClient) =
                     | Some game ->
                         let position = PosHelper.fromZ p.position.line p.position.character
                         let path = getPathFromDoc p.textDocument.uri
+                        let text = docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue ""
 
                         let gototype =
-                            game.FindAllRefs
-                                position
-                                path
-                                (docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue "")
+                            if PdxShaderFeatures.isShaderFile path then
+                                Some(PdxShaderFeatures.referencesAt (game.AllFiles()) position path text)
+                            else
+                                game.FindAllRefs position path text
 
                         match gototype with
                         | Some gotos ->
@@ -6215,12 +6286,13 @@ type Server(client: ILanguageClient) =
                         let position = PosHelper.fromZ p.position.line p.position.character
                         let path = getPathFromDoc p.textDocument.uri
                         let currentUri = p.textDocument.uri
+                        let text = docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue ""
 
                         let refs =
-                            game.FindAllRefs
-                                position
-                                path
-                                (docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue "")
+                            if PdxShaderFeatures.isShaderFile path then
+                                Some(PdxShaderFeatures.referencesAt (game.AllFiles()) position path text)
+                            else
+                                game.FindAllRefs position path text
 
                         match refs with
                         | Some locations ->
@@ -6366,25 +6438,70 @@ type Server(client: ILanguageClient) =
                         let types = game.Types()
                         let query = p.query.ToLowerInvariant()
 
-                        types
-                        |> Map.toList
-                        |> List.collect (fun (typeName, vs) ->
-                            if typeName.Contains(".") then []
-                            else
-                                vs
-                                |> Array.toList
-                                |> List.filter (fun tdi ->
-                                    query.Length = 0
-                                    || tdi.id.ToLowerInvariant().Contains(query)
-                                    || typeName.ToLowerInvariant().Contains(query))
-                                |> List.map (fun tdi ->
-                                    let kind = symbolKindForType typeName
-                                    { name = tdi.id
-                                      kind = kind
-                                      location =
-                                        { uri = filePathToUri(tdi.range.FileName)
-                                          range = convRangeToLSPRange tdi.range }
-                                      containerName = Some typeName }))
+                        let scriptSymbols =
+                            types
+                            |> Map.toList
+                            |> List.collect (fun (typeName, vs) ->
+                                if typeName.Contains(".") then []
+                                else
+                                    vs
+                                    |> Array.toList
+                                    |> List.filter (fun tdi ->
+                                        query.Length = 0
+                                        || tdi.id.ToLowerInvariant().Contains(query)
+                                        || typeName.ToLowerInvariant().Contains(query))
+                                    |> List.map (fun tdi ->
+                                        let kind = symbolKindForType typeName
+                                        { name = tdi.id
+                                          kind = kind
+                                          location =
+                                            { uri = filePathToUri(tdi.range.FileName)
+                                              range = convRangeToLSPRange tdi.range }
+                                          containerName = Some typeName }))
+                        let shaderKind declarationKind =
+                            match declarationKind with
+                            | PdxShaderRuntime.EffectDeclaration -> SymbolKind.Method, "shader.effect"
+                            | PdxShaderRuntime.HlslFunctionDeclaration -> SymbolKind.Function, "shader.function"
+                            | PdxShaderRuntime.HlslTypeDeclaration
+                            | PdxShaderRuntime.VertexStructDeclaration -> SymbolKind.Class, "shader.type"
+                            | PdxShaderRuntime.ConstantBufferDeclaration -> SymbolKind.Module, "shader.constant_buffer"
+                            | PdxShaderRuntime.SamplerDeclaration
+                            | PdxShaderRuntime.ShaderResourceDeclaration
+                            | PdxShaderRuntime.HlslVariableDeclaration -> SymbolKind.Variable, "shader.variable"
+                            | PdxShaderRuntime.MacroDeclaration -> SymbolKind.Constant, "shader.macro"
+                            | PdxShaderRuntime.BlendStateDeclaration
+                            | PdxShaderRuntime.DepthStencilStateDeclaration
+                            | PdxShaderRuntime.RasterizerStateDeclaration -> SymbolKind.Enum, "shader.state"
+                            | PdxShaderRuntime.VertexMainCodeDeclaration
+                            | PdxShaderRuntime.PixelMainCodeDeclaration
+                            | PdxShaderRuntime.GeometryMainCodeDeclaration -> SymbolKind.Function, "shader.maincode"
+                        let openDocuments =
+                            docs.OpenFiles()
+                            |> List.choose (fun file ->
+                                if PdxShaderFeatures.isShaderFile file.FullName then
+                                    docs.GetText file |> Option.map (fun text -> file.FullName, text)
+                                else None)
+                        let shaderSymbols =
+                            PdxShaderRuntime.buildModel
+                                (if activeGame = STL then stlGameVersion else None)
+                                (game.AllFiles())
+                                openDocuments
+                            |> _.declarations
+                            |> List.choose (fun declaration ->
+                                let kind, container = shaderKind declaration.kind
+                                if query.Length > 0
+                                   && not (declaration.name.ToLowerInvariant().Contains(query))
+                                   && not (container.Contains(query)) then None
+                                else
+                                    Some
+                                        { name = declaration.name
+                                          kind = kind
+                                          location =
+                                            { uri = filePathToUri(declaration.file)
+                                              range = convRangeToLSPRange declaration.selectionRange }
+                                          containerName = Some container })
+                        scriptSymbols @ shaderSymbols
+                        |> List.distinctBy (fun symbol -> symbol.name, symbol.containerName, symbol.location.uri, symbol.location.range.start.line, symbol.location.range.start.character)
                         |> List.sortBy (fun symbol ->
                             let container = symbol.containerName |> Option.defaultValue ""
                             symbolScore query container symbol.name, symbol.name.Length, symbol.name, container)
@@ -6399,6 +6516,15 @@ type Server(client: ILanguageClient) =
                     match gameObj with
                     | Some game ->
                         let path = getPathFromDoc p.textDocument.uri
+                        let shaderActions =
+                            if PdxShaderFeatures.isShaderFile path then
+                                Some
+                                    [ { title = "Validate shader compile unit"
+                                        command = "cwtools.ai.shader.validate"
+                                        arguments =
+                                            [ JsonValue.Record
+                                                [| "uri", JsonValue.String(p.textDocument.uri.ToString()) |] ] } ]
+                            else None
 
                         let les =
                             match locCache.TryGetValue(path) with
@@ -6442,17 +6568,20 @@ type Server(client: ILanguageClient) =
                                           JsonValue.String mode ] })
                             | _ -> []
 
-                        match les with
-                        | [] -> ces @ definitionInjectionModeActions
-                        | _ ->
-                            ces
-                            @ definitionInjectionModeActions
-                            @ [ { title = "Generate localisation .yml for this file"
-                                  command = "genlocfile"
-                                  arguments = [ p.textDocument.uri.LocalPath |> JsonValue.String ] }
-                                { title = "Generate localisation .yml for all"
-                                  command = "genlocall"
-                                  arguments = [] } ]
+                        match shaderActions with
+                        | Some actions -> actions
+                        | None ->
+                            match les with
+                            | [] -> ces @ definitionInjectionModeActions
+                            | _ ->
+                                ces
+                                @ definitionInjectionModeActions
+                                @ [ { title = "Generate localisation .yml for this file"
+                                      command = "genlocfile"
+                                      arguments = [ p.textDocument.uri.LocalPath |> JsonValue.String ] }
+                                    { title = "Generate localisation .yml for all"
+                                      command = "genlocall"
+                                      arguments = [] } ]
                     | None -> []
             }
 
@@ -6524,7 +6653,40 @@ type Server(client: ILanguageClient) =
             |> catchError p
 
         member this.InlayHint(p: InlayHintParams) =
-            async {
+            let shaderFilePath = FileInfo(p.textDocument.uri.LocalPath).FullName
+            if PdxShaderFeatures.isShaderFile shaderFilePath then
+                async {
+                    if not showInlineText then return []
+                    else
+                        let shaderText =
+                            docs.GetTextByPath(shaderFilePath)
+                            |> Option.defaultValue (try File.ReadAllText(shaderFilePath) with _ -> "")
+                        let positionAtOffset offset =
+                            let bounded = max 0 (min shaderText.Length offset)
+                            let mutable line = 0
+                            let mutable column = 0
+                            for index = 0 to bounded - 1 do
+                                if shaderText.[index] = '\n' then
+                                    line <- line + 1
+                                    column <- 0
+                                else
+                                    column <- column + 1
+                            { line = line; character = column }
+                        return
+                            PdxShaderFeatures.inlayHints shaderFilePath shaderText
+                            |> List.map (fun hint ->
+                                { position = positionAtOffset hint.offset
+                                  label = hint.label
+                                  paddingLeft = true
+                                  paddingRight = false })
+                            |> List.filter (fun hint ->
+                                (hint.position.line > p.range.start.line
+                                 || (hint.position.line = p.range.start.line && hint.position.character >= p.range.start.character))
+                                && (hint.position.line < p.range.``end``.line
+                                    || (hint.position.line = p.range.``end``.line && hint.position.character <= p.range.``end``.character)))
+                }
+                |> catchError []
+            else async {
                 if not showInlineText then return []
                 else
                     let filePath = FileInfo(p.textDocument.uri.LocalPath).FullName
@@ -6867,27 +7029,42 @@ type Server(client: ILanguageClient) =
         member this.SemanticTokensFull(p: SemanticTokensParams) =
             // Token type indices (must match legend in capabilities):
             async {
+                let! cancellationToken = Async.CancellationToken
+
                 let semanticTokensFunction (game: IGame<_>) =
+                    cancellationToken.ThrowIfCancellationRequested()
                     // - Content-hash cache: skip full AST traversal if file unchanged -
                     let filePath = p.textDocument.uri.LocalPath
-                    let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                    let fileInfo = FileInfo(filePath)
+                    let fileText, documentVersion =
+                        match docs.Get(fileInfo) with
+                        | Some(text, version) -> text, Some version
+                        | None ->
+                            let diskText =
+                                try File.ReadAllText fileInfo.FullName
+                                with _ -> ""
+                            diskText, None
+
+                    let documentStillCurrent () = docs.GetVersion(fileInfo) = documentVersion
                     let hash = contentHash fileText
                     match semanticTokensCache.TryGetValue(filePath) with
-                    | true, (cachedHash, cachedData, cachedResultId) when cachedHash = hash ->
+                    | true, (_, cachedHash, cachedData, cachedResultId) when cachedHash = hash && documentStillCurrent () ->
+                        cachePut semanticTokensCache filePath (documentVersion, cachedHash, cachedData, cachedResultId)
                         Some { data = Array.toList cachedData; resultId = Some cachedResultId }
-                    | true, _ ->
-                        // File modified! We want to cancel semantic updates until it is reopened.
-                        // Returning None translates to [[CANCEL]] error so VS Code shifts tokens natively.
+                    | _ when
+                        not (PdxShaderFeatures.isShaderFile filePath)
+                        && isCompletionHeavyEditPath filePath
+                        && isCompletionHeavyInteractiveWindow () ->
                         None
-                    | false, _ when isCompletionHeavyEditPath filePath && isCompletionHeavyInteractiveWindow () ->
-                        None
-                    | false, _ ->
+                    | _ ->
                         let dataArray = computeTokensForFile game filePath fileText
-                        if dataArray.Length = 0 then
+                        cancellationToken.ThrowIfCancellationRequested()
+
+                        if not (documentStillCurrent ()) then
                             None
                         else
                             let resultId = Guid.NewGuid().ToString()
-                            cachePut semanticTokensCache filePath (hash, dataArray, resultId)
+                            cachePut semanticTokensCache filePath (documentVersion, hash, dataArray, resultId)
                             evictIfNeeded semanticTokensCache
                             Some { data = Array.toList dataArray; resultId = Some resultId }
 
@@ -6903,32 +7080,50 @@ type Server(client: ILanguageClient) =
 
         member this.SemanticTokensFullDelta(p: SemanticTokensDeltaParams) =
             async {
+                let! cancellationToken = Async.CancellationToken
+
                 let semanticTokensFullDeltaFunction (game: IGame<_>) =
+                    cancellationToken.ThrowIfCancellationRequested()
                     let filePath = p.textDocument.uri.LocalPath
-                    let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                    let fileInfo = FileInfo(filePath)
+                    let fileText, documentVersion =
+                        match docs.Get(fileInfo) with
+                        | Some(text, version) -> text, Some version
+                        | None ->
+                            let diskText =
+                                try File.ReadAllText fileInfo.FullName
+                                with _ -> ""
+                            diskText, None
+
+                    let documentStillCurrent () = docs.GetVersion(fileInfo) = documentVersion
                     let hash = contentHash fileText
                     match semanticTokensCache.TryGetValue(filePath) with
-                    | true, (cachedHash, cachedData, cachedResultId) when cachedHash = hash ->
+                    | true, (_, cachedHash, cachedData, cachedResultId) when cachedHash = hash && documentStillCurrent () ->
+                        cachePut semanticTokensCache filePath (documentVersion, cachedHash, cachedData, cachedResultId)
                         if p.previousResultId = cachedResultId then
                             Some(Choice2Of2 { resultId = cachedResultId; edits = [] })
                         else
                             Some(Choice1Of2 { data = Array.toList cachedData; resultId = Some cachedResultId })
-                    | true, _ when isCompletionHeavyEditPath filePath ->
+                    | true, _ when not (PdxShaderFeatures.isShaderFile filePath) && isCompletionHeavyEditPath filePath ->
                         // Dynamic definition files are completion-heavy. After each
                         // accepted suggestion, VS Code immediately asks for semantic
                         // token deltas; recomputing them walks the old game AST and
                         // can delay the next completion. Cancel and let VS Code shift
                         // existing tokens until the next stable full refresh.
                         None
-                    | _ when isCompletionHeavyEditPath filePath && isCompletionHeavyInteractiveWindow () ->
+                    | _ when
+                        not (PdxShaderFeatures.isShaderFile filePath)
+                        && isCompletionHeavyEditPath filePath
+                        && isCompletionHeavyInteractiveWindow () ->
                         None
-                    | true, (_, oldDataArray, oldResultId) ->
+                    | true, (_, _, oldDataArray, oldResultId) ->
                         let newDataArray = computeTokensForFile game filePath fileText
-                        if newDataArray.Length = 0 then
-                            Some(Choice1Of2 { data = []; resultId = None })
+                        cancellationToken.ThrowIfCancellationRequested()
+
+                        if not (documentStillCurrent ()) then None
                         else
                             let newResultId = Guid.NewGuid().ToString()
-                            cachePut semanticTokensCache filePath (hash, newDataArray, newResultId)
+                            cachePut semanticTokensCache filePath (documentVersion, hash, newDataArray, newResultId)
                             evictIfNeeded semanticTokensCache
                             if p.previousResultId = oldResultId then
                                 let edit = computeDelta oldDataArray newDataArray
@@ -6937,11 +7132,12 @@ type Server(client: ILanguageClient) =
                                 Some(Choice1Of2 { data = Array.toList newDataArray; resultId = Some newResultId })
                     | _ ->
                         let newDataArray = computeTokensForFile game filePath fileText
-                        if newDataArray.Length = 0 then
-                            Some(Choice1Of2 { data = []; resultId = None })
+                        cancellationToken.ThrowIfCancellationRequested()
+
+                        if not (documentStillCurrent ()) then None
                         else
                             let newResultId = Guid.NewGuid().ToString()
-                            cachePut semanticTokensCache filePath (hash, newDataArray, newResultId)
+                            cachePut semanticTokensCache filePath (documentVersion, hash, newDataArray, newResultId)
                             evictIfNeeded semanticTokensCache
                             Some(Choice1Of2 { data = Array.toList newDataArray; resultId = Some newResultId })
                 let visitor =
@@ -6952,6 +7148,258 @@ type Server(client: ILanguageClient) =
                     |> Option.flatten
             }
             |> catchError None
+
+        member this.FoldingRanges(p: FoldingRangeParams) =
+            async {
+                let filePath = getPathFromDoc p.textDocument.uri
+                if not (PdxShaderFeatures.isShaderFile filePath) then return []
+                else
+                    let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                    return
+                        PdxShaderFeatures.foldingRanges filePath fileText
+                        |> List.map (fun shaderRange ->
+                            { startLine = max 0 (int shaderRange.StartLine - 1)
+                              startCharacter = Some(int shaderRange.StartColumn)
+                              endLine = max 0 (int shaderRange.EndLine - 1)
+                              endCharacter = Some(int shaderRange.EndColumn)
+                              kind = Some "region" })
+                        |> List.distinctBy (fun item -> item.startLine, item.startCharacter, item.endLine, item.endCharacter)
+                        |> List.sortBy (fun item -> item.startLine, item.startCharacter, item.endLine, item.endCharacter)
+            }
+            |> catchError []
+
+        member this.SelectionRanges(p: SelectionRangeParams) =
+            async {
+                let filePath = getPathFromDoc p.textDocument.uri
+                let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                let rec toSelectionRange ranges =
+                    match ranges with
+                    | [] -> None
+                    | shaderRange :: rest ->
+                        Some
+                            { range = convRangeToLSPRange shaderRange
+                              parent = toSelectionRange rest }
+                return
+                    p.positions
+                    |> List.map (fun position ->
+                        if PdxShaderFeatures.isShaderFile filePath then
+                            PdxShaderFeatures.selectionRangesAt
+                                (PosHelper.fromZ position.line position.character)
+                                filePath
+                                fileText
+                            |> toSelectionRange
+                            |> Option.defaultValue
+                                { range = { start = position; ``end`` = position }
+                                  parent = None }
+                        else
+                            { range = { start = position; ``end`` = position }
+                              parent = None })
+            }
+            |> catchError []
+
+        member this.PrepareCallHierarchy(p: TextDocumentPositionParams) =
+            async {
+                return
+                    match gameObj with
+                    | Some game ->
+                        let filePath = getPathFromDoc p.textDocument.uri
+                        if not (PdxShaderFeatures.isShaderFile filePath) then []
+                        else
+                            let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                            let cursor = PosHelper.fromZ p.position.line p.position.character
+                            let targetName =
+                                PdxShaderFeatures.renameTargetAt (game.AllFiles()) cursor filePath fileText
+                                |> Option.map _.name
+                            let openDocuments =
+                                docs.OpenFiles()
+                                |> List.choose (fun file ->
+                                    if PdxShaderFeatures.isShaderFile file.FullName
+                                       || PdxShaderRuntime.isEvidenceScriptFile file.FullName then
+                                        docs.GetText file |> Option.map (fun text -> file.FullName, text)
+                                    else None)
+                            let model =
+                                PdxShaderRuntime.buildModel
+                                    (if activeGame = STL then stlGameVersion else None)
+                                    (game.AllFiles())
+                                    openDocuments
+                            model.declarations
+                            |> List.filter (fun declaration ->
+                                match declaration.kind with
+                                | PdxShaderRuntime.EffectDeclaration
+                                | PdxShaderRuntime.VertexMainCodeDeclaration
+                                | PdxShaderRuntime.PixelMainCodeDeclaration
+                                | PdxShaderRuntime.GeometryMainCodeDeclaration
+                                | PdxShaderRuntime.HlslFunctionDeclaration ->
+                                    rangeContainsPos declaration.selectionRange cursor
+                                    || targetName |> Option.exists (fun name -> declaration.name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                                | _ -> false)
+                            |> List.map (fun declaration ->
+                                { name = declaration.name
+                                  kind = 12
+                                  detail =
+                                    Some(
+                                        if declaration.kind = PdxShaderRuntime.EffectDeclaration then "Paradox Shader runtime Effect"
+                                        else "Paradox Shader HLSL/compile-unit call")
+                                  uri = filePathToUri(declaration.file)
+                                  range = convRangeToLSPRange declaration.range
+                                  selectionRange = convRangeToLSPRange declaration.selectionRange
+                                  data =
+                                    Some(
+                                        JsonValue.Record
+                                            [| "domain", JsonValue.String "shader_declaration"
+                                               "stableId", JsonValue.String declaration.stableId |]) })
+                            |> List.distinctBy (fun item -> item.uri, item.selectionRange.start.line, item.selectionRange.start.character, item.name)
+                    | None -> []
+            }
+            |> catchError []
+
+        member this.CallHierarchyIncomingCalls(p: CallHierarchyIncomingCallsParams) =
+            async {
+                return
+                    match gameObj with
+                    | Some game ->
+                        let stringData name =
+                            p.item.data
+                            |> Option.bind (function
+                                | JsonValue.Record fields ->
+                                    fields
+                                    |> Array.tryPick (fun (key, value) ->
+                                        if key = name then
+                                            match value with JsonValue.String text -> Some text | _ -> None
+                                        else None)
+                                | _ -> None)
+                        match stringData "stableId", stringData "domain" with
+                        | Some stableId, Some "runtime_call" -> []
+                        | Some stableId, _ ->
+                            let openDocuments =
+                                docs.OpenFiles()
+                                |> List.choose (fun file ->
+                                    if PdxShaderFeatures.isShaderFile file.FullName
+                                       || PdxShaderRuntime.isEvidenceScriptFile file.FullName then
+                                        docs.GetText file |> Option.map (fun text -> file.FullName, text)
+                                    else None)
+                            let model =
+                                PdxShaderRuntime.buildModel
+                                    (if activeGame = STL then stlGameVersion else None)
+                                    (game.AllFiles())
+                                    openDocuments
+                            let declarationItem (declaration: PdxShaderRuntime.ShaderDeclaration) : CallHierarchyItem =
+                                { name = declaration.name
+                                  kind = 12
+                                  detail = Some "Paradox Shader semantic call"
+                                  uri = filePathToUri(declaration.file)
+                                  range = convRangeToLSPRange declaration.range
+                                  selectionRange = convRangeToLSPRange declaration.selectionRange
+                                  data =
+                                    Some(
+                                        JsonValue.Record
+                                            [| "domain", JsonValue.String "shader_declaration"
+                                               "stableId", JsonValue.String declaration.stableId |]) }
+                            let semanticCalls =
+                                model.semanticReferences
+                                |> List.filter (fun reference -> reference.targetIds |> List.contains stableId)
+                                |> List.choose (fun reference ->
+                                    reference.sourceId
+                                    |> Option.bind (fun sourceId -> model.declarations |> List.tryFind (fun declaration -> declaration.stableId = sourceId))
+                                    |> Option.map (fun source ->
+                                        { ``from`` = declarationItem source
+                                          fromRanges = [ convRangeToLSPRange reference.span ] }))
+                            let runtimeCalls =
+                                model.effects
+                                |> List.tryFind (fun effect -> effect.declaration.stableId = stableId)
+                                |> Option.map _.allEvidence
+                                |> Option.defaultValue []
+                                |> List.map (fun evidence ->
+                                    let callerName =
+                                        evidence.interfaceSprite
+                                        |> Option.orElse evidence.enclosingBlock
+                                        |> Option.defaultValue (Path.GetFileName(evidence.sourceFile))
+                                    { ``from`` =
+                                        { name = callerName
+                                          kind = 12
+                                          detail = Some(sprintf "Shader runtime call (%A)" evidence.kind)
+                                          uri = filePathToUri(evidence.sourceFile)
+                                          range = convRangeToLSPRange evidence.span
+                                          selectionRange = convRangeToLSPRange evidence.span
+                                          data =
+                                            Some(
+                                                JsonValue.Record
+                                                    [| "domain", JsonValue.String "runtime_call"
+                                                       "stableId", JsonValue.String stableId |]) }
+                                      fromRanges = [ convRangeToLSPRange evidence.span ] })
+                            semanticCalls @ runtimeCalls
+                            |> List.sortBy (fun call -> call.``from``.uri.LocalPath, call.``from``.selectionRange.start.line, call.``from``.selectionRange.start.character)
+                        | _ -> []
+                    | None -> []
+            }
+            |> catchError []
+
+        member this.CallHierarchyOutgoingCalls(p: CallHierarchyOutgoingCallsParams) =
+            async {
+                return
+                    match gameObj with
+                    | Some game ->
+                        let stringData name =
+                            p.item.data
+                            |> Option.bind (function
+                                | JsonValue.Record fields ->
+                                    fields
+                                    |> Array.tryPick (fun (key, value) ->
+                                        if key = name then
+                                            match value with JsonValue.String text -> Some text | _ -> None
+                                        else None)
+                                | _ -> None)
+                        match stringData "stableId" with
+                        | None -> []
+                        | Some stableId ->
+                            let openDocuments =
+                                docs.OpenFiles()
+                                |> List.choose (fun file ->
+                                    if PdxShaderFeatures.isShaderFile file.FullName
+                                       || PdxShaderRuntime.isEvidenceScriptFile file.FullName then
+                                        docs.GetText file |> Option.map (fun text -> file.FullName, text)
+                                    else None)
+                            let model =
+                                PdxShaderRuntime.buildModel
+                                    (if activeGame = STL then stlGameVersion else None)
+                                    (game.AllFiles())
+                                    openDocuments
+                            let declarationItem (declaration: PdxShaderRuntime.ShaderDeclaration) : CallHierarchyItem =
+                                { name = declaration.name
+                                  kind = 12
+                                  detail = Some "Paradox Shader semantic call"
+                                  uri = filePathToUri(declaration.file)
+                                  range = convRangeToLSPRange declaration.range
+                                  selectionRange = convRangeToLSPRange declaration.selectionRange
+                                  data =
+                                    Some(
+                                        JsonValue.Record
+                                            [| "domain", JsonValue.String "shader_declaration"
+                                               "stableId", JsonValue.String declaration.stableId |]) }
+                            if stringData "domain" = Some "runtime_call" then
+                                model.declarations
+                                |> List.filter (fun declaration -> declaration.stableId = stableId)
+                                |> List.map (fun declaration ->
+                                    { ``to`` = declarationItem declaration
+                                      fromRanges = [ p.item.selectionRange ] })
+                            else
+                                model.semanticReferences
+                                |> List.filter (fun reference -> reference.sourceId = Some stableId)
+                                |> List.collect (fun reference ->
+                                    let exactTargets =
+                                        model.declarations
+                                        |> List.filter (fun declaration -> reference.targetIds |> List.contains declaration.stableId)
+                                    let targets =
+                                        if not exactTargets.IsEmpty then exactTargets
+                                        else model.declarations |> List.filter (fun declaration -> declaration.name.Equals(reference.targetName, StringComparison.OrdinalIgnoreCase))
+                                    targets
+                                    |> List.map (fun target ->
+                                        { ``to`` = declarationItem target
+                                          fromRanges = [ convRangeToLSPRange reference.span ] }))
+                                |> List.sortBy (fun call -> call.``to``.uri.LocalPath, call.``to``.selectionRange.start.line, call.``to``.selectionRange.start.character)
+                    | None -> []
+            }
+            |> catchError []
 
         member this.DocumentFormatting(p: DocumentFormattingParams) =
             async {
@@ -6977,6 +7425,18 @@ type Server(client: ILanguageClient) =
                                 [ { range = createRange 0 0 100000 0
                                     newText = formatted } ]
                         | None -> return []
+                    elif PdxShaderFeatures.isShaderFile path then
+                        let formatted =
+                            PdxShaderFeatures.formatDocument
+                                p.options.insertSpaces
+                                p.options.tabSize
+                                path
+                                fileText
+                        if String.Equals(formatted, fileText, StringComparison.Ordinal) then return []
+                        else
+                            return
+                                [ { range = createRange 0 0 100000 0
+                                    newText = formatted } ]
                     elif extension.Equals(".gui", StringComparison.OrdinalIgnoreCase) then
                         return []
                     else
@@ -7104,10 +7564,52 @@ type Server(client: ILanguageClient) =
                     sameFile tdi.range.FileName target.FileName
                     && (rangeContainsRange tdi.range target || rangeContainsRange target tdi.range))
 
+            let shaderPrepareResult =
+                match gameObj with
+                | Some game ->
+                    let path = getPathFromDoc p.textDocument.uri
+                    if not (PdxShaderFeatures.isShaderFile path) then None
+                    else
+                        let text = readDocumentText path
+                        let target =
+                            PdxShaderFeatures.renameTargetAt
+                                (game.AllFiles())
+                                (PosHelper.fromZ p.position.line p.position.character)
+                                path
+                                text
+                        let allowedTarget =
+                            target
+                            |> Option.filter (fun value ->
+                                if not (value.kind.Equals("effect", StringComparison.OrdinalIgnoreCase)) then true
+                                else
+                                    let openDocuments =
+                                        docs.OpenFiles()
+                                        |> List.choose (fun file ->
+                                            if PdxShaderFeatures.isShaderFile file.FullName
+                                               || PdxShaderRuntime.isEvidenceScriptFile file.FullName then
+                                                docs.GetText file |> Option.map (fun contents -> file.FullName, contents)
+                                            else None)
+                                    let model =
+                                        PdxShaderRuntime.buildModel
+                                            (if activeGame = STL then stlGameVersion else None)
+                                            (game.AllFiles())
+                                            openDocuments
+                                    match PdxShaderRuntime.renamePolicy model value.name with
+                                    | PdxShaderRuntime.RenameAllowed _ -> true
+                                    | PdxShaderRuntime.RenameRequiresExplicitForce _
+                                    | PdxShaderRuntime.RenameDenied _ -> false)
+                        Some(
+                            allowedTarget
+                            |> Option.map (fun target ->
+                                { range = convRangeToLSPRange target.range
+                                  placeholder = target.name }))
+                | None -> None
+
             async {
                 return
-                    match gameObj with
-                    | Some game ->
+                    match shaderPrepareResult, gameObj with
+                    | Some result, _ -> result
+                    | None, Some game ->
                         let position = PosHelper.fromZ p.position.line p.position.character
                         let path = getPathFromDoc p.textDocument.uri
                         let sourceText = readDocumentText path
@@ -7152,7 +7654,7 @@ type Server(client: ILanguageClient) =
                             |> Option.map (fun placeholder ->
                                 { range = convRangeToLSPRange r
                                   placeholder = placeholder }))
-                    | None -> None
+                    | None, None -> None
             }
             |> catchError None
 
@@ -7376,10 +7878,69 @@ type Server(client: ILanguageClient) =
                         || rangeContainsRange tdi.range target
                         || rangeContainsRange target tdi.range))
 
+            let shaderRenameResult =
+                match gameObj with
+                | Some game ->
+                    let path = getPathFromDoc p.textDocument.uri
+                    if not (PdxShaderFeatures.isShaderFile path) then None
+                    else
+                        let text = readDocumentText path
+                        let validNewName =
+                            not (String.IsNullOrWhiteSpace p.newName)
+                            && System.Text.RegularExpressions.Regex.IsMatch(p.newName, "^[A-Za-z_][A-Za-z0-9_]*$")
+                        let target =
+                            if not validNewName then None
+                            else
+                                PdxShaderFeatures.renameTargetAt
+                                    (game.AllFiles())
+                                    (PosHelper.fromZ p.position.line p.position.character)
+                                    path
+                                    text
+                        let allowedTarget =
+                            target
+                            |> Option.filter (fun value ->
+                                if String.Equals(value.name, p.newName, StringComparison.Ordinal) then false
+                                elif not (value.kind.Equals("effect", StringComparison.OrdinalIgnoreCase)) then true
+                                else
+                                    let openDocuments =
+                                        docs.OpenFiles()
+                                        |> List.choose (fun file ->
+                                            if PdxShaderFeatures.isShaderFile file.FullName
+                                               || PdxShaderRuntime.isEvidenceScriptFile file.FullName then
+                                                docs.GetText file |> Option.map (fun contents -> file.FullName, contents)
+                                            else None)
+                                    let model =
+                                        PdxShaderRuntime.buildModel
+                                            (if activeGame = STL then stlGameVersion else None)
+                                            (game.AllFiles())
+                                            openDocuments
+                                    match PdxShaderRuntime.renamePolicy model value.name with
+                                    | PdxShaderRuntime.RenameAllowed _ -> true
+                                    | PdxShaderRuntime.RenameRequiresExplicitForce _
+                                    | PdxShaderRuntime.RenameDenied _ -> false)
+                        let changes =
+                            allowedTarget
+                            |> Option.map (fun value -> value.edits)
+                            |> Option.defaultValue []
+                            |> List.distinctBy rangeKey
+                            |> List.sortBy rangeKey
+                            |> List.groupBy _.FileName
+                            |> List.sortBy fst
+                            |> List.map (fun (fileName, ranges) ->
+                                filePathToUri(fileName).ToString(),
+                                (ranges
+                                 |> List.map (fun editRange ->
+                                     { range = convRangeToLSPRange editRange
+                                       newText = p.newName })))
+                            |> Map.ofList
+                        Some { documentChanges = None; changes = changes }
+                | None -> None
+
             async {
                 return
-                    match gameObj with
-                    | Some game ->
+                    match shaderRenameResult, gameObj with
+                    | Some result, _ -> result
+                    | None, Some game ->
                         let position = PosHelper.fromZ p.position.line p.position.character
                         let path = getPathFromDoc p.textDocument.uri
                         let sourceText = readDocumentText path
@@ -7499,7 +8060,7 @@ type Server(client: ILanguageClient) =
 
                             { documentChanges = None; changes = changes }
                         | _ -> { documentChanges = None; changes = Map.empty }
-                    | None -> { documentChanges = None; changes = Map.empty }
+                    | None, None -> { documentChanges = None; changes = Map.empty }
             }
             |> catchError { documentChanges = None; changes = Map.empty }
 
@@ -7569,7 +8130,1087 @@ type Server(client: ILanguageClient) =
                                        [| "start", codeLensPositionJson lspRange.start.line lspRange.start.character
                                           "end", codeLensPositionJson lspRange.``end``.line lspRange.``end``.character |] |]
 
+                        // - cwtools.ai.shader.* shared helpers -
+                        // All Shader queries are read-only; preflightEdit only analyzes the
+                        // proposed text. Errors carry the operation and offending target.
+                        let shaderErrorJson (operation: string) (target: string) (message: string) =
+                            JsonValue.Record
+                                [| "ok", JsonValue.Boolean false
+                                   "status", JsonValue.String "error"
+                                   "operation", JsonValue.String operation
+                                   "target", JsonValue.String target
+                                   "error", JsonValue.String message |]
+
+                        let shaderArgsRecord (args: JsonValue list) =
+                            args
+                            |> List.tryHead
+                            |> Option.bind (function JsonValue.Record fields -> Some fields | _ -> None)
+                            |> Option.defaultValue [||]
+
+                        let shaderTryProperty name (fields: (string * JsonValue) array) =
+                            fields |> Array.tryPick (fun (key, value) -> if key = name then Some value else None)
+
+                        let shaderStringProperty name fields =
+                            match shaderTryProperty name fields with
+                            | Some (JsonValue.String value) when not (String.IsNullOrWhiteSpace value) -> Some value
+                            | _ -> None
+
+                        let shaderRawStringProperty name fields =
+                            match shaderTryProperty name fields with
+                            | Some (JsonValue.String value) -> Some value
+                            | _ -> None
+
+                        let shaderIntProperty name fields =
+                            match shaderTryProperty name fields with
+                            | Some (JsonValue.Number value) -> Some(int value)
+                            | _ -> None
+
+                        let shaderLimit (operation: string) fields : Choice<int, JsonValue> =
+                            match shaderIntProperty "limit" fields with
+                            | None -> Choice1Of2 100
+                            | Some value when value >= 1 && value <= 500 -> Choice1Of2 value
+                            | Some _ -> Choice2Of2(shaderErrorJson operation "limit" "limit must be between 1 and 500.")
+
+                        let shaderCursor fields =
+                            match shaderIntProperty "cursor" fields with
+                            | Some value when value >= 0 -> value
+                            | _ -> 0
+
+                        let shaderOriginName (origin: PdxShaderProject.ShaderOrigin) =
+                            match origin with
+                            | PdxShaderProject.CurrentDocument -> "current_document"
+                            | PdxShaderProject.Workspace -> "workspace"
+                            | PdxShaderProject.Dependency order -> sprintf "dependency:%d" order
+                            | PdxShaderProject.Vanilla -> "vanilla"
+
+                        let captureOpenShaderScriptDocuments () =
+                            docs.OpenFiles()
+                            |> List.choose (fun (fileInfo: FileInfo) ->
+                                let path = fileInfo.FullName
+
+                                if
+                                    PdxShaderFeatures.isShaderFile path
+                                    || PdxShaderRuntime.isEvidenceScriptFile path
+                                then
+                                    docs.Get fileInfo |> Option.map (fun (text, version) -> path, text, version)
+                                else
+                                    None)
+                            |> List.sortBy (fun (path, _, _) -> PdxShaderProject.canonicalizePath path)
+
+                        let openShaderScriptDocuments () =
+                            captureOpenShaderScriptDocuments ()
+                            |> List.map (fun (path, text, _) -> path, text)
+
+                        let shaderRuntimeModel () =
+                            let rec resolve attempt =
+                                let epoch = modelEpochSnapshot ()
+                                let captured = captureOpenShaderScriptDocuments ()
+                                let openDocs = captured |> List.map (fun (path, text, _) -> path, text)
+                                let shaderGameVersion = if activeGame = STL then stlGameVersion else None
+
+                                // Do not use String.GetHashCode here: a collision or
+                                // nondeterministic dictionary order could reuse the
+                                // wrong immutable runtime graph. Content hashes keep
+                                // the one-entry key deterministic and auditable.
+                                let documentKey =
+                                    [ yield shaderGameVersion |> Option.defaultValue "unknown"
+                                      for path, text, version in captured do
+                                          yield
+                                              String.concat
+                                                  "|"
+                                                  [ PdxShaderProject.canonicalizePath path
+                                                    string version
+                                                    PdxShaderProject.contentHashForText text ] ]
+                                    |> String.concat "\n"
+
+                                let model =
+                                    lock shaderRuntimeModelCacheLock (fun () ->
+                                        match shaderRuntimeModelCache with
+                                        | Some(cachedEpoch, cachedDocumentKey, cachedModel) when
+                                            sameModelEpoch cachedEpoch epoch
+                                            && cachedDocumentKey = documentKey
+                                            ->
+                                            cachedModel
+                                        | _ ->
+                                            let rebuilt = PdxShaderRuntime.buildModel shaderGameVersion (game.AllFiles()) openDocs
+                                            shaderRuntimeModelCache <- Some(epoch, documentKey, rebuilt)
+                                            rebuilt)
+
+                                let documentsStillCurrent =
+                                    captured
+                                    |> List.forall (fun (path, _, version) -> docs.GetVersionByPath path = Some version)
+
+                                if documentsStillCurrent && sameModelEpoch epoch (modelEpochSnapshot ()) then
+                                    model
+                                elif attempt < 2 then
+                                    resolve (attempt + 1)
+                                else
+                                    raise (OperationCanceledException("Shader runtime inputs changed while the query was running."))
+
+                            resolve 0
+
+                        // A shader file path is accepted when it is inside a workspace root
+                        // or matches a known resource / vanilla / open-document shader file.
+                        let shaderPathFromUri (operation: string) (uriText: string) : Choice<string, JsonValue> =
+                            let filePath =
+                                try
+                                    getPathFromDoc (Uri uriText)
+                                with _ ->
+                                    ""
+
+                            if String.IsNullOrWhiteSpace filePath then
+                                Choice2Of2(shaderErrorJson operation uriText "uri is not a valid file URI.")
+                            elif not (PdxShaderFeatures.isShaderFile filePath) then
+                                Choice2Of2(shaderErrorJson operation uriText "uri must reference a .shader or .fxh file.")
+                            else
+                                let canonical = PdxShaderProject.canonicalizePath filePath
+
+                                let workspaceRoots =
+                                    match workspaceFolders with
+                                    | folders when not folders.IsEmpty -> folders |> List.map (fun folder -> folder.uri.LocalPath)
+                                    | _ -> rootUri |> Option.map (fun uri -> uri.LocalPath) |> Option.toList
+
+                                let inWorkspace =
+                                    workspaceRoots
+                                    |> List.exists (fun root ->
+                                        let rootCanonical = PdxShaderProject.canonicalizePath root
+
+                                        canonical = rootCanonical
+                                        || canonical.StartsWith(rootCanonical + "/", StringComparison.Ordinal))
+
+                                let isKnownResource =
+                                    game.AllFiles()
+                                    |> Seq.exists (fun resource ->
+                                        let path =
+                                            match resource with
+                                            | FileResource(_, r) -> r.filepath
+                                            | FileWithContentResource(_, r) -> r.filepath
+                                            | EntityResource(_, r) -> r.filepath
+
+                                        PdxShaderFeatures.isShaderFile path
+                                        && PdxShaderProject.canonicalizePath path = canonical)
+
+                                let isKnownVanilla =
+                                    PdxShaderFeatures.vanillaShaderSources ()
+                                    |> List.exists (fun source -> PdxShaderProject.canonicalizePath source.filepath = canonical)
+
+                                let isOpen = docs.GetTextByPath filePath |> Option.isSome
+
+                                if inWorkspace || isKnownResource || isKnownVanilla || isOpen then
+                                    Choice1Of2 filePath
+                                else
+                                    Choice2Of2(
+                                        shaderErrorJson operation uriText "path is outside the workspace and the known shader roots."
+                                    )
+
+                        let shaderEditPathFromUri (operation: string) (uriText: string) : Choice<string, JsonValue> =
+                            let filePath =
+                                try
+                                    getPathFromDoc (Uri uriText)
+                                with _ ->
+                                    ""
+
+                            if String.IsNullOrWhiteSpace filePath then
+                                Choice2Of2(shaderErrorJson operation uriText "uri is not a valid file URI.")
+                            elif PdxShaderFeatures.isShaderFile filePath then
+                                shaderPathFromUri operation uriText
+                            elif Path.GetExtension(filePath).Equals(".gfx", StringComparison.OrdinalIgnoreCase) then
+                                let canonical = PdxShaderProject.canonicalizePath filePath
+                                let workspaceRoots =
+                                    match workspaceFolders with
+                                    | folders when not folders.IsEmpty -> folders |> List.map (fun folder -> folder.uri.LocalPath)
+                                    | _ -> rootUri |> Option.map (fun uri -> uri.LocalPath) |> Option.toList
+                                let inWorkspace =
+                                    workspaceRoots
+                                    |> List.exists (fun root ->
+                                        let rootCanonical = PdxShaderProject.canonicalizePath root
+                                        canonical = rootCanonical
+                                        || canonical.StartsWith(rootCanonical + "/", StringComparison.Ordinal))
+
+                                if inWorkspace then Choice1Of2 filePath
+                                else Choice2Of2(shaderErrorJson operation uriText "interface .gfx writes must stay inside a workspace root.")
+                            else
+                                Choice2Of2(shaderErrorJson operation uriText "uri must reference a .shader, .fxh, or interface .gfx file.")
+
+                        let shaderEvidenceJson (model: PdxShaderRuntime.ShaderRuntimeModel) (evidence: PdxShaderRuntime.ShaderCallEvidence) =
+                            let invocation =
+                                model.interfaceSprites
+                                |> List.tryFind (fun candidate ->
+                                    PdxShaderProject.sameFilePath candidate.sourceFile evidence.sourceFile
+                                    && candidate.shaderFileSpan = evidence.span)
+
+                            let rendererContract =
+                                invocation |> Option.bind (PdxShaderRuntime.rendererContractForInvocation model)
+
+                            let rendererContractIssues =
+                                invocation
+                                |> Option.map (PdxShaderRuntime.validateRendererInvocation model)
+                                |> Option.defaultValue []
+
+                            let guiUses =
+                                match evidence.interfaceSprite with
+                                | Some spriteName ->
+                                    model.guiSpriteUses
+                                    |> List.filter (fun guiUse -> guiUse.spriteName.Equals(spriteName, StringComparison.OrdinalIgnoreCase))
+                                    |> List.sortBy (fun guiUse -> guiUse.sourceFile, guiUse.span.StartLine, guiUse.span.StartColumn)
+                                | None -> []
+
+                            let guiUseJson (guiUse: PdxShaderRuntime.GuiSpriteUse) =
+                                JsonValue.Record
+                                    [| "spriteName", JsonValue.String guiUse.spriteName
+                                       "file", JsonValue.String(guiUse.sourceFile.Replace('\\', '/'))
+                                       "logicalPath", JsonValue.String guiUse.logicalPath
+                                       "origin", JsonValue.String(shaderOriginName guiUse.origin)
+                                       "enclosingBlock",
+                                       (match guiUse.enclosingBlock with
+                                        | Some block -> JsonValue.String block
+                                        | None -> JsonValue.Null)
+                                       "range", locationToJson guiUse.span |]
+
+                            let rendererInputJson (input: PdxShaderRuntime.InterfaceSpriteInput) =
+                                JsonValue.Record
+                                    [| "field", JsonValue.String input.field
+                                       "value", JsonValue.String input.value
+                                       "range", locationToJson input.span |]
+
+                            JsonValue.Record
+                                [| "kind",
+                                   JsonValue.String(
+                                       match evidence.kind with
+                                       | PdxShaderRuntime.ShaderAssignment -> "shader_assignment"
+                                       | PdxShaderRuntime.EffectFileSelection -> "effect_file_selection"
+                                   )
+                                   "value", JsonValue.String evidence.value
+                                   "file", JsonValue.String(evidence.sourceFile.Replace('\\', '/'))
+                                   "logicalPath", JsonValue.String evidence.logicalPath
+                                   "origin", JsonValue.String(shaderOriginName evidence.origin)
+                                   "enclosingBlock",
+                                   (match evidence.enclosingBlock with
+                                    | Some block -> JsonValue.String block
+                                    | None -> JsonValue.Null)
+                                   "interfaceSprite",
+                                   (match evidence.interfaceSprite with
+                                    | Some name -> JsonValue.String name
+                                    | None -> JsonValue.Null)
+                                   "rendererSubtype",
+                                   (match evidence.rendererSubtype with
+                                    | Some subtype -> JsonValue.String subtype
+                                    | None -> JsonValue.Null)
+                                   "rendererInputs",
+                                   JsonValue.Array(
+                                       invocation
+                                       |> Option.map _.resourceInputs
+                                       |> Option.defaultValue []
+                                       |> List.map rendererInputJson
+                                       |> Array.ofList
+                                   )
+                                   "frameCount",
+                                   (match invocation |> Option.bind _.frameCount with
+                                    | Some count -> JsonValue.Number(decimal count)
+                                    | None -> JsonValue.Null)
+                                   "rendererContract",
+                                   (match rendererContract with
+                                    | Some contract ->
+                                        JsonValue.Record
+                                            [| "gameVersion", JsonValue.String contract.gameVersion
+                                               "effects", JsonValue.Array(contract.effects |> List.map JsonValue.String |> Array.ofList)
+                                               "requiredInputs", JsonValue.Array(contract.requiredInputs |> List.map JsonValue.String |> Array.ofList)
+                                               "evidence", JsonValue.String contract.evidence
+                                               "valid", JsonValue.Boolean rendererContractIssues.IsEmpty
+                                               "issues", JsonValue.Array(rendererContractIssues |> List.map JsonValue.String |> Array.ofList) |]
+                                    | None -> JsonValue.Null)
+                                   "guiUseCount", JsonValue.Number(decimal guiUses.Length)
+                                   "guiUses", JsonValue.Array(guiUses |> List.truncate 20 |> List.map guiUseJson |> Array.ofList)
+                                   "guiUsesTruncated", JsonValue.Boolean(guiUses.Length > 20)
+                                   "range", locationToJson evidence.span
+                                   "provenance",
+                                   JsonValue.Record
+                                       [| "sourceKind", JsonValue.String(PdxShaderRuntime.evidenceSourceKind evidence)
+                                          "confidence", JsonValue.String(PdxShaderRuntime.evidenceConfidence evidence)
+                                          "gameVersion", JsonValue.String model.gameVersion |] |]
+
+                        let shaderDeclarationKindName (kind: PdxShaderRuntime.ShaderDeclarationKind) =
+                            match kind with
+                            | PdxShaderRuntime.EffectDeclaration -> "effect", ""
+                            | PdxShaderRuntime.VertexMainCodeDeclaration -> "maincode", "vertex"
+                            | PdxShaderRuntime.PixelMainCodeDeclaration -> "maincode", "pixel"
+                            | PdxShaderRuntime.GeometryMainCodeDeclaration -> "maincode", "geometry"
+                            | PdxShaderRuntime.VertexStructDeclaration -> "struct", "vertex"
+                            | PdxShaderRuntime.ConstantBufferDeclaration -> "constantbuffer", ""
+                            | PdxShaderRuntime.SamplerDeclaration -> "sampler", ""
+                            | PdxShaderRuntime.ShaderResourceDeclaration -> "resource", ""
+                            | PdxShaderRuntime.HlslTypeDeclaration -> "hlsl_type", ""
+                            | PdxShaderRuntime.HlslFunctionDeclaration -> "hlsl_function", ""
+                            | PdxShaderRuntime.HlslVariableDeclaration -> "hlsl_variable", ""
+                            | PdxShaderRuntime.MacroDeclaration -> "macro", ""
+                            | PdxShaderRuntime.BlendStateDeclaration -> "state", "blend"
+                            | PdxShaderRuntime.DepthStencilStateDeclaration -> "state", "depth_stencil"
+                            | PdxShaderRuntime.RasterizerStateDeclaration -> "state", "rasterizer"
+
+                        let shaderDeclarationJson (declaration: PdxShaderRuntime.ShaderDeclaration) =
+                            let kindName, stage = shaderDeclarationKindName declaration.kind
+
+                            JsonValue.Record
+                                [| "stableId", JsonValue.String declaration.stableId
+                                   "name", JsonValue.String declaration.name
+                                   "kind", JsonValue.String kindName
+                                   "stage", JsonValue.String stage
+                                   "file", JsonValue.String(declaration.file.Replace('\\', '/'))
+                                   "logicalPath", JsonValue.String declaration.logicalPath
+                                   "origin", JsonValue.String(shaderOriginName declaration.origin)
+                                   "presenceCondition", JsonValue.String declaration.presenceCondition
+                                   "detail", (declaration.detail |> Option.map JsonValue.String |> Option.defaultValue JsonValue.Null)
+                                   "range", locationToJson declaration.range
+                                   "nameRange", locationToJson declaration.selectionRange |]
+
+                        let shaderReachabilityName (reachability: PdxShaderRuntime.EffectReachability) =
+                            match reachability with
+                            | PdxShaderRuntime.DataExplicit _ -> "data_explicit"
+                            | PdxShaderRuntime.EffectFileConvention _ -> "effect_file_convention"
+                            | PdxShaderRuntime.EffectFileConventionCandidate _ -> "effect_file_convention_candidate"
+                            | PdxShaderRuntime.EngineHardcoded _ -> "engine_hardcoded"
+                            | PdxShaderRuntime.EngineOrUnreferenced -> "engine_or_unreferenced"
+
+                        let shaderRenamePolicyJson (decision: PdxShaderRuntime.RenamePolicyDecision) =
+                            let name, reason =
+                                match decision with
+                                | PdxShaderRuntime.RenameAllowed reason -> "allowed", reason
+                                | PdxShaderRuntime.RenameRequiresExplicitForce reason -> "requires_explicit_force", reason
+                                | PdxShaderRuntime.RenameDenied reason -> "denied", reason
+
+                            JsonValue.Record
+                                [| "decision", JsonValue.String name
+                                   "reason", JsonValue.String reason |]
+
+                        let shaderAbiAuditJson (model: PdxShaderRuntime.ShaderRuntimeModel) =
+                            let audit = PdxShaderRuntime.verifyShaderAbiAudit model
+                            JsonValue.Record
+                                [| "status", JsonValue.String audit.status
+                                   "source", (audit.source |> Option.map (fun value -> JsonValue.String(value.Replace('\\', '/'))) |> Option.defaultValue JsonValue.Null)
+                                   "gameVersion", JsonValue.String audit.gameVersion
+                                   "reviewStatus", (audit.reviewStatus |> Option.map JsonValue.String |> Option.defaultValue JsonValue.Null)
+                                   "automaticPromotion", JsonValue.Boolean audit.automaticPromotion
+                                   "shaderFiles", (audit.shaderFileCount |> Option.map (decimal >> JsonValue.Number) |> Option.defaultValue JsonValue.Null)
+                                   "modelVanillaShaderFiles", JsonValue.Number(decimal audit.modelVanillaShaderFiles)
+                                   "auditedEffectDeclarations", (audit.auditedEffectDeclarations |> Option.map (decimal >> JsonValue.Number) |> Option.defaultValue JsonValue.Null)
+                                   "auditedUniqueEffectNames", (audit.auditedUniqueEffectNames |> Option.map (decimal >> JsonValue.Number) |> Option.defaultValue JsonValue.Null)
+                                   "modelVanillaEffectDeclarations", JsonValue.Number(decimal audit.modelVanillaEffectDeclarations)
+                                   "modelVanillaUniqueEffectNames", JsonValue.Number(decimal audit.modelVanillaUniqueEffectNames)
+                                   "confirmedEngineEntryCount", JsonValue.Number(decimal audit.confirmedEngineEntryCount)
+                                   "activeCatalogEntryCount", JsonValue.Number(decimal audit.activeCatalogEntryCount)
+                                   "corpusMatches", JsonValue.Boolean audit.corpusMatches
+                                   "diagnostics",
+                                   JsonValue.Array(
+                                       audit.diagnostics
+                                       |> List.map (fun diagnostic ->
+                                           JsonValue.Record
+                                               [| "code", JsonValue.String diagnostic.code
+                                                  "message", JsonValue.String diagnostic.message
+                                                  "source", JsonValue.String diagnostic.source |])
+                                       |> List.toArray
+                                   ) |]
+
+                        let shaderEffectJson (model: PdxShaderRuntime.ShaderRuntimeModel) (result: PdxShaderRuntime.EffectReachabilityResult) =
+                            JsonValue.Record
+                                [| "name", JsonValue.String result.name
+                                   "classification", JsonValue.String(shaderReachabilityName result.reachability)
+                                   "declarations",
+                                   JsonValue.Array(result.declarations |> List.map shaderDeclarationJson |> Array.ofList)
+                                   "evidence",
+                                   JsonValue.Array(result.evidence |> List.map (shaderEvidenceJson model) |> Array.ofList)
+                                   "provenance",
+                                   JsonValue.Record
+                                       [| "confidence", JsonValue.String(PdxShaderRuntime.reachabilityConfidence result.reachability)
+                                          "gameVersion", JsonValue.String model.gameVersion
+                                          "abiAudit", shaderAbiAuditJson model |]
+                                   "renamePolicy", shaderRenamePolicyJson (PdxShaderRuntime.renamePolicy model result.name) |]
+
                         match p with
+                        // - cwtools.ai.shader.symbols -
+                        // Declared shader symbols (effects, maincodes, constant buffers,
+                        // states) with file/span/origin and, for effects, the classification.
+                        | { command = "cwtools.ai.shader.symbols"
+                            arguments = args } ->
+                            let fields = shaderArgsRecord args
+                            let operation = "cwtools.ai.shader.symbols"
+
+                            match shaderLimit operation fields with
+                            | Choice2Of2 error -> Some error
+                            | Choice1Of2 limit ->
+                                let kindFilter = shaderStringProperty "kind" fields |> Option.defaultValue "all"
+                                let validKinds = set [ "all"; "effect"; "maincode"; "constantbuffer"; "state" ]
+
+                                if not (validKinds.Contains kindFilter) then
+                                    Some(
+                                        shaderErrorJson
+                                            operation
+                                            "kind"
+                                            (sprintf "unknown kind \"%s\"; expected one of: all, effect, maincode, constantbuffer, state." kindFilter)
+                                    )
+                                else
+                                    let filter = shaderStringProperty "filter" fields
+                                    let cursor = shaderCursor fields
+                                    let model = shaderRuntimeModel ()
+
+                                    let classificationOf (declaration: PdxShaderRuntime.ShaderDeclaration) =
+                                        if declaration.kind = PdxShaderRuntime.EffectDeclaration then
+                                            model.effects
+                                            |> List.tryFind (fun info ->
+                                                info.declaration.file = declaration.file
+                                                && info.declaration.name = declaration.name
+                                                && info.declaration.selectionRange = declaration.selectionRange)
+                                            |> Option.map (fun info -> shaderReachabilityName info.reachability)
+                                        else
+                                            None
+
+                                    let filtered =
+                                        model.declarations
+                                        |> List.filter (fun declaration ->
+                                            let kindName, _ = shaderDeclarationKindName declaration.kind
+
+                                            (kindFilter = "all" || kindName = kindFilter)
+                                            && (match filter with
+                                                | Some value -> declaration.name.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0
+                                                | None -> true))
+                                        |> List.sortBy (fun declaration ->
+                                            declaration.name.ToLowerInvariant(),
+                                            PdxShaderProject.originRank declaration.origin,
+                                            declaration.file)
+
+                                    let page = filtered |> List.skip (min cursor filtered.Length) |> List.truncate limit
+
+                                    let symbolJson declaration =
+                                        match shaderDeclarationJson declaration, classificationOf declaration with
+                                        | JsonValue.Record recordFields, Some classification ->
+                                            JsonValue.Record(
+                                                Array.append recordFields [| "classification", JsonValue.String classification |]
+                                            )
+                                        | json, _ -> json
+
+                                    Some(
+                                        JsonValue.Record
+                                            [| "ok", JsonValue.Boolean true
+                                               "gameVersion", JsonValue.String model.gameVersion
+                                               "totalCount", JsonValue.Number(decimal filtered.Length)
+                                               "returnedCount", JsonValue.Number(decimal page.Length)
+                                               "nextCursor",
+                                               (if cursor + page.Length < filtered.Length then
+                                                    JsonValue.Number(decimal (cursor + page.Length))
+                                                else
+                                                    JsonValue.Null)
+                                               "symbols", JsonValue.Array(page |> List.map symbolJson |> Array.ofList) |]
+                                    )
+
+                        // - cwtools.ai.shader.compileUnit -
+                        // Root, include members with resolution status, and reverse deps.
+                        | { command = "cwtools.ai.shader.compileUnit"
+                            arguments = args } ->
+                            let fields = shaderArgsRecord args
+                            let operation = "cwtools.ai.shader.compileUnit"
+
+                            match shaderStringProperty "uri" fields with
+                            | None -> Some(shaderErrorJson operation "uri" "uri is required.")
+                            | Some uriText ->
+                                match shaderPathFromUri operation uriText with
+                                | Choice2Of2 error -> Some error
+                                | Choice1Of2 filePath ->
+                                    let openDocs =
+                                        openShaderScriptDocuments ()
+                                        |> List.filter (fun (path, _) -> PdxShaderFeatures.isShaderFile path)
+
+                                    match PdxShaderRuntime.compileUnitFor (game.AllFiles()) openDocs filePath with
+                                    | None ->
+                                        Some(
+                                            shaderErrorJson operation uriText "file is not a known shader file in the workspace, dependencies or vanilla."
+                                        )
+                                    | Some (unit, snapshots) ->
+                                        let effectivePaths =
+                                            unit.effective |> List.map (fun snapshot -> snapshot.canonicalPath) |> Set.ofList
+
+                                        let memberJson (snapshot: PdxShaderProject.ShaderSnapshot) =
+                                            JsonValue.Record
+                                                [| "path", JsonValue.String(snapshot.displayPath.Replace('\\', '/'))
+                                                   "logicalPath", JsonValue.String snapshot.logicalPath
+                                                   "origin", JsonValue.String(shaderOriginName snapshot.origin)
+                                                   "effective", JsonValue.Boolean(Set.contains snapshot.canonicalPath effectivePaths)
+                                                   "status", JsonValue.String "resolved" |]
+
+                                        let snapshotFor includingPath =
+                                            let canonical = PdxShaderProject.canonicalizePath includingPath
+                                            snapshots |> List.tryFind (fun snapshot -> snapshot.canonicalPath = canonical)
+
+                                        let rangeOf includingPath start length =
+                                            snapshotFor includingPath
+                                            |> Option.map (fun snapshot ->
+                                                locationToJson (PdxShaderRuntime.offsetRange snapshot.displayPath snapshot.text start length))
+                                            |> Option.defaultValue JsonValue.Null
+
+                                        let problemJson problem =
+                                            match problem with
+                                            | PdxShaderProject.MissingInclude(includingPath, target, start, length) ->
+                                                JsonValue.Record
+                                                    [| "kind", JsonValue.String "missing"
+                                                       "target", JsonValue.String target
+                                                       "includingFile", JsonValue.String(includingPath.Replace('\\', '/'))
+                                                       "range", rangeOf includingPath start length |]
+                                            | PdxShaderProject.AmbiguousInclude(includingPath, target, start, length, candidates) ->
+                                                JsonValue.Record
+                                                    [| "kind", JsonValue.String "ambiguous"
+                                                       "target", JsonValue.String target
+                                                       "includingFile", JsonValue.String(includingPath.Replace('\\', '/'))
+                                                       "range", rangeOf includingPath start length
+                                                       "candidates",
+                                                       JsonValue.Array(
+                                                           candidates
+                                                           |> List.map (fun candidate -> JsonValue.String(candidate.Replace('\\', '/')))
+                                                           |> Array.ofList
+                                                       ) |]
+                                            | PdxShaderProject.CyclicInclude(includingPath, target, start, length, cyclePath) ->
+                                                JsonValue.Record
+                                                    [| "kind", JsonValue.String "cycle"
+                                                       "target", JsonValue.String target
+                                                       "includingFile", JsonValue.String(includingPath.Replace('\\', '/'))
+                                                       "range", rangeOf includingPath start length
+                                                       "cyclePath",
+                                                       JsonValue.Array(
+                                                           cyclePath
+                                                           |> List.map (fun path -> JsonValue.String(path.Replace('\\', '/')))
+                                                           |> Array.ofList
+                                                       ) |]
+                                            | PdxShaderProject.IncludeBudgetExceeded(includingPath, target, start, length, budget, limit) ->
+                                                JsonValue.Record
+                                                    [| "kind", JsonValue.String "budget_exceeded"
+                                                       "target", JsonValue.String target
+                                                       "includingFile", JsonValue.String(includingPath.Replace('\\', '/'))
+                                                       "range", rangeOf includingPath start length
+                                                       "budget", JsonValue.String budget
+                                                       "limit", JsonValue.Number(decimal limit) |]
+
+                                        Some(
+                                            JsonValue.Record
+                                                [| "ok", JsonValue.Boolean true
+                                                   "root",
+                                                   JsonValue.Record
+                                                       [| "path", JsonValue.String(unit.root.displayPath.Replace('\\', '/'))
+                                                          "logicalPath", JsonValue.String unit.root.logicalPath
+                                                          "origin", JsonValue.String(shaderOriginName unit.root.origin) |]
+                                                   "members", JsonValue.Array(unit.members |> List.map memberJson |> Array.ofList)
+                                                   "problems", JsonValue.Array(unit.problems |> List.map problemJson |> Array.ofList)
+                                                   "includedBy",
+                                                   JsonValue.Array(
+                                                       PdxShaderRuntime.reverseIncluders snapshots filePath
+                                                       |> List.map (fun path -> JsonValue.String(path.Replace('\\', '/')))
+                                                       |> Array.ofList
+                                                   ) |]
+                                        )
+
+                        // - cwtools.ai.shader.variants -
+                        // Presence conditions and active symbols for each supported platform profile.
+                        | { command = "cwtools.ai.shader.variants"
+                            arguments = args } ->
+                            let fields = shaderArgsRecord args
+                            let operation = "cwtools.ai.shader.variants"
+
+                            match shaderStringProperty "uri" fields with
+                            | None -> Some(shaderErrorJson operation "uri" "uri is required.")
+                            | Some uriText ->
+                                match shaderPathFromUri operation uriText with
+                                | Choice2Of2 error -> Some error
+                                | Choice1Of2 filePath ->
+                                    let openDocs =
+                                        openShaderScriptDocuments ()
+                                        |> List.filter (fun (path, _) -> PdxShaderFeatures.isShaderFile path)
+
+                                    match PdxShaderRuntime.compileUnitFor (game.AllFiles()) openDocs filePath with
+                                    | None ->
+                                        Some(shaderErrorJson operation uriText "file is not a known shader file in the workspace, dependencies or vanilla.")
+                                    | Some (unit, _) ->
+                                        let parsed =
+                                            unit.effective
+                                            |> List.map (fun snapshot -> snapshot, PdxShaderProject.semanticSnapshot snapshot)
+                                        let conditions =
+                                            parsed
+                                            |> List.collect (fun (_, semantic) ->
+                                                semantic.preprocessor.regions |> List.map _.condition)
+                                            |> List.distinctBy (sprintf "%A")
+                                        let nodeKindName =
+                                            function
+                                            | PdxShaderSyntax.ShaderNodeKind.Effect -> Some "effect"
+                                            | PdxShaderSyntax.ShaderNodeKind.MainCode -> Some "maincode"
+                                            | PdxShaderSyntax.ShaderNodeKind.VertexStruct -> Some "vertex_struct"
+                                            | PdxShaderSyntax.ShaderNodeKind.ConstantBuffer -> Some "constant_buffer"
+                                            | PdxShaderSyntax.ShaderNodeKind.BlendState -> Some "blend_state"
+                                            | PdxShaderSyntax.ShaderNodeKind.DepthStencilState -> Some "depth_stencil_state"
+                                            | PdxShaderSyntax.ShaderNodeKind.RasterizerState -> Some "rasterizer_state"
+                                            | PdxShaderSyntax.ShaderNodeKind.Sampler -> Some "sampler"
+                                            | _ -> None
+                                        let symbolFacts =
+                                            parsed
+                                            |> List.collect (fun (snapshot, semantic) ->
+                                                let outer =
+                                                    PdxShaderSyntax.descendants semantic.syntax.root
+                                                    |> Seq.choose (fun node ->
+                                                        match nodeKindName node.kind, node.name, node.nameSpan with
+                                                        | Some kind, Some name, Some nameSpan ->
+                                                            Some(
+                                                                name,
+                                                                kind,
+                                                                snapshot.displayPath,
+                                                                PdxShaderPreprocessor.conditionAt nameSpan.startOffset semantic.preprocessor
+                                                            )
+                                                        | _ -> None)
+                                                    |> Seq.toList
+                                                let hlsl =
+                                                    semantic.hlsl.symbols
+                                                    |> List.map (fun symbol ->
+                                                        symbol.name,
+                                                        (sprintf "hlsl_%A" symbol.kind).ToLowerInvariant(),
+                                                        snapshot.displayPath,
+                                                        symbol.condition)
+                                                outer @ hlsl)
+                                            |> List.distinctBy (fun (name, kind, path, condition) -> name, kind, path, sprintf "%A" condition)
+                                        let symbolJson
+                                            (name: string, kind: string, path: string, condition: PdxShaderPreprocessor.PresenceCondition)
+                                            =
+                                            JsonValue.Record
+                                                [| "name", JsonValue.String name
+                                                   "kind", JsonValue.String kind
+                                                   "file", JsonValue.String(path.Replace('\\', '/'))
+                                                   "presenceCondition", JsonValue.String(sprintf "%A" condition) |]
+                                        let variantJson (variant: PdxShaderPreprocessor.PlatformVariant) =
+                                            let active =
+                                                symbolFacts
+                                                |> List.filter (fun (_, _, _, condition) ->
+                                                    PdxShaderPreprocessor.evaluate variant.environment condition
+                                                    <> PdxShaderPreprocessor.ConditionFalse)
+                                                |> List.sortBy (fun (name, kind, path, _) -> kind, name, path)
+                                            JsonValue.Record
+                                                [| "name", JsonValue.String variant.name
+                                                   "definedMacros", JsonValue.Array(variant.environment.defined |> Seq.sort |> Seq.map JsonValue.String |> Seq.toArray)
+                                                   "activeSymbolCount", JsonValue.Number(decimal active.Length)
+                                                   "activeSymbols", JsonValue.Array(active |> List.truncate 500 |> List.map symbolJson |> Array.ofList)
+                                                   "symbolsTruncated", JsonValue.Boolean(active.Length > 500) |]
+                                        let conditionJson (item: PdxShaderPreprocessor.VariantCondition) =
+                                            JsonValue.Record
+                                                [| "condition", JsonValue.String(sprintf "%A" item.condition)
+                                                   "activeVariants", JsonValue.Array(item.activeVariants |> List.map JsonValue.String |> Array.ofList)
+                                                   "unknownVariants", JsonValue.Array(item.unknownVariants |> List.map JsonValue.String |> Array.ofList) |]
+                                        let macroJson (snapshot: PdxShaderProject.ShaderSnapshot, semantic: PdxShaderProject.ShaderSemanticSnapshot) =
+                                            semantic.preprocessor.macros
+                                            |> List.map (fun macro ->
+                                                JsonValue.Record
+                                                    [| "name", JsonValue.String macro.name
+                                                       "kind", JsonValue.String(sprintf "%A" macro.kind)
+                                                       "replacement", JsonValue.String macro.replacement
+                                                       "presenceCondition", JsonValue.String(sprintf "%A" macro.condition)
+                                                       "file", JsonValue.String(snapshot.displayPath.Replace('\\', '/')) |])
+
+                                        Some(
+                                            JsonValue.Record
+                                                [| "ok", JsonValue.Boolean true
+                                                   "root", JsonValue.String(unit.root.displayPath.Replace('\\', '/'))
+                                                   "platforms", JsonValue.Array(PdxShaderPreprocessor.defaultPlatformVariants |> List.map variantJson |> Array.ofList)
+                                                   "conditions",
+                                                   JsonValue.Array(
+                                                       PdxShaderPreprocessor.compareVariants PdxShaderPreprocessor.defaultPlatformVariants conditions
+                                                       |> List.map conditionJson
+                                                       |> Array.ofList
+                                                   )
+                                                   "macros", JsonValue.Array(parsed |> List.collect macroJson |> Array.ofList) |]
+                                        )
+
+                        // - cwtools.ai.shader.callers -
+                        // All located `shader = effectName` call sites with spans and origin.
+                        | { command = "cwtools.ai.shader.callers"
+                            arguments = args } ->
+                            let fields = shaderArgsRecord args
+                            let operation = "cwtools.ai.shader.callers"
+
+                            match shaderStringProperty "effectName" fields with
+                            | None -> Some(shaderErrorJson operation "effectName" "effectName is required.")
+                            | Some effectName ->
+                                match shaderLimit operation fields with
+                                | Choice2Of2 error -> Some error
+                                | Choice1Of2 limit ->
+                                    let model = shaderRuntimeModel ()
+                                    let callers = PdxShaderRuntime.callersOf model effectName
+                                    let page = callers |> List.truncate limit
+
+                                    Some(
+                                        JsonValue.Record
+                                            [| "ok", JsonValue.Boolean true
+                                               "effectName", JsonValue.String effectName
+                                               "totalCount", JsonValue.Number(decimal callers.Length)
+                                               "returnedCount", JsonValue.Number(decimal page.Length)
+                                               "callers",
+                                               JsonValue.Array(page |> List.map (shaderEvidenceJson model) |> Array.ofList) |]
+                                    )
+
+                        // - cwtools.ai.shader.reachability -
+                        // Classification + evidence + provenance + rename policy per effect,
+                        // by name or for every effect declared in a file (paginated).
+                        | { command = "cwtools.ai.shader.reachability"
+                            arguments = args } ->
+                            let fields = shaderArgsRecord args
+                            let operation = "cwtools.ai.shader.reachability"
+
+                            match shaderStringProperty "effectName" fields, shaderStringProperty "uri" fields with
+                            | None, None -> Some(shaderErrorJson operation "effectName" "effectName or uri is required.")
+                            | Some effectName, _ ->
+                                let model = shaderRuntimeModel ()
+
+                                match PdxShaderRuntime.effectReachability model effectName with
+                                | Some result ->
+                                    Some(
+                                        JsonValue.Record
+                                            [| "ok", JsonValue.Boolean true
+                                               "effect", shaderEffectJson model result |]
+                                    )
+                                | None ->
+                                    Some(shaderErrorJson operation effectName "effect is not declared in the known shader files.")
+                            | None, Some uriText ->
+                                match shaderPathFromUri operation uriText with
+                                | Choice2Of2 error -> Some error
+                                | Choice1Of2 filePath ->
+                                    match shaderLimit operation fields with
+                                    | Choice2Of2 error -> Some error
+                                    | Choice1Of2 limit ->
+                                        let cursor = shaderCursor fields
+                                        let model = shaderRuntimeModel ()
+                                        let canonical = PdxShaderProject.canonicalizePath filePath
+
+                                        let names =
+                                            model.declarations
+                                            |> List.filter (fun declaration ->
+                                                declaration.kind = PdxShaderRuntime.EffectDeclaration
+                                                && PdxShaderProject.canonicalizePath declaration.file = canonical)
+                                            |> List.map (fun declaration -> declaration.name)
+                                            |> List.distinctBy (fun name -> name.ToLowerInvariant())
+                                            |> List.sort
+
+                                        let page = names |> List.skip (min cursor names.Length) |> List.truncate limit
+
+                                        let effects =
+                                            page
+                                            |> List.choose (fun name -> PdxShaderRuntime.effectReachability model name)
+                                            |> List.map (shaderEffectJson model)
+                                            |> Array.ofList
+
+                                        Some(
+                                            JsonValue.Record
+                                                [| "ok", JsonValue.Boolean true
+                                                   "file", JsonValue.String(filePath.Replace('\\', '/'))
+                                                   "totalCount", JsonValue.Number(decimal names.Length)
+                                                   "returnedCount", JsonValue.Number(decimal effects.Length)
+                                                   "nextCursor",
+                                                   (if cursor + effects.Length < names.Length then
+                                                        JsonValue.Number(decimal (cursor + effects.Length))
+                                                    else
+                                                        JsonValue.Null)
+                                                   "effects", JsonValue.Array effects |]
+                                        )
+
+                        // - cwtools.ai.shader.validate -
+                        // Compile-unit (CWFX) diagnostics for one shader file, structured.
+                        | { command = "cwtools.ai.shader.validate"
+                            arguments = args } ->
+                            let fields = shaderArgsRecord args
+                            let operation = "cwtools.ai.shader.validate"
+
+                            match shaderStringProperty "uri" fields with
+                            | None -> Some(shaderErrorJson operation "uri" "uri is required.")
+                            | Some uriText ->
+                                match shaderPathFromUri operation uriText with
+                                | Choice2Of2 error -> Some error
+                                | Choice1Of2 filePath ->
+                                    let canonical = PdxShaderProject.canonicalizePath filePath
+
+                                    let resourceText =
+                                        game.AllFiles()
+                                        |> Seq.tryPick (function
+                                            | FileWithContentResource(_, resource) when
+                                                PdxShaderFeatures.isShaderFile resource.filepath
+                                                && PdxShaderProject.canonicalizePath resource.filepath = canonical
+                                                ->
+                                                Some resource.filetext
+                                            | _ -> None)
+
+                                    let text =
+                                        match docs.GetTextByPath filePath with
+                                        | Some openText -> Some openText
+                                        | None ->
+                                            match resourceText with
+                                            | Some resourceContent -> Some resourceContent
+                                            | None ->
+                                                try
+                                                    Some(File.ReadAllText filePath)
+                                                with _ ->
+                                                    None
+
+                                    match text with
+                                    | None ->
+                                        Some(
+                                            shaderErrorJson
+                                                operation
+                                                uriText
+                                                "no text available for the shader file (not open, not a content resource, not readable on disk)."
+                                        )
+                                    | Some fileText ->
+                                        let diagnostics =
+                                            PdxShaderFeatures.validateFromResources (game.AllFiles()) filePath fileText
+
+                                        let severityName (severity: Severity) =
+                                            match severity with
+                                            | Severity.Error -> "error"
+                                            | Severity.Warning -> "warning"
+                                            | Severity.Information -> "info"
+                                            | _ -> "hint"
+
+                                        let diagnosticJson (error: CWError) =
+                                            JsonValue.Record
+                                                [| "code", JsonValue.String error.code
+                                                   "severity", JsonValue.String(severityName error.severity)
+                                                   "message", JsonValue.String error.message
+                                                   "range", locationToJson error.range |]
+
+                                        Some(
+                                            JsonValue.Record
+                                                [| "ok", JsonValue.Boolean true
+                                                   "file", JsonValue.String(filePath.Replace('\\', '/'))
+                                                   "count", JsonValue.Number(decimal diagnostics.Length)
+                                                   "diagnostics",
+                                                   JsonValue.Array(diagnostics |> List.map diagnosticJson |> Array.ofList) |]
+                                        )
+
+                        // - cwtools.ai.shader.preflightEdit -
+                        // Host-only, fail-closed safety policy for exact proposed Shader
+                        // text and interface effectFile edits. It is intentionally not a
+                        // model-visible tool: every file write invokes it automatically.
+                        | { command = "cwtools.ai.shader.preflightEdit"
+                            arguments = args } ->
+                            let fields = shaderArgsRecord args
+                            let operation = "cwtools.ai.shader.preflightEdit"
+
+                            match
+                                shaderStringProperty "uri" fields,
+                                shaderRawStringProperty "previousText" fields,
+                                shaderRawStringProperty "text" fields
+                            with
+                            | Some uriText, Some previousText, Some proposedText ->
+                                if previousText.Length > 4_000_000 || proposedText.Length > 4_000_000 then
+                                    Some(shaderErrorJson operation uriText "shader preflight payload exceeds the 4,000,000 character safety limit.")
+                                else
+                                    match shaderEditPathFromUri operation uriText with
+                                    | Choice2Of2 error -> Some error
+                                    | Choice1Of2 filePath ->
+                                        let replaceOpenDocument text =
+                                            (filePath, text)
+                                            :: (openShaderScriptDocuments ()
+                                                |> List.filter (fun (path, _) -> not (PdxShaderProject.sameFilePath path filePath)))
+
+                                        let issues = ResizeArray<string>()
+                                        let mutable diagnosticsJson = JsonValue.Array [||]
+                                        let mutable removedEffects: string list = []
+                                        let mutable addedEffects: string list = []
+                                        let mutable compileRoot: string option = None
+                                        let mutable compileMemberCount = 0
+                                        let mutable rendererSubtypes: string list = []
+                                        let isShader = PdxShaderFeatures.isShaderFile filePath
+
+                                        if isShader then
+                                            let effectNames text =
+                                                PdxShaderProject.createSnapshot
+                                                    PdxShaderProject.CurrentDocument
+                                                    filePath
+                                                    filePath
+                                                    text
+                                                |> PdxShaderRuntime.declarationsFromSnapshot
+                                                |> List.filter (fun declaration -> declaration.kind = PdxShaderRuntime.EffectDeclaration)
+                                                |> List.map _.name
+                                                |> List.distinctBy (fun name -> name.ToLowerInvariant())
+
+                                            let beforeNames = effectNames previousText
+                                            let afterNames = effectNames proposedText
+                                            let beforeKeys = beforeNames |> List.map (fun name -> name.ToLowerInvariant()) |> Set.ofList
+                                            let afterKeys = afterNames |> List.map (fun name -> name.ToLowerInvariant()) |> Set.ofList
+                                            removedEffects <- beforeNames |> List.filter (fun name -> not (afterKeys.Contains(name.ToLowerInvariant())))
+                                            addedEffects <- afterNames |> List.filter (fun name -> not (beforeKeys.Contains(name.ToLowerInvariant())))
+
+                                            let model = shaderRuntimeModel ()
+                                            for effectName in removedEffects do
+                                                let policyReason =
+                                                    match PdxShaderRuntime.renamePolicy model effectName with
+                                                    | PdxShaderRuntime.RenameAllowed reason ->
+                                                        sprintf "%s; a declaration-only write still cannot prove that every caller is updated atomically" reason
+                                                    | PdxShaderRuntime.RenameRequiresExplicitForce reason -> reason
+                                                    | PdxShaderRuntime.RenameDenied reason -> reason
+
+                                                issues.Add(sprintf "Effect '%s' was removed or renamed: %s." effectName policyReason)
+
+                                            let diagnostics =
+                                                PdxShaderFeatures.validateFromResources (game.AllFiles()) filePath proposedText
+
+                                            let diagnosticJson (error: CWError) =
+                                                let severity =
+                                                    match error.severity with
+                                                    | Severity.Error -> "error"
+                                                    | Severity.Warning -> "warning"
+                                                    | Severity.Information -> "info"
+                                                    | _ -> "hint"
+
+                                                JsonValue.Record
+                                                    [| "code", JsonValue.String error.code
+                                                       "severity", JsonValue.String severity
+                                                       "message", JsonValue.String error.message
+                                                       "range", locationToJson error.range |]
+
+                                            diagnosticsJson <- JsonValue.Array(diagnostics |> List.map diagnosticJson |> Array.ofList)
+
+                                            let errors = diagnostics |> List.filter (fun diagnostic -> diagnostic.severity = Severity.Error)
+                                            for diagnostic in errors do
+                                                issues.Add(sprintf "%s: %s" diagnostic.code diagnostic.message)
+
+                                            match PdxShaderRuntime.compileUnitFor (game.AllFiles()) (replaceOpenDocument proposedText) filePath with
+                                            | None -> issues.Add("The proposed document could not be resolved to a shader compile unit.")
+                                            | Some (unit, _) ->
+                                                compileRoot <- Some unit.root.displayPath
+                                                compileMemberCount <- unit.effective.Length
+                                                for problem in unit.problems do
+                                                    issues.Add(sprintf "Compile-unit include problem: %A" problem)
+
+                                            let semantic =
+                                                PdxShaderProject.createSnapshot
+                                                    PdxShaderProject.CurrentDocument
+                                                    filePath
+                                                    filePath
+                                                    proposedText
+                                                |> PdxShaderProject.semanticSnapshot
+
+                                            if PdxShaderPreprocessor.defaultPlatformVariants.IsEmpty then
+                                                issues.Add("No platform macro profiles are available for variant analysis.")
+                                            else
+                                                semantic.preprocessor.regions
+                                                |> List.map _.condition
+                                                |> PdxShaderPreprocessor.compareVariants PdxShaderPreprocessor.defaultPlatformVariants
+                                                |> ignore
+                                        else
+                                            // Structured runtime extraction compares effectFile selections;
+                                            // no text regex is used to make a safety decision.
+                                            let shaderGameVersion = if activeGame = STL then stlGameVersion else None
+                                            let beforeModel =
+                                                PdxShaderRuntime.buildModel shaderGameVersion (game.AllFiles()) (replaceOpenDocument previousText)
+                                            let afterModel =
+                                                PdxShaderRuntime.buildModel shaderGameVersion (game.AllFiles()) (replaceOpenDocument proposedText)
+                                            let selections (model: PdxShaderRuntime.ShaderRuntimeModel) =
+                                                model.evidence
+                                                |> List.filter (fun evidence ->
+                                                    evidence.kind = PdxShaderRuntime.EffectFileSelection
+                                                    && PdxShaderProject.sameFilePath evidence.sourceFile filePath)
+                                                |> List.map _.value
+                                                |> List.distinct
+                                                |> List.sort
+
+                                            let beforeSelections = selections beforeModel
+                                            let afterSelections = selections afterModel
+                                            addedEffects <- afterSelections |> List.except beforeSelections
+                                            removedEffects <- beforeSelections |> List.except afterSelections
+                                            rendererSubtypes <-
+                                                afterModel.interfaceSprites
+                                                |> List.filter (fun sprite -> PdxShaderProject.sameFilePath sprite.sourceFile filePath)
+                                                |> List.map _.rendererSubtype
+                                                |> List.distinct
+                                                |> List.sort
+
+                                            if beforeSelections <> afterSelections then
+                                                let resolvedTargets =
+                                                    afterModel.effects
+                                                    |> List.filter (fun effect ->
+                                                        effect.allEvidence
+                                                        |> List.exists (fun evidence ->
+                                                            evidence.kind = PdxShaderRuntime.EffectFileSelection
+                                                            && PdxShaderProject.sameFilePath evidence.sourceFile filePath))
+
+                                                if resolvedTargets.IsEmpty && not afterSelections.IsEmpty then
+                                                    issues.Add("The new effectFile selection does not resolve to a known effective shader file.")
+
+                                                if not removedEffects.IsEmpty && afterSelections.IsEmpty then
+                                                    issues.Add("effectFile was removed; the renderer would lose its versioned Shader contract.")
+
+                                                afterModel.interfaceSprites
+                                                |> List.filter (fun sprite -> PdxShaderProject.sameFilePath sprite.sourceFile filePath)
+                                                |> List.collect (PdxShaderRuntime.validateRendererInvocation afterModel)
+                                                |> List.iter issues.Add
+
+                                        let issueList = issues |> Seq.distinct |> Seq.toList
+
+                                        Some(
+                                            JsonValue.Record
+                                                [| "ok", JsonValue.Boolean true
+                                                   "allowed", JsonValue.Boolean issueList.IsEmpty
+                                                   "file", JsonValue.String(filePath.Replace('\\', '/'))
+                                                   "targetKind", JsonValue.String(if isShader then "shader" else "interface_gfx")
+                                                   "issues", JsonValue.Array(issueList |> List.map JsonValue.String |> Array.ofList)
+                                                   "removed", JsonValue.Array(removedEffects |> List.map JsonValue.String |> Array.ofList)
+                                                   "added", JsonValue.Array(addedEffects |> List.map JsonValue.String |> Array.ofList)
+                                                   "compileRoot", compileRoot |> Option.map (fun path -> JsonValue.String(path.Replace('\\', '/'))) |> Option.defaultValue JsonValue.Null
+                                                   "compileMemberCount", JsonValue.Number(decimal compileMemberCount)
+                                                   "platformProfileCount", JsonValue.Number(decimal PdxShaderPreprocessor.defaultPlatformVariants.Length)
+                                                   "rendererSubtypes", JsonValue.Array(rendererSubtypes |> List.map JsonValue.String |> Array.ofList)
+                                                   "diagnostics", diagnosticsJson |]
+                                        )
+                            | _ ->
+                                Some(shaderErrorJson operation "arguments" "uri, previousText and text are required string fields.")
+
+                        // - cwtools.ai.shader.compareVanilla -
+                        // Effective vs overridden vanilla declarations, by effect name or file.
+                        | { command = "cwtools.ai.shader.compareVanilla"
+                            arguments = args } ->
+                            let fields = shaderArgsRecord args
+                            let operation = "cwtools.ai.shader.compareVanilla"
+
+                            let comparisonJson (comparison: PdxShaderRuntime.VanillaComparison) =
+                                JsonValue.Record
+                                    [| "name", JsonValue.String comparison.name
+                                       "effective",
+                                       JsonValue.Array(comparison.effective |> List.map shaderDeclarationJson |> Array.ofList)
+                                       "overriddenVanilla",
+                                       JsonValue.Array(comparison.overriddenVanilla |> List.map shaderDeclarationJson |> Array.ofList) |]
+
+                            match shaderStringProperty "effectName" fields, shaderStringProperty "uri" fields with
+                            | None, None -> Some(shaderErrorJson operation "effectName" "effectName or uri is required.")
+                            | Some effectName, _ ->
+                                let model = shaderRuntimeModel ()
+
+                                Some(
+                                    JsonValue.Record
+                                        [| "ok", JsonValue.Boolean true
+                                           "comparison", comparisonJson (PdxShaderRuntime.compareWithVanilla model effectName) |]
+                                )
+                            | None, Some uriText ->
+                                match shaderPathFromUri operation uriText with
+                                | Choice2Of2 error -> Some error
+                                | Choice1Of2 filePath ->
+                                    let model = shaderRuntimeModel ()
+                                    let canonical = PdxShaderProject.canonicalizePath filePath
+
+                                    let comparisons =
+                                        model.declarations
+                                        |> List.filter (fun declaration ->
+                                            declaration.kind = PdxShaderRuntime.EffectDeclaration
+                                            && PdxShaderProject.canonicalizePath declaration.file = canonical)
+                                        |> List.map (fun declaration -> declaration.name)
+                                        |> List.distinctBy (fun name -> name.ToLowerInvariant())
+                                        |> List.sort
+                                        |> List.map (fun name -> comparisonJson (PdxShaderRuntime.compareWithVanilla model name))
+                                        |> Array.ofList
+
+                                    Some(
+                                        JsonValue.Record
+                                            [| "ok", JsonValue.Boolean true
+                                               "file", JsonValue.String(filePath.Replace('\\', '/'))
+                                               "comparisons", JsonValue.Array comparisons |]
+                                    )
+
                         | { command = "cwtools.findTypeReferences"
                             arguments = typeNameArg :: idArg :: _ } ->
                             let typeName = typeNameArg.AsString().Split('.').[0]
@@ -8505,15 +10146,15 @@ type Server(client: ILanguageClient) =
                                     |> Array.truncate 4000
                                     |> Array.toList)
                                 |> Option.defaultValue []
-                            let allRules, allDefinitionReferences, rulesHash, hasConfigs =
+                            let allRules, allDefinitionReferences, allShaderReferences, rulesHash, hasConfigs =
                                 match semanticCatalogCache with
                                 | Some cached -> cached
                                 | None ->
                                     let configs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
                                     let parsedRules, parsedHash = semanticRulesFromConfigs [] configs
-                                    let parsedDefinitionReferences = semanticDefinitionReferencesFromConfigs configs
+                                    let parsedDefinitionReferences, parsedShaderReferences = semanticDefinitionReferencesFromConfigs configs
                                     semanticCatalogGeneration <- semanticCatalogGeneration + 1L
-                                    let cached = parsedRules, parsedDefinitionReferences, parsedHash, not configs.IsEmpty
+                                    let cached = parsedRules, parsedDefinitionReferences, parsedShaderReferences, parsedHash, not configs.IsEmpty
                                     semanticCatalogCache <- Some cached
                                     cached
                             let requested = System.Collections.Generic.HashSet<string>(requestedNames, StringComparer.OrdinalIgnoreCase)
@@ -8583,6 +10224,22 @@ type Server(client: ILanguageClient) =
                                                     |> List.truncate 512
                                                     |> List.toArray
                                                 fields.Add("valueReferences", JsonValue.Array valueReferences)
+                                                let shaderReferences =
+                                                    allShaderReferences
+                                                    |> List.filter (fun item -> String.Equals(item.definitionName, td.name, StringComparison.OrdinalIgnoreCase))
+                                                    |> List.map (fun item ->
+                                                        let referenceFields = ResizeArray<string * JsonValue>()
+                                                        referenceFields.Add("argumentPath", JsonValue.String item.reference.argumentPath)
+                                                        referenceFields.Add("referenceKind", JsonValue.String item.reference.referenceKind)
+                                                        referenceFields.Add("dynamicValuePolicy", JsonValue.String item.reference.dynamicValuePolicy)
+                                                        item.reference.pathPrefix
+                                                        |> Option.iter (fun value -> referenceFields.Add("pathPrefix", JsonValue.String value))
+                                                        item.reference.extension
+                                                        |> Option.iter (fun value -> referenceFields.Add("extension", JsonValue.String value))
+                                                        JsonValue.Record(referenceFields.ToArray()))
+                                                    |> List.truncate 512
+                                                    |> List.toArray
+                                                fields.Add("shaderReferences", JsonValue.Array shaderReferences)
                                                 JsonValue.Record(fields.ToArray()))
                                             |> List.toArray
                                         let ruleValues =

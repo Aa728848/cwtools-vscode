@@ -72,6 +72,13 @@ export interface CwtSchemaEntitySummary {
   typeKeyFilters?: string[];
   schemaKeys: string[];
   graphRelatedTypes?: string[];
+  shaderReferences?: Array<{
+    argumentPath: string;
+    referenceKind: 'shader_effect' | 'shader_file';
+    dynamicValuePolicy: 'allow_expression' | 'literal_or_parameter';
+    pathPrefix?: string;
+    extension?: string;
+  }>;
   matchedBy: string[];
   snippet?: string;
   truncated?: boolean;
@@ -667,6 +674,7 @@ async function extractCwtSchemaEntities(
     if (!typeName) continue;
     const end = findCwtBlockEnd(lines, index);
     const blockLines = lines.slice(index, end + 1);
+    const schemaBlock = findCwtSchemaBlock(lines, typeName.trim());
     const summary = summarizeCwtTypeBlock({
       name: typeName.trim(),
       filePath,
@@ -675,6 +683,7 @@ async function extractCwtSchemaEntities(
       startLine: index + 1,
       block: blockLines.join('\n'),
       blockLines,
+      schemaBlock,
     });
     if (cwtEntityMatches(summary, normalizedTarget, needle)) summaries.push(summary);
     index = end;
@@ -708,6 +717,7 @@ function summarizeCwtTypeBlock(args: {
   startLine: number;
   block: string;
   blockLines: string[];
+  schemaBlock?: string;
 }): CwtSchemaEntitySummary {
   const pathMatch = args.block.match(/^\s*path\s*=\s*"([^"]+)"/mi)
     ?? args.block.match(/^\s*path\s*=\s*([^\s#]+)/mi);
@@ -751,10 +761,94 @@ function summarizeCwtTypeBlock(args: {
     typeKeyFilters,
     schemaKeys,
     graphRelatedTypes,
+    shaderReferences: extractCwtShaderReferences(args.schemaBlock ?? ''),
     matchedBy: [],
     snippet: snippetLines.map((line, index) => `${args.startLine + index} | ${line}`).join('\n'),
     truncated: snippetLines.length < args.blockLines.length,
   };
+}
+
+function findCwtSchemaBlock(lines: string[], typeName: string): string | undefined {
+  const escaped = typeName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`^\\s*${escaped}\\s*=\\s*\\{`, 'i');
+  for (let index = 0; index < lines.length; index++) {
+    if (!pattern.test(lines[index] ?? '')) continue;
+    return lines.slice(index, findCwtBlockEnd(lines, index) + 1).join('\n');
+  }
+  return undefined;
+}
+
+function extractCwtShaderReferences(schemaBlock: string): NonNullable<CwtSchemaEntitySummary['shaderReferences']> {
+  const references: NonNullable<CwtSchemaEntitySummary['shaderReferences']> = [];
+  const seen = new Set<string>();
+  const stack: Array<{ key: string; depth: number }> = [];
+  let depth = 0;
+  const lines = schemaBlock.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index++) {
+    const line = stripCwtLineComment(lines[index] ?? '');
+    let leadingClose = 0;
+    while (leadingClose < line.length && /\s/.test(line[leadingClose]!)) leadingClose++;
+    while (line[leadingClose] === '}') {
+      depth = Math.max(0, depth - 1);
+      leadingClose++;
+      while (stack.length > 0 && stack[stack.length - 1]!.depth > depth) stack.pop();
+      while (leadingClose < line.length && /\s/.test(line[leadingClose]!)) leadingClose++;
+    }
+    const assignment = line.slice(leadingClose).match(/^([A-Za-z_][\w.-]*)\s*=\s*(.*)$/);
+    const key = assignment?.[1];
+    const rhs = assignment?.[2]?.trim();
+    if (index > 0 && key && rhs) {
+      const argumentPath = [...stack.map(item => item.key), key].join('.').toLowerCase();
+      const add = (reference: NonNullable<CwtSchemaEntitySummary['shaderReferences']>[number]) => {
+        const identity = `${reference.argumentPath}|${reference.referenceKind}`;
+        if (!seen.has(identity)) {
+          seen.add(identity);
+          references.push(reference);
+        }
+      };
+      if (/^\$shader_effect\b/i.test(rhs)) {
+        add({ argumentPath, referenceKind: 'shader_effect', dynamicValuePolicy: 'allow_expression' });
+      } else {
+        const filepath = rhs.match(/^filepath\[\s*([^,\]]*)\s*,\s*(\.shader)\s*\]/i);
+        if (filepath) {
+          add({
+            argumentPath,
+            referenceKind: 'shader_file',
+            dynamicValuePolicy: 'literal_or_parameter',
+            pathPrefix: filepath[1]?.trim().replace(/\\/g, '/'),
+            extension: filepath[2]!.toLowerCase(),
+          });
+        }
+      }
+    }
+    let opens = 0;
+    let closes = 0;
+    let quoted = false;
+    for (const char of line.slice(leadingClose)) {
+      if (char === '"') quoted = !quoted;
+      else if (!quoted && char === '{') opens++;
+      else if (!quoted && char === '}') closes++;
+    }
+    if (index > 0 && key && rhs?.startsWith('{') && opens > closes) {
+      stack.push({ key: key.toLowerCase(), depth: depth + 1 });
+    }
+    depth += opens - closes;
+    while (stack.length > 0 && stack[stack.length - 1]!.depth > depth) stack.pop();
+  }
+  return references;
+}
+
+function stripCwtLineComment(line: string): string {
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index < line.length; index++) {
+    const char = line[index]!;
+    if (escaped) escaped = false;
+    else if (char === '\\' && quoted) escaped = true;
+    else if (char === '"') quoted = !quoted;
+    else if (char === '#' && !quoted) return line.slice(0, index);
+  }
+  return line;
 }
 
 function cwtEntityMatches(summary: CwtSchemaEntitySummary, normalizedTarget: string, needle: string | undefined): boolean {
@@ -768,6 +862,7 @@ function cwtEntityMatches(summary: CwtSchemaEntitySummary, normalizedTarget: str
     ...(summary.typeKeyFilters ?? []),
     ...summary.schemaKeys,
     ...(summary.graphRelatedTypes ?? []),
+    ...(summary.shaderReferences ?? []).flatMap(reference => [reference.argumentPath, reference.referenceKind]),
   ].join('\n').toLowerCase().replace(/\\/g, '/');
 
   if (!normalizedTarget && !needle) matchedBy.push('listed-from-matched-cwt-file');

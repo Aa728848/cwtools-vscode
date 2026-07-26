@@ -56,6 +56,10 @@ describe('phase 1 read tool contracts', () => {
         '    }',
         '  }',
         '}',
+        'special_project = {',
+        '  effectFile = filepath[gfx/FX/,.shader]',
+        '  meshsettings = { shader = $shader_effect }',
+        '}',
         '',
       ].join('\n'), 'utf8');
       const host = createFsHost(repoRoot, {
@@ -89,6 +93,13 @@ describe('phase 1 read tool contracts', () => {
       expect(result.data!.entities[0]!.typeKeyFilters).to.include('ship_special_project');
       expect(result.data!.entities[0]!.subtypes).to.include('ship');
       expect(result.data!.entities[0]!.schemaKeys).to.include('path');
+      expect(result.data!.entities[0]!.shaderReferences).to.deep.include({
+        argumentPath: 'effectfile',
+        referenceKind: 'shader_file',
+        dynamicValuePolicy: 'literal_or_parameter',
+        pathPrefix: 'gfx/FX/',
+        extension: '.shader',
+      });
     } finally {
       fs.rmSync(rulesRoot, { recursive: true, force: true });
     }

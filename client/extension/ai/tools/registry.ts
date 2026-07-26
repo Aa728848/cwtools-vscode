@@ -17,7 +17,9 @@ export type AgentToolName =
     | 'get_memory' | 'search_memory' | 'save_memory'
     | 'convert_image_to_dds' | 'convert_audio' | 'deploy_mod_asset' | 'mcp_call'
     | 'write_localisation' | 'write_design_blueprint' | 'save_workflow' | 'git_ops' | 'dispatch_agents'
-    | 'query_blackboard' | 'merge_results' | 'get_design_blueprint_contract';
+    | 'query_blackboard' | 'merge_results' | 'get_design_blueprint_contract'
+    | 'query_shader_symbol' | 'query_shader_compile_unit' | 'query_shader_platform_variants' | 'query_shader_callers'
+    | 'explain_shader_reachability' | 'validate_shader' | 'compare_shader_with_vanilla';
 
 export type ToolEffect =
     | 'none'
@@ -146,6 +148,13 @@ const TOOL_DOMAINS = {
     query_blackboard: 'shared',
     merge_results: 'shared',
     get_design_blueprint_contract: 'paradox',
+    query_shader_symbol: 'paradox',
+    query_shader_compile_unit: 'paradox',
+    query_shader_platform_variants: 'paradox',
+    query_shader_callers: 'paradox',
+    explain_shader_reachability: 'paradox',
+    validate_shader: 'paradox',
+    compare_shader_with_vanilla: 'paradox',
 } satisfies Record<AgentToolName, ToolDomain>;
 
 const GENERAL_DISPATCH_SCHEMA: ToolDefinition = {
@@ -256,7 +265,9 @@ const BASE_READ: AgentToolName[] = [
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory', 'glob_files',
     'lsp_operation', 'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name', 'web_find',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
-    'get_entity_info', 'query_static_modifiers', 'query_variables', 'get_pdx_block', 'get_ignored_diagnostics'
+    'get_entity_info', 'query_static_modifiers', 'query_variables', 'get_pdx_block', 'get_ignored_diagnostics',
+    'query_shader_symbol', 'query_shader_compile_unit', 'query_shader_platform_variants', 'query_shader_callers',
+    'explain_shader_reachability', 'validate_shader', 'compare_shader_with_vanilla'
 ];
 const EDIT: AgentToolName[] = [
     'write_file', 'edit_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
@@ -351,7 +362,8 @@ for (const schema of SCHEMA_DEFINITIONS) {
     if (BASE_READ.includes(name)) {
         effect = 'workspace_read';
         riskLevel = 0;
-        if (['document_symbols', 'workspace_symbols', 'get_lsp_status', 'get_diagnostics', 'lsp_operation', 'query_references', 'query_definition', 'explore_pdx_project'].includes(name)) {
+        if (['document_symbols', 'workspace_symbols', 'get_lsp_status', 'get_diagnostics', 'lsp_operation', 'query_references', 'query_definition', 'explore_pdx_project',
+            'query_shader_symbol', 'query_shader_compile_unit', 'query_shader_platform_variants', 'query_shader_callers', 'explain_shader_reachability', 'validate_shader', 'compare_shader_with_vanilla'].includes(name)) {
             concurrencyClass = 'lsp-limited';
         } else {
             concurrencyClass = 'parallel';

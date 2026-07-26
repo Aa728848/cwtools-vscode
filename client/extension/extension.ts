@@ -60,6 +60,16 @@ import { parseWorkshopContentAppId, getGameIdForWorkshopAppId } from './workshop
 import { inferGameIdFromWorkspace, hasWorkspaceModDescriptor, workspaceHasParadoxStructure as workspaceHasParadoxStructureDetect } from './workspaceGameDetection';
 
 export let defaultClient: LanguageClient;
+
+export interface CwtoolsExtensionApi {
+	/** Returns the LanguageClient owned by the activated Extension Host instance. */
+	getLanguageClient(): LanguageClient | undefined;
+}
+
+const extensionApi: CwtoolsExtensionApi = {
+	getLanguageClient: () => defaultClient,
+};
+
 let fileList: FileListItem[];
 let fileExplorer: FileExplorer;
 
@@ -2489,7 +2499,7 @@ export async function activate(context: ExtensionContext) {
 	ErrorReporter.debug('Extension', `Startup gate: start=${looksLikeParadoxWorkspace} vanilla=${isVanillaFolder} descriptor=${hasModDescriptor} language=${languageId}`);
 	if (looksLikeParadoxWorkspace) {
 		await init(languageId, isVanillaFolder);
-		return;
+		return extensionApi;
 	}
 
 	ErrorReporter.debug('Extension', 'No Paradox project detected in this workspace; deferring CWTools language server start');
@@ -2526,6 +2536,7 @@ export async function activate(context: ExtensionContext) {
 			await commands.executeCommand(commandId);
 		});
 	}
+	return extensionApi;
 }
 
 function normaliseLocLanguageSetting(value: readonly string[] | undefined): string[] | undefined {
@@ -2822,4 +2833,3 @@ function getSteamLibraryPaths(): string[] {
 
 	return libraries;
 }
-

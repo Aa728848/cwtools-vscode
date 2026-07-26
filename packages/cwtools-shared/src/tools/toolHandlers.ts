@@ -308,6 +308,80 @@ export const defaultSharedToolDispatcher: SharedToolDispatcher = async (host, na
         symbol: String(args.symbol ?? ''),
       });
 
+    // Shader knowledge tools: each LSP command takes a single JSON record
+    // argument and returns { ok, ... } / { ok: false, status: 'error', ... }.
+    case 'query_shader_symbol':
+      return executeLspTool(
+        host,
+        'cwtools.ai.shader.symbols',
+        [shaderRecord({
+          filter: typeof args.filter === 'string' ? args.filter : undefined,
+          kind: typeof args.kind === 'string' ? args.kind : undefined,
+          limit: typeof args.limit === 'number' ? args.limit : undefined,
+          cursor: typeof args.cursor === 'number' ? args.cursor : undefined,
+        })],
+        'Start the CWTools LSP process and wait for the shader model to load before querying shader symbols.',
+      );
+
+    case 'query_shader_compile_unit':
+      return executeLspTool(
+        host,
+        'cwtools.ai.shader.compileUnit',
+        [{ uri: toFileUri(String(args.file ?? ''), host.workspaceRoot) }],
+        'Start the CWTools LSP process and wait for the shader model to load before resolving compile units.',
+      );
+
+    case 'query_shader_platform_variants':
+      return executeLspTool(
+        host,
+        'cwtools.ai.shader.variants',
+        [{ uri: toFileUri(String(args.file ?? ''), host.workspaceRoot) }],
+        'Start the CWTools LSP process and wait for the shader model to load before comparing shader platform variants.',
+      );
+
+    case 'query_shader_callers':
+      return executeLspTool(
+        host,
+        'cwtools.ai.shader.callers',
+        [shaderRecord({
+          effectName: String(args.effectName ?? ''),
+          limit: typeof args.limit === 'number' ? args.limit : undefined,
+        })],
+        'Start the CWTools LSP process and wait for the shader model to load before querying Effect callers.',
+      );
+
+    case 'explain_shader_reachability':
+      return executeLspTool(
+        host,
+        'cwtools.ai.shader.reachability',
+        [typeof args.effectName === 'string' && args.effectName
+          ? { effectName: args.effectName }
+          : shaderRecord({
+              uri: toFileUri(String(args.file ?? ''), host.workspaceRoot),
+              limit: typeof args.limit === 'number' ? args.limit : undefined,
+              cursor: typeof args.cursor === 'number' ? args.cursor : undefined,
+            })],
+        'Start the CWTools LSP process and wait for the shader model to load before explaining Effect reachability.',
+      );
+
+    case 'validate_shader':
+      return executeLspTool(
+        host,
+        'cwtools.ai.shader.validate',
+        [{ uri: toFileUri(String(args.file ?? ''), host.workspaceRoot) }],
+        'Start the CWTools LSP process and wait for the shader model to load before validating shader files.',
+      );
+
+    case 'compare_shader_with_vanilla':
+      return executeLspTool(
+        host,
+        'cwtools.ai.shader.compareVanilla',
+        [typeof args.effectName === 'string' && args.effectName
+          ? { effectName: args.effectName }
+          : { uri: toFileUri(String(args.file ?? ''), host.workspaceRoot) }],
+        'Start the CWTools LSP process and wait for the shader model to load before comparing with vanilla.',
+      );
+
     default:
       return {
         ok: false,
@@ -325,4 +399,13 @@ function toFileUri(filePath: string, workspaceRoot: string): string {
   const resolved = path.resolve(workspaceRoot, filePath).replace(/\\/g, '/');
   const withLeadingSlash = resolved.startsWith('/') ? resolved : `/${resolved}`;
   return `file://${encodeURI(withLeadingSlash).replace(/#/g, '%23')}`;
+}
+
+/** Drop undefined fields so the LSP command record only carries provided args. */
+function shaderRecord(fields: Record<string, unknown>): Record<string, unknown> {
+  const record: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined) record[key] = value;
+  }
+  return record;
 }

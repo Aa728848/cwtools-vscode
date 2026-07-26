@@ -568,4 +568,63 @@ describe('project knowledge SQLite V2', () => {
         expect(options.databasePath).to.equal(projectKnowledge.getProjectKnowledgeDatabasePath(workspaceRoot));
         expect(options.changedFiles).to.deep.equal([changedFile]);
     });
+
+    it('includes .shader and .fxh files in the project knowledge fingerprint and watcher', async () => {
+        const shaderFile = path.join(workspaceRoot, 'gfx', 'FX', 'test.shader');
+        const fxhFile = path.join(workspaceRoot, 'gfx', 'FX', 'test.fxh');
+        fs.mkdirSync(path.dirname(shaderFile), { recursive: true });
+        fs.writeFileSync(shaderFile, 'shader body\n', 'utf8');
+        fs.writeFileSync(fxhFile, '#include "x"\n', 'utf8');
+
+        const before = projectKnowledge.computeProjectKnowledgeFingerprint(workspaceRoot);
+        fs.writeFileSync(shaderFile, 'modified shader body\n', 'utf8');
+        const afterShader = projectKnowledge.computeProjectKnowledgeFingerprint(workspaceRoot);
+        fs.writeFileSync(fxhFile, '#include "y"\n', 'utf8');
+        const afterFxh = projectKnowledge.computeProjectKnowledgeFingerprint(workspaceRoot);
+
+        expect(afterShader).to.not.equal(before);
+        expect(afterFxh).to.not.equal(afterShader);
+
+        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        nextSnapshot = {
+            ok: true,
+            status: 'ready',
+            game: 'stellaris',
+            generatedAtUnixMs: Date.now(),
+            projectRoots: [workspaceRoot],
+            generationMode: 'full',
+            domains: [{ id: 'event' }],
+            counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
+            warnings: [],
+        };
+        await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
+        fs.mkdirSync(path.join(workspaceRoot, '.cwtools', 'project'), { recursive: true });
+        fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), JSON.stringify(profile), 'utf8');
+        commandCalls = [];
+        const context = {
+            globalStorageUri: { fsPath: path.join(workspaceRoot, 'global-storage') },
+            subscriptions: [] as Array<{ dispose(): void }>,
+        };
+        projectKnowledge.registerProjectKnowledgeWatcher(context as any);
+
+        const clock = sinon.useFakeTimers();
+        try {
+            watcherStubs[0]!.change?.({ fsPath: shaderFile });
+            watcherStubs[0]!.change?.({ fsPath: fxhFile });
+            await clock.tickAsync(2000);
+            await clock.runAllAsync();
+        } finally {
+            clock.restore();
+            for (const disposable of context.subscriptions.reverse()) disposable.dispose();
+        }
+
+        const exports = commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge');
+        expect(exports).to.have.length(1);
+        const options = exports[0]!.args[0] as { databasePath: string; changedFiles: string[]; generationMode: string };
+        expect(options.databasePath).to.equal(projectKnowledge.getProjectKnowledgeDatabasePath(workspaceRoot));
+        expect(options.generationMode).to.equal('incremental');
+        expect(options.changedFiles).to.have.length(2);
+        expect(options.changedFiles).to.deep.include(shaderFile);
+        expect(options.changedFiles).to.deep.include(fxhFile);
+    });
 });

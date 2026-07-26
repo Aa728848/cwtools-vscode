@@ -40,7 +40,7 @@ export function useDirectSandboxRunnerForTests(enabled: boolean): void {
         : spawnFn => new BrokeredSandboxRunner(spawnFn);
 }
 const COMMAND_SNAPSHOT_TEXT_EXTENSIONS = new Set([
-    '.asset', '.cson', '.css', '.csv', '.cwt', '.fs', '.fsx', '.gfx', '.gui', '.html',
+    '.asset', '.cson', '.css', '.csv', '.cwt', '.fs', '.fsx', '.fxh', '.gfx', '.gui', '.html',
     '.ini', '.js', '.json', '.jsonc', '.jsx', '.loc', '.lua', '.md', '.mod', '.pdxtxt',
     '.ps1', '.py', '.rules', '.sfx', '.shader', '.txt', '.ts', '.tsx', '.xml', '.yaml',
     '.yml',

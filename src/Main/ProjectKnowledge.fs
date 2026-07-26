@@ -246,31 +246,154 @@ let private definitionJson (definition: DefinitionFact) =
           definition.overridePath |> Option.map (fun value -> "overridePath", JsonValue.String value)
           definition.overrideStrategy |> Option.map (fun value -> "overrideStrategy", JsonValue.String value) ]
 
-let private collectDefinitions (game: IGame) (projectRoots: string list) (resources: IDictionary<string, ResourceFact>) (options: ExportOptions) : DefinitionFact list =
+let private shaderEntityType =
+    function
+    | PdxShaderRuntime.EffectDeclaration -> "shader_effect", []
+    | PdxShaderRuntime.VertexMainCodeDeclaration -> "shader_maincode", [ "vertex" ]
+    | PdxShaderRuntime.PixelMainCodeDeclaration -> "shader_maincode", [ "pixel" ]
+    | PdxShaderRuntime.GeometryMainCodeDeclaration -> "shader_maincode", [ "geometry" ]
+    | PdxShaderRuntime.VertexStructDeclaration -> "shader_struct", [ "vertex" ]
+    | PdxShaderRuntime.ConstantBufferDeclaration -> "shader_constant_buffer", []
+    | PdxShaderRuntime.SamplerDeclaration -> "shader_sampler", []
+    | PdxShaderRuntime.ShaderResourceDeclaration -> "shader_resource", []
+    | PdxShaderRuntime.HlslTypeDeclaration -> "shader_hlsl_type", []
+    | PdxShaderRuntime.HlslFunctionDeclaration -> "shader_hlsl_function", []
+    | PdxShaderRuntime.HlslVariableDeclaration -> "shader_hlsl_variable", []
+    | PdxShaderRuntime.MacroDeclaration -> "shader_macro", []
+    | PdxShaderRuntime.BlendStateDeclaration -> "shader_render_state", [ "blend" ]
+    | PdxShaderRuntime.DepthStencilStateDeclaration -> "shader_render_state", [ "depth_stencil" ]
+    | PdxShaderRuntime.RasterizerStateDeclaration -> "shader_render_state", [ "rasterizer" ]
+
+let private shaderOriginName =
+    function
+    | PdxShaderProject.Vanilla -> "vanilla"
+    | PdxShaderProject.Dependency _ -> "dependency"
+    | PdxShaderProject.CurrentDocument
+    | PdxShaderProject.Workspace -> "workspace"
+
+let private collectShaderDefinitions (model: PdxShaderRuntime.ShaderRuntimeModel option) (resources: IDictionary<string, ResourceFact>) =
+    match model with
+    | None -> []
+    | Some model ->
+        let declarations =
+            model.declarations
+            |> List.map (fun declaration ->
+                let resource = resourceForFile resources declaration.file
+                let entityType, subtypes = shaderEntityType declaration.kind
+
+                { id = declaration.stableId
+                  entityType = entityType
+                  file = declaration.file
+                  logicalPath = declaration.logicalPath
+                  line = int declaration.range.StartLine
+                  endLine = int declaration.range.EndLine
+                  origin = shaderOriginName declaration.origin
+                  validate = true
+                  subtypes = subtypes
+                  overwrite = resource |> Option.map (fun item -> item.overwrite) |> Option.defaultValue "none"
+                  resourceScope = resource |> Option.map (fun item -> item.scope) |> Option.filter (String.IsNullOrWhiteSpace >> not)
+                  domain = "shader"
+                  overridePath = None
+                  overrideStrategy = None })
+
+        let interfaceSprites =
+            model.interfaceSprites
+            |> List.choose (fun invocation ->
+                invocation.spriteName
+                |> Option.map (fun spriteName ->
+                    let resource = resourceForFile resources invocation.sourceFile
+
+                    { id = spriteName
+                      entityType = "shader_interface_sprite"
+                      file = invocation.sourceFile
+                      logicalPath = invocation.logicalPath
+                      line = int invocation.blockRange.StartLine
+                      endLine = int invocation.blockRange.EndLine
+                      origin = shaderOriginName invocation.origin
+                      validate = true
+                      subtypes = [ invocation.rendererSubtype ]
+                      overwrite = resource |> Option.map (fun item -> item.overwrite) |> Option.defaultValue "none"
+                      resourceScope = resource |> Option.map (fun item -> item.scope) |> Option.filter (String.IsNullOrWhiteSpace >> not)
+                      domain = "shader"
+                      overridePath = None
+                      overrideStrategy = None }))
+
+        let rendererContractSource =
+            PdxShaderRuntime.spriteRendererContractInfo ()
+            |> fst
+            |> Option.defaultValue "shader/renderer-contracts.json"
+
+        let rendererContracts =
+            model.rendererContracts
+            |> List.map (fun contract ->
+                { id = sprintf "%s:%s:%s" contract.gameVersion contract.rendererSubtype (normalizePath contract.shaderFile)
+                  entityType = "shader_renderer_contract"
+                  file = rendererContractSource
+                  logicalPath = "shader/renderer-contracts.json"
+                  line = 1
+                  endLine = 1
+                  origin = "curated"
+                  validate = true
+                  subtypes = [ contract.rendererSubtype; contract.gameVersion ]
+                  overwrite = "none"
+                  resourceScope = None
+                  domain = "shader"
+                  overridePath = None
+                  overrideStrategy = None })
+
+        let abiAuditDefinitions =
+            match PdxShaderRuntime.shaderAbiAuditInfo () with
+            | source, Some audit, diagnostics when List.isEmpty diagnostics ->
+                [ { id = sprintf "%s:abi-audit" audit.gameVersion
+                    entityType = "shader_abi_audit"
+                    file = source |> Option.defaultValue "shader/abi-audit.json"
+                    logicalPath = "shader/abi-audit.json"
+                    line = 1
+                    endLine = 1
+                    origin = "curated"
+                    validate = true
+                    subtypes =
+                        [ audit.reviewStatus
+                          if audit.stale then "stale" else "current"
+                          sprintf "confirmed:%d" audit.confirmedEngineEntries.Length ]
+                    overwrite = "none"
+                    resourceScope = None
+                    domain = "shader"
+                    overridePath = None
+                    overrideStrategy = None } ]
+            | _ -> []
+
+        declarations @ interfaceSprites @ rendererContracts @ abiAuditDefinitions
+
+let private collectDefinitions (game: IGame) (projectRoots: string list) (resources: IDictionary<string, ResourceFact>) (shaderModel: PdxShaderRuntime.ShaderRuntimeModel option) (options: ExportOptions) : DefinitionFact list =
     let changedFiles = options.changedFiles |> Set.ofList
-    game.Types()
-    |> Map.toSeq
-    |> Seq.collect (fun (entityType, values) ->
-        values
-        |> Seq.map (fun definition ->
-            let resource = resourceForFile resources definition.range.FileName
-            let logicalPath = resource |> Option.map (fun item -> item.logicalPath) |> Option.defaultValue definition.range.FileName
-            let domain = domainFor entityType logicalPath
-            let matchedMode = game.OverrideModeAtPath logicalPath
-            { id = definition.id
-              entityType = entityType
-              file = definition.range.FileName
-              logicalPath = logicalPath
-              line = int definition.range.StartLine
-              endLine = int definition.range.EndLine
-              origin = originForPath projectRoots definition.range.FileName
-              validate = definition.validate
-              subtypes = definition.subtypes
-              overwrite = resource |> Option.map (fun item -> item.overwrite) |> Option.defaultValue "none"
-              resourceScope = resource |> Option.map (fun item -> item.scope) |> Option.filter (String.IsNullOrWhiteSpace >> not)
-              domain = domain
-              overridePath = matchedMode |> Option.map (fun item -> item.path)
-              overrideStrategy = matchedMode |> Option.map (fun item -> item.strategy) }))
+
+    let typedDefinitions =
+        game.Types()
+        |> Map.toSeq
+        |> Seq.collect (fun (entityType, values) ->
+            values
+            |> Seq.map (fun definition ->
+                let resource = resourceForFile resources definition.range.FileName
+                let logicalPath = resource |> Option.map (fun item -> item.logicalPath) |> Option.defaultValue definition.range.FileName
+                let domain = domainFor entityType logicalPath
+                let matchedMode = game.OverrideModeAtPath logicalPath
+                { id = definition.id
+                  entityType = entityType
+                  file = definition.range.FileName
+                  logicalPath = logicalPath
+                  line = int definition.range.StartLine
+                  endLine = int definition.range.EndLine
+                  origin = originForPath projectRoots definition.range.FileName
+                  validate = definition.validate
+                  subtypes = definition.subtypes
+                  overwrite = resource |> Option.map (fun item -> item.overwrite) |> Option.defaultValue "none"
+                  resourceScope = resource |> Option.map (fun item -> item.scope) |> Option.filter (String.IsNullOrWhiteSpace >> not)
+                  domain = domain
+                  overridePath = matchedMode |> Option.map (fun item -> item.path)
+                  overrideStrategy = matchedMode |> Option.map (fun item -> item.strategy) }))
+
+    Seq.append typedDefinitions (collectShaderDefinitions shaderModel resources)
     |> Seq.filter (fun definition ->
         (options.domains.IsEmpty && changedFiles.IsEmpty)
         || options.domains |> List.contains definition.domain
@@ -397,7 +520,7 @@ let private compactDomainSummaries (definitions: DefinitionFact seq) =
     |> Seq.sortBy (fun value -> value.GetProperty("id").AsString())
     |> Seq.toArray
 
-let private collectTopology (projectRoots: string list) (options: ExportOptions) (game: IGame<'T>) : TopologyFacts =
+let private collectTopology (projectRoots: string list) (options: ExportOptions) (shaderModel: PdxShaderRuntime.ShaderRuntimeModel option) (game: IGame<'T>) : TopologyFacts =
     let files = ResizeArray<FileFact>()
     let edges = ResizeArray<ReferenceFact>()
     let pathComparer = if OperatingSystem.IsWindows() then StringComparer.OrdinalIgnoreCase else StringComparer.Ordinal
@@ -452,6 +575,181 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
                           logicalPath = normalizePath entity.logicalpath
                           domain = domain
                           origin = originForPath projectRoots entity.filepath })
+
+    let shaderSourceSelected sourceFile =
+        (options.domains.IsEmpty && changedFiles.IsEmpty)
+        || options.domains |> List.contains "shader"
+        || changedFiles.Contains(normalizeFileKey sourceFile)
+
+    let addShaderFile sourceFile sourceLogicalPath origin =
+        let normalizedFile = normalizePath sourceFile
+
+        if seenFiles.Add normalizedFile then
+            if options.completeExport || fileCount < options.maxTopologyFiles then
+                fileCount <- fileCount + 1
+                files.Add
+                    { file = normalizedFile
+                      logicalPath = normalizePath sourceLogicalPath
+                      domain = "shader"
+                      origin = origin }
+            else
+                fileLimitExceeded <- true
+
+    let addShaderEdge sourceFile sourceLogicalPath origin targetId typeGroup line referenceType label associatedType =
+        if shaderSourceSelected sourceFile && not (String.IsNullOrWhiteSpace targetId) then
+            addShaderFile sourceFile sourceLogicalPath origin
+            let normalizedFile = normalizePath sourceFile
+            let edgeKey = struct (normalizedFile, targetId, typeGroup, line, referenceType)
+
+            if seenEdges.Add edgeKey then
+                if options.completeExport || edges.Count < options.maxEdges then
+                    edges.Add
+                        { sourceFile = normalizedFile
+                          sourceLogicalPath = normalizePath sourceLogicalPath
+                          targetId = targetId
+                          typeGroup = typeGroup
+                          line = line
+                          isOutgoing = true
+                          referenceType = referenceType
+                          label = label
+                          associatedType = associatedType
+                          domain = "shader" }
+                else
+                    edgeLimitExceeded <- true
+
+    shaderModel
+    |> Option.iter (fun model ->
+        for snapshot in model.snapshots do
+            let origin = shaderOriginName snapshot.origin
+
+            for includeEntry in PdxShaderProject.extractIncludes snapshot do
+                let targetId, referenceType, associatedType =
+                    match PdxShaderProject.resolveInclude model.snapshots snapshot includeEntry.target with
+                    | PdxShaderProject.Resolved(best :: _) ->
+                        normalizePath best.logicalPath, "includes", Some "resolved"
+                    | PdxShaderProject.Resolved [] ->
+                        normalizePath includeEntry.target, "includes_missing", Some "missing"
+                    | PdxShaderProject.Ambiguous _ ->
+                        normalizePath includeEntry.target, "includes_ambiguous", Some "ambiguous"
+                    | PdxShaderProject.Missing ->
+                        normalizePath includeEntry.target, "includes_missing", Some "missing"
+
+                let includeRange =
+                    PdxShaderRuntime.offsetRange snapshot.displayPath snapshot.text includeEntry.start includeEntry.length
+
+                addShaderEdge
+                    snapshot.displayPath
+                    snapshot.logicalPath
+                    origin
+                    targetId
+                    "shader_file"
+                    (int includeRange.StartLine)
+                    referenceType
+                    (Some "Includes")
+                    associatedType
+
+        for declaration in model.declarations do
+            let entityType, subtypes = shaderEntityType declaration.kind
+
+            addShaderEdge
+                declaration.file
+                declaration.logicalPath
+                (shaderOriginName declaration.origin)
+                declaration.stableId
+                entityType
+                (int declaration.selectionRange.StartLine)
+                "declares_shader_symbol"
+                None
+                (subtypes |> List.tryHead)
+
+        for reference in model.semanticReferences do
+            let typeGroup, referenceType =
+                match reference.kind with
+                | PdxShaderRuntime.EffectUsesVertexMainCode
+                | PdxShaderRuntime.EffectUsesPixelMainCode
+                | PdxShaderRuntime.EffectUsesGeometryMainCode -> "shader_maincode", "effect_uses_maincode"
+                | PdxShaderRuntime.EffectUsesRenderState -> "shader_render_state", "effect_uses_render_state"
+                | PdxShaderRuntime.MainCodeUsesConstantBuffer -> "shader_constant_buffer", "maincode_uses_constant_buffer"
+                | PdxShaderRuntime.HlslCallsFunction -> "shader_hlsl_function", "hlsl_calls_function"
+                | PdxShaderRuntime.HlslUsesType -> "shader_hlsl_type", "hlsl_uses_type"
+                | PdxShaderRuntime.HlslUsesMember -> "shader_hlsl_variable", "hlsl_uses_member"
+                | PdxShaderRuntime.HlslUsesSymbol -> "shader_hlsl_variable", "hlsl_uses_symbol"
+            let targets = if reference.targetIds.IsEmpty then [ reference.targetName ] else reference.targetIds
+
+            for target in targets do
+                addShaderEdge
+                    reference.file
+                    reference.logicalPath
+                    (shaderOriginName reference.origin)
+                    target
+                    typeGroup
+                    (int reference.span.StartLine)
+                    referenceType
+                    reference.sourceName
+                    (Some(sprintf "%s | %s" reference.stage reference.presenceCondition))
+
+        for evidence in model.evidence do
+            let targetId, typeGroup, referenceType, label, associatedType =
+                match evidence.kind with
+                | PdxShaderRuntime.ShaderAssignment ->
+                    evidence.value, "shader_effect", "calls_shader_effect", evidence.enclosingBlock, None
+                | PdxShaderRuntime.EffectFileSelection ->
+                    normalizePath evidence.value,
+                    "shader_file",
+                    (if evidence.interfaceSprite.IsSome then "interface_sprite_selects_shader_file" else "effect_file_selects_shader_file"),
+                    (evidence.interfaceSprite |> Option.orElse evidence.enclosingBlock),
+                    evidence.rendererSubtype
+
+            addShaderEdge
+                evidence.sourceFile
+                evidence.logicalPath
+                (shaderOriginName evidence.origin)
+                targetId
+                typeGroup
+                (int evidence.span.StartLine)
+                referenceType
+                label
+                associatedType
+
+        for invocation in model.interfaceSprites do
+            for input in invocation.resourceInputs do
+                addShaderEdge
+                    invocation.sourceFile
+                    invocation.logicalPath
+                    (shaderOriginName invocation.origin)
+                    (normalizePath input.value)
+                    "shader_renderer_input"
+                    (int input.span.StartLine)
+                    "renderer_input"
+                    (Some input.field)
+                    (Some invocation.rendererSubtype)
+
+            match PdxShaderRuntime.rendererContractForInvocation model invocation with
+            | Some contract ->
+                for effectName in contract.effects do
+                    addShaderEdge
+                        invocation.sourceFile
+                        invocation.logicalPath
+                        (shaderOriginName invocation.origin)
+                        effectName
+                        "shader_effect"
+                        (int invocation.shaderFileSpan.StartLine)
+                        "renderer_contract_selects_effect"
+                        invocation.spriteName
+                        (Some(sprintf "%s@%s" invocation.rendererSubtype contract.gameVersion))
+            | None -> ()
+
+        for guiUse in model.guiSpriteUses do
+            addShaderEdge
+                guiUse.sourceFile
+                guiUse.logicalPath
+                (shaderOriginName guiUse.origin)
+                guiUse.spriteName
+                "shader_interface_sprite"
+                (int guiUse.span.StartLine)
+                "gui_uses_interface_sprite"
+                guiUse.enclosingBlock
+                None)
 
     { files = files |> Seq.sortBy (fun item -> item.file, item.logicalPath) |> Seq.toList
       edges =
@@ -1502,14 +1800,34 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
               Some("unresolved", JsonValue.Array(unresolved.ToArray()))
               Some("requiredNextChecks", jsonStringArray
                 [ "Use query_cwt_schema/query_rules/query_scope for legality before writing."
+                  "For shader evidence, use query_shader_compile_unit/query_shader_callers/explain_shader_reachability before editing."
+                  "For interface shaders, trace gui_uses_interface_sprite -> interface_sprite_selects_shader_file and verify renderer inputs/subtype before editing effectFile or Effect names."
                   "Read exact source blocks referenced by event structure and logic evidence."
                   "Verify event scope bridges and state lifecycles before approving complex blueprints." ]) ]
 
 let exportProjectKnowledge (activeGame: string) (projectRoots: string list) (rawOptions: ExportOptions) (runtime: RuntimeMetadata) (game: IGame<'T>) =
     let normalizedOptions = normalizeOptions rawOptions
-    let requestedOptions =
+    let shaderRelevantFile (file: string) =
+        match Path.GetExtension(file).ToLowerInvariant() with
+        | ".shader"
+        | ".fxh"
+        | ".gfx"
+        | ".asset"
+        | ".gui" -> true
+        | _ -> false
+    let boundedRequestedOptions =
         { normalizedOptions with
             changedFiles = normalizedOptions.changedFiles |> List.filter (fun file -> projectRoots |> List.exists (fun root -> pathInside root file)) }
+    // Shader resolution is graph-wide: adding/removing a file can change Include
+    // ambiguity, effectFile suffix resolution and GUI-to-sprite edges originating
+    // in otherwise unchanged files. Invalidate the complete Shader domain whenever
+    // one of its source classes changes.
+    let requestedOptions =
+        if activeGame.Equals("stellaris", StringComparison.OrdinalIgnoreCase)
+           && boundedRequestedOptions.changedFiles |> List.exists shaderRelevantFile then
+            { boundedRequestedOptions with domains = "shader" :: boundedRequestedOptions.domains |> List.distinct }
+        else
+            boundedRequestedOptions
     let incrementalBase =
         match requestedOptions.databasePath with
         | Some databasePath when requestedOptions.generationMode = "incremental" && (not requestedOptions.domains.IsEmpty || not requestedOptions.changedFiles.IsEmpty) ->
@@ -1520,8 +1838,19 @@ let exportProjectKnowledge (activeGame: string) (projectRoots: string list) (raw
         | Some _, None -> { requestedOptions with domains = []; changedFiles = []; generationMode = "full" }
         | _ -> requestedOptions
     let resources = resourceFacts (game :> IGame)
-    let freshDefinitions = collectDefinitions (game :> IGame) projectRoots resources collectionOptions
-    let freshTopology = collectTopology projectRoots collectionOptions game
+    let shaderRefreshRequired =
+        match incrementalBase with
+        | None -> true
+        | Some _ ->
+            collectionOptions.domains |> List.contains "shader"
+            || collectionOptions.changedFiles |> List.exists shaderRelevantFile
+    let shaderModel =
+        if activeGame.Equals("stellaris", StringComparison.OrdinalIgnoreCase) && shaderRefreshRequired then
+            Some(PdxShaderRuntime.buildModel None (game.AllFiles()) [])
+        else
+            None
+    let freshDefinitions = collectDefinitions (game :> IGame) projectRoots resources shaderModel collectionOptions
+    let freshTopology = collectTopology projectRoots collectionOptions shaderModel game
     let availableDefinitions, topology, generationMode =
         match incrementalBase with
         | Some(retainedDefinitions, retainedTopology) ->

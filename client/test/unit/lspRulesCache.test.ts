@@ -73,6 +73,23 @@ describe('LspToolHandler CWT rules cache lifecycle (plan §7.4)', () => {
             '}',
             '',
         ].join('\n'), 'utf8');
+        const interfaceRulesDir = path.join(rulesDir, 'interface');
+        fs.mkdirSync(interfaceRulesDir, { recursive: true });
+        fs.writeFileSync(path.join(interfaceRulesDir, 'sprites.cwt'), [
+            'types = {',
+            '  type[sprite] = {',
+            '    name_field = name',
+            '    path = "game/interface"',
+            '  }',
+            '}',
+            'sprite = {',
+            '  effectFile = filepath[gfx/FX/,.shader]',
+            '  meshsettings = {',
+            '    shader = $shader_effect',
+            '  }',
+            '}',
+            '',
+        ].join('\n'), 'utf8');
     });
 
     afterEach(() => {
@@ -159,5 +176,28 @@ describe('LspToolHandler CWT rules cache lifecycle (plan §7.4)', () => {
             nameField: 'id',
             typeKeyFilters: ['realm_event'],
         });
+    });
+
+    it('exposes shader Effect/file mappings and dynamic policies in the fallback semantic catalog', async () => {
+        const handler = makeHandler();
+        const catalog = await handler.getPdxSemanticCatalog(
+            [path.join(workspaceRoot, 'interface', 'test.gfx')],
+            [],
+        );
+
+        expect(catalog.definitionTypes.find(type => type.name === 'sprite')?.shaderReferences).to.deep.equal([
+            {
+                argumentPath: 'effectfile',
+                referenceKind: 'shader_file',
+                dynamicValuePolicy: 'literal_or_parameter',
+                pathPrefix: 'gfx/FX/',
+                extension: '.shader',
+            },
+            {
+                argumentPath: 'meshsettings.shader',
+                referenceKind: 'shader_effect',
+                dynamicValuePolicy: 'allow_expression',
+            },
+        ]);
     });
 });

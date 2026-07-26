@@ -9,13 +9,15 @@ echo   1. scan   - generate rules.generated.json and CWT candidates
 echo   2. check  - generate and compare with current config
 echo   3. update - generate append-only candidates for review
 echo   4. report - visual HTML comparison report (opens in browser)
+echo   5. shader ABI - scan a game update and generate a fail-closed review pack
 echo   Q. quit
-choice /C 1234Q /N /M "Choose 1, 2, 3, 4, or Q: "
-if errorlevel 5 exit /b 0
-if errorlevel 4 set "MODE=report"
-if errorlevel 3 set "MODE=update"
-if errorlevel 2 set "MODE=check"
-if errorlevel 1 set "MODE=scan"
+choice /C 12345Q /N /M "Choose 1, 2, 3, 4, 5, or Q: "
+if "%ERRORLEVEL%"=="6" exit /b 0
+if "%ERRORLEVEL%"=="5" set "MODE=shader-abi"
+if "%ERRORLEVEL%"=="4" set "MODE=report"
+if "%ERRORLEVEL%"=="3" set "MODE=update"
+if "%ERRORLEVEL%"=="2" set "MODE=check"
+if "%ERRORLEVEL%"=="1" set "MODE=scan"
 node "%~dp0tools\rules-sync\stellaris-rules-sync.js" %MODE%
 set "LAST_SYNC_EXIT=%ERRORLEVEL%"
 echo.

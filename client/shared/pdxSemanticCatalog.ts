@@ -8,6 +8,15 @@ export interface CwtRuleValueReference {
     typeName: string;
 }
 
+/** Shader-aware CWT field mapping emitted by the active rules catalog. */
+export interface CwtShaderReference {
+    argumentPath: string;
+    referenceKind: 'shader_effect' | 'shader_file';
+    dynamicValuePolicy: 'allow_expression' | 'literal_or_parameter';
+    pathPrefix?: string;
+    extension?: string;
+}
+
 export interface PdxSemanticCatalog {
     status: 'ready' | 'partial' | 'unavailable';
     source: 'lsp' | 'cwt_fallback';
@@ -28,6 +37,8 @@ export interface PdxSemanticCatalog {
         typeKeyFilters: string[];
         /** Typed fields declared by this TypeDef's active CWT schema. */
         valueReferences?: CwtRuleValueReference[];
+        /** Shader Effect/file fields, including their dynamic-value policy. */
+        shaderReferences?: CwtShaderReference[];
     }>;
     warnings: string[];
 }
@@ -109,6 +120,8 @@ export function parsePdxSemanticCatalog(
         });
     }
     const definitionTypes: PdxSemanticCatalog['definitionTypes'] = [];
+    const shaderReferenceKinds = new Set<CwtShaderReference['referenceKind']>(['shader_effect', 'shader_file']);
+    const shaderDynamicPolicies = new Set<CwtShaderReference['dynamicValuePolicy']>(['allow_expression', 'literal_or_parameter']);
     for (const item of record.definitionTypes.slice(0, 4_000)) {
         if (!item || typeof item !== 'object') continue;
         const definition = item as Record<string, unknown>;
@@ -129,6 +142,27 @@ export function parsePdxSemanticCatalog(
                 });
             }
         }
+        const shaderReferences: CwtShaderReference[] = [];
+        if (Array.isArray(definition.shaderReferences)) {
+            for (const candidate of definition.shaderReferences.slice(0, 512)) {
+                if (!candidate || typeof candidate !== 'object') continue;
+                const reference = candidate as Record<string, unknown>;
+                if (typeof reference.argumentPath !== 'string'
+                    || typeof reference.referenceKind !== 'string'
+                    || !shaderReferenceKinds.has(reference.referenceKind as CwtShaderReference['referenceKind'])
+                    || typeof reference.dynamicValuePolicy !== 'string'
+                    || !shaderDynamicPolicies.has(reference.dynamicValuePolicy as CwtShaderReference['dynamicValuePolicy'])
+                    || (reference.pathPrefix !== undefined && typeof reference.pathPrefix !== 'string')
+                    || (reference.extension !== undefined && typeof reference.extension !== 'string')) continue;
+                shaderReferences.push({
+                    argumentPath: reference.argumentPath.toLowerCase(),
+                    referenceKind: reference.referenceKind as CwtShaderReference['referenceKind'],
+                    dynamicValuePolicy: reference.dynamicValuePolicy as CwtShaderReference['dynamicValuePolicy'],
+                    pathPrefix: typeof reference.pathPrefix === 'string' ? reference.pathPrefix.replace(/\\/g, '/') : undefined,
+                    extension: typeof reference.extension === 'string' ? reference.extension.toLowerCase() : undefined,
+                });
+            }
+        }
         definitionTypes.push({
             name: definition.name.toLowerCase(),
             paths: Array.isArray(definition.paths)
@@ -142,6 +176,7 @@ export function parsePdxSemanticCatalog(
                 ? definition.typeKeyFilters.filter((key): key is string => typeof key === 'string').map(key => key.toLowerCase()).sort()
                 : [],
             valueReferences,
+            shaderReferences,
         });
     }
     const status = record.status === 'ready' || record.status === 'partial' || record.status === 'unavailable'

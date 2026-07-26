@@ -12,6 +12,31 @@ open System.Text.Json
 
 // Store vanilla scripted variables path for hover (set after game load)
 let mutable stlVanillaScriptedVarsPath: string option = None
+let mutable stlGameVersion: string option = None
+
+let tryReadStellarisGameVersion (vanillaPath: string) =
+    let launcherSettings = System.IO.Path.Combine(vanillaPath, "launcher-settings.json")
+
+    if not (System.IO.File.Exists launcherSettings) then
+        None
+    else
+        try
+            use document = JsonDocument.Parse(System.IO.File.ReadAllText launcherSettings)
+            let mutable rawVersion = Unchecked.defaultof<JsonElement>
+
+            if
+                document.RootElement.TryGetProperty("rawVersion", &rawVersion)
+                && rawVersion.ValueKind = JsonValueKind.String
+            then
+                rawVersion.GetString()
+                |> Option.ofObj
+                |> Option.map (fun value -> value.Trim().TrimStart('v', 'V'))
+                |> Option.filter (String.IsNullOrWhiteSpace >> not)
+            else
+                None
+        with ex ->
+            logWarning (sprintf "GameLoader: failed to read Stellaris version from %s: %s" launcherSettings ex.Message)
+            None
 
 let rec replaceFirst predicate value =
     function
@@ -247,6 +272,10 @@ let getRootDirectories (serverSettings: ServerSettings) =
                 { WorkspaceDirectory.name = wd.name
                   path = wd.uri.LocalPath })
     let rawdirs = rawdirs |> Array.ofList
+    rawdirs
+    |> Array.map (fun directory -> directory.name, directory.path)
+    |> Array.toList
+    |> PdxShaderProject.configureLoadOrderRoots
     Array.concat
         [ rawdirs |> Array.map WD;
             rawdirs |> Array.collect (CWTools.Serializer.addDLCs "dlc");
@@ -424,6 +453,7 @@ let loadVIC2 serverSettings =
     game
 
 let loadSTL serverSettings =
+    stlGameVersion <- None
     let cached, cachedFiles =
         getCachedFiles STL serverSettings.cachePath serverSettings.isVanillaFolder
 
@@ -461,9 +491,35 @@ let loadSTL serverSettings =
     match serverSettings.stlVanillaPath with
     | Some vp ->
         stlVanillaScriptedVarsPath <- Some(System.IO.Path.Combine(vp, "common", "scripted_variables"))
+        stlGameVersion <- tryReadStellarisGameVersion vp
         CWTools.Games.PdxShaderFeatures.loadVanillaFxSources vp
     | None -> ()
-    
+
+    // Load version-bound shader ABI evidence shipped with the Stellaris rules.
+    // launcher-settings.json supplies the active game version; missing/mismatched
+    // versions fail closed and cannot classify Effects.
+    CWTools.Games.PdxShaderRuntime.resetShaderAbiCatalog ()
+    CWTools.Games.PdxShaderRuntime.resetShaderAbiAudit ()
+    CWTools.Games.PdxShaderRuntime.resetSpriteRendererContracts ()
+
+    configs
+    |> List.tryPick (fun (path, _) ->
+        let normalized = path.Replace('\\', '/')
+        let marker = normalized.LastIndexOf("/config/", StringComparison.Ordinal)
+        if marker >= 0 then Some(normalized.Substring(0, marker + "/config".Length)) else None)
+    |> Option.iter (fun configDir ->
+        let catalogPath = System.IO.Path.Combine(configDir, "shader", "abi-catalog.json")
+        if System.IO.File.Exists catalogPath then
+            CWTools.Games.PdxShaderRuntime.loadShaderAbiCatalog stlGameVersion catalogPath
+
+        let abiAuditPath = System.IO.Path.Combine(configDir, "shader", "abi-audit.json")
+        if System.IO.File.Exists abiAuditPath then
+            CWTools.Games.PdxShaderRuntime.loadShaderAbiAudit stlGameVersion abiAuditPath
+
+        let rendererContractsPath = System.IO.Path.Combine(configDir, "shader", "renderer-contracts.json")
+        if System.IO.File.Exists rendererContractsPath then
+            CWTools.Games.PdxShaderRuntime.loadSpriteRendererContracts stlGameVersion rendererContractsPath)
+
     game
 
 let loadCK3 serverSettings =

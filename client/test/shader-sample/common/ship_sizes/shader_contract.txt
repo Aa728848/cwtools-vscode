@@ -1,0 +1,1 @@
+# Stellaris-specific workspace marker for the Shader Extension Host contract.

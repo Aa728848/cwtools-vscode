@@ -190,7 +190,9 @@ export class LspToolHandler {
             // Semantic graph queries may be query-only and therefore carry no file
             // path in their cache key. Any project mutation can change their nodes,
             // edges, ranking, or freshness, so invalidate them globally.
-            if (key.startsWith('semanticGraph:') || key.includes(normalized)) {
+            // Shader knowledge results share the same property: reachability and
+            // caller evidence can change when any project file is written.
+            if (key.startsWith('semanticGraph:') || key.startsWith('shader:') || key.includes(normalized)) {
                 this.lspReadCache.delete(key);
             }
         }
@@ -640,6 +642,163 @@ export class LspToolHandler {
         });
     }
 
+    // - Shader knowledge tools (read-only cwtools.ai.shader.* commands) -
+    // Each command takes a single JSON record argument and returns
+    // { ok: true, ... } or { ok: false, status: 'error', operation, target, error }.
+    // The structured error is passed through unchanged; transport failures get the
+    // same shape with the operation and target filled in so failures keep context.
+
+    /** Normalize an absolute or workspace-relative shader path into a file URI. */
+    private shaderFileUri(file: string | undefined): string | undefined {
+        const trimmed = file?.trim();
+        if (!trimmed) return undefined;
+        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
+        const absolute = path.isAbsolute(trimmed) ? trimmed : path.resolve(this.ctx.workspaceRoot, trimmed);
+        return vs.Uri.file(absolute).toString();
+    }
+
+    private async shaderLspRead(command: string, record: Record<string, unknown>): Promise<unknown> {
+        const target = String(record.uri ?? record.effectName ?? record.filter ?? '');
+        const cacheKey = `shader:${command}:${JSON.stringify(record)}`;
+        return this.cachedLspRead(cacheKey, async () => {
+            try {
+                const raw = await this.lspRequestWithRetry(command, [record], 20_000) as any;
+                return raw ?? { ok: false, status: 'error', operation: command, target, error: 'LSP returned no response.' };
+            } catch (e) {
+                return { ok: false, status: 'error', operation: command, target, error: String(e) };
+            }
+        });
+    }
+
+    async queryShaderSymbol(args: { filter?: string; kind?: string; limit?: number; cursor?: number }): Promise<unknown> {
+        const record: Record<string, unknown> = {};
+        if (typeof args.filter === 'string' && args.filter.trim()) record.filter = args.filter.trim();
+        if (typeof args.kind === 'string' && args.kind.trim()) record.kind = args.kind.trim();
+        if (typeof args.limit === 'number' && Number.isFinite(args.limit)) record.limit = args.limit;
+        if (typeof args.cursor === 'number' && Number.isFinite(args.cursor)) record.cursor = args.cursor;
+        return this.shaderLspRead('cwtools.ai.shader.symbols', record);
+    }
+
+    async queryShaderCompileUnit(args: { file?: string }): Promise<unknown> {
+        const uri = this.shaderFileUri(args.file);
+        if (!uri) {
+            return { ok: false, status: 'error', operation: 'cwtools.ai.shader.compileUnit', target: '', error: 'Missing required file argument. Pass an absolute or workspace-relative .shader/.fxh path.' };
+        }
+        return this.shaderLspRead('cwtools.ai.shader.compileUnit', { uri });
+    }
+
+    async queryShaderPlatformVariants(args: { file?: string }): Promise<unknown> {
+        const uri = this.shaderFileUri(args.file);
+        if (!uri) {
+            return { ok: false, status: 'error', operation: 'cwtools.ai.shader.variants', target: '', error: 'Missing required file argument. Pass an absolute or workspace-relative .shader/.fxh path.' };
+        }
+        return this.shaderLspRead('cwtools.ai.shader.variants', { uri });
+    }
+
+    async queryShaderCallers(args: { effectName?: string; limit?: number }): Promise<unknown> {
+        const effectName = args.effectName?.trim();
+        if (!effectName) {
+            return { ok: false, status: 'error', operation: 'cwtools.ai.shader.callers', target: '', error: 'Missing required effectName argument.' };
+        }
+        const record: Record<string, unknown> = { effectName };
+        if (typeof args.limit === 'number' && Number.isFinite(args.limit)) record.limit = args.limit;
+        return this.shaderLspRead('cwtools.ai.shader.callers', record);
+    }
+
+    async explainShaderReachability(args: { effectName?: string; file?: string; limit?: number; cursor?: number }): Promise<unknown> {
+        const effectName = args.effectName?.trim();
+        const record: Record<string, unknown> = {};
+        if (effectName) {
+            record.effectName = effectName;
+        } else {
+            const uri = this.shaderFileUri(args.file);
+            if (!uri) {
+                return { ok: false, status: 'error', operation: 'cwtools.ai.shader.reachability', target: '', error: 'Pass effectName for one Effect, or file to page through the Effects of a shader file.' };
+            }
+            record.uri = uri;
+            if (typeof args.limit === 'number' && Number.isFinite(args.limit)) record.limit = args.limit;
+            if (typeof args.cursor === 'number' && Number.isFinite(args.cursor)) record.cursor = args.cursor;
+        }
+        return this.shaderLspRead('cwtools.ai.shader.reachability', record);
+    }
+
+    async validateShader(args: { file?: string }): Promise<unknown> {
+        const uri = this.shaderFileUri(args.file);
+        if (!uri) {
+            return { ok: false, status: 'error', operation: 'cwtools.ai.shader.validate', target: '', error: 'Missing required file argument. Pass an absolute or workspace-relative .shader/.fxh path.' };
+        }
+        return this.shaderLspRead('cwtools.ai.shader.validate', { uri });
+    }
+
+    /**
+     * Host-only write preflight. Unlike model-visible shader queries this is not
+     * cached: every call carries the exact proposed text and must observe the
+     * current document/resource snapshot.
+     */
+    async preflightShaderEdit(args: { file: string; previousContent: string; content: string }): Promise<unknown> {
+        const uri = this.shaderFileUri(args.file);
+        if (!uri) {
+            return { ok: false, status: 'error', operation: 'cwtools.ai.shader.preflightEdit', target: '', error: 'Missing file argument.' };
+        }
+        try {
+            const raw = await this.lspRequestWithRetry('cwtools.ai.shader.preflightEdit', [{
+                uri,
+                previousText: args.previousContent,
+                text: args.content,
+            }], 30_000) as unknown;
+            return raw ?? {
+                ok: false,
+                status: 'error',
+                operation: 'cwtools.ai.shader.preflightEdit',
+                target: uri,
+                error: 'LSP returned no response.',
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                status: 'error',
+                operation: 'cwtools.ai.shader.preflightEdit',
+                target: uri,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
+
+    async queryShaderCompileUnitFresh(file: string): Promise<unknown> {
+        const uri = this.shaderFileUri(file);
+        if (!uri) return { ok: false, status: 'error', error: 'Missing shader file.' };
+        try {
+            return await this.lspRequestWithRetry('cwtools.ai.shader.compileUnit', [{ uri }], 30_000);
+        } catch (error) {
+            return { ok: false, status: 'error', error: error instanceof Error ? error.message : String(error) };
+        }
+    }
+
+    async validateShaderFresh(file: string): Promise<unknown> {
+        const uri = this.shaderFileUri(file);
+        if (!uri) return { ok: false, status: 'error', error: 'Missing shader file.' };
+        try {
+            return await this.lspRequestWithRetry('cwtools.ai.shader.validate', [{ uri }], 30_000);
+        } catch (error) {
+            return { ok: false, status: 'error', error: error instanceof Error ? error.message : String(error) };
+        }
+    }
+
+    async compareShaderWithVanilla(args: { effectName?: string; file?: string }): Promise<unknown> {
+        const effectName = args.effectName?.trim();
+        const record: Record<string, unknown> = {};
+        if (effectName) {
+            record.effectName = effectName;
+        } else {
+            const uri = this.shaderFileUri(args.file);
+            if (!uri) {
+                return { ok: false, status: 'error', operation: 'cwtools.ai.shader.compareVanilla', target: '', error: 'Pass effectName for one Effect, or file to compare all Effects of a shader file.' };
+            }
+            record.uri = uri;
+        }
+        return this.shaderLspRead('cwtools.ai.shader.compareVanilla', record);
+    }
+
     // - queryTypes -
 
     async queryTypes(args: { typeName: string; filter?: string; limit?: number; vanillaOnly?: boolean }): Promise<QueryTypesResult> {
@@ -964,11 +1123,17 @@ export class LspToolHandler {
                     .sort();
                 const key = entity.name.toLowerCase();
                 const existing = definitions.get(key);
+                const shaderReferences = Array.from(new Map([
+                    ...(existing?.shaderReferences ?? []),
+                    ...(entity.shaderReferences ?? []),
+                ].map(reference => [`${reference.argumentPath}|${reference.referenceKind}`, reference])).values())
+                    .sort((left, right) => left.argumentPath.localeCompare(right.argumentPath));
                 definitions.set(key, {
                     name: entity.name.toLowerCase(),
                     paths: Array.from(new Set([...(existing?.paths ?? []), ...(normalizedPath ? [normalizedPath] : [])])).sort(),
                     nameField: existing?.nameField ?? entity.nameField?.toLowerCase(),
                     typeKeyFilters: Array.from(new Set([...(existing?.typeKeyFilters ?? []), ...typeKeyFilters])).sort(),
+                    shaderReferences,
                 });
             }
         }
@@ -1423,6 +1588,7 @@ export class LspToolHandler {
                 const end = this.findCwtBlockEnd(lines, index);
                 const blockLines = lines.slice(index, end + 1);
                 const block = blockLines.join('\n');
+                const schemaBlock = this.findCwtSchemaBlock(lines, typeName.trim());
                 const summary = this.summarizeCwtTypeBlock({
                     name: typeName.trim(),
                     filePath,
@@ -1431,6 +1597,7 @@ export class LspToolHandler {
                     startLine: index + 1,
                     block,
                     blockLines,
+                    schemaBlock,
                 });
                 if (!this.cwtEntityMatches(summary, normalizedTarget, needle)) continue;
                 summaries.push(summary);
@@ -1469,6 +1636,7 @@ export class LspToolHandler {
         startLine: number;
         block: string;
         blockLines: string[];
+        schemaBlock?: string;
     }): CwtSchemaEntitySummary {
         const pathMatch = args.block.match(/^\s*path\s*=\s*"([^"]+)"/mi)
             ?? args.block.match(/^\s*path\s*=\s*([^\s#]+)/mi);
@@ -1514,10 +1682,94 @@ export class LspToolHandler {
             typeKeyFilters,
             schemaKeys,
             graphRelatedTypes,
+            shaderReferences: this.extractCwtShaderReferences(args.schemaBlock ?? ''),
             matchedBy: [],
             snippet: snippetLines.map((line, index) => `${args.startLine + index} | ${line}`).join('\n'),
             truncated: snippetLines.length < args.blockLines.length,
         };
+    }
+
+    private findCwtSchemaBlock(lines: string[], typeName: string): string | undefined {
+        const escaped = typeName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = new RegExp(`^\\s*${escaped}\\s*=\\s*\\{`, 'i');
+        for (let index = 0; index < lines.length; index++) {
+            if (!pattern.test(lines[index] ?? '')) continue;
+            return lines.slice(index, this.findCwtBlockEnd(lines, index) + 1).join('\n');
+        }
+        return undefined;
+    }
+
+    private extractCwtShaderReferences(schemaBlock: string): NonNullable<CwtSchemaEntitySummary['shaderReferences']> {
+        const references: NonNullable<CwtSchemaEntitySummary['shaderReferences']> = [];
+        const seen = new Set<string>();
+        const stack: Array<{ key: string; depth: number }> = [];
+        let depth = 0;
+        const lines = schemaBlock.split(/\r?\n/);
+        for (let index = 0; index < lines.length; index++) {
+            const line = this.stripCwtLineComment(lines[index] ?? '');
+            let leadingClose = 0;
+            while (leadingClose < line.length && /\s/.test(line[leadingClose]!)) leadingClose++;
+            while (line[leadingClose] === '}') {
+                depth = Math.max(0, depth - 1);
+                leadingClose++;
+                while (stack.length > 0 && stack[stack.length - 1]!.depth > depth) stack.pop();
+                while (leadingClose < line.length && /\s/.test(line[leadingClose]!)) leadingClose++;
+            }
+            const assignment = line.slice(leadingClose).match(/^([A-Za-z_][\w.-]*)\s*=\s*(.*)$/);
+            const key = assignment?.[1];
+            const rhs = assignment?.[2]?.trim();
+            if (index > 0 && key && rhs) {
+                const argumentPath = [...stack.map(item => item.key), key].join('.').toLowerCase();
+                const add = (reference: NonNullable<CwtSchemaEntitySummary['shaderReferences']>[number]) => {
+                    const identity = `${reference.argumentPath}|${reference.referenceKind}`;
+                    if (!seen.has(identity)) {
+                        seen.add(identity);
+                        references.push(reference);
+                    }
+                };
+                if (/^\$shader_effect\b/i.test(rhs)) {
+                    add({ argumentPath, referenceKind: 'shader_effect', dynamicValuePolicy: 'allow_expression' });
+                } else {
+                    const filepath = rhs.match(/^filepath\[\s*([^,\]]*)\s*,\s*(\.shader)\s*\]/i);
+                    if (filepath) {
+                        add({
+                            argumentPath,
+                            referenceKind: 'shader_file',
+                            dynamicValuePolicy: 'literal_or_parameter',
+                            pathPrefix: filepath[1]?.trim().replace(/\\/g, '/'),
+                            extension: filepath[2]!.toLowerCase(),
+                        });
+                    }
+                }
+            }
+            let opens = 0;
+            let closes = 0;
+            let quoted = false;
+            for (const char of line.slice(leadingClose)) {
+                if (char === '"') quoted = !quoted;
+                else if (!quoted && char === '{') opens++;
+                else if (!quoted && char === '}') closes++;
+            }
+            if (index > 0 && key && rhs?.startsWith('{') && opens > closes) {
+                stack.push({ key: key.toLowerCase(), depth: depth + 1 });
+            }
+            depth += opens - closes;
+            while (stack.length > 0 && stack[stack.length - 1]!.depth > depth) stack.pop();
+        }
+        return references;
+    }
+
+    private stripCwtLineComment(line: string): string {
+        let quoted = false;
+        let escaped = false;
+        for (let index = 0; index < line.length; index++) {
+            const char = line[index]!;
+            if (escaped) escaped = false;
+            else if (char === '\\' && quoted) escaped = true;
+            else if (char === '"') quoted = !quoted;
+            else if (char === '#' && !quoted) return line.slice(0, index);
+        }
+        return line;
     }
 
     private cwtEntityMatches(summary: CwtSchemaEntitySummary, normalizedTarget: string, needle: string | undefined): boolean {
@@ -1531,6 +1783,7 @@ export class LspToolHandler {
             ...(summary.typeKeyFilters ?? []),
             ...summary.schemaKeys,
             ...(summary.graphRelatedTypes ?? []),
+            ...(summary.shaderReferences ?? []).flatMap(reference => [reference.argumentPath, reference.referenceKind]),
         ].join('\n').toLowerCase().replace(/\\/g, '/');
 
         if (!normalizedTarget && !needle) {

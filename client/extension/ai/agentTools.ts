@@ -190,6 +190,13 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     get_entity_info: 45_000,
     query_static_modifiers: 45_000,
     query_variables: 45_000,
+    query_shader_symbol: 45_000,
+    query_shader_compile_unit: 45_000,
+    query_shader_platform_variants: 45_000,
+    query_shader_callers: 45_000,
+    explain_shader_reachability: 45_000,
+    validate_shader: 45_000,
+    compare_shader_with_vanilla: 45_000,
     read_file: 30_000,
     write_file: 30_000,
     edit_file: 30_000,
@@ -509,7 +516,7 @@ export class AgentToolExecutor {
 
     private isDiagnosticRelevantFile(filePath: string): boolean {
         const ext = path.extname(filePath).toLowerCase();
-        return ['.txt', '.gui', '.yml', '.gfx', '.asset', '.cwt', '.entity'].includes(ext);
+        return ['.txt', '.gui', '.yml', '.gfx', '.asset', '.cwt', '.entity', '.shader', '.fxh'].includes(ext);
     }
 
     private async requestRevalidateFiles(files: string[]): Promise<Record<string, unknown> | undefined> {
@@ -1005,6 +1012,113 @@ export class AgentToolExecutor {
         }
     }
 
+    private isShaderTarget(filePath: string): boolean {
+        const extension = path.extname(filePath).toLowerCase();
+        return extension === '.shader' || extension === '.fxh';
+    }
+
+    private requiresShaderInterfacePreflight(filePath: string, previousContent: string, content: string): boolean {
+        return path.extname(filePath).toLowerCase() === '.gfx'
+            && (/\beffectFile\s*=/i.test(previousContent) || /\beffectFile\s*=/i.test(content));
+    }
+
+    private async evaluateShaderWritePreflight(request: {
+        filePath: string;
+        previousContent: string;
+        content: string;
+    }): Promise<{ allowed: boolean; message?: string; summary: Record<string, unknown> }> {
+        const raw = await this.lspHandler.preflightShaderEdit({
+            file: request.filePath,
+            previousContent: request.previousContent,
+            content: request.content,
+        });
+        const result = raw && typeof raw === 'object' && !Array.isArray(raw)
+            ? raw as Record<string, unknown>
+            : {};
+        const issues = Array.isArray(result.issues)
+            ? result.issues.filter((item): item is string => typeof item === 'string')
+            : [];
+        if (result.ok !== true) {
+            const detail = typeof result.error === 'string' ? result.error : 'Shader preflight returned no authoritative result.';
+            return {
+                allowed: false,
+                message: `Shader semantic preflight unavailable; write blocked (fail closed): ${detail}`,
+                summary: { ...result, allowed: false, degraded: true },
+            };
+        }
+        if (result.allowed !== true) {
+            return {
+                allowed: false,
+                message: issues.length > 0
+                    ? `Shader semantic preflight blocked the write:\n- ${issues.join('\n- ')}`
+                    : 'Shader semantic preflight blocked the write because safety could not be proven.',
+                summary: result,
+            };
+        }
+        return { allowed: true, summary: result };
+    }
+
+    private async validateAffectedShaderUnits(filePath: string): Promise<Record<string, unknown>> {
+        const compileRaw = await this.lspHandler.queryShaderCompileUnitFresh(filePath);
+        const compileUnit = compileRaw && typeof compileRaw === 'object' && !Array.isArray(compileRaw)
+            ? compileRaw as Record<string, unknown>
+            : {};
+        if (compileUnit.ok !== true) {
+            return {
+                passed: false,
+                status: 'unavailable',
+                affectedRoots: [],
+                validations: [],
+                error: typeof compileUnit.error === 'string'
+                    ? compileUnit.error
+                    : 'Compile-unit lookup returned no authoritative result.',
+            };
+        }
+
+        const root = compileUnit.root && typeof compileUnit.root === 'object' && !Array.isArray(compileUnit.root)
+            ? compileUnit.root as Record<string, unknown>
+            : {};
+        const candidates = [
+            filePath,
+            typeof root.path === 'string' ? root.path : undefined,
+            ...(Array.isArray(compileUnit.includedBy) ? compileUnit.includedBy : []),
+        ].filter((item): item is string => typeof item === 'string' && item.length > 0);
+        const affectedRoots = [...new Set(candidates.map(item => path.resolve(item)))].sort((a, b) => a.localeCompare(b));
+        if (affectedRoots.length > 128) {
+            return {
+                passed: false,
+                status: 'unavailable',
+                affectedRoots: affectedRoots.slice(0, 128),
+                validations: [],
+                error: `Shader write affects ${affectedRoots.length} compile roots, above the bounded validation limit of 128.`,
+            };
+        }
+
+        const validations: Record<string, unknown>[] = [];
+        let unavailable = false;
+        let errorCount = 0;
+        for (const target of affectedRoots) {
+            const raw = await this.lspHandler.validateShaderFresh(target);
+            const validation = raw && typeof raw === 'object' && !Array.isArray(raw)
+                ? raw as Record<string, unknown>
+                : {};
+            const diagnostics = Array.isArray(validation.diagnostics)
+                ? validation.diagnostics.filter(item => item && typeof item === 'object') as Record<string, unknown>[]
+                : [];
+            const errors = diagnostics.filter(item => item.severity === 'error');
+            errorCount += errors.length;
+            if (validation.ok !== true) unavailable = true;
+            validations.push({ file: target, ok: validation.ok === true, errorCount: errors.length, diagnostics });
+        }
+        return {
+            passed: !unavailable && errorCount === 0,
+            status: unavailable ? 'unavailable' : errorCount > 0 ? 'errors' : 'validated',
+            affectedRoots,
+            validations,
+            errorCount,
+        };
+    }
+
     /** Re-run evidence against integrated on-disk files after all child writes merge. */
     public async finalizePdxEvidence(
         writtenFiles: readonly string[],
@@ -1323,6 +1437,8 @@ export class AgentToolExecutor {
 
             let gateOutcome: { summary?: Record<string, unknown>; errorResult?: Record<string, unknown> } | undefined;
             let completedPdxWrite: { toolName: string; filePath: string; content: string } | undefined;
+            let completedShaderWrite: { filePath: string } | undefined;
+            let shaderPreflightSummary: Record<string, unknown> | undefined;
             const inheritedPdxPreflight = context?.onBeforePdxWrite;
             const toolContext: import('./types').AgentToolContext = {
                 ...(context ?? {}),
@@ -1335,6 +1451,27 @@ export class AgentToolExecutor {
                 if (inheritedPdxPreflight) {
                     const inherited = await inheritedPdxPreflight(request);
                     if (!inherited.allowed) return inherited;
+                }
+                const shaderTarget = this.isShaderTarget(request.filePath);
+                if (shaderTarget || this.requiresShaderInterfacePreflight(request.filePath, request.previousContent, request.content)) {
+                    const shaderGate = await this.evaluateShaderWritePreflight(request);
+                    shaderPreflightSummary = shaderGate.summary;
+                    if (!shaderGate.allowed) {
+                        gateOutcome = {
+                            summary: shaderGate.summary,
+                            errorResult: {
+                                success: false,
+                                error: shaderGate.message ?? 'Shader semantic preflight blocked the write.',
+                                shaderSafetyGate: shaderGate.summary,
+                            },
+                        };
+                        return { allowed: false, message: shaderGate.message };
+                    }
+                    if (shaderTarget) {
+                        completedShaderWrite = { filePath: request.filePath };
+                        gateOutcome = { summary: { shaderSafetyGate: shaderGate.summary } };
+                        return { allowed: true };
+                    }
                 }
                 gateOutcome = await this.evaluateEvidenceGate(
                     request.toolName,
@@ -1393,6 +1530,9 @@ export class AgentToolExecutor {
                 const postWriteEvidence = completedPdxWrite && writeSucceeded
                     ? await this.evaluatePostWriteEvidence(completedPdxWrite, toolContext)
                     : undefined;
+                const postWriteShader = completedShaderWrite && writeSucceeded
+                    ? await this.validateAffectedShaderUnits(completedShaderWrite.filePath)
+                    : undefined;
                 await runAgentHooks('postToolUse', {
                     toolName,
                     success: !(result && typeof result === 'object' && ('error' in result || (result as any).success === false)),
@@ -1408,6 +1548,16 @@ export class AgentToolExecutor {
                     }
                     if (gateOutcome?.summary && !gateOutcome.errorResult) {
                         resultRecord.evidenceGate = gateOutcome.summary;
+                    }
+                    if (shaderPreflightSummary) {
+                        resultRecord.shaderSafetyGate = shaderPreflightSummary;
+                    }
+                    if (postWriteShader) {
+                        resultRecord.shaderPostWriteValidation = postWriteShader;
+                        if (postWriteShader.passed !== true) {
+                            if (postWriteShader.status === 'errors') resultRecord.requiresRepair = true;
+                            else resultRecord.requiresValidation = true;
+                        }
                     }
                     if (postWriteEvidence) {
                         const validation = classifyPostWriteValidation(
@@ -1559,6 +1709,20 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.queryStaticModifiers(args as any); break;
             case 'query_variables':
                 result = await this.lspHandler.queryVariables(args as any); break;
+            case 'query_shader_symbol':
+                result = await this.lspHandler.queryShaderSymbol(args as any); break;
+            case 'query_shader_compile_unit':
+                result = await this.lspHandler.queryShaderCompileUnit(args as any); break;
+            case 'query_shader_platform_variants':
+                result = await this.lspHandler.queryShaderPlatformVariants(args as any); break;
+            case 'query_shader_callers':
+                result = await this.lspHandler.queryShaderCallers(args as any); break;
+            case 'explain_shader_reachability':
+                result = await this.lspHandler.explainShaderReachability(args as any); break;
+            case 'validate_shader':
+                result = await this.lspHandler.validateShader(args as any); break;
+            case 'compare_shader_with_vanilla':
+                result = await this.lspHandler.compareShaderWithVanilla(args as any); break;
 
             // - File tools -
             case 'read_file':

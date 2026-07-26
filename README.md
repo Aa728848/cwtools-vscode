@@ -26,6 +26,7 @@ The CWTools LSP server, customized using **.NET 10** and **F#**, serves as the c
 - **O(1) Definition Search**: The `DocumentStore` abandons traditional $O(N)$ traversals, adopting **lazy line offset cache reconstruction** to compress Hover and Go-To-Definition search times to $O(1)$, realizing instantaneous positioning even for large mod files with hundreds of thousands of lines of code.
 - **Semantic Validation & Macro Evaluation**: Supports deep syntax analysis, including real-time evaluation of complex macro expressions `@[...]` and `value:xxx|`, displaying localized texts in-line (CodeLens) and allowing hover previews of `inline_script` files.
 - **Incremental Type Index Refresh**: When editing custom script definitions in `scripted_triggers` / `scripted_effects` / `script_values`, you no longer experience the 15-25s lag of reload project. The backend precisely replaces the affected type entries by file name and reconstructs index ONLY for modified types (zero-overhead reuse of other types). Diagnostics and completion refresh instantly on save (when `experimental` toggle is enabled).
+- **Paradox Shader Language Service**: `.shader` and `.fxh` share one lossless outer-DSL, preprocessor, and tolerant HLSL/Cg front end. Features are compile-unit aware (`Includes`, mod/dependency/vanilla precedence, platform conditions) and include diagnostics, completion, hover, definitions/references, signature help, semantic tokens with delta updates, formatting, rename, inlay hints, folding/selection, call hierarchy, and workspace symbols. Interface `effectFile` and `.gui` sprite uses feed a versioned renderer-contract graph; only curated ABI evidence is classified as executable-hardcoded, while unproved entries remain unknown.
 
 ##### 🎨 2. Sandbox Multi-Dimensional Webview Visualization Engine
 This project makes deep use of the VS Code Webview isolation sandbox, utilizing modern web rendering technologies (Canvas / Cytoscape.js / Three.js) to deliver an unprecedented WYSIWYG experience to mod developers.
@@ -42,7 +43,8 @@ This subsystem combines a general repository-coding Agent with a Paradox/CWTools
 - **Domain-Separated Execution**: General Coding receives only domain-neutral repository prompts, tools, diagnostics, memory, caches, resume state, and sub-Agent roles. It can inspect and edit ordinary repositories, run approved commands, and verify builds/tests, but cannot call CWT/CWTools/PDXScript, localisation, game-asset, or MCP capabilities. Paradox execution obtains mutable game facts on demand from active CWT rules, the CWTools LSP, and project indexes instead of embedding a small hard-coded rules table in prompts.
 - **Profile-Aware Parallel DAG Orchestration**: General Multi-Agent dispatches repository engineering roles; Paradox Multi-Agent adds CWT/LSP evidence, entity contracts, localisation specialists, and semantic quality gates. Both coordinate bounded parallel work through a shared Blackboard.
 - **Long-Run Reliability & Smart Context Windowing**: Structured context compression, recoverable checkpoints, progress-aware run budgets, activity-based child-Agent stall detection, and loop prevention allow long-running tasks to continue while still stopping genuinely stalled work.
-- **Bi-directional MCP Integration**: The Paradox capability domain can consume configured stdio/SSE tools as an **MCP Client**; General Coding does not receive MCP tools because configured servers do not yet declare a trustworthy capability domain. The plugin simultaneously **exports a read-only MCP Server** (`packages/cwtools-mcp`) with 27 semantic tools for external agents like **Codex / Claude Code**—see Section 8 for details.
+- **Bi-directional MCP Integration**: The Paradox capability domain can consume configured stdio/SSE tools as an **MCP Client**; General Coding does not receive MCP tools because configured servers do not yet declare a trustworthy capability domain. The plugin simultaneously **exports a read-only MCP Server** (`packages/cwtools-mcp`) with 34 semantic tools for external agents like **Codex / Claude Code**—see Section 8 for details.
+- **Shader-Aware Agent Safety**: Seven read-only Shader queries expose symbols, compile units, platform variants, callers, reachability, validation, and vanilla comparison with provenance and version data. Shader edits must pass the preflight policy: engine-hardcoded and unknown Effects fail closed, and all reverse Include dependants are revalidated.
 - **Workspace-wide Localization Indexing**: An asynchronous incremental indexing system based on VS Code `FileSystemWatcher` feeds stable, accurate localization context to the large model.
 
 ##### 📂 4. Differences & Fast Migration Pipeline (Vanilla Compare)
@@ -127,7 +129,7 @@ Below is the overall module interaction and data flow topology:
   - Fine-tune materials (e.g., diffuse, specular) using slider panels.
 
 ##### 🔌 8. Out-of-the-Box MCP Server (for Codex / Claude Code)
-This extension bundles a **read-only** Model Context Protocol (MCP) server, offering 27 read-only semantic tools of CWTools (project knowledge pack, bounded project graph, syntax check, scope queries, definitions, references, diagnostics, scripted triggers/effects/enums) to external agents.
+This extension bundles a **read-only** Model Context Protocol (MCP) server, offering 34 read-only semantic tools of CWTools (project knowledge pack, bounded project graph, syntax check, scope queries, definitions, references, diagnostics, scripted triggers/effects/enums, and seven Shader queries) to external agents.
 * **Bounded Semantic Graph**: `explore_pdx_project` is the preferred first query for large mods. It returns ranked typed entry points, dependency edges, per-file semantic facts, provenance, truncation budgets, and freshness from the live CWTools model without reading whole files.
 * **Compact `/init` Knowledge Database**: the deep `/init` phase performs one complete export of the loaded project + vanilla definitions and workspace reference topology into `.cwtools/project/knowledge/manifest.json` plus `knowledge.sqlite`, replacing the former duplicated capability/archetype JSON set. Deterministic partial results are published once with an accurate coverage warning instead of repeating the same full scan; transient loading/stale states still retry. `/init` also directly creates or incrementally updates `.cwtools/index/workspace-symbols.sqlite` before deep export. On first activation, an existing `.cwtools-ai` tree is merged into `.cwtools` and the old directory is removed; when both contain the same relative path, the current `.cwtools` copy wins and the legacy copy is preserved under `.cwtools/migration-conflicts/cwtools-ai/`. A lower-left VS Code progress indicator remains visible while the workspace index is built, CWTools becomes ready, and the knowledge database is published. `query_project_knowledge` resolves explicit IDs through SQLite indexes, expands their reference/event/logic neighbourhood, and falls back to bounded intent search only when no identifier seed is supplied. It retrieves definitions, stacks, topology, project/vanilla patterns, and event structure/logic—including call phases, `on_action` entries, flags, technologies, variables, and scope bridges—without loading the whole database into the prompt. Lazy `query_workspace_index` calls restore persistent SQLite rows, publish the workspace phase first, parse only changed files, and wait at most eight seconds before returning partial results while vanilla indexing continues. After a serialized vanilla `.cwb` and its metadata are successfully rewritten, the Extension immediately force-rebuilds that game's global vanilla-symbol SQLite database before reloading; the filesystem watcher remains a fallback and durably marks matching project knowledge for refresh, which resumes when the reloaded LSP reports ready.
 * **Extension-Host Bridge by Default**: The MCP entry script connects to the active VS Code-compatible host (VS Code, Cursor, VSCodium, Antigravity, etc.) through `globalStorage/mcp/bridge-manifest.json`, reusing the IDE's existing CWTools language client and Problems diagnostics instead of starting a second server. The client workspace is discovered dynamically from MCP roots/session environment/cwd and must match the bridge workspace; mismatches return `bridge_unavailable` instead of answering from another project.
@@ -142,6 +144,12 @@ This extension bundles a **read-only** Model Context Protocol (MCP) server, offe
   ```
 * **Antigravity**: add `cwtools` to `~/.gemini/config/mcp_config.json` with `"command": "node"` and `"args": ["<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs", "--stdio"]`.
   Use the `globalStorage` path from the compatible host where the extension is active. For configuration details, see [packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md).
+
+##### 🧩 9. Paradox Shader Editing and Safety
+* Open any Stellaris `gfx/FX/*.shader` or `.fxh` file normally. Navigation and validation are restricted to the file's real transitive Include compile unit; an unrelated file with the same symbol name is never used as a fallback.
+* Platform-conditional declarations stay visible with inactive semantic-token modifiers. Rename and code actions are conservative across variants, file overrides, renderer contracts, and curated executable ABI entries.
+* A `.gfx` `spriteType`, `corneredTileSpriteType`, or `progressbartype` `effectFile` is linked to its Shader file. Static `.gui` `GFX_*` uses then select only the renderer-contract Effects required for that sprite subtype; selecting a file never marks every Effect in it reachable.
+* Agent and MCP answers distinguish explicit data calls, confirmed renderer conventions, convention candidates, curated engine-hardcoded entries, and engine-or-unreferenced unknowns. Lack of a text reference is never treated as proof of an executable call.
 
 ---
 
@@ -277,6 +285,7 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
 - **O(1) 定位查找**：`DocumentStore` 摒弃了传统的 $O(N)$ 遍历，采用**惰性重建行偏移缓存**技术，将 Hover 和 Go-To-Definition 的查找时间直接压缩至 $O(1)$，对拥有数十万行代码的超大型 Mod 文件实现即时定位。
 - **语义校验与宏求值**：支持深度语法分析，甚至能对复杂的宏表达式 `@[...]` 以及 `value:xxx|` 进行实时求值，在编辑器行内无缝显示本地化文本（CodeLens）及 `inline_script` 文件悬浮预览。
 - **增量类型索引刷新**：编辑保存 `scripted_triggers` / `scripted_effects` / `script_values` 等自定义脚本定义时，告别旧版「必须重新加载项目」的 15–25 秒卡顿——后端按文件名精确替换受影响的类型条目、仅重建变更类型的索引（其余类型零开销复用），保存后诊断与补全即时刷新（`experimental` 开关启用）。
+- **Paradox Shader 语言服务**：`.shader` 与 `.fxh` 共用无损的外层 DSL、预处理和容错 HLSL/Cg 前端；所有功能都按真实编译单元工作（`Includes`、Mod/依赖/原版覆盖顺序、平台条件），覆盖诊断、补全、悬停、定义/引用、签名帮助、支持 delta 的语义 token、格式化、重命名、inlay hint、折叠/选择范围、调用层级和工作区符号。interface `effectFile` 与 `.gui` 精灵使用会进入带版本的 renderer contract 图；只有 curated ABI 证据可归类为 EXE 硬调用，未证明入口始终保持 unknown。
 
 ##### 🎨 2. 沙盒化多维 Webview 可视化引擎 (Rich Visualization)
 本项目深度利用了 VS Code Webview 隔离沙盒，基于现代 Web 渲染技术（Canvas / Cytoscape.js / Three.js），为 Mod 开发者带来了前所未有的所见即所得体验。
@@ -293,7 +302,8 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
 - **按领域分离执行链**：通用编码 Agent 只接收领域中立的仓库提示词、工具、诊断、记忆、缓存、恢复状态和子 Agent 角色；它可以调查普通仓库、修改代码/配置/测试/文档并运行获准的构建测试，但不能调用 CWT/CWTools/PDXScript、本地化、游戏资产或 MCP 能力。Paradox Agent 则按需从活动 CWT 规则、CWTools LSP 和项目索引获取动态游戏事实，不在提示词中维护少量易过时的硬编码规则表。
 - **Profile 感知的并行 DAG 编排**：通用多 Agent 使用领域中立的仓库工程角色；Paradox 多 Agent 额外使用 CWT/LSP 证据、实体契约、本地化专职角色和语义质量门。两者都通过共享黑板协调有界并行任务。
 - **长期运行可靠性与智能压缩**：结构化上下文压缩、可恢复检查点、按进展续期的运行预算、基于活动状态的子 Agent 卡死检测和循环防御，使长任务可以持续完成，同时仍会终止真正停滞的工作。
-- **MCP 双向集成（消费 + 输出）**：Paradox 能力领域可作为 **MCP 客户端**调用已配置的 stdio/SSE 工具；由于现有 MCP Server 配置尚无可信的能力领域声明，通用编码不会获得 MCP 工具。插件同时**对外输出一个随包分发的只读 MCP 服务**（`packages/cwtools-mcp`），把 27 个 PDX 语义工具开放给 **Codex / Claude Code** 等外部 Agent 复用——详见下方功能指引第 8 节。
+- **MCP 双向集成（消费 + 输出）**：Paradox 能力领域可作为 **MCP 客户端**调用已配置的 stdio/SSE 工具；由于现有 MCP Server 配置尚无可信的能力领域声明，通用编码不会获得 MCP 工具。插件同时**对外输出一个随包分发的只读 MCP 服务**（`packages/cwtools-mcp`），把 34 个 PDX 语义工具开放给 **Codex / Claude Code** 等外部 Agent 复用——详见下方功能指引第 8 节。
+- **Shader 感知的 Agent 安全门**：七个只读 Shader 查询提供符号、编译单元、平台变体、调用方、可达性、验证与原版对比，并携带来源和版本。Shader 写入必须经过 preflight 策略；引擎硬调用和未知 Effect 默认失败关闭，修改后会重新验证所有反向 Include 依赖。
 - **全工作区本地化索引**：全工作区本地化 YML 文本基于后台 `FileSystemWatcher` 异步实时增量索引，为大模型源源不断地输送稳定、精准的项目上下文。
 
 ##### 📂 4. 原版对比与极速迁移通道 (Vanilla Compare & Sync)
@@ -381,7 +391,7 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
   - 支持材质属性（如漫反射、高光强度）在侧边栏面板上的动态滑块调节与实时重绘调试。
 
 ##### 🔌 8. 通用 MCP 服务（供 Codex / Claude Code 调用）
-本插件随包分发一个**只读**的 MCP 服务，把 CWTools 的 PDX 语义能力（项目知识包、有界项目语义图、验证 ID、查语法、查作用域、全项目诊断、定义/引用、补全、scripted effects/triggers/enums/modifiers/variables、实体信息，共 27 个只读工具）开放给任意 MCP 客户端。文件写入仍由你的 Agent 自带环境完成。
+本插件随包分发一个**只读**的 MCP 服务，把 CWTools 的 PDX 语义能力（项目知识包、有界项目语义图、验证 ID、查语法、查作用域、全项目诊断、定义/引用、补全、scripted effects/triggers/enums/modifiers/variables、实体信息和七个 Shader 查询，共 34 个只读工具）开放给任意 MCP 客户端。文件写入仍由你的 Agent 自带环境完成。
 * **有界语义图**：大型 Mod 优先调用 `explore_pdx_project`。它直接读取 live CWTools model，返回排序后的 typed entry point、依赖边、逐文件语义事实、provenance、截断预算与 freshness，不需要读取整份文件。
 * **紧凑的 `/init` 知识数据库**：深度 `/init` 阶段只执行一次完整导出，把已加载的项目与原版定义以及工作区引用拓扑保存为 `.cwtools/project/knowledge/manifest.json` 和 `knowledge.sqlite`，替代原先重复的 capability/archetype JSON 集合。确定性的部分结果只发布一次并准确提示覆盖范围，不再重复相同的全量扫描；仅临时的加载中或陈旧状态会重试。`/init` 还会在深层导出前直接创建或增量更新 `.cwtools/index/workspace-symbols.sqlite`。首次激活时，已有 `.cwtools-ai` 会合并进 `.cwtools` 并删除旧目录；同一相对路径同时存在时，以当前 `.cwtools` 文件为准，旧冲突内容保存在 `.cwtools/migration-conflicts/cwtools-ai/`。构建工作区索引、等待 CWTools 和发布知识数据库期间，VS Code 左下角会持续显示进度。`query_project_knowledge` 会先通过 SQLite 索引解析显式 ID，再扩展其引用、事件与逻辑邻域；只有未提供标识符种子时才退回有界意图检索。它可按需检索定义、定义栈、拓扑、项目/原版范例，以及事件调用阶段、`on_action` 入口、Flag、科技、变量和作用域桥接等事件结构与逻辑关系，无需把整个数据库塞入提示词。懒加载的 `query_workspace_index` 会先恢复持久化 SQLite、优先发布工作区阶段、只解析变化文件，并最多等待八秒后返回部分结果，同时让原版索引继续构建。序列化原版 `.cwb` 及其元数据成功重写后，Extension 会在重载窗口前立即强制重建该游戏的全局原版符号 SQLite；文件 watcher 仍作为兜底，并持久标记匹配的项目知识为待刷新，重载后的 LSP 报告 ready 时会继续执行该刷新。
 
@@ -402,6 +412,12 @@ claude mcp add cwtools --scope user -- node "<host-globalStorage>/foreverskywalk
 * **Antigravity**：在 `~/.gemini/config/mcp_config.json` 中添加 `cwtools`，内容为 `"command": "node"` 和 `"args": ["<host-globalStorage>/foreverskywalker.foreverskywalker-stellaris-cwtools/mcp/cwtools-mcp.cjs", "--stdio"]`。
 
   请使用实际运行插件的兼容宿主自己的 `globalStorage` 路径。等价的 `~/.codex/config.toml` 手写配置、`--standalone`/`--rules`/`--cache`/`--game-path` 高级选项与 Claude Code 接入方式，详见 [packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md)。
+
+##### 🧩 9. Paradox Shader 编辑与安全
+* 正常打开 Stellaris `gfx/FX/*.shader` 或 `.fxh` 即可使用。导航和验证只在文件真实的传递 Include 编译单元内进行；未 Include 的同名符号绝不会作为兜底绑定。
+* 平台条件声明会保留并以 inactive 语义 token 修饰。重命名与 code action 会保守处理条件变体、文件覆盖、renderer contract 和 curated EXE ABI 入口。
+* `.gfx` 中 `spriteType`、`corneredTileSpriteType`、`progressbartype` 的 `effectFile` 会连接到 Shader 文件；静态 `.gui` 的 `GFX_*` 使用再按 sprite subtype 选择 renderer contract 要求的 Effect，绝不会因文件被选择就把其中所有 Effect 判定为可达。
+* Agent 与 MCP 明确区分显式数据调用、已确认 renderer 约定、约定候选、curated 引擎硬调用和 engine-or-unreferenced unknown；“没有文本引用”永远不是 EXE 调用证据。
 
 ---
 

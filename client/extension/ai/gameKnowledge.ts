@@ -26,6 +26,15 @@ This prompt intentionally contains no game-version rule tables, scope lists, ent
 CWT structure, hard facts, completions, typed definitions, parse results, and fresh diagnostics are legality evidence. CWT comments, documentation, project examples, and vanilla archetypes help explain intent but do not prove runtime gameplay behaviour. If active sources are missing or disagree, keep the fact unresolved and report the source/revision instead of filling it from model memory.
 
 Executable statements may be order-sensitive. Preserve source order unless current rule evidence and a verified archetype establish that reordering is safe. Validate the integrated final file after writing.
+
+### Shader safety gate (.shader / .fxh)
+- Effect names may be EXE ABI. Before rename/delete, call \`explain_shader_reachability\` and obey renamePolicy.
+- A new Effect runs only through a data call, effectFile convention, or known engine entry.
+- Visibility depends on root + Includes + platform. Repository search proves nothing; use \`query_shader_symbol\` and \`query_shader_compile_unit\`.
+- In \`interface/*.gfx\`, effectFile selects a file; UI state then selects convention Effects such as \`Up/Down/Over/Disable/Text*\`. \`effect_file_convention_candidate\` does not make every Effect reachable. Check \`query_shader_callers\` for \`interfaceSprite\`, \`rendererSubtype\`, and the enclosing block; use the Shader project-knowledge edges to trace static \`.gui -> GFX_* -> shader file\` uses and renderer inputs.
+- Before edits query reachability, callers, and compile units; afterward run \`validate_shader\` on every affected root.
+- \`engine_or_unreferenced\` means reachability is unknown, not dead code. Never suggest deleting it.
+- If Shader tools fail, report it and remain read-only; never guess semantics.
 `;
 
 /**

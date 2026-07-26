@@ -80,4 +80,77 @@ describe('deep semantic tools routing contract', () => {
     expect(hit!.args.slice(0, 1)).to.deep.equal(['my_chain.10']);
     expect(hit!.args.slice(2)).to.deep.equal(['event', true, 2, 24, 60, false]);
   });
+
+  it('query_shader_symbol routes a single record to cwtools.ai.shader.symbols', async () => {
+    const calls: Array<{ command: string; args: unknown[] }> = [];
+    await defaultSharedToolDispatcher(recordingHost(calls), 'query_shader_symbol', {
+      filter: 'pdx',
+      kind: 'effect',
+      limit: 50,
+      cursor: 100,
+    });
+    const hit = calls.find(c => c.command === 'cwtools.ai.shader.symbols');
+    expect(hit).to.not.equal(undefined);
+    expect(hit!.args).to.deep.equal([{ filter: 'pdx', kind: 'effect', limit: 50, cursor: 100 }]);
+  });
+
+  it('query_shader_compile_unit routes a file URI record to cwtools.ai.shader.compileUnit', async () => {
+    const calls: Array<{ command: string; args: unknown[] }> = [];
+    await defaultSharedToolDispatcher(recordingHost(calls), 'query_shader_compile_unit', { file: 'gfx/FX/test.shader' });
+    const hit = calls.find(c => c.command === 'cwtools.ai.shader.compileUnit');
+    expect(hit).to.not.equal(undefined);
+    const record = hit!.args[0] as Record<string, unknown>;
+    expect(String(record.uri)).to.match(/^file:\/\/\//);
+    expect(String(record.uri)).to.include('gfx/FX/test.shader');
+  });
+
+  it('query_shader_platform_variants routes a file URI record to cwtools.ai.shader.variants', async () => {
+    const calls: Array<{ command: string; args: unknown[] }> = [];
+    await defaultSharedToolDispatcher(recordingHost(calls), 'query_shader_platform_variants', { file: 'gfx/FX/test.shader' });
+    const hit = calls.find(c => c.command === 'cwtools.ai.shader.variants');
+    expect(hit).to.not.equal(undefined);
+    expect(String((hit!.args[0] as Record<string, unknown>).uri)).to.include('gfx/FX/test.shader');
+  });
+
+  it('query_shader_callers routes effectName and limit to cwtools.ai.shader.callers', async () => {
+    const calls: Array<{ command: string; args: unknown[] }> = [];
+    await defaultSharedToolDispatcher(recordingHost(calls), 'query_shader_callers', { effectName: 'my_effect', limit: 10 });
+    const hit = calls.find(c => c.command === 'cwtools.ai.shader.callers');
+    expect(hit).to.not.equal(undefined);
+    expect(hit!.args).to.deep.equal([{ effectName: 'my_effect', limit: 10 }]);
+  });
+
+  it('explain_shader_reachability routes effectName or file forms to cwtools.ai.shader.reachability', async () => {
+    const byName: Array<{ command: string; args: unknown[] }> = [];
+    await defaultSharedToolDispatcher(recordingHost(byName), 'explain_shader_reachability', { effectName: 'my_effect' });
+    expect(byName.find(c => c.command === 'cwtools.ai.shader.reachability')!.args).to.deep.equal([{ effectName: 'my_effect' }]);
+
+    const byFile: Array<{ command: string; args: unknown[] }> = [];
+    await defaultSharedToolDispatcher(recordingHost(byFile), 'explain_shader_reachability', { file: 'gfx/FX/test.shader', limit: 25 });
+    const hit = byFile.find(c => c.command === 'cwtools.ai.shader.reachability');
+    expect(hit).to.not.equal(undefined);
+    const record = hit!.args[0] as Record<string, unknown>;
+    expect(String(record.uri)).to.include('gfx/FX/test.shader');
+    expect(record.limit).to.equal(25);
+  });
+
+  it('validate_shader routes a file URI record to cwtools.ai.shader.validate', async () => {
+    const calls: Array<{ command: string; args: unknown[] }> = [];
+    await defaultSharedToolDispatcher(recordingHost(calls), 'validate_shader', { file: 'gfx/FX/test.fxh' });
+    const hit = calls.find(c => c.command === 'cwtools.ai.shader.validate');
+    expect(hit).to.not.equal(undefined);
+    expect(String((hit!.args[0] as Record<string, unknown>).uri)).to.include('gfx/FX/test.fxh');
+  });
+
+  it('compare_shader_with_vanilla routes effectName or file forms to cwtools.ai.shader.compareVanilla', async () => {
+    const byName: Array<{ command: string; args: unknown[] }> = [];
+    await defaultSharedToolDispatcher(recordingHost(byName), 'compare_shader_with_vanilla', { effectName: 'my_effect' });
+    expect(byName.find(c => c.command === 'cwtools.ai.shader.compareVanilla')!.args).to.deep.equal([{ effectName: 'my_effect' }]);
+
+    const byFile: Array<{ command: string; args: unknown[] }> = [];
+    await defaultSharedToolDispatcher(recordingHost(byFile), 'compare_shader_with_vanilla', { file: 'gfx/FX/test.shader' });
+    const hit = byFile.find(c => c.command === 'cwtools.ai.shader.compareVanilla');
+    expect(hit).to.not.equal(undefined);
+    expect(String((hit!.args[0] as Record<string, unknown>).uri)).to.include('gfx/FX/test.shader');
+  });
 });

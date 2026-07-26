@@ -26,6 +26,13 @@ export const MCP_TOOL_NAMES = [
   'query_static_modifiers',
   'query_variables',
   'get_entity_info',
+  'query_shader_symbol',
+  'query_shader_compile_unit',
+  'query_shader_platform_variants',
+  'query_shader_callers',
+  'explain_shader_reachability',
+  'validate_shader',
+  'compare_shader_with_vanilla',
 ] as const;
 
 export type McpToolName = typeof MCP_TOOL_NAMES[number];

@@ -1028,5 +1028,220 @@ export const GENERATED_MCP_TOOLS = [
       "riskLevel": 0,
       "concurrencyClass": "parallel"
     }
+  },
+  {
+    "tool": {
+      "name": "query_shader_symbol",
+      "description": "Read-only. Query declared Paradox shader symbols (Effects, MainCode stages, constant buffers, render states) from the CWTools shader model across mod, dependencies, and vanilla. Effect entries carry a reachability classification: engine_or_unreferenced means reachability is UNKNOWN, not dead code - never treat it as safe to delete. Page with cursor when nextCursor is non-null.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "string",
+            "description": "Optional case-insensitive substring filter on the symbol name."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "all",
+              "effect",
+              "maincode",
+              "constantbuffer",
+              "state"
+            ],
+            "description": "Symbol kind filter. Default all."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results to return (1-500, default 100)."
+          },
+          "cursor": {
+            "type": "number",
+            "description": "Numeric offset returned as nextCursor by a previous call. Default 0."
+          }
+        },
+        "required": []
+      }
+    },
+    "registry": {
+      "name": "query_shader_symbol",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "lsp-limited"
+    }
+  },
+  {
+    "tool": {
+      "name": "query_shader_compile_unit",
+      "description": "Read-only. Return the compile unit for a .shader root or .fxh include: root file, include members with resolution status and origin, include problems (missing/ambiguous/cycle), and the roots that include this file. MANDATORY before editing any .fxh: symbol validity depends on the whole compile unit (root + Includes + platform conditions), so raw text search across the repo does not prove shader semantics.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Absolute or workspace-relative path of the .shader/.fxh file."
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    "registry": {
+      "name": "query_shader_compile_unit",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "lsp-limited"
+    }
+  },
+  {
+    "tool": {
+      "name": "query_shader_platform_variants",
+      "description": "Read-only. Compare presence conditions, macros, and active symbols for every supported Paradox shader platform profile in a compile unit. MANDATORY before changing conditional shader code or macros; validating only the current platform is insufficient.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Absolute or workspace-relative path of the .shader/.fxh file."
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    "registry": {
+      "name": "query_shader_platform_variants",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "lsp-limited"
+    }
+  },
+  {
+    "tool": {
+      "name": "query_shader_callers",
+      "description": "Read-only. Return evidence of what references a shader Effect: data-script assignments and effectFile selections, each with file, logicalPath, origin, enclosingBlock, interfaceSprite/rendererSubtype, direct renderer inputs and bounded static GUI use sites when known, range, and provenance (sourceKind, confidence, gameVersion). MANDATORY before renaming or deleting an Effect.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "effectName": {
+            "type": "string",
+            "description": "Exact shader Effect name."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max evidence entries to return (default 100)."
+          }
+        },
+        "required": [
+          "effectName"
+        ]
+      }
+    },
+    "registry": {
+      "name": "query_shader_callers",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "lsp-limited"
+    }
+  },
+  {
+    "tool": {
+      "name": "explain_shader_reachability",
+      "description": "Read-only. Explain why a shader Effect is reachable or why reachability is unknown: classification, declarations, evidence with provenance/confidence, and the rename policy decision. Respect renamePolicy - engine_hardcoded or unknown entry points must not be renamed. A newly declared Effect is NOT executed unless reachable via a data call, an effectFile convention, or a known engine entry. Pass effectName for one Effect, or file to page through all Effects declared in a shader file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "effectName": {
+            "type": "string",
+            "description": "Exact shader Effect name. Takes precedence over file."
+          },
+          "file": {
+            "type": "string",
+            "description": "Absolute or workspace-relative path of a .shader/.fxh file; lists its Effects with cursor pagination."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results for the per-file form (1-500, default 100)."
+          },
+          "cursor": {
+            "type": "number",
+            "description": "Numeric offset returned as nextCursor by a previous per-file call. Default 0."
+          }
+        },
+        "required": []
+      }
+    },
+    "registry": {
+      "name": "explain_shader_reachability",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "lsp-limited"
+    }
+  },
+  {
+    "tool": {
+      "name": "validate_shader",
+      "description": "Read-only. Validate a .shader/.fxh file inside its compile unit and return structured diagnostics (code, severity, message, range). Run this on every affected compile-unit root after editing shader files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Absolute or workspace-relative path of the .shader/.fxh file."
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    "registry": {
+      "name": "validate_shader",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "lsp-limited"
+    }
+  },
+  {
+    "tool": {
+      "name": "compare_shader_with_vanilla",
+      "description": "Read-only. Structurally compare workspace shader declarations with vanilla: which declarations are effective and which vanilla declarations they override. Pass effectName for one Effect, or file for all Effects declared in a shader file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "effectName": {
+            "type": "string",
+            "description": "Exact shader Effect name. Takes precedence over file."
+          },
+          "file": {
+            "type": "string",
+            "description": "Absolute or workspace-relative path of a .shader/.fxh file."
+          }
+        },
+        "required": []
+      }
+    },
+    "registry": {
+      "name": "compare_shader_with_vanilla",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "lsp-limited"
+    }
   }
 ] as const satisfies readonly GeneratedMcpTool[];

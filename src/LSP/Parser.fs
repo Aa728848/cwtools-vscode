@@ -305,6 +305,11 @@ let parseSemanticTokensParams =
 let parseSemanticTokensDeltaParams =
     deserializerFactory<SemanticTokensDeltaParams> readOptions
 
+let parseFoldingRangeParams = deserializerFactory<FoldingRangeParams> readOptions
+let parseSelectionRangeParams = deserializerFactory<SelectionRangeParams> readOptions
+let parseCallHierarchyIncomingCallsParams = deserializerFactory<CallHierarchyIncomingCallsParams> readOptions
+let parseCallHierarchyOutgoingCallsParams = deserializerFactory<CallHierarchyOutgoingCallsParams> readOptions
+
 let parseRequest (method: string, json: JsonValue) : Request =
     match method with
     | "initialize" -> Initialize(parseInitialize json)
@@ -334,4 +339,9 @@ let parseRequest (method: string, json: JsonValue) : Request =
     | "workspace/didChangeWorkspaceFolders" -> DidChangeWorkspaceFolders(parseDidChangeWorkspaceFoldersParams json)
     | "textDocument/semanticTokens/full" -> SemanticTokensFull(parseSemanticTokensParams json)
     | "textDocument/semanticTokens/full/delta" -> SemanticTokensFullDelta(parseSemanticTokensDeltaParams json)
+    | "textDocument/foldingRange" -> FoldingRanges(parseFoldingRangeParams json)
+    | "textDocument/selectionRange" -> SelectionRanges(parseSelectionRangeParams json)
+    | "textDocument/prepareCallHierarchy" -> PrepareCallHierarchy(parseTextDocumentPositionParams json)
+    | "callHierarchy/incomingCalls" -> CallHierarchyIncomingCalls(parseCallHierarchyIncomingCallsParams json)
+    | "callHierarchy/outgoingCalls" -> CallHierarchyOutgoingCalls(parseCallHierarchyOutgoingCallsParams json)
     | _ -> raise (Exception $"Unexpected request method %s{method}")

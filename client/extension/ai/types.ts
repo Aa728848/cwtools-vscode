@@ -4,7 +4,7 @@
 
 import type { SlashCommandDescriptor } from './slashCommands';
 import type { CwtRuleValueReference } from '../../shared/pdxSemanticCatalog';
-export type { CwtRuleValueReference, PdxRuleCategory, PdxSemanticCatalog } from '../../shared/pdxSemanticCatalog';
+export type { CwtRuleValueReference, CwtShaderReference, PdxRuleCategory, PdxSemanticCatalog } from '../../shared/pdxSemanticCatalog';
 
 // ─── Agent Modes ─────────────────────────────────────────────────────────────
 
@@ -617,6 +617,8 @@ export interface CwtSchemaEntitySummary {
     typeKeyFilters?: string[];
     schemaKeys: string[];
     graphRelatedTypes?: string[];
+    /** Machine-readable Shader Effect/file fields declared by this type schema. */
+    shaderReferences?: import('../../shared/pdxSemanticCatalog').CwtShaderReference[];
     matchedBy: string[];
     snippet?: string;
     truncated?: boolean;

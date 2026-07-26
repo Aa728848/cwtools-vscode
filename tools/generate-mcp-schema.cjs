@@ -33,6 +33,13 @@ const mcpToolNames = [
   'query_static_modifiers',
   'query_variables',
   'get_entity_info',
+  'query_shader_symbol',
+  'query_shader_compile_unit',
+  'query_shader_platform_variants',
+  'query_shader_callers',
+  'explain_shader_reachability',
+  'validate_shader',
+  'compare_shader_with_vanilla',
 ];
 
 require.extensions['.ts'] = function loadTypeScript(module, filename) {

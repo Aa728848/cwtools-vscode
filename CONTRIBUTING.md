@@ -106,9 +106,12 @@ npm run rules:stellaris:scan
 npm run rules:stellaris:check
 npm run rules:stellaris:update
 npm run rules:stellaris:report
+npm run rules:stellaris:shader-abi
 ```
 
 `rules:stellaris:report` runs a read-only comparison between the latest game `script_documentation` log, vanilla `common/`, and the CWT config baseline, generating a self-contained HTML report (`tools/rules-sync/report.ts`, automatically opens in the browser by default, disable with `--no-open`). For details, see [tools/rules-sync/README.md](./tools/rules-sync/README.md).
+
+`rules:stellaris:shader-abi` parses the updated `gfx/FX` corpus through CWTools, fingerprints `stellaris.exe`, and writes a fail-closed ABI upgrade review pack. It never promotes candidates automatically; applying canonical catalog/audit files requires both separately reviewed artifacts.
 
 #### Run and Debug
 
@@ -466,12 +469,17 @@ npm run rules:stellaris:scan
 npm run rules:stellaris:check
 npm run rules:stellaris:update
 npm run rules:stellaris:report
+npm run rules:stellaris:shader-abi
 ```
 
 `rules:stellaris:report` 会把最新游戏 `script_documentation` 日志、原版 `common/`
 与 CWT 配置基线做只读对比，并生成自包含 HTML 报告
 （`tools/rules-sync/report.ts`，默认自动在浏览器打开，可用 `--no-open` 关闭）。
 详见 [tools/rules-sync/README.md](./tools/rules-sync/README.md)。
+
+`rules:stellaris:shader-abi` 会通过 CWTools 解析更新后的 `gfx/FX`、记录 `stellaris.exe`
+指纹并生成保守的 ABI 升级审核包。它不会自动晋升候选项；写入正式 catalog/audit 前，
+必须分别提供已审核的两份产物。
 
 
 #### 运行和调试

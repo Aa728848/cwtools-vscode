@@ -142,7 +142,7 @@ The repository depends on two submodules with different responsibilities:
 | Submodule | Role |
 | --- | --- |
 | `submodules/cwtools/` | Upstream CWTools F# library. The language server depends on it for parsing, validation, game model semantics, shader analysis, and scripted-type refresh behavior. |
-| `submodules/cwtools-stellaris-config/` | Stellaris CWT rule/config data. Rules sync tooling compares it with game `script_documentation` logs and vanilla `common/`; packaging zips its `config/` directory into the fallback rules bundle. |
+| `submodules/cwtools-stellaris-config/` | Stellaris CWT rule/config data. Rules sync tooling compares it with game `script_documentation` logs and vanilla `common/`; `rules:stellaris:shader-abi` generates fail-closed, human-reviewed Shader ABI upgrade packs; packaging zips its `config/` directory into the fallback rules bundle. |
 
 The first submodule is executable/library semantics; the second is rules data.
 Keep that distinction visible in commits and PR descriptions.
@@ -355,7 +355,7 @@ Both paths structure DAG sub-tasks, bound parallel execution, share results thro
 
 #### Out-of-the-Box MCP Server
 
-The packages `packages/cwtools-shared` and `packages/cwtools-mcp` implement a **read-only** Model Context Protocol (MCP) server. It exports 27 semantic tools of CWTools to external hosts.
+The packages `packages/cwtools-shared` and `packages/cwtools-mcp` implement a **read-only** Model Context Protocol (MCP) server. It exports 34 semantic tools of CWTools to external hosts, including seven Shader queries.
 
 ##### Scope & Structure
 
@@ -394,7 +394,10 @@ The backend runs on .NET 10.
 - **Latest-wins validation**: Each editor mutation advances a per-file generation. Stellaris rule validation samples the generation between clauses and returns no partial result when superseded; diagnostic publication still requires the exact document version and model epoch. A completed interactive rule result is reused by save-time deep validation only for the same immutable entity and rule service.
 - **Incremental refreshes**: Saves under type-defining paths update only touched type keys (gated by `experimental`). `StagedTypeIndex.semanticChanged` compares validation/completion/localisation metadata while ignoring source ranges: range-only/body-only updates keep navigation current without advancing the global type epoch, rebuilding services, or scanning all localisation. Touched validation arrays and unchanged type tries are structurally shared; semantic changes and unknown cases retain the conservative full-refresh fallback.
 - **Staged full refreshes**: Heavy rule rebuilds run against a lookup clone under the read lock. A commit-guard miss discards the obsolete stage and retries after a quiet period instead of immediately allocating a second locked rebuild; exceptions or unsupported staging still fall back safely. Guard references and the stage are released before localisation recomputation/GC, and the type-localisation inverted map remains lazy until it is actually needed after commit.
-- **Shader parsing**: Renders tokens and declarations. Uses brace counts for nesting rather than simple regex.
+- **Paradox Shader front end**: `PdxShaderSyntax`, `PdxShaderPreprocessor`, and `PdxShaderHlsl` form one lossless, tolerant pipeline for the outer FX DSL, embedded `[[ ... ]]` HLSL/Cg, and raw `.fxh`. The binder models lexical/function/struct scopes, receiver-typed members and swizzles, overload selection, stage constraints, resource bindings, and presence conditions; unsupported vendor syntax remains in the lossless tree instead of being discarded.
+- **Compile units and provenance**: `PdxShaderProject` builds a root-scoped transitive Include graph with explicit current-document/workspace/dependency/vanilla precedence. Conditional branches are retained as presence conditions, cycles/ambiguity/missing files and hard depth/member budgets are structured problems, and content-versioned semantic/include LRUs are bounded. Every language feature consumes this same snapshot rather than a global symbol pool.
+- **Runtime and interface graph**: `PdxShaderRuntime` joins Shader declarations/references with script `shader =` calls, `.gfx effectFile` sprite invocations, static `.gui GFX_*` uses, versioned renderer contracts, and the curated ABI catalog. Reachability distinguishes `data_explicit`, confirmed/candidate renderer conventions, curated `engine_hardcoded`, and `engine_or_unreferenced`; absence of text evidence never upgrades an entry to executable evidence.
+- **LSP and Agent boundary**: `Program.fs` bridges the complete Shader request matrix and `cwtools.ai.shader.*` queries. Semantic-token caches are document-version checked, delta edits compare complete five-integer token records, cancelled JSON-RPC requests return `-32800`, and runtime models use a deterministic one-entry snapshot cache. The Extension, project knowledge database, Agent registry, and MCP dispatcher consume these structured queries; Shader writes additionally require the fail-closed preflight command.
 
 #### Build System
 
@@ -589,7 +592,7 @@ EvidenceGate 对项目可扩展 TypeDef 引用执行分阶段判定。`pre_write
 | 子模块 | 作用 |
 | --- | --- |
 | `submodules/cwtools/` | 上游 CWTools F# 库。语言服务器依赖它完成解析、校验、游戏模型语义、Shader 分析和 scripted type 刷新行为。 |
-| `submodules/cwtools-stellaris-config/` | Stellaris CWT 规则/配置数据。规则同步工具会把它与游戏 `script_documentation` 日志和原版 `common/` 对比；打包时会将其中的 `config/` 目录压缩为 fallback 规则包。 |
+| `submodules/cwtools-stellaris-config/` | Stellaris CWT 规则/配置数据。规则同步工具会把它与游戏 `script_documentation` 日志和原版 `common/` 对比；`rules:stellaris:shader-abi` 生成保守且必须人工审核的 Shader ABI 升级包；打包时会将其中的 `config/` 目录压缩为 fallback 规则包。 |
 
 前者是可执行/库语义，后者是规则数据。提交和 PR 说明中应保持这个边界清晰。
 
@@ -927,7 +930,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ##### 工具集与单一事实源
 
-- 当前工具为 **27 个只读工具**（`cwtools-shared/src/tools/names.ts`），其中 `query_project_knowledge` 提供 `/init` 项目知识包检索，`explore_pdx_project` 是 live 有界语义图入口；其余工具覆盖规则、作用域、诊断、类型/定义/引用、本地化与 workspace 索引、结构化 block、补全及深层语义查询。
+- 当前工具为 **34 个只读工具**（`cwtools-shared/src/tools/names.ts`），其中 `query_project_knowledge` 提供 `/init` 项目知识包检索，`explore_pdx_project` 是 live 有界语义图入口，七个 `query/validate/compare_shader_*` 工具覆盖 Shader 符号、编译单元、平台变体、调用方、可达性、验证与原版对比；其余工具覆盖规则、作用域、诊断、类型/定义/引用、本地化与 workspace 索引、结构化 block、补全及深层语义查询。
 - schema 由 `tools/generate-mcp-schema.cjs` 从上游 `definitions.ts` + `registry.ts` 生成到 `cwtools-shared/src/generated/mcpTools.ts`，**不手写**；白名单同时存在于 `names.ts` 与生成脚本，须保持一致，contract 测试检测漂移。
 - 共享 dispatcher（`tools/toolHandlers.ts`）把每个工具路由到对应 `cwtools.ai.*` LSP 命令或 host 调用。新增语义能力必须先在 `src/LSP`/`src/Main` 增加 `cwtools.ai.*` 命令（只读命令同时登记到 `LanguageServer.fs` 的 `isReadCmd`），再在 dispatcher 接线，不在 MCP 内重写 CWTools 语义。
 
@@ -1008,18 +1011,18 @@ Webview 维护规则：
 
 Shader 支持覆盖 `.shader` 和 `.fxh`，涉及：
 
-- **全量刷新分阶段提交**：`delayedAnalyze` 触发的全量 `RefreshCaches` 在 `experimental` 下改走分阶段路径——读锁内 `IGame.PrepareRefreshCaches`（`RulesManager.PrepareRefreshConfig` 将内部 lookup 暂指向 `Lookup.ShallowClone` 克隆体后运行完整 `refreshConfig`，temp 状态快照还原，STL hooks 全部作用于克隆体），写锁内 `CommitRefreshCaches` 以 `typeDefInfo`/`varDefInfo`/`configRules` 三重引用守卫校验后 `AbsorbFieldsFrom` 吸收字段并交换三服务。守卫失效表示阶段结果已过期，会丢弃并等下一静默期重试，避免立刻再分配一次锁内全量模型；仅 prepare/commit 异常或不支持 staged 时安全回退原有全量路径。提交后先释放 stage 及旧 lookup 守卫引用，再计算本地化/触发 GC；`InfoService.invertedTypeMap` 保持惰性到提交后实际需要时，降低新旧模型并存峰值。刷新期间读请求（补全/悬停）不再被长时间写锁阻塞。
-- `release/package.json` 的 `pdx-shader` language contribution。
-- `src/Main/Program.fs` 的语义 token、document symbol、document link 桥接。
-- `src/Main/GameLoader.fs` 的 vanilla fx source 加载。
-- `submodules/cwtools/CWTools/Game/PdxShaderFeatures.fs` 的 shader 解析与特征提取。
+- **统一前端**：`PdxShaderSyntax`、`PdxShaderPreprocessor`、`PdxShaderHlsl` 共同处理外层 FX DSL、内嵌 `[[ ... ]]` HLSL/Cg 和 raw `.fxh`。前端无损且容错；binder 建模词法/函数/struct 作用域、按 receiver 类型解析的成员与 swizzle、重载选择、阶段限制、资源绑定和 presence condition，厂商扩展语法无法识别时仍保留原 token。
+- **编译单元与来源**：`PdxShaderProject` 以根文件构建传递 Include 图，优先级显式为当前未保存文档、工作区/Mod、依赖、原版。缺失/歧义/循环以及深度/成员硬预算都返回结构化问题；语义与 Include LRU 以路径 + 内容 hash 为键且有界。所有 LSP 功能只消费该编译单元，不再使用全局同名符号池。
+- **运行时与 interface 图**：`PdxShaderRuntime` 联结 Shader 声明/引用、脚本 `shader =`、`.gfx effectFile` sprite、静态 `.gui GFX_*` 使用、带版本的 renderer contract 与 curated ABI。可达性严格区分 `data_explicit`、已确认/候选 renderer 约定、curated `engine_hardcoded` 和 `engine_or_unreferenced`；缺少文本证据绝不会自动成为 EXE 硬调用证据。
+- **协议边界**：`Program.fs` 负责完整 Shader LSP 请求矩阵与 `cwtools.ai.shader.*` 的协议桥接。语义 token 按文档版本校验，delta 以完整五整数 token 记录比较；取消返回 JSON-RPC `-32800`；runtime model 使用确定性的单项 snapshot 缓存。Extension 索引、知识数据库、Agent registry 与 MCP dispatcher 复用结构化结果，Shader 写入还必须通过失败关闭的 preflight。
+- **语言与测试面**：语言贡献位于 `release/package.json`；vanilla/profile 来源由 `GameLoader.fs` 注入；`PdxShaderFeatures.fs` 是稳定 façade。Vanilla 4.4.6 baseline、三类 Mod fixture、Include 图预算/并发版本/property 测试和真实 URI/version/cancellation LSP contract 共同约束行为。
 
 维护约束：
 
-- 嵌套块如 `Samplers`、`VertexStruct` 应使用花括号深度计数解析，避免单层 `[^}]+` 正则截断嵌套内容。
-- 高频语义计算应复用文件文本 hash 缓存和 lazy built-in 集合，避免重复读盘或重复构建大集合。
-- 字符串区间扫描要保留转义双引号 `\"` 的处理。
-- 尽量把 shader parsing helper 留在 `PdxShaderFeatures.fs`，避免让 `Program.fs` 堆积大量顶级定义。
+- 嵌套结构必须使用 CST/括号深度，不得恢复单层正则。
+- 所有新缓存必须有硬上限；Windows 以外保持路径大小写敏感。
+- 字符串区间扫描必须保留转义双引号 `\"` 的处理。
+- 解析、runtime、Extension 与 Agent 不得各自复制第二套 Shader 语义。
 
 ##### Vanilla Compare
 
@@ -1047,6 +1050,7 @@ Shader 支持覆盖 `.shader` 和 `.fxh`，涉及：
 - `npm run rules:stellaris` — 交互式入口
 - `npm run rules:stellaris:scan` / `check` / `update` — 扫描、校验（支持 `--ci`）、更新
 - `npm run rules:stellaris:report` — 只读对比游戏 `script_documentation` 日志、原版 `common/` 与 CWT 配置基线，生成自包含 HTML 报告（`tools/rules-sync/report.ts`，默认自动打开浏览器，`--no-open` 关闭）
+- `npm run rules:stellaris:shader-abi` — 复用 CWTools Shader parser 扫描新版本 `gfx/FX` 与 EXE，生成禁止自动晋升的 ABI 审核草案；只有同时提供已审核 catalog/audit 时 `--apply` 才能写入
 
 .NET 常用命令：
 

@@ -420,6 +420,43 @@ type SemanticTokensDelta =
     { resultId: string
       edits: SemanticTokensEdit list }
 
+type FoldingRangeParams = { textDocument: TextDocumentIdentifier }
+
+type FoldingRange =
+    { startLine: int
+      startCharacter: int option
+      endLine: int
+      endCharacter: int option
+      kind: string option }
+
+type SelectionRangeParams =
+    { textDocument: TextDocumentIdentifier
+      positions: Position list }
+
+type SelectionRange =
+    { range: Range
+      parent: SelectionRange option }
+
+type CallHierarchyItem =
+    { name: string
+      kind: int
+      detail: string option
+      uri: Uri
+      range: Range
+      selectionRange: Range
+      data: JsonValue option }
+
+type CallHierarchyIncomingCallsParams = { item: CallHierarchyItem }
+type CallHierarchyOutgoingCallsParams = { item: CallHierarchyItem }
+
+type CallHierarchyIncomingCall =
+    { ``from``: CallHierarchyItem
+      fromRanges: Range list }
+
+type CallHierarchyOutgoingCall =
+    { ``to``: CallHierarchyItem
+      fromRanges: Range list }
+
 type Request =
     | Initialize of InitializeParams
     | Shutdown
@@ -448,6 +485,11 @@ type Request =
     | DidChangeWorkspaceFolders of DidChangeWorkspaceFoldersParams
     | SemanticTokensFull of SemanticTokensParams
     | SemanticTokensFullDelta of SemanticTokensDeltaParams
+    | FoldingRanges of FoldingRangeParams
+    | SelectionRanges of SelectionRangeParams
+    | PrepareCallHierarchy of TextDocumentPositionParams
+    | CallHierarchyIncomingCalls of CallHierarchyIncomingCallsParams
+    | CallHierarchyOutgoingCalls of CallHierarchyOutgoingCallsParams
 
 [<RequireQualifiedAccess>]
 type TextDocumentSyncKind =
@@ -536,6 +578,9 @@ type ServerCapabilities =
       documentLinkProvider: DocumentLinkOptions option
       executeCommandProvider: ExecuteCommandOptions option
       inlayHintProvider: bool
+      foldingRangeProvider: bool
+      selectionRangeProvider: bool
+      callHierarchyProvider: bool
       semanticTokensProvider: SemanticTokensOptions option }
 
 let defaultServerCapabilities: ServerCapabilities =
@@ -557,6 +602,9 @@ let defaultServerCapabilities: ServerCapabilities =
       documentLinkProvider = None
       executeCommandProvider = None
       inlayHintProvider = false
+      foldingRangeProvider = false
+      selectionRangeProvider = false
+      callHierarchyProvider = false
       semanticTokensProvider = None }
 
 type InitializeResult = { capabilities: ServerCapabilities }
@@ -716,6 +764,11 @@ type ILanguageServer =
     abstract member DidFocusFile: DidFocusFileParams -> Async<unit>
     abstract member SemanticTokensFull: SemanticTokensParams -> Async<SemanticTokens option>
     abstract member SemanticTokensFullDelta: SemanticTokensDeltaParams -> Async<Choice<SemanticTokens, SemanticTokensDelta> option>
+    abstract member FoldingRanges: FoldingRangeParams -> Async<FoldingRange list>
+    abstract member SelectionRanges: SelectionRangeParams -> Async<SelectionRange list>
+    abstract member PrepareCallHierarchy: TextDocumentPositionParams -> Async<CallHierarchyItem list>
+    abstract member CallHierarchyIncomingCalls: CallHierarchyIncomingCallsParams -> Async<CallHierarchyIncomingCall list>
+    abstract member CallHierarchyOutgoingCalls: CallHierarchyOutgoingCallsParams -> Async<CallHierarchyOutgoingCall list>
 
 type PublishDiagnosticsParams =
     { uri: Uri

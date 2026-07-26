@@ -260,11 +260,20 @@ story_arc = {
                     { argumentPath: 'Stage.Event', access: 'type', typeName: 'Event.Realm' },
                     { argumentPath: 42, access: 'type', typeName: 'event.realm' },
                 ],
+                shaderReferences: [
+                    { argumentPath: 'MeshSettings.Shader', referenceKind: 'shader_effect', dynamicValuePolicy: 'allow_expression' },
+                    { argumentPath: 'EffectFile', referenceKind: 'shader_file', dynamicValuePolicy: 'literal_or_parameter', pathPrefix: 'gfx\\FX\\', extension: '.SHADER' },
+                    { argumentPath: 'unsafe', referenceKind: 'engine_hardcoded', dynamicValuePolicy: 'allow_expression' },
+                ],
             }],
         });
 
         expect(parsed?.definitionTypes[0]?.valueReferences).to.deep.equal([
             { argumentPath: 'stage.event', access: 'type', typeName: 'event.realm' },
+        ]);
+        expect(parsed?.definitionTypes[0]?.shaderReferences).to.deep.equal([
+            { argumentPath: 'meshsettings.shader', referenceKind: 'shader_effect', dynamicValuePolicy: 'allow_expression', pathPrefix: undefined, extension: undefined },
+            { argumentPath: 'effectfile', referenceKind: 'shader_file', dynamicValuePolicy: 'literal_or_parameter', pathPrefix: 'gfx/FX/', extension: '.shader' },
         ]);
     });
 

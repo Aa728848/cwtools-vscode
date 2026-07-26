@@ -8,5 +8,11 @@
     "esModuleInterop": true,
     "types": ["node", "mocha"]
   },
-  "include": ["scope-contracts.ts", "scope-contracts-cli.ts", "scope-contracts.test.ts"]
+  "include": [
+    "scope-contracts.ts",
+    "scope-contracts-cli.ts",
+    "scope-contracts.test.ts",
+    "shader-abi-sync.ts",
+    "shader-abi-sync.test.ts"
+  ]
 }

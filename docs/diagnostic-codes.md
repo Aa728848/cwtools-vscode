@@ -618,6 +618,174 @@ should no longer be used. Follow the message text for the replacement.
 
 引用的类型键(type key)已过时,不应再使用。按报错原文中的提示改用新写法。
 
+---
+
+# Shader diagnostics (CWFX) / Shader 诊断
+
+`CWFX` codes are reported by the PDX shader (`.shader` / `.fxh`) language
+features. Lossless-front-end failures (`CWFX101`–`CWFX104`) default to
+**Error**; reference, Include, stage, and binding findings default to
+**Warning**.
+
+`CWFX` 错误码由 PDX Shader(`.shader` / `.fxh`)语言功能报告。
+无损前端失败(`CWFX101`–`CWFX104`)默认严重度为 **Error**；引用、Include、
+阶段和资源绑定类诊断默认严重度为 **Warning**。
+
+## CWFX001
+
+**Undefined MainCode reference (W)** — an `Effect` references a `VertexShader`
+or `PixelShader` MainCode that is not defined in the effect's compile unit
+(the root `.shader` file plus its transitive `Includes`). Check the MainCode
+name, or add the file that defines it to `Includes`.
+
+Effect 引用了未定义的 `VertexShader` / `PixelShader` MainCode(解析范围是当前
+编译单元:根 `.shader` 文件及其 `Includes` 传递闭包)。检查名称拼写,
+或把定义该 MainCode 的文件加入 `Includes`。
+
+Note: vanilla Stellaris 4.4.6 ships a few such references
+(`PixelLineLegacy`, `VertexPdxMeshShieldHitEffectSkinned`) that resolve to
+nothing on disk — they are engine-provided or legacy entry points, recorded as
+pending-classification compatibility samples. Do not auto-fix them.
+
+注意:原版 Stellaris 4.4.6 中存在少量此类引用(`PixelLineLegacy`、
+`VertexPdxMeshShieldHitEffectSkinned`),在磁盘上没有对应定义,可能是引擎内置
+或遗留入口,已记录为待分类兼容样本。**不要**对它们应用自动修复。
+
+## CWFX002
+
+**Undefined ConstantBuffer reference (W)** — a MainCode references a
+`ConstantBuffer` that is not defined in the current compile unit.
+
+MainCode 引用了当前编译单元中未定义的 `ConstantBuffer`。
+
+## CWFX003
+
+**Undefined render state reference (W)** — an `Effect` references a
+`BlendState`, `DepthStencilState`, or `RasterizerState` that is not defined in
+the current compile unit.
+
+Effect 引用了当前编译单元中未定义的渲染状态
+(`BlendState` / `DepthStencilState` / `RasterizerState`)。
+
+## CWFX004
+
+**Include problem (W)** — an `Includes` entry cannot be resolved: the file is
+not loaded (missing), matches more than one file (ambiguous, never silently
+resolved), forms an include cycle, or exceeds the hard depth/member analysis
+budget. Budget exhaustion returns a bounded partial compile unit and is never
+treated as successful complete analysis.
+
+`Includes` 条目无法解析:文件未加载(缺失)、匹配到多个文件(歧义,绝不静默
+任选其一)、构成 include 循环，或超过深度/成员硬预算。预算耗尽时返回有界
+partial 编译单元，绝不会伪装成完整分析成功。
+
+## CWFX101
+
+**Unterminated Shader string (E)** — the outer FX DSL or HLSL token stream
+reached end-of-file before a quoted string closed. The parser preserves the
+remaining source for recovery, but semantic edits are blocked until the quote
+is repaired. No automatic fix is offered because the intended closing point is
+ambiguous.
+
+**Shader 字符串未闭合 (E)** — 外层 FX DSL 或 HLSL token 流在引号闭合前到达
+文件末尾。parser 会保留剩余源码用于恢复，但修复引号前会阻止语义编辑；由于
+无法证明正确的闭合位置，不提供自动修复。
+
+## CWFX102
+
+**Unterminated comment or preprocessor condition (E)** — a block comment or
+one or more `#if/#ifdef/#ifndef` frames are not closed. The diagnostic is
+variant-sensitive. Close the comment or add the matching `#endif`; automatic
+Agent edits require an unambiguous matching opener.
+
+**注释或预处理条件未闭合 (E)** — 块注释或一个以上
+`#if/#ifdef/#ifndef` frame 未闭合。该诊断区分条件变体；请闭合注释或补充匹配
+的 `#endif`，Agent 只有在 opener 唯一明确时才允许自动修改。
+
+## CWFX103
+
+**Unterminated block/HLSL region or unmatched conditional directive (E)** —
+an FX/HLSL delimiter is missing, or `#elif`, `#else`, or `#endif` has no active
+matching conditional. Repair the delimiter/directive structure before relying
+on symbols after this point. No broad brace-insertion quick fix is allowed.
+
+**块/HLSL 区域未闭合或条件指令不匹配 (E)** — FX/HLSL delimiter 缺失，或
+`#elif`、`#else`、`#endif` 没有活动的匹配条件。依赖后续符号前必须先修复
+delimiter/指令结构；禁止提供大范围自动补括号 quick fix。
+
+## CWFX104
+
+**Malformed declaration/delimiter/macro name (E)** — a declaration or macro
+is missing its required name, or a closing delimiter appears without a matching
+opener. This is a local syntax failure; fixes may only replace an explicitly
+selected malformed token and must not guess an engine identifier.
+
+**声明、delimiter 或宏名称格式错误 (E)** — 声明/宏缺少必需名称，或 closing
+delimiter 没有匹配 opener。该错误属于局部语法失败；修复只能替换明确选中的
+错误 token，不得猜测引擎标识符。
+
+## CWFX402
+
+**Stage-restricted intrinsic used from a vertex entry (W)** — a pixel-stage
+intrinsic such as `ddx`, `ddy`, `fwidth`, or `clip` is reachable in a vertex
+MainCode region. The finding is stage- and variant-specific. Move the operation
+to a pixel path or replace it manually; no automatic semantic rewrite is safe.
+
+**Vertex 入口使用阶段受限 intrinsic (W)** — `ddx`、`ddy`、`fwidth`、`clip`
+等 pixel-stage intrinsic 出现在 vertex MainCode 可达路径。该诊断区分 stage 与
+variant；请移动到 pixel 路径或人工替换，不允许自动语义改写。
+
+## CWFX403
+
+**Potential resource-register collision (W)** — two declarations can be active
+in the same platform variant and use the same register class/index. Declarations
+whose presence conditions are mutually exclusive do not conflict. Renumbering
+is never automatic because engine and renderer bindings may be ABI-sensitive.
+
+**潜在资源寄存器冲突 (W)** — 两个声明可在同一平台变体生效，并使用相同
+register class/index；presence condition 互斥的声明不冲突。由于引擎与 renderer
+绑定可能属于 ABI，绝不自动改寄存器编号。
+
+## Target taxonomy for new codes / 新错误码的目标分组
+
+The current CWFX001–CWFX004 mapping is frozen for compatibility. **New**
+shader diagnostics are grouped by range (this is the target taxonomy; the
+ranges below are not all in use yet):
+
+现有 CWFX001–CWFX004 映射为兼容性而冻结。**新增** Shader 诊断按号段分组
+(下表为目标分组策略,并非所有号段都已启用):
+
+| Range / 号段 | Category / 类别 | Examples / 示例 |
+| --- | --- | --- |
+| `CWFX1xx` | Lexer / syntax / preprocessor 词法/语法/预处理 | unclosed `[[`, illegal directive, macro recursion, unsatisfiable branch |
+| `CWFX2xx` | Project / include / override 项目/Include/覆盖 | missing include, ambiguity, cycle, casing, overridden source |
+| `CWFX3xx` | Name / type / HLSL 名称/类型 | undefined symbol, duplicate declaration, ambiguous overload, type/member errors |
+| `CWFX4xx` | Effect / stage / render state Effect/阶段/渲染状态 | MainCode stage mismatch, invisible state, incompatible interface semantic |
+| `CWFX5xx` | Runtime / ABI / reachability 运行时/ABI/可达性 | unreachable new effect, dangerous rename, stale ABI version |
+| `CWFX9xx` | Analysis limits 分析限制 | unknown engine symbol, unsupported conditional expression, analysis budget exceeded |
+
+Rules / 规则:
+
+- A published code never changes meaning without notice; retiring a code beats
+  redefining it.
+- Each diagnostic definition must declare: default severity, suppressible
+  scope, whether it is variant-specific, whether a quick fix is allowed, the
+  agent auto-edit policy, a doc link, and a test fixture.
+- The vanilla baseline does not require zero diagnostics; it requires zero
+  unclassified errors and zero new unknown warnings. Known compatibility
+  warnings enter the versioned baseline with a reason and are re-audited after
+  upgrades.
+- Unknown-state classifications such as `engine_or_unreferenced` are
+  informational only and must never receive delete quick-fixes.
+
+- 已发布的错误码不得无说明改变含义;弃用一个码优于重新定义它。
+- 每个诊断定义必须包含:默认严重度、可抑制范围、是否区分 variant、
+  是否允许 quick fix、Agent 自动修改政策、文档链接和测试 fixture。
+- Vanilla 基线不要求"零诊断",而要求"零未分类 error、零新增未知 warning"。
+  已知兼容告警带版本和原因进入基线,升级后必须重新审计。
+- `engine_or_unreferenced` 一类的未知状态分类仅为提示信息,
+  永远不得提供删除类 quick fix。
+
 ## CW998
 
 **Rules error** — an error raised by the CWT rules engine; follow the message

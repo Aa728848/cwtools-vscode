@@ -95,7 +95,7 @@ export interface GenerateProjectKnowledgeOptions {
     requireReady?: boolean;
 }
 
-const RELEVANT_EXTENSIONS = new Set(['.txt', '.gfx', '.asset', '.gui', '.yml', '.cwt', '.mod']);
+const RELEVANT_EXTENSIONS = new Set(['.txt', '.gfx', '.asset', '.gui', '.yml', '.cwt', '.mod', '.shader', '.fxh']);
 const EXCLUDED_DIRECTORIES = new Set(['.git', '.cwtools', '.cwtools-ai', 'node_modules', 'release', 'artifacts', 'dist', 'out']);
 let watcherRegistration: vs.Disposable | undefined;
 interface PendingRootRefresh {
@@ -215,7 +215,10 @@ function collectRelevantFileFacts(root: string, maxFiles = 10000): string[] {
             if (!entry.isFile() || !RELEVANT_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
             try {
                 const stat = fs.statSync(fullPath);
-                facts.push(`${normalizePath(path.relative(root, fullPath))}:${stat.size}:${Math.floor(stat.mtimeMs)}`);
+                // Keep the filesystem's sub-millisecond precision. Flooring made
+                // same-size Shader edits within one millisecond invisible to the
+                // project-knowledge freshness check.
+                facts.push(`${normalizePath(path.relative(root, fullPath))}:${stat.size}:${stat.mtimeMs}`);
             } catch {
                 // Ignore files that disappeared during fingerprinting.
             }
@@ -770,7 +773,7 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, in
     if (watcherRegistration) return;
     vanillaCacheDirectory = path.join(context.globalStorageUri.fsPath, '.cwtools');
     fs.mkdirSync(vanillaCacheDirectory, { recursive: true });
-    const watcher = vs.workspace.createFileSystemWatcher('**/*.{txt,gfx,asset,gui,yml,cwt,mod}');
+    const watcher = vs.workspace.createFileSystemWatcher('**/*.{txt,gfx,asset,gui,yml,cwt,mod,shader,fxh}');
     const schedule = (uri: vs.Uri) => {
         const workspaceFolder = vs.workspace.getWorkspaceFolder(uri);
         if (!workspaceFolder) return;

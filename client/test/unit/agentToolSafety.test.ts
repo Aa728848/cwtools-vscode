@@ -40,6 +40,11 @@ const vscodeStub = {
             toString: () => `file://${filePath.replace(/\\/g, '/')}`,
         }),
     },
+    CancellationTokenSource: class {
+        token = {};
+        cancel(): void { /* stub */ }
+        dispose(): void { /* stub */ }
+    },
     window: {
         showWarningMessage: async () => undefined,
         showInformationMessage: async () => undefined,
@@ -1957,6 +1962,46 @@ describe('agent tool topic artifacts', () => {
         expect(snapshots).to.deep.include({ filePath: helperPath, previousContent: 'print("before")\n' });
     });
 
+    it('records previous-content snapshots for .shader and .fxh files changed by commands', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const scriptDir = path.join(workspaceRoot, 'tools');
+        const scriptPath = path.join(scriptDir, 'modify-shaders.js');
+        const shaderPath = path.join(workspaceRoot, 'gfx', 'FX', 'test.shader');
+        const fxhPath = path.join(workspaceRoot, 'gfx', 'FX', 'test.fxh');
+        fs.mkdirSync(path.dirname(shaderPath), { recursive: true });
+        fs.mkdirSync(scriptDir, { recursive: true });
+        fs.writeFileSync(shaderPath, 'shader before\n', 'utf8');
+        fs.writeFileSync(fxhPath, '#include "before"\n', 'utf8');
+        fs.writeFileSync(scriptPath, [
+            "const fs = require('fs');",
+            "fs.writeFileSync('gfx/FX/test.shader', 'shader after\\n', 'utf8');",
+            "fs.writeFileSync('gfx/FX/test.fxh', '#include \"after\"\\n', 'utf8');",
+        ].join('\n'), 'utf8');
+
+        const snapshots: Array<{ filePath: string; previousContent: string | null }> = [];
+        const result = await handler.runCommand({
+            command: 'node "tools/modify-shaders.js"',
+            timeoutMs: 10000,
+        }, {
+            runnerOptions: {
+                mode: 'utility',
+                topicId: 'shader-topic',
+                abortSignal: new AbortController().signal,
+            },
+            onPermissionRequest: async () => true,
+            onBeforeFileWrite: (filePath: string, previousContent: string | null) => {
+                snapshots.push({ filePath, previousContent });
+            },
+        } as any);
+
+        if (result.exitCode !== 0) {
+            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
+        }
+        expect(snapshots).to.deep.include({ filePath: shaderPath, previousContent: 'shader before\n' });
+        expect(snapshots).to.deep.include({ filePath: fxhPath, previousContent: '#include "before"\n' });
+        expect(result.recordedSnapshots).to.be.at.least(2);
+    });
+
     it('returns deployed asset paths as written files for downstream refresh', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         const sourcePath = path.join(workspaceRoot, '.cwtools', 'media-topic', 'media', 'generated.asset');
@@ -2046,6 +2091,45 @@ describe('agent tool progress and aborts', () => {
         expect(sendRequest.calledOnce).to.equal(true);
         expect(sendRequest.firstCall.args[0]).to.equal('workspace/executeCommand');
         expect(sendRequest.firstCall.args[1].command).to.equal('cwtools.ai.revalidateFiles');
+        expect(result.revalidation.ok).to.equal(true);
+    });
+
+    it('requests CWTools revalidation for .shader and .fxh files reported by tools', async () => {
+        const shaderFile = path.join(workspaceRoot, 'gfx', 'FX', 'test.shader');
+        const fxhFile = path.join(workspaceRoot, 'gfx', 'FX', 'test.fxh');
+        fs.mkdirSync(path.dirname(shaderFile), { recursive: true });
+        fs.writeFileSync(shaderFile, 'shader body\n', 'utf8');
+        fs.writeFileSync(fxhFile, '#include "x"\n', 'utf8');
+
+        const sendRequest = sinon.stub().resolves({ ok: true, requested: 2 });
+        const client = {
+            onNotification: () => undefined,
+            sendNotification: () => undefined,
+            sendRequest,
+        } as any;
+        const executor = new AgentToolExecutor(client, workspaceRoot);
+        sinon.stub(executor as any, 'executeInternal').resolves({
+            stdout: '',
+            stderr: '',
+            exitCode: 0,
+            writtenFiles: [shaderFile, fxhFile],
+        });
+        const invalidate = sinon.spy();
+
+        const permission = sinon.stub().resolves(true);
+        const result = await executor.execute('git_ops', { action: 'checkout', file: 'gfx/FX/test.shader' }, {
+            runnerOptions: { mode: 'build' },
+            agentRunner: { readTracker: { invalidate } },
+            onPermissionRequest: permission,
+        } as any) as any;
+
+        expect(sendRequest.calledOnce).to.equal(true);
+        expect(sendRequest.firstCall.args[0]).to.equal('workspace/executeCommand');
+        expect(sendRequest.firstCall.args[1].command).to.equal('cwtools.ai.revalidateFiles');
+        const requestedTargets = sendRequest.firstCall.args[1].arguments[0] as string[];
+        expect(requestedTargets).to.have.length(2);
+        expect(requestedTargets.map(u => (u as string).replace(/^file:\/\//, '').replace(/\//g, '\\'))).to.deep.include(shaderFile);
+        expect(requestedTargets.map(u => (u as string).replace(/^file:\/\//, '').replace(/\//g, '\\'))).to.deep.include(fxhFile);
         expect(result.revalidation.ok).to.equal(true);
     });
 

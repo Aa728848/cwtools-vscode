@@ -17,8 +17,11 @@ import * as path from 'path';
 import type { EvidenceClaimKind } from './evidenceTypes';
 import type { PdxSemanticCatalog, CwtRuleValueReference } from '../types';
 
-/** PDX script extensions the gate applies to (mirrors fileTools.isPdxStructureGuardedPath). */
+/** PDX script extensions handled by the generic CWT evidence extractor. */
 export const PDX_SCRIPT_EXTENSIONS: readonly string[] = ['.txt', '.gui', '.gfx', '.asset', '.entity'];
+
+/** All semantic-write targets. Shader text is handled by the dedicated LSP gate. */
+export const PDX_SEMANTIC_EXTENSIONS: readonly string[] = [...PDX_SCRIPT_EXTENSIONS, '.shader', '.fxh'];
 
 /** Hard bounds so a hostile or pathological payload cannot stall the gate. */
 export const MAX_EXTRACT_CHARS = 100_000;
@@ -77,6 +80,11 @@ export interface ExtractedClaimCandidate {
 export function isPdxScriptTarget(filePath: string): boolean {
     const ext = path.extname(filePath).toLowerCase();
     return PDX_SCRIPT_EXTENSIONS.includes(ext);
+}
+
+export function isPdxSemanticTarget(filePath: string): boolean {
+    const ext = path.extname(filePath).toLowerCase();
+    return PDX_SEMANTIC_EXTENSIONS.includes(ext);
 }
 
 function asTrimmedString(value: unknown): string | undefined {

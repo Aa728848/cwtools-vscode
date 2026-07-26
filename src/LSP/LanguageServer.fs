@@ -106,6 +106,12 @@ let private serializeSemanticTokensOrDelta (c: Choice<SemanticTokens, SemanticTo
 let private serializeSemanticTokensOrDeltaOption =
     Option.map serializeSemanticTokensOrDelta
 
+let private serializeFoldingRangeList = serializerFactory<FoldingRange list> jsonWriteOptions
+let private serializeSelectionRangeList = serializerFactory<SelectionRange list> jsonWriteOptions
+let private serializeCallHierarchyItemList = serializerFactory<CallHierarchyItem list> jsonWriteOptions
+let private serializeCallHierarchyIncomingCallList = serializerFactory<CallHierarchyIncomingCall list> jsonWriteOptions
+let private serializeCallHierarchyOutgoingCallList = serializerFactory<CallHierarchyOutgoingCall list> jsonWriteOptions
+
 let private serializePublishDiagnostics =
     serializerFactory<PublishDiagnosticsParams> jsonWriteOptions
 
@@ -316,6 +322,11 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | ResolveDocumentLink(p)-> server.ResolveDocumentLink(p) |> thenMap serializeDocumentLink |> thenSome,           true
         | SemanticTokensFull(p) -> server.SemanticTokensFull(p)  |> thenMap serializeSemanticTokensOption |> thenMap (Option.defaultValue "[[CANCEL]]") |> thenSome, true
         | SemanticTokensFullDelta(p) -> server.SemanticTokensFullDelta(p) |> thenMap serializeSemanticTokensOrDeltaOption |> thenMap (Option.defaultValue "[[CANCEL]]") |> thenSome, true
+        | FoldingRanges(p)      -> server.FoldingRanges(p)       |> thenMap serializeFoldingRangeList |> thenSome, true
+        | SelectionRanges(p)    -> server.SelectionRanges(p)     |> thenMap serializeSelectionRangeList |> thenSome, true
+        | PrepareCallHierarchy(p) -> server.PrepareCallHierarchy(p) |> thenMap serializeCallHierarchyItemList |> thenSome, true
+        | CallHierarchyIncomingCalls(p) -> server.CallHierarchyIncomingCalls(p) |> thenMap serializeCallHierarchyIncomingCallList |> thenSome, true
+        | CallHierarchyOutgoingCalls(p) -> server.CallHierarchyOutgoingCalls(p) |> thenMap serializeCallHierarchyOutgoingCallList |> thenSome, true
         // CodeActions reads game state but result doesn't mutate; treat as read-only
         | CodeActions(p)        -> server.CodeActions(p)         |> thenMap serializeCommandList |> thenSome,            true
         // ExecuteCommand: split into read-only (query/info) and write (etc.)
@@ -344,6 +355,14 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 | "cwtools.ai.getValidationStatus"
                 | "cwtools.ai.revalidateFiles"
                 | "cwtools.ai.parseFragment"
+                | "cwtools.ai.shader.symbols"
+                | "cwtools.ai.shader.compileUnit"
+                | "cwtools.ai.shader.variants"
+                | "cwtools.ai.shader.callers"
+                | "cwtools.ai.shader.reachability"
+                | "cwtools.ai.shader.validate"
+                | "cwtools.ai.shader.preflightEdit"
+                | "cwtools.ai.shader.compareVanilla"
                 | "cwtools.exportTypes"
                 | "typeGraphInfo"
                 | "getFileTypes"
@@ -431,8 +450,11 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                                 Some(fun () -> Some "[[CANCEL]]")
                             | _ -> None
                         let cancel = new CancellationTokenSource()
-                        processQueue.Add(ProcessRequest(id, task, cancel, isReadOnly, lockFallback))
                         pendingRequests[id] <- cancel
+                        // Publish the cancellation source before the work item. A
+                        // fast worker must never finish/remove the request before
+                        // the reader has made it cancellable.
+                        processQueue.Add(ProcessRequest(id, task, cancel, isReadOnly, lockFallback))
                 | Parser.ResponseMessage(id, result) -> responseAgent.Post(Response(id, result))
 
             processQueue.Add(Quit)
@@ -444,6 +466,10 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
     // Process messages on main thread
     let mutable quit = false
 
+    let respondRequestCancelled id =
+        let errText = $"""{{"id":%d{id},"error":{{"code":-32800,"message":"RequestCancelled"}}}}"""
+        writeClient (send, errText)
+
     // Helper: run a read-only task concurrently on the .NET thread pool,
     // acquiring a shared read lock so concurrent writes are properly blocked.
     let startReadOnlyRequest
@@ -452,7 +478,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         (cancel: CancellationTokenSource)
         (lockFallback: (unit -> string option) option)
         =
-        Async.Start(
+        let workflow =
             async {
                 let acquired =
                     match lockFallback with
@@ -468,11 +494,11 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                                 match! task with
                                 | Some result ->
                                     if result = "[[CANCEL]]" then
-                                        let errText = $"""{{"id":%d{id},"error":{{"code":-32800,"message":"RequestCancelled"}}}}"""
-                                        writeClient (send, errText)
+                                        respondRequestCancelled id
                                     else respond (send, id, result)
                                 | None        -> respond (send, id, "null")
-                            with :? OperationCanceledException -> ()
+                            with :? OperationCanceledException as cancellation ->
+                                raise cancellation
                     finally
                         gameStateLock.ExitReadLock()
                         pendingRequests.TryRemove(id) |> ignore
@@ -481,13 +507,22 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                         if not cancel.IsCancellationRequested then
                             match lockFallback |> Option.bind (fun fb -> fb ()) with
                             | Some "[[CANCEL]]" ->
-                                let errText = $"""{{"id":%d{id},"error":{{"code":-32800,"message":"RequestCancelled"}}}}"""
-                                writeClient (send, errText)
+                                respondRequestCancelled id
                             | Some result -> respond (send, id, result)
                             | None -> respond (send, id, "null")
                     finally
                         pendingRequests.TryRemove(id) |> ignore
-            },
+            }
+
+        Async.StartWithContinuations(
+            workflow,
+            (fun () -> ()),
+            (fun error ->
+                pendingRequests.TryRemove(id) |> ignore
+                dprintfn $"Unhandled read request failure %d{id}: %O{error}"),
+            (fun _ ->
+                pendingRequests.TryRemove(id) |> ignore
+                respondRequestCancelled id),
             cancel.Token
         )
 
@@ -502,7 +537,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                     | Some result -> respond (send, id, result)
                     | None        -> respond (send, id, "null")
                 with
-                | :? OperationCanceledException -> ()
+                | :? OperationCanceledException -> respondRequestCancelled id
                 | :? System.TimeoutException    -> ()   // guard: should not occur without a timeout arg, but be safe
             finally
                 gameStateLock.ExitWriteLock()

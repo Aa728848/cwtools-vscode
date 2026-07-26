@@ -123,6 +123,9 @@ interface GuiElement {
     propertyLines: Record<string, number>;
 }
 
+const OFF_CANVAS_THRESHOLD = 5_000;
+const SAFE_HIDDEN_POSITION = -9_999;
+
 // ─── Colors ─────────────────────────────────────────────────────────────────
 
 const COLORS: Record<string, { bg: string; border: string; tag: string }> = {
@@ -490,7 +493,7 @@ function effectiveSize(el: GuiElement, parentW = 0, parentH = 0): { w: number; h
             let maxR = 0, maxB = 0;
             for (const ch of el.children) {
                 if (ch.type === 'background') continue;
-                if (Math.abs(ch.position.x) > 5000 || Math.abs(ch.position.y) > 5000) continue;
+                if (isOffCanvasElement(ch)) continue;
                 const cs = effectiveSize(ch);
                 const r = Math.max(0, ch.position.x) + cs.w;
                 const b = Math.max(0, ch.position.y) + cs.h;
@@ -518,9 +521,10 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
     const c = COLORS[el.type] ?? DEFAULT_COLOR;
     const { w, h } = effectiveSize(el, parentW, parentH);
 
-    // Skip elements with position > 5000 (off-screen, used for game logic)
+    // Off-canvas controls remain in the source and layer tree because engine
+    // code may require their named GUI instances even though they are hidden.
     // Performance: don't create any DOM nodes for skipped elements.
-    if (Math.abs(el.position.x) > 5000 || Math.abs(el.position.y) > 5000) {
+    if (isOffCanvasElement(el)) {
         return null;
     }
 
@@ -813,7 +817,7 @@ function renderAll(elements: GuiElement[], fileName: string) {
     let hasAnchoredOrientation = false;
     for (const el of elements) {
         // Skip elements with extreme positions (hidden off-screen)
-        if (Math.abs(el.position.x) > 5000 || Math.abs(el.position.y) > 5000) continue;
+        if (isOffCanvasElement(el)) continue;
         
         // Check if element uses a non-UPPER_LEFT orientation anchor.
         // These elements position themselves relative to the canvas size (e.g. CENTER_UP → screenW*0.5),
@@ -1075,7 +1079,7 @@ function setupControls() {
     document.getElementById('btn-redo')!.onclick = redo;
     document.getElementById('btn-save')!.onclick = requestDocumentSave;
     document.getElementById('btn-duplicate')!.onclick = duplicateSelected;
-    document.getElementById('btn-delete')!.onclick = deleteSelected;
+    document.getElementById('btn-hide-off-canvas')!.onclick = hideSelectedOffCanvas;
 
 }
 
@@ -1084,8 +1088,13 @@ function setupControls() {
 
 const REPEAT_LAYER_GROUP_MIN = 6;
 
+function isOffCanvasElement(el: GuiElement): boolean {
+    return Math.abs(el.position.x) > OFF_CANVAS_THRESHOLD
+        || Math.abs(el.position.y) > OFF_CANVAS_THRESHOLD;
+}
+
 function isRenderableLayerElement(el: GuiElement): boolean {
-    if (Math.abs(el.position.x) > 5000 || Math.abs(el.position.y) > 5000) return false;
+    if (isOffCanvasElement(el)) return false;
     if (el.sizeExplicit && el.size.width === 0 && el.size.height === 0
         && (el.type === 'containerWindowType' || el.type === 'windowType')) return false;
     return true;
@@ -1120,7 +1129,6 @@ function collectRepeatLayerGroup(elements: GuiElement[], startIndex: number) {
 function buildLayerTree(elements: GuiElement[], container: HTMLElement, depth = 0) {
     for (let i = 0; i < elements.length; i++) {
         const el = elements[i]!;
-        if (!isRenderableLayerElement(el)) continue;
 
         const group = collectRepeatLayerGroup(elements, i);
         if (group) {
@@ -1214,9 +1222,12 @@ function appendLayerGroup(
 function appendLayerElement(el: GuiElement, container: HTMLElement, depth: number) {
     const hasChildren = el.children.length > 0;
     const c = COLORS[el.type] ?? DEFAULT_COLOR;
+    const offCanvas = isOffCanvasElement(el);
+    const renderable = isRenderableLayerElement(el);
 
     const item = document.createElement('div');
     item.className = 'layer-item';
+    item.classList.toggle('off-canvas-control', offCanvas);
     item.style.paddingLeft = `${6 + depth * 12}px`;
     item.dataset.line = String(el.line);
     item.dataset.search = `${el.name || '(unnamed)'} ${el.type} ${c.tag}`.toLowerCase();
@@ -1241,8 +1252,11 @@ function appendLayerElement(el: GuiElement, container: HTMLElement, depth: numbe
 
     const toggle = document.createElement('button');
     toggle.className = 'layer-toggle';
-    toggle.innerHTML = svgIconNoMargin('eye');
-    toggle.title = tr('Toggle visibility', '切换可见性');
+    toggle.innerHTML = svgIconNoMargin(renderable ? 'eye' : 'eyeOff');
+    toggle.title = renderable
+        ? tr('Toggle visibility', '切换可见性')
+        : tr('Preserved outside the visible canvas', '保留在可见画布之外');
+    toggle.disabled = !renderable;
     toggle.onclick = (e) => {
         e.stopPropagation();
         const isInSelection = editMode && selectedElements.some(s => s.el.line === el.line) && selectedElements.length > 1;
@@ -1279,6 +1293,17 @@ function appendLayerElement(el: GuiElement, container: HTMLElement, depth: numbe
     typeSpan.textContent = c.tag;
     item.appendChild(typeSpan);
 
+    if (offCanvas) {
+        const status = document.createElement('span');
+        status.className = 'layer-status';
+        status.textContent = tr('Off-canvas', '画布外');
+        status.title = tr(
+            'Engine-safe hidden control: preserve its name and hierarchy',
+            '引擎安全隐藏控件：请保留名称与层级',
+        );
+        item.appendChild(status);
+    }
+
     item.onclick = (e) => {
         if (reparentMode) {
             e.stopPropagation();
@@ -1287,8 +1312,13 @@ function appendLayerElement(el: GuiElement, container: HTMLElement, depth: numbe
         }
 
         const entry = elMap.get(el.line);
+        if (!entry) {
+            clearSelection();
+            item.classList.add('active');
+            updateViewportStatus(el);
+            return;
+        }
         if (workspaceMode !== 'preview') {
-            if (!entry) return;
             if (editMode && e.ctrlKey) toggleSelection(entry.el, entry.div, { focusCanvas: true });
             else selectElement(entry.el, entry.div, { focusCanvas: true, openProperties: workspaceMode === 'inspect' });
         } else {
@@ -1307,9 +1337,9 @@ function appendLayerElement(el: GuiElement, container: HTMLElement, depth: numbe
         vscode.postMessage({ command: 'goToLine', line: el.line });
     };
 
-    item.draggable = true;
+    item.draggable = renderable;
     item.addEventListener('dragstart', (e) => {
-        if (!editMode) { e.preventDefault(); return; }
+        if (!editMode || !renderable) { e.preventDefault(); return; }
         e.dataTransfer!.setData('text/plain', String(el.line));
         e.dataTransfer!.effectAllowed = 'move';
         item.classList.add('dragging');
@@ -1317,7 +1347,8 @@ function appendLayerElement(el: GuiElement, container: HTMLElement, depth: numbe
             document.querySelectorAll('.layer-item').forEach(li => {
                 const targetLine = parseInt((li as HTMLElement).dataset.line ?? '0');
                 const targetEl = findElementByLine(targetLine, allElements);
-                if (targetEl && (targetEl.type === 'containerWindowType' || targetEl.type === 'windowType')
+                if (targetEl && isRenderableLayerElement(targetEl)
+                    && (targetEl.type === 'containerWindowType' || targetEl.type === 'windowType')
                     && targetEl.line !== el.line && !findChild(el, targetEl.line)) {
                     li.classList.add('drop-target-valid');
                 }
@@ -1331,7 +1362,7 @@ function appendLayerElement(el: GuiElement, container: HTMLElement, depth: numbe
     });
 
     const isContainer = el.type === 'containerWindowType' || el.type === 'windowType';
-    if (isContainer) {
+    if (isContainer && renderable) {
         item.addEventListener('dragover', (e) => {
             const sourceLine = e.dataTransfer?.types.includes('text/plain') ? true : false;
             if (!sourceLine) return;
@@ -1716,7 +1747,7 @@ function setupInspectorResizer(): void {
 
 function updateSelectionCommands(): void {
     const hasSelection = selectedElements.length > 0;
-    for (const id of ['btn-delete', 'btn-duplicate']) {
+    for (const id of ['btn-hide-off-canvas', 'btn-duplicate']) {
         const button = document.getElementById(id) as HTMLButtonElement | null;
         if (button) button.disabled = !editMode || !hasSelection;
     }
@@ -2744,8 +2775,8 @@ function setupContextMenu() {
 }
 
 function handleContextAction(action: string) {
-    if (action === 'delete') {
-        deleteSelected();
+    if (action === 'hide-off-canvas') {
+        hideSelectedOffCanvas();
     } else if (action === 'duplicate') {
         duplicateSelected();
     } else if (action === 'add-background') {
@@ -2944,7 +2975,8 @@ function startReparentTargetSelection() {
     document.querySelectorAll('.layer-item').forEach(item => {
         const line = parseInt((item as HTMLElement).dataset.line ?? '0');
         const el = findElementByLine(line, allElements);
-        if (el && (el.type === 'containerWindowType' || el.type === 'windowType')
+        if (el && isRenderableLayerElement(el)
+            && (el.type === 'containerWindowType' || el.type === 'windowType')
             && el.line !== reparentSource!.line && !findChild(reparentSource!, el.line)) {
             item.classList.add('reparent-target');
         }
@@ -2994,14 +3026,28 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-function deleteSelected() {
+function hideSelectedOffCanvas() {
     if (selectedElements.length === 0) return;
-    pushUndo({ type: 'structural' });
+    pushUndo({
+        type: 'move',
+        items: selectedElements.map(selection => ({
+            el: selection.el,
+            origX: selection.el.position.x,
+            origY: selection.el.position.y,
+            hadPositionLine: selection.el.propertyLines?.position !== undefined
+                && selection.el.propertyLines.position !== selection.el.line,
+        })),
+    });
     for (const s of selectedElements) {
+        s.el.position.x = SAFE_HIDDEN_POSITION;
+        s.el.position.y = SAFE_HIDDEN_POSITION;
+        syncDivVisuals(s.el, s.div);
         vscode.postMessage({
-            command: 'deleteElement',
-            startLine: s.el.line,
-            endLine: s.el.endLine,
+            command: 'updateProperty',
+            line: s.el.line,
+            property: 'position',
+            value: { x: SAFE_HIDDEN_POSITION, y: SAFE_HIDDEN_POSITION },
+            propertyLine: s.el.propertyLines?.position ?? s.el.line,
         });
     }
     clearSelection();
@@ -3056,7 +3102,7 @@ function setupEditorKeyboard() {
         }
 
         if (e.key === 'Delete') {
-            deleteSelected();
+            hideSelectedOffCanvas();
             e.preventDefault();
             return;
         }

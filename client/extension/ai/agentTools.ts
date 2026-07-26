@@ -34,6 +34,8 @@ import type { IndexService } from '../indexing/indexService';
 import { validateToolAccess, evaluateMcpPermission } from './tools/permissions';
 import { readProjectProfile, queryProjectProfile } from './projectProfile';
 import { queryProjectKnowledge } from './projectKnowledge';
+import { queryInterfaceKnowledge } from './interfaceKnowledge';
+import { validateOffCanvasGuiPreservation } from '../guiSafety';
 import { loadSkill } from './skills';
 import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 import { saveProjectWorkflow } from './workflowRegistry';
@@ -164,6 +166,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     explore_pdx_project: 45_000,
     query_project_profile: 5_000,
     query_project_knowledge: 10_000,
+    query_interface_knowledge: 5_000,
     query_rules: 45_000,
     query_override_modes: 45_000,
     search_rule_capabilities: 45_000,
@@ -1439,6 +1442,7 @@ export class AgentToolExecutor {
             let completedPdxWrite: { toolName: string; filePath: string; content: string } | undefined;
             let completedShaderWrite: { filePath: string } | undefined;
             let shaderPreflightSummary: Record<string, unknown> | undefined;
+            let guiSafetySummary: Record<string, unknown> | undefined;
             const inheritedPdxPreflight = context?.onBeforePdxWrite;
             const toolContext: import('./types').AgentToolContext = {
                 ...(context ?? {}),
@@ -1451,6 +1455,44 @@ export class AgentToolExecutor {
                 if (inheritedPdxPreflight) {
                     const inherited = await inheritedPdxPreflight(request);
                     if (!inherited.allowed) return inherited;
+                }
+                if (path.extname(request.filePath).toLowerCase() === '.gui') {
+                    const guiSafety = validateOffCanvasGuiPreservation(request.previousContent, request.content);
+                    guiSafetySummary = {
+                        allowed: guiSafety.allowed,
+                        protectedCount: guiSafety.protectedControls.length,
+                        preservedCount: guiSafety.preservedCount,
+                        missingControls: guiSafety.missingControls.map(control => ({
+                            type: control.type,
+                            name: control.name,
+                            parentPath: control.parentPath,
+                            line: control.line,
+                            position: { x: control.x, y: control.y },
+                        })),
+                        parseError: guiSafety.parseError,
+                    };
+                    if (!guiSafety.allowed) {
+                        const missing = guiSafety.missingControls
+                            .map(control => `${control.type} "${control.name}" at line ${control.line}`)
+                            .join(', ');
+                        const reason = guiSafety.parseError
+                            ? `Unable to verify preserved off-canvas GUI controls: ${guiSafety.parseError}`
+                            : `The edit removes, renames, or reparents engine-bound off-canvas GUI controls: ${missing}. Preserve each block and hide it with its large coordinates instead of deleting it.`;
+                        gateOutcome = {
+                            summary: { guiSafetyGate: guiSafetySummary },
+                            errorResult: {
+                                success: false,
+                                error: aiText(
+                                    reason,
+                                    guiSafety.parseError
+                                        ? `无法验证离屏 GUI 控件是否保留：${guiSafety.parseError}`
+                                        : `此修改删除、重命名或改变了引擎绑定离屏 GUI 控件的层级：${missing}。请保留控件块，并继续使用大坐标将其移出画布。`,
+                                ),
+                                guiSafetyGate: guiSafetySummary,
+                            },
+                        };
+                        return { allowed: false, message: reason };
+                    }
                 }
                 const shaderTarget = this.isShaderTarget(request.filePath);
                 if (shaderTarget || this.requiresShaderInterfacePreflight(request.filePath, request.previousContent, request.content)) {
@@ -1480,6 +1522,15 @@ export class AgentToolExecutor {
                     request.previousContent,
                     toolContext,
                 );
+                if (guiSafetySummary && !gateOutcome?.errorResult) {
+                    gateOutcome = {
+                        ...gateOutcome,
+                        summary: {
+                            ...(gateOutcome?.summary ?? {}),
+                            guiSafetyGate: guiSafetySummary,
+                        },
+                    };
+                }
                 const error = gateOutcome?.errorResult?.error;
                 if (!gateOutcome?.errorResult) {
                     completedPdxWrite = {
@@ -1647,6 +1698,8 @@ export class AgentToolExecutor {
                 result = queryProjectProfile(this.workspaceRoot, args as any); break;
             case 'query_project_knowledge':
                 result = await queryProjectKnowledge(this.workspaceRoot, args as any); break;
+            case 'query_interface_knowledge':
+                result = queryInterfaceKnowledge(args); break;
             case 'run_skill':
                 result = this.runSkill(args); break;
             case 'query_rules':

@@ -1170,6 +1170,57 @@ describe('agent sprite candidate tool contract', () => {
         expect(result.entries).to.deep.equal([]);
     });
 
+    it('falls back to the shared index when the VS Code workspace symbol provider fails', async () => {
+        const originalExecuteCommand = vscodeStub.commands.executeCommand;
+        let ensureArgs: any;
+        let indexQuery: any;
+        vscodeStub.commands.executeCommand = async (command: string) => {
+            if (command === 'vscode.executeWorkspaceSymbolProvider') {
+                throw new Error('provider timed out');
+            }
+            return undefined;
+        };
+        try {
+            const fakeIndexService = {
+                status: 'ready',
+                workspaceSymbolStatus: 'ready',
+                ensureWorkspaceSymbolsReady: async (args: any) => {
+                    ensureArgs = args;
+                },
+                queryWorkspaceSymbols: (query: any) => {
+                    indexQuery = query;
+                    return [{
+                        name: 'mammalian_01_habitat_phase_03_entity',
+                        kind: 'model_entity',
+                        category: 'asset',
+                        file: path.join(workspaceRoot, 'gfx', 'models', 'ships', 'habitat.asset'),
+                        line: 12,
+                        source: 'asset',
+                    }];
+                },
+            };
+            const executor = new AgentToolExecutor({} as any, workspaceRoot, fakeIndexService as any);
+
+            const result = await executor.execute('workspace_symbols', {
+                query: 'habitat_phase_03_entity',
+                limit: 5,
+            }) as any;
+
+            expect(ensureArgs).to.deep.equal({ includeVanilla: true });
+            expect(indexQuery).to.deep.equal({ name: 'habitat_phase_03_entity', limit: 5 });
+            expect(result.symbols).to.deep.equal([{
+                name: 'mammalian_01_habitat_phase_03_entity',
+                kind: 'model_entity',
+                file: 'gfx/models/ships/habitat.asset',
+                line: 11,
+            }]);
+            expect(result._warning).to.include('provider timed out');
+            expect(result._hint).to.include('prefixed or suffixed');
+        } finally {
+            vscodeStub.commands.executeCommand = originalExecuteCommand;
+        }
+    });
+
     it('counts get_diagnostics totals across the full filtered set while excluding ignored diagnostics', async () => {
         const fileA = path.join(workspaceRoot, 'events', 'a.txt');
         const fileB = path.join(workspaceRoot, 'events', 'b.txt');

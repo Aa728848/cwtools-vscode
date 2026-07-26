@@ -47,6 +47,27 @@ describe('tool definitions', () => {
         expect(registry?.allowedModes.has('plan')).to.equal(true);
     });
 
+    it('registers focused Interface knowledge as a read-only Paradox tool', () => {
+        const tool = TOOL_DEFINITIONS.find(def => def.function.name === 'query_interface_knowledge');
+        expect(tool).to.not.equal(undefined);
+        const parameters = tool!.function.parameters as {
+            properties?: Record<string, unknown>;
+            required?: string[];
+        };
+        expect(parameters.required).to.deep.equal([]);
+        expect(Object.keys(parameters.properties ?? {})).to.have.members([
+            'topic',
+            'query',
+            'elementType',
+            'limit',
+        ]);
+        const registry = TOOL_REGISTRY.get('query_interface_knowledge');
+        expect(registry?.domain).to.equal('paradox');
+        expect(registry?.isReadOnly).to.equal(true);
+        expect(registry?.effect).to.equal('workspace_read');
+        expect(registry?.allowedModes.has('gui_expert')).to.equal(true);
+    });
+
     it('keeps get_completion_at arguments aligned with the runtime handler', () => {
         const tool = TOOL_DEFINITIONS.find(def => def.function.name === 'get_completion_at');
         expect(tool).to.not.equal(undefined);

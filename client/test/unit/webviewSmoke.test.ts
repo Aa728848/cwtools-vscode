@@ -302,7 +302,14 @@ describe('webview smoke checks', () => {
         expect(script).to.include("vscode.postMessage({ command: 'saveDocument' });");
         expect(host).to.include("case 'saveDocument':");
         expect(host.match(/await doc\.save\(\);/g)).to.have.length(1);
+        expect(host).to.include('id="btn-hide-off-canvas"');
+        expect(host).to.include('Move off canvas');
+        expect(script).to.include('function hideSelectedOffCanvas()');
+        expect(script).to.include('const SAFE_HIDDEN_POSITION = -9_999;');
+        expect(script).to.include("status.textContent = tr('Off-canvas', '画布外');");
+        expect(script).to.not.include("command: 'deleteElement'");
         expect(css).to.include('var(--vscode-editor-background)');
+        expect(css).to.include('.layer-item.off-canvas-control');
         expect(css).to.include('#side-panel #layers-panel,');
         expect(css).to.include('body.overlay-focus');
         expect(css).to.include('@media (prefers-reduced-motion: reduce)');

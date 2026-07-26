@@ -78,6 +78,7 @@ export function parseWorkspaceSymbols(
             filePath,
             ext === '.gui' ? 'gui' : 'asset',
             options.maxReferencesPerSymbol !== 0,
+            options.definitionTypes ?? [],
         );
     } else {
         return [];
@@ -372,11 +373,28 @@ function parseNamedBlockSymbols(
     filePath: string,
     source: WorkspaceSymbolSource,
     collectPropertyReferences: boolean,
+    definitionTypes: readonly PdxDefinitionType[],
 ): WorkspaceSymbolEntry[] {
     const entries: WorkspaceSymbolEntry[] = [];
     const lines = content.split(/\r?\n/);
     let depth = 0;
     let openBlock: OpenBlock | undefined;
+    const normalizedFile = normalizePath(filePath);
+
+    const addEntry = (block: OpenBlock, rawName: string, line: number): void => {
+        const entry: WorkspaceSymbolEntry = {
+            name: rawName,
+            kind: block.kind,
+            file: filePath,
+            line,
+            source,
+            container: block.name,
+            category: source === 'gui' ? 'gui' : 'asset',
+            references: block.references?.slice(0, 12),
+        };
+        block.entry = entry;
+        entries.push(entry);
+    };
 
     for (let i = 0; i < lines.length; i++) {
         const line = stripComment(lines[i] ?? '');
@@ -387,12 +405,18 @@ function parseNamedBlockSymbols(
 
         if (topBlockMatch?.[1]) {
             const blockName = topBlockMatch[1];
+            const definition = matchPdxDefinitionType(definitionTypes, normalizedFile, blockName);
+            const nameField = definition?.nameField ?? 'name';
             openBlock = {
                 name: blockName,
-                kind: source === 'gui' ? inferGuiKind(blockName) : inferAssetKind(blockName),
+                kind: definition?.name ?? (source === 'gui' ? inferGuiKind(blockName) : inferAssetKind(blockName)),
                 source,
                 references: [],
+                nameField,
             };
+            const inlineContent = line.slice(topBlockMatch[0].length);
+            const inlineName = findScalarAssignment(inlineContent, nameField);
+            if (inlineName) addEntry(openBlock, inlineName, i + 1);
         } else if (openBlock && beforeDepth > 0) {
             const assetRef = collectPropertyReferences ? toAssetPropertyReference(line, filePath, i + 1) : undefined;
             if (assetRef && openBlock.references) {
@@ -402,22 +426,8 @@ function parseNamedBlockSymbols(
                 }
             }
 
-            const nameMatch = line.match(/^\s*name\s*=\s*"?([^"#\r\n]+)"?/);
-            const rawName = nameMatch?.[1]?.trim();
-            if (rawName) {
-                const entry: WorkspaceSymbolEntry = {
-                    name: rawName,
-                    kind: openBlock.kind,
-                    file: filePath,
-                    line: i + 1,
-                    source,
-                    container: openBlock.name,
-                    category: source === 'gui' ? 'gui' : 'asset',
-                    references: openBlock.references?.slice(0, 12),
-                };
-                openBlock.entry = entry;
-                entries.push(entry);
-            }
+            const rawName = findScalarAssignment(line, openBlock.nameField ?? 'name');
+            if (rawName) addEntry(openBlock, rawName, i + 1);
         }
 
         depth += countBracesOutsideStrings(line);
@@ -428,6 +438,16 @@ function parseNamedBlockSymbols(
     }
 
     return entries;
+}
+
+function findScalarAssignment(line: string, fieldName: string): string | undefined {
+    const escapedField = fieldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = new RegExp(
+        `(?:^|[\\s{])${escapedField}\\s*=\\s*(?:"((?:\\\\.|[^"\\\\])*)"|([^\\s{}#]+))`,
+        'i',
+    ).exec(line);
+    const value = (match?.[1] ?? match?.[2])?.trim();
+    return value || undefined;
 }
 
 function toAssetPropertyReference(line: string, filePath: string, lineNumber: number): WorkspaceSymbolReference | undefined {

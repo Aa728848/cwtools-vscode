@@ -3755,6 +3755,8 @@ export class LspToolHandler {
             );
 
             if (!symbols || symbols.length === 0) {
+                const indexed = await this.workspaceSymbolsFromIndex(args.query, limit);
+                if (indexed) return indexed;
                 const generalDomain = context?.runnerOptions?.domain === 'general';
                 return {
                     symbols: [],
@@ -3776,7 +3778,44 @@ export class LspToolHandler {
                 })),
             };
         } catch (e) {
+            const indexed = await this.workspaceSymbolsFromIndex(args.query, args.limit ?? 20, e);
+            if (indexed) return indexed;
             return { symbols: [], error: e instanceof Error ? e.message : String(e) };
+        }
+    }
+
+    private async workspaceSymbolsFromIndex(
+        query: string,
+        limit: number,
+        providerError?: unknown,
+    ): Promise<WorkspaceSymbolsResult | undefined> {
+        const index = this.ctx.indexService;
+        if (!index) return undefined;
+        try {
+            const readiness = index.ensureWorkspaceSymbolsReady?.({ includeVanilla: true });
+            if (readiness !== undefined) {
+                await Promise.race([
+                    readiness.catch(() => undefined),
+                    new Promise<void>(resolve => setTimeout(resolve, 2_000)),
+                ]);
+            }
+            const entries = index.queryWorkspaceSymbols({ name: query, limit });
+            if (entries.length === 0) return undefined;
+            const providerMessage = providerError instanceof Error ? providerError.message : providerError ? String(providerError) : undefined;
+            return {
+                symbols: entries.map(entry => ({
+                    name: entry.name,
+                    kind: entry.kind,
+                    file: path.relative(this.ctx.workspaceRoot, entry.file).replace(/\\/g, '/'),
+                    line: Math.max(0, entry.line - 1),
+                })),
+                _warning: providerMessage
+                    ? `VS Code workspace symbols failed (${providerMessage}); returned shared index matches.`
+                    : 'VS Code workspace symbols returned no matches; returned shared index matches.',
+                _hint: 'Shared-index matching is name-based and may return multiple CWT-valid prefixed or suffixed definitions. Use query_cwt_schema or diagnostics to resolve a reference in its owning field context.',
+            };
+        } catch {
+            return undefined;
         }
     }
 

@@ -488,13 +488,15 @@ You are dealing exclusively with .gui files. After modifying GUI files, use \`ge
 </system-reminder>
 
 ## CRITICAL GUI Modding Guidelines
-- **NEVER Delete Vanilla Elements**: Deleting original hardcoded UI components usually causes Game Crashes (CTD) or breaks engine logic. To "remove" a vanilla element, you MUST move it far off-screen (e.g., \`position = { x = -9999 y = -9999 }\` or using local constants like \`@invisible_position = 23333\`) or hide it, rather than deleting the code block.
+- **Retrieve Interface Contracts First**: Before planning or editing a GUI, call \`query_interface_knowledge\` with the relevant topic. Treat its crash-risk rules as mandatory and verify exact names against the complete current project or vanilla parent block.
+- **NEVER Delete Vanilla Elements**: Deleting original hardcoded UI components usually causes Game Crashes (CTD) or breaks engine logic. To "remove" one, preserve its type, name, hierarchy, and source order, then move it far off-screen (e.g., \`position = { x = -9999 y = -9999 }\` or using local constants like \`@invisible_position = 23333\`) rather than deleting the code block.
+- **Extreme Coordinates Are Intentional**: Large X/Y values are off-canvas compatibility markers, not malformed layout. Never clamp, normalize, auto-arrange, reparent, rename, or pull those controls back into the visible canvas during cleanup.
 - **Template Reference Methodology**: BEFORE creating or modifying a GUI, use \`glob_files\` or \`list_directory\` to find existing \`.gui\` and \`.gfx\` files in the mod's \`interface/\` folder. Read these templates to learn:
   1. What graphical asset types (\`spriteType\`, \`corneredTileSpriteType\`) are used for specific buttons/backgrounds.
   2. The local mod's variable conventions (e.g., \`@invisible_position\`, scaled height definitions).
   3. Which vanilla components the modder typically hides vs. keeps.
   4. The standard formatting and file naming conventions of the current mod.
-- **Button Effect & Scripted GUI Tracing**: UI buttons are often tied to backend scripts. Before modifying or overriding a button's \`name\`, you MUST use \`grep\` or \`workspace_symbols\` to check if it is tied to a \`button_effect\` or \`scripted_gui\` in the \`common/\` folder.
+- **Button Effect & Scripted GUI Tracing**: \`buttonType\` behavior is commonly hardcoded; a visual button does not acquire an action automatically. Use \`effectButtonType\` only with a verified \`effect\` from \`/common/button_effects/\` or current custom GUI evidence. Before modifying a button's \`name\`, trace its \`button_effect\`, \`custom_gui\`, or \`scripted_gui\` relationship.
 - **Read Full Hierarchy**: Always read the entire parent \`containerWindowType\` structure using \`get_pdx_block\` before modifying elements. Elements inherit coordinates from parents.
 - **Orientation and Origo**: Do not arbitrarily change them without understanding the parent window anchor.
 - **Textures/Sprites**: Use \`find_sprite_candidates\` for any \`spriteType\`, \`quadTextureSprite\`, button/background image, or GFX reference. GUI Expert agents must verify project and vanilla \`.gfx\` definitions before replacing or adding sprite names.

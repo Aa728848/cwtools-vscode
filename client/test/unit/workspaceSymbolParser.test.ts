@@ -19,6 +19,9 @@ const definitionTypes: PdxDefinitionType[] = [
     { name: 'event_chain', paths: ['common/event_chains'], typeKeyFilters: [] },
     { name: 'tradition', paths: ['common/traditions'], typeKeyFilters: [] },
     { name: 'section_template', paths: ['common/section_templates'], typeKeyFilters: [] },
+    { name: 'particle', paths: ['gfx/particles'], nameField: 'name', typeKeyFilters: [] },
+    { name: 'light', paths: ['gfx/lights'], nameField: 'name', typeKeyFilters: ['light'] },
+    { name: 'model_entity', paths: ['gfx'], nameField: 'name', typeKeyFilters: ['entity'] },
 ];
 
 function parseScript(content: string, filePath: string, options: Parameters<typeof parseWorkspaceSymbols>[2] = {}) {
@@ -98,6 +101,34 @@ describe('Workspace Symbol Parser (indexing)', () => {
             source: 'asset',
             container: 'sound',
             category: 'asset',
+        });
+    });
+
+    it('parses inline named assets and classifies them from active TypeDefs', () => {
+        const particle = parseScript([
+            'particle = {',
+            '    pdxparticle = { name = "white_hole_particle" type = "black_hole_file" scale = 2.0 }',
+            '}',
+        ].join('\n'), '/mod/gfx/particles/kuat_particles.gfx');
+        const light = parseScript('light = { name = "kuat_white_hole_light" intensity = 2.5 }', '/mod/gfx/lights/kuat_lights.asset');
+        const entity = parseScript('entity = { name = kuat_white_hole_planet_01_entity pdxmesh = white_hole_new_mesh }', '/mod/gfx/models/planets/kuat.asset');
+
+        expect(particle.find(entry => entry.name === 'white_hole_particle')).to.deep.include({
+            kind: 'particle',
+            line: 2,
+            source: 'asset',
+            container: 'pdxparticle',
+            category: 'asset',
+        });
+        expect(light.find(entry => entry.name === 'kuat_white_hole_light')).to.deep.include({
+            kind: 'light',
+            line: 1,
+            container: 'light',
+        });
+        expect(entity.find(entry => entry.name === 'kuat_white_hole_planet_01_entity')).to.deep.include({
+            kind: 'model_entity',
+            line: 1,
+            container: 'entity',
         });
     });
 

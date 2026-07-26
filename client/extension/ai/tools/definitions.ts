@@ -134,6 +134,38 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'query_interface_knowledge',
+            description: 'Query the bundled, curated Stellaris Interface modding knowledge pack. Use this before planning or editing .gui/.gfx/custom_gui work, interpreting extreme coordinates, choosing button types, or tracing button effects. Returns crash-risk engine constraints on preserving named controls off-canvas plus focused reference entries and source revision metadata. Current project, vanilla, CWT/LSP, and diagnostics remain required for exact identifiers and legality.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    topic: {
+                        type: 'string',
+                        enum: ['overview', 'gui_files', 'gfx_files', 'buttons_and_effects', 'custom_windows', 'off_canvas_hiding', 'layout', 'debugging', 'all'],
+                        description: 'Focused Interface topic. Default all; prefer the narrowest topic for the current task.',
+                    },
+                    query: {
+                        type: 'string',
+                        description: 'Optional concise Interface question used to rank the bundled entries.',
+                    },
+                    elementType: {
+                        type: 'string',
+                        description: 'Optional exact GUI element type such as effectButtonType or containerWindowType.',
+                    },
+                    limit: {
+                        type: 'number',
+                        minimum: 1,
+                        maximum: 10,
+                        description: 'Maximum focused reference entries. Default 5.',
+                    },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'explore_pdx_project',
             description: 'Primary semantic exploration entry point for large Paradox projects. Queries the live CWTools type/reference graph and returns bounded entry points, typed nodes, dependency edges, file facts, provenance, truncation, and freshness without scanning or reading whole files. Use this FIRST for questions such as how an entity is connected, what calls or references an ID, what a file depends on, or what may be affected by a change. Follow with exact query_rules/query_scope/query_types/get_pdx_block checks before writing.',
             parameters: {

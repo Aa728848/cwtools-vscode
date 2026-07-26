@@ -5,7 +5,7 @@ import { getWorkspaceCacheRoot } from '../ai/workspacePaths';
 import type { WorkspaceSymbolEntry, WorkspaceSymbolOrigin } from './workspaceSymbolParser';
 
 const SCHEMA_VERSION = 1;
-const PARSER_VERSION = 2;
+const PARSER_VERSION = 3;
 export const WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH = path.join('index', 'workspace-symbols.sqlite');
 
 /** Primary cache location: per-workspace extension storage once configured. */

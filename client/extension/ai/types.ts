@@ -1205,6 +1205,7 @@ export type AgentToolName =
     | 'explore_pdx_project'
     | 'query_project_profile'
     | 'query_project_knowledge'
+    | 'query_interface_knowledge'
     | 'run_skill'
     | 'query_rules'
     | 'query_cwt_schema'

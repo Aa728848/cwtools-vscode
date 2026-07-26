@@ -13,7 +13,6 @@ type GuiPanelMessage =
     | { command: 'goToLine'; line: number }
     | { command: 'updateProperty'; line: number; property: string; value: unknown; propertyLine?: number }
     | { command: 'addElement'; parentEndLine: number; type: string; name: string; x: number; y: number; w: number; h: number }
-    | { command: 'deleteElement'; startLine: number; endLine: number }
     | { command: 'duplicateElement'; startLine: number; endLine: number; newName: string }
     | { command: 'removePropertyLine'; line: number; property: string }
     | { command: 'addBackground'; parentEndLine: number; sprite?: string }
@@ -110,9 +109,6 @@ export class GuiPanel {
                         break;
                     case 'addElement':
                         this._queueOperation(() => this._handleAddElement(msg));
-                        break;
-                    case 'deleteElement':
-                        this._queueOperation(() => this._handleDeleteElement(msg));
                         break;
                     case 'duplicateElement':
                         this._queueOperation(() => this._handleDuplicateElement(msg));
@@ -775,26 +771,6 @@ export class GuiPanel {
     }
 
     /**
-     * Handle deleteElement message from webview.
-     * msg: { command, startLine, endLine }
-     */
-    private async _handleDeleteElement(msg: { startLine: number; endLine: number }) {
-        if (!this._document) return;
-        const doc = this._document;
-        this._saveSnapshot(doc);
-        const edit = new vscode.WorkspaceEdit();
-        // Delete the entire line range including the preceding newline
-        const startPos = msg.startLine > 1
-            ? new vscode.Position(msg.startLine - 2, doc.lineAt(msg.startLine - 2).text.length)
-            : new vscode.Position(0, 0);
-        const endPos = new vscode.Position(msg.endLine - 1, doc.lineAt(msg.endLine - 1).text.length);
-        edit.delete(doc.uri, new vscode.Range(startPos, endPos));
-        await vscode.workspace.applyEdit(edit);
-        // Full re-render
-        await this._loadAndRender(doc);
-    }
-
-    /**
      * Handle duplicateElement message from webview.
      * msg: { command, startLine, endLine, newName }
      */
@@ -1009,7 +985,7 @@ export class GuiPanel {
         <button data-action="add-text">+ ${panelText('Text box', '文本框')}</button>
         <hr />
         <button data-action="duplicate">${panelText('Duplicate (Ctrl+D)', '复制 (Ctrl+D)')}</button>
-        <button data-action="delete">${panelText('Delete (Del)', '删除 (Del)')}</button>
+        <button data-action="hide-off-canvas">${panelText('Move off canvas (Del)', '移出画布 (Del)')}</button>
         <hr />
         <button data-action="reparent">${panelText('Move into container (P)', '移入容器 (P)')}</button>
         <button data-action="unparent">${panelText('Move out of container (Shift+P)', '移出容器 (Shift+P)')}</button>
@@ -1055,7 +1031,7 @@ export class GuiPanel {
                 <button id="btn-undo" type="button" title="${panelText('Undo (Ctrl+Z)', '撤销 (Ctrl+Z)')}">↶</button>
                 <button id="btn-redo" type="button" title="${panelText('Redo (Ctrl+Y)', '重做 (Ctrl+Y)')}">↷</button>
                 <button id="btn-duplicate" type="button" disabled title="${panelText('Duplicate (Ctrl+D)', '复制 (Ctrl+D)')}">${panelText('Duplicate', '复制')}</button>
-                <button id="btn-delete" type="button" disabled title="${panelText('Delete (Del)', '删除 (Del)')}">${panelText('Delete', '删除')}</button>
+                <button id="btn-hide-off-canvas" type="button" disabled title="${panelText('Preserve the control and move it off canvas (Del)', '保留控件并将其移出画布 (Del)')}">${panelText('Move off canvas', '移出画布')}</button>
                 <span class="toolbar-divider"></span>
                 <button id="btn-align-left" title="${panelText('Align left', '左对齐')}" class="align-btn" disabled>⬅</button>
                 <button id="btn-align-hcenter" title="${panelText('Center horizontally', '水平居中')}" class="align-btn" disabled>⬌</button>

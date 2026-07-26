@@ -102,12 +102,52 @@ let private tryGetValueArgContext (textBeforeCursor: string) =
                             Some(entityName, pipeCount % 2 = 0)
     with _ -> None
 
-let private tryFindScriptValueLikeType (game: IGame) (entityName: string) =
-    game.Types()
-    |> Map.toSeq
-    |> Seq.sortBy fst
-    |> Seq.tryPick (fun (_, definitions) ->
-        definitions |> Array.tryFind (fun definition -> definition.id = entityName))
+let private scriptedDefinitionTypePriority =
+    // Preserve the old Map.sortBy lookup order for duplicate identifiers while
+    // avoiding a scan through every unrelated TypeDef family on each request.
+    [| "script_value"; "scripted_effect"; "scripted_trigger" |]
+
+let private scriptedDefinitionFileCacheMaxEntries = 100_000
+let private scriptedDefinitionFileCacheLock = obj()
+let mutable private scriptedDefinitionFileCacheSource: obj = null
+let mutable private scriptedDefinitionFileCache =
+    Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+
+let private rebuildScriptedDefinitionFileCache (types: Map<string, TypeDefInfo array>) =
+    let next = Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+
+    for typeName in scriptedDefinitionTypePriority do
+        match Map.tryFind typeName types with
+        | Some definitions ->
+            for definition in definitions do
+                if next.Count < scriptedDefinitionFileCacheMaxEntries
+                   && not (next.ContainsKey definition.id) then
+                    next.[definition.id] <- definition.range.FileName
+        | None -> ()
+
+    scriptedDefinitionFileCacheSource <- types
+    scriptedDefinitionFileCache <- next
+
+let private tryFindScriptedDefinitionFile (game: IGame) (entityName: string) =
+    let types = game.Types()
+
+    lock scriptedDefinitionFileCacheLock (fun () ->
+        if not (Object.ReferenceEquals(scriptedDefinitionFileCacheSource, types)) then
+            rebuildScriptedDefinitionFileCache types
+
+        match scriptedDefinitionFileCache.TryGetValue entityName with
+        | true, filePath -> Some filePath
+        | false, _ ->
+            // The bounded cache normally contains every scripted definition. If a
+            // pathological workspace exceeds the cap, retain correctness with a
+            // targeted scan of only the three callable families.
+            scriptedDefinitionTypePriority
+            |> Array.tryPick (fun typeName ->
+                types
+                |> Map.tryFind typeName
+                |> Option.bind (Array.tryFind (fun definition ->
+                    String.Equals(definition.id, entityName, StringComparison.OrdinalIgnoreCase)))
+                |> Option.map (fun definition -> definition.range.FileName)))
 
 let private tryReadTypeFileText (docs: DocumentStore) (filePath: string) =
     if String.IsNullOrEmpty(filePath) then None
@@ -130,9 +170,9 @@ let private tryGetScriptValueMacroParams (game: IGame) (docs: DocumentStore) (fi
     |> Option.bind (fun (entityName, isParamPosition) ->
         if not isParamPosition then None
         else
-            tryFindScriptValueLikeType game entityName
-            |> Option.bind (fun t ->
-                tryReadTypeFileText docs t.range.FileName
+            tryFindScriptedDefinitionFile game entityName
+            |> Option.bind (fun definitionFile ->
+                tryReadTypeFileText docs definitionFile
                 |> Option.bind (fun sourceText ->
                     let values =
                         [ for m in macroParamPattern.Matches(sourceText) -> m.Groups.[1].Value
@@ -233,15 +273,7 @@ let private tryFindParamDefinitionFile (game: IGame) (callKey: string) (text: st
                     Some f
                 | _ -> None)
     else
-        let types = game.Types()
-
-        types
-        |> Map.toSeq
-        |> Seq.sortBy fst
-        |> Seq.tryPick (fun (_, definitions) ->
-            definitions
-            |> Array.tryFind (fun definition -> String.Equals(definition.id, callKey, StringComparison.OrdinalIgnoreCase))
-            |> Option.map (fun definition -> definition.range.FileName))
+        tryFindScriptedDefinitionFile game callKey
 
 let private trySliceNamedDefinitionBlock (text: string) (callKey: string) =
     let pattern =

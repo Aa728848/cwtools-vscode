@@ -2036,6 +2036,19 @@ type Server(client: ILanguageClient) =
     let typeDefinitionsByFileCacheMaxEntries = 128
     let typeDefinitionsByFileCache =
         System.Collections.Concurrent.ConcurrentDictionary<string, (string * string * TypeDefInfo) list>()
+    let normalisedTypeDefinitionPathCacheMaxEntries = 32_768
+    let normalisedTypeDefinitionPathCache =
+        System.Collections.Concurrent.ConcurrentDictionary<string, string>()
+
+    let normaliseTypeDefinitionPath path =
+        match normalisedTypeDefinitionPathCache.TryGetValue path with
+        | true, cached -> cached
+        | false, _ ->
+            if normalisedTypeDefinitionPathCache.Count >= normalisedTypeDefinitionPathCacheMaxEntries then
+                normalisedTypeDefinitionPathCache.Clear()
+            let normalised = normaliseCachePath path
+            normalisedTypeDefinitionPathCache.[path] <- normalised
+            normalised
 
     let getTypesForFile (game: IGame) filePath =
         let key = normaliseCachePath filePath
@@ -2043,15 +2056,8 @@ type Server(client: ILanguageClient) =
         match typeDefinitionsByFileCache.TryGetValue key with
         | true, cached -> cached
         | false, _ ->
-            let pathMatches = System.Collections.Generic.Dictionary<string, bool>()
-
             let belongsToRequestedFile path =
-                match pathMatches.TryGetValue path with
-                | true, matches -> matches
-                | false, _ ->
-                    let matches = normaliseCachePath path = key
-                    pathMatches.[path] <- matches
-                    matches
+                normaliseTypeDefinitionPath path = key
 
             let result =
                 game.Types()
@@ -2424,10 +2430,58 @@ type Server(client: ILanguageClient) =
 
     let mutable lastFocusedFile: string option = None
 
-    /// Atomic flag 0 = idle, 1 = refreshing.  Use Interlocked.CompareExchange
-    /// instead of a plain mutable bool to prevent two DidOpenTextDocument handlers
-    /// from both passing the "false" check and starting duplicate Tasks.
+    /// Atomic flag 0 = idle, 1 = refreshing. File-list refreshes are structural
+    /// work and run only after create/delete notifications, never on every open.
     let currentlyRefreshingFiles = ref 0
+    let fileListRefreshPending = ref 0
+
+    let rec queueFileListRefresh (game: IGame) =
+        System.Threading.Interlocked.Exchange(fileListRefreshPending, 1) |> ignore
+
+        if System.Threading.Interlocked.CompareExchange(currentlyRefreshingFiles, 1, 0) = 0 then
+            let mapResourceToFilePath =
+                function
+                | EntityResource(f, r) -> r.scope, f, r.logicalpath
+                | FileResource(f, r) -> r.scope, f, r.logicalpath
+                | FileWithContentResource(f, r) -> r.scope, f, r.logicalpath
+
+            let task =
+                new Task(fun () ->
+                    try
+                        let mutable refreshAgain = true
+
+                        while refreshAgain do
+                            System.Threading.Interlocked.Exchange(fileListRefreshPending, 0) |> ignore
+                            gameStateLock.EnterReadLock()
+
+                            let fileList =
+                                try
+                                    game.AllFiles()
+                                    |> List.map mapResourceToFilePath
+                                    |> List.map (fun (scope, file, logicalPath) ->
+                                        let uri = filePathToUri file
+                                        JsonValue.Record
+                                            [| "scope", JsonValue.String scope
+                                               "uri", JsonValue.String uri.AbsoluteUri
+                                               "logicalpath", JsonValue.String logicalPath |])
+                                    |> Array.ofList
+                                finally
+                                    gameStateLock.ExitReadLock()
+
+                            client.CustomNotification(
+                                "updateFileList",
+                                JsonValue.Record [| "fileList", JsonValue.Array fileList |]
+                            )
+
+                            refreshAgain <-
+                                System.Threading.Interlocked.CompareExchange(fileListRefreshPending, 0, 0) <> 0
+                    finally
+                        System.Threading.Interlocked.Exchange(currentlyRefreshingFiles, 0) |> ignore
+
+                        if System.Threading.Interlocked.Exchange(fileListRefreshPending, 0) <> 0 then
+                            queueFileListRefresh game)
+
+            task.Start()
 
     let (|TrySuccess|TryFailure|) tryResult =
         match tryResult with
@@ -3211,8 +3265,11 @@ type Server(client: ILanguageClient) =
     let lint (doc: Uri) (shallowAnalyze: bool) (forceDisk: bool) (isEditAction: bool) (validateCachedOnly: bool) (fastDefinitionIndex: bool) (requestStillCurrent: unit -> bool) : Async<unit> =
         async {
             let name = getPathFromDoc doc
-            // Invalidate codelens cache for THIS file only
-            forgetFileCaches name
+            // Only content mutations invalidate file-derived editor features.
+            // Open/focus validation observes the same document version and must
+            // preserve CodeLens/semantic-token caches instead of rebuilding them.
+            if isEditAction then
+                forgetFileCaches name
 
             if name.EndsWith(".yml") then
                 if isEditAction && not shallowAnalyze then
@@ -3221,8 +3278,14 @@ type Server(client: ILanguageClient) =
                     clearLocalisationCaches ()
                 if isEditAction then markFileStale name "localisation"
 
+            // Localisation edits only need an atomic VFS/localisation-manager
+            // replacement here. The deferred localisation pass below owns the
+            // processed-map rebuild and diagnostics, so a save must not run the
+            // full rule-validation UpdateFile path for an unchanged script model.
             let useInteractiveUpdate =
-                isEditAction && shallowAnalyze
+                isEditAction
+                && (shallowAnalyze
+                    || name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase))
 
             let canTryIncrementalTypeRefresh =
                 isEditAction
@@ -3324,24 +3387,32 @@ type Server(client: ILanguageClient) =
                 | Some game when validateCachedOnly ->
                     let allocBeforeValidate = GC.GetTotalAllocatedBytes(false)
                     let updateErrors =
-                        gameStateLock.EnterReadLock()
-                        try
-                            let result =
-                                match game with
-                                | :? ICancellableFileValidation as cancellable ->
-                                    cancellable.ValidateFileCancellable(shallowAnalyze, name, (fun () -> not (lintSnapshotStillCurrent ())))
-                                | _ when lintSnapshotStillCurrent () ->
-                                    Some(game.ValidateFile shallowAnalyze name)
-                                | _ -> None
+                        if name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) then
+                            // Localisation diagnostics are already partitioned in
+                            // locCache. Calling ValidateFile here cannot contribute
+                            // results, but used to force needless resource work on
+                            // every open/focus of a localisation document.
+                            validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
+                            []
+                        else
+                            gameStateLock.EnterReadLock()
+                            try
+                                let result =
+                                    match game with
+                                    | :? ICancellableFileValidation as cancellable ->
+                                        cancellable.ValidateFileCancellable(shallowAnalyze, name, (fun () -> not (lintSnapshotStillCurrent ())))
+                                    | _ when lintSnapshotStillCurrent () ->
+                                        Some(game.ValidateFile shallowAnalyze name)
+                                    | _ -> None
 
-                            match result with
-                            | Some completed ->
-                                validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
-                                completed
-                            | None ->
-                                lintUpdateSuperseded <- true
-                                []
-                        finally gameStateLock.ExitReadLock()
+                                match result with
+                                | Some completed ->
+                                    validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
+                                    completed
+                                | None ->
+                                    lintUpdateSuperseded <- true
+                                    []
+                            finally gameStateLock.ExitReadLock()
                     let astErrors =
                         updateErrors
                         |> List.map (fun e ->
@@ -3804,7 +3875,7 @@ type Server(client: ILanguageClient) =
                             (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
                     let allocAfterUpdate = GC.GetTotalAllocatedBytes(false)
                     let updateMode =
-                        if isEditAction && shallowAnalyze && not fastDefinitionIndex then "interactive"
+                        if useInteractiveUpdate && not fastDefinitionIndex then "interactive"
                         else "full"
                     monitorLog Lint $"UpdateFile file={name} mode={updateMode} shallow={shallowAnalyze} allocDeltaMB={(allocAfterUpdate - allocBeforeUpdate) / 1048576L}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                     
@@ -4562,7 +4633,11 @@ type Server(client: ILanguageClient) =
                                     match fileDiagnosticStates.TryGetValue(lintPath) with
                                     | true, state -> state.diagnostics
                                     | _ -> []
-                                let validateCachedOnly = options.forceDeepLint && not isEditAction
+                                // Open/focus never changes the VFS. Re-validating the
+                                // current cached entity under the read lock avoids a
+                                // redundant UpdateFile write lock, which previously
+                                // blocked completion, CodeLens and semantic tokens.
+                                let validateCachedOnly = not isEditAction
                                 do! lint uri useShallowAnalyze options.forceDisk isEditAction validateCachedOnly options.fastDefinitionIndex requestStillCurrent
                                 // Deep passes and the explicit fast-definition save path schedule
                                 // cross-file revalidation; ordinary shallow keystrokes still skip it.
@@ -5763,43 +5838,6 @@ type Server(client: ILanguageClient) =
                     )
                 )
 
-                let mapResourceToFilePath =
-                    function
-                    | EntityResource(f, r) -> r.scope, f, r.logicalpath
-                    | FileResource(f, r) -> r.scope, f, r.logicalpath
-                    | FileWithContentResource(f, r) -> r.scope, f, r.logicalpath
-
-                match gameObj with
-                | Some game when System.Threading.Interlocked.CompareExchange(currentlyRefreshingFiles, 1, 0) = 0 ->
-
-                    let task =
-                        new Task(fun () ->
-                            // M1 Fix: AllFiles() reads internal game state acquire a shared
-                            // read lock so we don't race against a concurrent game reload.
-                            gameStateLock.EnterReadLock()
-                            try
-                                let fileList =
-                                    game.AllFiles()
-                                    |> List.map mapResourceToFilePath
-                                    |> List.choose (fun (s, f, l) -> parseUri f |> Option.map (fun u -> (s, u, l)))
-                                    |> List.map (fun (s, uri, l) ->
-                                        JsonValue.Record
-                                            [| "scope", JsonValue.String s
-                                               "uri", uri
-                                               "logicalpath", JsonValue.String l |])
-                                    |> Array.ofList
-
-                                client.CustomNotification(
-                                    "updateFileList",
-                                    JsonValue.Record [| "fileList", JsonValue.Array fileList |]
-                                )
-                            finally
-                                gameStateLock.ExitReadLock()
-                                // Reset the flag inside the task so writers can see it.
-                                System.Threading.Interlocked.Exchange(currentlyRefreshingFiles, 0) |> ignore)
-
-                    task.Start()
-                | _ -> ()
             }
 
         member this.DidFocusFile(p: DidFocusFileParams) =
@@ -5898,10 +5936,13 @@ type Server(client: ILanguageClient) =
 
         member this.DidChangeWatchedFiles(p: DidChangeWatchedFilesParams) =
             async {
+                let mutable refreshFileList = false
                 for change in p.changes do
                     match change.``type`` with
                     | FileChangeType.Created
                     | FileChangeType.Changed ->
+                        if change.``type`` = FileChangeType.Created then
+                            refreshFileList <- true
                         let path = getPathFromDoc change.uri
                         advanceLintGeneration path |> ignore
                         forgetFileCaches path
@@ -5923,6 +5964,7 @@ type Server(client: ILanguageClient) =
                             markFileStale path "types"
                         lintDebounceAgent.Post(UpdateRequest({ uri = change.uri; version = 0 }, diskRefreshRequest))
                     | FileChangeType.Deleted ->
+                        refreshFileList <- true
                         let path = getPathFromDoc change.uri
                         committedTypeIndexVersions.TryRemove(normaliseCachePath path) |> ignore
                         if incrementalTypeRefreshEnabled () && isTypeDefiningPath path then
@@ -6005,6 +6047,9 @@ type Server(client: ILanguageClient) =
                         client.PublishDiagnostics { uri = change.uri; diagnostics = [] }
                         forgetFileCaches path
                         fileDiagnosticStates.TryRemove(path) |> ignore
+
+                if refreshFileList then
+                    gameObj |> Option.iter queueFileListRefresh
             }
 
         member this.Completion(p: CompletionParams) =

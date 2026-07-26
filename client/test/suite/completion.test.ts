@@ -8,6 +8,8 @@ import { expect } from 'chai';
 const sampleRoot = path.resolve(__dirname, '../sample');
 const testEventFile = path.join(sampleRoot, 'events', 'irm.txt');
 const testNicheFile = path.join(sampleRoot, 'common', 'pop_faction_types', 'irm_regionalist.txt');
+const testScriptedEffectFile = path.join(sampleRoot, 'common', 'scripted_effects', 'irm_scripted_effects.txt');
+const testScriptedTriggerFile = path.join(sampleRoot, 'common', 'scripted_triggers', 'irm_scripted_triggers.txt');
 
 async function waitForLSP(uri: vscode.Uri, maxRetries = 120, delayMs = 500): Promise<void> {
     let diagnosticsReady = false;
@@ -156,6 +158,33 @@ suite('LSP Completion Tests', function () {
         assert.ok(completions.items.length > 0, 'Should have completion items');
     });
 
+    test('should provide first-open and switched-line completions in scripted definition files', async function () {
+        const cases = [
+            { file: testScriptedEffectFile, needles: ['random_owned_pop = {', 'create_leader = {'] },
+            { file: testScriptedTriggerFile, needles: ['has_trait =', 'has_modifier ='] },
+        ];
+
+        for (const testCase of cases) {
+            const document = await vscode.workspace.openTextDocument(vscode.Uri.file(testCase.file));
+            await vscode.window.showTextDocument(document);
+
+            for (const needle of testCase.needles) {
+                const line = Array.from({ length: document.lineCount }, (_, index) => index)
+                    .find(index => document.lineAt(index).text.includes(needle));
+                assert.ok(line !== undefined, `Missing completion test anchor '${needle}' in ${testCase.file}`);
+                if (line === undefined) throw new Error(`Missing completion test anchor '${needle}'`);
+                const lineText = document.lineAt(line).text;
+                const character = lineText.length - lineText.trimStart().length;
+                const startedAt = Date.now();
+                const completions = await getCompletions(document.uri, new vscode.Position(line, character));
+                const elapsed = Date.now() - startedAt;
+
+                assert.ok(elapsed < 5000, `${path.basename(testCase.file)} completion at '${needle}' took ${elapsed}ms`);
+                assert.ok(completions.items.length > 0, `Expected completions at '${needle}' in ${testCase.file}`);
+            }
+        }
+    });
+
     test('should provide LSP-based completions not just text fallback', async function () {
         const document = await openAndGetTestDocument();
         const completions = await getCompletions(document.uri, new vscode.Position(12, 0));
@@ -171,4 +200,3 @@ suite('LSP Completion Tests', function () {
     });
 
 });
-

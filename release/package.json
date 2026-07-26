@@ -715,6 +715,26 @@
                     "default": true,
                     "description": "%configuration.stellarisLanguageServices.editor.formatIndentOnPaste.description%"
                 },
+                "stellarisLanguageServices.editor.codeLens.enabled": {
+                    "scope": "window",
+                    "type": "boolean",
+                    "default": true,
+                    "description": "%configuration.stellarisLanguageServices.editor.codeLens.enabled.description%"
+                },
+                "stellarisLanguageServices.editor.semanticHighlighting.enabled": {
+                    "scope": "window",
+                    "type": "boolean",
+                    "default": true,
+                    "description": "%configuration.stellarisLanguageServices.editor.semanticHighlighting.enabled.description%"
+                },
+                "stellarisLanguageServices.editor.backgroundFeaturesDelayMs": {
+                    "scope": "window",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2000,
+                    "default": 250,
+                    "description": "%configuration.stellarisLanguageServices.editor.backgroundFeaturesDelayMs.description%"
+                },
                 "stellarisLanguageServices.trace.server": {
                     "scope": "window",
                     "type": "string",

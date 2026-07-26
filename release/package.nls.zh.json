@@ -1,4 +1,7 @@
 {
+  "configuration.stellarisLanguageServices.editor.codeLens.enabled.description": "启用 CWTools CodeLens。在超大型工作区中可关闭，以完全停止 CodeLens 后台请求。",
+  "configuration.stellarisLanguageServices.editor.semanticHighlighting.enabled.description": "启用 CWTools 语义高亮。在超大型工作区中可关闭，以完全停止语义标记后台请求。",
+  "configuration.stellarisLanguageServices.editor.backgroundFeaturesDelayMs.description": "打开文件或进行补全后，延迟 CodeLens 与语义标记请求，使补全优先发送。设为 0 可关闭延迟。",
   "extension.displayName": "Stellaris语言服务",
   "extension.description": "面向 Stellaris Mod 开发的语言服务、预览、校验与 AI 辅助工具集",
   "views.loadedFiles.name": "已加载文件",

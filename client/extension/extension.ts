@@ -58,6 +58,7 @@ import { getDefaultLocalisationLanguagesForUiLocale } from './localisationLangua
 import { handleVanillaCacheGenerated } from './vanillaCacheLifecycle';
 import { parseWorkshopContentAppId, getGameIdForWorkshopAppId } from './workshopDetection';
 import { inferGameIdFromWorkspace, hasWorkspaceModDescriptor, workspaceHasParadoxStructure as workspaceHasParadoxStructureDetect } from './workspaceGameDetection';
+import { LspFeaturePriorityGate } from './lspFeaturePriority';
 
 export let defaultClient: LanguageClient;
 
@@ -1816,6 +1817,28 @@ export async function activate(context: ExtensionContext) {
 			workspace.createFileSystemWatcher("**/{interface,gfx,fonts,music,sound}/**/*.asset"),
 			workspace.createFileSystemWatcher("**/{localisation,localisation_synced,localization}/**/*.yml")
 		]
+		const editorFeaturePriority = new LspFeaturePriorityGate();
+		const editorFeaturesConfiguration = () => workspace.getConfiguration('stellarisLanguageServices.editor');
+		const backgroundFeatureDelay = () =>
+			Math.max(0, editorFeaturesConfiguration().get<number>('backgroundFeaturesDelayMs', 250));
+		const waitForBackgroundFeature = async (token: vs.CancellationToken) =>
+			editorFeaturePriority.waitForBackgroundSlot(backgroundFeatureDelay(), token);
+		const runBackgroundFeature = async <T>(
+			token: vs.CancellationToken,
+			dispatch: (backgroundToken: vs.CancellationToken) => Thenable<T> | T,
+		): Promise<T | undefined> => {
+			if (!await waitForBackgroundFeature(token)) return undefined;
+			const backgroundCancellation = new vs.CancellationTokenSource();
+			const originalCancellation = token.onCancellationRequested(() => backgroundCancellation.cancel());
+			const stopTracking = editorFeaturePriority.trackBackgroundCancellation(() => backgroundCancellation.cancel());
+			try {
+				return await dispatch(backgroundCancellation.token);
+			} finally {
+				stopTracking();
+				originalCancellation.dispose();
+				backgroundCancellation.dispose();
+			}
+		};
 
 		// Options to control the language client
 		const clientOptions: LanguageClientOptions = {
@@ -1831,6 +1854,22 @@ export async function activate(context: ExtensionContext) {
 				fileEvents: fileEvents
 			},
 			middleware: {
+				provideCompletionItem: (document, position, context, token, next) => {
+					editorFeaturePriority.prioritiseCompletion(backgroundFeatureDelay());
+					return next(document, position, context, token);
+				},
+				provideCodeLenses: async (document, token, next) => {
+					if (!editorFeaturesConfiguration().get<boolean>('codeLens.enabled', true)) return [];
+					return (await runBackgroundFeature(token, backgroundToken => next(document, backgroundToken))) ?? [];
+				},
+				provideDocumentSemanticTokens: async (document, token, next) => {
+					if (!editorFeaturesConfiguration().get<boolean>('semanticHighlighting.enabled', true)) return undefined;
+					return runBackgroundFeature(token, backgroundToken => next(document, backgroundToken));
+				},
+				provideDocumentSemanticTokensEdits: async (document, previousResultId, token, next) => {
+					if (!editorFeaturesConfiguration().get<boolean>('semanticHighlighting.enabled', true)) return undefined;
+					return runBackgroundFeature(token, backgroundToken => next(document, previousResultId, backgroundToken));
+				},
 				workspace: {
 					didChangeConfiguration: async (sections: any, next: (sections: any) => Promise<void>) => {
 						// Drop config changes if they were just triggered by our own AI Settings Manager

@@ -1040,7 +1040,13 @@ type private IncrementalTypeStage =
     | TypeIndexOnly of IIncrementalTypeIndex * StagedTypeIndex
 
 /// Shared token computation - walks AST, classifies tokens, encodes to delta int[].
-let computeShaderTokens (_game: IGame<_>) (filePath: string) (fileText: string) =
+let computeShaderTokens
+    (cancellationToken: System.Threading.CancellationToken)
+    (_game: IGame<_>)
+    (filePath: string)
+    (fileText: string)
+    =
+    cancellationToken.ThrowIfCancellationRequested()
     let tokenTypeIndex =
         Map.ofList
             [ "namespace", 0
@@ -1060,6 +1066,7 @@ let computeShaderTokens (_game: IGame<_>) (filePath: string) (fileText: string) 
     let lineStarts = ResizeArray<int>()
     lineStarts.Add 0
     for offset = 0 to fileText.Length - 1 do
+        if offset % 4096 = 0 then cancellationToken.ThrowIfCancellationRequested()
         if fileText.[offset] = '\n' then lineStarts.Add(offset + 1)
 
     let lineAndColumn offset =
@@ -1073,6 +1080,7 @@ let computeShaderTokens (_game: IGame<_>) (filePath: string) (fileText: string) 
 
     let tokens = ResizeArray<struct (int * int * int * int * int)>()
     for token in PdxShaderFeatures.semanticTokens filePath fileText do
+        cancellationToken.ThrowIfCancellationRequested()
         match Map.tryFind token.tokenType tokenTypeIndex with
         | None -> ()
         | Some tokenType ->
@@ -1108,18 +1116,20 @@ let computeShaderTokens (_game: IGame<_>) (filePath: string) (fileText: string) 
         prevChar <- col
     data |> Seq.toArray
 
-let computeScriptTokens (game: IGame<_>) (filePath: string) (fileText: string) =
-    let entityOpt =
-        game.AllEntities()
-        |> Seq.tryPick (fun struct (e, _) ->
-            if e.filepath = filePath then Some e else None)
-    match entityOpt with
+let computeScriptTokens
+    (cancellationToken: System.Threading.CancellationToken)
+    (rootNodeOpt: CWTools.Process.Node option)
+    (allEffects: System.Collections.Generic.HashSet<string>)
+    (allTriggers: System.Collections.Generic.HashSet<string>)
+    (filePath: string)
+    (fileText: string)
+    =
+    cancellationToken.ThrowIfCancellationRequested()
+    match rootNodeOpt with
     | None -> [||]
-    | Some entity ->
+    | Some rootNode ->
         let tokens = ResizeArray<struct (int * int * int * int * int)>()
         let lines = fileText.Split('\n')
-        let allEffects = game.ScriptedEffects() |> Seq.map (fun e -> e.Name.GetString()) |> System.Collections.Generic.HashSet
-        let allTriggers = game.ScriptedTriggers() |> Seq.map (fun e -> e.Name.GetString()) |> System.Collections.Generic.HashSet
         let keywords = System.Collections.Generic.HashSet([|
             "if"; "else"; "else_if"; "AND"; "OR"; "NOT"; "NOR"; "NAND"
             "limit"; "trigger"; "modifier"; "while"
@@ -1157,6 +1167,7 @@ let computeScriptTokens (game: IGame<_>) (filePath: string) (fileText: string) =
                 if segmentStart < value.Length then
                     verifyAndAdd line (col + segmentStart) (value.Length - segmentStart) fallbackTokenType
         let rec visitNode (n: CWTools.Process.Node) =
+            cancellationToken.ThrowIfCancellationRequested()
             n.Leaves |> Seq.iter (fun l ->
                 if l.Position.FileName = filePath then
                     let line = max 0 (int l.Position.StartLine - 1)
@@ -1243,8 +1254,9 @@ let computeScriptTokens (game: IGame<_>) (filePath: string) (fileText: string) =
                             verifyAndAdd nLine actualCol nKey.Length keyType
                 visitNode childNode
             )
-        visitNode entity.entity
+        visitNode rootNode
         lines |> Array.iteri (fun lineIdx lineText ->
+            if lineIdx % 64 = 0 then cancellationToken.ThrowIfCancellationRequested()
             let trimmed = lineText.TrimStart()
             if trimmed.StartsWith("#") then
                 let col = lineText.Length - trimmed.Length
@@ -1266,15 +1278,28 @@ let computeScriptTokens (game: IGame<_>) (filePath: string) (fileText: string) =
             prevChar <- col
         data |> Seq.toArray
 
-let computeTokensForFile (game: IGame<_>) (filePath: string) (fileText: string) =
+let computeTokensForFile
+    (cancellationToken: System.Threading.CancellationToken)
+    (game: IGame<_>)
+    (allEffects: System.Collections.Generic.HashSet<string>)
+    (allTriggers: System.Collections.Generic.HashSet<string>)
+    (filePath: string)
+    (fileText: string)
+    =
     let isShaderFile (path: string) =
         let ext = System.IO.Path.GetExtension(path)
         ext.Equals(".shader", System.StringComparison.OrdinalIgnoreCase) || ext.Equals(".fxh", System.StringComparison.OrdinalIgnoreCase)
         
     if isShaderFile filePath then
-        computeShaderTokens game filePath fileText
+        computeShaderTokens cancellationToken game filePath fileText
     else
-        computeScriptTokens game filePath fileText
+        let rootNode =
+            match CKParser.parseString fileText filePath with
+            | Failure _ -> None
+            | Success(statements, _, _) ->
+                Some(CWTools.Process.STLProcess.simpleProcess.ProcessNode () "root" (mkZeroFile filePath) statements)
+
+        computeScriptTokens cancellationToken rootNode allEffects allTriggers filePath fileText
 
 
 //-Diagnostic freshness state machine-
@@ -1824,6 +1849,15 @@ type Server(client: ILanguageClient) =
     /// Avoids full AST re-traversal when file content hasn't changed.
     /// resultId enables delta diff against the previous snapshot.
     let semanticTokensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int option * int * int[] * string>()
+    let semanticClassificationCacheMaxEntries = 100_000
+    let semanticClassificationCacheLock = obj()
+    let mutable semanticClassificationCacheSource: obj = null
+    let mutable semanticClassificationRulesEpoch = -1L
+    let mutable semanticClassificationTypesEpoch = -1L
+    let mutable semanticEffectNames =
+        System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    let mutable semanticTriggerNames =
+        System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
 
     /// CodeLens cache: filePath -> (contentHash, lenses).
     let codeLensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * CodeLens list>()
@@ -1858,6 +1892,51 @@ type Server(client: ILanguageClient) =
     let normaliseCachePath (filePath: string) =
         try FileInfo(filePath).FullName.Replace('\\', '/').ToLowerInvariant()
         with _ -> filePath.Replace('\\', '/').ToLowerInvariant()
+
+    let clearSemanticClassificationCache () =
+        lock semanticClassificationCacheLock (fun () ->
+            semanticClassificationCacheSource <- null
+            semanticClassificationRulesEpoch <- -1L
+            semanticClassificationTypesEpoch <- -1L
+            semanticEffectNames <-
+                System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            semanticTriggerNames <-
+                System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase))
+
+    let getSemanticClassificationNames
+        (cancellationToken: System.Threading.CancellationToken)
+        (game: IGame)
+        =
+        lock semanticClassificationCacheLock (fun () ->
+            cancellationToken.ThrowIfCancellationRequested()
+            if not (Object.ReferenceEquals(semanticClassificationCacheSource, game))
+               || semanticClassificationRulesEpoch <> rulesModelEpoch
+               || semanticClassificationTypesEpoch <> typesModelEpoch then
+                let buildBoundedSet names =
+                    let next =
+                        System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    let mutable index = 0
+
+                    for name in names |> Seq.truncate semanticClassificationCacheMaxEntries do
+                        if index % 256 = 0 then cancellationToken.ThrowIfCancellationRequested()
+                        next.Add(name) |> ignore
+                        index <- index + 1
+
+                    next
+
+                semanticEffectNames <-
+                    game.ScriptedEffects()
+                    |> Seq.map (fun effect -> effect.Name.GetString())
+                    |> buildBoundedSet
+                semanticTriggerNames <-
+                    game.ScriptedTriggers()
+                    |> Seq.map (fun trigger -> trigger.Name.GetString())
+                    |> buildBoundedSet
+                semanticClassificationCacheSource <- game
+                semanticClassificationRulesEpoch <- rulesModelEpoch
+                semanticClassificationTypesEpoch <- typesModelEpoch
+
+            semanticEffectNames, semanticTriggerNames)
 
     let completionFallbackKind (filePath: string) =
         let normalised = filePath.Replace('\\', '/').ToLowerInvariant()
@@ -2050,7 +2129,8 @@ type Server(client: ILanguageClient) =
             normalisedTypeDefinitionPathCache.[path] <- normalised
             normalised
 
-    let getTypesForFile (game: IGame) filePath =
+    let getTypesForFile (cancellationToken: System.Threading.CancellationToken) (game: IGame) filePath =
+        cancellationToken.ThrowIfCancellationRequested()
         let key = normaliseCachePath filePath
 
         match typeDefinitionsByFileCache.TryGetValue key with
@@ -2063,11 +2143,13 @@ type Server(client: ILanguageClient) =
                 game.Types()
                 |> Map.toSeq
                 |> Seq.collect (fun (typeName, definitions) ->
+                    cancellationToken.ThrowIfCancellationRequested()
                     if typeName.Contains(".") then
                         Seq.empty
                     else
                         definitions
                         |> Seq.choose (fun definition ->
+                            cancellationToken.ThrowIfCancellationRequested()
                             if belongsToRequestedFile definition.range.FileName then
                                 Some(typeName, definition.id, definition)
                             else
@@ -2114,6 +2196,7 @@ type Server(client: ILanguageClient) =
     /// Clear the type index related cache (called after the type-defining file changes)
     let clearTypeCaches () =
         clearTypeIndexCache ()
+        clearSemanticClassificationCache ()
         completionListCache.Clear()
         codeLensCache.Clear()  // CodeLens depends on type index
         typeReferenceResultCache.Clear()
@@ -2130,6 +2213,7 @@ type Server(client: ILanguageClient) =
         codeLensCache.Clear()
         inlayHintCache.Clear()
         clearTypeIndexCache ()
+        clearSemanticClassificationCache ()
         completionListCache.Clear()
         typeReferenceResultCache.Clear()
 
@@ -6632,6 +6716,8 @@ type Server(client: ILanguageClient) =
 
         member this.CodeLens(p: CodeLensParams) =
             async {
+                let! cancellationToken = Async.CancellationToken
+                cancellationToken.ThrowIfCancellationRequested()
                 return
                     match gameObj with
                     | Some game ->
@@ -6641,10 +6727,12 @@ type Server(client: ILanguageClient) =
                             | Some t -> t
                             | None -> try System.IO.File.ReadAllText(filePath) with _ -> ""
                         let buildLenses fileText =
+                            cancellationToken.ThrowIfCancellationRequested()
                             let hash = contentHash fileText
                             let lenses =
-                                getTypesForFile game filePath
+                                getTypesForFile cancellationToken game filePath
                                 |> List.map (fun (typeName, id, tdi) -> makeTypeCodeLens (Some fileText) typeName id filePath tdi)
+                            cancellationToken.ThrowIfCancellationRequested()
                             cachePut codeLensCache filePath (hash, lenses)
                             evictIfNeeded codeLensCache
                             lenses
@@ -7102,7 +7190,9 @@ type Server(client: ILanguageClient) =
                         && isCompletionHeavyInteractiveWindow () ->
                         None
                     | _ ->
-                        let dataArray = computeTokensForFile game filePath fileText
+                        let allEffects, allTriggers = getSemanticClassificationNames cancellationToken game
+                        let dataArray =
+                            computeTokensForFile cancellationToken game allEffects allTriggers filePath fileText
                         cancellationToken.ThrowIfCancellationRequested()
 
                         if not (documentStillCurrent ()) then
@@ -7162,7 +7252,9 @@ type Server(client: ILanguageClient) =
                         && isCompletionHeavyInteractiveWindow () ->
                         None
                     | true, (_, _, oldDataArray, oldResultId) ->
-                        let newDataArray = computeTokensForFile game filePath fileText
+                        let allEffects, allTriggers = getSemanticClassificationNames cancellationToken game
+                        let newDataArray =
+                            computeTokensForFile cancellationToken game allEffects allTriggers filePath fileText
                         cancellationToken.ThrowIfCancellationRequested()
 
                         if not (documentStillCurrent ()) then None
@@ -7176,7 +7268,9 @@ type Server(client: ILanguageClient) =
                             else
                                 Some(Choice1Of2 { data = Array.toList newDataArray; resultId = Some newResultId })
                     | _ ->
-                        let newDataArray = computeTokensForFile game filePath fileText
+                        let allEffects, allTriggers = getSemanticClassificationNames cancellationToken game
+                        let newDataArray =
+                            computeTokensForFile cancellationToken game allEffects allTriggers filePath fileText
                         cancellationToken.ThrowIfCancellationRequested()
 
                         if not (documentStillCurrent ()) then None

@@ -56,7 +56,6 @@ export function getAgentToolTargetFiles(
 
     switch (toolName) {
         case 'write_file':
-        case 'edit_pdx_block':
         case 'git_ops':
             add(args.file);
             break;
@@ -68,24 +67,10 @@ export function getAgentToolTargetFiles(
         case 'get_file_context':
             add(args.file);
             break;
-        case 'multi_replace_file_content':
-            add(args.TargetFile);
-            break;
         case 'replace_lines':
         case 'write_localisation':
             add(args.filePath);
             break;
-        case 'apply_patch': {
-            const patch = typeof args.patch === 'string' ? args.patch : '';
-            for (const line of patch.split(/\r?\n/)) {
-                const match = line.match(/^\+\+\+\s+(?:b\/)?(.+)$/);
-                if (!match) continue;
-                const raw = match[1]!.trim();
-                if (!raw || raw === '/dev/null') continue;
-                add(raw.replace(/^"|"$/g, ''));
-            }
-            break;
-        }
         case 'deploy_mod_asset':
             if (workspaceRoot && typeof args.targetRelativePath === 'string') {
                 paths.push(path.resolve(workspaceRoot, args.targetRelativePath));

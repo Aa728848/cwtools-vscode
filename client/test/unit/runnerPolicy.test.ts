@@ -25,8 +25,6 @@ const toolDefinitions = [
     'mcp_call',
     'run_command',
     'write_file',
-    'apply_patch',
-    'multi_replace_file_content',
     'write_localisation',
 ].map(name => ({
     type: 'function',
@@ -42,8 +40,17 @@ describe('runnerPolicy', () => {
         expect(names).to.include('replace_lines');
         expect(names).to.not.include('dispatch_agents');
         expect(names).to.include('mcp_call');
-        expect(names).to.not.include.members(['apply_patch', 'multi_replace_file_content']);
+    });
 
+    it('registers only the shared core source editors plus domain-specific writes', () => {
+        const names = registeredTools.map(tool => tool.function.name);
+        expect(names).to.not.include.members(['apply_patch', 'multi_replace_file_content', 'edit_pdx_block']);
+        expect([...TOOL_REGISTRY.keys()]).to.not.include.members(['apply_patch', 'multi_replace_file_content', 'edit_pdx_block']);
+
+        for (const name of ['write_file', 'edit_file', 'replace_lines'] as const) {
+            expect(TOOL_REGISTRY.get(name)?.domain, name).to.equal('shared');
+        }
+        expect(TOOL_REGISTRY.get('write_localisation')?.domain).to.equal('paradox');
     });
 
     it('starts build runs with a narrow discovery tool stage', () => {
@@ -133,7 +140,7 @@ describe('runnerPolicy', () => {
         const discoveryNames = filterToolDefinitionsForStage(modeTools, 'plan', 'discovery')
             .map(tool => tool.function.name);
         expect(discoveryNames).to.include.members(['dispatch_agents', 'query_blackboard', 'merge_results']);
-        expect(discoveryNames).to.not.include.members(['write_localisation', 'edit_pdx_block']);
+        expect(discoveryNames).to.not.include('write_localisation');
         expect(validateToolAccess('dispatch_agents', { mode: 'plan' }).allowed).to.equal(true);
         expect(advanceToolStage('plan', 'discovery', 'dispatch_agents', { success: true })).to.equal('design');
     });
@@ -143,7 +150,7 @@ describe('runnerPolicy', () => {
         const discoveryNames = filterToolDefinitionsForStage(modeTools, 'explore', 'discovery')
             .map(tool => tool.function.name);
         expect(discoveryNames).to.include.members(['dispatch_agents', 'query_blackboard', 'merge_results']);
-        expect(discoveryNames).to.not.include.members(['write_file', 'write_localisation', 'edit_pdx_block']);
+        expect(discoveryNames).to.not.include.members(['write_file', 'write_localisation']);
         expect(validateToolAccess('dispatch_agents', { mode: 'explore' }).allowed).to.equal(true);
         expect(advanceToolStage('explore', 'discovery', 'dispatch_agents', { success: true })).to.equal('validation');
     });
@@ -192,14 +199,14 @@ describe('runnerPolicy', () => {
         const generalUtility = filterToolDefinitionsForMode(registeredTools, 'utility', { domain: 'general' })
             .map(tool => tool.function.name);
         expect(generalUtility).to.include.members([
-            'read_file', 'write_file', 'grep', 'document_symbols', 'workspace_symbols',
+            'read_file', 'write_file', 'edit_file', 'replace_lines', 'grep', 'document_symbols', 'workspace_symbols',
             'get_diagnostics', 'run_command', 'git_ops',
         ]);
         expect(generalUtility).to.not.include.members([
             'query_cwt_schema', 'query_scope', 'query_types', 'verify_pdx_identifier',
             'query_localisation_index', 'find_sprite_candidates', 'find_sound_candidates',
-            'write_localisation', 'write_design_blueprint', 'get_pdx_block', 'edit_pdx_block',
-            'mcp_call', 'apply_patch', 'multi_replace_file_content',
+            'write_localisation', 'write_design_blueprint', 'get_pdx_block',
+            'mcp_call',
             'set_memory', 'get_memory', 'search_memory', 'save_memory',
         ]);
 
@@ -211,21 +218,7 @@ describe('runnerPolicy', () => {
             domain: 'general',
             legacyFullToolset: true,
         }).map(tool => tool.function.name);
-        expect(legacyGeneral).to.not.include.members([
-            'query_cwt_schema', 'mcp_call', 'apply_patch', 'multi_replace_file_content',
-        ]);
-
-        for (const domain of ['general', 'paradox'] as const) {
-            for (const mode of ['utility', 'build', 'plan', 'explore', 'review', 'orchestrator', 'script'] as const) {
-                const visible = filterToolDefinitionsForMode(registeredTools, mode, {
-                    domain,
-                    legacyFullToolset: true,
-                }).map(tool => tool.function.name);
-                expect(visible, `${domain}/${mode} retired tool exposure`).to.not.include.members([
-                    'apply_patch', 'multi_replace_file_content',
-                ]);
-            }
-        }
+        expect(legacyGeneral).to.not.include.members(['query_cwt_schema', 'mcp_call']);
 
         const generalDispatch = filterToolDefinitionsForMode(registeredTools, 'orchestrator', { domain: 'general' })
             .find(tool => tool.function.name === 'dispatch_agents');
@@ -271,8 +264,6 @@ describe('runnerPolicy', () => {
         const names = filtered.map(t => t.function.name);
         expect(names).to.include('write_localisation');
         expect(names).to.include('write_file');
-        expect(names).to.not.include('apply_patch');
-        expect(names).to.not.include('multi_replace_file_content');
         expect(names).to.not.include('replace_lines');
     });
 

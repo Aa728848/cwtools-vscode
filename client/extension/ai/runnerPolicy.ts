@@ -33,13 +33,13 @@ const BUILD_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = 
     write: new Set([
         'query_rules', 'query_scope', 'parse_pdx_fragment', 'verify_pdx_identifier',
         'get_diagnostics', 'read_file', 'get_file_context', 'get_pdx_block',
-        'write_file', 'edit_file', 'replace_lines', 'edit_pdx_block',
+        'write_file', 'edit_file', 'replace_lines',
         'write_localisation', 'todo_write',
     ]),
     finalize: new Set([
         'get_diagnostics', 'analyze_diagnostic_error', 'query_references',
         'verify_pdx_identifier', 'read_file', 'get_file_context', 'get_pdx_block',
-        'write_file', 'edit_file', 'replace_lines', 'edit_pdx_block', 'todo_write',
+        'write_file', 'edit_file', 'replace_lines', 'todo_write',
     ]),
 };
 
@@ -169,11 +169,8 @@ const VALIDATION_PROGRESS_TOOLS = new Set([
     'query_definition_by_name', 'query_references', 'explain_scope', 'todo_write',
 ]);
 const STAGED_WRITE_TOOLS = new Set([
-    'write_file', 'edit_file', 'replace_lines', 'edit_pdx_block', 'write_localisation',
+    'write_file', 'edit_file', 'replace_lines', 'write_localisation',
 ]);
-
-/** Kept executable only to return migration guidance for persisted histories. */
-const RETIRED_MODEL_TOOLS = new Set(['apply_patch', 'multi_replace_file_content']);
 
 export function initialToolStageForMode(mode: AgentMode): AgentToolStage | undefined {
     return MODE_STAGE_TOOLS[mode] ? 'discovery' : undefined;
@@ -312,7 +309,6 @@ export function filterToolDefinitionsForMode(
     let filtered = tools.filter(t => {
         const entry = TOOL_REGISTRY.get(t.function.name as import('./types').AgentToolName);
         if (!entry) return false;
-        if (RETIRED_MODEL_TOOLS.has(entry.name)) return false;
         if (domain === 'general' && entry.domain === 'paradox') return false;
         
         if (options.legacyFullToolset) {

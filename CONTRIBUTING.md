@@ -265,8 +265,8 @@ Key constraints for tools:
 - Skills: `SKILL.md` (built-in/user/project) is indexed by `skills.ts`. The prompt builder only injects a slim index. Full skill contents are loaded on demand via `run_skill` to save prompt tokens.
 - Plan mode writes are guarded by `planModeGuard.ts`: only implementation plans and plan/blueprint/walkthrough output files are write-authorized; all other writes are blocked.
 - Read-only modes (plan, explore, review, script_reviewer, orchestrator, script) only allow `status` and `diff` for `git_ops`, guarded by `planModeGuard.ts`'s `validateGitOpsForMode` before execution.
-- `edit_file(filePath, oldString, newString, replaceAll?)` is the single-occurrence fuzzy replace primitive. It shares the same checks (ReadTracker, pending-write, etc.).
-- `apply_patch`, `multi_replace_file_content`, and `ast_mutate` are retired from model-visible tools. `agentTools.execute()` redirects them to `edit_file`/`replace_lines`/`edit_pdx_block`/`write_localisation`.
+- `write_file`, `edit_file`, and `replace_lines` are the complete shared source-editing surface for General and Paradox execution. For PDXScript, obtain exact context with `get_pdx_block`, then make the smallest guarded `edit_file` or `replace_lines` change so untouched comments and text remain stable.
+- The executable tool paths for `apply_patch`, `multi_replace_file_content`, and `edit_pdx_block` have been removed; Webview-only historical rendering may still recognize their old names. `ast_mutate` remains retired; `agentTools.execute()` redirects it to `edit_file`/`replace_lines`/`write_localisation`.
 - Concurrent reads of a file with an in-flight write are queued after it via `writeCoordinator.afterCurrentWrites`. Target paths for `read_file`/`get_pdx_block`/`get_file_context`/`edit_file` are resolved inside `getAgentToolTargetFiles`.
 - `get_file_context`/`get_pdx_block` marks reads and returns 1-indexed line spans. Query errors return an `error` field to distinguish from empty results. `read_file` lines are prefixed with `N | `. `replacerSuite.ts`'s `stripLineNumberPrefixes` automatically strips pasted prefixes when matching fails.
 - Diagnostic repair hints are cataloged in `tools/diagnosticMetadata.ts` for `analyze_diagnostic_error`. Update `diagnosticMetadata.test.ts` accordingly.
@@ -634,8 +634,8 @@ Webview 运行在浏览器沙盒中：
 - 技能系统：`SKILL.md` 文件（built-in / user / project 三类作用域）由 `skills.ts` 建立索引，`promptBuilder.ts` 只注入精简的技能索引；完整技能正文通过 `run_skill` 工具按需加载，避免撑大基础 prompt。
 - 计划模式写入受 `planModeGuard.ts` 约束：仅允许写入实现计划（`implementation_plan.md`）与 plan/blueprint/walkthrough 等产物文件，其余写操作一律拦截。
 - 只读导向模式（plan/explore/review/script_reviewer/orchestrator/script）下的 `git_ops` 只放行 `status`/`diff`，变更性 action 由 `planModeGuard.ts` 的 `validateGitOpsForMode` 在 `agentRunner`/`agentTools` 执行前拦截。
-- `edit_file(filePath, oldString, newString, replaceAll?)` 是单处模糊替换原语，复用 `fuzzyReplace` 与既有写守卫（`.yml` 拒绝、ReadTracker、pending-write）。新增同类编辑工具时记得同步 `editFailCount` 升级与 `doomLoopDetector` 归一化。
-- `apply_patch`、`multi_replace_file_content`、`ast_mutate` 已从模型可见工具集中退役：`agentTools.execute()` 会拦截这些调用并引导改用 `edit_file`/`replace_lines`/`edit_pdx_block`/`write_localisation`；实现保留仅供内部调用，不要重新暴露。
+- `write_file`、`edit_file`、`replace_lines` 是通用与 Paradox 执行域共享的完整源码编辑面。修改 PDXScript 时，先用 `get_pdx_block` 取得精确上下文，再通过最小化且带守卫的 `edit_file` 或 `replace_lines` 修改，避免改动未触及的注释和文本。
+- `apply_patch`、`multi_replace_file_content`、`edit_pdx_block` 的可执行工具路径已彻底移除，Webview 仅可为历史消息保留旧名称识别；`ast_mutate` 继续保持退役状态，`agentTools.execute()` 会引导改用 `edit_file`/`replace_lines`/`write_localisation`。
 - 同一文件的读操作会经 `writeCoordinator.afterCurrentWrites` 排在在途写入之后；`getAgentToolTargetFiles` 已为 `read_file`/`get_pdx_block`/`get_file_context`/`edit_file` 补齐路径提取。
 - `get_file_context`/`get_pdx_block` 现会 `markRead` 并返回 1 基 `startLine`/`endLine`，可直接衔接 `replace_lines`；读/搜索工具出错时返回 `error` 字段以区别于"空结果"。`read_file` 输出带 `N | ` 行号前缀，`replacerSuite.ts` 的 `stripLineNumberPrefixes` 会在 `edit_file` 匹配失败时剥离模型误粘贴的行号前缀。
 - 诊断修复元数据集中在 `tools/diagnosticMetadata.ts`：为 `analyze_diagnostic_error` 提供诊断分类（`DiagnosticAnalysisCategory`）与修复提示，修改时同步更新 `diagnosticMetadata.test.ts`。

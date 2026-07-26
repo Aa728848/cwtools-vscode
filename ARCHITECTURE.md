@@ -314,8 +314,8 @@ The Runner restricts tools based on the active Workflow and appends supplementar
 - General Coding receives only ordinary repository tools and domain-safe schemas. It excludes CWTools/PDXScript queries, project/game indexes, localisation, media conversion, skills, EvidenceGate, CWTools diagnostics, and all MCP calls. MCP remains Paradox-only until server configuration carries enforceable capability metadata.
 - Legacy persistent-memory tools remain Paradox-only because their stored records predate domain metadata. General Multi-Agent uses its conversation/checkpoint context plus a domain-prefixed Blackboard view; `query_blackboard` and `merge_results` cannot read results from a previous Paradox run or another topic.
 - Writes to `.yml` localization files must call `write_localisation`, not generic text replacers.
-- `edit_file` leverages a 10-step fuzzy match pipeline.
-- `apply_patch`, `multi_replace_file_content`, and `ast_mutate` are retired and absent from every model-visible tool set, including legacy-full mode. Persisted histories receive migration guidance to use `edit_file` or `replace_lines`.
+- General and Paradox execution share the same three source-editing primitives: `write_file`, `edit_file`, and `replace_lines`. PDXScript changes should obtain exact context with `get_pdx_block`, then use the smallest guarded edit so untouched comments and source text remain unchanged. Localisation remains the exception and must use `write_localisation`.
+- The executable tool paths for `apply_patch`, `multi_replace_file_content`, and `edit_pdx_block` have been removed. Historical Webview rendering may still recognize old names. `ast_mutate` remains retired and receives migration guidance to use `edit_file` or `replace_lines`.
 - Reads of a file queue behind pending writes via `writeCoordinator.afterCurrentWrites`.
 - Multi-agent systems use `dispatch_agents`, `query_blackboard`, and `merge_results`. Sub-agents are sandboxed in `orchestrator/subAgentSandbox.ts`.
 - VS Code Workspace Trust is the outer execution gate: Restricted Mode keeps read/LSP features but blocks mutations, shell, network, media, git, and MCP tools.
@@ -780,8 +780,8 @@ Runner 会在模式工具集基础上应用 Workflow tool policy，并把 Workfl
 - `planModeGuard.ts` 的 `validateGitOpsForMode` 在 plan/explore/review/script_reviewer/orchestrator/script 等非写入模式下只放行 `status`/`diff` 的 `git_ops`，由 `agentRunner`/`agentTools` 在执行前拦截变更性 action。
 - `runner/permissionPolicy.ts` 的 `cwdScope` 判断使用 `path.relative`，避免前缀绕过。
 - 写工具经由 `PartitionedWriteQueue` 管理；`.yml` 本地化写入必须使用 `write_localisation`。
-- `edit_file(filePath, oldString, newString, replaceAll?)` 是单处模糊替换原语（registry `EDIT`、`per-file-write`），复用 `fuzzyReplace` 与既有写守卫。
-- `apply_patch`、`multi_replace_file_content`、`ast_mutate` 已从所有模型可见工具集退役，旧版完整工具集开关也不会重新暴露；历史会话调用会收到迁移提示，改用 `edit_file`/`replace_lines`/`edit_pdx_block`/`write_localisation`。
+- 通用与 Paradox 执行域共享 `write_file`、`edit_file`、`replace_lines` 三个源码编辑原语。PDXScript 修改应先用 `get_pdx_block` 取得精确上下文，再执行最小化的受保护编辑，使未触及的注释和源码文本保持不变；本地化文件仍必须使用 `write_localisation`。
+- `apply_patch`、`multi_replace_file_content`、`edit_pdx_block` 的可执行工具路径已彻底移除，Webview 仅可为历史消息保留旧名称识别；`ast_mutate` 继续保持退役状态，并引导改用 `edit_file` 或 `replace_lines`。
 - `read_file` 输出带 `N | ` 行号前缀；`write_file`/`edit_file` 会自动剥离误粘贴的前缀（`replacerSuite.ts` 的 `stripLineNumberPrefixes` 兼作 `fuzzyReplace` 的回退匹配策略）。
 - 对 PDXScript 优先使用 `query_workspace_index`、`document_symbols`、`get_pdx_block`、`get_file_context` 等结构化读取工具。`get_pdx_block`/`get_file_context` 现会 `markRead` 并返回 1 基行号，读/搜索工具出错时返回 `error` 字段区别于空结果。
 - 当前多 Agent 调度工具是 `dispatch_agents`，配套 `query_blackboard` 和 `merge_results`。

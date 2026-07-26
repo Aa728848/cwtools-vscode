@@ -13,7 +13,6 @@ export * from './knowledge/rules';
 export * from './knowledge/workflowHints';
 export * from './project/profile';
 export * from './project/knowledge';
-export * from './safety/pdxEdit';
 export * from './safety/localisation';
 export * from './safety/paths';
 export * from './safety/writes';

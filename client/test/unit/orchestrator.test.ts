@@ -1347,8 +1347,6 @@ describe('Orchestrator runtime safety', () => {
             'write_file',
             'edit_file',
             'replace_lines',
-            'multi_replace_file_content',
-            'apply_patch',
         ]);
         expect(capturedOptions.excludeTools).to.not.include('write_localisation');
     });

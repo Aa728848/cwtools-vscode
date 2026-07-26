@@ -83,9 +83,7 @@ export function getToolMetadata(toolName: string): {
     if (
         name === 'write_file' ||
         name === 'edit_file' ||
-        name === 'multi_replace_file_content' ||
         name === 'replace_lines' ||
-        name === 'apply_patch' ||
         name === 'write_localisation' ||
         name === 'write_design_blueprint'
     ) {

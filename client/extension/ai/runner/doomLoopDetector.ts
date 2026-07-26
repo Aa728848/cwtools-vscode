@@ -39,8 +39,8 @@ export function normalizeToolResultHash(toolName: string, result: unknown): stri
     if (toolName === 'read_file' && typeof obj.content === 'string') {
         return `read_file:${obj.file ?? ''}:${obj.content.length}`;
     }
-    // multi_replace_file_content / write_file → hash written content
-    if ((toolName === 'multi_replace_file_content' || toolName === 'write_file') && typeof obj.content === 'string') {
+    // write_file → hash written content
+    if (toolName === 'write_file' && typeof obj.content === 'string') {
         return `write:${obj.filePath ?? obj.file ?? obj.TargetFile ?? ''}:${obj.content.length}`;
     }
     // query_scope → hash scope chain

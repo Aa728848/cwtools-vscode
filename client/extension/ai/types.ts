@@ -1157,7 +1157,6 @@ export type ToolArgs =
     | SetMemoryArgs
     | GetMemoryArgs
     | WriteDesignBlueprintArgs
-    | EditPdxBlockArgs
     | GrepArgs;
 
 export type ToolResult =
@@ -1214,7 +1213,7 @@ export type AgentToolName =
     | 'explain_scope'
     | 'parse_pdx_fragment'
     | 'query_references'
-    // validate_code — REMOVED: replaced by get_diagnostics + multi_replace_file_content inline diagnostics
+    // validate_code — REMOVED: replaced by get_diagnostics and inline write diagnostics
     | 'get_lsp_status'
     | 'get_diagnostics'
     | 'get_file_context'
@@ -1229,7 +1228,6 @@ export type AgentToolName =
     | 'read_file'
     | 'write_file'
     | 'edit_file'
-    | 'multi_replace_file_content'
     | 'replace_lines'
     | 'list_directory'
     | 'glob_files'
@@ -1243,7 +1241,6 @@ export type AgentToolName =
     | 'read_process'
     | 'write_process_stdin'
     | 'terminate_process'
-    | 'apply_patch'
     | 'analyze_diagnostic_error'
     | 'set_memory'
     | 'get_memory'
@@ -1263,7 +1260,6 @@ export type AgentToolName =
     | 'remove_ignored_diagnostic'
     | 'get_ignored_diagnostics'
     | 'get_pdx_block'
-    | 'edit_pdx_block'
     // ── Media Asset Conversion tools ──
     | 'convert_image_to_dds'
     | 'convert_audio'
@@ -1363,15 +1359,6 @@ export interface ReplaceLinesArgs {
     /** Optional guard: current selected range must end with this text after trimming trailing whitespace */
     expectedEndText?: string;
     encoding?: 'utf8' | 'utf8bom';
-}
-
-export interface EditPdxBlockArgs {
-    /** Absolute path to the file to modify */
-    file: string;
-    /** Name of the top-level block/identifier to replace */
-    symbol: string;
-    /** The replacement content for the specified block */
-    newContent: string;
 }
 
 export interface ReplaceLinesResult {

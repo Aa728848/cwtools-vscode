@@ -3,8 +3,7 @@
  *
  * Pure, deterministic, bounded. Extracts the semantic claims a write makes
  * (effect/trigger/modifier usage, ID references, entry-point definitions)
- * from the *new* text of write_file / edit_file / replace_lines /
- * edit_pdx_block / multi_replace_file_content calls. Only PDX script
+ * from the *new* text of write_file / edit_file / replace_lines calls. Only PDX script
  * extensions are in scope; localisation .yml, markdown and other files are
  * skipped so non-script writes never pay for the gate.
  *
@@ -113,22 +112,6 @@ export function extractWritePayload(toolName: string, args: Record<string, unkno
             targetFile = asTrimmedString(args.filePath) ?? asTrimmedString(args.file);
             text = typeof args.newContent === 'string' ? args.newContent : undefined;
             break;
-        case 'edit_pdx_block':
-            targetFile = asTrimmedString(args.file) ?? asTrimmedString(args.filePath);
-            text = typeof args.newContent === 'string' ? args.newContent : undefined;
-            break;
-        case 'multi_replace_file_content': {
-            targetFile = asTrimmedString(args.TargetFile) ?? asTrimmedString(args.filePath);
-            const chunks = Array.isArray(args.ReplacementChunks) ? args.ReplacementChunks : [];
-            const parts: string[] = [];
-            for (const chunk of chunks) {
-                if (chunk && typeof chunk === 'object' && typeof (chunk as Record<string, unknown>).ReplacementContent === 'string') {
-                    parts.push((chunk as Record<string, unknown>).ReplacementContent as string);
-                }
-            }
-            text = parts.length > 0 ? parts.join('\n') : undefined;
-            break;
-        }
         default:
             return null;
     }

@@ -203,9 +203,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     read_file: 30_000,
     write_file: 30_000,
     edit_file: 30_000,
-    multi_replace_file_content: 30_000,
     replace_lines: 30_000,
-    apply_patch: 30_000,
     list_directory: 30_000,
     glob_files: 30_000,
     grep: 30_000,
@@ -230,11 +228,8 @@ const TOOL_TIMEOUTS: Record<string, number> = {
 const WRITE_CONFIRMATION_TOOLS = new Set<string>([
     'write_file',
     'edit_file',
-    'multi_replace_file_content',
     'replace_lines',
-    'apply_patch',
     'ast_mutate',
-    'edit_pdx_block',
     'write_localisation',
     'lsp_operation',
 ]);
@@ -243,7 +238,7 @@ const DEFAULT_TOOL_TIMEOUT = 30_000;
 const LOCALISATION_YML_TOOL_GUARD = [
     'Localisation YML routing guard:',
     '- These targets are Paradox localisation .yml files. Use `write_localisation` only.',
-    '- Do not use `write_file`, `edit_file`, `replace_lines`, `multi_replace_file_content`, or `apply_patch` on localisation YAML.',
+    '- Do not use `write_file`, `edit_file`, or `replace_lines` on localisation YAML.',
     '- If the request describes a line/text replacement, convert it into exact localisation key upserts through `write_localisation`.',
 ].join('\n');
 
@@ -477,11 +472,6 @@ export class AgentToolExecutor {
 * Replaces the old sharedMemory Map and provides typed entries, CAS optimistic locking, and prefix subscriptions. 
 * Compatibility layer legacySet/Get/Search ensures existing set_memory/get_memory/search_memory tools work seamlessly. */
     public blackboard!: import('./orchestrator/blackboard').Blackboard;
-
-    /** Forward LSP read-cache invalidation to the lspHandler. */
-    public async multiReplaceFileContent(args: any, context?: any): Promise<any> {
-        return this.fileHandler.multiReplaceFileContent(args, context);
-    }
 
     invalidateCacheForFile(filePath: string): void {
         this.lspHandler.invalidateCacheForFile(filePath);
@@ -1246,11 +1236,11 @@ export class AgentToolExecutor {
                 };
             }
         }
-        // Redirect retired edit tools to the consolidated edit toolset instead of failing
-        if (toolName === 'apply_patch' || toolName === 'multi_replace_file_content' || toolName === 'ast_mutate') {
+        // Redirect the retired AST mutation tool instead of failing without guidance.
+        if (toolName === 'ast_mutate') {
             return {
                 success: false,
-                message: `${toolName} has been retired. Use edit_file(filePath, oldString, newString) for text replacement, replace_lines(filePath, startLine, endLine, newContent, expectedContent) for line-range edits, edit_pdx_block(file, symbol, newContent) for whole PDX blocks, or write_file for new/whole-file writes. For .yml localisation files use write_localisation.`,
+                message: `${toolName} has been retired. Use get_pdx_block to obtain exact context, then edit_file(filePath, oldString, newString) for the smallest text replacement or replace_lines(filePath, startLine, endLine, newContent, expectedContent) for guarded line-range edits. Use write_file only for new or intentional whole-file writes, and write_localisation for .yml localisation files.`,
             };
         }
         const readTracker = (context?.agentRunner as any)?.readTracker;
@@ -1741,9 +1731,6 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.verifyPdxIdentifier(args as any); break;
             case 'get_pdx_block':
                 result = await this.lspHandler.getPdxBlock(args as any, context); break;
-            case 'edit_pdx_block':
-                result = await this.lspHandler.editPdxBlock(args as any, context); break;
-            case 'edit_pdx_block_disabled': break;
             case 'lsp_operation':
                 result = await this.lspHandler.lspOperation(args as any, context); break;
             case 'query_definition':
@@ -1784,12 +1771,8 @@ export class AgentToolExecutor {
                 result = await this.fileHandler.writeFile(args as any, context); break;
             case 'edit_file':
                 result = await this.fileHandler.editFile(args as any, context); break;
-            case 'multi_replace_file_content':
-                result = await this.fileHandler.multiReplaceFileContent(args as any, context); break;
             case 'replace_lines':
                 result = await this.fileHandler.replaceLines(args as any, context); break;
-            case 'apply_patch':
-                result = await this.fileHandler.applyPatch(args as any, context); break;
             case 'list_directory':
                 result = await this.fileHandler.listDirectory(args as any, context); break;
             case 'glob_files':
@@ -2254,13 +2237,13 @@ export class AgentToolExecutor {
             case 'read_tracker_stale':
                 return {
                     recommendedTools: ['read_file', 'get_file_context'],
-                    avoidTools: ['write_file', 'multi_replace_file_content', 'replace_lines'],
+                    avoidTools: ['write_file', 'replace_lines'],
                     nextInstruction: 'Refresh the target file with read_file or get_file_context, then retry the smallest guarded edit.',
                 };
             case 'tool_argument_error':
                 return {
                     recommendedTools: ['read_file', 'get_file_context', 'replace_lines'],
-                    avoidTools: ['multi_replace_file_content with the same TargetContent', 'write_file with a large whole-file payload'],
+                    avoidTools: ['write_file with a large whole-file payload'],
                     nextInstruction: 'Do not retry the same malformed arguments. Re-read exact current text or switch to line-based replacement with anchors.',
                 };
             case 'brace_or_syntax_error':

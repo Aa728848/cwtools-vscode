@@ -149,7 +149,7 @@ registerWorkflow({
 			'find_sprite_candidates', 'find_sound_candidates',
 			// Write
 			'write_file', 'edit_file', 'replace_lines',
-			'edit_pdx_block', 'write_localisation',
+			'write_localisation',
 			// Reflection
 			'analyze_diagnostic_error',
 			// Task tracking
@@ -411,7 +411,6 @@ registerWorkflow({
 			'find_sprite_candidates', 'find_sound_candidates',
 			'query_cwt_schema', 'query_rules', 'query_override_modes',
 			'write_file', 'edit_file', 'replace_lines',
-			'edit_pdx_block',
 			'todo_write',
 		],
 	},

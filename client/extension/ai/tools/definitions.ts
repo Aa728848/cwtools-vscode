@@ -345,22 +345,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
-            name: 'edit_pdx_block',
-            description: 'ZERO-READ EDIT: Replace a specific PDX AST block entirely by its exact symbol name, without reading the file first. Uses LSP to find block boundaries across supported PDX text, GUI, and asset formats. newContent must keep the full outer block and brace structure intact; unsafe brace-breaking writes are rejected before the file changes. If a file contains duplicate top-level symbols, only the first match is edited; use replaceLines with explicit line ranges for duplicates.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    file: { type: 'string', description: 'Absolute file path' },
-                    symbol: { type: 'string', description: 'Exact symbol identifier. Derive its shape from query_types/query_cwt_schema or current-file symbols; if no match is found, the error lists available symbols.' },
-                    newContent: { type: 'string', description: 'The completely new code block to replace the old one. Must include the outer block definition (e.g. "my_trigger = { ... }", not just the inner content).' },
-                },
-                required: ['file', 'symbol', 'newContent'],
-            },
-        },
-    },
-    {
-        type: 'function',
-        function: {
             name: 'query_references',
             description: 'Find all references to a specific identifier in the mod files. Use this to understand how an event, trigger, or effect is used across the codebase.',
             parameters: {
@@ -373,8 +357,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // validate_code - REMOVED: Replaced by get_diagnostics (zero side effects) + multi_replace_file_content inline diagnostics.
-    // get_diagnostics directly reads the diagnostic panel (~50ms), multi_replace_file_content automatically returns to diagnosis after writing.
+    // validate_code - REMOVED: Replaced by get_diagnostics (zero side effects) and inline write diagnostics.
     {
         type: 'function',
         function: {
@@ -395,7 +378,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'search_mod_files',
-            description: 'Search for files containing text patterns. Default: mod workspace. For vanilla: set searchContext="vanilla" + exactMatch=true. Zero results are NOT proof an ID/key is missing; use verify_pdx_identifier before declaring absence. Hint: After finding a target, use get_pdx_block or edit_pdx_block - NOT read_file.',
+            description: 'Search for files containing text patterns. Default: mod workspace. For vanilla: set searchContext="vanilla" + exactMatch=true. Zero results are NOT proof an ID/key is missing; use verify_pdx_identifier before declaring absence. Hint: After finding a PDX target, use get_pdx_block for exact context, then make the smallest guarded edit with edit_file or replace_lines.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -850,12 +833,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // apply_patch / multi_replace_file_content — RETIRED from the model-visible toolset.
-    // Their semantics fully overlap edit_file (fuzzy old/new replacement) and
-    // replace_lines (guarded line ranges); offering all of them diluted tool choice
-    // and multiplied edit-failure modes. The handler implementations remain for
-    // internal callers (edit_pdx_block delegates to multiReplaceFileContent) and
-    // stale histories hit a redirect in AgentToolExecutor.execute.
     // - CWTools Deep API tools -
     {
         type: 'function',

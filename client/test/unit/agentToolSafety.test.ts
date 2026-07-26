@@ -354,19 +354,6 @@ describe('agent tool file path safety', () => {
         expect(writeResult.success).to.equal(false);
         expect(writeResult.message).to.include('write_localisation');
 
-        const replaceResult = await handler.multiReplaceFileContent({
-            TargetFile: ymlRel,
-            Instruction: 'should be refused',
-            ReplacementChunks: [{
-                StartLine: 2,
-                EndLine: 2,
-                TargetContent: ' old_key:0 "Old"',
-                ReplacementContent: ' old_key:0 "New"',
-            }],
-        }, ctx) as any;
-        expect(replaceResult.success).to.equal(false);
-        expect(replaceResult.message).to.include('write_localisation');
-
         const editResult = await handler.editFile({
             filePath: ymlRel,
             oldString: ' old_key:0 "Old"',
@@ -375,18 +362,6 @@ describe('agent tool file path safety', () => {
         expect(editResult.success).to.equal(false);
         expect(editResult.message).to.include('write_localisation');
 
-        const patchResult = await handler.applyPatch({
-            patch: [
-                `--- a/${ymlRel}`,
-                `+++ b/${ymlRel}`,
-                '@@',
-                '- old_key:0 "Old"',
-                '+ old_key:0 "New"',
-                '',
-            ].join('\n'),
-        }, ctx);
-        expect(patchResult.success).to.equal(false);
-        expect(patchResult.errors.join('\n')).to.include('write_localisation');
         expect(fs.readFileSync(ymlAbs, 'utf8')).to.equal(original);
     });
 
@@ -550,59 +525,6 @@ describe('agent tool file path safety', () => {
         expect(replaceResult.message).to.include('PDX brace structure');
         expect(fs.readFileSync(fileAbs, 'utf8')).to.equal(original);
 
-        const multiReplaceResult = await handler.multiReplaceFileContent({
-            TargetFile: fileAbs,
-            Instruction: 'remove the block terminator',
-            ReplacementChunks: [{
-                StartLine: 3,
-                EndLine: 3,
-                TargetContent: '}',
-                ReplacementContent: '',
-            }],
-        }, makeContext()) as any;
-        expect(multiReplaceResult.success).to.equal(false);
-        expect(multiReplaceResult.message).to.include('PDX brace structure');
-        expect(fs.readFileSync(fileAbs, 'utf8')).to.equal(original);
-
-        const patchResult = await handler.applyPatch({
-            patch: [
-                '--- a/common/buildings/guarded_buildings.txt',
-                '+++ b/common/buildings/guarded_buildings.txt',
-                '@@',
-                '-building_guarded = {',
-                '-\tcost = { minerals = 100 }',
-                '-}',
-                '+building_guarded = {',
-                '+\tcost = { minerals = 100 }',
-                '',
-            ].join('\n'),
-        }, makeContext());
-        expect(patchResult.success).to.equal(false);
-        expect(patchResult.errors.join('\n')).to.include('PDX brace structure');
-        expect(fs.readFileSync(fileAbs, 'utf8')).to.equal(original);
-    });
-
-    it('returns escalating read-before-edit hints after repeated apply_patch failures', async () => {
-        const handler = createFileHandler();
-        const fileAbs = path.join(workspaceRoot, 'notes.md');
-        fs.writeFileSync(fileAbs, 'current line\n', 'utf8');
-
-        const patch = [
-            '--- a/notes.md',
-            '+++ b/notes.md',
-            '@@',
-            '-missing line',
-            '+new line',
-            '',
-        ].join('\n');
-
-        await handler.applyPatch({ patch }, makeContext());
-        await handler.applyPatch({ patch }, makeContext());
-        const thirdResult = await handler.applyPatch({ patch }, makeContext());
-
-        expect(thirdResult.success).to.equal(false);
-        expect(thirdResult.errors.join('\n')).to.include('MANDATORY: call `read_file');
-        expect(fs.readFileSync(fileAbs, 'utf8')).to.equal('current line\n');
     });
 
     it('ignores PDX brace-like text in strings and comments during edit safety checks', async () => {
@@ -658,8 +580,6 @@ describe('agent tool file path safety', () => {
     it('extracts write target paths for runner scheduling without marking localisation as superseded', () => {
         expect(getAgentToolTargetFiles('write_localisation', { filePath: 'localisation/english/kuat_l_english.yml' }, workspaceRoot))
             .to.deep.equal([path.join(workspaceRoot, 'localisation', 'english', 'kuat_l_english.yml')]);
-        expect(getAgentToolTargetFiles('multi_replace_file_content', { TargetFile: 'events/kuat_events.txt' }, workspaceRoot))
-            .to.deep.equal([path.join(workspaceRoot, 'events', 'kuat_events.txt')]);
         expect(getAgentToolTargetFiles('replace_lines', { filePath: 'common/scripted_effects/kuat.txt' }, workspaceRoot))
             .to.deep.equal([path.join(workspaceRoot, 'common', 'scripted_effects', 'kuat.txt')]);
         expect(getAgentToolTargetFiles('write_file', { file: 'common/relics/kuat.txt' }, workspaceRoot))
@@ -672,7 +592,6 @@ describe('agent tool file path safety', () => {
 
         expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('write_file')).to.equal(true);
         expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('write_localisation')).to.equal(false);
-        expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('multi_replace_file_content')).to.equal(false);
     });
 
     it('loads the rich blueprint contract on demand instead of every request', () => {
@@ -858,7 +777,7 @@ describe('agent tool file path safety', () => {
         expect(fs.readFileSync(ymlAbs, 'utf8')).to.include('kuat_rakata_arc_epilogue_title');
     });
 
-    it('lets orchestrator sub-agents run multi_replace_file_content without pending-write confirmation', async () => {
+    it('lets orchestrator sub-agents run guarded replace_lines without pending-write confirmation', async () => {
         const pendingWrite = sinon.stub().resolves(false);
         const handler = new FileToolHandler({
             workspaceRoot,
@@ -869,15 +788,12 @@ describe('agent tool file path safety', () => {
         fs.mkdirSync(path.dirname(fileAbs), { recursive: true });
         fs.writeFileSync(fileAbs, 'country_event = {\n\tid = kuat.1\n}\n', 'utf8');
 
-        const result = await handler.multiReplaceFileContent({
-            TargetFile: fileAbs,
-            Instruction: 'sub-agent edit',
-            ReplacementChunks: [{
-                StartLine: 2,
-                EndLine: 2,
-                TargetContent: '\tid = kuat.1',
-                ReplacementContent: '\tid = kuat.2',
-            }],
+        const result = await handler.replaceLines({
+            filePath: fileAbs,
+            startLine: 2,
+            endLine: 2,
+            expectedContent: '\tid = kuat.1',
+            newContent: '\tid = kuat.2',
         }, {
             runnerOptions: {
                 topicId: 'topic-123',

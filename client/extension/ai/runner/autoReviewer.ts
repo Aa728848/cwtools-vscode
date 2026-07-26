@@ -66,7 +66,7 @@ const REVIEWER_SYSTEM_PROMPT = [
 ].join('\n');
 
 const ROUTINE_WRITE_TOOLS = new Set([
-    'write_file', 'edit_file', 'replace_lines', 'edit_pdx_block',
+    'write_file', 'edit_file', 'replace_lines',
     'write_localisation', 'write_design_blueprint', 'save_workflow',
 ]);
 

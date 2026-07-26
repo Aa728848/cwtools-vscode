@@ -106,16 +106,6 @@ describe('AgentRunner 状态机与工具调度测试 (阶段 0 基线)', () => {
             expect(files[0]).to.equal('C:\\workspace\\events\\test.txt');
         });
 
-        it('正确解析 multi_replace_file_content 的 TargetFile 路径', () => {
-            const { getAgentToolTargetFiles } = loadAgentRunner();
-            const workspaceRoot = 'C:\\workspace';
-            const args = { TargetFile: 'common/traits/test_traits.txt' };
-            const files = getAgentToolTargetFiles('multi_replace_file_content', args, workspaceRoot);
-
-            expect(files).to.have.lengthOf(1);
-            expect(files[0]).to.equal('C:\\workspace\\common\\traits\\test_traits.txt');
-        });
-
         it('正确解析 replace_lines 和 write_localisation 的 filePath 路径', () => {
             const { getAgentToolTargetFiles } = loadAgentRunner();
             const workspaceRoot = 'C:\\workspace';

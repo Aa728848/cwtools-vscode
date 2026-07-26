@@ -122,22 +122,6 @@ function isCurrentTopicImplementationPlan(filePath: string, workspaceRoot: strin
     return segments[0]!.toLowerCase() === safeTopicId;
 }
 
-function extractPatchTargets(args: Record<string, unknown>, workspaceRoot: string): string[] {
-    const patch = typeof args.patch === 'string' ? args.patch : '';
-    if (!patch) return [];
-
-    const targets: string[] = [];
-    for (const line of patch.split(/\r?\n/)) {
-        const match = line.match(/^\+\+\+\s+(?:b\/)?(.+)$/);
-        if (!match) continue;
-        const raw = match[1]!.trim();
-        if (!raw || raw === '/dev/null') continue;
-        const clean = raw.replace(/^"|"$/g, '');
-        targets.push(path.isAbsolute(clean) ? path.resolve(clean) : path.resolve(workspaceRoot, clean));
-    }
-    return [...new Set(targets)];
-}
-
 export function validatePlanModeToolUse(
     toolName: string,
     args: Record<string, unknown>,
@@ -164,11 +148,9 @@ export function validatePlanModeToolUse(
 
     const targets = precomputedTargets && precomputedTargets.length > 0
         ? precomputedTargets
-        : toolName === 'apply_patch'
-            ? extractPatchTargets(args, workspaceRoot)
-            : getAgentToolTargetFiles(toolName, args, workspaceRoot, topicId);
+        : getAgentToolTargetFiles(toolName, args, workspaceRoot, topicId);
 
-    const planFileWriteTools = new Set(['write_file', 'edit_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch']);
+    const planFileWriteTools = new Set(['write_file', 'edit_file', 'replace_lines']);
     const allowedArtifactTargets = mode === 'plan'
         ? targets.every(target => isPlanModeCardArtifactFile(target, workspaceRoot))
         : toolName === 'write_file'

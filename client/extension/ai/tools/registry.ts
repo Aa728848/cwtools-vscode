@@ -4,13 +4,12 @@ import { analyzeSchema, flattenSchema } from './schemaFlatten';
 
 export type AgentToolName =
     | 'query_scope' | 'query_types' | 'query_rules' | 'query_cwt_schema' | 'query_override_modes' | 'search_rule_capabilities' | 'explain_scope' | 'parse_pdx_fragment' | 'remove_ignored_diagnostic'
-    | 'query_localisation_index' | 'query_workspace_index' | 'explore_pdx_project' | 'query_project_profile' | 'query_project_knowledge' | 'query_interface_knowledge' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'edit_pdx_block' | 'query_references'
+    | 'query_localisation_index' | 'query_workspace_index' | 'explore_pdx_project' | 'query_project_profile' | 'query_project_knowledge' | 'query_interface_knowledge' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'query_references'
     | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
     | 'verify_pdx_identifier' | 'todo_write' | 'read_file' | 'write_file' | 'edit_file'
     | 'replace_lines' | 'list_directory' | 'get_lsp_status' | 'get_diagnostics' | 'analyze_diagnostic_error'
     | 'glob_files' | 'lsp_operation' | 'web_search' | 'web_open' | 'web_find' | 'run_command' | 'list_processes' | 'read_process' | 'write_process_stdin' | 'terminate_process'
-    | 'apply_patch' | 'multi_replace_file_content'
     | 'query_definition' | 'query_definition_by_name' | 'query_scripted_effects'
     | 'query_scripted_triggers' | 'query_enums' | 'get_entity_info'
     | 'query_static_modifiers' | 'query_variables' | 'set_memory'
@@ -88,7 +87,6 @@ const TOOL_DOMAINS = {
     run_skill: 'paradox',
     get_ignored_diagnostics: 'paradox',
     get_pdx_block: 'paradox',
-    edit_pdx_block: 'paradox',
     query_references: 'paradox',
     get_file_context: 'shared',
     search_mod_files: 'paradox',
@@ -118,8 +116,6 @@ const TOOL_DOMAINS = {
     read_process: 'shared',
     write_process_stdin: 'shared',
     terminate_process: 'shared',
-    apply_patch: 'shared',
-    multi_replace_file_content: 'shared',
     query_definition: 'paradox',
     query_definition_by_name: 'paradox',
     query_scripted_effects: 'paradox',
@@ -271,8 +267,8 @@ const BASE_READ: AgentToolName[] = [
     'explain_shader_reachability', 'validate_shader', 'compare_shader_with_vanilla'
 ];
 const EDIT: AgentToolName[] = [
-    'write_file', 'edit_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
-    'edit_pdx_block', 'write_localisation', 'write_design_blueprint', 'save_workflow', 'remove_ignored_diagnostic'
+    'write_file', 'edit_file', 'replace_lines',
+    'write_localisation', 'write_design_blueprint', 'save_workflow', 'remove_ignored_diagnostic'
 ];
 const MEMORY: AgentToolName[] = ['todo_write', 'set_memory', 'get_memory', 'search_memory', 'save_memory'];
 const NETWORK: AgentToolName[] = ['web_search', 'web_open'];
@@ -286,10 +282,7 @@ const SUB_AGENT_EXCLUDES_SET = new Set<string>(['web_search', 'web_open', 'web_f
 const FILE_SCOPED_WRITE_TOOLS_SET = new Set<string>([
     'write_file',
     'edit_file',
-    'multi_replace_file_content',
     'replace_lines',
-    'apply_patch',
-    'edit_pdx_block',
     'write_localisation',
     'write_design_blueprint',
     'deploy_mod_asset',
@@ -321,7 +314,7 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'query_blackboard',
 ]);
 
-const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'todo_write', 'write_file', 'edit_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
+const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
 const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'git_ops', 'save_workflow']);
 const REVIEW_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
 const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ..._MCP]);

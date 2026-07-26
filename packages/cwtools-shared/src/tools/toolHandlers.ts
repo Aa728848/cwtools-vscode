@@ -9,7 +9,6 @@ import {
 } from '../knowledge/rules';
 import { queryProjectProfileWithHost } from '../project/profile';
 import { queryProjectKnowledgeWithHost } from '../project/knowledge';
-import { editPdxBlockWithHost } from '../safety/pdxEdit';
 import { writeLocalisationWithHost } from '../safety/localisation';
 import { getPdxBlockWithHost } from './pdxBlock';
 import { toolUnavailable, type SharedToolResult } from './schema';
@@ -152,14 +151,6 @@ export const defaultSharedToolDispatcher: SharedToolDispatcher = async (host, na
         language: typeof args.language === 'string' ? args.language : undefined,
         entries: Array.isArray(args.entries) ? args.entries as never : [],
       });
-
-    case 'edit_pdx_block': {
-      return editPdxBlockWithHost(host, {
-        file: String(args.file ?? ''),
-        symbol: String(args.symbol ?? ''),
-        newContent: String(args.newContent ?? ''),
-      });
-    }
 
     case 'get_completion_at':
       return getCompletionAtWithHost(host, {

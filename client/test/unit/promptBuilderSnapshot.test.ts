@@ -234,7 +234,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         const prompt = builder.buildSlimSystemPromptForMode('loc_writer');
 
         expect(prompt).to.include('write_localisation` is the only mutation path');
-        expect(prompt).to.include('Do not use `apply_patch`');
+        expect(prompt).to.include('Do not use `edit_file`');
         expect(prompt).to.include('non-localisation deliverable');
         expect(prompt).to.include('return a concise summary immediately');
     });

@@ -68,7 +68,7 @@ describe('AI static prompt budgets', () => {
             explore: ['discovery', 'validation', 'finalize'],
             review: ['discovery', 'validation', 'finalize'],
         } as const;
-        const projectWriteTools = new Set(['write_file', 'edit_file', 'replace_lines', 'edit_pdx_block', 'write_localisation']);
+        const projectWriteTools = new Set(['write_file', 'edit_file', 'replace_lines', 'write_localisation']);
 
         for (const mode of Object.keys(stages) as Array<keyof typeof stages>) {
             const modeTools = runnerPolicy.filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode);

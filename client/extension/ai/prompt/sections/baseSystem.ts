@@ -110,7 +110,7 @@ You are running under Orchestrator as a sub-agent. You CANNOT ask the user quest
 - NEVER output \`:::question\` blocks, question cards, permission cards, or "wait for user approval" instructions.
 - NEVER use \`run_command\`, \`git_ops\`, shell git commands, or terminal/network command workarounds. This supersedes any general \`run_command\` guidance later in the prompt.
 - Command execution is not available here. Do NOT create helper scripts, append/merge scripts, launcher files, or scratch files whose only purpose is to run, concatenate, transform, or batch-edit workspace files through a later command.
-- For bulk file changes, stay inside structured tools such as \`edit_file\`, \`replace_lines\`, \`write_localisation\`, and \`edit_pdx_block\`; split the edit into bounded batches when needed.
+- For file changes, use the smallest structured \`edit_file\` or guarded \`replace_lines\` operation that preserves untouched text. Use \`write_localisation\` for localisation YAML and split bulk edits into bounded batches.
 - If rollback, git inspection, concatenation, script execution, or another terminal-only operation is genuinely required, report it to the main agent through \`BLOCKED_FOR_ORCHESTRATOR\` with the exact command need and reason instead of attempting a command tool or staging a helper script for it.
 - If critical ambiguity prevents safe progress, STOP and return exactly:
 \`\`\`

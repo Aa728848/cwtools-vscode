@@ -101,16 +101,6 @@ describe('claimExtractor', () => {
         expect(extractWritePayload('write_file', { file: 'events/a.txt', content: 'x = 1' })?.text).to.equal('x = 1');
         expect(extractWritePayload('edit_file', { filePath: 'common/a.txt', oldString: 'a', newString: 'b = 2' })?.text).to.equal('b = 2');
         expect(extractWritePayload('replace_lines', { filePath: 'common/a.txt', startLine: 1, endLine: 2, newContent: 'c = 3' })?.text).to.equal('c = 3');
-        expect(extractWritePayload('edit_pdx_block', { file: 'events/a.txt', symbol: 'country_event', newContent: 'd = 4' })?.text).to.equal('d = 4');
-        const multi = extractWritePayload('multi_replace_file_content', {
-            TargetFile: 'common/a.txt',
-            ReplacementChunks: [
-                { StartLine: 1, EndLine: 1, TargetContent: 'a', ReplacementContent: 'e = 5' },
-                { StartLine: 3, EndLine: 3, TargetContent: 'b', ReplacementContent: 'f = 6' },
-            ],
-        });
-        expect(multi?.text).to.equal('e = 5\nf = 6');
-
         expect(extractWritePayload('write_file', { file: 'localisation/a_l_english.yml', content: 'x = 1' })).to.equal(null);
         expect(extractWritePayload('write_file', { file: 'docs/README.md', content: '# hi' })).to.equal(null);
         expect(extractWritePayload('write_file', { file: 'gfx/a.png', content: 'x' })).to.equal(null);
@@ -1349,34 +1339,6 @@ describe('AgentToolExecutor evidence gate wiring', () => {
             endLine: 2,
             expectedContent: '  set_variable = { which = x value = 1 }',
             newContent: '  totally_fake_effect = yes',
-        }, makeContext([])) as any;
-
-        expect(result.success).to.equal(false);
-        expect(result.evidenceGateBlocked).to.equal(true);
-        expect(fs.readFileSync(target, 'utf8')).to.include('set_variable');
-        expect(fs.readFileSync(target, 'utf8')).to.not.include('totally_fake_effect');
-    });
-
-    it('gates edit_pdx_block through its delegated structured file write', async () => {
-        gateModeConfig = 'enforce';
-        const lsp = makeFakeLspClient({ parseValid: false });
-        const executor = makeExecutor(lsp);
-        const target = path.join(workspaceRoot, 'common', 'scripted_effects', 'block.txt');
-        fs.mkdirSync(path.dirname(target), { recursive: true });
-        fs.writeFileSync(target, 'my_effect = { set_variable = { which = x value = 1 } }\n');
-        vscodeStub.commands.executeCommand = async (command: unknown) => command === 'vscode.executeDocumentSymbolProvider'
-            ? [{
-                name: 'my_effect',
-                kind: 0,
-                range: { start: { line: 0 }, end: { line: 0 } },
-                children: [],
-            }]
-            : undefined;
-
-        const result = await executor.execute('edit_pdx_block', {
-            file: target,
-            symbol: 'my_effect',
-            newContent: 'my_effect = { totally_fake_effect = yes }',
         }, makeContext([])) as any;
 
         expect(result.success).to.equal(false);

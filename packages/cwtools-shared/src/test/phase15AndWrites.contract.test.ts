@@ -5,13 +5,12 @@ import {
   createUnavailableDiagnosticsHost,
   createUnavailableLspHost,
   documentSymbolsWithHost,
-  editPdxBlockWithHost,
   getCompletionAtWithHost,
   workspaceSymbolsWithHost,
   type HostServices,
 } from 'cwtools-shared';
 
-describe('phase 1.5 symbols and phase 2 write contracts', () => {
+describe('phase 1.5 symbol contracts', () => {
   const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
 
   it('infers document symbols without reading through VS Code', async () => {
@@ -121,75 +120,13 @@ describe('phase 1.5 symbols and phase 2 write contracts', () => {
     }
   });
 
-  it('replaces a PDX block only when writes are explicitly enabled', async () => {
-    const workspaceRoot = fs.mkdtempSync(path.join(repoRoot, '.tmp-mcp-edit-'));
-    try {
-      const filePath = path.join(workspaceRoot, 'common', 'scripted_triggers', 'test.txt');
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, [
-        'first_trigger = {',
-        '  always = yes',
-        '}',
-        'second_trigger = {',
-        '  always = no',
-        '}',
-        '',
-      ].join('\n'), 'utf8');
-      const host = createFsHost(workspaceRoot, { writesEnabled: true });
-      const invalidated: string[] = [];
-      host.indexing = {
-        async invalidate(file) { invalidated.push(file); },
-        async queryWorkspace() { return { status: 'ready', totalCount: 0, entries: [] }; },
-        async queryLocalisation() { return { status: 'ready', totalCount: 0, entries: [] }; },
-      };
-
-      const result = await editPdxBlockWithHost(host, {
-        file: 'common/scripted_triggers/test.txt',
-        symbol: 'second_trigger',
-        newContent: [
-          'second_trigger = {',
-          '  always = yes',
-          '}',
-        ].join('\n'),
-      });
-
-      expect(result.ok).to.equal(true);
-      expect(fs.readFileSync(filePath, 'utf8')).to.include('second_trigger = {\n  always = yes\n}');
-      expect(invalidated).to.deep.equal([filePath]);
-    } finally {
-      fs.rmSync(workspaceRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects brace-breaking PDX block edits before writing', async () => {
-    const workspaceRoot = fs.mkdtempSync(path.join(repoRoot, '.tmp-mcp-edit-deny-'));
-    try {
-      const filePath = path.join(workspaceRoot, 'common', 'scripted_triggers', 'test.txt');
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, 'second_trigger = {\n  always = no\n}\n', 'utf8');
-      const host = createFsHost(workspaceRoot, { writesEnabled: true });
-
-      const result = await editPdxBlockWithHost(host, {
-        file: 'common/scripted_triggers/test.txt',
-        symbol: 'second_trigger',
-        newContent: 'second_trigger = {\n  always = yes',
-      });
-
-      expect(result.ok).to.equal(false);
-      expect(result.status).to.equal('denied');
-      expect(fs.readFileSync(filePath, 'utf8')).to.equal('second_trigger = {\n  always = no\n}\n');
-    } finally {
-      fs.rmSync(workspaceRoot, { recursive: true, force: true });
-    }
-  });
 });
 
-function createFsHost(workspaceRoot: string, options: { writesEnabled?: boolean } = {}): HostServices {
+function createFsHost(workspaceRoot: string): HostServices {
   return {
     workspaceRoot,
-    readonlyMode: !options.writesEnabled,
-    writesEnabled: options.writesEnabled === true,
-    allowedWriteTools: new Set(['write_localisation', 'edit_pdx_block']),
+    readonlyMode: true,
+    writesEnabled: false,
     lsp: createUnavailableLspHost(),
     diagnostics: createUnavailableDiagnosticsHost(),
     filesystem: {
@@ -198,11 +135,7 @@ function createFsHost(workspaceRoot: string, options: { writesEnabled?: boolean 
         const content = fs.readFileSync(filePath, 'utf8');
         return { content, hasBom: content.charCodeAt(0) === 0xfeff, exists: true };
       },
-      async writeTextFile(filePath, content) {
-        if (!options.writesEnabled) throw new Error('unexpected write');
-        fs.mkdirSync(path.dirname(filePath), { recursive: true });
-        fs.writeFileSync(filePath, content, 'utf8');
-      },
+      async writeTextFile() { throw new Error('unexpected write'); },
       async list() { return []; },
       async glob() { return []; },
     },

@@ -3059,8 +3059,6 @@ export class AgentRunner {
                     // Add tool-specific truncation recovery guidance
                     if (toolName === 'write_localisation') {
                         errMsg += '\n\n⚠️ Your entries array was truncated by the output length limit. Split into SMALLER batches: call write_localisation multiple times with at most 15 entries each.';
-                    } else if (toolName === 'multi_replace_file_content') {
-                        errMsg += '\n\n⚠️ Your ReplacementChunks array was truncated. Split into SMALLER batches: call multi_replace_file_content with fewer chunks.';
                     } else if (toolName === 'dispatch_agents') {
                         errMsg += '\n\n⚠️ Your tasks array was truncated or malformed because the prompt strings were too long. KEEP PROMPTS CONCISE. Do NOT embed massive file contents or long paths directly in the prompt. If you need to pass large data, use `set_memory` first and pass the memory key. Also, try dispatching fewer tasks at once.';
                     }

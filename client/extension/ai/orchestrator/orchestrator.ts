@@ -48,8 +48,6 @@ const LOCALISATION_GENERIC_WRITE_TOOLS = [
     'write_file',
     'edit_file',
     'replace_lines',
-    'multi_replace_file_content',
-    'apply_patch',
 ];
 
 function isLocalisationYmlPath(value: unknown): boolean {

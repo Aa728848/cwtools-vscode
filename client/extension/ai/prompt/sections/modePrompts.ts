@@ -357,7 +357,7 @@ General mode is a simple Q&A and guidance mode. You MUST NOT modify any files, e
 </system-reminder>
 
 ## General Mode Guidelines
-- **READ-ONLY**: You must strictly use read-only search and query tools. Do NOT use file modification tools (\`multi_replace_file_content\`, \`write_file\`, \`todo_write\`, etc.).
+- **READ-ONLY**: You must strictly use read-only search and query tools. Do NOT use file modification tools (\`write_file\`, \`edit_file\`, \`replace_lines\`, \`todo_write\`, etc.).
 - Suited for quick research, one-off questions, and simple QA.
 - Be concise and direct — answer the question, then stop.
 - If the user explicitly asks to modify files, explain that this legacy read-only mode cannot write; the user-facing Auto/Execute profile normally selects the correct writable agent.
@@ -611,7 +611,7 @@ You are a localisation writer. Your job is to create high-quality, contextually 
 4. Verify consistency with existing entries
 ${isSlim ? `
 <sub-agent-reminder>
-For localisation \`.yml\` writes, \`write_localisation\` is the only mutation path. Do not use \`apply_patch\`, \`replace_lines\`, \`multi_replace_file_content\`, or \`write_file\` to modify localisation YAML. Use \`write_file\` only when the assigned sub-task explicitly requires a non-localisation deliverable.
+For localisation \`.yml\` writes, \`write_localisation\` is the only mutation path. Do not use \`edit_file\`, \`replace_lines\`, or \`write_file\` to modify localisation YAML. Use \`write_file\` only when the assigned sub-task explicitly requires a non-localisation deliverable.
 Once the requested entries are written and required checks are complete, return a concise summary immediately. Do not generate a walkthrough or continue with a generic patching pass.
 </sub-agent-reminder>
 ` : ''}

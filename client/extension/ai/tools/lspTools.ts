@@ -28,7 +28,6 @@ import type {
 } from '../types';
 import { isPathInsideOrEqual } from '../workspaceSandbox';
 import { diagnosticMetadata } from './diagnosticMetadata';
-import { stripLineNumberPrefixes } from './replacerSuite';
 import { diagnosticCodeString, diagnosticMatchesIgnoredKey } from '../../diagnosticI18n';
 import { readProjectProfile } from '../projectProfile';
 import { parsePdxSemanticCatalog } from '../../../shared/pdxSemanticCatalog';
@@ -160,8 +159,6 @@ export interface LspToolContext {
     fileWriteMode?: 'confirm' | 'auto';
     /** Callback when a file write needs user confirmation (confirm mode). */
     onPendingWrite?: (file: string, newContent: string, messageId: string) => Promise<boolean>;
-    /** Delegate multi_replace_file_content back to FileToolHandler via executor */
-    multiReplaceFileContent?: (args: any, context?: any) => Promise<any>;
 }
 
 // - Handler class -
@@ -2975,7 +2972,7 @@ export class LspToolHandler {
         if (limitReached) {
             returnObj._warning = `[CRITICAL TRUNCATION] Truncation: The output limit of ${limit} files has been reached. The remaining matching files (which may contain hundreds) have been forcibly discarded to protect the large model context! Please narrow your search using the more precise \`query\` or \`directory\` parameters.`;
         }
-        returnObj._hint = "Found what you need? If the match is in a PDX Script (.txt), do not use read_file. Use document_symbols to find its boundaries, then get_pdx_block to read it, or edit_pdx_block to replace it directly.";
+        returnObj._hint = "Found what you need? If the match is in a PDX Script (.txt), use document_symbols to find its boundaries, get_pdx_block for exact context, then make the smallest guarded edit with edit_file or replace_lines.";
         return returnObj as import('../types').SearchModFilesResult;
     }
 
@@ -3560,7 +3557,7 @@ export class LspToolHandler {
             truncated,
             _hint: generalDomain
                 ? 'This is a bounded workspace text search. Use document_symbols or workspace_symbols when language-aware structure is more appropriate.'
-                : 'If you found your target in a PDX Script (.txt), do not use read_file. Use document_symbols + get_pdx_block to read it, or edit_pdx_block to directly replace the node.'
+                : 'If you found your target in a PDX Script (.txt), use document_symbols + get_pdx_block for exact context, then make the smallest guarded edit with edit_file or replace_lines.'
         };
         if (matches.length === 0) {
             returnObj._warning = generalDomain
@@ -4236,80 +4233,4 @@ export class LspToolHandler {
         };
     }
 
-    async editPdxBlock(args: import('../types').EditPdxBlockArgs, context?: import('../types').AgentToolContext): Promise<unknown> {
-        if (!this.ctx.multiReplaceFileContent) {
-            return { success: false, message: 'File writing operations are unavailable in this context.' };
-        }
-        this.invalidateCacheForFile(args.file);
-        const symbols = await this.documentSymbols({ file: args.file });
-        if (symbols.symbols.length === 0) {
-            return { success: false, message: 'Could not parse symbols in file. File might be invalid or empty.' };
-        }
-        const findSymbol = (syms: DocumentSymbolInfo[]): DocumentSymbolInfo | null => {
-            for (const sym of syms) {
-                if (sym.name === args.symbol) {
-                    return sym;
-                }
-                if (sym.children && sym.children.length > 0) {
-                    const found = findSymbol(sym.children);
-                    if (found) return found;
-                }
-            }
-            return null;
-        };
-        const targetSymbol = findSymbol(symbols.symbols);
-        if (!targetSymbol) {
-            // Directly attach the list of available symbols to avoid AI adjusting document_symbols again
-            const collectNames = (syms: DocumentSymbolInfo[], depth = 0): string[] => {
-                const names: string[] = [];
-                for (const s of syms) {
-                    const prefix = depth > 0 ? '  '.repeat(depth) + '- ' : '';
-                    names.push(`${prefix}${s.name} (L${s.range.startLine}-${s.range.endLine})`);
-                    if (s.children && s.children.length > 0 && depth < 1) {
-                        names.push(...collectNames(s.children, depth + 1));
-                    }
-                }
-                return names;
-            };
-            const allNames = collectNames(symbols.symbols);
-            const preview = allNames.slice(0, 20).join('\n');
-            const suffix = allNames.length > 20 ? `\n... and ${allNames.length - 20} more` : '';
-            return { success: false, message: `Symbol '${args.symbol}' not found in file.\n\nAvailable symbols:\n${preview}${suffix}\n\nUse one of these exact names.` };
-        }
-        // documentSymbols is 0-indexed, replaceLines is 1-indexed
-        const startLine = targetSymbol.range.startLine + 1;
-        const endLine = targetSymbol.range.endLine + 1;
-        
-        const rawContent = fs.readFileSync(args.file, 'utf-8');
-        const hasBom = rawContent.charCodeAt(0) === 0xFEFF;
-        const content = hasBom ? rawContent.slice(1) : rawContent;
-
-        const isCRLF = content.includes('\r\n');
-        // The split needs to preserve the exact string to be a precise match
-        const targetContent = content.split(isCRLF ? '\r\n' : '\n').slice(startLine - 1, endLine).join(isCRLF ? '\r\n' : '\n');
-
-        if (!targetContent.includes(args.symbol)) {
-            const preview = targetContent.split(/\r?\n/).slice(0, 3).join('\n');
-            return {
-                success: false,
-                message: `edit_pdx_block aborted: lines ${startLine}-${endLine} do not contain the symbol '${args.symbol}' — the symbol ranges are stale (the file changed after the last parse). Current content at those lines starts with:\n${preview}\n\nWait for diagnostics to refresh or call document_symbols again, verify the symbol's current range, then retry.`,
-            };
-        }
-
-        const readTracker = (context?.agentRunner as { readTracker?: { markRead(file: string): void } } | undefined)?.readTracker;
-        readTracker?.markRead(args.file);
-
-        const cleanedNewContent = stripLineNumberPrefixes(args.newContent) ?? args.newContent;
-
-        return await this.ctx.multiReplaceFileContent({
-            TargetFile: args.file,
-            Instruction: `Update PDX block: ${args.symbol}`,
-            ReplacementChunks: [{
-                StartLine: startLine,
-                EndLine: endLine,
-                TargetContent: targetContent,
-                ReplacementContent: cleanedNewContent
-            }]
-        }, context);
-    }
 }

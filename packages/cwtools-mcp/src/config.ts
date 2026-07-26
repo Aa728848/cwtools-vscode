@@ -163,7 +163,7 @@ export function helpText(): string {
     '  cwtools-mcp --standalone --workspace <path> [--game stellaris] [--stdio] [--server-path <path>]',
     '  cwtools-mcp --standalone --workspace <path> --http [--host 127.0.0.1] [--port 3000]',
     '  cwtools-mcp --standalone --workspace <path> --enable-writes',
-    '  cwtools-mcp --standalone --workspace <path> --enable-writes --allow-tool write_localisation --allow-tool edit_pdx_block',
+    '  cwtools-mcp --standalone --workspace <path> --enable-writes --allow-tool write_localisation',
     '',
     'Default bridge mode:',
     '  The script connects to the extension-host MCP bridge written by the active',

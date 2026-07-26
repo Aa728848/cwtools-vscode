@@ -282,6 +282,8 @@ describe('webview smoke checks', () => {
         expect(css).to.include('#toolbar');
         expect(css).to.include('#main-layout');
         expect(css).to.include('#search-bar.hidden { display: none; }');
+        expect(css).to.include('body.search-open #main-layout');
+        expect(script).to.include("document.body.classList.toggle('search-open', isOpen);");
         for (const control of [
             'id="btn-inspect"',
             'id="btn-fit-screen"',

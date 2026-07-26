@@ -1497,7 +1497,9 @@ function setupSearch() {
 
     function toggleSearch() {
         searchBar!.classList.toggle('hidden');
-        if (!searchBar!.classList.contains('hidden')) {
+        const isOpen = !searchBar!.classList.contains('hidden');
+        document.body.classList.toggle('search-open', isOpen);
+        if (isOpen) {
             searchInput!.focus();
             searchInput!.select();
         } else {

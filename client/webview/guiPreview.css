@@ -1025,6 +1025,10 @@ html, body {
     background: var(--gui-surface);
 }
 
+body.search-open #main-layout {
+    top: 90px;
+}
+
 #viewport {
     min-width: 0;
     background-color: var(--vscode-editor-background);

@@ -706,822 +706,804 @@
             }
         ],
         "configuration": [
-        {
-            "type": "object",
-            "title": "%configuration.category.editor%",
-            "order": 10,
-            "properties": {
-                "stellarisLanguageServices.editor.formatIndentOnPaste": {
-                    "scope": "language-overridable",
-                    "type": "boolean",
-                    "default": true,
-                    "description": "%configuration.stellarisLanguageServices.editor.formatIndentOnPaste.description%"
-                },
-                "stellarisLanguageServices.editor.codeLens.enabled": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": true,
-                    "description": "%configuration.stellarisLanguageServices.editor.codeLens.enabled.description%"
-                },
-                "stellarisLanguageServices.editor.semanticHighlighting.enabled": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": true,
-                    "description": "%configuration.stellarisLanguageServices.editor.semanticHighlighting.enabled.description%"
-                },
-                "stellarisLanguageServices.editor.backgroundFeaturesDelayMs": {
-                    "scope": "window",
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 2000,
-                    "default": 250,
-                    "description": "%configuration.stellarisLanguageServices.editor.backgroundFeaturesDelayMs.description%"
+            {
+                "type": "object",
+                "title": "%configuration.category.editor%",
+                "order": 10,
+                "properties": {
+                    "stellarisLanguageServices.editor.formatIndentOnPaste": {
+                        "scope": "language-overridable",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.editor.formatIndentOnPaste.description%"
+                    },
+                    "stellarisLanguageServices.editor.codeLens.enabled": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.editor.codeLens.enabled.description%"
+                    },
+                    "stellarisLanguageServices.editor.semanticHighlighting.enabled": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.editor.semanticHighlighting.enabled.description%"
+                    },
+                    "stellarisLanguageServices.editor.backgroundFeaturesDelayMs": {
+                        "scope": "window",
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 2000,
+                        "default": 250,
+                        "description": "%configuration.stellarisLanguageServices.editor.backgroundFeaturesDelayMs.description%"
+                    }
                 }
-            }
-        },
-        {
-            "type": "object",
-            "title": "%configuration.category.language%",
-            "order": 20,
-            "properties": {
-                "stellarisLanguageServices.trace.server": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "off",
-                        "messages",
-                        "verbose"
-                    ],
-                    "default": "off",
-                    "description": "%configuration.stellarisLanguageServices.trace.server.description%"
-                },
-                "stellarisLanguageServices.localisation.languages": {
-                    "scope": "window",
-                    "type": "array",
-                    "items": {
+            },
+            {
+                "type": "object",
+                "title": "%configuration.category.language%",
+                "order": 20,
+                "properties": {
+                    "stellarisLanguageServices.trace.server": {
+                        "scope": "window",
                         "type": "string",
                         "enum": [
-                            "English",
-                            "French",
-                            "German",
-                            "Spanish",
-                            "Russian",
-                            "Braz_Por",
-                            "Polish",
-                            "Chinese",
-                            "Korean",
-                            "Japanese",
-                            "Turkish"
+                            "off",
+                            "messages",
+                            "verbose"
+                        ],
+                        "default": "off",
+                        "description": "%configuration.stellarisLanguageServices.trace.server.description%"
+                    },
+                    "stellarisLanguageServices.localisation.languages": {
+                        "scope": "window",
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "English",
+                                "French",
+                                "German",
+                                "Spanish",
+                                "Russian",
+                                "Braz_Por",
+                                "Polish",
+                                "Chinese",
+                                "Korean",
+                                "Japanese",
+                                "Turkish"
+                            ]
+                        },
+                        "default": [
+                            "English"
+                        ],
+                        "description": "%configuration.stellarisLanguageServices.localisation.languages.description%",
+                        "uniqueItems": true
+                    },
+                    "stellarisLanguageServices.localisation.generated_strings": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": ":0 \"REPLACE_ME\"",
+                        "description": "%configuration.stellarisLanguageServices.localisation.generated_strings.description%"
+                    },
+                    "stellarisLanguageServices.errors.vanilla": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.errors.vanilla.description%"
+                    },
+                    "stellarisLanguageServices.errors.ignore": {
+                        "scope": "window",
+                        "type": "array",
+                        "description": "%configuration.stellarisLanguageServices.errors.ignore.description%",
+                        "uniqueItems": true
+                    },
+                    "stellarisLanguageServices.errors.ignorefiles": {
+                        "scope": "window",
+                        "type": "array",
+                        "description": "%configuration.stellarisLanguageServices.errors.ignorefiles.description%",
+                        "uniqueItems": true,
+                        "default": [
+                            "README.txt",
+                            "credits.txt",
+                            "credits_l_simp_chinese.txt",
+                            "reference.txt",
+                            "startup_info.txt"
                         ]
                     },
-                    "default": [
-                        "English"
-                    ],
-                    "description": "%configuration.stellarisLanguageServices.localisation.languages.description%",
-                    "uniqueItems": true
-                },
-                "stellarisLanguageServices.localisation.generated_strings": {
-                    "scope": "window",
-                    "type": "string",
-                    "default": ":0 \"REPLACE_ME\"",
-                    "description": "%configuration.stellarisLanguageServices.localisation.generated_strings.description%"
-                },
-                "stellarisLanguageServices.errors.vanilla": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.errors.vanilla.description%"
-                },
-                "stellarisLanguageServices.errors.ignore": {
-                    "scope": "window",
-                    "type": "array",
-                    "description": "%configuration.stellarisLanguageServices.errors.ignore.description%",
-                    "uniqueItems": true
-                },
-                "stellarisLanguageServices.errors.ignorefiles": {
-                    "scope": "window",
-                    "type": "array",
-                    "description": "%configuration.stellarisLanguageServices.errors.ignorefiles.description%",
-                    "uniqueItems": true,
-                    "default": [
-                        "README.txt",
-                        "credits.txt",
-                        "credits_l_simp_chinese.txt",
-                        "reference.txt",
-                        "startup_info.txt"
-                    ]
-                },
-                "stellarisLanguageServices.experimental": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": true,
-                    "description": "%configuration.stellarisLanguageServices.experimental.description%"
-                },
-                "stellarisLanguageServices.debug_mode": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.debug_mode.description%"
-                },
-                "stellarisLanguageServices.showInlineText": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.showInlineText.description%"
-                },
-                "stellarisLanguageServices.logging.diagnostic": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.logging.diagnostic.description%"
-                }
-            }
-        },
-        {
-            "type": "object",
-            "title": "%configuration.category.rules%",
-            "order": 30,
-            "properties": {
-                "stellarisLanguageServices.rules_version": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "stable",
-                        "latest",
-                        "manual"
-                    ],
-                    "default": "latest",
-                    "description": "%configuration.stellarisLanguageServices.rules_version.description%"
-                },
-                "stellarisLanguageServices.rules_remote_url": {
-                    "scope": "window",
-                    "type": "string",
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.rules_remote_url.description%"
-                },
-                "stellarisLanguageServices.rules_folder": {
-                    "scope": "window",
-                    "type": "string",
-                    "description": "%configuration.stellarisLanguageServices.rules_folder.description%"
-                },
-                "stellarisLanguageServices.ignore_patterns": {
-                    "scope": "window",
-                    "type": "array",
-                    "description": "%configuration.stellarisLanguageServices.ignore_patterns.description%",
-                    "uniqueItems": true,
-                    "default": [
-                        "**/99_README**.txt"
-                    ]
-                },
-                "stellarisLanguageServices.cache.eu4": {
-                    "scope": "application",
-                    "type": "string",
-                    "description": "%configuration.stellarisLanguageServices.cache.eu4.description%"
-                },
-                "stellarisLanguageServices.cache.hoi4": {
-                    "scope": "application",
-                    "type": "string",
-                    "description": "%configuration.stellarisLanguageServices.cache.hoi4.description%"
-                },
-                "stellarisLanguageServices.cache.stellaris": {
-                    "scope": "application",
-                    "type": "string",
-                    "description": "%configuration.stellarisLanguageServices.cache.stellaris.description%"
-                },
-                "stellarisLanguageServices.cache.ck2": {
-                    "scope": "application",
-                    "type": "string",
-                    "description": "%configuration.stellarisLanguageServices.cache.ck2.description%"
-                },
-                "stellarisLanguageServices.cache.imperator": {
-                    "scope": "application",
-                    "type": "string",
-                    "description": "%configuration.stellarisLanguageServices.cache.imperator.description%"
-                },
-                "stellarisLanguageServices.cache.vic2": {
-                    "scope": "application",
-                    "type": "string",
-                    "description": "%configuration.stellarisLanguageServices.cache.vic2.description%"
-                },
-                "stellarisLanguageServices.cache.ck3": {
-                    "scope": "application",
-                    "type": "string",
-                    "description": "%configuration.stellarisLanguageServices.cache.ck3.description%"
-                },
-                "stellarisLanguageServices.cache.vic3": {
-                    "scope": "application",
-                    "type": "string",
-                    "description": "%configuration.stellarisLanguageServices.cache.vic3.description%"
-                },
-                "stellarisLanguageServices.cache.eu5": {
-                    "scope": "application",
-                    "type": "string",
-                    "description": "%configuration.stellarisLanguageServices.cache.eu5.description%"
-                },
-                "stellarisLanguageServices.maxFileSize": {
-                    "scope": "resource",
-                    "type": "integer",
-                    "minimum": 1,
-                    "default": 2,
-                    "description": "%configuration.stellarisLanguageServices.maxFileSize.description%"
-                },
-                "stellarisLanguageServices.diagnostics.deferDynamicParameterDiagnostics": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": true,
-                    "description": "%configuration.stellarisLanguageServices.diagnostics.deferDynamicParameterDiagnostics.description%"
-                },
-                "stellarisLanguageServices.diagnostics.dynamicPreflightTimeoutMs": {
-                    "scope": "window",
-                    "type": "integer",
-                    "minimum": 0,
-                    "default": 2000,
-                    "description": "%configuration.stellarisLanguageServices.diagnostics.dynamicPreflightTimeoutMs.description%"
-                },
-                "stellarisLanguageServices.diagnostics.dynamicPreflightMaxEntities": {
-                    "scope": "window",
-                    "type": "integer",
-                    "minimum": 0,
-                    "default": 2000,
-                    "description": "%configuration.stellarisLanguageServices.diagnostics.dynamicPreflightMaxEntities.description%"
-                },
-                "stellarisLanguageServices.checkForUpdates": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": true,
-                    "description": "%configuration.stellarisLanguageServices.checkForUpdates.description%"
-                }
-            }
-        },
-        {
-            "type": "object",
-            "title": "%configuration.category.ai.core%",
-            "order": 40,
-            "properties": {
-                "stellarisLanguageServices.ai.enabled": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.ai.enabled.description%"
-                },
-                "stellarisLanguageServices.ai.provider": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "codex-chatgpt",
-                        "openai",
-                        "claude",
-                        "deepseek",
-                        "minimax",
-                        "glm",
-                        "qwen",
-                        "ollama",
-                        "custom",
-                        "siliconflow",
-                        "openrouter",
-                        "github",
-                        "together",
-                        "deepinfra",
-                        "google",
-                        "mimo",
-                        "minimax-token-plan",
-                        "mimo-token-plan",
-                        "opencode",
-                        "opencode-go",
-                        "kimi",
-                        "kimi-code-plan"
-                    ],
-                    "enumDescriptions": [
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.codex-chatgpt%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.claude%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.deepseek%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.minimax%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.glm%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.qwen%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.ollama%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.custom%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.siliconflow%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.openrouter%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.github%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.together%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.deepinfra%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.google%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.mimo%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.minimax-token-plan%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.opencode-go%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.kimi%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.kimi-code-plan%"
-                    ],
-                    "default": "openai",
-                    "markdownDescription": "%configuration.stellarisLanguageServices.ai.provider.description%"
-                },
-                "stellarisLanguageServices.ai.model": {
-                    "scope": "window",
-                    "type": "string",
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.model.description%"
-                },
-                "stellarisLanguageServices.ai.endpoint": {
-                    "scope": "window",
-                    "type": "string",
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.endpoint.description%"
-                },
-                "stellarisLanguageServices.ai.providerEndpoints": {
-                    "scope": "window",
-                    "type": "object",
-                    "default": {},
-                    "additionalProperties": {
-                        "type": "string"
+                    "stellarisLanguageServices.experimental": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.experimental.description%"
                     },
-                    "description": "%configuration.stellarisLanguageServices.ai.providerEndpoints.description%"
-                },
-                "stellarisLanguageServices.ai.customApiFormat": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "openai-chat-completions",
-                        "openai-responses",
-                        "anthropic-messages",
-                        "gemini-generate-content"
-                    ],
-                    "enumDescriptions": [
-                        "%configuration.stellarisLanguageServices.ai.customApiFormat.enum.openai-chat-completions%",
-                        "%configuration.stellarisLanguageServices.ai.customApiFormat.enum.openai-responses%",
-                        "%configuration.stellarisLanguageServices.ai.customApiFormat.enum.anthropic-messages%",
-                        "%configuration.stellarisLanguageServices.ai.customApiFormat.enum.gemini-generate-content%"
-                    ],
-                    "default": "openai-chat-completions",
-                    "description": "%configuration.stellarisLanguageServices.ai.customApiFormat.description%"
-                },
-                "stellarisLanguageServices.ai.agentFileWriteMode": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "confirm",
-                        "auto"
-                    ],
-                    "enumDescriptions": [
-                        "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.enum.confirm%",
-                        "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.enum.auto%"
-                    ],
-                    "default": "auto",
-                    "description": "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.description%"
-                },
-                "stellarisLanguageServices.ai.evidenceGate.mode": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "off",
-                        "shadow",
-                        "enforce"
-                    ],
-                    "enumDescriptions": [
-                        "%configuration.stellarisLanguageServices.ai.evidenceGate.mode.enum.off%",
-                        "%configuration.stellarisLanguageServices.ai.evidenceGate.mode.enum.shadow%",
-                        "%configuration.stellarisLanguageServices.ai.evidenceGate.mode.enum.enforce%"
-                    ],
-                    "default": "enforce",
-                    "description": "%configuration.stellarisLanguageServices.ai.evidenceGate.mode.description%"
-                },
-                "stellarisLanguageServices.ai.approvals.reviewer": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "user",
-                        "auto_review"
-                    ],
-                    "enumDescriptions": [
-                        "%configuration.stellarisLanguageServices.ai.approvals.reviewer.enum.user%",
-                        "%configuration.stellarisLanguageServices.ai.approvals.reviewer.enum.auto_review%"
-                    ],
-                    "default": "user",
-                    "description": "%configuration.stellarisLanguageServices.ai.approvals.reviewer.description%"
-                },
-                "stellarisLanguageServices.ai.developer.disableSecuritySandbox": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.ai.developer.disableSecuritySandbox.description%"
-                },
-                "stellarisLanguageServices.ai.history.persistence": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "off",
-                        "metadata",
-                        "full"
-                    ],
-                    "default": "full",
-                    "description": "%configuration.stellarisLanguageServices.ai.history.persistence.description%"
-                },
-                "stellarisLanguageServices.ai.history.maxAgeDays": {
-                    "scope": "window",
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 3650,
-                    "default": 30,
-                    "description": "%configuration.stellarisLanguageServices.ai.history.maxAgeDays.description%"
-                },
-                "stellarisLanguageServices.ai.history.maxBytes": {
-                    "scope": "window",
-                    "type": "integer",
-                    "minimum": 0,
-                    "default": 268435456,
-                    "description": "%configuration.stellarisLanguageServices.ai.history.maxBytes.description%"
-                },
-                "stellarisLanguageServices.ai.history.redactLocalPaths": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": true,
-                    "description": "%configuration.stellarisLanguageServices.ai.history.redactLocalPaths.description%"
-                },
-                "stellarisLanguageServices.ai.hooks.enabled": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.ai.hooks.enabled.description%"
-                },
-                "stellarisLanguageServices.ai.policy.preset": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "read-only",
-                        "workspace-auto",
-                        "workspace-auto-review",
-                        "trusted-automation",
-                        "full-access"
-                    ],
-                    "enumDescriptions": [
-                        "%configuration.stellarisLanguageServices.ai.policy.preset.enum.read-only%",
-                        "%configuration.stellarisLanguageServices.ai.policy.preset.enum.workspace-auto%",
-                        "%configuration.stellarisLanguageServices.ai.policy.preset.enum.workspace-auto-review%",
-                        "%configuration.stellarisLanguageServices.ai.policy.preset.enum.trusted-automation%",
-                        "%configuration.stellarisLanguageServices.ai.policy.preset.enum.full-access%"
-                    ],
-                    "default": "workspace-auto",
-                    "description": "%configuration.stellarisLanguageServices.ai.policy.preset.description%"
-                },
-                "stellarisLanguageServices.ai.shell.commandRules": {
-                    "scope": "window",
-                    "type": "array",
-                    "default": [],
-                    "description": "%configuration.stellarisLanguageServices.ai.shell.commandRules.description%",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                            "prefix",
-                            "decision"
-                        ],
-                        "properties": {
-                            "prefix": {
-                                "type": "array",
-                                "minItems": 1,
-                                "items": {
-                                    "type": "string",
-                                    "minLength": 1
-                                },
-                                "description": "%configuration.stellarisLanguageServices.ai.shell.commandRules.prefix.description%"
-                            },
-                            "decision": {
-                                "type": "string",
-                                "enum": [
-                                    "allow",
-                                    "prompt",
-                                    "forbidden"
-                                ],
-                                "description": "%configuration.stellarisLanguageServices.ai.shell.commandRules.decision.description%"
-                            },
-                            "justification": {
-                                "type": "string",
-                                "description": "%configuration.stellarisLanguageServices.ai.shell.commandRules.justification.description%"
-                            }
-                        }
+                    "stellarisLanguageServices.debug_mode": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.debug_mode.description%"
+                    },
+                    "stellarisLanguageServices.showInlineText": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.showInlineText.description%"
+                    },
+                    "stellarisLanguageServices.logging.diagnostic": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.logging.diagnostic.description%"
                     }
-                },
-                "stellarisLanguageServices.ai.maxRetries": {
-                    "scope": "window",
-                    "type": "integer",
-                    "default": 3,
-                    "minimum": 1,
-                    "maximum": 5,
-                    "description": "%configuration.stellarisLanguageServices.ai.maxRetries.description%"
-                },
-                "stellarisLanguageServices.ai.requestTimeoutMs": {
-                    "scope": "window",
-                    "type": "integer",
-                    "default": 1200000,
-                    "minimum": 60000,
-                    "maximum": 3600000,
-                    "description": "%configuration.stellarisLanguageServices.ai.requestTimeoutMs.description%"
-                },
-                "stellarisLanguageServices.ai.reasoningEffort": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "low",
-                        "medium",
-                        "high",
-                        "max"
-                    ],
-                    "enumDescriptions": [
-                        "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.low%",
-                        "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.medium%",
-                        "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.high%",
-                        "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.max%"
-                    ],
-                    "default": "high",
-                    "description": "%configuration.stellarisLanguageServices.ai.reasoningEffort.description%"
-                },
-                "stellarisLanguageServices.ai.maxContextTokens": {
-                    "scope": "window",
-                    "type": "integer",
-                    "default": 0,
-                    "minimum": 0,
-                    "maximum": 10000000,
-                    "description": "%configuration.stellarisLanguageServices.ai.maxContextTokens.description%"
                 }
-            }
-        },
-        {
-            "type": "object",
-            "title": "%configuration.category.ai.inline%",
-            "order": 50,
-            "properties": {
-                "stellarisLanguageServices.ai.inlineCompletion.enabled": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.enabled.description%"
-                },
-                "stellarisLanguageServices.ai.inlineCompletion.debounceMs": {
-                    "scope": "window",
-                    "type": "integer",
-                    "default": 200,
-                    "minimum": 100,
-                    "maximum": 5000,
-                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.debounceMs.description%"
-                },
-                "stellarisLanguageServices.ai.inlineCompletion.maxTokens": {
-                    "scope": "window",
-                    "type": "integer",
-                    "default": 128,
-                    "minimum": 16,
-                    "maximum": 1024,
-                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.maxTokens.description%"
-                },
-                "stellarisLanguageServices.ai.inlineCompletion.contextBeforeLines": {
-                    "scope": "window",
-                    "type": "integer",
-                    "default": 20,
-                    "minimum": 0,
-                    "maximum": 200,
-                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.contextBeforeLines.description%"
-                },
-                "stellarisLanguageServices.ai.inlineCompletion.contextAfterLines": {
-                    "scope": "window",
-                    "type": "integer",
-                    "default": 10,
-                    "minimum": 1,
-                    "maximum": 200,
-                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.contextAfterLines.description%"
-                },
-                "stellarisLanguageServices.ai.inlineCompletion.includeMcpContext": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.includeMcpContext.description%"
-                },
-                "stellarisLanguageServices.ai.inlineCompletion.mcpCacheTtlMs": {
-                    "scope": "window",
-                    "type": "integer",
-                    "default": 30000,
-                    "minimum": 0,
-                    "maximum": 300000,
-                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.mcpCacheTtlMs.description%"
-                },
-                "stellarisLanguageServices.ai.inlineCompletion.requestTimeoutMs": {
-                    "scope": "window",
-                    "type": "integer",
-                    "default": 1500,
-                    "minimum": 500,
-                    "maximum": 30000,
-                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.requestTimeoutMs.description%"
-                },
-                "stellarisLanguageServices.ai.inlineCompletion.lspFastPath": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": true,
-                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.lspFastPath.description%"
-                },
-                "stellarisLanguageServices.ai.inlineCompletion.overlapStripping": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": true,
-                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.overlapStripping.description%"
-                },
-                "stellarisLanguageServices.ai.inlineCompletion.provider": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "openai",
-                        "claude",
-                        "deepseek",
-                        "minimax",
-                        "glm",
-                        "qwen",
-                        "ollama",
-                        "custom",
-                        "siliconflow",
-                        "openrouter",
-                        "github",
-                        "together",
-                        "deepinfra",
-                        "google",
-                        "mimo",
-                        "minimax-token-plan",
-                        "mimo-token-plan",
-                        "opencode",
-                        "opencode-go"
-                    ],
-                    "enumDescriptions": [
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.claude%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.deepseek%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.minimax%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.glm%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.qwen%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.ollama%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.custom%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.siliconflow%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.openrouter%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.github%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.together%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.deepinfra%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.google%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.mimo%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.minimax-token-plan%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.opencode-go%"
-                    ],
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.provider.description%"
-                },
-                "stellarisLanguageServices.ai.inlineCompletion.model": {
-                    "scope": "window",
-                    "type": "string",
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.model.description%"
-                },
-                "stellarisLanguageServices.ai.inlineCompletion.endpoint": {
-                    "scope": "window",
-                    "type": "string",
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.endpoint.description%"
-                }
-            }
-        },
-        {
-            "type": "object",
-            "title": "%configuration.category.ai.assistance%",
-            "order": 60,
-            "properties": {
-                "stellarisLanguageServices.ai.translationPreview.provider": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "",
-                        "openai",
-                        "claude",
-                        "deepseek",
-                        "minimax",
-                        "glm",
-                        "qwen",
-                        "ollama",
-                        "custom",
-                        "siliconflow",
-                        "openrouter",
-                        "github",
-                        "together",
-                        "deepinfra",
-                        "google",
-                        "mimo",
-                        "minimax-token-plan",
-                        "mimo-token-plan",
-                        "opencode",
-                        "opencode-go",
-                        "kimi",
-                        "kimi-code-plan"
-                    ],
-                    "enumDescriptions": [
-                        "%configuration.stellarisLanguageServices.ai.translationPreview.provider.enum.inherit%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.claude%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.deepseek%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.minimax%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.glm%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.qwen%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.ollama%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.custom%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.siliconflow%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.openrouter%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.github%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.together%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.deepinfra%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.google%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.mimo%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.minimax-token-plan%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.opencode-go%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.kimi%",
-                        "%configuration.stellarisLanguageServices.ai.provider.enum.kimi-code-plan%"
-                    ],
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.translationPreview.provider.description%"
-                },
-                "stellarisLanguageServices.ai.translationPreview.model": {
-                    "scope": "window",
-                    "type": "string",
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.translationPreview.model.description%"
-                },
-                "stellarisLanguageServices.ai.dynamicModels": {
-                    "type": "object",
-                    "default": {},
-                    "description": "%configuration.stellarisLanguageServices.ai.dynamicModels.description%"
-                },
-                "stellarisLanguageServices.ai.dynamicModelsContext": {
-                    "type": "object",
-                    "default": {},
-                    "description": "%configuration.stellarisLanguageServices.ai.dynamicModelsContext.description%"
-                },
-                "stellarisLanguageServices.ai.ignoredDiagnostics": {
-                    "scope": "resource",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "default": [],
-                    "description": "%configuration.stellarisLanguageServices.ai.ignoredDiagnostics.description%"
-                },
-                "stellarisLanguageServices.ai.enhancedDiagnostics": {
-                    "scope": "resource",
-                    "type": "boolean",
-                    "default": true,
-                    "description": "%configuration.stellarisLanguageServices.ai.enhancedDiagnostics.description%"
-                }
-            }
-        },
-        {
-            "type": "object",
-            "title": "%configuration.category.ai.integrations%",
-            "order": 70,
-            "properties": {
-                "stellarisLanguageServices.ai.web.mode": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "disabled",
-                        "indexed",
-                        "live"
-                    ],
-                    "enumDescriptions": [
-                        "%configuration.stellarisLanguageServices.ai.web.mode.disabled%",
-                        "%configuration.stellarisLanguageServices.ai.web.mode.indexed%",
-                        "%configuration.stellarisLanguageServices.ai.web.mode.live%"
-                    ],
-                    "default": "indexed",
-                    "description": "%configuration.stellarisLanguageServices.ai.web.mode.description%"
-                },
-                "stellarisLanguageServices.ai.web.provider": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "auto",
-                        "openai",
-                        "brave",
-                        "exa",
-                        "tavily",
-                        "serper",
-                        "serpapi",
-                        "searxng",
-                        "duckduckgo"
-                    ],
-                    "default": "auto",
-                    "description": "%configuration.stellarisLanguageServices.ai.web.provider.description%"
-                },
-                "stellarisLanguageServices.ai.web.fallbackProviders": {
-                    "scope": "window",
-                    "type": "array",
-                    "items": {
+            },
+            {
+                "type": "object",
+                "title": "%configuration.category.rules%",
+                "order": 30,
+                "properties": {
+                    "stellarisLanguageServices.rules_version": {
+                        "scope": "window",
                         "type": "string",
                         "enum": [
+                            "stable",
+                            "latest",
+                            "manual"
+                        ],
+                        "default": "latest",
+                        "description": "%configuration.stellarisLanguageServices.rules_version.description%"
+                    },
+                    "stellarisLanguageServices.rules_remote_url": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.rules_remote_url.description%"
+                    },
+                    "stellarisLanguageServices.rules_folder": {
+                        "scope": "window",
+                        "type": "string",
+                        "description": "%configuration.stellarisLanguageServices.rules_folder.description%"
+                    },
+                    "stellarisLanguageServices.ignore_patterns": {
+                        "scope": "window",
+                        "type": "array",
+                        "description": "%configuration.stellarisLanguageServices.ignore_patterns.description%",
+                        "uniqueItems": true,
+                        "default": [
+                            "**/99_README**.txt"
+                        ]
+                    },
+                    "stellarisLanguageServices.cache.eu4": {
+                        "scope": "application",
+                        "type": "string",
+                        "description": "%configuration.stellarisLanguageServices.cache.eu4.description%"
+                    },
+                    "stellarisLanguageServices.cache.hoi4": {
+                        "scope": "application",
+                        "type": "string",
+                        "description": "%configuration.stellarisLanguageServices.cache.hoi4.description%"
+                    },
+                    "stellarisLanguageServices.cache.stellaris": {
+                        "scope": "application",
+                        "type": "string",
+                        "description": "%configuration.stellarisLanguageServices.cache.stellaris.description%"
+                    },
+                    "stellarisLanguageServices.cache.ck2": {
+                        "scope": "application",
+                        "type": "string",
+                        "description": "%configuration.stellarisLanguageServices.cache.ck2.description%"
+                    },
+                    "stellarisLanguageServices.cache.imperator": {
+                        "scope": "application",
+                        "type": "string",
+                        "description": "%configuration.stellarisLanguageServices.cache.imperator.description%"
+                    },
+                    "stellarisLanguageServices.cache.vic2": {
+                        "scope": "application",
+                        "type": "string",
+                        "description": "%configuration.stellarisLanguageServices.cache.vic2.description%"
+                    },
+                    "stellarisLanguageServices.cache.ck3": {
+                        "scope": "application",
+                        "type": "string",
+                        "description": "%configuration.stellarisLanguageServices.cache.ck3.description%"
+                    },
+                    "stellarisLanguageServices.cache.vic3": {
+                        "scope": "application",
+                        "type": "string",
+                        "description": "%configuration.stellarisLanguageServices.cache.vic3.description%"
+                    },
+                    "stellarisLanguageServices.cache.eu5": {
+                        "scope": "application",
+                        "type": "string",
+                        "description": "%configuration.stellarisLanguageServices.cache.eu5.description%"
+                    },
+                    "stellarisLanguageServices.maxFileSize": {
+                        "scope": "resource",
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 2,
+                        "description": "%configuration.stellarisLanguageServices.maxFileSize.description%"
+                    },
+                    "stellarisLanguageServices.diagnostics.deferDynamicParameterDiagnostics": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.diagnostics.deferDynamicParameterDiagnostics.description%"
+                    },
+                    "stellarisLanguageServices.diagnostics.dynamicPreflightTimeoutMs": {
+                        "scope": "window",
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 2000,
+                        "description": "%configuration.stellarisLanguageServices.diagnostics.dynamicPreflightTimeoutMs.description%"
+                    },
+                    "stellarisLanguageServices.diagnostics.dynamicPreflightMaxEntities": {
+                        "scope": "window",
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 2000,
+                        "description": "%configuration.stellarisLanguageServices.diagnostics.dynamicPreflightMaxEntities.description%"
+                    },
+                    "stellarisLanguageServices.checkForUpdates": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.checkForUpdates.description%"
+                    }
+                }
+            },
+            {
+                "type": "object",
+                "title": "%configuration.category.ai.core%",
+                "order": 40,
+                "properties": {
+                    "stellarisLanguageServices.ai.enabled": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.ai.enabled.description%"
+                    },
+                    "stellarisLanguageServices.ai.provider": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "codex-chatgpt",
+                            "openai",
+                            "claude",
+                            "deepseek",
+                            "minimax",
+                            "glm",
+                            "qwen",
+                            "ollama",
+                            "custom",
+                            "siliconflow",
+                            "openrouter",
+                            "github",
+                            "together",
+                            "deepinfra",
+                            "google",
+                            "mimo",
+                            "minimax-token-plan",
+                            "mimo-token-plan",
+                            "opencode",
+                            "opencode-go",
+                            "kimi",
+                            "kimi-code-plan"
+                        ],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.codex-chatgpt%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.claude%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.deepseek%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.minimax%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.glm%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.qwen%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.ollama%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.custom%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.siliconflow%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.openrouter%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.github%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.together%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.deepinfra%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.google%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.mimo%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.minimax-token-plan%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.opencode-go%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.kimi%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.kimi-code-plan%"
+                        ],
+                        "default": "openai",
+                        "markdownDescription": "%configuration.stellarisLanguageServices.ai.provider.description%"
+                    },
+                    "stellarisLanguageServices.ai.model": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.ai.model.description%"
+                    },
+                    "stellarisLanguageServices.ai.endpoint": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.ai.endpoint.description%"
+                    },
+                    "stellarisLanguageServices.ai.providerEndpoints": {
+                        "scope": "window",
+                        "type": "object",
+                        "default": {},
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "description": "%configuration.stellarisLanguageServices.ai.providerEndpoints.description%"
+                    },
+                    "stellarisLanguageServices.ai.customApiFormat": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "openai-chat-completions",
+                            "openai-responses",
+                            "anthropic-messages",
+                            "gemini-generate-content"
+                        ],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.customApiFormat.enum.openai-chat-completions%",
+                            "%configuration.stellarisLanguageServices.ai.customApiFormat.enum.openai-responses%",
+                            "%configuration.stellarisLanguageServices.ai.customApiFormat.enum.anthropic-messages%",
+                            "%configuration.stellarisLanguageServices.ai.customApiFormat.enum.gemini-generate-content%"
+                        ],
+                        "default": "openai-chat-completions",
+                        "description": "%configuration.stellarisLanguageServices.ai.customApiFormat.description%"
+                    },
+                    "stellarisLanguageServices.ai.agentFileWriteMode": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "confirm",
+                            "auto"
+                        ],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.enum.confirm%",
+                            "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.enum.auto%"
+                        ],
+                        "default": "auto",
+                        "description": "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.description%"
+                    },
+                    "stellarisLanguageServices.ai.evidenceGate.mode": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "off",
+                            "shadow",
+                            "enforce"
+                        ],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.evidenceGate.mode.enum.off%",
+                            "%configuration.stellarisLanguageServices.ai.evidenceGate.mode.enum.shadow%",
+                            "%configuration.stellarisLanguageServices.ai.evidenceGate.mode.enum.enforce%"
+                        ],
+                        "default": "enforce",
+                        "description": "%configuration.stellarisLanguageServices.ai.evidenceGate.mode.description%"
+                    },
+                    "stellarisLanguageServices.ai.approvals.reviewer": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "user",
+                            "auto_review"
+                        ],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.approvals.reviewer.enum.user%",
+                            "%configuration.stellarisLanguageServices.ai.approvals.reviewer.enum.auto_review%"
+                        ],
+                        "default": "user",
+                        "description": "%configuration.stellarisLanguageServices.ai.approvals.reviewer.description%"
+                    },
+                    "stellarisLanguageServices.ai.developer.disableSecuritySandbox": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.ai.developer.disableSecuritySandbox.description%"
+                    },
+                    "stellarisLanguageServices.ai.history.persistence": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "off",
+                            "metadata",
+                            "full"
+                        ],
+                        "default": "full",
+                        "description": "%configuration.stellarisLanguageServices.ai.history.persistence.description%"
+                    },
+                    "stellarisLanguageServices.ai.history.maxAgeDays": {
+                        "scope": "window",
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 3650,
+                        "default": 30,
+                        "description": "%configuration.stellarisLanguageServices.ai.history.maxAgeDays.description%"
+                    },
+                    "stellarisLanguageServices.ai.history.maxBytes": {
+                        "scope": "window",
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 268435456,
+                        "description": "%configuration.stellarisLanguageServices.ai.history.maxBytes.description%"
+                    },
+                    "stellarisLanguageServices.ai.history.redactLocalPaths": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.ai.history.redactLocalPaths.description%"
+                    },
+                    "stellarisLanguageServices.ai.hooks.enabled": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.ai.hooks.enabled.description%"
+                    },
+                    "stellarisLanguageServices.ai.policy.preset": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "read-only",
+                            "workspace-auto",
+                            "workspace-auto-review",
+                            "trusted-automation",
+                            "full-access"
+                        ],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.policy.preset.enum.read-only%",
+                            "%configuration.stellarisLanguageServices.ai.policy.preset.enum.workspace-auto%",
+                            "%configuration.stellarisLanguageServices.ai.policy.preset.enum.workspace-auto-review%",
+                            "%configuration.stellarisLanguageServices.ai.policy.preset.enum.trusted-automation%",
+                            "%configuration.stellarisLanguageServices.ai.policy.preset.enum.full-access%"
+                        ],
+                        "default": "workspace-auto",
+                        "description": "%configuration.stellarisLanguageServices.ai.policy.preset.description%"
+                    },
+                    "stellarisLanguageServices.ai.shell.commandRules": {
+                        "scope": "window",
+                        "type": "array",
+                        "default": [],
+                        "description": "%configuration.stellarisLanguageServices.ai.shell.commandRules.description%",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "prefix",
+                                "decision"
+                            ],
+                            "properties": {
+                                "prefix": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "description": "%configuration.stellarisLanguageServices.ai.shell.commandRules.prefix.description%"
+                                },
+                                "decision": {
+                                    "type": "string",
+                                    "enum": [
+                                        "allow",
+                                        "prompt",
+                                        "forbidden"
+                                    ],
+                                    "description": "%configuration.stellarisLanguageServices.ai.shell.commandRules.decision.description%"
+                                },
+                                "justification": {
+                                    "type": "string",
+                                    "description": "%configuration.stellarisLanguageServices.ai.shell.commandRules.justification.description%"
+                                }
+                            }
+                        }
+                    },
+                    "stellarisLanguageServices.ai.maxRetries": {
+                        "scope": "window",
+                        "type": "integer",
+                        "default": 3,
+                        "minimum": 1,
+                        "maximum": 5,
+                        "description": "%configuration.stellarisLanguageServices.ai.maxRetries.description%"
+                    },
+                    "stellarisLanguageServices.ai.requestTimeoutMs": {
+                        "scope": "window",
+                        "type": "integer",
+                        "default": 1200000,
+                        "minimum": 60000,
+                        "maximum": 3600000,
+                        "description": "%configuration.stellarisLanguageServices.ai.requestTimeoutMs.description%"
+                    },
+                    "stellarisLanguageServices.ai.reasoningEffort": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "max"
+                        ],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.low%",
+                            "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.medium%",
+                            "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.high%",
+                            "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.max%"
+                        ],
+                        "default": "high",
+                        "description": "%configuration.stellarisLanguageServices.ai.reasoningEffort.description%"
+                    },
+                    "stellarisLanguageServices.ai.maxContextTokens": {
+                        "scope": "window",
+                        "type": "integer",
+                        "default": 0,
+                        "minimum": 0,
+                        "maximum": 10000000,
+                        "description": "%configuration.stellarisLanguageServices.ai.maxContextTokens.description%"
+                    }
+                }
+            },
+            {
+                "type": "object",
+                "title": "%configuration.category.ai.inline%",
+                "order": 50,
+                "properties": {
+                    "stellarisLanguageServices.ai.inlineCompletion.enabled": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.enabled.description%"
+                    },
+                    "stellarisLanguageServices.ai.inlineCompletion.debounceMs": {
+                        "scope": "window",
+                        "type": "integer",
+                        "default": 200,
+                        "minimum": 100,
+                        "maximum": 5000,
+                        "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.debounceMs.description%"
+                    },
+                    "stellarisLanguageServices.ai.inlineCompletion.maxTokens": {
+                        "scope": "window",
+                        "type": "integer",
+                        "default": 128,
+                        "minimum": 16,
+                        "maximum": 1024,
+                        "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.maxTokens.description%"
+                    },
+                    "stellarisLanguageServices.ai.inlineCompletion.contextBeforeLines": {
+                        "scope": "window",
+                        "type": "integer",
+                        "default": 20,
+                        "minimum": 0,
+                        "maximum": 200,
+                        "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.contextBeforeLines.description%"
+                    },
+                    "stellarisLanguageServices.ai.inlineCompletion.contextAfterLines": {
+                        "scope": "window",
+                        "type": "integer",
+                        "default": 10,
+                        "minimum": 1,
+                        "maximum": 200,
+                        "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.contextAfterLines.description%"
+                    },
+                    "stellarisLanguageServices.ai.inlineCompletion.includeMcpContext": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.includeMcpContext.description%"
+                    },
+                    "stellarisLanguageServices.ai.inlineCompletion.mcpCacheTtlMs": {
+                        "scope": "window",
+                        "type": "integer",
+                        "default": 30000,
+                        "minimum": 0,
+                        "maximum": 300000,
+                        "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.mcpCacheTtlMs.description%"
+                    },
+                    "stellarisLanguageServices.ai.inlineCompletion.requestTimeoutMs": {
+                        "scope": "window",
+                        "type": "integer",
+                        "default": 1500,
+                        "minimum": 500,
+                        "maximum": 30000,
+                        "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.requestTimeoutMs.description%"
+                    },
+                    "stellarisLanguageServices.ai.inlineCompletion.lspFastPath": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.lspFastPath.description%"
+                    },
+                    "stellarisLanguageServices.ai.inlineCompletion.overlapStripping": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.overlapStripping.description%"
+                    },
+                    "stellarisLanguageServices.ai.inlineCompletion.provider": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "openai",
+                            "claude",
+                            "deepseek",
+                            "minimax",
+                            "glm",
+                            "qwen",
+                            "ollama",
+                            "custom",
+                            "siliconflow",
+                            "openrouter",
+                            "github",
+                            "together",
+                            "deepinfra",
+                            "google",
+                            "mimo",
+                            "minimax-token-plan",
+                            "mimo-token-plan",
+                            "opencode",
+                            "opencode-go"
+                        ],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.claude%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.deepseek%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.minimax%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.glm%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.qwen%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.ollama%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.custom%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.siliconflow%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.openrouter%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.github%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.together%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.deepinfra%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.google%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.mimo%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.minimax-token-plan%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.opencode-go%"
+                        ],
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.provider.description%"
+                    },
+                    "stellarisLanguageServices.ai.inlineCompletion.model": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.model.description%"
+                    },
+                    "stellarisLanguageServices.ai.inlineCompletion.endpoint": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.endpoint.description%"
+                    }
+                }
+            },
+            {
+                "type": "object",
+                "title": "%configuration.category.ai.assistance%",
+                "order": 60,
+                "properties": {
+                    "stellarisLanguageServices.ai.translationPreview.provider": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "",
+                            "openai",
+                            "claude",
+                            "deepseek",
+                            "minimax",
+                            "glm",
+                            "qwen",
+                            "ollama",
+                            "custom",
+                            "siliconflow",
+                            "openrouter",
+                            "github",
+                            "together",
+                            "deepinfra",
+                            "google",
+                            "mimo",
+                            "minimax-token-plan",
+                            "mimo-token-plan",
+                            "opencode",
+                            "opencode-go",
+                            "kimi",
+                            "kimi-code-plan"
+                        ],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.translationPreview.provider.enum.inherit%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.claude%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.deepseek%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.minimax%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.glm%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.qwen%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.ollama%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.custom%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.siliconflow%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.openrouter%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.github%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.together%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.deepinfra%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.google%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.mimo%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.minimax-token-plan%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.opencode-go%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.kimi%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.kimi-code-plan%"
+                        ],
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.ai.translationPreview.provider.description%"
+                    },
+                    "stellarisLanguageServices.ai.translationPreview.model": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.ai.translationPreview.model.description%"
+                    },
+                    "stellarisLanguageServices.ai.dynamicModels": {
+                        "type": "object",
+                        "default": {},
+                        "description": "%configuration.stellarisLanguageServices.ai.dynamicModels.description%"
+                    },
+                    "stellarisLanguageServices.ai.dynamicModelsContext": {
+                        "type": "object",
+                        "default": {},
+                        "description": "%configuration.stellarisLanguageServices.ai.dynamicModelsContext.description%"
+                    },
+                    "stellarisLanguageServices.ai.ignoredDiagnostics": {
+                        "scope": "resource",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "default": [],
+                        "description": "%configuration.stellarisLanguageServices.ai.ignoredDiagnostics.description%"
+                    },
+                    "stellarisLanguageServices.ai.enhancedDiagnostics": {
+                        "scope": "resource",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.ai.enhancedDiagnostics.description%"
+                    }
+                }
+            },
+            {
+                "type": "object",
+                "title": "%configuration.category.ai.integrations%",
+                "order": 70,
+                "properties": {
+                    "stellarisLanguageServices.ai.web.mode": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "disabled",
+                            "indexed",
+                            "live"
+                        ],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.web.mode.disabled%",
+                            "%configuration.stellarisLanguageServices.ai.web.mode.indexed%",
+                            "%configuration.stellarisLanguageServices.ai.web.mode.live%"
+                        ],
+                        "default": "indexed",
+                        "description": "%configuration.stellarisLanguageServices.ai.web.mode.description%"
+                    },
+                    "stellarisLanguageServices.ai.web.provider": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "auto",
                             "openai",
                             "brave",
                             "exa",
@@ -1530,239 +1512,257 @@
                             "serpapi",
                             "searxng",
                             "duckduckgo"
-                        ]
+                        ],
+                        "default": "auto",
+                        "description": "%configuration.stellarisLanguageServices.ai.web.provider.description%"
                     },
-                    "default": [],
-                    "description": "%configuration.stellarisLanguageServices.ai.web.fallbackProviders.description%"
-                },
-                "stellarisLanguageServices.ai.web.contextSize": {
-                    "scope": "window",
-                    "type": "string",
-                    "enum": [
-                        "low",
-                        "medium",
-                        "high"
-                    ],
-                    "default": "medium",
-                    "description": "%configuration.stellarisLanguageServices.ai.web.contextSize.description%"
-                },
-                "stellarisLanguageServices.ai.web.allowedDomains": {
-                    "scope": "window",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
+                    "stellarisLanguageServices.ai.web.fallbackProviders": {
+                        "scope": "window",
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "openai",
+                                "brave",
+                                "exa",
+                                "tavily",
+                                "serper",
+                                "serpapi",
+                                "searxng",
+                                "duckduckgo"
+                            ]
+                        },
+                        "default": [],
+                        "description": "%configuration.stellarisLanguageServices.ai.web.fallbackProviders.description%"
                     },
-                    "default": [],
-                    "description": "%configuration.stellarisLanguageServices.ai.web.allowedDomains.description%"
-                },
-                "stellarisLanguageServices.ai.web.blockedDomains": {
-                    "scope": "window",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
+                    "stellarisLanguageServices.ai.web.contextSize": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "low",
+                            "medium",
+                            "high"
+                        ],
+                        "default": "medium",
+                        "description": "%configuration.stellarisLanguageServices.ai.web.contextSize.description%"
                     },
-                    "default": [],
-                    "description": "%configuration.stellarisLanguageServices.ai.web.blockedDomains.description%"
-                },
-                "stellarisLanguageServices.ai.web.country": {
-                    "scope": "window",
-                    "type": "string",
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.web.country.description%"
-                },
-                "stellarisLanguageServices.ai.web.searxngEndpoint": {
-                    "scope": "window",
-                    "type": "string",
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.web.searxngEndpoint.description%"
-                },
-                "stellarisLanguageServices.ai.web.openaiModel": {
-                    "scope": "window",
-                    "type": "string",
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.web.openaiModel.description%"
-                },
-                "stellarisLanguageServices.ai.web.cacheTtlMs": {
-                    "scope": "window",
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 3600000,
-                    "default": 300000,
-                    "description": "%configuration.stellarisLanguageServices.ai.web.cacheTtlMs.description%"
-                },
-                "stellarisLanguageServices.ai.web.allowSyntheticProxyAddresses": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.ai.web.allowSyntheticProxyAddresses.description%"
-                },
-                "stellarisLanguageServices.ai.imageMagickPath": {
-                    "scope": "window",
-                    "type": "string",
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.imageMagickPath.description%"
-                },
-                "stellarisLanguageServices.ai.ffmpegPath": {
-                    "scope": "window",
-                    "type": "string",
-                    "default": "",
-                    "description": "%configuration.stellarisLanguageServices.ai.ffmpegPath.description%"
-                },
-                "stellarisLanguageServices.ai.mcp.servers": {
-                    "scope": "window",
-                    "type": "array",
-                    "default": [],
-                    "description": "%configuration.stellarisLanguageServices.ai.mcp.servers.description%",
-                    "items": {
+                    "stellarisLanguageServices.ai.web.allowedDomains": {
+                        "scope": "window",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "default": [],
+                        "description": "%configuration.stellarisLanguageServices.ai.web.allowedDomains.description%"
+                    },
+                    "stellarisLanguageServices.ai.web.blockedDomains": {
+                        "scope": "window",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "default": [],
+                        "description": "%configuration.stellarisLanguageServices.ai.web.blockedDomains.description%"
+                    },
+                    "stellarisLanguageServices.ai.web.country": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.ai.web.country.description%"
+                    },
+                    "stellarisLanguageServices.ai.web.searxngEndpoint": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.ai.web.searxngEndpoint.description%"
+                    },
+                    "stellarisLanguageServices.ai.web.openaiModel": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.ai.web.openaiModel.description%"
+                    },
+                    "stellarisLanguageServices.ai.web.cacheTtlMs": {
+                        "scope": "window",
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 3600000,
+                        "default": 300000,
+                        "description": "%configuration.stellarisLanguageServices.ai.web.cacheTtlMs.description%"
+                    },
+                    "stellarisLanguageServices.ai.web.allowSyntheticProxyAddresses": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.ai.web.allowSyntheticProxyAddresses.description%"
+                    },
+                    "stellarisLanguageServices.ai.imageMagickPath": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.ai.imageMagickPath.description%"
+                    },
+                    "stellarisLanguageServices.ai.ffmpegPath": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.ai.ffmpegPath.description%"
+                    },
+                    "stellarisLanguageServices.ai.mcp.servers": {
+                        "scope": "window",
+                        "type": "array",
+                        "default": [],
+                        "description": "%configuration.stellarisLanguageServices.ai.mcp.servers.description%",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "description": "Server name"
+                                },
+                                "type": {
+                                    "type": "string",
+                                    "enum": [
+                                        "stdio",
+                                        "sse"
+                                    ],
+                                    "description": "Transport type"
+                                },
+                                "command": {
+                                    "type": "string",
+                                    "description": "Command for stdio transport"
+                                },
+                                "args": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "description": "Command arguments"
+                                },
+                                "env": {
+                                    "type": "object",
+                                    "description": "Environment variables"
+                                },
+                                "url": {
+                                    "type": "string",
+                                    "description": "URL for SSE transport"
+                                }
+                            },
+                            "required": [
+                                "name",
+                                "type"
+                            ]
+                        }
+                    },
+                    "stellarisLanguageServices.ai.orchestrator.agentModels": {
+                        "scope": "window",
                         "type": "object",
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "Server name"
-                            },
-                            "type": {
-                                "type": "string",
-                                "enum": [
-                                    "stdio",
-                                    "sse"
-                                ],
-                                "description": "Transport type"
-                            },
-                            "command": {
-                                "type": "string",
-                                "description": "Command for stdio transport"
-                            },
-                            "args": {
-                                "type": "array",
-                                "items": {
+                        "default": {},
+                        "description": "%configuration.stellarisLanguageServices.ai.orchestrator.agentModels.description%",
+                        "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                                "provider": {
                                     "type": "string"
                                 },
-                                "description": "Command arguments"
-                            },
-                            "env": {
-                                "type": "object",
-                                "description": "Environment variables"
-                            },
-                            "url": {
-                                "type": "string",
-                                "description": "URL for SSE transport"
-                            }
-                        },
-                        "required": [
-                            "name",
-                            "type"
-                        ]
-                    }
-                },
-                "stellarisLanguageServices.ai.orchestrator.agentModels": {
-                    "scope": "window",
-                    "type": "object",
-                    "default": {},
-                    "description": "%configuration.stellarisLanguageServices.ai.orchestrator.agentModels.description%",
-                    "additionalProperties": {
-                        "type": "object",
-                        "properties": {
-                            "provider": {
-                                "type": "string"
-                            },
-                            "model": {
-                                "type": "string"
+                                "model": {
+                                    "type": "string"
+                                }
                             }
                         }
                     }
                 }
-            }
-        },
-        {
-            "type": "object",
-            "title": "%configuration.category.ai.performance%",
-            "order": 80,
-            "properties": {
-                "stellarisLanguageServices.ai.performance.legacyFullToolset": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.ai.performance.legacyFullToolset.description%"
-                },
-                "stellarisLanguageServices.ai.performance.fullProjectRulesInBuild": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.ai.performance.fullProjectRulesInBuild.description%"
-                },
-                "stellarisLanguageServices.ai.performance.includeFullSmallFiles": {
-                    "scope": "window",
-                    "type": "boolean",
-                    "default": false,
-                    "description": "%configuration.stellarisLanguageServices.ai.performance.includeFullSmallFiles.description%"
-                },
-                "stellarisLanguageServices.ai.performance.compactionMinIntervalSeconds": {
-                    "scope": "window",
-                    "type": "number",
-                    "default": 60,
-                    "minimum": 0,
-                    "description": "%configuration.stellarisLanguageServices.ai.performance.compactionMinIntervalSeconds.description%"
-                },
-                "stellarisLanguageServices.ai.performance.modelCallBudget": {
-                    "scope": "window",
-                    "type": "number",
-                    "default": 64,
-                    "minimum": 1,
-                    "description": "%configuration.stellarisLanguageServices.ai.performance.modelCallBudget.description%"
-                },
-                "stellarisLanguageServices.ai.performance.wallTimeBudgetMinutes": {
-                    "scope": "window",
-                    "type": "number",
-                    "default": 20,
-                    "minimum": 1,
-                    "description": "%configuration.stellarisLanguageServices.ai.performance.wallTimeBudgetMinutes.description%"
-                },
-                "stellarisLanguageServices.ai.performance.uncachedInputTokenBudget": {
-                    "scope": "window",
-                    "type": "number",
-                    "default": 300000,
-                    "minimum": 1000,
-                    "description": "%configuration.stellarisLanguageServices.ai.performance.uncachedInputTokenBudget.description%"
-                },
-                "stellarisLanguageServices.ai.performance.hardBudgetMultiplier": {
-                    "scope": "window",
-                    "type": "number",
-                    "default": 8,
-                    "minimum": 2,
-                    "maximum": 100,
-                    "description": "%configuration.stellarisLanguageServices.ai.performance.hardBudgetMultiplier.description%"
-                },
-                "stellarisLanguageServices.ai.performance.goalHardBudgetMultiplier": {
-                    "scope": "window",
-                    "type": "number",
-                    "default": 32,
-                    "minimum": 8,
-                    "maximum": 100,
-                    "description": "%configuration.stellarisLanguageServices.ai.performance.goalHardBudgetMultiplier.description%"
-                },
-                "stellarisLanguageServices.ai.performance.subAgentModelCallBudget": {
-                    "scope": "window",
-                    "type": "number",
-                    "default": 24,
-                    "minimum": 1,
-                    "description": "%configuration.stellarisLanguageServices.ai.performance.subAgentModelCallBudget.description%"
-                },
-                "stellarisLanguageServices.ai.performance.subAgentWallTimeBudgetMinutes": {
-                    "scope": "window",
-                    "type": "number",
-                    "default": 8,
-                    "minimum": 1,
-                    "description": "%configuration.stellarisLanguageServices.ai.performance.subAgentWallTimeBudgetMinutes.description%"
-                },
-                "stellarisLanguageServices.ai.performance.subAgentUncachedInputTokenBudget": {
-                    "scope": "window",
-                    "type": "number",
-                    "default": 100000,
-                    "minimum": 1000,
-                    "description": "%configuration.stellarisLanguageServices.ai.performance.subAgentUncachedInputTokenBudget.description%"
+            },
+            {
+                "type": "object",
+                "title": "%configuration.category.ai.performance%",
+                "order": 80,
+                "properties": {
+                    "stellarisLanguageServices.ai.performance.legacyFullToolset": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.legacyFullToolset.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.fullProjectRulesInBuild": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.fullProjectRulesInBuild.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.includeFullSmallFiles": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.includeFullSmallFiles.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.compactionMinIntervalSeconds": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 60,
+                        "minimum": 0,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.compactionMinIntervalSeconds.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.modelCallBudget": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 64,
+                        "minimum": 1,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.modelCallBudget.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.wallTimeBudgetMinutes": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 20,
+                        "minimum": 1,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.wallTimeBudgetMinutes.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.uncachedInputTokenBudget": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 300000,
+                        "minimum": 1000,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.uncachedInputTokenBudget.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.hardBudgetMultiplier": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 8,
+                        "minimum": 2,
+                        "maximum": 100,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.hardBudgetMultiplier.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.goalHardBudgetMultiplier": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 32,
+                        "minimum": 8,
+                        "maximum": 100,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.goalHardBudgetMultiplier.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.subAgentModelCallBudget": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 24,
+                        "minimum": 1,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.subAgentModelCallBudget.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.subAgentWallTimeBudgetMinutes": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 8,
+                        "minimum": 1,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.subAgentWallTimeBudgetMinutes.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.subAgentUncachedInputTokenBudget": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 100000,
+                        "minimum": 1000,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.subAgentUncachedInputTokenBudget.description%"
+                    }
                 }
             }
-        }
         ],
         "languages": [
             {

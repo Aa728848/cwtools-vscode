@@ -12,6 +12,7 @@ open JsonExtensions
 
 let gameStateLock = new ReaderWriterLockSlim()
 let mutable completionLockTimeoutMs = 80
+let private editorRequestLockTimeoutMs = 500
 let mutable completionImmediateFallback: (CompletionParams -> CompletionList option) option = None
 let mutable completionTimeoutFallback: (CompletionParams -> CompletionList option) option = None
 
@@ -283,14 +284,19 @@ type RealClient(send: BinaryWriter) =
             }
 
 
+type private ReadLockFallback =
+    { timeoutMs: int
+      getResult: unit -> string option }
+
 type private PendingTask =
     | ProcessNotification of method: string * task: Async<unit> * needsWriteLock: bool
+    | ProcessLockFreeRequest of id: int * task: Async<string option> * cancel: CancellationTokenSource
     | ProcessRequest of
         id: int *
         task: Async<string option> *
         cancel: CancellationTokenSource *
         isReadOnly: bool *
-        lockFallback: (unit -> string option) option
+        lockFallback: ReadLockFallback option
     | Quit
 
 let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryReader, send: BinaryWriter) =
@@ -401,6 +407,11 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
     let processQueue =
         new System.Collections.Concurrent.BlockingCollection<PendingTask>()
 
+    let fixedLockFallback timeoutMs result =
+        Some
+            { timeoutMs = timeoutMs
+              getResult = fun () -> Some result }
+
     Thread(fun () ->
         try
             // Read all messages on the main thread
@@ -435,26 +446,64 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                     | Some result -> respond (send, id, result)
                     | None ->
                         let task, isReadOnly = processRequest parsed
+                        // Editor-facing reads must not accumulate behind a long
+                        // validation/cache writer. VS Code naturally retries its
+                        // background providers; direct navigation gets a bounded
+                        // empty response instead of an unbounded loading widget.
                         let lockFallback =
                             match parsed with
                             | Completion p ->
-                                Some(fun () ->
-                                    completionTimeoutFallback
-                                    |> Option.bind (fun provider -> provider p)
-                                    |> serializeCompletionListOption)
+                                Some
+                                    { timeoutMs = completionLockTimeoutMs
+                                      getResult =
+                                        fun () ->
+                                            completionTimeoutFallback
+                                            |> Option.bind (fun provider -> provider p)
+                                            |> serializeCompletionListOption }
+                            | Hover _
+                            | SignatureHelp _
+                            | PrepareRename _ ->
+                                fixedLockFallback editorRequestLockTimeoutMs "null"
+                            | GotoDefinition _
+                            | FindReferences _
+                            | DocumentHighlight _ ->
+                                fixedLockFallback editorRequestLockTimeoutMs "[]"
+                            | DocumentSymbols _
+                            | WorkspaceSymbols _
+                            | CodeLens _
+                            | InlayHint _
+                            | DocumentLink _
+                            | SelectionRanges _
+                            | PrepareCallHierarchy _
+                            | CallHierarchyIncomingCalls _
+                            | CallHierarchyOutgoingCalls _
+                            | CodeActions _ ->
+                                fixedLockFallback editorRequestLockTimeoutMs "[]"
+                            | ResolveCompletionItem item ->
+                                fixedLockFallback editorRequestLockTimeoutMs (serializeCompletionItem item)
+                            | ResolveCodeLens lens ->
+                                fixedLockFallback editorRequestLockTimeoutMs (serializeCodeLens lens)
+                            | ResolveDocumentLink link ->
+                                fixedLockFallback editorRequestLockTimeoutMs (serializeDocumentLink link)
                             | SemanticTokensFull _
                             | SemanticTokensFullDelta _ ->
                                 // Never publish ranges from an older document version.
                                 // A prompt cancellation keeps VS Code's shifted tokens
                                 // visible and lets it retry after the writer drains.
-                                Some(fun () -> Some "[[CANCEL]]")
+                                fixedLockFallback completionLockTimeoutMs "[[CANCEL]]"
                             | _ -> None
                         let cancel = new CancellationTokenSource()
                         pendingRequests[id] <- cancel
                         // Publish the cancellation source before the work item. A
                         // fast worker must never finish/remove the request before
                         // the reader has made it cancellable.
-                        processQueue.Add(ProcessRequest(id, task, cancel, isReadOnly, lockFallback))
+                        match parsed with
+                        | FoldingRanges _ ->
+                            // Folding scans only the current DocumentStore text. It
+                            // must remain available while the game model has a writer.
+                            processQueue.Add(ProcessLockFreeRequest(id, task, cancel))
+                        | _ ->
+                            processQueue.Add(ProcessRequest(id, task, cancel, isReadOnly, lockFallback))
                 | Parser.ResponseMessage(id, result) -> responseAgent.Post(Response(id, result))
 
             processQueue.Add(Quit)
@@ -470,19 +519,47 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         let errText = $"""{{"id":%d{id},"error":{{"code":-32800,"message":"RequestCancelled"}}}}"""
         writeClient (send, errText)
 
+    let startLockFreeRequest
+        (id: int)
+        (task: Async<string option>)
+        (cancel: CancellationTokenSource)
+        =
+        let workflow =
+            async {
+                try
+                    if not cancel.IsCancellationRequested then
+                        match! task with
+                        | Some result -> respond (send, id, result)
+                        | None -> respond (send, id, "null")
+                finally
+                    pendingRequests.TryRemove(id) |> ignore
+            }
+
+        Async.StartWithContinuations(
+            workflow,
+            (fun () -> ()),
+            (fun error ->
+                pendingRequests.TryRemove(id) |> ignore
+                dprintfn $"Unhandled lock-free request failure %d{id}: %O{error}"),
+            (fun _ ->
+                pendingRequests.TryRemove(id) |> ignore
+                respondRequestCancelled id),
+            cancel.Token
+        )
+
     // Helper: run a read-only task concurrently on the .NET thread pool,
     // acquiring a shared read lock so concurrent writes are properly blocked.
     let startReadOnlyRequest
         (id: int)
         (task: Async<string option>)
         (cancel: CancellationTokenSource)
-        (lockFallback: (unit -> string option) option)
+        (lockFallback: ReadLockFallback option)
         =
         let workflow =
             async {
                 let acquired =
                     match lockFallback with
-                    | Some _ -> gameStateLock.TryEnterReadLock(completionLockTimeoutMs)
+                    | Some fallback -> gameStateLock.TryEnterReadLock(fallback.timeoutMs)
                     | None ->
                         gameStateLock.EnterReadLock()
                         true
@@ -505,7 +582,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 else
                     try
                         if not cancel.IsCancellationRequested then
-                            match lockFallback |> Option.bind (fun fb -> fb ()) with
+                            match lockFallback |> Option.bind (fun fallback -> fallback.getResult ()) with
                             | Some "[[CANCEL]]" ->
                                 respondRequestCancelled id
                             | Some result -> respond (send, id, result)
@@ -554,6 +631,8 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 gameStateLock.ExitWriteLock()
         | ProcessNotification(_, task, false (* no lock needed *)) ->
             Async.RunSynchronously(task)
+        | ProcessLockFreeRequest(id, task, cancel) ->
+            startLockFreeRequest id task cancel
         | ProcessRequest(id, task, cancel, true (* isReadOnly *), lockFallback) ->
             startReadOnlyRequest id task cancel lockFallback
         | ProcessRequest(id, task, cancel, false (* isWrite    *), _) ->

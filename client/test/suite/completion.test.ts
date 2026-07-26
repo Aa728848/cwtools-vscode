@@ -74,6 +74,20 @@ async function getCompletions(uri: vscode.Uri, position: vscode.Position): Promi
     return completions;
 }
 
+async function within<T>(promise: Thenable<T>, timeoutMs: number, label: string): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+        return await Promise.race([
+            Promise.resolve(promise),
+            new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`${label} did not respond within ${timeoutMs}ms`)), timeoutMs);
+            }),
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
 suite('LSP Completion Tests', function () {
     this.timeout(120000);
 
@@ -156,6 +170,69 @@ suite('LSP Completion Tests', function () {
 
         assert.ok(duration < 5000, `Completion should be fast, took ${duration}ms`);
         assert.ok(completions.items.length > 0, 'Should have completion items');
+    });
+
+    test('should keep editor language features responsive immediately after save', async function () {
+        const document = await openAndGetNicheDocument();
+        const position = new vscode.Position(26, 41);
+        const originalText = document.getText();
+
+        // Seed the completion fallback with a real result before save-time
+        // validation briefly replaces the live resource.
+        await getCompletions(document.uri, position);
+
+        const appendProbe = new vscode.WorkspaceEdit();
+        appendProbe.insert(document.uri, document.positionAt(originalText.length), '\n# responsiveness probe');
+
+        try {
+            assert.ok(await vscode.workspace.applyEdit(appendProbe), 'Failed to apply save responsiveness probe');
+            assert.ok(await document.save(), 'Failed to save responsiveness probe');
+
+            const startedAt = Date.now();
+            const [completions, hovers, definitions] = await Promise.all([
+                within(
+                    vscode.commands.executeCommand<vscode.CompletionList>(
+                        'vscode.executeCompletionItemProvider',
+                        document.uri,
+                        position,
+                    ),
+                    2000,
+                    'Completion after save',
+                ),
+                within(
+                    vscode.commands.executeCommand<vscode.Hover[]>(
+                        'vscode.executeHoverProvider',
+                        document.uri,
+                        position,
+                    ),
+                    2000,
+                    'Hover after save',
+                ),
+                within(
+                    vscode.commands.executeCommand<Array<vscode.Location | vscode.LocationLink>>(
+                        'vscode.executeDefinitionProvider',
+                        document.uri,
+                        position,
+                    ),
+                    2000,
+                    'Definition after save',
+                ),
+            ]);
+
+            assert.ok(Date.now() - startedAt < 2000, 'Save-time validation blocked editor language features');
+            assert.ok(completions?.items?.length, 'Completion after save should remain usable');
+            assert.ok(Array.isArray(hovers), 'Hover after save should return a bounded response');
+            assert.ok(Array.isArray(definitions), 'Definition after save should return a bounded response');
+        } finally {
+            const restore = new vscode.WorkspaceEdit();
+            restore.replace(
+                document.uri,
+                new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)),
+                originalText,
+            );
+            await vscode.workspace.applyEdit(restore);
+            await document.save();
+        }
     });
 
     test('should provide first-open and switched-line completions in scripted definition files', async function () {

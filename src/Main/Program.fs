@@ -3362,11 +3362,12 @@ type Server(client: ILanguageClient) =
                     clearLocalisationCaches ()
                 if isEditAction then markFileStale name "localisation"
 
-            // Localisation edits only need an atomic VFS/localisation-manager
-            // replacement here. The deferred localisation pass below owns the
-            // processed-map rebuild and diagnostics, so a save must not run the
-            // full rule-validation UpdateFile path for an unchanged script model.
-            let useInteractiveUpdate =
+            // Current-buffer edits can parse outside the game-state write lock and
+            // atomically install the prepared resource. Deep saves still run the
+            // normal validation afterwards, but under the shared read lock; only
+            // shallow typing/localisation uses detached interactive validation.
+            let usePreparedEditorUpdate = isEditAction && not forceDisk
+            let useInteractiveValidation =
                 isEditAction
                 && (shallowAnalyze
                     || name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase))
@@ -3375,9 +3376,9 @@ type Server(client: ILanguageClient) =
                 isEditAction
                 && (not shallowAnalyze
                     || fastDefinitionIndex
-                    || (useInteractiveUpdate && isScriptedDefinitionPath name))
+                    || (useInteractiveValidation && isScriptedDefinitionPath name))
                 && (incrementalTypeRefreshEnabled ()
-                    || (useInteractiveUpdate && isScriptedDefinitionPath name))
+                    || (useInteractiveValidation && isScriptedDefinitionPath name))
                 && isTypeDefiningPath name
                 && not (isInlineScriptDefinitionPath name)
             let shouldRevalidateReferencedCallSites =
@@ -3520,10 +3521,10 @@ type Server(client: ILanguageClient) =
                     // post-commit under the READ lock, so the write-locked first pass only
                     // needs the shallow update — this keeps save-time write locks short.
                     let deferDeepValidation =
-                        canTryIncrementalTypeRefresh && not fastDefinitionIndex && not useInteractiveUpdate
+                        canTryIncrementalTypeRefresh && not fastDefinitionIndex && not useInteractiveValidation
 
-                    let stagedInteractiveUpdate =
-                        if useInteractiveUpdate
+                    let stagedEditorUpdate =
+                        if usePreparedEditorUpdate
                            && not interactiveResourceAlreadyCurrent
                            && lintSnapshotStillCurrent () then
                             let prepareSw = Stopwatch.StartNew()
@@ -3579,7 +3580,7 @@ type Server(client: ILanguageClient) =
                          priorDefsForRevalidation,
                          definitionIdentityUnchanged,
                          gameRefAtUpdate,
-                         interactiveCommitted,
+                         preparedUpdateCommitted,
                          updateSuperseded) =
                         try
                             let gameStillCurrent =
@@ -3619,8 +3620,8 @@ type Server(client: ILanguageClient) =
 
                                 if interactiveResourceAlreadyCurrent then
                                     [], prior, identityUnchanged, game, false, false
-                                elif useInteractiveUpdate then
-                                    match stagedInteractiveUpdate with
+                                elif usePreparedEditorUpdate then
+                                    match stagedEditorUpdate with
                                     | Some staged when game.CommitUpdateFileInteractive staged ->
                                         if staged.kind = LocalisationFile then bumpLocalisationModelEpoch ()
                                         if isTypeDefiningPath name then
@@ -3628,6 +3629,16 @@ type Server(client: ILanguageClient) =
                                             |> Option.iter (fun version ->
                                                 committedInteractiveVersions.[normaliseCachePath name] <- struct (version, game))
                                         [], prior, identityUnchanged, game, true, false
+                                    | _ when not useInteractiveValidation ->
+                                        // Preparation/commit is an optimisation for deep saves.
+                                        // If either failed, retain the established locked update
+                                        // path so a save never leaves the live model stale.
+                                        committedInteractiveVersions.TryRemove(normaliseCachePath name) |> ignore
+                                        let errs = game.UpdateFile (shallowAnalyze || deferDeepValidation) name filetext
+                                        if name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) then
+                                            bumpLocalisationModelEpoch ()
+                                        validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
+                                        errs, prior, identityUnchanged, game, false, false
                                     | _ ->
                                         [], prior, identityUnchanged, game, false, true
                                 else
@@ -3662,9 +3673,9 @@ type Server(client: ILanguageClient) =
 
                     let skipIncrementalRefresh = incrementalIndexAlreadyCurrent
 
-                    if useInteractiveUpdate then
+                    if usePreparedEditorUpdate then
                         monitorLog Lint
-                            $"CommitUpdateFileInteractive file={name} wait={updateWriteWaitSw.ElapsedMilliseconds}ms hold={updateWriteHoldSw.ElapsedMilliseconds}ms committed={interactiveCommitted}"
+                            $"CommitUpdateFileInteractive file={name} wait={updateWriteWaitSw.ElapsedMilliseconds}ms hold={updateWriteHoldSw.ElapsedMilliseconds}ms committed={preparedUpdateCommitted}"
 
                     if updateSuperseded then
                         lintUpdateSuperseded <- true
@@ -3818,7 +3829,7 @@ type Server(client: ILanguageClient) =
                         monitorLog Refresh
                             $"CommitIncrementalTypes file={name} wait={commitWriteWaitSw.ElapsedMilliseconds}ms hold={commitWriteHoldSw.ElapsedMilliseconds}ms committed={incrementalCommitSucceeded} semantic={incrementalSemanticChanged}"
 
-                    if useInteractiveUpdate
+                    if useInteractiveValidation
                        && not skipIncrementalRefresh
                        && not incrementalCommitSucceeded then
                         fileDiagnosticStates.Keys
@@ -3868,9 +3879,16 @@ type Server(client: ILanguageClient) =
                         finally
                             gameStateLock.ExitReadLock()
 
+                    let validatePreparedInteractively =
+                        preparedUpdateCommitted
+                        && not fastDefinitionIndex
+                        && (useInteractiveValidation
+                            || (stagedEditorUpdate
+                                |> Option.exists (fun staged -> staged.kind = ShaderFile)))
+
                     let updateErrors =
-                        if interactiveCommitted && not fastDefinitionIndex then
-                            match stagedInteractiveUpdate with
+                        if validatePreparedInteractively then
+                            match stagedEditorUpdate with
                             | Some staged ->
                                 gameStateLock.EnterReadLock()
                                 try
@@ -3894,7 +3912,8 @@ type Server(client: ILanguageClient) =
                                         []
                                 finally gameStateLock.ExitReadLock()
                             | None -> []
-                        elif fastDefinitionIndex
+                        elif preparedUpdateCommitted
+                             || fastDefinitionIndex
                              || (deferDeepValidation && (incrementalCommitSucceeded || not shallowAnalyze)) then
                             // The VFS already holds the new text from the earlier UpdateFile, so
                             // the deep (re-)validation only reads; the shared read lock lets
@@ -3925,7 +3944,7 @@ type Server(client: ILanguageClient) =
                             updateErrors
 
                     let deferGlobalNegativeDiagnostics =
-                        (useInteractiveUpdate
+                        (useInteractiveValidation
                          && isTypeDefiningPath name
                          && (not canTryIncrementalTypeRefresh
                              || (not skipIncrementalRefresh && not incrementalCommitSucceeded)))
@@ -3933,7 +3952,7 @@ type Server(client: ILanguageClient) =
                             && not skipIncrementalRefresh
                             && not incrementalCommitSucceeded)
 
-                    if useInteractiveUpdate
+                    if useInteractiveValidation
                        && isTypeDefiningPath name
                        && not (name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)) then
                         lintDeferredGlobalKinds <- [ "localisation" ]
@@ -3959,7 +3978,8 @@ type Server(client: ILanguageClient) =
                             (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
                     let allocAfterUpdate = GC.GetTotalAllocatedBytes(false)
                     let updateMode =
-                        if useInteractiveUpdate && not fastDefinitionIndex then "interactive"
+                        if useInteractiveValidation && not fastDefinitionIndex then "interactive"
+                        elif preparedUpdateCommitted then "prepared-deep"
                         else "full"
                     monitorLog Lint $"UpdateFile file={name} mode={updateMode} shallow={shallowAnalyze} allocDeltaMB={(allocAfterUpdate - allocBeforeUpdate) / 1048576L}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                     
@@ -3990,7 +4010,7 @@ type Server(client: ILanguageClient) =
             // validation results after a slow Ctrl+S refresh.
             let refreshedCurrentDiagnostics = diagnosticsForFile name visibleDiagnosticsList
             let publishedCurrentDiagnostics =
-                if isDynamicDefinitionPath name && not useInteractiveUpdate then
+                if isDynamicDefinitionPath name && not useInteractiveValidation then
                     DiagnosticMerge.mergeImmediateDefinitionDiagnostics
                         (existingDiagnosticsForFile name)
                         refreshedCurrentDiagnostics
@@ -4665,6 +4685,8 @@ type Server(client: ILanguageClient) =
         MailboxProcessor.Start(fun agent ->
             let mutable nextAnalyseTime = DateTime.Now
             let mutable needsDeepAnalyse = false
+            let activeLintPaths =
+                System.Collections.Concurrent.ConcurrentDictionary<string, byte>()
 
             let analyzeTask (file: VersionedTextDocumentIdentifier) (options: LintRequestOptions) (isEditAction: bool) =
                 async {
@@ -4743,6 +4765,7 @@ type Server(client: ILanguageClient) =
                             logError $"uri %A{uri.LocalPath} \n exception %A{e}"
                     finally
                         cycleSw.Stop()
+                        activeLintPaths.TryRemove(normaliseCachePath uri.LocalPath) |> ignore
                         ownedLintGeneration
                         |> Option.iter (fun (filePath, generation) ->
                             releaseLintGeneration filePath generation)
@@ -4758,6 +4781,7 @@ type Server(client: ILanguageClient) =
 
             let analyze (file: VersionedTextDocumentIdentifier) options isEditAction =
                 //eprintfn "Analyze %s" (file.uri.ToString())
+                activeLintPaths.[normaliseCachePath file.uri.LocalPath] <- 0uy
                 analyzeTask file options isEditAction |> ignore
 
             let shouldYieldLintStart (file: VersionedTextDocumentIdentifier) isEditAction =
@@ -4812,7 +4836,12 @@ type Server(client: ILanguageClient) =
                         analyze ur normalLintRequest false  // not an edit action
                         return! loop true state
                     | Some (OpenRequest ur), true ->
-                        if not (Map.containsKey ur.uri.LocalPath state) then
+                        if activeLintPaths.ContainsKey(normaliseCachePath ur.uri.LocalPath) then
+                            // didOpen and the active-editor focus notification commonly
+                            // arrive back-to-back. The running pass observes the same
+                            // DocumentStore version, so a second validation is redundant.
+                            return! loop inprogress state
+                        elif not (Map.containsKey ur.uri.LocalPath state) then
                             return! loop inprogress (state |> Map.add ur.uri.LocalPath (ur, normalLintRequest, false))
                         else
                             return! loop inprogress state  // edit request already queued, skip open
@@ -7291,9 +7320,8 @@ type Server(client: ILanguageClient) =
         member this.FoldingRanges(p: FoldingRangeParams) =
             async {
                 let filePath = getPathFromDoc p.textDocument.uri
-                if not (PdxShaderFeatures.isShaderFile filePath) then return []
-                else
-                    let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                if PdxShaderFeatures.isShaderFile filePath then
                     return
                         PdxShaderFeatures.foldingRanges filePath fileText
                         |> List.map (fun shaderRange ->
@@ -7304,6 +7332,15 @@ type Server(client: ILanguageClient) =
                               kind = Some "region" })
                         |> List.distinctBy (fun item -> item.startLine, item.startCharacter, item.endLine, item.endCharacter)
                         |> List.sortBy (fun item -> item.startLine, item.startCharacter, item.endLine, item.endCharacter)
+                else
+                    return
+                        Main.PdxFolding.ranges fileText
+                        |> List.map (fun span ->
+                            { startLine = span.startLine
+                              startCharacter = Some span.startCharacter
+                              endLine = span.endLine
+                              endCharacter = span.endCharacter
+                              kind = None })
             }
             |> catchError []
 

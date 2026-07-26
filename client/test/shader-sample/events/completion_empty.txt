@@ -1,0 +1,5 @@
+namespace = completion_empty
+
+event = {
+	
+}

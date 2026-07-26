@@ -149,4 +149,42 @@ suite('Paradox Shader LSP contract', function () {
         );
         assert.strictEqual(retry.data.length % 5, 0);
     });
+
+    test('returns event-field suggestions for a partially typed key', async () => {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        assert.ok(workspaceFolder);
+        const emptyEventPath = path.join(workspaceFolder.uri.fsPath, 'events', 'completion_empty.txt');
+        const emptyEventDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(emptyEventPath));
+        await vscode.languages.setTextDocumentLanguage(emptyEventDocument, 'stellaris');
+        await vscode.window.showTextDocument(emptyEventDocument);
+        const emptyCompletion = await client.sendRequest<{ items: Array<{ label: string }> } | null>(
+            'textDocument/completion',
+            {
+                textDocument: { uri: emptyEventDocument.uri.toString() },
+                position: { line: 3, character: emptyEventDocument.lineAt(3).text.length },
+                context: { triggerKind: 1 },
+            },
+        );
+        const emptyLabels = emptyCompletion?.items.map(item => item.label) ?? [];
+        assert.ok(emptyLabels.includes('id'), `empty event completion must contain id; received: ${emptyLabels.slice(0, 40).join(', ')}`);
+
+        const eventPath = path.join(workspaceFolder.uri.fsPath, 'events', 'completion_contract.txt');
+        const eventDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(eventPath));
+        await vscode.languages.setTextDocumentLanguage(eventDocument, 'stellaris');
+        await vscode.window.showTextDocument(eventDocument);
+
+        const line = eventDocument.lineAt(3);
+        const completion = await client.sendRequest<{ items: Array<{ label: string }> } | null>(
+            'textDocument/completion',
+            {
+                textDocument: { uri: eventDocument.uri.toString() },
+                position: { line: 3, character: line.text.length },
+                context: { triggerKind: 1 },
+            },
+        );
+
+        assert.ok(completion, 'the LSP must return a completion list');
+        const labels = completion.items.map(item => item.label);
+        assert.ok(labels.includes('id'), `event completion must contain id; received: ${labels.slice(0, 40).join(', ')}`);
+    });
 });

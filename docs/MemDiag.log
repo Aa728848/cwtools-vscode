@@ -1,0 +1,2607 @@
+[09:58:42] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 1 [lint=1] | 全局刷新次数: 0 [refresh=0] | 本地化刷新次数: 0 [refreshLoc=0]
+  ↳ 补全次数: 0 [completion=0] | 字符串池: 624586 [strings=624586] | 整数池: 973383 [ints=973383]
+  内存: 托管堆: 4879MB [heap=4879MB] | 累计分配: 148630MB [alloc=148630MB] | 工作集: 6188MB [working=6188MB] | 专用内存: 6860MB [private=6860MB]
+  ↳ 堆碎片: 1061MB [fragmented=1061MB] | 第 0 代 GC: 2374 [gc0=2374] | 第 1 代 GC: 184 [gc1=184] | 第 2 代 GC: 16 [gc2=16]
+  诊断: 文件: 10737 [files=10737] | 最新: 10737 [fresh=10737] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[09:58:42] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10737 [files=10737] | 最新: 10737 [fresh=10737] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[09:58:42] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 137 [locFiles=137] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[09:58:42] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 624586 [strings=624586] | 整数池: 973383 [ints=973383]
+  内存: 托管堆: 4880MB [heap=4880MB] | 累计分配: 148630MB [alloc=148630MB] | 工作集: 6188MB [working=6188MB] | 专用内存: 6860MB [private=6860MB]
+  ↳ 堆碎片: 1061MB [fragmented=1061MB] | 第 0 代 GC: 2374 [gc0=2374] | 第 1 代 GC: 184 [gc1=184] | 第 2 代 GC: 16 [gc2=16]
+  诊断: 文件: 10737 [files=10737] | 最新: 10737 [fresh=10737] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:15:33] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/deposits/spth_planetary_deposits.txt
+  详情: 行: 224 [line=224] | 列: 29 [char=29] | 耗时: 129ms [elapsed=129ms] | 本次分配: 31 MB [allocDeltaMB=31]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:15:34] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/deposits/spth_planetary_deposits.txt
+  详情: 行: 224 [line=224] | 列: 25 [char=25] | 耗时: 56ms [elapsed=56ms] | 本次分配: 9 MB [allocDeltaMB=9]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:15:37] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/deposits/spth_planetary_deposits.txt
+  详情: 行: 221 [line=221] | 列: 40 [char=40] | 耗时: 35ms [elapsed=35ms] | 本次分配: 9 MB [allocDeltaMB=9]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:15:41] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/deposits/spth_planetary_deposits.txt
+  详情: 行: 226 [line=226] | 列: 1 [char=1] | 耗时: 43ms [elapsed=43ms] | 本次分配: 11 MB [allocDeltaMB=11]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:15:59] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/deposits/spth_planetary_deposits.txt
+  详情: 行: 221 [line=221] | 列: 32 [char=32] | 耗时: 28ms [elapsed=28ms] | 本次分配: 9 MB [allocDeltaMB=9]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:16:22] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/deposits/spth_planetary_deposits.txt
+  详情: 行: 223 [line=223] | 列: 20 [char=20] | 耗时: 53ms [elapsed=53ms] | 本次分配: 9 MB [allocDeltaMB=9]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:16:30] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/deposits/spth_planetary_deposits.txt
+  详情: 行: 221 [line=221] | 列: 29 [char=29] | 耗时: 46ms [elapsed=46ms] | 本次分配: 9 MB [allocDeltaMB=9]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:27:23] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/deposits/spth_planetary_deposits.txt
+  详情: 行: 228 [line=228] | 列: 1 [char=1] | 耗时: 45ms [elapsed=45ms] | 本次分配: 11 MB [allocDeltaMB=11]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:28:33] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 行: 11 [line=11] | 列: 39 [char=39] | 耗时: 131ms [elapsed=131ms] | 本次分配: 11 MB [allocDeltaMB=11]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 3 [groupedTypeFiles=3]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:28:41] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 行: 297 [line=297] | 列: 3 [char=3] | 耗时: 60ms [elapsed=60ms] | 本次分配: 10 MB [allocDeltaMB=10]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 3 [groupedTypeFiles=3]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:28:42] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 行: 297 [line=297] | 列: 4 [char=4] | 耗时: 52ms [elapsed=52ms] | 本次分配: 9 MB [allocDeltaMB=9]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 3 [groupedTypeFiles=3]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:28:42] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 行: 297 [line=297] | 列: 4 [char=4] | 耗时: 51ms [elapsed=51ms] | 本次分配: 3 MB [allocDeltaMB=3]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 3 [groupedTypeFiles=3]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:28:43] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 行: 297 [line=297] | 列: 4 [char=4] | 耗时: 48ms [elapsed=48ms] | 本次分配: 11 MB [allocDeltaMB=11]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 3 [groupedTypeFiles=3]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:28:57] [刷新] CommitIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 等待写锁: 15ms [wait=15ms] | 持有写锁: 0ms [hold=0ms] | 已提交: 否 [committed=False] | 语义: 否 [semantic=False]
+
+[10:28:57] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 16314 MB [allocDeltaMB=16314]
+  诊断: 文件: 10737 [files=10737] | 最新: 10736 [fresh=10736] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:28:57] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 2 [lint=2] | 全局刷新次数: 0 [refresh=0] | 本地化刷新次数: 0 [refreshLoc=0]
+  ↳ 补全次数: 0 [completion=0] | 字符串池: 624715 [strings=624715] | 整数池: 973525 [ints=973525]
+  内存: 托管堆: 4934MB [heap=4934MB] | 累计分配: 166112MB [alloc=166112MB] | 工作集: 5508MB [working=5508MB] | 专用内存: 6994MB [private=6994MB]
+  ↳ 堆碎片: 846MB [fragmented=846MB] | 第 0 代 GC: 2398 [gc0=2398] | 第 1 代 GC: 185 [gc1=185] | 第 2 代 GC: 16 [gc2=16]
+  诊断: 文件: 10737 [files=10737] | 最新: 10736 [fresh=10736] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:29:09] [刷新] PrepareIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 268ms [hold=268ms] | 使用 staged 刷新: 是 [staged=True]
+
+[10:29:09] [刷新] CommitIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 0ms [hold=0ms] | 已提交: 是 [committed=True] | 语义: 是 [semantic=True]
+
+[10:29:09] [刷新] 增量刷新类型
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 语义: 是 [semantic=True] | 增量补丁: 1 [patches=1] | 引用文件: 0 [refs=0]
+
+[10:29:09] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 16642 MB [allocDeltaMB=16642]
+  诊断: 文件: 10737 [files=10737] | 最新: 10736 [fresh=10736] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:29:09] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 1 [skip=1] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 10737 [files=10737] | 最新: 10736 [fresh=10736] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:29:09] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 136 [locFiles=136] | 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+
+[10:29:09] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 624715 [strings=624715] | 整数池: 973525 [ints=973525]
+  内存: 托管堆: 4154MB [heap=4154MB] | 累计分配: 182755MB [alloc=182755MB] | 工作集: 4955MB [working=4955MB] | 专用内存: 6419MB [private=6419MB]
+  ↳ 堆碎片: 1078MB [fragmented=1078MB] | 第 0 代 GC: 2730 [gc0=2730] | 第 1 代 GC: 188 [gc1=188] | 第 2 代 GC: 18 [gc2=18]
+  诊断: 文件: 10737 [files=10737] | 最新: 10736 [fresh=10736] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:29:11] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 2 [skip=2] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 10737 [files=10737] | 最新: 10736 [fresh=10736] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:29:11] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 136 [locFiles=136] | 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+
+[10:29:11] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 624715 [strings=624715] | 整数池: 973525 [ints=973525]
+  内存: 托管堆: 4154MB [heap=4154MB] | 累计分配: 182755MB [alloc=182755MB] | 工作集: 4958MB [working=4958MB] | 专用内存: 6422MB [private=6422MB]
+  ↳ 堆碎片: 1078MB [fragmented=1078MB] | 第 0 代 GC: 2730 [gc0=2730] | 第 1 代 GC: 188 [gc1=188] | 第 2 代 GC: 18 [gc2=18]
+  诊断: 文件: 10737 [files=10737] | 最新: 10736 [fresh=10736] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:29:33] [刷新] 刷新缓存
+  详情: 本次分配: 20990 MB [allocDeltaMB=20990] | 使用 staged 刷新: 是 [staged=True] | 强制刷新: 否 [force=False] | 达到跳过上限: 否 [skipLimit=False]
+  内存: 托管堆: 7334MB [heap=7334MB] | 累计分配: 203746MB [alloc=203746MB] | 工作集: 7532MB [working=7532MB] | 专用内存: 9030MB [private=9030MB]
+  ↳ 堆碎片: 643MB [fragmented=643MB] | 第 0 代 GC: 2952 [gc0=2952] | 第 1 代 GC: 223 [gc1=223] | 第 2 代 GC: 19 [gc2=19]
+  诊断: 文件: 10737 [files=10737] | 最新: 10736 [fresh=10736] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:29:51] [本地化] 本地化诊断
+  详情: 本次分配: 22630 MB [allocDeltaMB=22630] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+
+[10:29:51] [内存] 分析周期
+  详情: 本周期分配: 43763 MB [cycleAllocMB=43763] | 字符串池: 625427 [strings=625427] | 整数池: 974751 [ints=974751]
+  内存: 托管堆: 3984MB [heap=3984MB] | 累计分配: 226519MB [alloc=226519MB] | 工作集: 6063MB [working=6063MB] | 专用内存: 7508MB [private=7508MB]
+  ↳ 堆碎片: 2351MB [fragmented=2351MB] | 第 0 代 GC: 3411 [gc0=3411] | 第 1 代 GC: 231 [gc1=231] | 第 2 代 GC: 20 [gc2=20]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:29:51] [性能] 性能计数
+  详情: 最近操作: delayedAnalyze [last=delayedAnalyze] | 校验次数: 3 [lint=3] | 全局刷新次数: 1 [refresh=1] | 本地化刷新次数: 1 [refreshLoc=1]
+  ↳ 补全次数: 0 [completion=0] | 字符串池: 625427 [strings=625427] | 整数池: 974751 [ints=974751]
+  内存: 托管堆: 3984MB [heap=3984MB] | 累计分配: 226519MB [alloc=226519MB] | 工作集: 6063MB [working=6063MB] | 专用内存: 7508MB [private=7508MB]
+  ↳ 堆碎片: 2351MB [fragmented=2351MB] | 第 0 代 GC: 3411 [gc0=3411] | 第 1 代 GC: 231 [gc1=231] | 第 2 代 GC: 20 [gc2=20]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:30:02] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 16098 MB [allocDeltaMB=16098]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:38:34] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 行: 312 [line=312] | 列: 55 [char=55] | 耗时: 72ms [elapsed=72ms] | 本次分配: 19 MB [allocDeltaMB=19]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:38:39] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 行: 297 [line=297] | 列: 6 [char=6] | 耗时: 73ms [elapsed=73ms] | 本次分配: 17 MB [allocDeltaMB=17]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:38:39] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/th_common.gfx
+  详情: 行: 292 [line=292] | 列: 15 [char=15] | 耗时: 73ms [elapsed=73ms] | 本次分配: 17 MB [allocDeltaMB=17]
+  ↳ 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:39:55] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/gfx/FX/math.fxh
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 13 MB [allocDeltaMB=13]
+  诊断: 文件: 10723 [files=10723] | 最新: 1 [fresh=1] | 待校验: 10722 [pending=10722] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:39:55] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 5 [lint=5] | 全局刷新次数: 1 [refresh=1] | 本地化刷新次数: 1 [refreshLoc=1]
+  ↳ 补全次数: 0 [completion=0] | 字符串池: 625427 [strings=625427] | 整数池: 974751 [ints=974751]
+  内存: 托管堆: 4028MB [heap=4028MB] | 累计分配: 242717MB [alloc=242717MB] | 工作集: 5918MB [working=5918MB] | 专用内存: 7288MB [private=7288MB]
+  ↳ 堆碎片: 2329MB [fragmented=2329MB] | 第 0 代 GC: 3835 [gc0=3835] | 第 1 代 GC: 233 [gc1=233] | 第 2 代 GC: 20 [gc2=20]
+  诊断: 文件: 10724 [files=10724] | 最新: 2 [fresh=2] | 待校验: 10722 [pending=10722] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:39:55] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10724 [files=10724] | 最新: 2 [fresh=2] | 待校验: 10722 [pending=10722] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:39:55] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 137 [locFiles=137] | 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+
+[10:39:55] [内存] 分析周期
+  详情: 本周期分配: 174 MB [cycleAllocMB=174] | 字符串池: 625427 [strings=625427] | 整数池: 974751 [ints=974751]
+  内存: 托管堆: 4119MB [heap=4119MB] | 累计分配: 242896MB [alloc=242896MB] | 工作集: 5961MB [working=5961MB] | 专用内存: 7338MB [private=7338MB]
+  ↳ 堆碎片: 2329MB [fragmented=2329MB] | 第 0 代 GC: 3836 [gc0=3836] | 第 1 代 GC: 233 [gc1=233] | 第 2 代 GC: 20 [gc2=20]
+  诊断: 文件: 10724 [files=10724] | 最新: 2 [fresh=2] | 待校验: 10722 [pending=10722] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:39:56] [刷新] PrepareIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/gfx/FX/math.fxh
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 159ms [hold=159ms] | 使用 staged 刷新: 是 [staged=True]
+
+[10:39:56] [刷新] 增量刷新类型 · 全局语义未变化
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/gfx/FX/math.fxh
+
+[10:39:56] [刷新] CommitIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/gfx/FX/math.fxh
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 0ms [hold=0ms] | 已提交: 是 [committed=True] | 语义: 否 [semantic=False]
+
+[10:39:56] [刷新] 增量刷新类型
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/gfx/FX/math.fxh
+  详情: 语义: 否 [semantic=False] | 增量补丁: 0 [patches=0] | 引用文件: 0 [refs=0]
+
+[10:39:56] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/gfx/FX/math.fxh
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 189 MB [allocDeltaMB=189]
+  诊断: 文件: 10724 [files=10724] | 最新: 1 [fresh=1] | 待校验: 10722 [pending=10722] | 过期: 1 [stale=1]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:39:56] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 1 [skip=1] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 10724 [files=10724] | 最新: 1 [fresh=1] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:39:56] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 137 [locFiles=137] | 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+
+[10:39:56] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 625427 [strings=625427] | 整数池: 974751 [ints=974751]
+  内存: 托管堆: 4312MB [heap=4312MB] | 累计分配: 243089MB [alloc=243089MB] | 工作集: 6021MB [working=6021MB] | 专用内存: 7467MB [private=7467MB]
+  ↳ 堆碎片: 2329MB [fragmented=2329MB] | 第 0 代 GC: 3836 [gc0=3836] | 第 1 代 GC: 233 [gc1=233] | 第 2 代 GC: 20 [gc2=20]
+  诊断: 文件: 10724 [files=10724] | 最新: 1 [fresh=1] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:39:58] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 2 [skip=2] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 10724 [files=10724] | 最新: 1 [fresh=1] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:39:58] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 137 [locFiles=137] | 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+
+[10:39:58] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 625427 [strings=625427] | 整数池: 974751 [ints=974751]
+  内存: 托管堆: 4314MB [heap=4314MB] | 累计分配: 243091MB [alloc=243091MB] | 工作集: 6019MB [working=6019MB] | 专用内存: 7467MB [private=7467MB]
+  ↳ 堆碎片: 2329MB [fragmented=2329MB] | 第 0 代 GC: 3836 [gc0=3836] | 第 1 代 GC: 233 [gc1=233] | 第 2 代 GC: 20 [gc2=20]
+  诊断: 文件: 10724 [files=10724] | 最新: 1 [fresh=1] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:40:36] [刷新] 刷新缓存
+  详情: 本次分配: 41498 MB [allocDeltaMB=41498] | 使用 staged 刷新: 是 [staged=True] | 强制刷新: 否 [force=False] | 达到跳过上限: 否 [skipLimit=False]
+  内存: 托管堆: 7145MB [heap=7145MB] | 累计分配: 284590MB [alloc=284590MB] | 工作集: 7959MB [working=7959MB] | 专用内存: 9407MB [private=9407MB]
+  ↳ 堆碎片: 1247MB [fragmented=1247MB] | 第 0 代 GC: 4441 [gc0=4441] | 第 1 代 GC: 270 [gc1=270] | 第 2 代 GC: 22 [gc2=22]
+  诊断: 文件: 10724 [files=10724] | 最新: 1 [fresh=1] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:40:53] [本地化] 本地化诊断
+  详情: 本次分配: 22629 MB [allocDeltaMB=22629] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+
+[10:40:53] [内存] 分析周期
+  详情: 本周期分配: 64261 MB [cycleAllocMB=64261] | 字符串池: 625429 [strings=625429] | 整数池: 974753 [ints=974753]
+  内存: 托管堆: 4465MB [heap=4465MB] | 累计分配: 307352MB [alloc=307352MB] | 工作集: 7464MB [working=7464MB] | 专用内存: 8995MB [private=8995MB]
+  ↳ 堆碎片: 3223MB [fragmented=3223MB] | 第 0 代 GC: 4901 [gc0=4901] | 第 1 代 GC: 276 [gc1=276] | 第 2 代 GC: 23 [gc2=23]
+  诊断: 文件: 10724 [files=10724] | 最新: 0 [fresh=0] | 待校验: 10724 [pending=10724] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:40:53] [性能] 性能计数
+  详情: 最近操作: delayedAnalyze [last=delayedAnalyze] | 校验次数: 6 [lint=6] | 全局刷新次数: 2 [refresh=2] | 本地化刷新次数: 2 [refreshLoc=2]
+  ↳ 补全次数: 0 [completion=0] | 字符串池: 625429 [strings=625429] | 整数池: 974753 [ints=974753]
+  内存: 托管堆: 4465MB [heap=4465MB] | 累计分配: 307352MB [alloc=307352MB] | 工作集: 7464MB [working=7464MB] | 专用内存: 8995MB [private=8995MB]
+  ↳ 堆碎片: 3223MB [fragmented=3223MB] | 第 0 代 GC: 4901 [gc0=4901] | 第 1 代 GC: 276 [gc1=276] | 第 2 代 GC: 23 [gc2=23]
+  诊断: 文件: 10724 [files=10724] | 最新: 0 [fresh=0] | 待校验: 10724 [pending=10724] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:40:53] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/gfx/FX/math.fxh
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 13 MB [allocDeltaMB=13]
+  诊断: 文件: 10724 [files=10724] | 最新: 0 [fresh=0] | 待校验: 10724 [pending=10724] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:47:10] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/country_types/spth_crisis_country_types.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 16261 MB [allocDeltaMB=16261]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:47:10] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 8 [lint=8] | 全局刷新次数: 2 [refresh=2] | 本地化刷新次数: 2 [refreshLoc=2]
+  ↳ 补全次数: 0 [completion=0] | 字符串池: 625429 [strings=625429] | 整数池: 974753 [ints=974753]
+  内存: 托管堆: 4595MB [heap=4595MB] | 累计分配: 323707MB [alloc=323707MB] | 工作集: 7205MB [working=7205MB] | 专用内存: 8818MB [private=8818MB]
+  ↳ 堆碎片: 3128MB [fragmented=3128MB] | 第 0 代 GC: 5299 [gc0=5299] | 第 1 代 GC: 279 [gc1=279] | 第 2 代 GC: 23 [gc2=23]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:47:28] [补全] 补全
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/country_types/spth_crisis_country_types.txt
+  详情: 行: 557 [line=557] | 列: 1 [char=1] | 结果数: 74 [items=74] | 耗时: 269ms [elapsed=269ms]
+  ↳ 本次分配: 326 MB [allocDeltaMB=326]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 1 [completionTTL=1] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:47:28] [补全] 补全
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/country_types/spth_crisis_country_types.txt
+  详情: 行: 557 [line=557] | 列: 4 [char=4] | 结果数: 74 [items=74] | 耗时: 37ms [elapsed=37ms]
+  ↳ 本次分配: 39 MB [allocDeltaMB=39]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 1 [completionTTL=1] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:47:28] [补全] 补全
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/country_types/spth_crisis_country_types.txt
+  详情: 行: 557 [line=557] | 列: 5 [char=5] | 结果数: 74 [items=74] | 耗时: 15ms [elapsed=15ms]
+  ↳ 本次分配: 27 MB [allocDeltaMB=27]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 1 [completionTTL=1] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:47:28] [补全] 补全
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/country_types/spth_crisis_country_types.txt
+  详情: 行: 557 [line=557] | 列: 6 [char=6] | 结果数: 74 [items=74] | 耗时: 18ms [elapsed=18ms]
+  ↳ 本次分配: 30 MB [allocDeltaMB=30]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 1 [completionTTL=1] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:47:28] [补全] 补全
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/country_types/spth_crisis_country_types.txt
+  详情: 行: 557 [line=557] | 列: 7 [char=7] | 结果数: 74 [items=74] | 耗时: 20ms [elapsed=20ms]
+  ↳ 本次分配: 26 MB [allocDeltaMB=26]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 1 [completionTTL=1] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:47:39] [刷新] 刷新缓存
+  详情: 本次分配: 30393 MB [allocDeltaMB=30393] | 使用 staged 刷新: 是 [staged=True] | 强制刷新: 否 [force=False] | 达到跳过上限: 否 [skipLimit=False]
+  内存: 托管堆: 9656MB [heap=9656MB] | 累计分配: 354100MB [alloc=354100MB] | 工作集: 9711MB [working=9711MB] | 专用内存: 11443MB [private=11443MB]
+  ↳ 堆碎片: 685MB [fragmented=685MB] | 第 0 代 GC: 5542 [gc0=5542] | 第 1 代 GC: 314 [gc1=314] | 第 2 代 GC: 24 [gc2=24]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10722 [pending=10722] | 过期: 1 [stale=1]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:47:53] [补全] 补全 · 锁等待超时回退
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/country_types/spth_crisis_country_types.txt
+  详情: 行: 557 [line=557] | 列: 21 [char=21] | prefix:  [prefix=] | 旧缓存结果数: 74 [staleItems=74]
+
+[10:47:59] [本地化] 本地化诊断
+  详情: 本次分配: 22631 MB [allocDeltaMB=22631] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 178771 [cachedLocKeys=178771]
+
+[10:47:59] [内存] 分析周期
+  详情: 本周期分配: 53164 MB [cycleAllocMB=53164] | 字符串池: 625449 [strings=625449] | 整数池: 974775 [ints=974775]
+  内存: 托管堆: 4975MB [heap=4975MB] | 累计分配: 376871MB [alloc=376871MB] | 工作集: 5759MB [working=5759MB] | 专用内存: 7620MB [private=7620MB]
+  ↳ 堆碎片: 1124MB [fragmented=1124MB] | 第 0 代 GC: 6003 [gc0=6003] | 第 1 代 GC: 321 [gc1=321] | 第 2 代 GC: 26 [gc2=26]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:47:59] [性能] 性能计数
+  详情: 最近操作: delayedAnalyze [last=delayedAnalyze] | 校验次数: 8 [lint=8] | 全局刷新次数: 3 [refresh=3] | 本地化刷新次数: 3 [refreshLoc=3]
+  ↳ 补全次数: 5 [completion=5] | 字符串池: 625449 [strings=625449] | 整数池: 974775 [ints=974775]
+  内存: 托管堆: 4975MB [heap=4975MB] | 累计分配: 376871MB [alloc=376871MB] | 工作集: 5759MB [working=5759MB] | 专用内存: 7620MB [private=7620MB]
+  ↳ 堆碎片: 1124MB [fragmented=1124MB] | 第 0 代 GC: 6003 [gc0=6003] | 第 1 代 GC: 321 [gc1=321] | 第 2 代 GC: 26 [gc2=26]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[10:47:59] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/country_types/spth_crisis_country_types.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 0 MB [allocDeltaMB=0]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178771 [locKeys=178771] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:51:19] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 190884 MB [allocDeltaMB=190884]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10722 [pending=10722] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:51:19] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 10 [lint=10] | 全局刷新次数: 3 [refresh=3] | 本地化刷新次数: 3 [refreshLoc=3]
+  ↳ 补全次数: 5 [completion=5] | 字符串池: 625449 [strings=625449] | 整数池: 974775 [ints=974775]
+  内存: 托管堆: 5095MB [heap=5095MB] | 累计分配: 567758MB [alloc=567758MB] | 工作集: 5633MB [working=5633MB] | 专用内存: 7354MB [private=7354MB]
+  ↳ 堆碎片: 1122MB [fragmented=1122MB] | 第 0 代 GC: 11246 [gc0=11246] | 第 1 代 GC: 327 [gc1=327] | 第 2 代 GC: 26 [gc2=26]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:51:19] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:51:30] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 211 [affected=211] | 错误: 1618 [errors=1618]
+
+[10:51:30] [本地化] 本地化诊断
+  详情: 本次分配: 16699 MB [allocDeltaMB=16699] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[10:51:30] [内存] 分析周期
+  详情: 本周期分配: 16770 MB [cycleAllocMB=16770] | 字符串池: 625449 [strings=625449] | 整数池: 974775 [ints=974775]
+  内存: 托管堆: 4975MB [heap=4975MB] | 累计分配: 584528MB [alloc=584528MB] | 工作集: 5522MB [working=5522MB] | 专用内存: 7350MB [private=7350MB]
+  ↳ 堆碎片: 1069MB [fragmented=1069MB] | 第 0 代 GC: 11711 [gc0=11711] | 第 1 代 GC: 329 [gc1=329] | 第 2 代 GC: 26 [gc2=26]
+  诊断: 文件: 10723 [files=10723] | 最新: 10723 [fresh=10723] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:54:38] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 190737 MB [allocDeltaMB=190737]
+  诊断: 文件: 10723 [files=10723] | 最新: 10722 [fresh=10722] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:54:38] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 11 [lint=11] | 全局刷新次数: 3 [refresh=3] | 本地化刷新次数: 4 [refreshLoc=4]
+  ↳ 补全次数: 5 [completion=5] | 字符串池: 625449 [strings=625449] | 整数池: 974775 [ints=974775]
+  内存: 托管堆: 5160MB [heap=5160MB] | 累计分配: 775266MB [alloc=775266MB] | 工作集: 5661MB [working=5661MB] | 专用内存: 7381MB [private=7381MB]
+  ↳ 堆碎片: 1071MB [fragmented=1071MB] | 第 0 代 GC: 16948 [gc0=16948] | 第 1 代 GC: 336 [gc1=336] | 第 2 代 GC: 26 [gc2=26]
+  诊断: 文件: 10723 [files=10723] | 最新: 10722 [fresh=10722] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:56:53] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 190738 MB [allocDeltaMB=190738]
+  诊断: 文件: 10723 [files=10723] | 最新: 10721 [fresh=10721] | 待校验: 0 [pending=0] | 过期: 2 [stale=2]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:56:53] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 12 [lint=12] | 全局刷新次数: 3 [refresh=3] | 本地化刷新次数: 4 [refreshLoc=4]
+  ↳ 补全次数: 5 [completion=5] | 字符串池: 625449 [strings=625449] | 整数池: 974775 [ints=974775]
+  内存: 托管堆: 5145MB [heap=5145MB] | 累计分配: 966007MB [alloc=966007MB] | 工作集: 5652MB [working=5652MB] | 专用内存: 7546MB [private=7546MB]
+  ↳ 堆碎片: 1068MB [fragmented=1068MB] | 第 0 代 GC: 22192 [gc0=22192] | 第 1 代 GC: 342 [gc1=342] | 第 2 代 GC: 26 [gc2=26]
+  诊断: 文件: 10723 [files=10723] | 最新: 10721 [fresh=10721] | 待校验: 0 [pending=0] | 过期: 2 [stale=2]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:57:04] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/country_types/spth_crisis_country_types.txt
+  详情: 行: 519 [line=519] | 列: 5 [char=5] | 耗时: 11093ms [elapsed=11093ms] | 本次分配: 15920 MB [allocDeltaMB=15920]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:57:15] [刷新] PrepareIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/country_types/spth_crisis_country_types.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 89ms [hold=89ms] | 使用 staged 刷新: 是 [staged=True]
+
+[10:57:15] [刷新] CommitIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/country_types/spth_crisis_country_types.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 0ms [hold=0ms] | 已提交: 是 [committed=True] | 语义: 是 [semantic=True]
+
+[10:57:15] [刷新] 增量刷新类型
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/country_types/spth_crisis_country_types.txt
+  详情: 语义: 是 [semantic=True] | 增量补丁: 1 [patches=1] | 引用文件: 0 [refs=0]
+
+[10:57:16] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/country_types/spth_crisis_country_types.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 16422 MB [allocDeltaMB=16422]
+  诊断: 文件: 10723 [files=10723] | 最新: 10721 [fresh=10721] | 待校验: 0 [pending=0] | 过期: 2 [stale=2]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:57:16] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 1 [skip=1] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 10723 [files=10723] | 最新: 10721 [fresh=10721] | 待校验: 1 [pending=1] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:57:16] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 211 [affected=211] | 错误: 1618 [errors=1618]
+
+[10:57:16] [本地化] 本地化诊断
+  详情: 本次分配: 783 MB [allocDeltaMB=783] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[10:57:16] [内存] 分析周期
+  详情: 本周期分配: 853 MB [cycleAllocMB=853] | 字符串池: 625449 [strings=625449] | 整数池: 974775 [ints=974775]
+  内存: 托管堆: 5170MB [heap=5170MB] | 累计分配: 999202MB [alloc=999202MB] | 工作集: 5789MB [working=5789MB] | 专用内存: 7609MB [private=7609MB]
+  ↳ 堆碎片: 997MB [fragmented=997MB] | 第 0 代 GC: 23076 [gc0=23076] | 第 1 代 GC: 346 [gc1=346] | 第 2 代 GC: 26 [gc2=26]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[10:59:36] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 190773 MB [allocDeltaMB=190773]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10721 [pending=10721] | 过期: 2 [stale=2]
+  ↳ 错误: 2878 [errors=2878] | 警告: 2704 [warnings=2704]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:59:36] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 14 [lint=14] | 全局刷新次数: 3 [refresh=3] | 本地化刷新次数: 5 [refreshLoc=5]
+  ↳ 补全次数: 5 [completion=5] | 字符串池: 625449 [strings=625449] | 整数池: 974775 [ints=974775]
+  内存: 托管堆: 5151MB [heap=5151MB] | 累计分配: 1189981MB [alloc=1189981MB] | 工作集: 5581MB [working=5581MB] | 专用内存: 7942MB [private=7942MB]
+  ↳ 堆碎片: 982MB [fragmented=982MB] | 第 0 代 GC: 28337 [gc0=28337] | 第 1 代 GC: 410 [gc1=410] | 第 2 代 GC: 26 [gc2=26]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10722 [pending=10722] | 过期: 1 [stale=1]
+  ↳ 错误: 2878 [errors=2878] | 警告: 2704 [warnings=2704]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[10:59:46] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_triggers/th_scripted_triggers.txt
+  详情: 行: 680 [line=680] | 列: 23 [char=23] | 耗时: 10789ms [elapsed=10789ms] | 本次分配: 17610 MB [allocDeltaMB=17610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:00:15] [刷新] 刷新缓存
+  详情: 本次分配: 50907 MB [allocDeltaMB=50907] | 使用 staged 刷新: 是 [staged=True] | 强制刷新: 否 [force=False] | 达到跳过上限: 否 [skipLimit=False]
+  内存: 托管堆: 11022MB [heap=11022MB] | 累计分配: 1240906MB [alloc=1240906MB] | 工作集: 10164MB [working=10164MB] | 专用内存: 13182MB [private=13182MB]
+  ↳ 堆碎片: 744MB [fragmented=744MB] | 第 0 代 GC: 28928 [gc0=28928] | 第 1 代 GC: 447 [gc1=447] | 第 2 代 GC: 27 [gc2=27]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10722 [pending=10722] | 过期: 1 [stale=1]
+  ↳ 错误: 2878 [errors=2878] | 警告: 2704 [warnings=2704]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:00:37] [本地化] 本地化诊断
+  详情: 本次分配: 22709 MB [allocDeltaMB=22709] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:00:37] [内存] 分析周期
+  详情: 本周期分配: 73748 MB [cycleAllocMB=73748] | 字符串池: 625451 [strings=625451] | 整数池: 974779 [ints=974779]
+  内存: 托管堆: 5471MB [heap=5471MB] | 累计分配: 1263747MB [alloc=1263747MB] | 工作集: 6014MB [working=6014MB] | 专用内存: 8450MB [private=8450MB]
+  ↳ 堆碎片: 1246MB [fragmented=1246MB] | 第 0 代 GC: 29384 [gc0=29384] | 第 1 代 GC: 453 [gc1=453] | 第 2 代 GC: 29 [gc2=29]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2878 [errors=2878] | 警告: 2704 [warnings=2704]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[11:00:37] [性能] 性能计数
+  详情: 最近操作: delayedAnalyze [last=delayedAnalyze] | 校验次数: 14 [lint=14] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 6 [refreshLoc=6]
+  ↳ 补全次数: 5 [completion=5] | 字符串池: 625451 [strings=625451] | 整数池: 974779 [ints=974779]
+  内存: 托管堆: 5471MB [heap=5471MB] | 累计分配: 1263747MB [alloc=1263747MB] | 工作集: 6014MB [working=6014MB] | 专用内存: 8450MB [private=8450MB]
+  ↳ 堆碎片: 1246MB [fragmented=1246MB] | 第 0 代 GC: 29384 [gc0=29384] | 第 1 代 GC: 453 [gc1=453] | 第 2 代 GC: 29 [gc2=29]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2878 [errors=2878] | 警告: 2704 [warnings=2704]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 138 [cacheWriteKeys=138]
+
+[11:00:37] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 0 MB [allocDeltaMB=0]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2878 [errors=2878] | 警告: 2704 [warnings=2704]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:00:47] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 16265 MB [allocDeltaMB=16265]
+  诊断: 文件: 10723 [files=10723] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 0 [stale=0]
+  ↳ 错误: 2878 [errors=2878] | 警告: 2704 [warnings=2704]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:01:07] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_effects/spth_difficulty_effects.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 29560 MB [allocDeltaMB=29560]
+  诊断: 文件: 10723 [files=10723] | 最新: 1 [fresh=1] | 待校验: 10722 [pending=10722] | 过期: 0 [stale=0]
+  ↳ 错误: 2878 [errors=2878] | 警告: 2704 [warnings=2704]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:01:07] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 17 [lint=17] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 6 [refreshLoc=6]
+  ↳ 补全次数: 5 [completion=5] | 字符串池: 626036 [strings=626036] | 整数池: 975755 [ints=975755]
+  内存: 托管堆: 8016MB [heap=8016MB] | 累计分配: 1309580MB [alloc=1309580MB] | 工作集: 8395MB [working=8395MB] | 专用内存: 10758MB [private=10758MB]
+  ↳ 堆碎片: 1149MB [fragmented=1149MB] | 第 0 代 GC: 30216 [gc0=30216] | 第 1 代 GC: 460 [gc1=460] | 第 2 代 GC: 30 [gc2=30]
+  诊断: 文件: 10723 [files=10723] | 最新: 4 [fresh=4] | 待校验: 10719 [pending=10719] | 过期: 0 [stale=0]
+  ↳ 错误: 2878 [errors=2878] | 警告: 2755 [warnings=2755]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:01:07] [校验] 准备交互更新
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_triggers/th_scripted_triggers.txt
+  详情: 耗时: 10ms [elapsed=10ms]
+
+[11:01:43] [校验] 提交交互更新
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_triggers/th_scripted_triggers.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 36176ms [hold=36176ms] | 已提交: 是 [committed=True]
+
+[11:01:55] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 行: 1604 [line=1604] | 列: 26 [char=26] | 耗时: 233ms [elapsed=233ms] | 本次分配: 266 MB [allocDeltaMB=266]
+  ↳ 缓存的本地化 key: 178773 [cachedLocKeys=178773]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:02:03] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 行: 1604 [line=1604] | 列: 25 [char=25] | 耗时: 231ms [elapsed=231ms] | 本次分配: 258 MB [allocDeltaMB=258]
+  ↳ 缓存的本地化 key: 178773 [cachedLocKeys=178773]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:02:23] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 行: 1604 [line=1604] | 列: 33 [char=33] | 耗时: 225ms [elapsed=225ms] | 本次分配: 347 MB [allocDeltaMB=347]
+  ↳ 缓存的本地化 key: 178773 [cachedLocKeys=178773]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:03:02] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 行: 1604 [line=1604] | 列: 30 [char=30] | 耗时: 221ms [elapsed=221ms] | 本次分配: 625 MB [allocDeltaMB=625]
+  ↳ 缓存的本地化 key: 178773 [cachedLocKeys=178773]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:03:09] [刷新] PrepareIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_triggers/th_scripted_triggers.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 10605ms [hold=10605ms] | 使用 staged 刷新: 是 [staged=True]
+
+[11:03:09] [刷新] CommitIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_triggers/th_scripted_triggers.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 1ms [hold=1ms] | 已提交: 是 [committed=True] | 语义: 是 [semantic=True]
+
+[11:03:27] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/TH_weapon.gfx
+  详情: 行: 15 [line=15] | 列: 33 [char=33] | 耗时: 7910ms [elapsed=7910ms] | 本次分配: 17018 MB [allocDeltaMB=17018]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:03:27] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/TH_weapon.gfx
+  详情: 行: 14 [line=14] | 列: 25 [char=25] | 耗时: 5875ms [elapsed=5875ms] | 本次分配: 11883 MB [allocDeltaMB=11883]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:03:27] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/TH_weapon.gfx
+  详情: 行: 7 [line=7] | 列: 50 [char=50] | 耗时: 4813ms [elapsed=4813ms] | 本次分配: 9520 MB [allocDeltaMB=9520]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:03:27] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/TH_weapon.gfx
+  详情: 行: 9 [line=9] | 列: 5 [char=5] | 耗时: 15364ms [elapsed=15364ms] | 本次分配: 35825 MB [allocDeltaMB=35825]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:03:27] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/TH_weapon.gfx
+  详情: 行: 15 [line=15] | 列: 51 [char=51] | 耗时: 7971ms [elapsed=7971ms] | 本次分配: 17182 MB [allocDeltaMB=17182]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:03:27] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/TH_weapon.gfx
+  详情: 行: 11 [line=11] | 列: 5 [char=5] | 耗时: 15192ms [elapsed=15192ms] | 本次分配: 35469 MB [allocDeltaMB=35469]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:03:27] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/TH_weapon.gfx
+  详情: 行: 11 [line=11] | 列: 39 [char=39] | 耗时: 5813ms [elapsed=5813ms] | 本次分配: 11715 MB [allocDeltaMB=11715]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:03:27] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/TH_weapon.gfx
+  详情: 行: 10 [line=10] | 列: 4 [char=4] | 耗时: 15277ms [elapsed=15277ms] | 本次分配: 35637 MB [allocDeltaMB=35637]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:03:27] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/TH_weapon.gfx
+  详情: 行: 10 [line=10] | 列: 3 [char=3] | 耗时: 15331ms [elapsed=15331ms] | 本次分配: 35753 MB [allocDeltaMB=35753]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:03:31] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 行: 1613 [line=1613] | 列: 36 [char=36] | 耗时: 54ms [elapsed=54ms] | 本次分配: 58 MB [allocDeltaMB=58]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 1 [completionTTL=1] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:03:32] [悬停] 悬停
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 行: 1621 [line=1621] | 列: 27 [char=27] | 耗时: 305ms [elapsed=305ms] | 本次分配: 379 MB [allocDeltaMB=379]
+  ↳ 缓存的本地化 key: 178773 [cachedLocKeys=178773]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 1 [completionTTL=1] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:03:35] [补全] 补全 · 立即回退
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 行: 1619 [line=1619] | 列: 2 [char=2] | prefix:  [prefix=] | 旧缓存结果数: 74 [staleItems=74]
+
+[11:03:36] [补全] 补全 · 立即回退
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 行: 1620 [line=1620] | 列: 2 [char=2] | prefix: h [prefix=h] | 旧缓存结果数: 24 [staleItems=24]
+
+[11:03:36] [补全] 补全
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 行: 1620 [line=1620] | 列: 3 [char=3] | 结果数: 97 [items=97] | 耗时: 42ms [elapsed=42ms]
+  ↳ 本次分配: 78 MB [allocDeltaMB=78]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 2 [completionTTL=2] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:03:36] [性能] 性能计数
+  详情: 最近操作: completion [last=completion] | 校验次数: 17 [lint=17] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 6 [refreshLoc=6]
+  ↳ 补全次数: 6 [completion=6] | 字符串池: 626054 [strings=626054] | 整数池: 975775 [ints=975775]
+  内存: 托管堆: 7681MB [heap=7681MB] | 累计分配: 1539722MB [alloc=1539722MB] | 工作集: 8469MB [working=8469MB] | 专用内存: 10985MB [private=10985MB]
+  ↳ 堆碎片: 1542MB [fragmented=1542MB] | 第 0 代 GC: 34892 [gc0=34892] | 第 1 代 GC: 474 [gc1=474] | 第 2 代 GC: 34 [gc2=34]
+  诊断: 文件: 10723 [files=10723] | 最新: 3 [fresh=3] | 待校验: 10717 [pending=10717] | 过期: 3 [stale=3]
+  ↳ 错误: 2878 [errors=2878] | 警告: 2755 [warnings=2755]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 2 [completionTTL=2] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:03:37] [补全] 补全
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 行: 1620 [line=1620] | 列: 9 [char=9] | 结果数: 2 [items=2] | 耗时: 35ms [elapsed=35ms]
+  ↳ 本次分配: 70 MB [allocDeltaMB=70]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 2 [completionTTL=2] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:03:37] [补全] 补全
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 行: 1620 [line=1620] | 列: 10 [char=10] | 结果数: 2 [items=2] | 耗时: 37ms [elapsed=37ms]
+  ↳ 本次分配: 69 MB [allocDeltaMB=69]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 2 [completionTTL=2] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:04:25] [刷新] 增量刷新类型
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_triggers/th_scripted_triggers.txt
+  详情: 语义: 是 [semantic=True] | 增量补丁: 1 [patches=1] | 引用文件: 160 [refs=160]
+
+[11:04:26] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_triggers/th_scripted_triggers.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 314435 MB [allocDeltaMB=314435]
+  诊断: 文件: 10725 [files=10725] | 最新: 2 [fresh=2] | 待校验: 10721 [pending=10721] | 过期: 2 [stale=2]
+  ↳ 错误: 2878 [errors=2878] | 警告: 2755 [warnings=2755]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 1 [completionTTL=1] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:04:26] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 18 [lint=18] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 6 [refreshLoc=6]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 7949MB [heap=7949MB] | 累计分配: 1624027MB [alloc=1624027MB] | 工作集: 8620MB [working=8620MB] | 专用内存: 11104MB [private=11104MB]
+  ↳ 堆碎片: 1514MB [fragmented=1514MB] | 第 0 代 GC: 37145 [gc0=37145] | 第 1 代 GC: 475 [gc1=475] | 第 2 代 GC: 34 [gc2=34]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 2 [stale=2]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2771 [warnings=2771]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 1 [completionTTL=1] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:04:33] [校验] 批量校验文件 · 动态引用批次
+  详情: 文件: 160 [files=160] | 诊断数: 2906 [diagnostics=2906] | 耗时: 7663 ms [elapsedMs=7663] | 本次分配: 17928 MB [allocDeltaMB=17928]
+  诊断: 文件: 10725 [files=10725] | 最新: 3 [fresh=3] | 待校验: 10720 [pending=10720] | 过期: 2 [stale=2]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2771 [warnings=2771]
+
+[11:06:15] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_effects/spth_difficulty_effects.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 29724 MB [allocDeltaMB=29724]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 2 [stale=2]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2771 [warnings=2771]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:06:16] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 19 [lint=19] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 6 [refreshLoc=6]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 5812MB [heap=5812MB] | 累计分配: 1782346MB [alloc=1782346MB] | 工作集: 5653MB [working=5653MB] | 专用内存: 8467MB [private=8467MB]
+  ↳ 堆碎片: 1068MB [fragmented=1068MB] | 第 0 代 GC: 40901 [gc0=40901] | 第 1 代 GC: 493 [gc1=493] | 第 2 代 GC: 36 [gc2=36]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 2 [stale=2]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2771 [warnings=2771]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:06:23] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 2 [stale=2]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2771 [warnings=2771]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:06:23] [本地化] 本地化诊断
+  详情: 本次分配: 57 MB [allocDeltaMB=57] | 本地化文件缓存: 136 [locFiles=136] | 本地化错误: 2369 [locErrors=2369] | 缓存的本地化 key: 178773 [cachedLocKeys=178773]
+
+[11:06:24] [内存] 分析周期
+  详情: 本周期分配: 7516 MB [cycleAllocMB=7516] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 5951MB [heap=5951MB] | 累计分配: 1789866MB [alloc=1789866MB] | 工作集: 6283MB [working=6283MB] | 专用内存: 9002MB [private=9002MB]
+  ↳ 堆碎片: 1056MB [fragmented=1056MB] | 第 0 代 GC: 40973 [gc0=40973] | 第 1 代 GC: 498 [gc1=498] | 第 2 代 GC: 36 [gc2=36]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:06:24] [校验] 批量校验文件 · 动态引用批次
+  详情: 文件: 160 [files=160] | 诊断数: 2906 [diagnostics=2906] | 耗时: 45175 ms [elapsedMs=45175] | 本次分配: 37001 MB [allocDeltaMB=37001]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+
+[11:06:36] [刷新] PrepareIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/TH_weapon.gfx
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 293ms [hold=293ms] | 使用 staged 刷新: 是 [staged=True]
+
+[11:06:36] [刷新] CommitIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/TH_weapon.gfx
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 0ms [hold=0ms] | 已提交: 是 [committed=True] | 语义: 是 [semantic=True]
+
+[11:06:36] [刷新] 增量刷新类型
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/TH_weapon.gfx
+  详情: 语义: 是 [semantic=True] | 增量补丁: 2 [patches=2] | 引用文件: 0 [refs=0]
+
+[11:06:36] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/interface/TH_weapon.gfx
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 16633 MB [allocDeltaMB=16633]
+  诊断: 文件: 10725 [files=10725] | 最新: 10723 [fresh=10723] | 待校验: 1 [pending=1] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:06:36] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 1 [skip=1] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 10725 [files=10725] | 最新: 10723 [fresh=10723] | 待校验: 2 [pending=2] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:06:36] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 136 [locFiles=136] | 缓存的本地化 key: 178773 [cachedLocKeys=178773]
+
+[11:06:36] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 6074MB [heap=6074MB] | 累计分配: 1806501MB [alloc=1806501MB] | 工作集: 6001MB [working=6001MB] | 专用内存: 8657MB [private=8657MB]
+  ↳ 堆碎片: 967MB [fragmented=967MB] | 第 0 代 GC: 41410 [gc0=41410] | 第 1 代 GC: 500 [gc1=500] | 第 2 代 GC: 36 [gc2=36]
+  诊断: 文件: 10725 [files=10725] | 最新: 10723 [fresh=10723] | 待校验: 2 [pending=2] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178773 [locKeys=178773] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:08:50] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 190880 MB [allocDeltaMB=190880]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:08:50] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 21 [lint=21] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 7 [refreshLoc=7]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 6080MB [heap=6080MB] | 累计分配: 1997382MB [alloc=1997382MB] | 工作集: 6003MB [working=6003MB] | 专用内存: 8541MB [private=8541MB]
+  ↳ 堆碎片: 966MB [fragmented=966MB] | 第 0 代 GC: 46616 [gc0=46616] | 第 1 代 GC: 506 [gc1=506] | 第 2 代 GC: 36 [gc2=36]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:11:02] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 190983 MB [allocDeltaMB=190983]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:11:02] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 22 [lint=22] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 7 [refreshLoc=7]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 6113MB [heap=6113MB] | 累计分配: 2188366MB [alloc=2188366MB] | 工作集: 6022MB [working=6022MB] | 专用内存: 8558MB [private=8558MB]
+  ↳ 堆碎片: 964MB [fragmented=964MB] | 第 0 代 GC: 51850 [gc0=51850] | 第 1 代 GC: 512 [gc1=512] | 第 2 代 GC: 36 [gc2=36]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:13:17] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 191179 MB [allocDeltaMB=191179]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:13:17] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 23 [lint=23] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 7 [refreshLoc=7]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 6084MB [heap=6084MB] | 累计分配: 2379551MB [alloc=2379551MB] | 工作集: 6013MB [working=6013MB] | 专用内存: 8664MB [private=8664MB]
+  ↳ 堆碎片: 961MB [fragmented=961MB] | 第 0 代 GC: 57043 [gc0=57043] | 第 1 代 GC: 518 [gc1=518] | 第 2 代 GC: 36 [gc2=36]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:15:28] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 191359 MB [allocDeltaMB=191359]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:15:28] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 24 [lint=24] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 7 [refreshLoc=7]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 6185MB [heap=6185MB] | 累计分配: 2570914MB [alloc=2570914MB] | 工作集: 6103MB [working=6103MB] | 专用内存: 8605MB [private=8605MB]
+  ↳ 堆碎片: 931MB [fragmented=931MB] | 第 0 代 GC: 62195 [gc0=62195] | 第 1 代 GC: 524 [gc1=524] | 第 2 代 GC: 36 [gc2=36]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:17:43] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 191187 MB [allocDeltaMB=191187]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:17:43] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 25 [lint=25] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 7 [refreshLoc=7]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 6009MB [heap=6009MB] | 累计分配: 2762102MB [alloc=2762102MB] | 工作集: 5942MB [working=5942MB] | 专用内存: 8443MB [private=8443MB]
+  ↳ 堆碎片: 926MB [fragmented=926MB] | 第 0 代 GC: 67443 [gc0=67443] | 第 1 代 GC: 532 [gc1=532] | 第 2 代 GC: 36 [gc2=36]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:19:58] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 191239 MB [allocDeltaMB=191239]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:19:58] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 26 [lint=26] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 7 [refreshLoc=7]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 6041MB [heap=6041MB] | 累计分配: 2953341MB [alloc=2953341MB] | 工作集: 5946MB [working=5946MB] | 专用内存: 8445MB [private=8445MB]
+  ↳ 堆碎片: 925MB [fragmented=925MB] | 第 0 代 GC: 72681 [gc0=72681] | 第 1 代 GC: 753 [gc1=753] | 第 2 代 GC: 36 [gc2=36]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:22:16] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 191337 MB [allocDeltaMB=191337]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:22:16] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 27 [lint=27] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 7 [refreshLoc=7]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 6039MB [heap=6039MB] | 累计分配: 3144679MB [alloc=3144679MB] | 工作集: 5950MB [working=5950MB] | 专用内存: 8448MB [private=8448MB]
+  ↳ 堆碎片: 924MB [fragmented=924MB] | 第 0 代 GC: 77939 [gc0=77939] | 第 1 代 GC: 971 [gc1=971] | 第 2 代 GC: 36 [gc2=36]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:24:29] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 191392 MB [allocDeltaMB=191392]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:24:29] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 28 [lint=28] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 7 [refreshLoc=7]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 6061MB [heap=6061MB] | 累计分配: 3336071MB [alloc=3336071MB] | 工作集: 5957MB [working=5957MB] | 专用内存: 8455MB [private=8455MB]
+  ↳ 堆碎片: 923MB [fragmented=923MB] | 第 0 代 GC: 83170 [gc0=83170] | 第 1 代 GC: 1187 [gc1=1187] | 第 2 代 GC: 36 [gc2=36]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 3 [pending=3] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:25:24] [刷新] 刷新缓存
+  详情: 本次分配: 55613 MB [allocDeltaMB=55613] | 使用 staged 刷新: 是 [staged=True] | 强制刷新: 否 [force=False] | 达到跳过上限: 否 [skipLimit=False]
+  内存: 托管堆: 12896MB [heap=12896MB] | 累计分配: 3391685MB [alloc=3391685MB] | 工作集: 10734MB [working=10734MB] | 专用内存: 15216MB [private=15216MB]
+  ↳ 堆碎片: 677MB [fragmented=677MB] | 第 0 代 GC: 83902 [gc0=83902] | 第 1 代 GC: 1229 [gc1=1229] | 第 2 代 GC: 39 [gc2=39]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 3 [pending=3] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:25:49] [本地化] 本地化诊断
+  详情: 本次分配: 22707 MB [allocDeltaMB=22707] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2480 [locErrors=2480] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:25:49] [内存] 分析周期
+  详情: 本周期分配: 78451 MB [cycleAllocMB=78451] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 5851MB [heap=5851MB] | 累计分配: 3414523MB [alloc=3414523MB] | 工作集: 7244MB [working=7244MB] | 专用内存: 9964MB [private=9964MB]
+  ↳ 堆碎片: 2226MB [fragmented=2226MB] | 第 0 代 GC: 84362 [gc0=84362] | 第 1 代 GC: 1235 [gc1=1235] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10725 [pending=10725] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:25:49] [性能] 性能计数
+  详情: 最近操作: delayedAnalyze [last=delayedAnalyze] | 校验次数: 28 [lint=28] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 8 [refreshLoc=8]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 5852MB [heap=5852MB] | 累计分配: 3414523MB [alloc=3414523MB] | 工作集: 7244MB [working=7244MB] | 专用内存: 9964MB [private=9964MB]
+  ↳ 堆碎片: 2226MB [fragmented=2226MB] | 第 0 代 GC: 84362 [gc0=84362] | 第 1 代 GC: 1235 [gc1=1235] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10725 [pending=10725] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:28:00] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 191389 MB [allocDeltaMB=191389]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10725 [pending=10725] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2610 [warnings=2610]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:28:00] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 29 [lint=29] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 8 [refreshLoc=8]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 5985MB [heap=5985MB] | 累计分配: 3605920MB [alloc=3605920MB] | 工作集: 7123MB [working=7123MB] | 专用内存: 9734MB [private=9734MB]
+  ↳ 堆碎片: 2217MB [fragmented=2217MB] | 第 0 代 GC: 89577 [gc0=89577] | 第 1 代 GC: 1242 [gc1=1242] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 1 [fresh=1] | 待校验: 10724 [pending=10724] | 过期: 0 [stale=0]
+  ↳ 错误: 2885 [errors=2885] | 警告: 2611 [warnings=2611]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:33:13] [补全] 补全 · 锁等待超时回退
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/game_concepts/spth_word_concepts.txt
+  详情: 行: 65 [line=65] | 列: 1 [char=1] | prefix: c [prefix=c] | 旧缓存结果数: 0 [staleItems=0]
+
+[11:33:14] [补全] 补全 · 锁等待超时回退
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/game_concepts/spth_word_concepts.txt
+  详情: 行: 65 [line=65] | 列: 2 [char=2] | prefix: co [prefix=co] | 旧缓存结果数: 0 [staleItems=0]
+
+[11:33:14] [补全] 补全 · 锁等待超时回退
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/game_concepts/spth_word_concepts.txt
+  详情: 行: 65 [line=65] | 列: 4 [char=4] | prefix: conc [prefix=conc] | 旧缓存结果数: 0 [staleItems=0]
+
+[11:33:15] [补全] 补全 · 锁等待超时回退
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/game_concepts/spth_word_concepts.txt
+  详情: 行: 65 [line=65] | 列: 6 [char=6] | prefix: concep [prefix=concep] | 旧缓存结果数: 0 [staleItems=0]
+
+[11:33:16] [补全] 补全 · 锁等待超时回退
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/game_concepts/spth_word_concepts.txt
+  详情: 行: 65 [line=65] | 列: 7 [char=7] | prefix: concept [prefix=concept] | 旧缓存结果数: 0 [staleItems=0]
+
+[11:33:23] [补全] 补全 · 锁等待超时回退
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/game_concepts/spth_word_concepts.txt
+  详情: 行: 65 [line=65] | 列: 16 [char=16] | prefix: concept_touhou_q [prefix=concept_touhou_q] | 旧缓存结果数: 0 [staleItems=0]
+
+[11:33:25] [补全] 补全 · 锁等待超时回退
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/game_concepts/spth_word_concepts.txt
+  详情: 行: 65 [line=65] | 列: 19 [char=19] | prefix: concept_touhou_quie [prefix=concept_touhou_quie] | 旧缓存结果数: 0 [staleItems=0]
+
+[11:33:27] [补全] 补全 · 锁等待超时回退
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/game_concepts/spth_word_concepts.txt
+  详情: 行: 65 [line=65] | 列: 20 [char=20] | prefix: concept_touhou_quiet [prefix=concept_touhou_quiet] | 旧缓存结果数: 0 [staleItems=0]
+
+[11:35:19] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 191397 MB [allocDeltaMB=191397]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10723 [pending=10723] | 过期: 2 [stale=2]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2607 [warnings=2607]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:35:19] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 30 [lint=30] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 8 [refreshLoc=8]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626056 [strings=626056] | 整数池: 975777 [ints=975777]
+  内存: 托管堆: 5825MB [heap=5825MB] | 累计分配: 3797322MB [alloc=3797322MB] | 工作集: 6961MB [working=6961MB] | 专用内存: 9844MB [private=9844MB]
+  ↳ 堆碎片: 2206MB [fragmented=2206MB] | 第 0 代 GC: 94835 [gc0=94835] | 第 1 代 GC: 1420 [gc1=1420] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10724 [pending=10724] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2607 [warnings=2607]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:35:31] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/game_concepts/spth_word_concepts.txt
+  详情: 行: 54 [line=54] | 列: 63 [char=63] | 耗时: 11817ms [elapsed=11817ms] | 本次分配: 16102 MB [allocDeltaMB=16102]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:35:31] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10724 [pending=10724] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2607 [warnings=2607]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 134 [cacheWriteKeys=134]
+
+[11:35:31] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 207 [affected=207] | 错误: 1567 [errors=1567]
+
+[11:35:31] [本地化] 本地化诊断
+  详情: 本次分配: 769 MB [allocDeltaMB=769] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:35:31] [内存] 分析周期
+  详情: 本周期分配: 16918 MB [cycleAllocMB=16918] | 字符串池: 626057 [strings=626057] | 整数池: 975779 [ints=975779]
+  内存: 托管堆: 6012MB [heap=6012MB] | 累计分配: 3814261MB [alloc=3814261MB] | 工作集: 7129MB [working=7129MB] | 专用内存: 9947MB [private=9947MB]
+  ↳ 堆碎片: 2093MB [fragmented=2093MB] | 第 0 代 GC: 95238 [gc0=95238] | 第 1 代 GC: 1424 [gc1=1424] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:35:40] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11968 MB [allocDeltaMB=11968]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:35:49] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:35:49] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 32 [lint=32] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 9 [refreshLoc=9]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626057 [strings=626057] | 整数池: 975779 [ints=975779]
+  内存: 托管堆: 6025MB [heap=6025MB] | 累计分配: 3838197MB [alloc=3838197MB] | 工作集: 7120MB [working=7120MB] | 专用内存: 9787MB [private=9787MB]
+  ↳ 堆碎片: 2077MB [fragmented=2077MB] | 第 0 代 GC: 95889 [gc0=95889] | 第 1 代 GC: 1427 [gc1=1427] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:35:58] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:36:07] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:36:07] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:36:18] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 13 [affected=13] | 错误: 376 [errors=376]
+
+[11:36:18] [本地化] 本地化诊断
+  详情: 本次分配: 16019 MB [allocDeltaMB=16019] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:36:18] [内存] 分析周期
+  详情: 本周期分配: 16089 MB [cycleAllocMB=16089] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6074MB [heap=6074MB] | 累计分配: 3878221MB [alloc=3878221MB] | 工作集: 7174MB [working=7174MB] | 专用内存: 9744MB [private=9744MB]
+  ↳ 堆碎片: 2030MB [fragmented=2030MB] | 第 0 代 GC: 96988 [gc0=96988] | 第 1 代 GC: 1432 [gc1=1432] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:36:29] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:36:29] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 35 [lint=35] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 10 [refreshLoc=10]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6098MB [heap=6098MB] | 累计分配: 3890189MB [alloc=3890189MB] | 工作集: 7164MB [working=7164MB] | 专用内存: 9732MB [private=9732MB]
+  ↳ 堆碎片: 2023MB [fragmented=2023MB] | 第 0 代 GC: 97315 [gc0=97315] | 第 1 代 GC: 1434 [gc1=1434] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:36:29] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:36:41] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:36:41] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:36:41] [内存] 分析周期
+  详情: 本周期分配: 16084 MB [cycleAllocMB=16084] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6167MB [heap=6167MB] | 累计分配: 3906274MB [alloc=3906274MB] | 工作集: 7204MB [working=7204MB] | 专用内存: 9728MB [private=9728MB]
+  ↳ 堆碎片: 1949MB [fragmented=1949MB] | 第 0 代 GC: 97757 [gc0=97757] | 第 1 代 GC: 1436 [gc1=1436] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:37:17] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:37:17] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 36 [lint=36] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 11 [refreshLoc=11]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6200MB [heap=6200MB] | 累计分配: 3918241MB [alloc=3918241MB] | 工作集: 7200MB [working=7200MB] | 专用内存: 9663MB [private=9663MB]
+  ↳ 堆碎片: 1943MB [fragmented=1943MB] | 第 0 代 GC: 98084 [gc0=98084] | 第 1 代 GC: 1438 [gc1=1438] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:37:26] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:37:34] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:37:43] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:37:52] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:37:52] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 40 [lint=40] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 11 [refreshLoc=11]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6182MB [heap=6182MB] | 累计分配: 3966111MB [alloc=3966111MB] | 工作集: 7193MB [working=7193MB] | 专用内存: 9654MB [private=9654MB]
+  ↳ 堆碎片: 1935MB [fragmented=1935MB] | 第 0 代 GC: 99401 [gc0=99401] | 第 1 代 GC: 1488 [gc1=1488] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:38:01] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:38:01] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:38:12] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:38:12] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:38:12] [内存] 分析周期
+  详情: 本周期分配: 16084 MB [cycleAllocMB=16084] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6285MB [heap=6285MB] | 累计分配: 3994163MB [alloc=3994163MB] | 工作集: 7269MB [working=7269MB] | 专用内存: 9743MB [private=9743MB]
+  ↳ 堆碎片: 1878MB [fragmented=1878MB] | 第 0 代 GC: 100172 [gc0=100172] | 第 1 代 GC: 1505 [gc1=1505] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:41:35] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:41:35] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 42 [lint=42] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 12 [refreshLoc=12]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6293MB [heap=6293MB] | 累计分配: 4006131MB [alloc=4006131MB] | 工作集: 7267MB [working=7267MB] | 专用内存: 9681MB [private=9681MB]
+  ↳ 堆碎片: 1863MB [fragmented=1863MB] | 第 0 代 GC: 100498 [gc0=100498] | 第 1 代 GC: 1507 [gc1=1507] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:41:35] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:41:46] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:41:46] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:41:46] [内存] 分析周期
+  详情: 本周期分配: 16084 MB [cycleAllocMB=16084] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6357MB [heap=6357MB] | 累计分配: 4022216MB [alloc=4022216MB] | 工作集: 7310MB [working=7310MB] | 专用内存: 9767MB [private=9767MB]
+  ↳ 堆碎片: 1810MB [fragmented=1810MB] | 第 0 代 GC: 100936 [gc0=100936] | 第 1 代 GC: 1510 [gc1=1510] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:42:14] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:42:14] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 43 [lint=43] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 13 [refreshLoc=13]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6356MB [heap=6356MB] | 累计分配: 4034183MB [alloc=4034183MB] | 工作集: 7310MB [working=7310MB] | 专用内存: 9710MB [private=9710MB]
+  ↳ 堆碎片: 1801MB [fragmented=1801MB] | 第 0 代 GC: 101264 [gc0=101264] | 第 1 代 GC: 1512 [gc1=1512] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:42:23] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:42:31] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:42:31] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:42:42] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:42:42] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:42:42] [内存] 分析周期
+  详情: 本周期分配: 16084 MB [cycleAllocMB=16084] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6439MB [heap=6439MB] | 累计分配: 4074203MB [alloc=4074203MB] | 工作集: 7377MB [working=7377MB] | 专用内存: 9768MB [private=9768MB]
+  ↳ 堆碎片: 1730MB [fragmented=1730MB] | 第 0 代 GC: 102361 [gc0=102361] | 第 1 代 GC: 1552 [gc1=1552] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:42:51] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:42:51] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 46 [lint=46] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 14 [refreshLoc=14]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6440MB [heap=6440MB] | 累计分配: 4086170MB [alloc=4086170MB] | 工作集: 7372MB [working=7372MB] | 专用内存: 9770MB [private=9770MB]
+  ↳ 堆碎片: 1723MB [fragmented=1723MB] | 第 0 代 GC: 102686 [gc0=102686] | 第 1 代 GC: 1555 [gc1=1555] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:42:51] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:43:02] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:43:02] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:43:03] [内存] 分析周期
+  详情: 本周期分配: 16083 MB [cycleAllocMB=16083] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6523MB [heap=6523MB] | 累计分配: 4102254MB [alloc=4102254MB] | 工作集: 7446MB [working=7446MB] | 专用内存: 9817MB [private=9817MB]
+  ↳ 堆碎片: 1682MB [fragmented=1682MB] | 第 0 代 GC: 103125 [gc0=103125] | 第 1 代 GC: 1558 [gc1=1558] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:43:36] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:43:36] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 47 [lint=47] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 15 [refreshLoc=15]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6553MB [heap=6553MB] | 累计分配: 4114222MB [alloc=4114222MB] | 工作集: 7442MB [working=7442MB] | 专用内存: 9750MB [private=9750MB]
+  ↳ 堆碎片: 1675MB [fragmented=1675MB] | 第 0 代 GC: 103452 [gc0=103452] | 第 1 代 GC: 1560 [gc1=1560] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:43:36] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:43:47] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:43:47] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:43:47] [内存] 分析周期
+  详情: 本周期分配: 16084 MB [cycleAllocMB=16084] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6618MB [heap=6618MB] | 累计分配: 4130307MB [alloc=4130307MB] | 工作集: 7508MB [working=7508MB] | 专用内存: 9857MB [private=9857MB]
+  ↳ 堆碎片: 1645MB [fragmented=1645MB] | 第 0 代 GC: 103896 [gc0=103896] | 第 1 代 GC: 1566 [gc1=1566] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:43:56] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:43:56] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:44:08] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:44:08] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:44:08] [内存] 分析周期
+  详情: 本周期分配: 16083 MB [cycleAllocMB=16083] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6720MB [heap=6720MB] | 累计分配: 4158358MB [alloc=4158358MB] | 工作集: 7588MB [working=7588MB] | 专用内存: 9922MB [private=9922MB]
+  ↳ 堆碎片: 1605MB [fragmented=1605MB] | 第 0 代 GC: 104663 [gc0=104663] | 第 1 代 GC: 1577 [gc1=1577] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:44:08] [性能] 性能计数
+  详情: 最近操作: delayedAnalyze [last=delayedAnalyze] | 校验次数: 48 [lint=48] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 17 [refreshLoc=17]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6720MB [heap=6720MB] | 累计分配: 4158358MB [alloc=4158358MB] | 工作集: 7588MB [working=7588MB] | 专用内存: 9922MB [private=9922MB]
+  ↳ 堆碎片: 1605MB [fragmented=1605MB] | 第 0 代 GC: 104663 [gc0=104663] | 第 1 代 GC: 1577 [gc1=1577] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:44:17] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:44:17] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:44:28] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:44:28] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:44:28] [内存] 分析周期
+  详情: 本周期分配: 16084 MB [cycleAllocMB=16084] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6780MB [heap=6780MB] | 累计分配: 4186410MB [alloc=4186410MB] | 工作集: 7668MB [working=7668MB] | 专用内存: 9989MB [private=9989MB]
+  ↳ 堆碎片: 1566MB [fragmented=1566MB] | 第 0 代 GC: 105428 [gc0=105428] | 第 1 代 GC: 1588 [gc1=1588] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:45:11] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:45:11] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 50 [lint=50] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 18 [refreshLoc=18]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6798MB [heap=6798MB] | 累计分配: 4198378MB [alloc=4198378MB] | 工作集: 7663MB [working=7663MB] | 专用内存: 9912MB [private=9912MB]
+  ↳ 堆碎片: 1560MB [fragmented=1560MB] | 第 0 代 GC: 105755 [gc0=105755] | 第 1 代 GC: 1591 [gc1=1591] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:45:11] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:45:22] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:45:22] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:45:22] [内存] 分析周期
+  详情: 本周期分配: 16084 MB [cycleAllocMB=16084] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6861MB [heap=6861MB] | 累计分配: 4214463MB [alloc=4214463MB] | 工作集: 7735MB [working=7735MB] | 专用内存: 10015MB [private=10015MB]
+  ↳ 堆碎片: 1525MB [fragmented=1525MB] | 第 0 代 GC: 106197 [gc0=106197] | 第 1 代 GC: 1594 [gc1=1594] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:46:05] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:46:05] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 51 [lint=51] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 19 [refreshLoc=19]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6887MB [heap=6887MB] | 累计分配: 4226430MB [alloc=4226430MB] | 工作集: 7738MB [working=7738MB] | 专用内存: 9963MB [private=9963MB]
+  ↳ 堆碎片: 1519MB [fragmented=1519MB] | 第 0 代 GC: 106524 [gc0=106524] | 第 1 代 GC: 1596 [gc1=1596] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:46:05] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:46:16] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:46:16] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:46:16] [内存] 分析周期
+  详情: 本周期分配: 16083 MB [cycleAllocMB=16083] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6960MB [heap=6960MB] | 累计分配: 4242514MB [alloc=4242514MB] | 工作集: 7794MB [working=7794MB] | 专用内存: 10072MB [private=10072MB]
+  ↳ 堆碎片: 1494MB [fragmented=1494MB] | 第 0 代 GC: 106964 [gc0=106964] | 第 1 代 GC: 1600 [gc1=1600] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:46:26] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:46:35] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:46:35] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:46:46] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:46:46] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:46:46] [内存] 分析周期
+  详情: 本周期分配: 16084 MB [cycleAllocMB=16084] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7038MB [heap=7038MB] | 累计分配: 4282534MB [alloc=4282534MB] | 工作集: 7863MB [working=7863MB] | 专用内存: 10097MB [private=10097MB]
+  ↳ 堆碎片: 1424MB [fragmented=1424MB] | 第 0 代 GC: 108058 [gc0=108058] | 第 1 代 GC: 1618 [gc1=1618] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:46:46] [性能] 性能计数
+  详情: 最近操作: delayedAnalyze [last=delayedAnalyze] | 校验次数: 53 [lint=53] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 21 [refreshLoc=21]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7039MB [heap=7039MB] | 累计分配: 4282534MB [alloc=4282534MB] | 工作集: 7863MB [working=7863MB] | 专用内存: 10097MB [private=10097MB]
+  ↳ 堆碎片: 1424MB [fragmented=1424MB] | 第 0 代 GC: 108058 [gc0=108058] | 第 1 代 GC: 1618 [gc1=1618] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:46:55] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:46:55] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:47:06] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:47:06] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:47:06] [内存] 分析周期
+  详情: 本周期分配: 16084 MB [cycleAllocMB=16084] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7121MB [heap=7121MB] | 累计分配: 4310586MB [alloc=4310586MB] | 工作集: 7924MB [working=7924MB] | 专用内存: 10144MB [private=10144MB]
+  ↳ 堆碎片: 1388MB [fragmented=1388MB] | 第 0 代 GC: 108826 [gc0=108826] | 第 1 代 GC: 1624 [gc1=1624] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:47:15] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:47:15] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:47:26] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:47:26] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:47:26] [内存] 分析周期
+  详情: 本周期分配: 16083 MB [cycleAllocMB=16083] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7214MB [heap=7214MB] | 累计分配: 4338638MB [alloc=4338638MB] | 工作集: 7993MB [working=7993MB] | 专用内存: 10188MB [private=10188MB]
+  ↳ 堆碎片: 1341MB [fragmented=1341MB] | 第 0 代 GC: 109592 [gc0=109592] | 第 1 代 GC: 1629 [gc1=1629] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:47:26] [性能] 性能计数
+  详情: 最近操作: delayedAnalyze [last=delayedAnalyze] | 校验次数: 55 [lint=55] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 23 [refreshLoc=23]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7214MB [heap=7214MB] | 累计分配: 4338638MB [alloc=4338638MB] | 工作集: 7993MB [working=7993MB] | 专用内存: 10188MB [private=10188MB]
+  ↳ 堆碎片: 1341MB [fragmented=1341MB] | 第 0 代 GC: 109592 [gc0=109592] | 第 1 代 GC: 1629 [gc1=1629] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:49:15] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:49:15] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 56 [lint=56] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 23 [refreshLoc=23]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7243MB [heap=7243MB] | 累计分配: 4350605MB [alloc=4350605MB] | 工作集: 7988MB [working=7988MB] | 专用内存: 10119MB [private=10119MB]
+  ↳ 堆碎片: 1335MB [fragmented=1335MB] | 第 0 代 GC: 109918 [gc0=109918] | 第 1 代 GC: 1632 [gc1=1632] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:49:24] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:49:33] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/spth_concept_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 11967 MB [allocDeltaMB=11967]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:49:33] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:49:44] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 10 [affected=10] | 错误: 325 [errors=325]
+
+[11:49:44] [本地化] 本地化诊断
+  详情: 本次分配: 16014 MB [allocDeltaMB=16014] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:49:44] [内存] 分析周期
+  详情: 本周期分配: 16084 MB [cycleAllocMB=16084] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7294MB [heap=7294MB] | 累计分配: 4390625MB [alloc=4390625MB] | 工作集: 8054MB [working=8054MB] | 专用内存: 10247MB [private=10247MB]
+  ↳ 堆碎片: 1314MB [fragmented=1314MB] | 第 0 代 GC: 111019 [gc0=111019] | 第 1 代 GC: 1657 [gc1=1657] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:50:45] [补全] 补全 · 锁等待超时回退
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_weapon.txt
+  详情: 行: 3519 [line=3519] | 列: 1 [char=1] | prefix: # [prefix=#] | 旧缓存结果数: 0 [staleItems=0]
+
+[11:50:48] [补全] 补全 · 锁等待超时回退
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_weapon.txt
+  详情: 行: 3519 [line=3519] | 列: 4 [char=4] | prefix: 畜生 [prefix=畜生] | 旧缓存结果数: 0 [staleItems=0]
+
+[11:52:11] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 191395 MB [allocDeltaMB=191395]
+  诊断: 文件: 10725 [files=10725] | 最新: 10721 [fresh=10721] | 待校验: 0 [pending=0] | 过期: 4 [stale=4]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2607 [warnings=2607]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:52:11] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 59 [lint=59] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 24 [refreshLoc=24]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7301MB [heap=7301MB] | 累计分配: 4582023MB [alloc=4582023MB] | 工作集: 8086MB [working=8086MB] | 专用内存: 10789MB [private=10789MB]
+  ↳ 堆碎片: 1303MB [fragmented=1303MB] | 第 0 代 GC: 116310 [gc0=116310] | 第 1 代 GC: 1873 [gc1=1873] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10721 [fresh=10721] | 待校验: 0 [pending=0] | 过期: 4 [stale=4]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2607 [warnings=2607]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:52:23] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_sets/th_weapon_sets.txt
+  详情: 行: 9 [line=9] | 列: 25 [char=25] | 耗时: 12153ms [elapsed=12153ms] | 本次分配: 16098 MB [allocDeltaMB=16098]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:54:45] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 191848 MB [allocDeltaMB=191848]
+  诊断: 文件: 10725 [files=10725] | 最新: 10721 [fresh=10721] | 待校验: 0 [pending=0] | 过期: 4 [stale=4]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2607 [warnings=2607]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:54:45] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 60 [lint=60] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 24 [refreshLoc=24]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7475MB [heap=7475MB] | 累计分配: 4789590MB [alloc=4789590MB] | 工作集: 8157MB [working=8157MB] | 专用内存: 10272MB [private=10272MB]
+  ↳ 堆碎片: 1243MB [fragmented=1243MB] | 第 0 代 GC: 121991 [gc0=121991] | 第 1 代 GC: 2031 [gc1=2031] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10721 [fresh=10721] | 待校验: 1 [pending=1] | 过期: 3 [stale=3]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2607 [warnings=2607]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:54:45] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 10721 [fresh=10721] | 待校验: 1 [pending=1] | 过期: 3 [stale=3]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2607 [warnings=2607]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 135 [locFiles=135]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 133 [cacheWriteKeys=133]
+
+[11:54:57] [本地化] 本地化诊断 · 增量影响的 key/文件
+  详情: 受影响: 207 [affected=207] | 错误: 1567 [errors=1567]
+
+[11:54:57] [本地化] 本地化诊断
+  详情: 本次分配: 16685 MB [allocDeltaMB=16685] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:54:57] [内存] 分析周期
+  详情: 本周期分配: 16755 MB [cycleAllocMB=16755] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7545MB [heap=7545MB] | 累计分配: 4806345MB [alloc=4806345MB] | 工作集: 8227MB [working=8227MB] | 专用内存: 10421MB [private=10421MB]
+  ↳ 堆碎片: 1204MB [fragmented=1204MB] | 第 0 代 GC: 122455 [gc0=122455] | 第 1 代 GC: 2033 [gc1=2033] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:55:09] [刷新] PrepareIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_weapon.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 106ms [hold=106ms] | 使用 staged 刷新: 是 [staged=True]
+
+[11:55:09] [刷新] CommitIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_weapon.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 0ms [hold=0ms] | 已提交: 是 [committed=True] | 语义: 是 [semantic=True]
+
+[11:55:09] [刷新] 增量刷新类型
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_weapon.txt
+  详情: 语义: 是 [semantic=True] | 增量补丁: 1 [patches=1] | 引用文件: 0 [refs=0]
+
+[11:55:10] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_weapon.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 16966 MB [allocDeltaMB=16966]
+  诊断: 文件: 10725 [files=10725] | 最新: 10723 [fresh=10723] | 待校验: 0 [pending=0] | 过期: 2 [stale=2]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2611 [warnings=2611]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:55:10] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 1 [skip=1] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 10725 [files=10725] | 最新: 10723 [fresh=10723] | 待校验: 1 [pending=1] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:55:10] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 137 [locFiles=137] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:55:10] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7683MB [heap=7683MB] | 累计分配: 4823314MB [alloc=4823314MB] | 工作集: 8388MB [working=8388MB] | 专用内存: 10598MB [private=10598MB]
+  ↳ 堆碎片: 1174MB [fragmented=1174MB] | 第 0 代 GC: 122900 [gc0=122900] | 第 1 代 GC: 2038 [gc1=2038] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10723 [fresh=10723] | 待校验: 1 [pending=1] | 过期: 1 [stale=1]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:55:22] [刷新] PrepareIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 142ms [hold=142ms] | 使用 staged 刷新: 是 [staged=True]
+
+[11:55:22] [刷新] CommitIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 0ms [hold=0ms] | 已提交: 是 [committed=True] | 语义: 是 [semantic=True]
+
+[11:55:22] [刷新] 增量刷新类型
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 语义: 是 [semantic=True] | 增量补丁: 2 [patches=2] | 引用文件: 0 [refs=0]
+
+[11:55:22] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_shield.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 16693 MB [allocDeltaMB=16693]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 1 [pending=1] | 过期: 2 [stale=2]
+  ↳ 错误: 2884 [errors=2884] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:55:22] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 62 [lint=62] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 25 [refreshLoc=25]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7703MB [heap=7703MB] | 累计分配: 4840009MB [alloc=4840009MB] | 工作集: 8206MB [working=8206MB] | 专用内存: 10631MB [private=10631MB]
+  ↳ 堆碎片: 1152MB [fragmented=1152MB] | 第 0 代 GC: 123346 [gc0=123346] | 第 1 代 GC: 2041 [gc1=2041] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2886 [errors=2886] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:55:22] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 2 [skip=2] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2886 [errors=2886] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:55:22] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 137 [locFiles=137] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:55:22] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7703MB [heap=7703MB] | 累计分配: 4840009MB [alloc=4840009MB] | 工作集: 8206MB [working=8206MB] | 专用内存: 10631MB [private=10631MB]
+  ↳ 堆碎片: 1152MB [fragmented=1152MB] | 第 0 代 GC: 123346 [gc0=123346] | 第 1 代 GC: 2041 [gc1=2041] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2886 [errors=2886] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:55:22] [性能] 性能计数
+  详情: 最近操作: delayedAnalyze [last=delayedAnalyze] | 校验次数: 62 [lint=62] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 25 [refreshLoc=25]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7703MB [heap=7703MB] | 累计分配: 4840009MB [alloc=4840009MB] | 工作集: 8206MB [working=8206MB] | 专用内存: 10631MB [private=10631MB]
+  ↳ 堆碎片: 1152MB [fragmented=1152MB] | 第 0 代 GC: 123346 [gc0=123346] | 第 1 代 GC: 2041 [gc1=2041] | 第 2 代 GC: 40 [gc2=40]
+  诊断: 文件: 10725 [files=10725] | 最新: 10722 [fresh=10722] | 待校验: 2 [pending=2] | 过期: 1 [stale=1]
+  ↳ 错误: 2886 [errors=2886] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[11:57:50] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 191382 MB [allocDeltaMB=191382]
+  诊断: 文件: 10725 [files=10725] | 最新: 10721 [fresh=10721] | 待校验: 2 [pending=2] | 过期: 2 [stale=2]
+  ↳ 错误: 2886 [errors=2886] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:57:50] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 63 [lint=63] | 全局刷新次数: 5 [refresh=5] | 本地化刷新次数: 25 [refreshLoc=25]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 5753MB [heap=5753MB] | 累计分配: 5031392MB [alloc=5031392MB] | 工作集: 7455MB [working=7455MB] | 专用内存: 10070MB [private=10070MB]
+  ↳ 堆碎片: 2242MB [fragmented=2242MB] | 第 0 代 GC: 128618 [gc0=128618] | 第 1 代 GC: 2260 [gc1=2260] | 第 2 代 GC: 41 [gc2=41]
+  诊断: 文件: 10725 [files=10725] | 最新: 10721 [fresh=10721] | 待校验: 3 [pending=3] | 过期: 1 [stale=1]
+  ↳ 错误: 2886 [errors=2886] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:58:59] [刷新] 刷新缓存
+  详情: 本次分配: 60212 MB [allocDeltaMB=60212] | 使用 staged 刷新: 是 [staged=True] | 强制刷新: 否 [force=False] | 达到跳过上限: 否 [skipLimit=False]
+  内存: 托管堆: 13920MB [heap=13920MB] | 累计分配: 5091605MB [alloc=5091605MB] | 工作集: 10219MB [working=10219MB] | 专用内存: 16453MB [private=16453MB]
+  ↳ 堆碎片: 746MB [fragmented=746MB] | 第 0 代 GC: 129365 [gc0=129365] | 第 1 代 GC: 2301 [gc1=2301] | 第 2 代 GC: 44 [gc2=44]
+  诊断: 文件: 10725 [files=10725] | 最新: 10721 [fresh=10721] | 待校验: 3 [pending=3] | 过期: 1 [stale=1]
+  ↳ 错误: 2886 [errors=2886] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+
+[11:59:27] [本地化] 本地化诊断
+  详情: 本次分配: 22712 MB [allocDeltaMB=22712] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[11:59:27] [内存] 分析周期
+  详情: 本周期分配: 83055 MB [cycleAllocMB=83055] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6412MB [heap=6412MB] | 累计分配: 5114448MB [alloc=5114448MB] | 工作集: 7625MB [working=7625MB] | 专用内存: 10488MB [private=10488MB]
+  ↳ 堆碎片: 1934MB [fragmented=1934MB] | 第 0 代 GC: 129817 [gc0=129817] | 第 1 代 GC: 2308 [gc1=2308] | 第 2 代 GC: 45 [gc2=45]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10725 [pending=10725] | 过期: 0 [stale=0]
+  ↳ 错误: 2886 [errors=2886] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[11:59:27] [性能] 性能计数
+  详情: 最近操作: delayedAnalyze [last=delayedAnalyze] | 校验次数: 63 [lint=63] | 全局刷新次数: 6 [refresh=6] | 本地化刷新次数: 26 [refreshLoc=26]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6412MB [heap=6412MB] | 累计分配: 5114448MB [alloc=5114448MB] | 工作集: 7625MB [working=7625MB] | 专用内存: 10488MB [private=10488MB]
+  ↳ 堆碎片: 1934MB [fragmented=1934MB] | 第 0 代 GC: 129817 [gc0=129817] | 第 1 代 GC: 2308 [gc1=2308] | 第 2 代 GC: 45 [gc2=45]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10725 [pending=10725] | 过期: 0 [stale=0]
+  ↳ 错误: 2886 [errors=2886] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[12:01:48] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/localisation/simp_chinese/new_spth_l_simp_chinese.yml
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 191380 MB [allocDeltaMB=191380]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10725 [pending=10725] | 过期: 0 [stale=0]
+  ↳ 错误: 2886 [errors=2886] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:01:48] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 64 [lint=64] | 全局刷新次数: 6 [refresh=6] | 本地化刷新次数: 26 [refreshLoc=26]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6509MB [heap=6509MB] | 累计分配: 5305835MB [alloc=5305835MB] | 工作集: 7319MB [working=7319MB] | 专用内存: 10061MB [private=10061MB]
+  ↳ 堆碎片: 1925MB [fragmented=1925MB] | 第 0 代 GC: 135033 [gc0=135033] | 第 1 代 GC: 2313 [gc1=2313] | 第 2 代 GC: 45 [gc2=45]
+  诊断: 文件: 10725 [files=10725] | 最新: 1 [fresh=1] | 待校验: 10724 [pending=10724] | 过期: 0 [stale=0]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:01:53] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_variables/spth_component_variables.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 340 MB [allocDeltaMB=340]
+  诊断: 文件: 10725 [files=10725] | 最新: 1 [fresh=1] | 待校验: 10724 [pending=10724] | 过期: 0 [stale=0]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:01:56] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 4 [fresh=4] | 待校验: 10721 [pending=10721] | 过期: 0 [stale=0]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:01:56] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 137 [locFiles=137] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[12:01:56] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6734MB [heap=6734MB] | 累计分配: 5306197MB [alloc=5306197MB] | 工作集: 7550MB [working=7550MB] | 专用内存: 10307MB [private=10307MB]
+  ↳ 堆碎片: 1873MB [fragmented=1873MB] | 第 0 代 GC: 135035 [gc0=135035] | 第 1 代 GC: 2313 [gc1=2313] | 第 2 代 GC: 45 [gc2=45]
+  诊断: 文件: 10725 [files=10725] | 最新: 4 [fresh=4] | 待校验: 10721 [pending=10721] | 过期: 0 [stale=0]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:02:16] [校验] 准备交互更新
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_variables/spth_component_variables.txt
+  详情: 耗时: 8ms [elapsed=8ms]
+
+[12:02:16] [校验] 提交交互更新
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_variables/spth_component_variables.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 1ms [hold=1ms] | 已提交: 是 [committed=True]
+
+[12:02:16] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_variables/spth_component_variables.txt
+  详情: 模式: 交互 [mode=interactive] | 浅层校验: 是 [shallow=True] | 本次分配: 20 MB [allocDeltaMB=20]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10725 [pending=10725] | 过期: 0 [stale=0]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:02:18] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_variables/spth_component_variables.txt
+  详情: 行: 1902 [line=1902] | 列: 52 [char=52] | 耗时: 71ms [elapsed=71ms] | 本次分配: 6 MB [allocDeltaMB=6]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[12:02:19] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10724 [pending=10724] | 过期: 1 [stale=1]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2718 [warnings=2718]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[12:02:19] [本地化] 本地化诊断
+  详情: 本次分配: 25 MB [allocDeltaMB=25] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[12:02:19] [内存] 分析周期
+  详情: 本周期分配: 100 MB [cycleAllocMB=100] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6916MB [heap=6916MB] | 累计分配: 5306379MB [alloc=5306379MB] | 工作集: 7714MB [working=7714MB] | 专用内存: 10402MB [private=10402MB]
+  ↳ 堆碎片: 1873MB [fragmented=1873MB] | 第 0 代 GC: 135035 [gc0=135035] | 第 1 代 GC: 2313 [gc1=2313] | 第 2 代 GC: 45 [gc2=45]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[12:02:19] [性能] 性能计数
+  详情: 最近操作: delayedAnalyze [last=delayedAnalyze] | 校验次数: 66 [lint=66] | 全局刷新次数: 6 [refresh=6] | 本地化刷新次数: 27 [refreshLoc=27]
+  ↳ 补全次数: 8 [completion=8] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 6916MB [heap=6916MB] | 累计分配: 5306379MB [alloc=5306379MB] | 工作集: 7714MB [working=7714MB] | 专用内存: 10402MB [private=10402MB]
+  ↳ 堆碎片: 1873MB [fragmented=1873MB] | 第 0 代 GC: 135035 [gc0=135035] | 第 1 代 GC: 2313 [gc1=2313] | 第 2 代 GC: 45 [gc2=45]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 137 [cacheWriteKeys=137]
+
+[12:02:24] [校验] 准备交互更新
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_variables/spth_component_variables.txt
+  详情: 耗时: 14ms [elapsed=14ms]
+
+[12:02:24] [校验] 提交交互更新
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_variables/spth_component_variables.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 1ms [hold=1ms] | 已提交: 是 [committed=True]
+
+[12:02:24] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_variables/spth_component_variables.txt
+  详情: 模式: 交互 [mode=interactive] | 浅层校验: 是 [shallow=True] | 本次分配: 20 MB [allocDeltaMB=20]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10725 [pending=10725] | 过期: 0 [stale=0]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:02:27] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 10725 [files=10725] | 最新: 0 [fresh=0] | 待校验: 10725 [pending=10725] | 过期: 0 [stale=0]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:02:27] [本地化] 本地化诊断
+  详情: 本次分配: 25 MB [allocDeltaMB=25] | 本地化文件缓存: 137 [locFiles=137] | 本地化错误: 2479 [locErrors=2479] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[12:02:27] [内存] 分析周期
+  详情: 本周期分配: 95 MB [cycleAllocMB=95] | 字符串池: 626058 [strings=626058] | 整数池: 975781 [ints=975781]
+  内存: 托管堆: 7057MB [heap=7057MB] | 累计分配: 5306520MB [alloc=5306520MB] | 工作集: 7851MB [working=7851MB] | 专用内存: 10529MB [private=10529MB]
+  ↳ 堆碎片: 1873MB [fragmented=1873MB] | 第 0 代 GC: 135035 [gc0=135035] | 第 1 代 GC: 2313 [gc1=2313] | 第 2 代 GC: 45 [gc2=45]
+  诊断: 文件: 10725 [files=10725] | 最新: 10725 [fresh=10725] | 待校验: 0 [pending=0] | 过期: 0 [stale=0]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:02:36] [刷新] CommitIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_variables/spth_component_variables.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 0ms [hold=0ms] | 已提交: 否 [committed=False] | 语义: 否 [semantic=False]
+
+[12:02:36] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_variables/spth_component_variables.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 241 MB [allocDeltaMB=241]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:02:36] [刷新] PrepareIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_variables/spth_component_variables.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 72ms [hold=72ms] | 使用 staged 刷新: 否 [staged=False]
+
+[12:02:36] [刷新] CommitIncrementalTypes
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_variables/spth_component_variables.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 0ms [hold=0ms] | 已提交: 否 [committed=False] | 语义: 否 [semantic=False]
+
+[12:02:37] [校验] 更新文件
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/scripted_variables/spth_component_variables.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 否 [shallow=False] | 本次分配: 479 MB [allocDeltaMB=479]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:02:37] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 1 [skip=1] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:02:37] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 137 [locFiles=137] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[12:02:37] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 626073 [strings=626073] | 整数池: 975811 [ints=975811]
+  内存: 托管堆: 6730MB [heap=6730MB] | 累计分配: 5307364MB [alloc=5307364MB] | 工作集: 7975MB [working=7975MB] | 专用内存: 10667MB [private=10667MB]
+  ↳ 堆碎片: 1795MB [fragmented=1795MB] | 第 0 代 GC: 135037 [gc0=135037] | 第 1 代 GC: 2314 [gc1=2314] | 第 2 代 GC: 45 [gc2=45]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:02:39] [校验] 批量校验文件 · 动态引用批次
+  详情: 文件: 1 [files=1] | 诊断数: 0 [diagnostics=0] | 耗时: 227 ms [elapsedMs=227] | 本次分配: 163 MB [allocDeltaMB=163]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2720 [warnings=2720]
+
+[12:02:39] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 2 [skip=2] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:02:39] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 137 [locFiles=137] | 缓存的本地化 key: 0 [cachedLocKeys=0]
+
+[12:02:39] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 626073 [strings=626073] | 整数池: 975811 [ints=975811]
+  内存: 托管堆: 6533MB [heap=6533MB] | 累计分配: 5307528MB [alloc=5307528MB] | 工作集: 7978MB [working=7978MB] | 专用内存: 10667MB [private=10667MB]
+  ↳ 堆碎片: 1793MB [fragmented=1793MB] | 第 0 代 GC: 135038 [gc0=135038] | 第 1 代 GC: 2314 [gc1=2314] | 第 2 代 GC: 45 [gc2=45]
+  诊断: 文件: 10725 [files=10725] | 最新: 10724 [fresh=10724] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 2887 [errors=2887] | 警告: 2720 [warnings=2720]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 137 [locFiles=137]
+  ↳ 本地化 key: 0 [locKeys=0] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 136 [cacheWriteKeys=136]
+
+[12:03:02] [性能] 转到定义
+  文件 [file]: /home/koishi/IdeaProjects/stellaris_touhou/common/component_templates/th_weapon.txt
+  详情: 行: 3548 [line=3548] | 列: 13 [char=13] | 耗时: 66ms [elapsed=66ms] | 本次分配: 67 MB [allocDeltaMB=67]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 136 [locFiles=136]
+  ↳ 本地化 key: 178788 [locKeys=178788] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 2 [groupedTypeFiles=2]
+  ↳ 缓存写入记录: 135 [cacheWriteKeys=135]
+

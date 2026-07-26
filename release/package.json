@@ -705,9 +705,11 @@
                 "when": "editorTextFocus && editorHasSelection && config.stellarisLanguageServices.ai.enabled"
             }
         ],
-        "configuration": {
+        "configuration": [
+        {
             "type": "object",
-            "title": "%configuration.title%",
+            "title": "%configuration.category.editor%",
+            "order": 10,
             "properties": {
                 "stellarisLanguageServices.editor.formatIndentOnPaste": {
                     "scope": "language-overridable",
@@ -734,7 +736,14 @@
                     "maximum": 2000,
                     "default": 250,
                     "description": "%configuration.stellarisLanguageServices.editor.backgroundFeaturesDelayMs.description%"
-                },
+                }
+            }
+        },
+        {
+            "type": "object",
+            "title": "%configuration.category.language%",
+            "order": 20,
+            "properties": {
                 "stellarisLanguageServices.trace.server": {
                     "scope": "window",
                     "type": "string",
@@ -825,7 +834,14 @@
                     "type": "boolean",
                     "default": false,
                     "description": "%configuration.stellarisLanguageServices.logging.diagnostic.description%"
-                },
+                }
+            }
+        },
+        {
+            "type": "object",
+            "title": "%configuration.category.rules%",
+            "order": 30,
+            "properties": {
                 "stellarisLanguageServices.rules_version": {
                     "scope": "window",
                     "type": "string",
@@ -934,7 +950,14 @@
                     "type": "boolean",
                     "default": true,
                     "description": "%configuration.stellarisLanguageServices.checkForUpdates.description%"
-                },
+                }
+            }
+        },
+        {
+            "type": "object",
+            "title": "%configuration.category.ai.core%",
+            "order": 40,
+            "properties": {
                 "stellarisLanguageServices.ai.enabled": {
                     "scope": "window",
                     "type": "boolean",
@@ -1221,7 +1244,14 @@
                     "minimum": 0,
                     "maximum": 10000000,
                     "description": "%configuration.stellarisLanguageServices.ai.maxContextTokens.description%"
-                },
+                }
+            }
+        },
+        {
+            "type": "object",
+            "title": "%configuration.category.ai.inline%",
+            "order": 50,
+            "properties": {
                 "stellarisLanguageServices.ai.inlineCompletion.enabled": {
                     "scope": "window",
                     "type": "boolean",
@@ -1353,7 +1383,14 @@
                     "type": "string",
                     "default": "",
                     "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.endpoint.description%"
-                },
+                }
+            }
+        },
+        {
+            "type": "object",
+            "title": "%configuration.category.ai.assistance%",
+            "order": 60,
+            "properties": {
                 "stellarisLanguageServices.ai.translationPreview.provider": {
                     "scope": "window",
                     "type": "string",
@@ -1438,7 +1475,14 @@
                     "type": "boolean",
                     "default": true,
                     "description": "%configuration.stellarisLanguageServices.ai.enhancedDiagnostics.description%"
-                },
+                }
+            }
+        },
+        {
+            "type": "object",
+            "title": "%configuration.category.ai.integrations%",
+            "order": 70,
+            "properties": {
                 "stellarisLanguageServices.ai.web.mode": {
                     "scope": "window",
                     "type": "string",
@@ -1626,7 +1670,14 @@
                             }
                         }
                     }
-                },
+                }
+            }
+        },
+        {
+            "type": "object",
+            "title": "%configuration.category.ai.performance%",
+            "order": 80,
+            "properties": {
                 "stellarisLanguageServices.ai.performance.legacyFullToolset": {
                     "scope": "window",
                     "type": "boolean",
@@ -1711,7 +1762,8 @@
                     "description": "%configuration.stellarisLanguageServices.ai.performance.subAgentUncachedInputTokenBudget.description%"
                 }
             }
-        },
+        }
+        ],
         "languages": [
             {
                 "id": "stellaris-localisation",

@@ -1,4 +1,12 @@
 {
+  "configuration.category.editor": "CWTools：编辑器体验",
+  "configuration.category.language": "CWTools：语言与诊断",
+  "configuration.category.rules": "CWTools：规则与游戏数据",
+  "configuration.category.ai.core": "CWTools AI：模型与运行时",
+  "configuration.category.ai.inline": "CWTools AI：行内补全",
+  "configuration.category.ai.assistance": "CWTools AI：翻译与诊断",
+  "configuration.category.ai.integrations": "CWTools AI：网络与集成",
+  "configuration.category.ai.performance": "CWTools AI：性能",
   "configuration.stellarisLanguageServices.editor.codeLens.enabled.description": "启用 CWTools CodeLens。在超大型工作区中可关闭，以完全停止 CodeLens 后台请求。",
   "configuration.stellarisLanguageServices.editor.semanticHighlighting.enabled.description": "启用 CWTools 语义高亮。在超大型工作区中可关闭，以完全停止语义标记后台请求。",
   "configuration.stellarisLanguageServices.editor.backgroundFeaturesDelayMs.description": "打开文件或进行补全后，延迟 CodeLens 与语义标记请求，使补全优先发送。设为 0 可关闭延迟。",

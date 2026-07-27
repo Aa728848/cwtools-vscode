@@ -56,6 +56,26 @@ describe('MemDiag locale-aware formatter', () => {
 		expect(lines.filter(line => line.includes('CustomEvent')).length).to.equal(1);
 	});
 
+	it('formats client completion and validation feedback beside server performance entries', () => {
+		const completion = formatMemDiagEntry({
+			category: 'Completion',
+			message: 'ClientCompletion request=3 status=success elapsedMs=42 items=20 trigger=character triggerChar=":" file=events/test.txt line=8 char=4 total=3 completed=3 succeeded=3 cancelled=0 failed=0 averageMs=31.5 maxMs=42',
+			timestamp: '10:00:03.042',
+		}, '00:00:00', 'en');
+		const validation = formatMemDiagEntry({
+			category: 'Lint',
+			message: 'ClientValidationFeedback request=7 trigger=change version=12 elapsedMs=180 diagnostics=4 publishedDiagnostics=3 errors=1 warnings=2 information=1 hints=0 file=events/test.txt total=9 completed=7 superseded=2 dropped=0 averageMs=150.0 maxMs=420',
+			timestamp: '10:00:04.180',
+		}, '00:00:00', 'en');
+
+		expect(completion[0]).to.equal('[10:00:03.042] [Completion] Client completion feedback');
+		expect(completion.some(line => line.includes('Elapsed: 42 ms [elapsedMs=42]'))).to.equal(true);
+		expect(completion.some(line => line.includes('Trigger: character [trigger=character]'))).to.equal(true);
+		expect(validation[0]).to.equal('[10:00:04.180] [Lint] Client validation feedback');
+		expect(validation.some(line => line.includes('Published diagnostics: 3 [publishedDiagnostics=3]'))).to.equal(true);
+		expect(validation.some(line => line.includes('Superseded: 2 [superseded=2]'))).to.equal(true);
+	});
+
 	it('selects Chinese only for VS Code Chinese locales', () => {
 		expect(memDiagLanguageForLocale('zh-cn')).to.equal('zh');
 		expect(memDiagLanguageForLocale('ZH-TW')).to.equal('zh');

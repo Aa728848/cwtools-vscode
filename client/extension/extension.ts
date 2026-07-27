@@ -59,6 +59,7 @@ import { handleVanillaCacheGenerated } from './vanillaCacheLifecycle';
 import { parseWorkshopContentAppId, getGameIdForWorkshopAppId } from './workshopDetection';
 import { inferGameIdFromWorkspace, hasWorkspaceModDescriptor, workspaceHasParadoxStructure as workspaceHasParadoxStructureDetect } from './workspaceGameDetection';
 import { LspFeaturePriorityGate } from './lspFeaturePriority';
+import { LspPerformanceStats, type ValidationDiagnosticCounts } from './lspPerformanceStats';
 
 export let defaultClient: LanguageClient;
 
@@ -1818,6 +1819,16 @@ export async function activate(context: ExtensionContext) {
 			workspace.createFileSystemWatcher("**/{localisation,localisation_synced,localization}/**/*.yml")
 		]
 		const editorFeaturePriority = new LspFeaturePriorityGate();
+		const monitorLogChannel = window.createOutputChannel('MemDiag');
+		const monitorLogLanguage = memDiagLanguageForLocale(vs.env.language);
+		const appendMemDiagEntry = (entry: { category?: string; message: string; timestamp?: string }) => {
+			const fallbackTimestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+			for (const line of formatMemDiagEntry(entry, fallbackTimestamp, monitorLogLanguage)) {
+				monitorLogChannel.appendLine(line);
+			}
+		};
+		const lspPerformanceStats = new LspPerformanceStats(appendMemDiagEntry);
+		context.subscriptions.push(monitorLogChannel);
 		const editorFeaturesConfiguration = () => workspace.getConfiguration('stellarisLanguageServices.editor');
 		const backgroundFeatureDelay = () =>
 			Math.max(0, editorFeaturesConfiguration().get<number>('backgroundFeaturesDelayMs', 250));
@@ -1854,9 +1865,28 @@ export async function activate(context: ExtensionContext) {
 				fileEvents: fileEvents
 			},
 			middleware: {
-				provideCompletionItem: (document, position, context, token, next) => {
+				provideCompletionItem: async (document, position, context, token, next) => {
 					editorFeaturePriority.prioritiseCompletion(backgroundFeatureDelay());
-					return next(document, position, context, token);
+					const statsRequest = lspPerformanceStats.beginCompletion({
+						file: workspace.asRelativePath(document.uri, false),
+						line: position.line,
+						character: position.character,
+						triggerKind: context.triggerKind,
+						triggerCharacter: context.triggerCharacter,
+					});
+					try {
+						const result = await next(document, position, context, token);
+						const itemCount = Array.isArray(result) ? result.length : result?.items.length ?? 0;
+						lspPerformanceStats.finishCompletion(statsRequest, token.isCancellationRequested
+							? { status: 'cancelled', itemCount }
+							: { status: 'success', itemCount });
+						return result;
+					} catch (error) {
+						lspPerformanceStats.finishCompletion(statsRequest, token.isCancellationRequested
+							? { status: 'cancelled' }
+							: { status: 'error', error });
+						throw error;
+					}
 				},
 				provideCodeLenses: async (document, token, next) => {
 					if (!editorFeaturesConfiguration().get<boolean>('codeLens.enabled', true)) return [];
@@ -1896,6 +1926,15 @@ export async function activate(context: ExtensionContext) {
 						enrichDiagnosticsInPlace(result, vs.env.language.startsWith('zh'));
 					}
 					next(uri, result);
+					const counts: ValidationDiagnosticCounts = {
+						diagnostics: diagnostics.length,
+						publishedDiagnostics: result.length,
+						errors: diagnostics.filter(diagnostic => diagnostic.severity === vs.DiagnosticSeverity.Error).length,
+						warnings: diagnostics.filter(diagnostic => diagnostic.severity === vs.DiagnosticSeverity.Warning).length,
+						information: diagnostics.filter(diagnostic => diagnostic.severity === vs.DiagnosticSeverity.Information).length,
+						hints: diagnostics.filter(diagnostic => diagnostic.severity === vs.DiagnosticSeverity.Hint).length,
+					};
+					lspPerformanceStats.finishValidation(uri.toString(), counts);
 				},
 				provideDocumentLinks: async (document, token, next) => {
 					const links = await next(document, token);
@@ -1922,9 +1961,6 @@ export async function activate(context: ExtensionContext) {
 		const client = new LanguageClient('cwtools', 'Paradox Language Server', serverOptions, clientOptions);
 		defaultClient = client;
 		client.registerProposedFeatures();
-		const monitorLogChannel = window.createOutputChannel('MemDiag');
-		const monitorLogLanguage = memDiagLanguageForLocale(vs.env.language);
-		context.subscriptions.push(monitorLogChannel);
 		interface loadingBarParams { enable: boolean; value: string; percentage?: number }
 		const loadingBarNotification = new NotificationType<loadingBarParams>('loadingBar');
 		interface debugStatusBarParams { enable: boolean; value: string }
@@ -1959,6 +1995,29 @@ export async function activate(context: ExtensionContext) {
 		}
 
 		context.subscriptions.push(window.onDidChangeActiveTextEditor(didChangeActiveTextEditor));
+
+		const trackedValidationLanguages = new Set([
+			'paradox', 'yaml', 'stellaris', 'hoi4', 'eu4', 'ck2', 'imperator',
+			'vic2', 'vic3', 'ck3', 'eu5', 'pdx-shader',
+		]);
+		const recordValidationTrigger = (document: vs.TextDocument, trigger: 'open' | 'change' | 'save') => {
+			if (document.uri.scheme !== 'file' || !trackedValidationLanguages.has(document.languageId)) return;
+			lspPerformanceStats.recordValidationTrigger({
+				uri: document.uri.toString(),
+				file: workspace.asRelativePath(document.uri, false),
+				version: document.version,
+				trigger,
+			});
+		};
+		context.subscriptions.push(
+			workspace.onDidOpenTextDocument(document => recordValidationTrigger(document, 'open')),
+			workspace.onDidChangeTextDocument(event => {
+				if (event.contentChanges.length > 0) recordValidationTrigger(event.document, 'change');
+			}),
+			workspace.onDidSaveTextDocument(document => recordValidationTrigger(document, 'save')),
+			workspace.onDidCloseTextDocument(document => lspPerformanceStats.forgetValidation(document.uri.toString())),
+		);
+		for (const document of workspace.textDocuments) recordValidationTrigger(document, 'open');
 
 		// Monitor document changes and automatically trigger completion when | is entered in the script_value environment
 		let lastCursorLine = -1;
@@ -2083,7 +2142,7 @@ export async function activate(context: ExtensionContext) {
 				category: typeof param.category === 'string' ? param.category : undefined,
 				timestamp,
 			};
-			for (const line of formatMemDiagEntry(entry, timestamp, monitorLogLanguage)) monitorLogChannel.appendLine(line);
+			appendMemDiagEntry(entry);
 		})
 		client.onNotification(completionRefreshNotification, (param: CompletionRefreshParams) => {
 			setTimeout(() => {

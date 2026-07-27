@@ -5,7 +5,7 @@
     "description": "%extension.description%",
     "author": "Eddy",
     "license": "MIT",
-    "version": "2.9.0",
+    "version": "2.9.2",
     "preview": true,
     "publisher": "ForeverSkywalker",
     "icon": "docs/stellaris.png",

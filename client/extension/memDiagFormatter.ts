@@ -42,6 +42,8 @@ const OPERATION_LABELS: Readonly<Record<string, string>> = {
 	UpdateFile: '更新文件 / UpdateFile',
 	LocErrors: '本地化诊断 / LocErrors',
 	Completion: '补全 / Completion',
+	ClientCompletion: '客户端补全反馈 / Client completion feedback',
+	ClientValidationFeedback: '客户端校验反馈 / Client validation feedback',
 	Hover: '悬停 / Hover',
 };
 
@@ -125,10 +127,27 @@ const FIELD_LABELS: Readonly<Record<string, string>> = {
 	refresh: '全局刷新次数 / Refresh count',
 	refreshLoc: '本地化刷新次数 / Localisation refresh count',
 	completion: '补全次数 / Completion count',
+	request: '请求序号 / Request',
+	status: '状态 / Status',
+	trigger: '触发方式 / Trigger',
+	triggerChar: '触发字符 / Trigger character',
+	version: '文档版本 / Document version',
+	total: '总触发数 / Total triggers',
+	completed: '已完成 / Completed',
+	succeeded: '成功 / Succeeded',
+	cancelled: '已取消 / Cancelled',
+	failed: '失败 / Failed',
+	superseded: '被后续输入覆盖 / Superseded',
+	dropped: '状态记录丢弃 / Dropped state',
+	averageMs: '平均耗时 / Average elapsed',
+	maxMs: '最大耗时 / Maximum elapsed',
+	publishedDiagnostics: '发布诊断数 / Published diagnostics',
+	information: '信息 / Information',
+	hints: '提示 / Hints',
 };
 
 const MB_FIELDS = new Set(['allocDeltaMB', 'cycleAllocMB', 'heap', 'alloc', 'working', 'private', 'fragmented']);
-const MILLISECOND_FIELDS = new Set(['elapsedMs']);
+const MILLISECOND_FIELDS = new Set(['elapsedMs', 'averageMs', 'maxMs']);
 const PATH_FIELDS = new Set(['file', 'path']);
 const LABEL_SEPARATOR = ' / ';
 

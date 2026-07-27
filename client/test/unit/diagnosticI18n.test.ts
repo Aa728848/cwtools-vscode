@@ -1,6 +1,6 @@
 import { expect } from 'chai';
-import { buildDiagnosticHint, enrichDiagnosticsInPlace, diagnosticCodeString, HINT_PREFIX } from '../../extension/diagnosticI18n';
-import type { EnrichableDiagnostic } from '../../extension/diagnosticI18n';
+import { buildDiagnosticHint, enrichDiagnosticsInPlace, diagnosticCodeString, foldLocalisationWarnings, HINT_PREFIX } from '../../extension/diagnosticI18n';
+import type { EnrichableDiagnostic, FoldableDiagnostic } from '../../extension/diagnosticI18n';
 
 describe('diagnostic i18n enrichment', () => {
     describe('diagnosticCodeString', () => {
@@ -180,6 +180,99 @@ describe('diagnostic i18n enrichment', () => {
             enrichDiagnosticsInPlace([diag], true);
             expect(diag.message).to.equal('Some never-seen-before validator output');
             expect(diag.source).to.equal('CWTools');
+        });
+    });
+
+    describe('foldLocalisationWarnings', () => {
+        interface TestDiagnostic extends FoldableDiagnostic {
+            data?: string;
+        }
+        const WARNING = 1;
+        const ERROR = 0;
+        const uri = { fsPath: '/mod/events/test.txt' };
+        const rangeAt = (line: number) => ({
+            start: { line, character: 4 },
+            end: { line, character: 10 },
+        });
+        const warning = (code: string, line: number, message: string, data?: string): TestDiagnostic => ({
+            message,
+            code,
+            severity: WARNING,
+            range: rangeAt(line),
+            data,
+        });
+        const at = <T>(list: readonly T[], index: number): T => {
+            const value = list[index];
+            if (value === undefined) throw new Error(`expected index ${index} to exist`);
+            return value;
+        };
+
+        it('folds same-code localisation warnings into one entry with related locations', () => {
+            const diags = [
+                warning('CW255', 2, 'Localisation key a is not defined for English'),
+                warning('CW255', 5, 'Localisation key b is not defined for English'),
+                warning('CW255', 9, 'Localisation key c is not defined for English'),
+            ];
+            const result = foldLocalisationWarnings(diags, uri, false);
+            expect(result).to.have.lengthOf(1);
+            const merged = at(result, 0);
+            expect(merged.code).to.equal('CW255');
+            expect(merged.message).to.include('3').and.to.include('CW255');
+            expect(merged.range).to.equal(at(diags, 0).range);
+            const related = merged.relatedInformation ?? [];
+            expect(related).to.have.lengthOf(3);
+            expect(at(related, 1).message).to.equal(at(diags, 1).message);
+            expect(at(related, 1).location.range).to.equal(at(diags, 1).range);
+            expect(at(related, 1).location.uri).to.equal(uri);
+        });
+
+        it('folds per code and keeps original ordering of first occurrences', () => {
+            const diags = [
+                warning('CW255', 2, 'a'),
+                warning('CW102', 3, 'unknown trigger has_pop used.'),
+                warning('CW258', 4, 'b'),
+                warning('CW255', 5, 'c'),
+                warning('CW258', 6, 'd'),
+            ];
+            const result = foldLocalisationWarnings(diags, uri, false);
+            expect(result).to.have.lengthOf(3);
+            expect(at(result, 0).code).to.equal('CW255');
+            expect(at(result, 0).relatedInformation ?? []).to.have.lengthOf(2);
+            expect(at(result, 1)).to.equal(at(diags, 1));
+            expect(at(result, 2).code).to.equal('CW258');
+            expect(at(result, 2).relatedInformation ?? []).to.have.lengthOf(2);
+        });
+
+        it('never folds errors, even localisation-coded ones', () => {
+            const diags: TestDiagnostic[] = [
+                { message: 'e1', code: 'CW100', severity: ERROR, range: rangeAt(1) },
+                { message: 'e2', code: 'CW100', severity: ERROR, range: rangeAt(2) },
+            ];
+            const result = foldLocalisationWarnings(diags, uri, false);
+            expect(result).to.have.lengthOf(2);
+            expect(at(result, 0)).to.equal(at(diags, 0));
+            expect(at(result, 1)).to.equal(at(diags, 1));
+        });
+
+        it('leaves single occurrences and non-localisation codes untouched', () => {
+            const diags = [
+                warning('CW255', 2, 'only one'),
+                warning('CW102', 3, 'unknown trigger has_pop used.'),
+                warning('CW102', 4, 'unknown effect set_pop used.'),
+            ];
+            const result = foldLocalisationWarnings(diags, uri, false);
+            expect(result).to.deep.equal(diags);
+        });
+
+        it('keeps the first occurrence payload so quick fixes still target it', () => {
+            const diags = [
+                warning('CW266', 2, 'first', 'payload-1'),
+                warning('CW266', 5, 'second', 'payload-2'),
+            ];
+            const result = foldLocalisationWarnings(diags, uri, true);
+            expect(result).to.have.lengthOf(1);
+            expect(at(result, 0).data).to.equal('payload-1');
+            expect(at(result, 0).message).to.include('2').and.to.include('本地化');
         });
     });
 });

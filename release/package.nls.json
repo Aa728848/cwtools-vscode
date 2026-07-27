@@ -59,6 +59,7 @@
   "configuration.stellarisLanguageServices.localisation.languages.description": "The list of languages to validate localisation for.",
   "configuration.stellarisLanguageServices.localisation.generated_strings.description": "The placeholder string used when generating missing localisation strings.",
   "configuration.stellarisLanguageServices.errors.vanilla.description": "Whether or not to show errors for vanilla files",
+  "configuration.stellarisLanguageServices.errors.foldLocalisationWarnings.description": "Fold repeated localisation warnings sharing the same code within a file into a single expandable Problems-panel entry; the individual warnings are listed under that entry's related locations. Errors are never folded.",
   "configuration.stellarisLanguageServices.errors.ignore.description": "Error codes to ignore, list of IDs",
   "configuration.stellarisLanguageServices.errors.ignorefiles.description": "Files to ignore errors from, list of file names",
   "configuration.stellarisLanguageServices.experimental.description": "Whether or not to enable experimental features",

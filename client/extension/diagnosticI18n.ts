@@ -462,3 +462,83 @@ export function diagnosticMatchesIgnoredKey(
     if (diag.message.includes(key)) return true;
     return (diag.relatedInformation ?? []).some(ri => ri.message.includes(key));
 }
+
+// ---- Localisation warning folding ----
+
+/**
+ * CW codes the F# server classifies as localisation diagnostics. Mirror of
+ * `localisationDiagnosticCodes` in src/Main/Program.fs — keep the two in sync.
+ */
+const LOCALISATION_CODES = new Set([
+    'CW100', 'CW225', 'CW226', 'CW234', 'CW254', 'CW255',
+    'CW256', 'CW257', 'CW258', 'CW259', 'CW260', 'CW266',
+    'CW268', 'CW275',
+]);
+
+const WARNING_SEVERITY = 1; // vscode.DiagnosticSeverity.Warning
+
+export interface FoldableRange {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+}
+
+/** Structural subset of vscode.Diagnostic the folder reads/writes. */
+export interface FoldableDiagnostic extends EnrichableDiagnostic {
+    severity?: number;
+    range: FoldableRange;
+    relatedInformation?: { location: { uri: unknown; range: FoldableRange }; message: string }[];
+}
+
+function localisationCodeOf(diag: FoldableDiagnostic): string | undefined {
+    const code = codeOf(diag)?.toUpperCase().split('_', 1)[0];
+    return code && LOCALISATION_CODES.has(code) ? code : undefined;
+}
+
+/**
+ * Folds repeated same-code localisation warnings within one file into a single
+ * Problems-panel entry whose relatedInformation lists every occurrence — the
+ * same presentation CW274 inline_script call-site errors use. Only warnings
+ * are folded; errors stay individual, and single occurrences pass through
+ * untouched. The merged entry keeps the first occurrence's range/data so
+ * quick fixes at that position still work.
+ */
+export function foldLocalisationWarnings<T extends FoldableDiagnostic>(
+    diagnostics: readonly T[],
+    uri: unknown,
+    isChinese: boolean,
+): T[] {
+    const groups = new Map<string, T[]>();
+    for (const diag of diagnostics) {
+        if (diag.severity !== WARNING_SEVERITY) continue;
+        const code = localisationCodeOf(diag);
+        if (!code) continue;
+        const group = groups.get(code);
+        if (group) group.push(diag);
+        else groups.set(code, [diag]);
+    }
+    if (![...groups.values()].some(group => group.length > 1)) return diagnostics.slice();
+
+    const result: T[] = [];
+    for (const diag of diagnostics) {
+        const group = diag.severity === WARNING_SEVERITY
+            ? groups.get(localisationCodeOf(diag) ?? '')
+            : undefined;
+        if (!group || group.length < 2) {
+            result.push(diag);
+            continue;
+        }
+        if (diag !== group[0]) continue;
+        const message = isChinese
+            ? `本地化警告 ×${group.length}（${localisationCodeOf(diag)}）——展开此条目查看每一处。`
+            : `${group.length} localisation warnings (${localisationCodeOf(diag)}) — expand this entry for each occurrence.`;
+        result.push({
+            ...diag,
+            message,
+            relatedInformation: group.map(member => ({
+                location: { uri, range: member.range },
+                message: member.message,
+            })),
+        });
+    }
+    return result;
+}

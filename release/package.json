@@ -811,6 +811,12 @@
                             "startup_info.txt"
                         ]
                     },
+                    "stellarisLanguageServices.errors.foldLocalisationWarnings": {
+                        "scope": "resource",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.errors.foldLocalisationWarnings.description%"
+                    },
                     "stellarisLanguageServices.experimental": {
                         "scope": "window",
                         "type": "boolean",

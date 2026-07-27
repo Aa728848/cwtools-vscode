@@ -66,6 +66,19 @@ let lineBeforeCursor (text: string) (line: int) (character: int) =
 let prefixAtPosition (text: string) (line: int) (character: int) =
     lineBeforeCursor text line character |> prefixFromTextBeforeCursor
 
+/// A completion list is safe to reuse only for the exact file contents and
+/// cursor position that produced it. Directory/category keys are not AST
+/// identities and must never be shared by fallback completions.
+let completionCacheKey
+    (normalisedFilePath: string)
+    (textHash: int)
+    (line: int)
+    (character: int)
+    (debugMode: bool)
+    (supportsInsertReplaceEdit: bool)
+    =
+    $"{normalisedFilePath}|{textHash}|{line}|{character}|{debugMode}|{supportsInsertReplaceEdit}"
+
 let private isTokenCharacter character =
     not (
         Char.IsWhiteSpace character

@@ -41,6 +41,7 @@
     <Compile Include="DiagnosticMerge.fs" />
     <Compile Include="PdxFolding.fs" />
     <Compile Include="LocalisationPreview.fs" />
+    <Compile Include="SemanticDelta.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -20,4 +20,15 @@ assertEqual "colon insertion range" (4, 13, 13) (tokenRangeInLine "d = modifier:
 assertEqual "colon replacement range" (4, 13, 17) (tokenRangeInLine "d = modifier:beam" 13)
 assertEqual "token boundary" (4, 8, 8) (tokenRangeInLine "d = beam" 8)
 
+let private assertNotEqual name left right =
+    if left = right then failwith $"{name}: expected distinct cache identities"
+
+let commonA = completionCacheKey "c:/mod/common/on_actions/a.txt" 17 4 2 false true
+let commonB = completionCacheKey "c:/mod/common/decisions/b.txt" 17 4 2 false true
+let editedA = completionCacheKey "c:/mod/common/on_actions/a.txt" 18 4 2 false true
+let movedA = completionCacheKey "c:/mod/common/on_actions/a.txt" 17 5 2 false true
+assertNotEqual "different common AST files" commonA commonB
+assertNotEqual "edited document" commonA editedA
+assertNotEqual "different cursor path" commonA movedA
+
 printfn "CompletionText regression tests passed"

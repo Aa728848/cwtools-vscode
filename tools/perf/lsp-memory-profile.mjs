@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -20,11 +20,20 @@ const serverPath = resolve(args.get('server') ?? '');
 const rulesFolder = resolve(args.get('rules') ?? '');
 const cacheFolder = resolve(args.get('cache') ?? '.tmp/lsp-memory-profile-cache/stellaris');
 const holdMs = Number.parseInt(args.get('hold-ms') ?? '300000', 10);
+const iterations = Number.parseInt(args.get('iterations') ?? '0', 10);
+const iterationDelayMs = Number.parseInt(args.get('iteration-delay-ms') ?? '250', 10);
+const editFileArg = args.get('edit-file');
+const editFile = editFileArg ? resolve(root, editFileArg) : null;
 
 for (const [name, value] of [['root', root], ['server', serverPath], ['rules', rulesFolder]]) {
   if (!existsSync(value)) throw new Error(`${name} path does not exist: ${value}`);
 }
 if (!Number.isFinite(holdMs) || holdMs < 0) throw new Error(`Invalid --hold-ms value: ${holdMs}`);
+if (!Number.isFinite(iterations) || iterations < 0) throw new Error(`Invalid --iterations value: ${iterations}`);
+if (!Number.isFinite(iterationDelayMs) || iterationDelayMs < 0) throw new Error(`Invalid --iteration-delay-ms value: ${iterationDelayMs}`);
+if (iterations > 0 && (!editFile || !existsSync(editFile))) {
+  throw new Error(`--edit-file must identify an existing workspace file when --iterations is positive: ${editFile ?? ''}`);
+}
 
 const rootUri = pathToFileURL(root).href;
 const server = spawn(serverPath, [], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
@@ -54,6 +63,43 @@ function shutdown() {
     send({ jsonrpc: '2.0', method: 'exit', params: null });
     setTimeout(() => server.kill(), 2000).unref();
   }, 500).unref();
+}
+
+const delay = milliseconds => new Promise(resolveDelay => setTimeout(resolveDelay, milliseconds));
+
+async function runEditSequence() {
+  if (iterations === 0 || !editFile) return;
+  const uri = pathToFileURL(editFile).href;
+  const original = readFileSync(editFile, 'utf8').replace(/\r?\n# cwtools-lsp-memory-profile-[01]\s*$/u, '');
+  send({
+    jsonrpc: '2.0',
+    method: 'textDocument/didOpen',
+    params: { textDocument: { uri, languageId: 'paradox', version: 0, text: original } },
+  });
+  for (let iteration = 1; iteration <= iterations; iteration += 1) {
+    const text = `${original}\n# cwtools-lsp-memory-profile-${iteration % 2}`;
+    send({
+      jsonrpc: '2.0',
+      method: 'textDocument/didChange',
+      params: {
+        textDocument: { uri, version: iteration },
+        contentChanges: [{ text }],
+      },
+    });
+    send({ jsonrpc: '2.0', method: 'textDocument/didSave', params: { textDocument: { uri } } });
+    send({
+      jsonrpc: '2.0',
+      id: nextRequestId++,
+      method: 'textDocument/completion',
+      params: { textDocument: { uri }, position: { line: 0, character: 0 }, context: { triggerKind: 1 } },
+    });
+    if (iteration % 10 === 0 || iteration === iterations) {
+      console.log(`EDIT_PROGRESS iteration=${iteration}/${iterations}`);
+    }
+    await delay(iterationDelayMs);
+  }
+  send({ jsonrpc: '2.0', method: 'textDocument/didClose', params: { textDocument: { uri } } });
+  console.log(`EDIT_COMPLETE iterations=${iterations} settleMs=${holdMs}`);
 }
 
 function handleMessage(message) {
@@ -87,8 +133,16 @@ function handleMessage(message) {
     ready = true;
     const elapsedMs = Math.round(performance.now() - startedAt);
     console.log(`SERVER_READY elapsedMs=${elapsedMs} diagnostics=${publishedDiagnostics} files=${publishedDiagnosticFiles}`);
-    if (holdMs === 0) shutdown();
-    else setTimeout(shutdown, holdMs).unref();
+    runEditSequence()
+      .then(() => {
+        if (holdMs === 0) shutdown();
+        else setTimeout(shutdown, holdMs).unref();
+      })
+      .catch(error => {
+        console.error(error);
+        process.exitCode = 1;
+        shutdown();
+      });
     return;
   }
 
@@ -109,7 +163,7 @@ function handleMessage(message) {
   if (message.method === 'monitorLog') {
     const category = message.params?.category ?? 'General';
     const text = message.params?.message ?? '';
-    if (category === 'Memory' || category === 'Validation' || category === 'Loading') {
+    if (category === 'Memory' || category === 'Validation' || category === 'Loading' || category === 'Performance' || category === 'Refresh') {
       console.log(`[${category}] ${text}`);
     }
     return;

@@ -170,6 +170,74 @@ let isKnowledgeDatabasePathAllowed (projectRoots: string list) (databasePath: st
     let target = Path.GetFullPath databasePath
     projectRoots |> List.exists (fun root -> pathInside root target)
 
+let private knowledgeTemporaryFileLegacyMaxAge = TimeSpan.FromMinutes 30.0
+let private knowledgeTemporaryDeleteAttempts = 3
+
+let private tryDeleteKnowledgeTemporaryFile (filePath: string) =
+    let mutable deleted = not (File.Exists filePath)
+    let mutable attempt = 0
+    let mutable lastError: exn option = None
+    while not deleted && attempt < knowledgeTemporaryDeleteAttempts do
+        attempt <- attempt + 1
+        try
+            File.Delete filePath
+            deleted <- not (File.Exists filePath)
+        with e ->
+            lastError <- Some e
+            if attempt < knowledgeTemporaryDeleteAttempts then
+                Threading.Thread.Sleep 25
+    if not deleted then
+        let detail = lastError |> Option.map _.Message |> Option.defaultValue "file still exists"
+        CWTools.Utilities.Utils.logWarning
+            $"Failed to delete project knowledge temporary database after {knowledgeTemporaryDeleteAttempts} attempts: {filePath} ({detail})"
+    deleted
+
+let private temporaryFileOwnerProcessId (fileName: string) (prefix: string) =
+    if not (fileName.StartsWith(prefix, comparison)) then None
+    else
+        let suffix = fileName.Substring(prefix.Length)
+        let separator = suffix.IndexOf('-')
+        if separator <= 0 then None
+        else
+            match Int32.TryParse(suffix.Substring(0, separator)) with
+            | true, processId when processId > 0 -> Some processId
+            | _ -> None
+
+let private processIsRunning processId =
+    try
+        use ownerProcess = Diagnostics.Process.GetProcessById processId
+        not ownerProcess.HasExited
+    with
+    | :? ArgumentException -> false
+    | _ -> true
+
+/// Remove abandoned full-export databases without touching a temporary file
+/// owned by another live language-server process. Legacy GUID-only files have
+/// no owner metadata, so they are removed only after a conservative age guard.
+let cleanupStaleKnowledgeTemporaryFiles (databasePath: string) =
+    let target = Path.GetFullPath databasePath
+    let directory = Path.GetDirectoryName target
+    if not (String.IsNullOrWhiteSpace directory) && Directory.Exists directory then
+        let prefix = Path.GetFileName(target) + ".tmp-"
+        let legacyCutoff = DateTime.UtcNow - knowledgeTemporaryFileLegacyMaxAge
+        try
+            for candidate in Directory.EnumerateFiles(directory, prefix + "*", SearchOption.TopDirectoryOnly) do
+                try
+                    let ownerProcessId =
+                        temporaryFileOwnerProcessId (Path.GetFileName candidate) prefix
+                    let shouldDelete =
+                        match ownerProcessId with
+                        | Some processId -> not (processIsRunning processId)
+                        | None -> File.GetLastWriteTimeUtc(candidate) <= legacyCutoff
+                    if shouldDelete then
+                        tryDeleteKnowledgeTemporaryFile candidate |> ignore
+                with e ->
+                    CWTools.Utilities.Utils.logWarning
+                        $"Failed to inspect project knowledge temporary database {candidate}: {e.Message}"
+        with e ->
+            CWTools.Utilities.Utils.logWarning
+                $"Failed to enumerate project knowledge temporary databases beside {target}: {e.Message}"
+
 let private originForPath projectRoots filePath =
     if projectRoots |> List.exists (fun root -> pathInside root filePath) then "workspace"
     else "vanilla"
@@ -1075,14 +1143,19 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
     let allowed = isKnowledgeDatabasePathAllowed projectRoots target
     if not allowed then invalidArg "databasePath" "Project knowledge database must be inside a project root."
     Directory.CreateDirectory(Path.GetDirectoryName target) |> ignore
-    let temporary = target + ".tmp-" + Guid.NewGuid().ToString("N")
+    cleanupStaleKnowledgeTemporaryFiles target
+    let temporary =
+        target
+        + ".tmp-"
+        + Environment.ProcessId.ToString()
+        + "-"
+        + Guid.NewGuid().ToString("N")
     if File.Exists temporary then File.Delete temporary
     use temporaryCleanup =
         { new IDisposable with
             member _.Dispose() =
-                try
-                    if File.Exists temporary then File.Delete temporary
-                with _ -> () }
+                if File.Exists temporary then
+                    tryDeleteKnowledgeTemporaryFile temporary |> ignore }
     let mutable publishDatabase = false
     use atomicPublisher =
         { new IDisposable with

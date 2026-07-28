@@ -28,7 +28,7 @@ import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelPr
 import { lastAISettingsWriteTime } from './ai/chatSettings';
 import { checkForUpdates } from './updateChecker';
 import { registerCodeActions } from './codeActions';
-import { enrichDiagnosticsInPlace, diagnosticCodeString, diagnosticMatchesIgnoredKey, foldLocalisationWarnings } from './diagnosticI18n';
+import { enrichDiagnosticsInPlace, diagnosticCodeString, diagnosticMatchesIgnoredKey, foldLocalisationWarnings, foldRelatedCallSiteInformation } from './diagnosticI18n';
 import { isImagePathLinkText, registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
 import { registerPdxIndentFormatter } from './pdxIndentFormatter';
@@ -1927,6 +1927,9 @@ export async function activate(context: ExtensionContext) {
 					}
 					if (workspace.getConfiguration('stellarisLanguageServices.errors').get<boolean>('foldLocalisationWarnings', true)) {
 						result = foldLocalisationWarnings(result, uri, vs.env.language.startsWith('zh'));
+					}
+					if (workspace.getConfiguration('stellarisLanguageServices.errors').get<boolean>('foldRelatedCallSiteInformation', true)) {
+						result = foldRelatedCallSiteInformation(result, vs.env.language.startsWith('zh'));
 					}
 					next(uri, result);
 					const counts: ValidationDiagnosticCounts = {

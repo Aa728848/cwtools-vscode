@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { buildDiagnosticHint, enrichDiagnosticsInPlace, diagnosticCodeString, foldLocalisationWarnings, HINT_PREFIX } from '../../extension/diagnosticI18n';
+import { buildDiagnosticHint, enrichDiagnosticsInPlace, diagnosticCodeString, foldLocalisationWarnings, foldRelatedCallSiteInformation, HINT_PREFIX } from '../../extension/diagnosticI18n';
 import type { EnrichableDiagnostic, FoldableDiagnostic } from '../../extension/diagnosticI18n';
 
 describe('diagnostic i18n enrichment', () => {
@@ -273,6 +273,75 @@ describe('diagnostic i18n enrichment', () => {
             expect(result).to.have.lengthOf(1);
             expect(at(result, 0).data).to.equal('payload-1');
             expect(at(result, 0).message).to.include('2').and.to.include('本地化');
+        });
+    });
+
+    describe('foldRelatedCallSiteInformation', () => {
+        interface TestDiagnostic extends FoldableDiagnostic {
+            data?: string;
+        }
+        const INFORMATION = 2;
+        const WARNING = 1;
+        const uri = { fsPath: '/mod/common/scripted_effects/test.txt' };
+        const rangeAt = (line: number) => ({
+            start: { line, character: 4 },
+            end: { line, character: 10 },
+        });
+        const relatedAt = (line: number, message = 'Call site of test_effect') => ({
+            location: { uri, range: rangeAt(line) },
+            message,
+        });
+        const information = (
+            line: number,
+            callLine: number,
+            message = "scripted effect 'test_effect' results in an error when expanded at a call site",
+            data?: string,
+        ): TestDiagnostic => ({
+            message,
+            code: 'CW274D',
+            severity: INFORMATION,
+            range: rangeAt(line),
+            relatedInformation: [relatedAt(callLine)],
+            data,
+        });
+
+        it('folds repeated definition hints and preserves their call-site locations', () => {
+            const diags = [
+                information(10, 30, undefined, 'payload-1'),
+                information(10, 50, undefined, 'payload-2'),
+                information(10, 70, undefined, 'payload-3'),
+            ];
+            const result = foldRelatedCallSiteInformation(diags, false);
+            expect(result).to.have.lengthOf(1);
+            const merged = result[0];
+            expect(merged).to.not.equal(undefined);
+            expect(merged?.data).to.equal('payload-1');
+            expect(merged?.message).to.include('3 call sites');
+            expect(merged?.relatedInformation?.map(item => item.location.range.start.line))
+                .to.deep.equal([30, 50, 70]);
+        });
+
+        it('keeps different definitions in separate groups', () => {
+            const diags = [
+                information(10, 30),
+                information(10, 50),
+                information(20, 60, "scripted effect 'other_effect' results in an error when expanded at a call site"),
+                information(20, 80, "scripted effect 'other_effect' results in an error when expanded at a call site"),
+            ];
+            const result = foldRelatedCallSiteInformation(diags, true);
+            expect(result).to.have.lengthOf(2);
+            expect(result[0]?.message).to.include('2 个调用点');
+            expect(result[1]?.message).to.include('2 个调用点');
+            expect(result[0]?.range.start.line).to.equal(10);
+            expect(result[1]?.range.start.line).to.equal(20);
+        });
+
+        it('leaves single, non-information, and non-CW274D diagnostics untouched', () => {
+            const single = information(10, 30);
+            const warning = { ...information(20, 40), severity: WARNING };
+            const other = { ...information(30, 50), code: 'CW274' };
+            const diags = [single, warning, other];
+            expect(foldRelatedCallSiteInformation(diags, false)).to.deep.equal(diags);
         });
     });
 });

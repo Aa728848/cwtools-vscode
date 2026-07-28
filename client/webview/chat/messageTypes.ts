@@ -26,7 +26,10 @@ export interface SwitchModeMessage { type: 'switchMode'; mode: string }
 export interface SwitchAgentProfileMessage { type: 'switchAgentProfile'; profile: AgentProfileSelectionView }
 export interface SwitchWorkflowMessage { type: 'switchWorkflow'; workflowId?: string | null }
 export interface QuickChangeModelMessage { type: 'quickChangeModel'; model: string }
-export interface QuickChangeReasoningEffortMessage { type: 'quickChangeReasoningEffort'; effort: 'low' | 'medium' | 'high' | 'max' }
+export interface QuickChangeReasoningEffortMessage {
+    type: 'quickChangeReasoningEffort';
+    effort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+}
 export interface QuickChangeWriteModeMessage { type: 'quickChangeWriteMode'; mode: 'confirm' | 'auto' | 'auto_review' | 'full' }
 export interface RetractMessagePayload { type: 'retractMessage'; messageIndex: number }
 export interface SearchTopicsMessage { type: 'searchTopics'; query: string }

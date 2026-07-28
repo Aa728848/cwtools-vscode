@@ -23,6 +23,7 @@ import type {
     AnalyzeDiagnosticErrorResult,
     GetDiagnosticsResult,
     ToolDefinition,
+    ReasoningEffort,
 } from './types';
 import { contentToString } from './types';
 import { defaultDomainForMode } from './agentProfile';
@@ -227,7 +228,7 @@ export interface AgentRunnerOptions {
     /** Override model for this run */
     model?: string;
     /** Override reasoning effort for external runtimes. */
-    reasoningEffort?: 'low' | 'medium' | 'high' | 'max';
+    reasoningEffort?: ReasoningEffort;
     /** Dynamic maximum context tokens for this run */
     maxContextTokens?: number;
     /** Optional durable-goal aggregate token budget for the run. */

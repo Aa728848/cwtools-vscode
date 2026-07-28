@@ -312,6 +312,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let settingsOllamaModels: any[] = [];
     let settingsCodexAccount: any = undefined;
     let cachedSettingsData: { providers: any[]; current: any; ollamaModels: any[] } | undefined;
+    type ReasoningEffortValue = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+    type ReasoningCapabilityView = {
+        kind: 'none' | 'fixed' | 'toggle' | 'budget' | 'effort';
+        options: ReasoningEffortValue[];
+        defaultValue: ReasoningEffortValue;
+    };
+    let settingsReasoningCapabilities: Record<string, ReasoningCapabilityView> = {};
     // Per-provider endpoint overrides shown in the settings UI, keyed by provider id.
     // Lets us swap the endpoint field when switching providers without leaking values.
     let settingsProviderEndpoints: Record<string, string> = {};
@@ -380,7 +387,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let activeWorkflowId: string | null = null;
     let quickModelOptions: string[] = [];
     let quickModelCurrent = '';
-    let quickReasoningEffort: 'low' | 'medium' | 'high' | 'max' = 'high';
+    let quickReasoningEffort: ReasoningEffortValue = 'high';
     let quickWriteMode: 'confirm' | 'auto' | 'auto_review' | 'full' = 'auto';
     let fullAccessArmedUntil = 0;
     /** Last known host-side cwtools.ai.developer.disableSecuritySandbox value (the 'full' tier). */
@@ -2435,6 +2442,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (qms) qms.value = model;
                 quickModelCurrent = model;
                 renderQuickModelMenu();
+                updateQuickReasoningControls(cachedSettingsData?.current?.provider || '', model);
                 setModelMenuOpen(false);
                 vscode.postMessage({ type: 'quickChangeModel', model });
             });
@@ -2442,10 +2450,117 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
     }
 
+    const REASONING_VALUES = new Set<ReasoningEffortValue>([
+        'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
+    ]);
+
+    function isReasoningEffortValue(value: unknown): value is ReasoningEffortValue {
+        return typeof value === 'string' && REASONING_VALUES.has(value as ReasoningEffortValue);
+    }
+
+    function reasoningCapabilityFor(providerId: string, model: string): ReasoningCapabilityView {
+        return settingsReasoningCapabilities[`${providerId}:${model}`] ?? {
+            kind: 'none',
+            options: [],
+            defaultValue: 'high',
+        };
+    }
+
+    function reasoningOptionLabel(value: ReasoningEffortValue, kind: ReasoningCapabilityView['kind']): string {
+        if (kind === 'toggle') {
+            return value === 'none' ? tr('Thinking off', '关闭思考') : tr('Thinking on', '开启思考');
+        }
+        const labels: Record<ReasoningEffortValue, [string, string]> = {
+            none: ['Off', '关闭'],
+            minimal: ['Minimal', '最少'],
+            low: ['Low', '低'],
+            medium: ['Medium', '中'],
+            high: ['High', '高'],
+            xhigh: ['XHigh', '超高'],
+            max: ['Max', '最大'],
+        };
+        const [en, zh] = labels[value];
+        return tr(en, zh);
+    }
+
+    function selectReasoningValue(capability: ReasoningCapabilityView, requested: unknown): ReasoningEffortValue {
+        if (isReasoningEffortValue(requested) && capability.options.includes(requested)) return requested;
+        if (requested === 'max' || requested === 'xhigh') {
+            if (capability.options.includes('max')) return 'max';
+            if (capability.options.includes('xhigh')) return 'xhigh';
+            if (capability.options.includes('high')) return 'high';
+        }
+        return capability.options.includes(capability.defaultValue)
+            ? capability.defaultValue
+            : capability.options[0] ?? 'high';
+    }
+
+    function populateReasoningSelect(
+        select: HTMLSelectElement,
+        capability: ReasoningCapabilityView,
+        requested: unknown
+    ): ReasoningEffortValue {
+        const selected = selectReasoningValue(capability, requested);
+        select.innerHTML = '';
+        for (const value of capability.options) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = reasoningOptionLabel(value, capability.kind);
+            option.selected = value === selected;
+            select.appendChild(option);
+        }
+        select.disabled = capability.kind === 'fixed' || capability.kind === 'none';
+        select.value = selected;
+        return selected;
+    }
+
+    function updateSettingsReasoningControls(providerId: string, model: string, requested?: unknown): void {
+        const capability = reasoningCapabilityFor(providerId, model);
+        const group = document.getElementById('settingsReasoningGroup');
+        const select = document.getElementById('settingsReasoningEffort') as HTMLSelectElement | null;
+        const label = document.getElementById('settingsReasoningLabel');
+        const hint = document.getElementById('settingsReasoningHint');
+        if (!select) return;
+        const selected = populateReasoningSelect(
+            select,
+            capability,
+            requested ?? select.value ?? select.dataset.requested
+        );
+        select.dataset.requested = selected;
+        if (group) group.style.display = capability.kind === 'none' ? 'none' : '';
+        if (label) {
+            label.textContent = capability.kind === 'toggle' || capability.kind === 'fixed'
+                ? tr('Thinking mode', '思考模式')
+                : capability.kind === 'budget'
+                    ? tr('Thinking budget', '思考预算')
+                    : tr('Reasoning effort', '推理强度');
+        }
+        if (hint) {
+            hint.textContent = capability.kind === 'fixed'
+                ? tr('(always on for this model)', '（该模型始终开启）')
+                : capability.kind === 'toggle'
+                    ? tr('(this API exposes only an on/off switch)', '（该接口仅提供开关）')
+                    : '';
+        }
+    }
+
+    function updateQuickReasoningControls(providerId: string, model: string, requested?: unknown): void {
+        const capability = reasoningCapabilityFor(providerId, model);
+        const select = document.getElementById('quickReasoningEffort') as HTMLSelectElement | null;
+        const trigger = document.getElementById('quickReasoningTrigger') as HTMLButtonElement | null;
+        if (select) quickReasoningEffort = populateReasoningSelect(select, capability, requested ?? quickReasoningEffort);
+        if (trigger) {
+            trigger.style.display = capability.kind === 'none' ? 'none' : '';
+            trigger.disabled = capability.kind === 'fixed';
+        }
+        renderQuickReasoningMenu();
+    }
+
     function renderQuickReasoningMenu(): void {
         const select = document.getElementById('quickReasoningEffort') as HTMLSelectElement | null;
         const label = document.getElementById('quickReasoningLabel');
         const trigger = document.getElementById('quickReasoningTrigger');
+        const list = document.getElementById('reasoningMenuList');
         if (select) select.value = quickReasoningEffort;
         const selectedLabel = select?.selectedOptions[0]?.textContent || quickReasoningEffort;
         if (label) label.textContent = selectedLabel;
@@ -2454,11 +2569,26 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 ? `推理强度：${selectedLabel}`
                 : `Reasoning effort: ${selectedLabel}`;
         }
-        document.querySelectorAll<HTMLElement>('[data-reasoning-effort]').forEach(item => {
-            const active = item.dataset.reasoningEffort === quickReasoningEffort;
+        if (!list || !select) return;
+        list.innerHTML = '';
+        for (const option of Array.from(select.options)) {
+            if (!isReasoningEffortValue(option.value)) continue;
+            const item = document.createElement('button');
+            item.className = 'model-menu-item';
+            item.type = 'button';
+            item.setAttribute('role', 'option');
+            item.dataset.reasoningEffort = option.value;
+            item.textContent = option.textContent;
+            const active = option.value === quickReasoningEffort;
             item.classList.toggle('active', active);
             item.setAttribute('aria-selected', active ? 'true' : 'false');
-        });
+            item.addEventListener('click', () => {
+                select.value = option.value;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                setReasoningMenuOpen(false);
+            });
+            list.appendChild(item);
+        }
     }
 
     /** Map host settings to the quick ladder tier: confirm < auto < auto_review < full. */
@@ -2563,6 +2693,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         quickModelSel.addEventListener('change', () => {
             quickModelCurrent = (quickModelSel as HTMLSelectElement).value;
             renderQuickModelMenu();
+            updateQuickReasoningControls(cachedSettingsData?.current?.provider || '', quickModelCurrent);
             vscode.postMessage({ type: 'quickChangeModel', model: quickModelCurrent });
         });
     }
@@ -2570,19 +2701,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const quickReasoningSel = document.getElementById('quickReasoningEffort') as HTMLSelectElement | null;
     quickReasoningSel?.addEventListener('change', () => {
         const effort = quickReasoningSel.value;
-        if (effort !== 'low' && effort !== 'medium' && effort !== 'high' && effort !== 'max') return;
+        if (!isReasoningEffortValue(effort)) return;
         quickReasoningEffort = effort;
         renderQuickReasoningMenu();
         vscode.postMessage({ type: 'quickChangeReasoningEffort', effort });
-    });
-    document.querySelectorAll<HTMLElement>('[data-reasoning-effort]').forEach(item => {
-        item.addEventListener('click', () => {
-            const effort = item.dataset.reasoningEffort;
-            if (!quickReasoningSel || (effort !== 'low' && effort !== 'medium' && effort !== 'high' && effort !== 'max')) return;
-            quickReasoningSel.value = effort;
-            quickReasoningSel.dispatchEvent(new Event('change', { bubbles: true }));
-            setReasoningMenuOpen(false);
-        });
     });
 
     const quickWriteModeSel = document.getElementById('quickWriteModeSelect') as HTMLSelectElement | null;
@@ -2786,6 +2908,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         settingsPage.addEventListener('input', () => { if (settingsPage.classList.contains('active')) refreshSettingsOverview(); });
         settingsPage.addEventListener('change', event => {
             const targetId = (event.target as HTMLElement | null)?.id;
+            if (targetId === 'settingsReasoningEffort') {
+                const reasoningSelect = event.target as HTMLSelectElement;
+                reasoningSelect.dataset.requested = reasoningSelect.value;
+            }
             if ((targetId === 'agentWriteMode' || targetId === 'approvalsAutoReview') && !settingsSandboxDisabled) {
                 // While the 'full' tier is active the ladder is the only exit — the page
                 // controls don't persist the sandbox flag, so they must not repaint the tier.
@@ -6122,6 +6248,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 // Cache model context token map for use in updateModelUI
                 if (msg.modelContextTokens) settingsModelContextTokens = msg.modelContextTokens;
                 if (msg.thinkingModelPrefixes) settingsThinkingPrefixes = msg.thinkingModelPrefixes;
+                settingsReasoningCapabilities = msg.reasoningCapabilities || {};
                 updateQuickModelSelector(msg.providers, msg.current, msg.ollamaModels);
                 updateQuickReasoningSelector(msg.current);
                 updateQuickWriteModeSelector(deriveWriteTier(msg.current));
@@ -6167,6 +6294,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         }
                         if (msg.dynContexts) {
                             Object.assign(settingsModelContextTokens, msg.dynContexts);
+                        }
+                        if (msg.reasoningCapabilities) {
+                            Object.assign(settingsReasoningCapabilities, msg.reasoningCapabilities);
                         }
                         updateModelUI(msg.providerId, getSelectedModel(), null);
                         const ctxInfo = msg.ctxNote ? ` ${msg.ctxNote}` : '';
@@ -6911,12 +7041,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function updateQuickReasoningSelector(current: any): void {
-        const effort = current?.reasoningEffort;
-        quickReasoningEffort = effort === 'low' || effort === 'medium' || effort === 'max' ? effort : 'high';
-        const select = document.getElementById('quickReasoningEffort') as HTMLSelectElement | null;
-        if (!select) return;
-        select.value = quickReasoningEffort;
-        renderQuickReasoningMenu();
+        updateQuickReasoningControls(
+            current?.provider || '',
+            current?.model || quickModelCurrent,
+            current?.reasoningEffort
+        );
     }
 
     function refreshSettingsOverview() {
@@ -7024,7 +7153,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         // Auto-fill context size: prefer per-model lookup, then user-saved value
         const initCtx = autoFillContextForModel(current.model, current.provider) || current.maxContextTokens || 0;
         (document.getElementById('settingsCtx') as HTMLInputElement).value = initCtx;
-        (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value = current.reasoningEffort || 'high';
+        (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).dataset.requested =
+            current.reasoningEffort || 'high';
         (document.getElementById('inlineEnabled') as HTMLInputElement).checked = current.inlineCompletion?.enabled ?? false;
         const overlapEl = document.getElementById('inlineOverlapStripping') as HTMLInputElement | null;
         if (overlapEl) overlapEl.checked = current.inlineCompletion?.overlapStripping ?? true;
@@ -7418,6 +7548,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         function onModelSelected(model: string) {
             const ctx = autoFillContextForModel(model, providerId);
             if (ctx > 0) (document.getElementById('settingsCtx') as HTMLInputElement).value = ctx;
+            const reasoningSelect = document.getElementById('settingsReasoningEffort') as HTMLSelectElement | null;
+            updateSettingsReasoningControls(
+                providerId,
+                model,
+                reasoningSelect?.dataset.requested || reasoningSelect?.value
+            );
             refreshSettingsOverview();
         }
 

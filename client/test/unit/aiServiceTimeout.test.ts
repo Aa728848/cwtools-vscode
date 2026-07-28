@@ -86,7 +86,7 @@ describe('AIService provider protocol routing', () => {
             endpoint: 'https://chatgpt.com/backend-api/codex',
             providerId: 'codex-chatgpt',
             model: 'gpt-5.6-sol',
-            reasoning: 'max',
+            reasoning: 'xhigh',
         }]);
     });
 
@@ -139,9 +139,37 @@ describe('AIService provider protocol routing', () => {
         });
 
         expect(requests[0]).to.include({ enable_thinking: true, thinking_budget: 8192 });
-        expect(requests[1].reasoning).to.deep.equal({ effort: 'max' });
+        expect(requests[1].reasoning).to.deep.equal({ effort: 'high' });
         expect(requests[2]).to.include({ enable_thinking: true, thinking_budget: 16384 });
         expect(requests[3].reasoning_effort).to.equal('high');
+    });
+
+    it('turns off thinking for switch-based models instead of inventing a low effort', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        const requests: any[] = [];
+        service.callOpenAICompatibleStreaming = async (_endpoint: string, _apiKey: string, request: any) => {
+            requests.push(request);
+            return completionResponse(request.model);
+        };
+
+        await service.chatCompletion([{ role: 'user', content: 'Hello' }], {
+            providerId: 'deepseek',
+            model: 'deepseek-v4-pro',
+            apiKey: 'test-key',
+            reasoningEffort: 'none',
+        });
+        await service.chatCompletion([{ role: 'user', content: 'Hello' }], {
+            providerId: 'mimo',
+            model: 'mimo-v2.5-pro',
+            apiKey: 'test-key',
+            reasoningEffort: 'none',
+        });
+
+        expect(requests[0].thinking).to.deep.equal({ type: 'disabled' });
+        expect(requests[0]).to.not.have.property('reasoning_effort');
+        expect(requests[1].thinking).to.deep.equal({ type: 'disabled' });
+        expect(requests[1]).to.not.have.property('reasoning_effort');
     });
 
     it('routes MiniMax Token Plan through Anthropic Messages without side-channel checks', async () => {

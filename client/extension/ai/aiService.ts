@@ -16,6 +16,7 @@ import type {
     AIUserConfig,
     CustomApiFormat,
     ContentPart,
+    ReasoningEffort,
 } from './types';
 import {
     getProvider,
@@ -29,6 +30,8 @@ import {
     getThinkingParams,
     getEffectiveTemperature,
     getProviderApiFormat,
+    getModelReasoningCapability,
+    normalizeReasoningEffort,
 } from './providers';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
@@ -159,6 +162,21 @@ export function normalizeCustomApiFormat(value: unknown): CustomApiFormat {
             return value;
         default:
             return DEFAULT_CUSTOM_API_FORMAT;
+    }
+}
+
+function normalizeConfiguredReasoningEffort(value: unknown): ReasoningEffort {
+    switch (value) {
+        case 'none':
+        case 'minimal':
+        case 'low':
+        case 'medium':
+        case 'high':
+        case 'xhigh':
+        case 'max':
+            return value;
+        default:
+            return 'high';
     }
 }
 
@@ -297,7 +315,7 @@ export class AIService {
             maxContextTokens: cfg.get<number>('maxContextTokens', 0),
             agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'auto'),
             reasoningEffort: this.reasoningEffortOverride
-                ?? cfg.get<'low' | 'medium' | 'high' | 'max'>('reasoningEffort', 'high'),
+                ?? normalizeConfiguredReasoningEffort(cfg.get<unknown>('reasoningEffort', 'high')),
             inlineCompletion: {
                 enabled: cfg.get<boolean>('inlineCompletion.enabled') || false,
                 debounceMs: cfg.get<number>('inlineCompletion.debounceMs', 200),
@@ -490,15 +508,20 @@ export class AIService {
         let finalMessages = messages;
 
         let extraBody: Record<string, any> | undefined;
-        const requestedEffort = options?.reasoningEffort ?? config.reasoningEffort ?? 'high';
-        const reducedThinkingParams = options?.disableThinking
+        const reasoningCapability = getModelReasoningCapability(providerId, model, effectiveApiFormat);
+        const requestedEffort = normalizeReasoningEffort(
+            reasoningCapability,
+            options?.reasoningEffort ?? config.reasoningEffort
+        );
+        const disableThinking = options?.disableThinking === true || requestedEffort === 'none';
+        const reducedThinkingParams = disableThinking
             ? getReducedThinkingParams(model, providerId, effectiveApiFormat)
             : undefined;
-        const enabledThinkingParams = options?.disableThinking
+        const enabledThinkingParams = disableThinking || reasoningCapability.kind === 'none'
             ? undefined
             : getThinkingParams(model, providerId, effectiveApiFormat, requestedEffort);
 
-        if (options?.disableThinking) {
+        if (disableThinking) {
             // Data-driven lookup keeps provider-specific thinking controls out of this flow.
             if (reducedThinkingParams) {
                 if (reducedThinkingParams.extraBody) {
@@ -540,7 +563,7 @@ export class AIService {
         };
 
         // Inject reasoning effort / thinking preferences based on provider
-        if (options?.disableThinking) {
+        if (disableThinking) {
             if (reducedThinkingParams?.reasoningEffort) {
                 request.reasoning_effort = reducedThinkingParams.reasoningEffort;
             }
@@ -578,7 +601,7 @@ export class AIService {
                     onTextDelta: options?.onTextDelta,
                     onToolCallDelta: options?.onToolCallDelta,
                     promptCacheKey: options?.promptCacheKey,
-                    reasoningSummary: options?.onThinking && !options?.disableThinking ? 'auto' : undefined,
+                    reasoningSummary: options?.onThinking && !disableThinking ? 'auto' : undefined,
                 });
             }
             if (effectiveApiFormat === 'gemini-generate-content') {

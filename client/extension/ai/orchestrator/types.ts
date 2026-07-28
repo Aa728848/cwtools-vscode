@@ -12,6 +12,7 @@ import type {
     FeatureManifest,
     TaskEntityContract,
     TokenUsage,
+    ReasoningEffort,
 } from '../types';
 export type {
     AcceptanceCheck,
@@ -253,7 +254,7 @@ export interface OrchestratorOptions {
     /** User configured model (inherited from settings panel) */
     model?: string;
     /** User configured reasoning level (inherited from the parent Agent run) */
-    reasoningEffort?: 'low' | 'medium' | 'high' | 'max';
+    reasoningEffort?: ReasoningEffort;
     /** Abort signal */
     abortSignal?: AbortSignal;
     /** Topic ID (used for checkpoints and working directories) */

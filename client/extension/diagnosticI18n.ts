@@ -476,6 +476,7 @@ const LOCALISATION_CODES = new Set([
 ]);
 
 const WARNING_SEVERITY = 1; // vscode.DiagnosticSeverity.Warning
+const INFORMATION_SEVERITY = 2; // vscode.DiagnosticSeverity.Information
 
 export interface FoldableRange {
     start: { line: number; character: number };
@@ -538,6 +539,58 @@ export function foldLocalisationWarnings<T extends FoldableDiagnostic>(
                 location: { uri, range: member.range },
                 message: member.message,
             })),
+        });
+    }
+    return result;
+}
+
+/**
+ * Folds repeated CW274D definition hints into one Problems-panel entry per
+ * definition. Each server diagnostic already points at one failing call site
+ * through relatedInformation, so folding must flatten those existing
+ * locations rather than replacing them with the repeated definition range.
+ */
+export function foldRelatedCallSiteInformation<T extends FoldableDiagnostic>(
+    diagnostics: readonly T[],
+    isChinese: boolean,
+): T[] {
+    const groupKey = (diag: T): string | undefined => {
+        if (diag.severity !== INFORMATION_SEVERITY) return undefined;
+        if (codeOf(diag)?.toUpperCase() !== 'CW274D') return undefined;
+        if (!diag.relatedInformation?.length) return undefined;
+        const { start, end } = diag.range;
+        return JSON.stringify([
+            start.line, start.character, end.line, end.character, diag.message,
+        ]);
+    };
+
+    const groups = new Map<string, T[]>();
+    for (const diag of diagnostics) {
+        const key = groupKey(diag);
+        if (!key) continue;
+        const group = groups.get(key);
+        if (group) group.push(diag);
+        else groups.set(key, [diag]);
+    }
+    if (![...groups.values()].some(group => group.length > 1)) return diagnostics.slice();
+
+    const result: T[] = [];
+    for (const diag of diagnostics) {
+        const key = groupKey(diag);
+        const group = key ? groups.get(key) : undefined;
+        if (!group || group.length < 2) {
+            result.push(diag);
+            continue;
+        }
+        if (diag !== group[0]) continue;
+        const relatedInformation = group.flatMap(member => member.relatedInformation ?? []);
+        const countSuffix = isChinese
+            ? `（${relatedInformation.length} 个调用点）`
+            : ` (${relatedInformation.length} call sites)`;
+        result.push({
+            ...diag,
+            message: diag.message + countSuffix,
+            relatedInformation,
         });
     }
     return result;

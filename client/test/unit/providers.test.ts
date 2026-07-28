@@ -430,10 +430,10 @@ describe('getProviderApiFormat', () => {
 });
 
 describe('getEffectiveReasoningEffort', () => {
-    it('keeps max only for GPT-5.6 Responses models', () => {
-        expect(getEffectiveReasoningEffort('gpt-5.6', 'max', 'openai-responses')).to.equal('max');
-        expect(getEffectiveReasoningEffort('gpt-5.6-sol', 'max', 'openai-responses')).to.equal('max');
-        expect(getEffectiveReasoningEffort('gpt-5.5', 'max', 'openai-responses')).to.equal('high');
+    it('maps the common maximum selection to OpenAI Responses xhigh', () => {
+        expect(getEffectiveReasoningEffort('gpt-5.6', 'max', 'openai-responses')).to.equal('xhigh');
+        expect(getEffectiveReasoningEffort('gpt-5.6-sol', 'max', 'openai-responses')).to.equal('xhigh');
+        expect(getEffectiveReasoningEffort('gpt-5.5', 'max', 'openai-responses')).to.equal('xhigh');
     });
 
     it('does not alter other protocols or supported values', () => {

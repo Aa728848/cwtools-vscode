@@ -29,6 +29,22 @@ export type AgentRuntimeDomain = Exclude<AgentDomain, 'auto'>;
 export type AgentIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
 export type AgentExecutionStrategy = 'auto' | 'single' | 'multi';
 
+/**
+ * User-facing reasoning selection. `none` disables thinking when the concrete
+ * provider/model exposes a switch; `max` is normalized to the provider's
+ * highest accepted wire value (for example OpenAI `xhigh`).
+ */
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+export type ModelReasoningControlKind = 'none' | 'fixed' | 'toggle' | 'budget' | 'effort';
+
+/** Model-specific choices used by both request shaping and the Webview. */
+export interface ModelReasoningCapability {
+    kind: ModelReasoningControlKind;
+    options: ReasoningEffort[];
+    defaultValue: ReasoningEffort;
+}
+
 export interface AgentProfileSelection {
     domain: AgentDomain;
     intent: AgentIntent;
@@ -220,8 +236,8 @@ export interface AIUserConfig {
     maxContextTokens: number;
     /** Agent file write mode */
     agentFileWriteMode: 'confirm' | 'auto';
-    /** Reasoning effort / thinking depth (used by DeepSeek, OpenAI, Qwen, Gemini etc.) */
-    reasoningEffort: 'low' | 'medium' | 'high' | 'max';
+    /** Reasoning effort / thinking mode selected for the active model. */
+    reasoningEffort: ReasoningEffort;
     inlineCompletion: {
         enabled: boolean;
         debounceMs: number;
@@ -306,8 +322,8 @@ export interface ChatCompletionRequest {
     max_tokens?: number;
     stream?: boolean;
     stop?: string[];
-    /** Supported by DeepSeek and OpenAI for thinking depth */
-    reasoning_effort?: 'low' | 'medium' | 'high' | 'max';
+    /** Provider wire value for reasoning depth. */
+    reasoning_effort?: ReasoningEffort;
     /** Extra provider-specific params to merge into the request body (e.g. thinking config) */
      
     [key: string]: any;
@@ -2150,7 +2166,7 @@ export type WebViewMessage =
     | { type: 'confirmWriteFile'; messageId: string }
     | { type: 'cancelWriteFile'; messageId: string }
     | { type: 'quickChangeModel'; model: string }
-    | { type: 'quickChangeReasoningEffort'; effort: 'low' | 'medium' | 'high' | 'max' }
+    | { type: 'quickChangeReasoningEffort'; effort: ReasoningEffort }
     | { type: 'quickChangeWriteMode'; mode: 'confirm' | 'auto' | 'auto_review' | 'full' }
     | { type: 'slashCommand'; command: string }
     | { type: 'permissionResponse'; permissionId: string; decision?: PermissionDecision; allowed?: boolean; alwaysAllow?: boolean }
@@ -2210,9 +2226,9 @@ export type HostMessage =
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
     | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
     | { type: 'todoUpdate'; todos: TodoItem[] }
-    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; codexAccount?: CodexAccountStatus }
+    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
-    | { type: 'apiModelsFetched'; providerId: string; models: Array<{ id: string }>; dynContexts?: Record<string, number>; error?: string; ctxNote?: string }
+    | { type: 'apiModelsFetched'; providerId: string; models: Array<{ id: string }>; dynContexts?: Record<string, number>; reasoningCapabilities?: Record<string, ModelReasoningCapability>; error?: string; ctxNote?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }
     | { type: 'messageRetracted'; messageIndex: number; restoredInput?: { text: string; images?: string[]; contexts?: ContextItem[] }; restoredFiles?: number; skippedFiles?: number }
     | { type: 'pendingWriteFile'; file: string; messageId: string; isNewFile: boolean; diffPreview?: string; additions?: number; deletions?: number; diffLines?: DiffLine[] }
@@ -2325,8 +2341,8 @@ export interface PanelSettings {
     /** Mirror of stellarisLanguageServices.ai.developer.disableSecuritySandbox — the 'full' write tier. */
     securitySandboxDisabled?: boolean;
     sandboxBackend?: { available: boolean; backend?: string; message: string };
-    /** Reasoning effort / thinking depth (multi-provider) */
-    reasoningEffort: 'low' | 'medium' | 'high' | 'max';
+    /** Reasoning effort / thinking mode for the selected provider/model. */
+    reasoningEffort: ReasoningEffort;
     webAccess?: {
         mode: 'disabled' | 'indexed' | 'live';
         provider: 'auto' | 'openai' | 'brave' | 'exa' | 'tavily' | 'serper' | 'serpapi' | 'searxng' | 'duckduckgo';

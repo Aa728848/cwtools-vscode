@@ -2,7 +2,14 @@
  * CWTools AI Module — Provider Definitions & Quick Configurations Facade
  */
 
-import type { AIProviderConfig, ChatCompletionRequest, ContentPart, CustomApiFormat } from './types';
+import type {
+    AIProviderConfig,
+    ChatCompletionRequest,
+    ContentPart,
+    CustomApiFormat,
+    ModelReasoningCapability,
+    ReasoningEffort,
+} from './types';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
 import { contentToString } from './types';
@@ -275,8 +282,261 @@ export function getEffectiveReasoningEffort(
     apiFormat: CustomApiFormat
 ): ChatCompletionRequest['reasoning_effort'] {
     if (apiFormat !== 'openai-responses' || requested !== 'max') return requested;
-    const modelId = model.toLowerCase().split('/').pop() ?? '';
-    return /^gpt-5\.6(?:-|$)/.test(modelId) ? 'max' : 'high';
+    return 'xhigh';
+}
+
+const NO_REASONING: ModelReasoningCapability = {
+    kind: 'none',
+    options: [],
+    defaultValue: 'high',
+};
+
+function reasoningCapability(
+    kind: ModelReasoningCapability['kind'],
+    options: ReasoningEffort[],
+    defaultValue: ReasoningEffort
+): ModelReasoningCapability {
+    return { kind, options, defaultValue };
+}
+
+function openAiReasoningCapability(model: string): ModelReasoningCapability {
+    const modelId = modelName(model).split('/').pop() ?? '';
+    if (!/^(?:gpt-5|o[134](?:-|$))/.test(modelId)) return NO_REASONING;
+    if (/-pro(?:-|$)/.test(modelId)) return reasoningCapability('fixed', ['high'], 'high');
+    const version = modelId.match(/^gpt-5(?:[.-](\d+))?/);
+    const minor = version?.[1] ? Number(version[1]) : 0;
+    if (minor >= 2) {
+        return reasoningCapability('effort', ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'], 'high');
+    }
+    if (minor === 1) {
+        return reasoningCapability('effort', ['none', 'low', 'medium', 'high'], 'high');
+    }
+    return reasoningCapability('effort', ['minimal', 'low', 'medium', 'high'], 'medium');
+}
+
+function claudeReasoningCapability(model: string): ModelReasoningCapability {
+    const lower = modelName(model);
+    const features = getAnthropicModelFeatures(lower);
+    if (features.effort) {
+        const supportsMax = /claude-(?:fable-5|sonnet-5|opus-(?:4[.-][6-9]|[5-9]))/.test(lower);
+        const supportsXHigh = /claude-(?:fable-5|sonnet-5|opus-(?:4[.-][78]|[5-9]))/.test(lower);
+        const canDisable = !/claude-fable-5/.test(lower);
+        return reasoningCapability('effort', [
+            ...(canDisable ? ['none' as const] : []),
+            'low',
+            'medium',
+            'high',
+            ...(supportsXHigh ? ['xhigh' as const] : []),
+            ...(supportsMax ? ['max' as const] : []),
+        ], 'high');
+    }
+    if (/claude-(?:haiku-4[.-]5|opus-4[.-][0-4]|sonnet-4[.-][0-5])/.test(lower)) {
+        return reasoningCapability('budget', ['none', 'low', 'medium', 'high', 'max'], 'high');
+    }
+    return NO_REASONING;
+}
+
+function geminiReasoningCapability(model: string): ModelReasoningCapability {
+    const lower = modelName(model);
+    if (/gemini-3[.]1-pro/.test(lower)) {
+        return reasoningCapability('effort', ['low', 'medium', 'high'], 'high');
+    }
+    if (/gemini-(?:3[.]5-flash|3(?:[.-]|$)|3[.]1-flash-lite)/.test(lower)) {
+        return reasoningCapability('effort', ['minimal', 'low', 'medium', 'high'], 'medium');
+    }
+    if (/gemini-2[.]5-pro/.test(lower)) {
+        return reasoningCapability('budget', ['low', 'medium', 'high'], 'high');
+    }
+    if (/gemini-2[.]5-flash(?:-lite)?/.test(lower)) {
+        return reasoningCapability('budget', ['none', 'low', 'medium', 'high'], lower.includes('flash-lite') ? 'none' : 'high');
+    }
+    return NO_REASONING;
+}
+
+function upstreamGatewayCapability(providerId: string, model: string): ModelReasoningCapability | undefined {
+    const lower = modelName(model);
+    if (lower.includes('openai/') || /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower)) {
+        return openAiReasoningCapability(lower);
+    }
+    if (lower.includes('anthropic/') || lower.includes('claude-')) {
+        return claudeReasoningCapability(lower);
+    }
+    if (lower.includes('google/') || lower.includes('gemini-')) {
+        return geminiReasoningCapability(lower);
+    }
+    if (lower.includes('qwen')) {
+        return reasoningCapability('budget', ['none', 'minimal', 'low', 'medium', 'high', 'max'], 'high');
+    }
+    if (/deepseek-v4/.test(lower)) {
+        return reasoningCapability('effort', ['none', 'high', 'max'], 'high');
+    }
+    if (/glm-5[.]2/.test(lower)) {
+        return reasoningCapability('effort', ['none', 'high', 'max'], 'max');
+    }
+    if (/glm-(?:4[.]?[5-9]|5)/.test(lower)) {
+        return reasoningCapability('toggle', ['none', 'high'], 'high');
+    }
+    if (/(?:^|\/)(?:kimi-)?k3(?:-|$)/.test(lower)) {
+        return reasoningCapability('effort', ['low', 'high', 'max'], 'high');
+    }
+    if (/kimi-k2[.](?:5|6)/.test(lower)) {
+        return reasoningCapability('toggle', ['none', 'high'], 'high');
+    }
+    if (/kimi-k2[.]7-code/.test(lower)) {
+        return reasoningCapability('fixed', ['high'], 'high');
+    }
+    if (/minimax-m3/.test(lower)) {
+        return reasoningCapability('toggle', ['none', 'high'], 'high');
+    }
+    if (/minimax-m2/.test(lower)) {
+        return reasoningCapability('fixed', ['high'], 'high');
+    }
+    if (/mimo-v2[.]5/.test(lower)) {
+        return reasoningCapability('toggle', ['none', 'high'], 'high');
+    }
+    if (/gpt-oss/.test(lower)) {
+        return reasoningCapability('effort', ['low', 'medium', 'high'], 'medium');
+    }
+    return undefined;
+}
+
+/**
+ * Resolve the exact reasoning control exposed for a provider/model pair.
+ * Unknown models are deliberately treated as having no control so custom and
+ * dynamically discovered endpoints never receive guessed parameters.
+ */
+export function getModelReasoningCapability(
+    providerId: string,
+    model: string,
+    apiFormat: CustomApiFormat = getProviderApiFormat(providerId, model)
+): ModelReasoningCapability {
+    const provider = providerId.toLowerCase();
+    const lower = modelName(model);
+
+    if (!model) return NO_REASONING;
+    if (provider === 'github') return NO_REASONING;
+
+    if (provider === 'openrouter') {
+        return upstreamGatewayCapability(provider, lower) ?? NO_REASONING;
+    }
+    if (provider === 'deepinfra') {
+        return isKnownReasoningModel(lower)
+            ? reasoningCapability('effort', ['none', 'low', 'medium', 'high'], 'high')
+            : NO_REASONING;
+    }
+    if (provider === 'together') {
+        if (/deepseek-v4/.test(lower)) return reasoningCapability('effort', ['none', 'high', 'max'], 'high');
+        if (/gpt-oss/.test(lower)) return reasoningCapability('effort', ['low', 'medium', 'high'], 'medium');
+        if (isKnownReasoningModel(lower)) return reasoningCapability('toggle', ['none', 'high'], 'high');
+        return NO_REASONING;
+    }
+    if (provider === 'ollama') {
+        if (/gpt-oss/.test(lower)) return reasoningCapability('effort', ['low', 'medium', 'high'], 'medium');
+        if (/(?:qwen3|deepseek-(?:r1|v3)|qwq)/.test(lower)) {
+            return reasoningCapability('toggle', ['none', 'high'], 'high');
+        }
+        return NO_REASONING;
+    }
+    if (provider === 'custom') {
+        return upstreamGatewayCapability(provider, lower) ?? NO_REASONING;
+    }
+    if (provider === 'openai' || provider === 'codex-chatgpt'
+        || (apiFormat === 'openai-responses' && /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower))) {
+        return openAiReasoningCapability(lower);
+    }
+    if (provider === 'claude') return claudeReasoningCapability(lower);
+    if (provider === 'google') return geminiReasoningCapability(lower);
+    if (provider === 'deepseek') return /deepseek-v4/.test(lower)
+        ? reasoningCapability('effort', ['none', 'high', 'max'], 'high')
+        : reasoningCapability('fixed', ['high'], 'high');
+    if (provider === 'glm') {
+        if (/glm-5[.]2/.test(lower)) return reasoningCapability('effort', ['none', 'high', 'max'], 'max');
+        if (/glm-(?:4[.]?[5-9]|5)/.test(lower)) return reasoningCapability('toggle', ['none', 'high'], 'high');
+        return NO_REASONING;
+    }
+    if (provider === 'qwen') return isQwenThinkingModel(lower)
+        ? reasoningCapability('budget', ['none', 'minimal', 'low', 'medium', 'high', 'max'], 'high')
+        : NO_REASONING;
+    if (provider === 'siliconflow') return isKnownReasoningModel(lower)
+        ? reasoningCapability('budget', ['none', 'low', 'medium', 'high', 'max'], 'high')
+        : NO_REASONING;
+    if (provider === 'mimo' || provider === 'mimo-token-plan') return /mimo-v2[.]5/.test(lower)
+        ? reasoningCapability('toggle', ['none', 'high'], 'high')
+        : NO_REASONING;
+    if (provider === 'minimax' || provider === 'minimax-token-plan') {
+        if (/minimax-m3/.test(lower)) return reasoningCapability('toggle', ['none', 'high'], 'high');
+        if (/minimax-m2/.test(lower)) return reasoningCapability('fixed', ['high'], 'high');
+        return NO_REASONING;
+    }
+    if (provider === 'kimi' || provider === 'kimi-code-plan') {
+        if (/(?:^|\/)(?:kimi-)?k3(?:-|$)/.test(lower)) {
+            return reasoningCapability('effort', ['low', 'high', 'max'], 'high');
+        }
+        if (/kimi-k2[.](?:5|6)/.test(lower)) return reasoningCapability('toggle', ['none', 'high'], 'high');
+        if (/kimi-(?:for-coding|k2[.]7-code)/.test(lower)) return reasoningCapability('fixed', ['high'], 'high');
+        return NO_REASONING;
+    }
+    if (provider === 'opencode' || provider === 'opencode-go') {
+        return upstreamGatewayCapability(provider, lower) ?? NO_REASONING;
+    }
+    return NO_REASONING;
+}
+
+/** Narrow live model-catalog metadata such as OpenRouter's `reasoning` object. */
+export function parseAdvertisedReasoningCapability(value: unknown): ModelReasoningCapability | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const raw = value as Record<string, unknown>;
+    const allowed = new Set<ReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+    const advertisesAllEfforts = raw.supported_efforts === null;
+    const efforts = advertisesAllEfforts
+        ? Array.from(allowed)
+        : Array.isArray(raw.supported_efforts)
+        ? raw.supported_efforts.filter((item): item is ReasoningEffort => typeof item === 'string' && allowed.has(item as ReasoningEffort))
+        : [];
+    const mandatory = raw.mandatory === true;
+    const supportsBudget = raw.supports_max_tokens === true;
+    const defaultEffort = typeof raw.default_effort === 'string' && allowed.has(raw.default_effort as ReasoningEffort)
+        ? raw.default_effort as ReasoningEffort
+        : efforts.includes('high') ? 'high' : efforts[0];
+    if (efforts.length > 0 || supportsBudget) {
+        const enabledOptions = efforts.length > 0 ? efforts : ['low', 'medium', 'high', 'max'] satisfies ReasoningEffort[];
+        const options = mandatory
+            ? enabledOptions.filter(item => item !== 'none')
+            : Array.from(new Set<ReasoningEffort>(['none', ...enabledOptions]));
+        if (options.length === 0) return reasoningCapability('fixed', ['high'], 'high');
+        const enabledDefault = defaultEffort
+            ?? (enabledOptions.includes('high') ? 'high' : enabledOptions[0]);
+        const defaultValue = !mandatory && (raw.default_enabled === false || defaultEffort === 'none')
+            ? 'none'
+            : enabledDefault && options.includes(enabledDefault) ? enabledDefault : options[0]!;
+        const enabledCount = options.filter(item => item !== 'none').length;
+        return reasoningCapability(
+            supportsBudget ? 'budget' : enabledCount === 1 ? (mandatory ? 'fixed' : 'toggle') : 'effort',
+            options,
+            defaultValue
+        );
+    }
+    if (typeof raw.default_enabled === 'boolean') {
+        return reasoningCapability('toggle', ['none', 'high'], raw.default_enabled ? 'high' : 'none');
+    }
+    return undefined;
+}
+
+export function normalizeReasoningEffort(
+    capability: ModelReasoningCapability,
+    requested: ReasoningEffort | undefined
+): ReasoningEffort {
+    if (requested && capability.options.includes(requested)) return requested;
+    if (requested === 'max' || requested === 'xhigh') {
+        if (capability.options.includes('max')) return 'max';
+        if (capability.options.includes('xhigh')) return 'xhigh';
+        if (capability.options.includes('high')) return 'high';
+    }
+    if ((requested === 'minimal' || requested === 'low') && capability.options.includes('low')) return 'low';
+    if (requested === 'medium' && capability.options.includes('high') && !capability.options.includes('medium')) return 'high';
+    return capability.options.includes(capability.defaultValue)
+        ? capability.defaultValue
+        : capability.options[0] ?? 'high';
 }
 
 // ─── Disable-Thinking Capability Descriptors ─────────────────────────────────
@@ -298,12 +558,13 @@ export interface EnableThinkingResult {
     reasoningEffort?: ChatCompletionRequest['reasoning_effort'];
 }
 
-type ReasoningEffort = NonNullable<ChatCompletionRequest['reasoning_effort']>;
-
 const THINKING_BUDGETS: Record<ReasoningEffort, number> = {
+    none: 0,
+    minimal: 1024,
     low: 2048,
     medium: 8192,
     high: 32768,
+    xhigh: 65536,
     max: 81920,
 };
 
@@ -325,15 +586,16 @@ function budgetFor(effort: ReasoningEffort, maximum = THINKING_BUDGETS.max): num
 }
 
 function withoutMax(effort: ReasoningEffort): ReasoningEffort {
-    return effort === 'max' ? 'high' : effort;
+    return effort === 'max' || effort === 'xhigh' ? 'high' : effort;
 }
 
 function deepSeekV4Effort(effort: ReasoningEffort): ReasoningEffort {
-    return effort === 'low' || effort === 'medium' ? 'high' : effort;
+    return effort === 'max' || effort === 'xhigh' ? 'max' : 'high';
 }
 
 function kimiK3Effort(effort: ReasoningEffort): ReasoningEffort {
-    return effort === 'medium' ? 'high' : effort;
+    if (effort === 'max' || effort === 'xhigh') return 'max';
+    return effort === 'low' || effort === 'minimal' ? 'low' : 'high';
 }
 
 function qwenThinkingMaximum(model: string): number {
@@ -342,7 +604,8 @@ function qwenThinkingMaximum(model: string): number {
 
 function qwenBudgetFor(model: string, effort: ReasoningEffort): number {
     if (/qwen3[.]7-(?:max|plus)/.test(model)) {
-        return effort === 'low' ? 2048
+        return effort === 'minimal' ? 1024
+            : effort === 'low' ? 2048
             : effort === 'medium' ? 8192
                 : effort === 'high' ? 81920
                     : 262144;
@@ -436,8 +699,15 @@ export function getReducedThinkingParams(
         && /(?:^|\/)(?:kimi-)?k3(?:-|$)/.test(lowerModel)) {
         return { reasoningEffort: 'low' };
     }
-    if (lowerProvider === 'openai' || lowerProvider === 'deepseek' || apiFormat === 'openai-responses') {
-        return { reasoningEffort: 'low' };
+    if (lowerProvider === 'openrouter') {
+        return { extraBody: { reasoning: { enabled: false } } };
+    }
+    if (lowerProvider === 'together' && isKnownReasoningModel(lowerModel)) {
+        return { extraBody: { reasoning: { enabled: false } } };
+    }
+    if (lowerProvider === 'openai' || lowerProvider === 'deepinfra' || lowerProvider === 'ollama'
+        || lowerProvider === 'custom' || apiFormat === 'openai-responses') {
+        return { reasoningEffort: 'none' };
     }
 
     return undefined;
@@ -477,6 +747,11 @@ export function getThinkingParams(
 ): EnableThinkingResult | undefined {
     const lowerModel = modelName(model);
     const lowerProvider = providerId?.toLowerCase() ?? '';
+    requested = normalizeReasoningEffort(
+        getModelReasoningCapability(lowerProvider, model, apiFormat),
+        requested
+    );
+    if (requested === 'none') return getReducedThinkingParams(model, providerId, apiFormat);
 
     if (apiFormat === 'openai-responses') {
         return { reasoningEffort: getEffectiveReasoningEffort(model, requested, apiFormat) };
@@ -583,7 +858,10 @@ export function getThinkingParams(
 
     if (lowerProvider === 'together') {
         if (/deepseek-(?:ai\/)?deepseek-v4|deepseek-v4/.test(lowerModel)) {
-            return { reasoningEffort: deepSeekV4Effort(requested) };
+            return {
+                extraBody: { reasoning: { enabled: true } },
+                reasoningEffort: deepSeekV4Effort(requested),
+            };
         }
         if (isKnownReasoningModel(lowerModel)) return { extraBody: { reasoning: { enabled: true } } };
     }

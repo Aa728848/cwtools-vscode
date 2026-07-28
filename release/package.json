@@ -817,6 +817,12 @@
                         "default": true,
                         "description": "%configuration.stellarisLanguageServices.errors.foldLocalisationWarnings.description%"
                     },
+                    "stellarisLanguageServices.errors.foldRelatedCallSiteInformation": {
+                        "scope": "resource",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.errors.foldRelatedCallSiteInformation.description%"
+                    },
                     "stellarisLanguageServices.experimental": {
                         "scope": "window",
                         "type": "boolean",
@@ -1229,15 +1235,21 @@
                         "scope": "window",
                         "type": "string",
                         "enum": [
+                            "none",
+                            "minimal",
                             "low",
                             "medium",
                             "high",
+                            "xhigh",
                             "max"
                         ],
                         "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.none%",
+                            "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.minimal%",
                             "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.low%",
                             "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.medium%",
                             "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.high%",
+                            "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.xhigh%",
                             "%configuration.stellarisLanguageServices.ai.reasoningEffort.enum.max%"
                         ],
                         "default": "high",

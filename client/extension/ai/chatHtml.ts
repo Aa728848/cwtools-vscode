@@ -169,12 +169,7 @@ ${stylesheetLinks}
     </div>
     <div id="reasoningMenu" class="model-menu reasoning-menu" aria-hidden="true">
         <div class="model-menu-title">${t('Reasoning effort', '推理强度')}</div>
-        <div id="reasoningMenuList" class="model-menu-list" role="listbox" aria-label="${t('Reasoning effort', '推理强度')}">
-            <button class="model-menu-item" type="button" role="option" data-reasoning-effort="low">${t('Low', '低')}</button>
-            <button class="model-menu-item" type="button" role="option" data-reasoning-effort="medium">${t('Medium', '中')}</button>
-            <button class="model-menu-item" type="button" role="option" data-reasoning-effort="high">${t('High', '高')}</button>
-            <button class="model-menu-item" type="button" role="option" data-reasoning-effort="max">${t('Max', '极高')}</button>
-        </div>
+        <div id="reasoningMenuList" class="model-menu-list" role="listbox" aria-label="${t('Reasoning effort', '推理强度')}"></div>
     </div>
     <div id="writeModeMenu" class="model-menu write-mode-menu" aria-hidden="true">
         <div class="model-menu-title" id="writeModeMenuTitle">${t('Permission profile', '权限配置')}</div>
@@ -227,10 +222,7 @@ ${stylesheetLinks}
                     <span class="composer-chevron" aria-hidden="true">v</span>
                 </button>
                 <select class="hidden-composer-select" id="quickReasoningEffort" title="${t('Reasoning effort', '推理强度')}" aria-label="${t('Reasoning effort', '推理强度')}" aria-hidden="true" tabindex="-1">
-                    <option value="low">${t('Low', '低')}</option>
-                    <option value="medium">${t('Medium', '中')}</option>
                     <option value="high" selected>${t('High', '高')}</option>
-                    <option value="max">${t('Max', '极高')}</option>
                 </select>
                 <button class="composer-model-trigger composer-reasoning-trigger" id="quickReasoningTrigger" title="${t('Reasoning effort', '推理强度')}" aria-haspopup="listbox" aria-controls="reasoningMenuList" aria-expanded="false">
                     <span id="quickReasoningLabel">${t('High', '高')}</span>
@@ -317,14 +309,9 @@ ${stylesheetLinks}
                     <label class="settings-label">${svgIcon('ruler')} ${t('Context size (tokens)', '上下文大小 (tokens)')}</label>
                     <input class="settings-input" id="settingsCtx" type="number" min="0" placeholder="${t('0 = provider default', '0 = provider 默认')}" />
                 </div>
-                <div class="settings-group">
-                    <label class="settings-label">${svgIcon('stethoscope')} ${t('Reasoning effort', '思考深度 / Reasoning Effort')} <span style="opacity:0.5;font-weight:400">${t('(for supported models)', '(供支持的模型使用)')}</span></label>
-                    <select class="settings-select" id="settingsReasoningEffort">
-                        <option value="low">${t('Low (fast)', 'Low (快速)')}</option>
-                        <option value="medium">${t('Medium', 'Medium (中等)')}</option>
-                        <option value="high">${t('High (default)', 'High (默认)')}</option>
-                        <option value="max">${t('Max (DeepSeek-V4/o3 intensive reasoning)', 'Max (DeepSeek-V4/o3 高强度思考)')}</option>
-                    </select>
+                <div class="settings-group" id="settingsReasoningGroup">
+                    <label class="settings-label">${svgIcon('stethoscope')} <span id="settingsReasoningLabel">${t('Reasoning effort', '推理强度')}</span> <span id="settingsReasoningHint" style="opacity:0.5;font-weight:400"></span></label>
+                    <select class="settings-select" id="settingsReasoningEffort"></select>
                 </div>
             </div>
         </div>

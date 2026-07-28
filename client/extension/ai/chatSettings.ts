@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as cp from 'child_process';
 import { promisify } from 'util';
-import type { PanelSettings, HostMessage, CustomApiFormat } from './types';
+import type { PanelSettings, HostMessage, CustomApiFormat, ModelReasoningCapability, ReasoningEffort } from './types';
 import type { AIService } from './aiService';
 import { aiText } from './messages';
 import { getProjectWorkspaceRoot } from './workspacePaths';
@@ -23,12 +23,26 @@ import {
     setSessionPermissionMode,
 } from './runner/sessionPermissions';
 import { detectSandboxBackendAsync } from './runner/sandboxRunner';
-import { getProviderApiFormat } from './providers';
+import {
+    getModelReasoningCapability,
+    getProviderApiFormat,
+    normalizeReasoningEffort,
+    parseAdvertisedReasoningCapability,
+} from './providers';
 
 const execAsync = promisify(cp.exec);
 
 type PostMessageFn = (msg: HostMessage) => void;
 const DEFAULT_CUSTOM_API_FORMAT: CustomApiFormat = 'openai-chat-completions';
+const REASONING_EFFORTS = new Set<ReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+
+function isReasoningEffort(value: unknown): value is ReasoningEffort {
+    return typeof value === 'string' && REASONING_EFFORTS.has(value as ReasoningEffort);
+}
+
+function reasoningCapabilityKey(providerId: string, model: string): string {
+    return `${providerId}:${model}`;
+}
 
 function settingsErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -383,20 +397,42 @@ export class ChatSettingsManager {
         const dynamicContexts = vscodeConfig.get<Record<string, number>>('dynamicModelsContext') || {};
 
         const { ALWAYS_THINKING_PREFIXES } = await import('./providers');
+        const providerPayload = providers.map(p => ({
+            ...p,
+            hasKey: hasKeyMap[p.id] ?? false,
+            models: Array.from(new Set([...p.models, ...(dynamicModelsConfig[p.id] || [])]))
+        }));
+        const reasoningCapabilities: Record<string, ModelReasoningCapability> = {};
+        for (const provider of providerPayload) {
+            for (const model of provider.models) {
+                reasoningCapabilities[reasoningCapabilityKey(provider.id, model)] = getModelReasoningCapability(
+                    provider.id,
+                    model,
+                    getProviderApiFormat(provider.id, model, config.customApiFormat)
+                );
+            }
+        }
+        for (const model of ollamaModels ?? []) {
+            reasoningCapabilities[reasoningCapabilityKey('ollama', model.name)] =
+                getModelReasoningCapability('ollama', model.name);
+        }
+        const currentCapability = getModelReasoningCapability(
+            current.provider,
+            current.model,
+            getProviderApiFormat(current.provider, current.model, current.customApiFormat)
+        );
+        current.reasoningEffort = normalizeReasoningEffort(currentCapability, current.reasoningEffort);
 
         this.postMessage({
             type: 'settingsData',
-            providers: providers.map(p => ({
-                ...p,
-                hasKey: hasKeyMap[p.id] ?? false,
-                models: Array.from(new Set([...p.models, ...(dynamicModelsConfig[p.id] || [])]))
-            })) as any,
+            providers: providerPayload as any,
             current,
             ollamaModels,
             showPanel,
             targetSurface,
             modelContextTokens: { ...MODEL_CONTEXT_TOKENS, ...dynamicContexts },
             thinkingModelPrefixes: ALWAYS_THINKING_PREFIXES,
+            reasoningCapabilities,
             codexAccount,
         });
     }
@@ -413,7 +449,15 @@ export class ChatSettingsManager {
     }
 
     /** Quickly switch reasoning effort for the active extension session. */
-    async quickChangeReasoningEffort(effort: 'low' | 'medium' | 'high' | 'max'): Promise<void> {
+    async quickChangeReasoningEffort(effort: ReasoningEffort): Promise<void> {
+        if (!isReasoningEffort(effort)) return;
+        const config = this.aiService.getConfig();
+        const capability = getModelReasoningCapability(
+            config.provider,
+            config.model,
+            getProviderApiFormat(config.provider, config.model, config.customApiFormat)
+        );
+        if (!capability.options.includes(effort)) return;
         this.aiService.setReasoningEffortOverride(effort);
         await this.buildAndSendSettingsData();
     }
@@ -511,7 +555,23 @@ export class ChatSettingsManager {
         if (settings.approvals?.reviewer) {
             await cfg.update('approvals.reviewer', settings.approvals.reviewer, vs.ConfigurationTarget.Global);
         }
-        await cfg.update('reasoningEffort', settings.reasoningEffort, vs.ConfigurationTarget.Global);
+        const reasoningCapability = getModelReasoningCapability(
+            settings.provider,
+            settings.model,
+            getProviderApiFormat(
+                settings.provider,
+                settings.model,
+                normalizeCustomApiFormatSetting(settings.customApiFormat)
+            )
+        );
+        const requestedReasoning = isReasoningEffort(settings.reasoningEffort)
+            ? settings.reasoningEffort
+            : reasoningCapability.defaultValue;
+        await cfg.update(
+            'reasoningEffort',
+            normalizeReasoningEffort(reasoningCapability, requestedReasoning),
+            vs.ConfigurationTarget.Global
+        );
         await cfg.update('enabled', true, vs.ConfigurationTarget.Global);
         if (settings.inlineCompletion) {
             await cfg.update('inlineCompletion.enabled', settings.inlineCompletion.enabled, vs.ConfigurationTarget.Global);
@@ -668,6 +728,7 @@ export class ChatSettingsManager {
             const errors: string[] = [];
             const aggregateModels = new Map<string, any>();
             const aggregateContexts: Record<string, number> = {};
+            const aggregateReasoningCapabilities: Record<string, ModelReasoningCapability> = {};
             const aggregateLabels: string[] = [];
             const deprecatedModelIds = new Set<string>();
             let aggregateHasApiContext = false;
@@ -680,6 +741,7 @@ export class ChatSettingsManager {
                 }
                 const normalizedModelList = Array.from(uniqueById.values());
                 const dynContexts: Record<string, number> = {};
+                const reasoningCapabilities: Record<string, ModelReasoningCapability> = {};
                 let apiHasContext = false;
 
                 normalizedModelList.forEach((m: any) => {
@@ -692,6 +754,13 @@ export class ChatSettingsManager {
                     }
 
                     if (c) dynContexts[m.id] = c;
+                    const capability = parseAdvertisedReasoningCapability(m.reasoning)
+                        ?? getModelReasoningCapability(
+                            providerId,
+                            m.id,
+                            getProviderApiFormat(providerId, m.id, customApiFormat)
+                        );
+                    reasoningCapabilities[reasoningCapabilityKey(providerId, m.id)] = capability;
                 });
 
                 if (candidate.merge) {
@@ -701,11 +770,12 @@ export class ChatSettingsManager {
                     for (const [modelId, contextTokens] of Object.entries(dynContexts)) {
                         if (!(modelId in aggregateContexts)) aggregateContexts[modelId] = contextTokens;
                     }
+                    Object.assign(aggregateReasoningCapabilities, reasoningCapabilities);
                     if (apiHasContext) aggregateHasApiContext = true;
                     aggregateLabels.push(candidate.label);
                 }
 
-                return { normalizedModelList, dynContexts, apiHasContext };
+                return { normalizedModelList, dynContexts, reasoningCapabilities, apiHasContext };
             };
 
             for (const candidate of candidates) {
@@ -739,7 +809,7 @@ export class ChatSettingsManager {
                     errors.push(`${candidate.label}: empty or unknown response`);
                     continue;
                 }
-                const { normalizedModelList, dynContexts, apiHasContext } = collectModels(modelList, candidate);
+                const { normalizedModelList, dynContexts, reasoningCapabilities, apiHasContext } = collectModels(modelList, candidate);
                 if (candidate.merge) continue;
 
                 const dynModels = normalizedModelList.map((m: any) => m.id).filter(Boolean);
@@ -748,7 +818,7 @@ export class ChatSettingsManager {
                     ? `(context tokens from API for ${inferredCount} models; ${candidate.label})`
                     : `(context tokens inferred for ${inferredCount}/${dynModels.length} models; ${candidate.label})`;
 
-                this.postMessage({ type: 'apiModelsFetched', providerId, models: normalizedModelList, dynContexts, ctxNote });
+                this.postMessage({ type: 'apiModelsFetched', providerId, models: normalizedModelList, dynContexts, reasoningCapabilities, ctxNote });
                 return;
             }
             if (aggregateModels.size > 0) {
@@ -759,7 +829,14 @@ export class ChatSettingsManager {
                 const ctxNote = aggregateHasApiContext
                     ? `(context tokens from API for ${inferredCount} models; ${labels})`
                     : `(context tokens inferred for ${inferredCount}/${dynModels.length} models; ${labels})`;
-                this.postMessage({ type: 'apiModelsFetched', providerId, models: normalizedModelList, dynContexts: aggregateContexts, ctxNote });
+                this.postMessage({
+                    type: 'apiModelsFetched',
+                    providerId,
+                    models: normalizedModelList,
+                    dynContexts: aggregateContexts,
+                    reasoningCapabilities: aggregateReasoningCapabilities,
+                    ctxNote,
+                });
                 return;
             }
             this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: `Could not fetch model list from discovery endpoints: ${errors.join('; ')}` });

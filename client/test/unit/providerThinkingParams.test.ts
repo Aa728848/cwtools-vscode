@@ -44,10 +44,10 @@ describe('provider thinking params', () => {
         expect(result!.reasoningEffort).to.equal(undefined);
     });
 
-    it('lowers OpenAI reasoning effort when thinking cannot be fully disabled', () => {
+    it('disables OpenAI reasoning with the supported none effort', () => {
         const { getReducedThinkingParams } = loadProviders();
         const result = getReducedThinkingParams('gpt-5.5', 'openai', 'openai-responses');
-        expect(result).to.deep.equal({ reasoningEffort: 'low' });
+        expect(result).to.deep.equal({ reasoningEffort: 'none' });
     });
 
     it('lowers DeepSeek reasoning effort when thinking cannot be fully disabled', () => {
@@ -76,7 +76,7 @@ describe('provider thinking params', () => {
     it('maps OpenRouter reasoning models to its normalized effort object', () => {
         const { getThinkingParams } = loadProviders();
         expect(getThinkingParams('google/gemini-3.5-flash', 'openrouter', 'openai-chat-completions', 'max'))
-            .to.deep.equal({ extraBody: { reasoning: { effort: 'max' } } });
+            .to.deep.equal({ extraBody: { reasoning: { effort: 'high' } } });
         expect(getThinkingParams('deepseek/deepseek-v4-pro', 'openrouter', 'openai-chat-completions', 'medium'))
             .to.deep.equal({ extraBody: { reasoning: { effort: 'high' } } });
         expect(getThinkingParams('moonshotai/kimi-k2.7-code', 'openrouter', 'openai-chat-completions', 'max'))
@@ -122,7 +122,7 @@ describe('provider thinking params', () => {
     it('maps the remaining compatible gateway controls', () => {
         const { getThinkingParams } = loadProviders();
         expect(getThinkingParams('deepseek-ai/DeepSeek-V4-Pro', 'together', 'openai-chat-completions', 'max'))
-            .to.deep.equal({ reasoningEffort: 'max' });
+            .to.deep.equal({ extraBody: { reasoning: { enabled: true } }, reasoningEffort: 'max' });
         expect(getThinkingParams('openai/gpt-5', 'github', 'openai-chat-completions', 'max')).to.equal(undefined);
         expect(getThinkingParams('Qwen/Qwen3.6-27B', 'siliconflow', 'openai-chat-completions', 'max'))
             .to.deep.equal({ extraBody: { enable_thinking: true, thinking_budget: 32768 } });
@@ -216,6 +216,103 @@ describe('provider thinking params', () => {
             thinkingDisplay: false,
             effort: true,
             samplingRemoved: true,
+        });
+    });
+
+    it('describes the exact controls for representative model families', () => {
+        const { getModelReasoningCapability } = loadProviders();
+        expect(getModelReasoningCapability('openai', 'gpt-5.5', 'openai-responses')).to.deep.equal({
+            kind: 'effort',
+            options: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+            defaultValue: 'high',
+        });
+        expect(getModelReasoningCapability('deepseek', 'deepseek-v4-pro', 'openai-chat-completions')).to.deep.equal({
+            kind: 'effort',
+            options: ['none', 'high', 'max'],
+            defaultValue: 'high',
+        });
+        expect(getModelReasoningCapability('glm', 'glm-5.1', 'openai-chat-completions')).to.deep.equal({
+            kind: 'toggle',
+            options: ['none', 'high'],
+            defaultValue: 'high',
+        });
+        expect(getModelReasoningCapability('kimi', 'kimi-k2.7-code', 'openai-chat-completions')).to.deep.equal({
+            kind: 'fixed',
+            options: ['high'],
+            defaultValue: 'high',
+        });
+        expect(getModelReasoningCapability('together', 'meta-llama/Llama-3.3-70B-Instruct', 'openai-chat-completions')).to.deep.equal({
+            kind: 'none',
+            options: [],
+            defaultValue: 'high',
+        });
+    });
+
+    it('returns a deterministic capability for every built-in model', () => {
+        const { BUILTIN_PROVIDERS, getModelReasoningCapability, getProviderApiFormat } = loadProviders();
+        for (const provider of Object.values(BUILTIN_PROVIDERS)) {
+            for (const model of provider.models) {
+                const capability = getModelReasoningCapability(
+                    provider.id,
+                    model,
+                    getProviderApiFormat(provider.id, model)
+                );
+                expect(capability.kind).to.be.oneOf(['none', 'fixed', 'toggle', 'budget', 'effort']);
+                expect(capability.options).to.deep.equal(Array.from(new Set(capability.options)));
+                if (capability.kind !== 'none') {
+                    expect(capability.options).to.include(capability.defaultValue);
+                }
+            }
+        }
+    });
+
+    it('uses live gateway metadata when it advertises supported efforts', () => {
+        const { parseAdvertisedReasoningCapability } = loadProviders();
+        expect(parseAdvertisedReasoningCapability({
+            supported_efforts: ['high', 'medium', 'low', 'minimal'],
+            default_effort: 'medium',
+            default_enabled: true,
+            mandatory: true,
+        })).to.deep.equal({
+            kind: 'effort',
+            options: ['high', 'medium', 'low', 'minimal'],
+            defaultValue: 'medium',
+        });
+        expect(parseAdvertisedReasoningCapability({
+            default_enabled: false,
+        })).to.deep.equal({
+            kind: 'toggle',
+            options: ['none', 'high'],
+            defaultValue: 'none',
+        });
+        expect(parseAdvertisedReasoningCapability({
+            supported_efforts: ['high', 'low'],
+            default_effort: 'high',
+            default_enabled: true,
+            mandatory: false,
+        })).to.deep.equal({
+            kind: 'effort',
+            options: ['none', 'high', 'low'],
+            defaultValue: 'high',
+        });
+        expect(parseAdvertisedReasoningCapability({
+            supported_efforts: null,
+            default_effort: 'none',
+            default_enabled: false,
+            mandatory: false,
+        })).to.deep.equal({
+            kind: 'effort',
+            options: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+            defaultValue: 'none',
+        });
+        expect(parseAdvertisedReasoningCapability({
+            supports_max_tokens: true,
+            default_enabled: true,
+            mandatory: false,
+        })).to.deep.equal({
+            kind: 'budget',
+            options: ['none', 'low', 'medium', 'high', 'max'],
+            defaultValue: 'high',
         });
     });
 });

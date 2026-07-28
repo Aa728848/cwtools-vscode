@@ -48,7 +48,9 @@ describe('webview smoke checks', () => {
         expect(html).to.include('id="quickReasoningEffort"');
         expect(html).to.include('id="quickReasoningTrigger"');
         expect(html).to.include('id="reasoningMenu"');
-        expect(html).to.include('data-reasoning-effort="max"');
+        expect(html).to.include('id="reasoningMenuList"');
+        expect(script).to.include('settingsReasoningCapabilities');
+        expect(script).to.include('populateReasoningSelect');
         expect(html).to.include('id="quickWriteModeTrigger"');
         expect(html).to.include('role="listbox"');
         expect(html).to.include('id="btnWorkspace"');

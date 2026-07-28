@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [2.9.3] - 2026-07-28
+
+### 功能与优化 / Features & Optimizations
+- **[优化] 优化项目知识库的更新延迟**：降低了项目知识库更新检测的延迟，提升 AI 对项目最新状态与语境的理解时效。
+  English: [Optimization] Optimized the update latency of the project knowledge base, improving AI responsiveness to recent project changes.
+
+
 ## [2.9.0] - 2026-07-26
 
 ### 功能与优化 / Features & Optimizations

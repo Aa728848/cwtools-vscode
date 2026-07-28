@@ -2943,6 +2943,17 @@ type Server(client: ILanguageClient) =
         match gameObj with
         | Some (:? IIncrementalTypeIndex) -> true
         | _ -> false
+
+    let isCurrentGameLocalisationFile path =
+        match gameObj with
+        | Some (:? IIncrementalLocalisation as incremental) ->
+            incremental.IsLocalisationFile path
+        | _ ->
+            path.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)
+
+    let isIncrementalContributionCandidate path =
+        not (isCurrentGameLocalisationFile path)
+        && not (PdxShaderFeatures.isShaderFile path)
     let maxIncrementalScriptedPatchCount = 25
     let mutable incrementalScriptedPatchCount = 0
 
@@ -3245,7 +3256,7 @@ type Server(client: ILanguageClient) =
             if isEditAction then
                 forgetFileCaches name
 
-            if name.EndsWith(".yml") then
+            if isCurrentGameLocalisationFile name then
                 if isEditAction && not shallowAnalyze then
                     delayedLocUpdate <- true
                     addPendingRefreshDomains [ "localisation" ]
@@ -3264,23 +3275,19 @@ type Server(client: ILanguageClient) =
             let useInteractiveValidation =
                 isEditAction
                 && (shallowAnalyze
-                    || name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase))
+                    || isCurrentGameLocalisationFile name)
 
             let canTryIncrementalTypeRefresh =
                 isEditAction
                 && (not shallowAnalyze
                     || fastDefinitionIndex
                     || (useInteractiveValidation && isScriptedDefinitionPath name))
-                && (incrementalTypeRefreshEnabled ()
-                    || (useInteractiveValidation && isScriptedDefinitionPath name))
-                && isTypeDefiningPath name
+                && incrementalTypeRefreshEnabled ()
+                && isIncrementalContributionCandidate name
                 && not (isInlineScriptDefinitionPath name)
-            let shouldRevalidateReferencedCallSites =
-                isDynamicDefinitionPath name || isEventDefinitionPath name
-
             // Mark type refresh needed ONLY if the file was EDITED (not just opened).
             // Opening a file does not change its content, so the type/enum index is still valid.
-            if isEditAction && isTypeDefiningPath name && not shallowAnalyze && not canTryIncrementalTypeRefresh then
+            if isEditAction && isIncrementalContributionCandidate name && not shallowAnalyze && not canTryIncrementalTypeRefresh then
                 needsTypeRefresh <- true
                 lastTypeRefreshRequestAt <- DateTime.UtcNow
                 let domains =
@@ -3292,8 +3299,8 @@ type Server(client: ILanguageClient) =
                 markFileStale name "types"
             elif isEditAction
                  && shallowAnalyze
-                 && not (name.EndsWith(".yml"))
-                 && isTypeDefiningPath name
+                 && not (isCurrentGameLocalisationFile name)
+                 && isIncrementalContributionCandidate name
                  && not canTryIncrementalTypeRefresh then
                 delayedScriptLocUpdate <- true
                 pendingScriptLocalisationFiles.[name] <- 0uy
@@ -3337,7 +3344,7 @@ type Server(client: ILanguageClient) =
                     let parsed = CKParser.parseString t name
 
                     match name, parsed with
-                    | x, _ when x.EndsWith(".yml") -> []
+                    | x, _ when isCurrentGameLocalisationFile x -> []
                     | _, Success _ -> []
                     | _, Failure(msg, p, _) ->
                         let parserDiag =
@@ -3367,7 +3374,7 @@ type Server(client: ILanguageClient) =
                 | Some game when validateCachedOnly ->
                     let allocBeforeValidate = GC.GetTotalAllocatedBytes(false)
                     let updateErrors =
-                        if name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) then
+                        if isCurrentGameLocalisationFile name then
                             // Localisation diagnostics are already partitioned in
                             // locCache. Calling ValidateFile here cannot contribute
                             // results, but used to force needless resource work on
@@ -3399,7 +3406,7 @@ type Server(client: ILanguageClient) =
                             (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
                     let allocAfterValidate = GC.GetTotalAllocatedBytes(false)
                     monitorLog Lint $"ValidateFile file={name} shallow={shallowAnalyze} allocDeltaMB={(allocAfterValidate - allocBeforeValidate) / 1048576L}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
-                    if name.EndsWith(".yml") then parserErrors @ applicableCachedLocErrors
+                    if isCurrentGameLocalisationFile name then parserErrors @ applicableCachedLocErrors
                     else parserErrors @ applicableCachedLocErrors @ astErrors
                 | Some game ->
                     let allocBeforeUpdate = GC.GetTotalAllocatedBytes(false)
@@ -3507,11 +3514,7 @@ type Server(client: ILanguageClient) =
                                     | None -> false
 
                                 let prior =
-                                    if canTryIncrementalTypeRefresh
-                                       && shouldRevalidateReferencedCallSites then
-                                        priorDefs
-                                    else
-                                        []
+                                    if canTryIncrementalTypeRefresh then priorDefs else []
 
                                 if interactiveResourceAlreadyCurrent then
                                     [], prior, identityUnchanged, game, false, false
@@ -3519,7 +3522,7 @@ type Server(client: ILanguageClient) =
                                     match stagedEditorUpdate with
                                     | Some staged when game.CommitUpdateFileInteractive staged ->
                                         if staged.kind = LocalisationFile then bumpLocalisationModelEpoch ()
-                                        if isTypeDefiningPath name then
+                                        if isIncrementalContributionCandidate name then
                                             validatedDocumentVersion
                                             |> Option.iter (fun version ->
                                                 committedInteractiveVersions.[normaliseCachePath name] <- struct (version, game))
@@ -3539,7 +3542,7 @@ type Server(client: ILanguageClient) =
                                 else
                                     committedInteractiveVersions.TryRemove(normaliseCachePath name) |> ignore
                                     let errs = game.UpdateFile (shallowAnalyze || deferDeepValidation) name filetext
-                                    if name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) then
+                                    if isCurrentGameLocalisationFile name then
                                         bumpLocalisationModelEpoch ()
                                     validationModelEpochAtComputation <- Some(modelEpochSnapshot ())
                                     errs, prior, identityUnchanged, game, false, false
@@ -3607,8 +3610,9 @@ type Server(client: ILanguageClient) =
                                 try
                                     try
                                         let requiresScriptedServices =
-                                            isDynamicDefinitionPath name
-                                            && (not definitionIdentityUnchanged || nonTypeSemanticChanged)
+                                            nonTypeSemanticChanged
+                                            || (isDynamicDefinitionPath name
+                                                && not definitionIdentityUnchanged)
 
                                         if requiresScriptedServices then
                                             game.PrepareScriptedTypes([ name ], true)
@@ -3629,7 +3633,7 @@ type Server(client: ILanguageClient) =
                                                 | None -> None
                                             | _ -> None
                                     with e ->
-                                        logDiag $"Incremental type prepare failed for {name}: {e.Message}"
+                                        logDiag $"Incremental type prepare failed for {name}: reason=stage_prepare_failed error={e.Message}"
                                         None
                                 finally
                                     prepareReadHoldSw.Stop()
@@ -3758,14 +3762,18 @@ type Server(client: ILanguageClient) =
                                         $"RefreshIncrementalTypes decision=full file={name} reason={reason}"
                             elif incrementalCommitSuperseded then
                                 monitorLog Refresh
-                                    $"RefreshIncrementalTypes commit superseded file={name}; newer snapshot will decide refresh domains"
+                                    $"RefreshIncrementalTypes commit superseded file={name} reason=stage_guard_superseded; newer snapshot will decide refresh domains"
                             else
+                                let fallbackReason =
+                                    if staged.IsNone then "stage_prepare_failed" else "stage_commit_failed"
                                 needsTypeRefresh <- true
                                 lastTypeRefreshRequestAt <- DateTime.UtcNow
                                 addPendingRefreshDomains [ "types"; "rules" ]
                                 clearTypeCaches ()
                                 markFileStale name "types"
                                 incrementalScriptedPatchCount <- 0
+                                monitorLog Refresh
+                                    $"RefreshIncrementalTypes decision=full file={name} reason={fallbackReason}"
                         finally
                             commitWriteHoldSw.Stop()
                             exitGameStateWriteLock ()
@@ -3789,7 +3797,7 @@ type Server(client: ILanguageClient) =
                         gameStateLock.EnterReadLock()
                         try
                             let currentCallFiles =
-                                if incrementalSemanticChanged && shouldRevalidateReferencedCallSites then
+                                if incrementalSemanticChanged then
                                     referenceFilesForChangedDefinitions game name (typeDefinitionsForFiles game [ name ])
                                 else
                                     []
@@ -3892,7 +3900,7 @@ type Server(client: ILanguageClient) =
 
                     let deferGlobalNegativeDiagnostics =
                         (useInteractiveValidation
-                         && isTypeDefiningPath name
+                         && isIncrementalContributionCandidate name
                          && (not canTryIncrementalTypeRefresh
                              || (not skipIncrementalRefresh && not incrementalCommitSucceeded)))
                         || (canTryIncrementalTypeRefresh
@@ -3900,8 +3908,8 @@ type Server(client: ILanguageClient) =
                             && not incrementalCommitSucceeded)
 
                     if useInteractiveValidation
-                       && isTypeDefiningPath name
-                       && not (name.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)) then
+                       && isIncrementalContributionCandidate name
+                       && not (isCurrentGameLocalisationFile name) then
                         lintDeferredGlobalKinds <- [ "localisation" ]
 
                     if deferGlobalNegativeDiagnostics then
@@ -3930,7 +3938,7 @@ type Server(client: ILanguageClient) =
                         else "full"
                     monitorLog Lint $"UpdateFile file={name} mode={updateMode} shallow={shallowAnalyze} allocDeltaMB={(allocAfterUpdate - allocBeforeUpdate) / 1048576L}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                     
-                    if name.EndsWith(".yml") then
+                    if isCurrentGameLocalisationFile name then
                         // We still need to call game.UpdateFile so the VFS gets the new text,
                         // but we rely on locCache/RefreshLocalisationCaches for the actual validation errors.
                         if isEditAction then
@@ -6099,25 +6107,55 @@ type Server(client: ILanguageClient) =
                         refreshFileList <- true
                         let path = getPathFromDoc change.uri
                         committedTypeIndexVersions.TryRemove(normaliseCachePath path) |> ignore
-                        if incrementalTypeRefreshEnabled () && isTypeDefiningPath path then
+                        if isCurrentGameLocalisationFile path then
                             match gameObj with
-                            | Some game ->
-                                let mutable handled = false
-                                let mutable definitionsForRevalidation: (string * string) list = []
-                                let shouldRevalidateReferencedCallSites =
-                                    isDynamicDefinitionPath path || isEventDefinitionPath path
+                            | Some (:? IIncrementalLocalisation as incremental) ->
                                 let deleteWriteWaitSw = Stopwatch.StartNew()
                                 enterGameStateWriteLock ()
                                 deleteWriteWaitSw.Stop()
                                 let deleteWriteHoldSw = Stopwatch.StartNew()
                                 try
                                     try
-                                        if shouldRevalidateReferencedCallSites then
-                                            definitionsForRevalidation <-
-                                                if isEventDefinitionPath path then
-                                                    typeDefinitionsForFiles game [ path ]
-                                                else
-                                                    scriptedDefinitionsForFiles game [ path ]
+                                        let result = incremental.RemoveLocalisationFile path
+                                        applyIncrementalLocalisationResult result
+                                        bumpLocalisationModelEpoch ()
+                                        cachedLocMap <- None
+                                        cachedLocMapCount <- 0
+                                        delayedLocUpdate <- false
+                                        completeRefreshDomains [ "localisation" ] "incremental_localisation_delete"
+                                        monitorLog Localisation
+                                            $"RemoveLocalisation file={path} affected={result.affectedFiles.Length} errors={result.errors.Length}"
+                                    with e ->
+                                        delayedLocUpdate <- true
+                                        addPendingRefreshDomains [ "localisation" ]
+                                        logDiag $"Incremental localisation delete failed for {path}: reason=stage_commit_failed error={e.Message}"
+                                finally
+                                    exitGameStateWriteLock ()
+                                    deleteWriteHoldSw.Stop()
+                                    if deleteWriteHoldSw.ElapsedMilliseconds > writeLockHoldBudgetMs then
+                                        monitorLog Performance
+                                            $"WriteLock hold budget exceeded file={path} phase=deleteLocalisation wait={deleteWriteWaitSw.ElapsedMilliseconds}ms hold={deleteWriteHoldSw.ElapsedMilliseconds}ms"
+                            | _ ->
+                                delayedLocUpdate <- true
+                                addPendingRefreshDomains [ "localisation" ]
+                                monitorLog Localisation
+                                    $"RemoveLocalisation decision=full file={path} reason=capability_unavailable"
+                        elif incrementalTypeRefreshEnabled () && isIncrementalContributionCandidate path then
+                            match gameObj with
+                            | Some game ->
+                                let mutable handled = false
+                                let mutable definitionsForRevalidation: (string * string) list = []
+                                let deleteWriteWaitSw = Stopwatch.StartNew()
+                                enterGameStateWriteLock ()
+                                deleteWriteWaitSw.Stop()
+                                let deleteWriteHoldSw = Stopwatch.StartNew()
+                                try
+                                    try
+                                        definitionsForRevalidation <-
+                                            if isDynamicDefinitionPath path then
+                                                scriptedDefinitionsForFiles game [ path ]
+                                            else
+                                                typeDefinitionsForFiles game [ path ]
                                         handled <-
                                             if isDynamicDefinitionPath path then
                                                 game.RemoveScriptedTypes [ path ]
@@ -6126,7 +6164,7 @@ type Server(client: ILanguageClient) =
                                                 | :? IIncrementalTypeIndex as index -> index.RemoveTypeIndex [ path ]
                                                 | _ -> false
                                     with e ->
-                                        logDiag $"Incremental scripted delete failed for {path}: {e.Message}"
+                                        logDiag $"Incremental scripted delete failed for {path}: reason=stage_commit_failed error={e.Message}"
                                         handled <- false
                                 finally
                                     exitGameStateWriteLock ()
@@ -6171,8 +6209,10 @@ type Server(client: ILanguageClient) =
                                     addPendingRefreshDomains [ "types"; "rules" ]
                                     clearTypeCaches ()
                                     incrementalScriptedPatchCount <- 0
+                                    monitorLog Refresh
+                                        $"RemoveIncrementalTypes decision=full file={path} reason=stage_commit_failed"
                             | None -> ()
-                        elif isTypeDefiningPath path then
+                        elif isIncrementalContributionCandidate path then
                             needsTypeRefresh <- true
                             lastTypeRefreshRequestAt <- DateTime.UtcNow
                             let domains =
@@ -6181,6 +6221,8 @@ type Server(client: ILanguageClient) =
                                 |> List.distinct
                             addPendingRefreshDomains domains
                             clearTypeCaches ()
+                            monitorLog Refresh
+                                $"RemoveIncrementalTypes decision=full file={path} reason=capability_unavailable"
                         client.PublishDiagnostics { uri = change.uri; diagnostics = [] }
                         forgetFileCaches path
                         removeFileDiagnosticState path |> ignore

@@ -9,6 +9,9 @@ describe('standalone LSP file watcher contract', () => {
     assert.equal(isLspWatchedFile(root, path.join(root, 'events', 'example.txt')), true);
     assert.equal(isLspWatchedFile(root, path.join(root, '..templates', 'example.txt')), true);
     assert.equal(isLspWatchedFile(root, path.join(root, 'localisation', 'example.yml')), true);
+    assert.equal(isLspWatchedFile(root, path.join(root, 'localisation', 'example.csv')), true);
+    assert.equal(isLspWatchedFile(root, path.join(root, 'localisation', 'example.csv'), 'ck2'), true);
+    assert.equal(isLspWatchedFile(root, path.join(root, 'localisation', 'example.csv'), 'stellaris'), false);
     assert.equal(isLspWatchedFile(root, path.join(root, 'interface', 'example.gui')), true);
   });
 

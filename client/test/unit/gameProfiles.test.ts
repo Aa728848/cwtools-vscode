@@ -5,6 +5,7 @@ import {
     getAllLanguageIds,
     getAllProfiles,
     getAllLocalisationDirectoryNames,
+    getAllLocalisationFileExtensions,
     getLocalisationDirectoryGlob,
     getRulesRemoteUrl,
     getCacheSettingKey,
@@ -40,9 +41,14 @@ describe('GameProfile Registry', () => {
         expect(profile.id).to.equal('stellaris');
     });
 
-    it('falls back to Stellaris for "paradox" language ID', () => {
+    it('uses an independent conservative profile for "paradox" language ID', () => {
         const profile = getProfileByLanguageId('paradox');
-        expect(profile.id).to.equal('stellaris');
+        expect(profile.id).to.equal('paradox');
+        expect(profile.displayName).to.equal('Generic Paradox');
+        expect(profile.localisation.fileExtensions).to.deep.equal(['yml']);
+        expect(profile.folders.scriptDirs).to.include.members(['events', 'history', 'decisions', 'common']);
+        expect(profile.previews.solarSystemPreview).to.be.false;
+        expect(profile.rulesRemoteUrl).to.equal('');
     });
 
     it('getDefaultProfile returns Stellaris', () => {
@@ -67,6 +73,7 @@ describe('GameProfile Registry', () => {
     it('all profiles have localisation configuration', () => {
         for (const profile of getAllProfiles()) {
             expect(profile.localisation.directories, `${profile.id}.loc.directories`).to.be.an('array').and.not.be.empty;
+            expect(profile.localisation.fileExtensions, `${profile.id}.loc.fileExtensions`).to.be.an('array').and.not.be.empty;
             expect(profile.localisation.encoding, `${profile.id}.loc.encoding`).to.be.a('string');
             expect(profile.localisation.defaultLanguageTag, `${profile.id}.loc.defaultLanguageTag`).to.be.a('string');
         }
@@ -84,6 +91,16 @@ describe('GameProfile Registry', () => {
         const glob = getLocalisationDirectoryGlob();
         expect(glob).to.include('localisation');
         expect(glob).to.include('localization');
+    });
+
+    it('derives localisation extensions and preserves CK2 CSV conventions', () => {
+        expect(getAllLocalisationFileExtensions()).to.deep.equal(['csv', 'yml']);
+        const ck2 = getProfileByLanguageId('ck2');
+        expect(ck2.localisation.fileExtensions).to.deep.equal(['csv']);
+        expect(ck2.localisation.encoding).to.equal('windows-1252');
+        for (const profile of getAllProfiles().filter(profile => profile.id !== 'ck2')) {
+            expect(profile.localisation.fileExtensions, profile.id).to.deep.equal(['yml']);
+        }
     });
 
     // ── Rules remote URL ───────────────────────────────────────────────

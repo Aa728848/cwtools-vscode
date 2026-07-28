@@ -249,7 +249,7 @@ export class LspProcessHost implements LspHost {
   }
 
   private queueWatchedFileChange(filePath: string, type: 1 | 2 | 3): void {
-    if (!isLspWatchedFile(this.options.workspaceRoot, filePath)) return;
+    if (!isLspWatchedFile(this.options.workspaceRoot, filePath, this.options.game)) return;
     const resolved = path.resolve(filePath);
     const previous = this.pendingWatchedChanges.get(resolved);
     // Preserve a create over its following content-change event; deletion always wins.
@@ -263,10 +263,12 @@ export class LspProcessHost implements LspHost {
     this.watcherFlushTimer = undefined;
     const connection = this.connection;
     if (!connection || this.pendingWatchedChanges.size === 0) return;
-    const changes = Array.from(this.pendingWatchedChanges, ([filePath, type]) => ({
-      uri: pathToFileUri(filePath),
-      type,
-    }));
+    const changes = Array.from(this.pendingWatchedChanges, ([filePath, type]) => ({ filePath, type }))
+      .sort((left, right) => left.filePath.localeCompare(right.filePath))
+      .map(({ filePath, type }) => ({
+        uri: pathToFileUri(filePath),
+        type,
+      }));
     this.pendingWatchedChanges.clear();
     void connection.sendNotification('workspace/didChangeWatchedFiles', { changes });
   }
@@ -414,10 +416,10 @@ export function pathToFileUri(filePath: string): string {
 }
 
 const LSP_WATCHED_EXTENSIONS = new Set([
-  '.txt', '.gui', '.yml', '.gfx', '.asset', '.cwt', '.entity', '.shader', '.fxh',
+  '.txt', '.gui', '.yml', '.csv', '.gfx', '.asset', '.cwt', '.entity', '.shader', '.fxh',
 ]);
 
-export function isLspWatchedFile(workspaceRoot: string, filePath: string): boolean {
+export function isLspWatchedFile(workspaceRoot: string, filePath: string, game?: string): boolean {
   const relative = path.relative(path.resolve(workspaceRoot), path.resolve(filePath));
   if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return false;
   const segments = relative.split(/[\\/]+/).map(segment => segment.toLowerCase());
@@ -425,5 +427,7 @@ export function isLspWatchedFile(workspaceRoot: string, filePath: string): boole
     || segment === '.git'
     || segment === '.cwtools'
     || segment === '.cwtools-ai')) return false;
-  return LSP_WATCHED_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === '.csv' && game && game.toLowerCase() !== 'ck2') return false;
+  return LSP_WATCHED_EXTENSIONS.has(extension);
 }

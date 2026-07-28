@@ -106,7 +106,7 @@ function parsePlanHandoff(planText: string): { blockCount: number; value?: unkno
 function isExactFilePath(value: string): boolean {
     const normalized = value.trim().replace(/\\/g, '/');
     if (!normalized || normalized.endsWith('/') || normalized.includes('://')) return false;
-    if (/[*?\[\]{}<>]/.test(normalized)) return false;
+    if (/[*?[\]{}<>]/.test(normalized)) return false;
     if (/(?:^|\/)(?:\.{1,2}|tbd|todo|unknown|待定)(?:\/|$)/i.test(normalized)) return false;
     return true;
 }

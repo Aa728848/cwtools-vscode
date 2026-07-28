@@ -47,7 +47,6 @@ import { configureHistoryPolicy, enforceHistoryRetention } from './ai/runner/his
 import { sha256Text } from './ai/runner/durableStorage';
 import { processRegistry } from './ai/runner/processRegistry';
 import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
-import type { GameProfile } from './gameProfiles';
 import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService';
 import { McpBridgeServer } from './ai/mcpBridgeServer';
 import { maybePromptForDefaultDarkModernTheme } from './themePrompt';
@@ -1318,7 +1317,7 @@ export async function activate(context: ExtensionContext) {
 	// Closed files can be changed by Git, external editors, generators, or agent
 	// commands without producing onDidChangeTextDocument. Keep query-only semantic
 	// graph caches coherent with those file-system mutations as well.
-	const aiSemanticWatcher = workspace.createFileSystemWatcher('**/*.{txt,gui,yml,gfx,asset,cwt,entity,shader,fxh}');
+	const aiSemanticWatcher = workspace.createFileSystemWatcher('**/*.{txt,gui,yml,csv,gfx,asset,cwt,entity,shader,fxh}');
 	let aiMemoryInvalidationTimer: ReturnType<typeof setTimeout> | undefined;
 	const scheduleProjectMemoryInvalidation = () => {
 		if (aiMemoryInvalidationTimer) clearTimeout(aiMemoryInvalidationTimer);
@@ -1809,14 +1808,21 @@ export async function activate(context: ExtensionContext) {
 			debug: { command: serverExe, transport: TransportKind.stdio }
 		}
 
+		const activeProfile = getProfileByLanguageId(language);
+		const globAlternatives = (values: string[]) => values.length === 1 ? values[0]! : `{${values.join(',')}}`;
+		const scriptDirectories = globAlternatives(Array.from(new Set(activeProfile.folders.scriptDirs)).sort());
+		const guiDirectories = globAlternatives(Array.from(new Set(activeProfile.folders.guiDirs)).sort());
+		const gfxDirectories = globAlternatives(Array.from(new Set(activeProfile.folders.gfxDirs)).sort());
+		const localisationDirectories = globAlternatives(Array.from(new Set(activeProfile.localisation.directories)).sort());
+		const localisationExtensions = globAlternatives(Array.from(new Set(activeProfile.localisation.fileExtensions)).sort());
 		const fileEvents = [
-			workspace.createFileSystemWatcher("**/{events,common,map,map_data,prescripted_countries,flags,decisions,missions}/**/*.txt"),
-			workspace.createFileSystemWatcher("**/{interface,gfx}/**/*.gui"),
-			workspace.createFileSystemWatcher("**/{interface,gfx}/**/*.gfx"),
+			workspace.createFileSystemWatcher(`**/${scriptDirectories}/**/*.txt`),
+			workspace.createFileSystemWatcher(`**/${guiDirectories}/**/*.gui`),
+			workspace.createFileSystemWatcher(`**/${gfxDirectories}/**/*.gfx`),
 			workspace.createFileSystemWatcher("**/gfx/**/*.{shader,fxh}"),
 			workspace.createFileSystemWatcher("**/{interface}/**/*.sfx"),
 			workspace.createFileSystemWatcher("**/{interface,gfx,fonts,music,sound}/**/*.asset"),
-			workspace.createFileSystemWatcher("**/{localisation,localisation_synced,localization}/**/*.yml")
+			workspace.createFileSystemWatcher(`**/${localisationDirectories}/**/*.${localisationExtensions}`)
 		]
 		const editorFeaturePriority = new LspFeaturePriorityGate();
 		const monitorLogChannel = window.createOutputChannel('MemDiag');

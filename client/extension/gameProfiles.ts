@@ -17,6 +17,8 @@
 export interface LocalisationProfile {
 	/** Directory names that contain localisation files (e.g. 'localisation', 'localization'). */
 	directories: string[];
+	/** Localisation file extensions without a leading dot. */
+	fileExtensions: string[];
 	/** File encoding requirement ('utf8-bom' for most Paradox games). */
 	encoding: 'utf8-bom' | 'utf8' | 'windows-1252';
 	/** The header tag used in localisation files (e.g. 'l_english'). */
@@ -115,6 +117,7 @@ const STELLARIS_LOC_LANGS = [
 
 const STANDARD_LOC_PROFILE: LocalisationProfile = {
 	directories: ['localisation', 'localisation_synced'],
+	fileExtensions: ['yml'],
 	encoding: 'utf8-bom',
 	defaultLanguageTag: 'l_english',
 	supportedLanguageTags: STELLARIS_LOC_LANGS,
@@ -122,6 +125,7 @@ const STANDARD_LOC_PROFILE: LocalisationProfile = {
 
 const MODERN_LOC_PROFILE: LocalisationProfile = {
 	directories: ['localization'],
+	fileExtensions: ['yml'],
 	encoding: 'utf8-bom',
 	defaultLanguageTag: 'l_english',
 	supportedLanguageTags: STELLARIS_LOC_LANGS,
@@ -135,6 +139,44 @@ const NO_PREVIEWS: PreviewCapabilityProfile = {
 	entityPreview: false,
 	particlePreview: false,
 	staticGalaxyPreview: false,
+};
+
+/**
+ * Capability profile for the generic/custom CWT-backed language mode.
+ *
+ * This profile is deliberately not registered in PROFILES: custom projects
+ * have no fixed Steam installation or remote rules repository and therefore
+ * must not participate in game discovery. It still provides conservative
+ * watcher coverage without inheriting Stellaris-only capabilities.
+ */
+const GENERIC_PROFILE: GameProfile = {
+	id: 'paradox',
+	displayName: 'Generic Paradox',
+	languageId: 'paradox',
+	fileExtensions: ['txt', 'gui', 'gfx', 'asset', 'cwt'],
+	cacheSettingKey: 'stellarisLanguageServices.cache.custom',
+	rulesRemoteUrl: '',
+	localisation: {
+		...STANDARD_LOC_PROFILE,
+		directories: ['localisation', 'localisation_synced', 'localization'],
+	},
+	folders: {
+		scriptDirs: [
+			'common', 'events', 'history', 'decisions', 'missions', 'map', 'map_data',
+			'prescripted_countries', 'flags', 'setup', 'poptypes', 'units',
+		],
+		guiDirs: ['interface', 'gui'],
+		gfxDirs: ['gfx'],
+	},
+	previews: NO_PREVIEWS,
+	ai: { knowledgeKey: 'paradox' },
+	install: {
+		steamFolderName: '',
+		alternativeFolderNames: [],
+		steamAppId: '',
+		exeName: '',
+		exeInBinaries: false,
+	},
 };
 
 // ─── Profile registry ────────────────────────────────────────────────────────
@@ -245,7 +287,8 @@ registerProfile({
 	rulesRemoteUrl: 'https://github.com/cwtools/cwtools-ck2-config',
 	localisation: {
 		directories: ['localisation'],
-		encoding: 'utf8-bom',
+		fileExtensions: ['csv'],
+		encoding: 'windows-1252',
 		defaultLanguageTag: 'l_english',
 		supportedLanguageTags: STELLARIS_LOC_LANGS,
 	},
@@ -303,6 +346,7 @@ registerProfile({
 	rulesRemoteUrl: 'https://github.com/cwtools/cwtools-vic2-config',
 	localisation: {
 		directories: ['localisation'],
+		fileExtensions: ['yml'],
 		encoding: 'windows-1252',
 		defaultLanguageTag: 'l_english',
 		supportedLanguageTags: ['l_english'],
@@ -408,10 +452,12 @@ registerProfile({
 
 /**
  * Returns the profile for a given language ID.
- * Falls back to Stellaris if no matching profile is found.
+ * Generic/custom projects receive their own conservative capability profile.
+ * Other unknown language IDs fall back to Stellaris for backwards compatibility.
  */
 export function getProfileByLanguageId(languageId: string): GameProfile {
-	return PROFILES.get(languageId) ?? PROFILES.get('stellaris')!;
+	return PROFILES.get(languageId)
+		?? (languageId === GENERIC_PROFILE.languageId ? GENERIC_PROFILE : PROFILES.get('stellaris')!);
 }
 
 /**
@@ -453,12 +499,23 @@ export function getAllProfiles(): GameProfile[] {
  */
 export function getAllLocalisationDirectoryNames(): string[] {
 	const names = new Set<string>();
-	for (const profile of PROFILES.values()) {
+	for (const profile of [...PROFILES.values(), GENERIC_PROFILE]) {
 		for (const dir of profile.localisation.directories) {
 			names.add(dir);
 		}
 	}
-	return Array.from(names);
+	return Array.from(names).sort();
+}
+
+/** Returns all localisation extensions declared by registered game profiles. */
+export function getAllLocalisationFileExtensions(): string[] {
+	const extensions = new Set<string>();
+	for (const profile of [...PROFILES.values(), GENERIC_PROFILE]) {
+		for (const extension of profile.localisation.fileExtensions) {
+			extensions.add(extension.replace(/^\./, '').toLowerCase());
+		}
+	}
+	return Array.from(extensions).sort();
 }
 
 /**

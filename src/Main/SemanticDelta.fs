@@ -1,6 +1,7 @@
 module Main.SemanticDelta
 
 open System
+open System.IO
 
 /// Validation/completion-visible contribution of a file change. Path routing
 /// identifies the candidate domains; exact type keys and semantic equality are
@@ -27,20 +28,14 @@ type CommittedSemanticStage =
     | CommittedTypeIndex
     | CommittedScriptedServices
 
-let typeDefiningSegments =
-    [| "/common/"; "\\common\\"
-       "/events/"; "\\events\\"
-       "/interface/"; "\\interface\\"
-       "/gfx/"; "\\gfx\\"
-       "/map/"; "\\map\\"
-       "/prescripted_countries/"; "\\prescripted_countries\\" |]
+let typeDefiningExtensions =
+    set [ ".txt"; ".gui"; ".gfx"; ".asset" ]
 
-/// Conservative path-based fast-path: true when the file lives in a directory
-/// that is *capable* of contributing type/enum/scope definitions. The actual
-/// type-defining decision is made by inspecting the staged semantic delta.
+/// Conservative path-based hint for editor features. Core incremental routing
+/// asks the active game capability for exact type keys, so this must not encode
+/// any game's directory layout.
 let isTypeDefiningPath (path: string) =
-    let lp = path.ToLowerInvariant()
-    typeDefiningSegments |> Array.exists (fun seg -> lp.Contains(seg))
+    typeDefiningExtensions.Contains(Path.GetExtension(path).ToLowerInvariant())
 
 let dynamicDefinitionPathMarkers =
     [| "common/inline_scripts/"
@@ -54,6 +49,7 @@ let dynamicDefinitionPathMarkers =
 let scriptedDefinitionPathMarkers =
     [| "common/scripted_effects/"
        "common/scripted_triggers/"
+       "common/script_values/"
        "common/scripted_values/" |]
 
 let isDynamicDefinitionPath (path: string) =

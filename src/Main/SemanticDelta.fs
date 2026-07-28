@@ -23,6 +23,10 @@ type SemanticDecision =
     | ScriptedServices
     | FullRefresh of reason: string
 
+type CommittedSemanticStage =
+    | CommittedTypeIndex
+    | CommittedScriptedServices
+
 let typeDefiningSegments =
     [| "/common/"; "\\common\\"
        "/events/"; "\\events\\"
@@ -164,3 +168,15 @@ let decideSemanticDelta (delta: SemanticDelta) patchCount patchBudget =
         // Sprite or localisation surface changes are routed to their own
         // refresh paths; they do not require a full RefreshCaches.
         SemanticNoOp
+
+/// Once an atomic incremental stage has committed, that stage defines the safe
+/// publication boundary. Editor saves must not be promoted to a full cache
+/// rebuild merely because the generic delta is incomplete or a patch counter
+/// reached its historical safety budget.
+let decideCommittedSemanticDelta stage semanticChanged delta patchCount patchBudget =
+    if semanticChanged then
+        match stage with
+        | CommittedTypeIndex -> TypeIndexOnly
+        | CommittedScriptedServices -> ScriptedServices
+    else
+        decideSemanticDelta delta patchCount patchBudget

@@ -8,6 +8,13 @@ let nextSnapshot: Record<string, unknown>;
 let commandCalls: Array<{ command: string; args: unknown[] }> = [];
 let activeWorkspaceRoot = '';
 let exportGate: Promise<void> | undefined;
+let validationStatus: Record<string, unknown> = {
+    ok: true,
+    inProgress: false,
+    pendingGlobalKinds: [],
+    modelReadyForKnowledgeExport: true,
+    loading: { inProgress: false },
+};
 let progressCalls: Array<{
     options: Record<string, unknown>;
     reports: Array<{ message?: string }>;
@@ -19,6 +26,13 @@ const watcherStubs: Array<{
     delete?: (uri: { fsPath: string }) => void;
     dispose: () => void;
 }> = [];
+interface TextDocumentStub {
+    uri: { fsPath: string; scheme: string };
+    getText(): string;
+}
+let openDocumentListener: ((document: TextDocumentStub) => void) | undefined;
+let saveDocumentListener: ((document: TextDocumentStub) => void) | undefined;
+let closeDocumentListener: ((document: TextDocumentStub) => void) | undefined;
 
 class DisposableStub {
     constructor(private readonly callback: () => void) {}
@@ -32,6 +46,7 @@ class RelativePatternStub {
 const vscodeStub = {
     workspace: {
         workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
+        textDocuments: [] as TextDocumentStub[],
         getConfiguration: () => ({
             get: <T>(_key: string, defaultValue?: T): T | undefined => defaultValue,
         }),
@@ -53,10 +68,25 @@ const vscodeStub = {
             return watcher;
         },
         onDidChangeConfiguration: () => ({ dispose: () => undefined }),
+        onDidOpenTextDocument: (listener: (document: TextDocumentStub) => void) => {
+            openDocumentListener = listener;
+            return { dispose: () => { openDocumentListener = undefined; } };
+        },
+        onDidSaveTextDocument: (listener: (document: TextDocumentStub) => void) => {
+            saveDocumentListener = listener;
+            return { dispose: () => { saveDocumentListener = undefined; } };
+        },
+        onDidCloseTextDocument: (listener: (document: TextDocumentStub) => void) => {
+            closeDocumentListener = listener;
+            return { dispose: () => { closeDocumentListener = undefined; } };
+        },
     },
     commands: {
         executeCommand: async (command: string, ...args: unknown[]) => {
             commandCalls.push({ command, args });
+            if (command === 'cwtools.ai.getValidationStatus') {
+                return validationStatus;
+            }
             if (command === 'cwtools.ai.exportProjectKnowledge' && exportGate) {
                 await exportGate;
             }
@@ -94,7 +124,7 @@ const vscodeStub = {
         onDidChangeWindowState: () => ({ dispose: () => undefined }),
     },
     ProgressLocation: { Window: 10 },
-    Uri: { file: (fsPath: string) => ({ fsPath }) },
+    Uri: { file: (fsPath: string) => ({ fsPath, scheme: 'file' }) },
     RelativePattern: RelativePatternStub,
     Disposable: DisposableStub,
 };
@@ -126,9 +156,20 @@ describe('project knowledge SQLite V2', () => {
         workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-project-knowledge-'));
         activeWorkspaceRoot = workspaceRoot;
         vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: workspaceRoot } }];
+        vscodeStub.workspace.textDocuments = [];
         watcherStubs.length = 0;
+        openDocumentListener = undefined;
+        saveDocumentListener = undefined;
+        closeDocumentListener = undefined;
         commandCalls = [];
         exportGate = undefined;
+        validationStatus = {
+            ok: true,
+            inProgress: false,
+            pendingGlobalKinds: [],
+            modelReadyForKnowledgeExport: true,
+            loading: { inProgress: false },
+        };
         progressCalls = [];
         activeProgressCount = 0;
     });
@@ -649,6 +690,147 @@ describe('project knowledge SQLite V2', () => {
         expect(progressCalls).to.have.length(2);
         expect(projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)?.staleReasons).to.deep.equal([]);
         expect(secondManifest?.staleReasons).to.deep.equal([]);
+    });
+
+    it('keeps saved files queued until the language-server model is ready', async () => {
+        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        nextSnapshot = {
+            ok: true,
+            status: 'ready',
+            game: 'stellaris',
+            generatedAtUnixMs: Date.now(),
+            projectRoots: [workspaceRoot],
+            generationMode: 'full',
+            domains: [{ id: 'event' }],
+            counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
+            warnings: [],
+        };
+        await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
+        fs.mkdirSync(path.join(workspaceRoot, '.cwtools', 'project'), { recursive: true });
+        fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), JSON.stringify(profile), 'utf8');
+        commandCalls = [];
+        nextSnapshot = {
+            ...nextSnapshot,
+            generationMode: 'incremental',
+            generatedAtUnixMs: Date.now() + 1,
+        };
+        validationStatus = {
+            ok: true,
+            inProgress: true,
+            pendingGlobalKinds: ['types'],
+            modelReadyForKnowledgeExport: false,
+            loading: { inProgress: false },
+        };
+        const context = {
+            globalStorageUri: { fsPath: path.join(workspaceRoot, 'global-storage') },
+            subscriptions: [] as Array<{ dispose(): void }>,
+        };
+        projectKnowledge.registerProjectKnowledgeWatcher(context as any);
+        const firstChanged = path.join(workspaceRoot, 'events', 'first.txt');
+        const secondChanged = path.join(workspaceRoot, 'common', 'bypass', 'second.txt');
+
+        const clock = sinon.useFakeTimers();
+        try {
+            watcherStubs[0]!.change?.({ fsPath: firstChanged });
+            await clock.tickAsync(200);
+            expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(0);
+            expect(progressCalls).to.have.length(1);
+            expect(activeProgressCount).to.equal(1);
+
+            watcherStubs[0]!.change?.({ fsPath: firstChanged });
+            watcherStubs[0]!.change?.({ fsPath: secondChanged });
+            await clock.tickAsync(1200);
+            expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(0);
+
+            validationStatus = {
+                ok: true,
+                inProgress: false,
+                pendingGlobalKinds: ['types', 'rules'],
+                modelReadyForKnowledgeExport: true,
+                loading: { inProgress: false },
+            };
+            await clock.tickAsync(1200);
+            await clock.runAllAsync();
+        } finally {
+            clock.restore();
+            for (const disposable of context.subscriptions.reverse()) disposable.dispose();
+        }
+
+        const exports = commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge');
+        expect(exports).to.have.length(1);
+        expect(exports[0]!.args[0]).to.deep.include({
+            generationMode: 'incremental',
+            changedFiles: [firstChanged, secondChanged],
+        });
+        expect(progressCalls[0]!.reports.some(report => report.message?.includes('Waiting for validation'))).to.equal(true);
+        expect(progressCalls[0]!.reports.some(report => report.message?.includes('Updating changed project files'))).to.equal(true);
+        expect(activeProgressCount).to.equal(0);
+        const manifest = projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)!;
+        expect(manifest.status).to.equal('ready');
+        expect(manifest.staleReasons).to.deep.equal([]);
+    });
+
+    it('ignores unchanged saves and coalesces an open-document save with its file-watcher echo', async () => {
+        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        nextSnapshot = {
+            ok: true,
+            status: 'ready',
+            game: 'stellaris',
+            generatedAtUnixMs: Date.now(),
+            projectRoots: [workspaceRoot],
+            generationMode: 'full',
+            domains: [{ id: 'event' }],
+            counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
+            warnings: [],
+        };
+        await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
+        fs.mkdirSync(path.join(workspaceRoot, '.cwtools', 'project'), { recursive: true });
+        fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), JSON.stringify(profile), 'utf8');
+        commandCalls = [];
+        nextSnapshot = {
+            ...nextSnapshot,
+            generationMode: 'incremental',
+            generatedAtUnixMs: Date.now() + 1,
+        };
+
+        const changedFile = path.join(workspaceRoot, 'events', 'changed.txt');
+        let documentText = 'event = { id = test.1 }\n';
+        const document: TextDocumentStub = {
+            uri: { fsPath: changedFile, scheme: 'file' },
+            getText: () => documentText,
+        };
+        vscodeStub.workspace.textDocuments = [document];
+        const context = {
+            globalStorageUri: { fsPath: path.join(workspaceRoot, 'global-storage') },
+            subscriptions: [] as Array<{ dispose(): void }>,
+        };
+        projectKnowledge.registerProjectKnowledgeWatcher(context as any);
+
+        const clock = sinon.useFakeTimers();
+        try {
+            saveDocumentListener?.(document);
+            watcherStubs[0]!.change?.(document.uri);
+            await clock.tickAsync(1000);
+            expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(0);
+            expect(progressCalls).to.have.length(0);
+
+            documentText = 'event = { id = test.2 }\n';
+            saveDocumentListener?.(document);
+            watcherStubs[0]!.change?.(document.uri);
+            await clock.tickAsync(2000);
+            await clock.runAllAsync();
+        } finally {
+            clock.restore();
+            for (const disposable of context.subscriptions.reverse()) disposable.dispose();
+        }
+
+        const exports = commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge');
+        expect(exports).to.have.length(1);
+        expect(exports[0]!.args[0]).to.deep.include({
+            generationMode: 'incremental',
+            changedFiles: [changedFile],
+        });
+        expect(progressCalls).to.have.length(1);
     });
 
     it('routes secondary-root changes into one primary incremental export', async () => {

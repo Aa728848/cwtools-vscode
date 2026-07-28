@@ -3689,12 +3689,34 @@ type Server(client: ILanguageClient) =
                                 |> Option.iter (fun version ->
                                     committedTypeIndexVersions.[normaliseCachePath name] <- struct (version, game))
 
-                                match
-                                    decideSemanticDelta
-                                        semanticDelta
-                                        incrementalScriptedPatchCount
-                                        maxIncrementalScriptedPatchCount
-                                with
+                                // A successfully committed stage is authoritative about
+                                // the smallest safe publication unit. Do not promote an
+                                // editor save to the multi-GB full RefreshCaches path just
+                                // because the generic delta lacks a complete contribution
+                                // description or a historical patch budget was reached.
+                                let semanticDecision =
+                                    match staged with
+                                    | Some (ScriptedServices _) ->
+                                        decideCommittedSemanticDelta
+                                            CommittedSemanticStage.CommittedScriptedServices
+                                            incrementalSemanticChanged
+                                            semanticDelta
+                                            incrementalScriptedPatchCount
+                                            maxIncrementalScriptedPatchCount
+                                    | Some (TypeIndexOnly _) ->
+                                        decideCommittedSemanticDelta
+                                            CommittedSemanticStage.CommittedTypeIndex
+                                            incrementalSemanticChanged
+                                            semanticDelta
+                                            incrementalScriptedPatchCount
+                                            maxIncrementalScriptedPatchCount
+                                    | _ ->
+                                        decideSemanticDelta
+                                            semanticDelta
+                                            incrementalScriptedPatchCount
+                                            maxIncrementalScriptedPatchCount
+
+                                match semanticDecision with
                                 | SemanticDecision.SemanticNoOp ->
                                     clearTypeIndexCacheForFile name
                                     monitorLog Refresh $"RefreshIncrementalTypes semantic-noop file={name}"
@@ -6049,16 +6071,30 @@ type Server(client: ILanguageClient) =
                         if change.``type`` = FileChangeType.Created then
                             refreshFileList <- true
                         let path = getPathFromDoc change.uri
-                        advanceLintGeneration path |> ignore
-                        forgetFileCaches path
-                        match gameObj with
-                        | Some game -> game.InvalidateFileCache path
-                        | None -> ()
-                        // Creation and change both enter the staged semantic-delta
-                        // pipeline. A newly created file with an unknown contribution
-                        // will still choose FullRefresh, while known type/scripted
-                        // contributions can commit incrementally.
-                        lintDebounceAgent.Post(UpdateRequest({ uri = change.uri; version = 0 }, diskRefreshRequest))
+                        let isOpenDocumentSaveEcho =
+                            change.``type`` = FileChangeType.Changed
+                            && (match docs.GetTextByPath(path) with
+                                | Some openText ->
+                                    try String.Equals(openText, File.ReadAllText(path), StringComparison.Ordinal)
+                                    with _ -> false
+                                | None -> false)
+                        if isOpenDocumentSaveEcho then
+                            // VS Code reports an on-disk Changed event after didSave,
+                            // including Ctrl+S when no bytes changed. The open-document
+                            // pipeline already owns real edits, so replaying the watcher
+                            // event would parse and refresh the same file a second time.
+                            logDiag $"Skip open-document watched-file save echo: {path}"
+                        else
+                            advanceLintGeneration path |> ignore
+                            forgetFileCaches path
+                            match gameObj with
+                            | Some game -> game.InvalidateFileCache path
+                            | None -> ()
+                            // Creation and external change both enter the staged semantic-delta
+                            // pipeline. A newly created file with an unknown contribution
+                            // will still choose FullRefresh, while known type/scripted
+                            // contributions can commit incrementally.
+                            lintDebounceAgent.Post(UpdateRequest({ uri = change.uri; version = 0 }, diskRefreshRequest))
                     | FileChangeType.Deleted ->
                         refreshFileList <- true
                         let path = getPathFromDoc change.uri
@@ -10997,11 +11033,17 @@ type Server(client: ILanguageClient) =
                                     (pendingRefreshDomainList ())
                                 |> Seq.distinct
                                 |> Seq.toArray
+                            let pendingRefreshDomains = pendingRefreshDomainList ()
                             let freshness =
                                 if pendingFiles = 0 then "fresh"
                                 elif pendingFiles < totalFiles then "pending"
                                 else "stale"
                             let runtime = validationRuntimeSnapshot ()
+                            let loading = loadingRuntimeSnapshot ()
+                            let modelReadyForKnowledgeExport =
+                                not runtime.inProgress
+                                && not loading.inProgress
+                                && pendingRefreshDomains.IsEmpty
                             let result =
                                 JsonValue.Record
                                     [| "ok",                 JsonValue.Boolean true
@@ -11016,6 +11058,8 @@ type Server(client: ILanguageClient) =
                                        "totalFiles",        JsonValue.Number(decimal totalFiles)
                                        "pendingFiles",      JsonValue.Number(decimal pendingFiles)
                                        "pendingGlobalKinds",JsonValue.Array(allPendingKinds |> Array.map JsonValue.String)
+                                       "pendingRefreshDomains",JsonValue.Array(pendingRefreshDomains |> List.map JsonValue.String |> Array.ofList)
+                                       "modelReadyForKnowledgeExport",JsonValue.Boolean modelReadyForKnowledgeExport
                                        "inProgress",        JsonValue.Boolean runtime.inProgress
                                        "inProgressFile",    JsonValue.String runtime.inProgressFile
                                        "queueDepth",        JsonValue.Number(decimal runtime.queueDepth)

@@ -86,6 +86,16 @@ interface LspKnowledgeSnapshot {
     error?: string;
 }
 
+interface LspValidationStatus {
+    ok?: boolean;
+    inProgress?: boolean;
+    pendingGlobalKinds?: unknown;
+    modelReadyForKnowledgeExport?: unknown;
+    loading?: unknown;
+}
+
+class ProjectKnowledgeModelNotReadyError extends Error {}
+
 export interface GenerateProjectKnowledgeOptions {
     mode?: 'full' | 'incremental';
     changedFiles?: string[];
@@ -350,6 +360,11 @@ async function requestLspKnowledgeSnapshot(
         },
     );
     if (!result || result.ok !== true) {
+        if (result?.status === 'loading' || result?.status === 'stale') {
+            throw new ProjectKnowledgeModelNotReadyError(
+                result.error || `CWTools project knowledge export is waiting for the ${result.status} model to become ready.`,
+            );
+        }
         throw new Error(result?.error || 'CWTools project knowledge export is unavailable.');
     }
     return result;
@@ -714,7 +729,7 @@ export function shouldResumeFullProjectKnowledgeRefresh(reasons: readonly string
 async function withProjectKnowledgeRefreshProgress<T>(
     workspaceRoot: string,
     fullRefresh: boolean,
-    task: () => Promise<T>,
+    task: (progress?: vs.Progress<{ message?: string }>) => Promise<T>,
 ): Promise<T> {
     const workspaceName = path.basename(workspaceRoot);
     const title = fullRefresh
@@ -738,9 +753,9 @@ async function withProjectKnowledgeRefreshProgress<T>(
                 progress.report({
                     message: fullRefresh
                         ? aiText('Rebuilding the knowledge database...', '正在重建项目知识数据库...')
-                        : aiText('Updating changed project files...', '正在更新发生变化的项目文件...'),
+                        : aiText('Waiting for the CWTools model to become ready...', '正在等待 CWTools 模型完成更新...'),
                 });
-                return task();
+                return task(progress);
             },
         );
     }
@@ -755,6 +770,58 @@ async function withProjectKnowledgeRefreshProgress<T>(
 
 const INCREMENTAL_REFRESH_DEBOUNCE_MS = 150;
 const INCREMENTAL_FOLLOW_UP_DELAY_MS = 50;
+const MODEL_READY_POLL_INITIAL_MS = 100;
+const MODEL_READY_POLL_MAX_MS = 250;
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : undefined;
+}
+
+function isProjectKnowledgeModelReady(value: unknown): boolean | undefined {
+    const status = recordValue(value) as LspValidationStatus | undefined;
+    if (!status || status.ok !== true) return undefined;
+    if (typeof status.modelReadyForKnowledgeExport === 'boolean') {
+        return status.modelReadyForKnowledgeExport;
+    }
+    const loading = recordValue(status.loading);
+    const pendingGlobalKinds = Array.isArray(status.pendingGlobalKinds)
+        ? status.pendingGlobalKinds
+        : [];
+    return status.inProgress !== true
+        && loading?.inProgress !== true
+        && pendingGlobalKinds.length === 0;
+}
+
+async function waitForProjectKnowledgeModelReady(
+    workspaceRoot: string,
+    progress?: vs.Progress<{ message?: string }>,
+): Promise<boolean> {
+    let delayMs = MODEL_READY_POLL_INITIAL_MS;
+    const stateKey = workspaceRootKey(workspaceRoot);
+    while (pendingRootRefreshes.has(stateKey)) {
+        progress?.report({
+            message: aiText(
+                'Waiting for validation to finish; saved files remain queued...',
+                '正在等待文件验证完成；已保存的文件会继续合并排队...',
+            ),
+        });
+        try {
+            const status = await vs.commands.executeCommand<unknown>('cwtools.ai.getValidationStatus');
+            const ready = isProjectKnowledgeModelReady(status);
+            // Older or temporarily unavailable servers remain guarded by the
+            // authoritative requireReady check on the export command.
+            if (ready !== false) return true;
+        } catch (error) {
+            ErrorReporter.debug('ProjectKnowledge', 'Validation readiness probe failed; deferring to export guard', error);
+            return true;
+        }
+        await new Promise<void>(resolve => setTimeout(resolve, delayMs));
+        delayMs = Math.min(delayMs * 2, MODEL_READY_POLL_MAX_MS);
+    }
+    return false;
+}
 
 function scheduleRootRefresh(workspaceRoot: string, indexService: IndexService | undefined, delayMs = INCREMENTAL_REFRESH_DEBOUNCE_MS): void {
     const state = pendingRootRefresh(workspaceRoot);
@@ -768,45 +835,66 @@ function scheduleRootRefresh(workspaceRoot: string, indexService: IndexService |
 async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexService): Promise<void> {
     const state = pendingRootRefresh(workspaceRoot);
     if (state.inFlight) return state.inFlight;
-    const files = Array.from(state.changedFiles);
-    state.changedFiles.clear();
-    const fullRefresh = state.fullRefresh;
-    state.fullRefresh = false;
-    const refreshAllVanilla = pendingVanillaIndexAll;
-    pendingVanillaIndexAll = false;
-    const vanillaGames = Array.from(pendingVanillaIndexGames);
-    pendingVanillaIndexGames.clear();
-    const staleReasons = Array.from(state.staleReasons);
-    state.staleReasons.clear();
+    let retryAfterModelReady = false;
+    let fullRefreshAttempted = false;
     state.inFlight = (async () => {
-        if (indexService && (refreshAllVanilla || vanillaGames.length > 0)) {
-            try {
-                await indexService.refreshVanillaSymbols(refreshAllVanilla ? undefined : vanillaGames);
-            } catch (error) {
-                ErrorReporter.debug('ProjectKnowledge', 'Vanilla symbol cache refresh failed', error);
+        const fullRefreshForProgress = state.fullRefresh;
+        await withProjectKnowledgeRefreshProgress(workspaceRoot, fullRefreshForProgress, async progress => {
+            if (!await waitForProjectKnowledgeModelReady(workspaceRoot, progress)) return;
+
+            const files = Array.from(state.changedFiles);
+            state.changedFiles.clear();
+            const fullRefresh = state.fullRefresh;
+            state.fullRefresh = false;
+            const refreshAllVanilla = pendingVanillaIndexAll;
+            pendingVanillaIndexAll = false;
+            const vanillaGames = Array.from(pendingVanillaIndexGames);
+            pendingVanillaIndexGames.clear();
+            const staleReasons = Array.from(state.staleReasons);
+            state.staleReasons.clear();
+
+            if (indexService && (refreshAllVanilla || vanillaGames.length > 0)) {
+                try {
+                    await indexService.refreshVanillaSymbols(refreshAllVanilla ? undefined : vanillaGames);
+                } catch (error) {
+                    ErrorReporter.debug('ProjectKnowledge', 'Vanilla symbol cache refresh failed', error);
+                }
             }
-        }
-        if (!fullRefresh && files.length === 0) return;
-        const manifest = readProjectKnowledgeManifest(workspaceRoot);
-        if (!manifest) return;
-        const profile = readProjectProfile(workspaceRoot);
-        if (!profile) return;
-        markProjectKnowledgeStale(workspaceRoot, staleReasons.length > 0 ? staleReasons : ['workspace_files_changed']);
-        try {
-            await withProjectKnowledgeRefreshProgress(workspaceRoot, fullRefresh, () =>
-                generateProjectKnowledge(workspaceRoot, profile, {
+            if (!fullRefresh && files.length === 0) return;
+            const manifest = readProjectKnowledgeManifest(workspaceRoot);
+            if (!manifest) return;
+            const profile = readProjectProfile(workspaceRoot);
+            if (!profile) return;
+            markProjectKnowledgeStale(workspaceRoot, staleReasons.length > 0 ? staleReasons : ['workspace_files_changed']);
+            progress?.report({
+                message: fullRefresh
+                    ? aiText('Rebuilding the knowledge database...', '正在重建项目知识数据库...')
+                    : aiText('Updating changed project files...', '正在更新发生变化的项目文件...'),
+            });
+            try {
+                fullRefreshAttempted = fullRefresh;
+                await generateProjectKnowledge(workspaceRoot, profile, {
                     mode: fullRefresh ? 'full' : 'incremental',
                     changedFiles: files,
                     complete: manifest.completeExport === true || manifest.status === 'unavailable',
                     requireReady: true,
-                }));
-        } catch (error) {
-            markProjectKnowledgeStale(workspaceRoot, ['background_refresh_failed']);
-            ErrorReporter.debug('ProjectKnowledge', 'Background knowledge refresh failed', error);
-        }
+                });
+            } catch (error) {
+                if (error instanceof ProjectKnowledgeModelNotReadyError) {
+                    for (const file of files) state.changedFiles.add(file);
+                    for (const reason of staleReasons) state.staleReasons.add(reason);
+                    if (fullRefresh) state.fullRefresh = true;
+                    retryAfterModelReady = true;
+                    ErrorReporter.debug('ProjectKnowledge', 'Model changed during knowledge refresh; queued files retained for retry');
+                    return;
+                }
+                markProjectKnowledgeStale(workspaceRoot, ['background_refresh_failed']);
+                ErrorReporter.debug('ProjectKnowledge', 'Background knowledge refresh failed', error);
+            }
+        });
     })().finally(() => {
         state.inFlight = undefined;
-        if (fullRefresh && state.changedFiles.size > 0) {
+        if (fullRefreshAttempted && state.changedFiles.size > 0) {
             // The full export used the model snapshot from before these edits.
             // Preserve the deduplicated paths for one lightweight incremental tail.
             state.staleReasons.add('workspace_files_changed');
@@ -817,10 +905,16 @@ async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexSer
             || state.fullRefresh
             || pendingVanillaIndexAll
             || pendingVanillaIndexGames.size > 0;
+        const stateKey = workspaceRootKey(state.workspaceRoot);
+        if (pendingRootRefreshes.get(stateKey) !== state) return;
         if (needsAutomaticFollowUp) {
-            scheduleRootRefresh(state.workspaceRoot, indexService, INCREMENTAL_FOLLOW_UP_DELAY_MS);
+            scheduleRootRefresh(
+                state.workspaceRoot,
+                indexService,
+                retryAfterModelReady ? MODEL_READY_POLL_INITIAL_MS : INCREMENTAL_FOLLOW_UP_DELAY_MS,
+            );
         } else if (!state.timer) {
-            pendingRootRefreshes.delete(workspaceRootKey(state.workspaceRoot));
+            pendingRootRefreshes.delete(stateKey);
         }
     });
     return state.inFlight;
@@ -850,6 +944,12 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, in
     if (watcherRegistration) return;
     vanillaCacheDirectory = path.join(context.globalStorageUri.fsPath, '.cwtools');
     fs.mkdirSync(vanillaCacheDirectory, { recursive: true });
+    const savedDocumentHashes = new Map<string, string>();
+    const rememberSavedDocument = (document: vs.TextDocument): void => {
+        if (document.uri.scheme !== 'file') return;
+        savedDocumentHashes.set(workspaceRootKey(document.uri.fsPath), hashParts([document.getText()]));
+    };
+    for (const document of vs.workspace.textDocuments) rememberSavedDocument(document);
     const watcher = vs.workspace.createFileSystemWatcher('**/*.{txt,gfx,asset,gui,yml,cwt,mod,shader,fxh}');
     const schedule = (uri: vs.Uri) => {
         const workspaceFolder = vs.workspace.getWorkspaceFolder(uri);
@@ -868,10 +968,30 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, in
         state.staleReasons.add('workspace_files_changed');
         scheduleRootRefresh(ownerRoot, indexService);
     };
-    watcher.onDidChange(schedule);
+    watcher.onDidChange(uri => {
+        const key = workspaceRootKey(uri.fsPath);
+        const isOpenDocument = vs.workspace.textDocuments.some(document =>
+            document.uri.scheme === 'file' && workspaceRootKey(document.uri.fsPath) === key);
+        // Open documents are handled by onDidSaveTextDocument below. The file
+        // watcher also fires for Ctrl+S with no content changes and must not
+        // enqueue a duplicate project-knowledge refresh.
+        if (!isOpenDocument) schedule(uri);
+    });
     watcher.onDidCreate(schedule);
     watcher.onDidDelete(schedule);
     watcherRegistration = watcher;
+    const openDocumentWatcher = vs.workspace.onDidOpenTextDocument(rememberSavedDocument);
+    const saveDocumentWatcher = vs.workspace.onDidSaveTextDocument(document => {
+        if (document.uri.scheme !== 'file') return;
+        const key = workspaceRootKey(document.uri.fsPath);
+        const nextHash = hashParts([document.getText()]);
+        const previousHash = savedDocumentHashes.get(key);
+        savedDocumentHashes.set(key, nextHash);
+        if (previousHash !== nextHash) schedule(document.uri);
+    });
+    const closeDocumentWatcher = vs.workspace.onDidCloseTextDocument(document => {
+        if (document.uri.scheme === 'file') savedDocumentHashes.delete(workspaceRootKey(document.uri.fsPath));
+    });
     const configWatcher = vs.workspace.onDidChangeConfiguration(event => {
         if (!event.affectsConfiguration('stellarisLanguageServices.cache')
             && !event.affectsConfiguration('stellarisLanguageServices.rules_version')
@@ -897,14 +1017,23 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, in
     cwbWatcher.onDidChange(scheduleVanillaCacheRefresh);
     cwbWatcher.onDidCreate(scheduleVanillaCacheRefresh);
     cwbWatcher.onDidDelete(scheduleVanillaCacheRefresh);
-    context.subscriptions.push(watcher, cwbWatcher, configWatcher, new vs.Disposable(() => {
-        watcherRegistration = undefined;
-        for (const state of pendingRootRefreshes.values()) {
-            if (state.timer) clearTimeout(state.timer);
-        }
-        pendingRootRefreshes.clear();
-        pendingVanillaIndexAll = false;
-        pendingVanillaIndexGames.clear();
-        vanillaCacheDirectory = undefined;
-    }));
+    context.subscriptions.push(
+        watcher,
+        cwbWatcher,
+        configWatcher,
+        openDocumentWatcher,
+        saveDocumentWatcher,
+        closeDocumentWatcher,
+        new vs.Disposable(() => {
+            watcherRegistration = undefined;
+            for (const state of pendingRootRefreshes.values()) {
+                if (state.timer) clearTimeout(state.timer);
+            }
+            pendingRootRefreshes.clear();
+            pendingVanillaIndexAll = false;
+            pendingVanillaIndexGames.clear();
+            vanillaCacheDirectory = undefined;
+            savedDocumentHashes.clear();
+        }),
+    );
 }

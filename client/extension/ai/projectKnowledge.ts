@@ -6,6 +6,7 @@ import { getCacheSettingKey, getGameIdForVanillaCacheFile, getVanillaCacheFileNa
 import type { IndexService } from '../indexing/indexService';
 import { isPathInsideOrEqual } from '../pathScope';
 import { ErrorReporter } from './errorReporter';
+import { aiText } from './messages';
 import { readProjectProfile } from './projectProfile';
 import { migrateLegacyAiStorageRoot } from './workspacePaths';
 import type {
@@ -96,6 +97,7 @@ export interface GenerateProjectKnowledgeOptions {
 }
 
 const RELEVANT_EXTENSIONS = new Set(['.txt', '.gfx', '.asset', '.gui', '.yml', '.cwt', '.mod', '.shader', '.fxh']);
+const GRAPH_WIDE_EXTENSIONS = new Set(['.gfx', '.asset', '.gui', '.cwt', '.mod', '.shader', '.fxh']);
 const EXCLUDED_DIRECTORIES = new Set(['.git', '.cwtools', '.cwtools-ai', 'node_modules', 'release', 'artifacts', 'dist', 'out']);
 let watcherRegistration: vs.Disposable | undefined;
 interface PendingRootRefresh {
@@ -479,8 +481,10 @@ function currentStaleReasons(workspaceRoot: string, manifest: ProjectKnowledgeMa
 export function markProjectKnowledgeStale(workspaceRoot: string, reasons: string[]): void {
     const manifest = readProjectKnowledgeManifest(workspaceRoot);
     if (!manifest) return;
+    const staleReasons = Array.from(new Set([...(manifest.staleReasons ?? []), ...reasons]));
+    if (manifest.status === 'stale' && staleReasons.length === (manifest.staleReasons ?? []).length) return;
     manifest.status = 'stale';
-    manifest.staleReasons = Array.from(new Set([...(manifest.staleReasons ?? []), ...reasons]));
+    manifest.staleReasons = staleReasons;
     const primary = path.join(ensurePrimaryKnowledgeRoot(workspaceRoot), 'manifest.json');
     writeJson(primary, manifest);
 }
@@ -688,11 +692,71 @@ export function buildProjectKnowledgePrompt(workspaceRoot: string): string {
     return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: ${manifest.schemaVersion >= 2 ? 'manifest + SQLite V2' : 'legacy JSON V1'}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace + ${manifest.counts.vanillaDefinitions ?? 0} vanilla; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; typed graph: ${manifest.counts.eventNodes ?? 0} entry nodes / ${manifest.counts.eventEdges ?? 0} structural edges / ${manifest.counts.eventLogic ?? 0} logic facts\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Enumerate the involved TypeDefs and dependency families from the current semantic catalog, then load their project/vanilla patterns, typed topology, unresolved facts, and relevant graph slices. A blueprint must cite exact evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
 }
 
-function hasPendingRefresh(state: PendingRootRefresh): boolean {
-    return state.changedFiles.size > 0 || state.fullRefresh;
+const FULL_REFRESH_STALE_REASONS = new Set([
+    'workspace_files_changed',
+    'schema_version_changed',
+    'vanilla_changed',
+    'vanilla_cache_changed',
+    'rules_changed',
+    'rules_or_vanilla_configuration_changed',
+    'graph_wide_inputs_changed',
+    'lsp_export_unavailable',
+    'knowledge_loading',
+    'knowledge_unavailable',
+    'knowledge_error',
+]);
+
+/** Only durable model/cache changes justify an automatic full export after LSP startup. */
+export function shouldResumeFullProjectKnowledgeRefresh(reasons: readonly string[]): boolean {
+    return reasons.some(reason => FULL_REFRESH_STALE_REASONS.has(reason));
 }
 
-function scheduleRootRefresh(workspaceRoot: string, indexService: IndexService | undefined, delayMs = 1800): void {
+async function withProjectKnowledgeRefreshProgress<T>(
+    workspaceRoot: string,
+    fullRefresh: boolean,
+    task: () => Promise<T>,
+): Promise<T> {
+    const workspaceName = path.basename(workspaceRoot);
+    const title = fullRefresh
+        ? aiText(
+            `CWTools: Refreshing full project knowledge for ${workspaceName}`,
+            `CWTools：正在为 ${workspaceName} 全量刷新项目知识`,
+        )
+        : aiText(
+            `CWTools: Refreshing project knowledge for ${workspaceName}`,
+            `CWTools：正在为 ${workspaceName} 增量刷新项目知识`,
+        );
+    const progressLocation = vs.ProgressLocation?.Window;
+    if (typeof vs.window.withProgress === 'function' && progressLocation !== undefined) {
+        return vs.window.withProgress(
+            {
+                location: progressLocation,
+                title,
+                cancellable: false,
+            },
+            async progress => {
+                progress.report({
+                    message: fullRefresh
+                        ? aiText('Rebuilding the knowledge database...', '正在重建项目知识数据库...')
+                        : aiText('Updating changed project files...', '正在更新发生变化的项目文件...'),
+                });
+                return task();
+            },
+        );
+    }
+
+    const status = vs.window.setStatusBarMessage?.(`$(sync~spin) ${title}`);
+    try {
+        return await task();
+    } finally {
+        status?.dispose();
+    }
+}
+
+const INCREMENTAL_REFRESH_DEBOUNCE_MS = 150;
+const INCREMENTAL_FOLLOW_UP_DELAY_MS = 50;
+
+function scheduleRootRefresh(workspaceRoot: string, indexService: IndexService | undefined, delayMs = INCREMENTAL_REFRESH_DEBOUNCE_MS): void {
     const state = pendingRootRefresh(workspaceRoot);
     if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(() => {
@@ -729,20 +793,32 @@ async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexSer
         if (!profile) return;
         markProjectKnowledgeStale(workspaceRoot, staleReasons.length > 0 ? staleReasons : ['workspace_files_changed']);
         try {
-            await generateProjectKnowledge(workspaceRoot, profile, {
-                mode: fullRefresh ? 'full' : 'incremental',
-                changedFiles: files,
-                complete: manifest.completeExport === true || manifest.status === 'unavailable',
-                requireReady: true,
-            });
+            await withProjectKnowledgeRefreshProgress(workspaceRoot, fullRefresh, () =>
+                generateProjectKnowledge(workspaceRoot, profile, {
+                    mode: fullRefresh ? 'full' : 'incremental',
+                    changedFiles: files,
+                    complete: manifest.completeExport === true || manifest.status === 'unavailable',
+                    requireReady: true,
+                }));
         } catch (error) {
             markProjectKnowledgeStale(workspaceRoot, ['background_refresh_failed']);
             ErrorReporter.debug('ProjectKnowledge', 'Background knowledge refresh failed', error);
         }
     })().finally(() => {
         state.inFlight = undefined;
-        if (hasPendingRefresh(state) || pendingVanillaIndexAll || pendingVanillaIndexGames.size > 0) {
-            scheduleRootRefresh(state.workspaceRoot, indexService, 500);
+        if (fullRefresh && state.changedFiles.size > 0) {
+            // The full export used the model snapshot from before these edits.
+            // Preserve the deduplicated paths for one lightweight incremental tail.
+            state.staleReasons.add('workspace_files_changed');
+            markProjectKnowledgeStale(state.workspaceRoot, ['workspace_files_changed']);
+        }
+        const needsAutomaticFollowUp =
+            state.changedFiles.size > 0
+            || state.fullRefresh
+            || pendingVanillaIndexAll
+            || pendingVanillaIndexGames.size > 0;
+        if (needsAutomaticFollowUp) {
+            scheduleRootRefresh(state.workspaceRoot, indexService, INCREMENTAL_FOLLOW_UP_DELAY_MS);
         } else if (!state.timer) {
             pendingRootRefreshes.delete(workspaceRootKey(state.workspaceRoot));
         }
@@ -761,6 +837,7 @@ export function resumeStaleProjectKnowledgeRefreshes(
         if (!manifest) continue;
         const reasons = currentStaleReasons(workspaceRoot, manifest);
         if (reasons.length === 0) continue;
+        if (!shouldResumeFullProjectKnowledgeRefresh(reasons)) continue;
         const state = pendingRootRefresh(workspaceRoot);
         state.fullRefresh = true;
         for (const reason of reasons) state.staleReasons.add(reason);
@@ -781,6 +858,11 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, in
         if (!relative || relative.startsWith('.cwtools/') || relative.startsWith('.cwtools-ai/') || relative.startsWith('.git/') || relative.startsWith('node_modules/')) return;
         const ownerRoot = findKnowledgeOwnerRoot(workspaceFolder.uri.fsPath);
         if (!ownerRoot) return;
+        const graphWideChange = GRAPH_WIDE_EXTENSIONS.has(path.extname(uri.fsPath).toLowerCase());
+        markProjectKnowledgeStale(ownerRoot, graphWideChange
+            ? ['workspace_files_changed', 'graph_wide_inputs_changed']
+            : ['workspace_files_changed']);
+        if (graphWideChange) return;
         const state = pendingRootRefresh(ownerRoot);
         state.changedFiles.add(path.resolve(uri.fsPath));
         state.staleReasons.add('workspace_files_changed');
@@ -795,45 +877,27 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, in
             && !event.affectsConfiguration('stellarisLanguageServices.rules_version')
             && !event.affectsConfiguration('stellarisLanguageServices.rules_folder')
             && !event.affectsConfiguration('stellarisLanguageServices.rules_remote_url')) return;
-        pendingVanillaIndexAll = true;
         for (const folder of vs.workspace.workspaceFolders ?? []) {
             const workspaceRoot = folder.uri.fsPath;
             if (!readProjectKnowledgeManifest(workspaceRoot)) continue;
-            const state = pendingRootRefresh(workspaceRoot);
-            state.fullRefresh = true;
-            state.staleReasons.add('rules_or_vanilla_configuration_changed');
             markProjectKnowledgeStale(workspaceRoot, ['rules_or_vanilla_configuration_changed']);
-            scheduleRootRefresh(workspaceRoot, indexService);
         }
     });
     const cwbWatcher = vs.workspace.createFileSystemWatcher(new vs.RelativePattern(vs.Uri.file(vanillaCacheDirectory), '*.cwb'));
     const scheduleVanillaCacheRefresh = (uri: vs.Uri) => {
         const gameId = getGameIdForVanillaCacheFile(path.basename(uri.fsPath));
         if (!gameId) return;
-        pendingVanillaIndexGames.add(gameId);
-        let scheduled = false;
         for (const folder of vs.workspace.workspaceFolders ?? []) {
             const workspaceRoot = folder.uri.fsPath;
             const manifest = readProjectKnowledgeManifest(workspaceRoot);
             if (manifest?.game !== gameId) continue;
-            const state = pendingRootRefresh(workspaceRoot);
-            state.fullRefresh = true;
-            state.staleReasons.add('vanilla_cache_changed');
             markProjectKnowledgeStale(workspaceRoot, ['vanilla_cache_changed']);
-            scheduleRootRefresh(workspaceRoot, indexService);
-            scheduled = true;
         }
-        const fallbackRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!scheduled && fallbackRoot) scheduleRootRefresh(fallbackRoot, indexService);
     };
     cwbWatcher.onDidChange(scheduleVanillaCacheRefresh);
     cwbWatcher.onDidCreate(scheduleVanillaCacheRefresh);
     cwbWatcher.onDidDelete(scheduleVanillaCacheRefresh);
-    const focusWatcher = vs.window.onDidChangeWindowState(state => {
-        if (!state.focused) return;
-        resumeStaleProjectKnowledgeRefreshes(indexService, { refreshVanillaIndex: true });
-    });
-    context.subscriptions.push(watcher, cwbWatcher, configWatcher, focusWatcher, new vs.Disposable(() => {
+    context.subscriptions.push(watcher, cwbWatcher, configWatcher, new vs.Disposable(() => {
         watcherRegistration = undefined;
         for (const state of pendingRootRefreshes.values()) {
             if (state.timer) clearTimeout(state.timer);

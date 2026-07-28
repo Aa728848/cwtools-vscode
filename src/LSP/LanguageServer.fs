@@ -551,6 +551,20 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 | "getFileTypes"
                 | "getDataForFile"
                 | "getTypesForFile"  -> true
+                | "cwtools.ai.exportProjectKnowledge" ->
+                    p.arguments
+                    |> List.tryHead
+                    |> Option.bind (function
+                        | JsonValue.Record fields ->
+                            fields
+                            |> Array.tryPick (fun (key, value) ->
+                                if key = "generationMode" then
+                                    match value with
+                                    | JsonValue.String mode -> Some mode
+                                    | _ -> None
+                                else None)
+                        | _ -> None)
+                    |> Option.exists (fun mode -> mode = "incremental")
                 | _                  -> false
             server.ExecuteCommand p |> thenMap serializeExecuteCommandResponseOption, isReadCmd
 

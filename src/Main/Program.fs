@@ -10244,8 +10244,9 @@ type Server(client: ILanguageClient) =
                                 | VIC2 -> "vic2"
                                 | VIC3 -> "vic3"
                                 | Custom -> "paradox"
-                            // This command writes the generated SQLite cache and is therefore
-                            // scheduled under the protocol-level write lock.
+                            // Incremental export only reads the coherent game model and uses a
+                            // per-database gate, so the protocol may run it alongside editor reads.
+                            // Full publication remains under the protocol write lock during load.
                             let validation = validationRuntimeSnapshot ()
                             let loading = loadingRuntimeSnapshot ()
                             let pendingKinds = pendingRefreshDomainList ()

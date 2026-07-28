@@ -7,6 +7,12 @@ import * as sinon from 'sinon';
 let nextSnapshot: Record<string, unknown>;
 let commandCalls: Array<{ command: string; args: unknown[] }> = [];
 let activeWorkspaceRoot = '';
+let exportGate: Promise<void> | undefined;
+let progressCalls: Array<{
+    options: Record<string, unknown>;
+    reports: Array<{ message?: string }>;
+}> = [];
+let activeProgressCount = 0;
 const watcherStubs: Array<{
     change?: (uri: { fsPath: string }) => void;
     create?: (uri: { fsPath: string }) => void;
@@ -51,6 +57,9 @@ const vscodeStub = {
     commands: {
         executeCommand: async (command: string, ...args: unknown[]) => {
             commandCalls.push({ command, args });
+            if (command === 'cwtools.ai.exportProjectKnowledge' && exportGate) {
+                await exportGate;
+            }
             if (command === 'cwtools.ai.exportProjectKnowledge' && nextSnapshot?.ok === true) {
                 const options = args[0] as { databasePath?: string };
                 if (options.databasePath) {
@@ -68,8 +77,23 @@ const vscodeStub = {
             clear: () => undefined,
             dispose: () => undefined,
         }),
+        withProgress: async (
+            options: Record<string, unknown>,
+            task: (progress: { report(value: { message?: string }): void }) => Promise<unknown>,
+        ) => {
+            const call = { options, reports: [] as Array<{ message?: string }> };
+            progressCalls.push(call);
+            activeProgressCount++;
+            try {
+                return await task({ report: value => call.reports.push(value) });
+            } finally {
+                activeProgressCount--;
+            }
+        },
+        setStatusBarMessage: () => ({ dispose: () => undefined }),
         onDidChangeWindowState: () => ({ dispose: () => undefined }),
     },
+    ProgressLocation: { Window: 10 },
     Uri: { file: (fsPath: string) => ({ fsPath }) },
     RelativePattern: RelativePatternStub,
     Disposable: DisposableStub,
@@ -104,6 +128,9 @@ describe('project knowledge SQLite V2', () => {
         vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: workspaceRoot } }];
         watcherStubs.length = 0;
         commandCalls = [];
+        exportGate = undefined;
+        progressCalls = [];
+        activeProgressCount = 0;
     });
 
     afterEach(() => {
@@ -372,7 +399,7 @@ describe('project knowledge SQLite V2', () => {
         expect(commandCalls).to.have.length(0);
     });
 
-    it('rebuilds the vanilla symbol cache and project knowledge in one .cwb refresh stage', async () => {
+    it('defers a .cwb-triggered full rebuild until the next project load', async () => {
         nextSnapshot = {
             ok: true,
             status: 'ready',
@@ -409,11 +436,13 @@ describe('project knowledge SQLite V2', () => {
             for (const disposable of context.subscriptions.reverse()) disposable.dispose();
         }
 
-        expect(refreshedGames).to.deep.equal([['stellaris']]);
-        expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(2);
+        expect(refreshedGames).to.deep.equal([]);
+        expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(1);
+        expect(progressCalls).to.have.length(0);
+        expect(activeProgressCount).to.equal(0);
         const manifest = projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)!;
-        expect(manifest.status).to.equal('ready');
-        expect(manifest.staleReasons).to.deep.equal([]);
+        expect(manifest.status).to.equal('stale');
+        expect(manifest.staleReasons).to.include('vanilla_cache_changed');
     });
 
     it('resumes a vanilla knowledge refresh after the required window reload', async () => {
@@ -465,7 +494,108 @@ describe('project knowledge SQLite V2', () => {
         expect(manifest.staleReasons).to.deep.equal([]);
     });
 
-    it('keeps pending file refreshes isolated per workspace root', async () => {
+    it('repairs an interrupted incremental update with one full rebuild on project load', async () => {
+        nextSnapshot = {
+            ok: true,
+            status: 'ready',
+            game: 'stellaris',
+            generatedAtUnixMs: Date.now(),
+            projectRoots: [workspaceRoot],
+            generationMode: 'full',
+            domains: [{ id: 'events' }],
+            counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
+            warnings: [],
+        };
+        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
+        fs.mkdirSync(path.join(workspaceRoot, '.cwtools', 'project'), { recursive: true });
+        fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), JSON.stringify(profile), 'utf8');
+        const changedFile = path.join(workspaceRoot, 'events', 'changed-after-export.txt');
+        fs.mkdirSync(path.dirname(changedFile), { recursive: true });
+        fs.writeFileSync(changedFile, 'country_event = { id = test.1 }', 'utf8');
+        projectKnowledge.markProjectKnowledgeStale(workspaceRoot, ['workspace_files_changed']);
+        commandCalls = [];
+
+        const clock = sinon.useFakeTimers();
+        try {
+            projectKnowledge.resumeStaleProjectKnowledgeRefreshes();
+            await clock.tickAsync(1000);
+            await clock.runAllAsync();
+        } finally {
+            clock.restore();
+        }
+
+        const exports = commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge');
+        expect(exports).to.have.length(1);
+        expect((exports[0]!.args[0] as { generationMode: string }).generationMode).to.equal('full');
+        expect(progressCalls).to.have.length(1);
+        expect(projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)?.staleReasons).to.deep.equal([]);
+    });
+
+    it('coalesces edits made during a load-time full refresh into one incremental tail', async () => {
+        nextSnapshot = {
+            ok: true,
+            status: 'ready',
+            game: 'stellaris',
+            generatedAtUnixMs: Date.now(),
+            projectRoots: [workspaceRoot],
+            generationMode: 'full',
+            domains: [{ id: 'events' }],
+            counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
+            warnings: [],
+        };
+        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
+        fs.mkdirSync(path.join(workspaceRoot, '.cwtools', 'project'), { recursive: true });
+        fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), JSON.stringify(profile), 'utf8');
+        const context = {
+            globalStorageUri: { fsPath: path.join(workspaceRoot, 'global-storage') },
+            subscriptions: [] as Array<{ dispose(): void }>,
+        };
+        projectKnowledge.registerProjectKnowledgeWatcher(context as any, {
+            refreshVanillaSymbols: async () => undefined,
+        } as any);
+        commandCalls = [];
+
+        let releaseExport = () => undefined;
+        exportGate = new Promise<void>(resolve => { releaseExport = resolve; });
+        const clock = sinon.useFakeTimers();
+        try {
+            projectKnowledge.markProjectKnowledgeStale(workspaceRoot, ['vanilla_cache_changed']);
+            projectKnowledge.resumeStaleProjectKnowledgeRefreshes();
+            await clock.tickAsync(300);
+            expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(1);
+
+            const changedFile = path.join(workspaceRoot, 'events', 'changed-during-refresh.txt');
+            watcherStubs[0]!.change?.({ fsPath: changedFile });
+            watcherStubs[0]!.change?.({ fsPath: changedFile });
+            await clock.tickAsync(200);
+            expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(1);
+
+            releaseExport();
+            exportGate = undefined;
+            await clock.runAllAsync();
+        } finally {
+            releaseExport();
+            exportGate = undefined;
+            clock.restore();
+            for (const disposable of context.subscriptions.reverse()) disposable.dispose();
+        }
+
+        const exports = commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge');
+        expect(exports).to.have.length(2);
+        expect((exports[0]!.args[0] as { generationMode: string }).generationMode).to.equal('full');
+        expect((exports[1]!.args[0] as { generationMode: string; changedFiles: string[] })).to.deep.include({
+            generationMode: 'incremental',
+            changedFiles: [path.join(workspaceRoot, 'events', 'changed-during-refresh.txt')],
+        });
+        expect(activeProgressCount).to.equal(0);
+        const manifest = projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)!;
+        expect(manifest.status).to.equal('ready');
+        expect(manifest.staleReasons).to.deep.equal([]);
+    });
+
+    it('deduplicates saved files into one incremental batch per workspace', async () => {
         const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-project-knowledge-second-'));
         const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
         nextSnapshot = {
@@ -494,37 +624,34 @@ describe('project knowledge SQLite V2', () => {
         projectKnowledge.registerProjectKnowledgeWatcher(context as any);
         const firstChanged = path.join(workspaceRoot, 'events', 'first.txt');
         const secondChanged = path.join(secondRoot, 'common', 'scripted_effects', 'second.txt');
+        let secondManifest: import('../../extension/ai/projectKnowledge').ProjectKnowledgeManifest | undefined;
 
         const clock = sinon.useFakeTimers();
         try {
             watcherStubs[0]!.change?.({ fsPath: firstChanged });
+            watcherStubs[0]!.change?.({ fsPath: firstChanged });
             watcherStubs[0]!.change?.({ fsPath: secondChanged });
             await clock.tickAsync(2000);
             await clock.runAllAsync();
+            secondManifest = projectKnowledge.readProjectKnowledgeManifest(secondRoot);
         } finally {
             clock.restore();
             for (const disposable of context.subscriptions.reverse()) disposable.dispose();
             fs.rmSync(secondRoot, { recursive: true, force: true });
         }
 
-        const exports = commandCalls
-            .filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')
-            .map(call => call.args[0] as {
-                databasePath: string;
-                changedFiles: string[];
-                generationMode: string;
-                completeExport: boolean;
-                requireReady: boolean;
-            });
+        const exports = commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge');
         expect(exports).to.have.length(2);
-        expect(exports.find(item => item.databasePath.startsWith(workspaceRoot))?.changedFiles).to.deep.equal([firstChanged]);
-        expect(exports.find(item => item.databasePath.startsWith(secondRoot))?.changedFiles).to.deep.equal([secondChanged]);
-        expect(exports.every(item => item.generationMode === 'incremental')).to.equal(true);
-        expect(exports.every(item => item.completeExport === false)).to.equal(true);
-        expect(exports.every(item => item.requireReady === true)).to.equal(true);
+        expect(exports.every(call => (call.args[0] as { generationMode: string }).generationMode === 'incremental')).to.equal(true);
+        const changedBatches = exports.map(call => (call.args[0] as { changedFiles: string[] }).changedFiles);
+        expect(changedBatches).to.deep.include([firstChanged]);
+        expect(changedBatches).to.deep.include([secondChanged]);
+        expect(progressCalls).to.have.length(2);
+        expect(projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)?.staleReasons).to.deep.equal([]);
+        expect(secondManifest?.staleReasons).to.deep.equal([]);
     });
 
-    it('routes secondary-root changes into the primary combined knowledge database', async () => {
+    it('routes secondary-root changes into one primary incremental export', async () => {
         const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-project-knowledge-combined-'));
         const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
         vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: workspaceRoot } }, { uri: { fsPath: secondRoot } }];
@@ -564,12 +691,17 @@ describe('project knowledge SQLite V2', () => {
 
         const exports = commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge');
         expect(exports).to.have.length(1);
-        const options = exports[0]!.args[0] as { databasePath: string; changedFiles: string[] };
-        expect(options.databasePath).to.equal(projectKnowledge.getProjectKnowledgeDatabasePath(workspaceRoot));
-        expect(options.changedFiles).to.deep.equal([changedFile]);
+        expect(exports[0]!.args[0]).to.deep.include({
+            generationMode: 'incremental',
+            changedFiles: [changedFile],
+        });
+        expect(progressCalls).to.have.length(1);
+        const manifest = projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)!;
+        expect(manifest.status).to.equal('ready');
+        expect(manifest.staleReasons).to.deep.equal([]);
     });
 
-    it('includes .shader and .fxh files in the project knowledge fingerprint and watcher', async () => {
+    it('includes .shader and .fxh files in the fingerprint and marks watcher changes stale', async () => {
         const shaderFile = path.join(workspaceRoot, 'gfx', 'FX', 'test.shader');
         const fxhFile = path.join(workspaceRoot, 'gfx', 'FX', 'test.fxh');
         fs.mkdirSync(path.dirname(shaderFile), { recursive: true });
@@ -579,7 +711,7 @@ describe('project knowledge SQLite V2', () => {
         const before = projectKnowledge.computeProjectKnowledgeFingerprint(workspaceRoot);
         fs.writeFileSync(shaderFile, 'modified shader body\n', 'utf8');
         const afterShader = projectKnowledge.computeProjectKnowledgeFingerprint(workspaceRoot);
-        fs.writeFileSync(fxhFile, '#include "y"\n', 'utf8');
+        fs.writeFileSync(fxhFile, '#include "changed-y"\n', 'utf8');
         const afterFxh = projectKnowledge.computeProjectKnowledgeFingerprint(workspaceRoot);
 
         expect(afterShader).to.not.equal(before);
@@ -618,13 +750,11 @@ describe('project knowledge SQLite V2', () => {
             for (const disposable of context.subscriptions.reverse()) disposable.dispose();
         }
 
-        const exports = commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge');
-        expect(exports).to.have.length(1);
-        const options = exports[0]!.args[0] as { databasePath: string; changedFiles: string[]; generationMode: string };
-        expect(options.databasePath).to.equal(projectKnowledge.getProjectKnowledgeDatabasePath(workspaceRoot));
-        expect(options.generationMode).to.equal('incremental');
-        expect(options.changedFiles).to.have.length(2);
-        expect(options.changedFiles).to.deep.include(shaderFile);
-        expect(options.changedFiles).to.deep.include(fxhFile);
+        expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(0);
+        expect(progressCalls).to.have.length(0);
+        const manifest = projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)!;
+        expect(manifest.status).to.equal('stale');
+        expect(manifest.staleReasons).to.include('workspace_files_changed');
+        expect(manifest.staleReasons).to.include('graph_wide_inputs_changed');
     });
 });

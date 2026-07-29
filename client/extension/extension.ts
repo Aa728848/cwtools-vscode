@@ -61,6 +61,7 @@ import { LspFeaturePriorityGate } from './lspFeaturePriority';
 import { LspPerformanceStats, type ValidationDiagnosticCounts } from './lspPerformanceStats';
 import { DirectoryCompletionCommand } from './directoryCompletionCommand';
 import { LanguageServerProcessController, ManagedLanguageClient } from './languageServerProcess';
+import { getLanguageClientDocumentSelector } from './languageSelectors';
 
 export let defaultClient: LanguageClient;
 
@@ -1856,9 +1857,7 @@ export async function activate(context: ExtensionContext) {
 		// Options to control the language client
 		const clientOptions: LanguageClientOptions = {
 			// Register the server for F# documents
-			documentSelector: [{ scheme: 'file', language: 'paradox' }, { scheme: 'file', language: 'yaml' }, { scheme: 'file', language: 'stellaris' },
-			{ scheme: 'file', language: 'hoi4' }, { scheme: 'file', language: 'eu4' }, { scheme: 'file', language: 'ck2' }, { scheme: 'file', language: 'imperator' }
-				, { scheme: 'file', language: 'vic2' }, { scheme: 'file', language: 'vic3' }, { scheme: 'file', language: 'ck3' }, { scheme: 'file', language: 'eu5' }, { scheme: 'file', language: 'pdx-shader' }, { scheme: 'file', language: 'paradox' }],
+			documentSelector: getLanguageClientDocumentSelector(),
 			synchronize: {
 				// Synchronize extension settings to the language server.
 				configurationSection: 'stellarisLanguageServices',

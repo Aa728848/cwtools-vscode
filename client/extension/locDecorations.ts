@@ -29,6 +29,7 @@ import {
 	normaliseLocalisationLanguageTag,
 	sortLocalisationEntriesByLanguagePreference,
 } from './localisationLanguagePreference';
+import { getScriptDocumentSelector } from './languageSelectors';
 
 const colorDecorationTypes = new Map<string, vs.TextEditorDecorationType>();
 
@@ -490,8 +491,7 @@ class ScriptLocDefinitionProvider implements vs.DefinitionProvider {
  */
 export function registerLocalizationFeatures(context: vs.ExtensionContext, indexService: IndexService): void {
 	const ymlSelector: vs.DocumentSelector = { scheme: 'file', pattern: '**/*.yml' };
-	const gameLanguages = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox'];
-	const scriptSelector: vs.DocumentSelector = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
+	const scriptSelector: vs.DocumentSelector = getScriptDocumentSelector();
 
 	context.subscriptions.push(
 		vs.languages.registerCompletionItemProvider(

@@ -282,7 +282,6 @@ export class FileToolHandler {
     private isLocalisationPath(filePath: string): boolean {
         const relPath = this.workspaceRelativePath(filePath).toLowerCase();
         return relPath.startsWith('localisation/')
-            || relPath.startsWith('localisation_synced/')
             || relPath.startsWith('localization/');
     }
 
@@ -291,7 +290,7 @@ export class FileToolHandler {
 
         return {
             success: false,
-            message: `${toolName} refused to write a .yml localisation file. Use write_localisation with a real localisation path under localisation/, localisation_synced/, or localization/. Do not write localisation YAML into .cwtools scratch/topic folders.`,
+            message: `${toolName} refused to write a .yml localisation file. Use write_localisation with a real localisation path under localisation/ or localization/. Do not write localisation YAML into .cwtools scratch/topic folders.`,
         };
     }
 
@@ -300,7 +299,7 @@ export class FileToolHandler {
             return 'write_localisation only works with .yml files.';
         }
         if (!this.isLocalisationPath(filePath)) {
-            return `write_localisation refused '${this.workspaceRelativePath(filePath)}'. Localisation files must be written under localisation/, localisation_synced/, or localization/, never under .cwtools scratch/topic folders.`;
+            return `write_localisation refused '${this.workspaceRelativePath(filePath)}'. Localisation files must be written under localisation/ or localization/, never under .cwtools scratch/topic folders.`;
         }
         return null;
     }

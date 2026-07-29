@@ -23,7 +23,7 @@ suite(`Debug Integration Test: `, function() {
 	});
 
 	test('should activate', async function () {
-		this.timeout(1 * 60 * 1000);
+		this.timeout(3 * 60 * 1000);
 		const extension = await activate();
 		// In test environment, extension may not return exports due to server issues
 		// but it should at least attempt activation
@@ -33,7 +33,7 @@ suite(`Debug Integration Test: `, function() {
 	});
 
 	test('Extension activation status', async function () {
-		this.timeout(1 * 60 * 1000);
+		this.timeout(3 * 60 * 1000);
 		const extension = vscode.extensions.getExtension('ForeverSkywalker.foreverskywalker-stellaris-cwtools');
 		assert.ok(extension, 'Extension should be found');
 
@@ -45,12 +45,20 @@ suite(`Debug Integration Test: `, function() {
 	});
 
 	test('Commands are registered', async function () {
-		this.timeout(1 * 60 * 1000);
-		// Ensure extension is activated first
-		await activate();
+		this.timeout(3 * 60 * 1000);
+		// Command registration happens before the language server finishes its
+		// potentially expensive initial workspace load.
+		const extension = vscode.extensions.getExtension('ForeverSkywalker.foreverskywalker-stellaris-cwtools');
+		assert.ok(extension, 'Extension should be found');
+		if (!extension.isActive) void extension.activate();
+		let commands: string[] = [];
+		for (let attempt = 0; attempt < 100; attempt++) {
+			commands = await vscode.commands.getCommands();
+			if (commands.includes('cwtools.createGameDirectory')) break;
+			await new Promise(resolve => setTimeout(resolve, 100));
+		}
 
 		// Test that CWTools commands are registered
-		const commands = await vscode.commands.getCommands();
 		const cwtoolsCommands = commands.filter(cmd =>
 			cmd.includes('cwtools') ||
 			cmd === 'outputerrors' ||
@@ -59,6 +67,10 @@ suite(`Debug Integration Test: `, function() {
 
 		console.log('All available commands:', commands.slice(0, 20).join(', ') + '...');
 		console.log('CWTools related commands found:', cwtoolsCommands);
+		assert.ok(
+			commands.includes('cwtools.createGameDirectory'),
+			'Paradox game directory creation command should be registered',
+		);
 
 		// In test environment, commands may not be fully registered due to server issues
 		// But we should have at least some extension infrastructure

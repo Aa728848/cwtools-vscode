@@ -24,6 +24,7 @@ open Main.Lang.LanguageServerFeatures
 open Main.Completion
 open Main.SemanticGraph
 open Main.SemanticDelta
+open Main.SemanticDirectoryCatalog
 open CWTools.Utilities.Utils
 open CWTools.Localisation
 open LSP.LanguageServer   // brings gameStateLock into scope
@@ -471,7 +472,6 @@ let private isLocalisationDefinitionPath (filePath: string) =
     let normalized = filePath.Replace('\\', '/').ToLowerInvariant()
     normalized.EndsWith(".yml")
     || normalized.Contains("/localisation/")
-    || normalized.Contains("/localisation_synced/")
     || normalized.Contains("/localization/")
 
 let private isNavigableDefinitionRange (r: range) =
@@ -496,7 +496,7 @@ let private tryFindDescriptorRoot (filePath: string) =
 let private tryFindContentRoot (filePath: string) =
     let contentDirs =
         set
-            [ "common"; "events"; "interface"; "gfx"; "localisation"; "localisation_synced"
+            [ "common"; "events"; "interface"; "gfx"; "localisation"
               "localization"; "map"; "history"; "prescripted_countries"; "sound"; "music" ]
 
     let rec loop (dir: DirectoryInfo) =
@@ -10437,9 +10437,11 @@ type Server(client: ILanguageClient) =
                             let visitor =
                                 { new IGameVisitor<JsonValue> with
                                     member _.Visit game =
-                                        let definitionTypes =
+                                        let allTypeDefs =
                                             game.TypeDefs()
                                             |> List.sortBy (fun td -> td.name)
+                                        let definitionTypes =
+                                            allTypeDefs
                                             |> List.truncate 4000
                                             |> List.map (fun td ->
                                                 let paths =
@@ -10498,6 +10500,15 @@ type Server(client: ILanguageClient) =
                                                 fields.Add("shaderReferences", JsonValue.Array shaderReferences)
                                                 JsonValue.Record(fields.ToArray()))
                                             |> List.toArray
+                                        let directoryPaths =
+                                            allTypeDefs
+                                            |> Seq.map (fun td -> td.name, td.pathOptions.paths :> seq<string>)
+                                            |> Catalog.build
+                                            |> List.map (fun item ->
+                                                JsonValue.Record
+                                                    [| "path", JsonValue.String item.path
+                                                       "entityTypes", item.entityTypes |> List.map JsonValue.String |> List.toArray |> JsonValue.Array |])
+                                            |> List.toArray
                                         let ruleValues =
                                             rules
                                             |> List.map (fun rule ->
@@ -10528,6 +10539,9 @@ type Server(client: ILanguageClient) =
                                                "rulesContentHash", JsonValue.String rulesHash
                                                "rules", JsonValue.Array ruleValues
                                                "definitionTypes", JsonValue.Array definitionTypes
+                                               "directoryCatalogVersion", JsonValue.Number 1M
+                                               "directoryPaths", JsonValue.Array directoryPaths
+                                               "directoryPathsTruncated", JsonValue.Boolean false
                                                "warnings", JsonValue.Array(if not hasConfigs then [| JsonValue.String "No active CWT configuration files are loaded." |] else [||]) |] }
                             try
                                 match gameDispatcher.Dispatch visitor with

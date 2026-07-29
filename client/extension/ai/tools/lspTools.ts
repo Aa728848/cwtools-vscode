@@ -76,7 +76,6 @@ function isLocalisationDirectory(value?: string): boolean {
     const normalized = value.replace(/\\/g, '/').toLowerCase();
     return normalized.split('/').some(part =>
         part === 'localisation' ||
-        part === 'localisation_synced' ||
         part === 'localization'
     );
 }

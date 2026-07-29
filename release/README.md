@@ -151,6 +151,12 @@ This extension bundles a **read-only** Model Context Protocol (MCP) server, offe
 * A `.gfx` `spriteType`, `corneredTileSpriteType`, or `progressbartype` `effectFile` is linked to its Shader file. Static `.gui` `GFX_*` uses then select only the renderer-contract Effects required for that sprite subtype; selecting a file never marks every Effect in it reachable.
 * Agent and MCP answers distinguish explicit data calls, confirmed renderer conventions, convention candidates, curated engine-hardcoded entries, and engine-or-unreferenced unknowns. Lack of a text reference is never treated as proof of an executable call.
 
+##### 📁 10. Paradox Game Folder Suggestions
+* Right-click a folder in Explorer and choose **CWTools: Create Paradox Game Folder...**, or run the same command from the Command Palette. The searchable picker suggests only the next directory level for the selected parent.
+* Suggestions merge the active CWT TypeDef paths, the detected game's profile conventions, and immediate child folders from the configured vanilla installation. Existing project files/folders are removed, while custom single- or multi-segment relative paths remain available.
+* The command supports Stellaris, HOI4, EU4, EU5, CK2, CK3, Imperator, Victoria II, Victoria 3, and Custom/Generic CWT projects. Unknown projects never silently inherit Stellaris, and the retired Stellaris `localisation_synced` path is not suggested.
+* Creation uses the VS Code workspace file-system API, rechecks the parent and target, rejects absolute/traversing/invalid paths, does not overwrite existing resources, and reveals the new folder in Explorer. Multi-root and writable virtual workspaces follow the same URI-safe path.
+
 ---
 
 #### 🛠️ Developer Hub
@@ -418,6 +424,12 @@ claude mcp add cwtools --scope user -- node "<host-globalStorage>/foreverskywalk
 * 平台条件声明会保留并以 inactive 语义 token 修饰。重命名与 code action 会保守处理条件变体、文件覆盖、renderer contract 和 curated EXE ABI 入口。
 * `.gfx` 中 `spriteType`、`corneredTileSpriteType`、`progressbartype` 的 `effectFile` 会连接到 Shader 文件；静态 `.gui` 的 `GFX_*` 使用再按 sprite subtype 选择 renderer contract 要求的 Effect，绝不会因文件被选择就把其中所有 Effect 判定为可达。
 * Agent 与 MCP 明确区分显式数据调用、已确认 renderer 约定、约定候选、curated 引擎硬调用和 engine-or-unreferenced unknown；“没有文本引用”永远不是 EXE 调用证据。
+
+##### 📁 10. Paradox 游戏文件夹建议
+* 在 Explorer 中右键文件夹并选择 **CWTools: 创建 Paradox 游戏文件夹...**，或从命令面板运行同名命令。可搜索选择器只建议当前父目录的下一层。
+* 候选会合并活动 CWT TypeDef 路径、已识别游戏的 profile 约定，以及已配置原版安装中对应层级的直接子目录；项目中已存在的文件/目录会被移除，同时允许输入自定义单段或多段相对路径。
+* 功能覆盖 Stellaris、HOI4、EU4、EU5、CK2、CK3、Imperator、Victoria II、Victoria 3 和 Custom/Generic CWT 项目。未知项目不会静默继承 Stellaris，已废弃的 Stellaris `localisation_synced` 路径也不会进入建议。
+* 创建过程使用 VS Code 工作区文件系统 API，并在写入前复核父目录与目标；绝对路径、路径穿越和非法名称会被拒绝，已有资源不会被覆盖。创建成功后会在 Explorer 中定位，多根工作区与可写 virtual workspace 使用同一套 URI 安全边界。
 
 ---
 

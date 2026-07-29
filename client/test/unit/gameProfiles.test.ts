@@ -82,7 +82,7 @@ describe('GameProfile Registry', () => {
     it('derives localisation directory names from all profiles', () => {
         const names = getAllLocalisationDirectoryNames();
         expect(names).to.include('localisation');
-        expect(names).to.include('localisation_synced');
+        expect(names).not.to.include('localisation_synced');
         expect(names).to.include('localization');
         expect(new Set(names).size).to.equal(names.length);
     });
@@ -235,6 +235,14 @@ describe('GameProfile Registry', () => {
         const profile = getProfileByLanguageId('ck3');
         expect(profile.localisation.directories).to.deep.equal(['localization']);
         expect(profile.folders.steamSubdir).to.equal('game');
+    });
+
+    it('does not expose the retired localisation_synced directory from built-in or generic profiles', () => {
+        for (const id of [...getAllLanguageIds(), 'paradox']) {
+            const profile = getProfileByLanguageId(id);
+            expect(profile.localisation.directories, id).not.to.include('localisation_synced');
+        }
+        expect(getProfileByLanguageId('stellaris').folders.deprecatedDirs).to.include('localisation_synced');
     });
 
     it('maps every serialized vanilla cache file back to its game', () => {

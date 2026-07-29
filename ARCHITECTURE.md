@@ -113,11 +113,17 @@ Because the graph reads the existing game model, scripted-type refreshes and ord
 
 ##### Dynamic Semantic Catalog
 
-`cwtools.ai.getSemanticCatalog` is the shared read-only boundary for deterministic consumers that need current-game structure. The LSP combines CWTools `TypeDefs()` with the active CWT alias rules and returns type paths, `name_field`, `type_key_filter`, rule categories, supported/pushed scopes, and typed `value`/`value_set`/`<type>` references together with a rule generation and content hash. Callers request only rule names present in the files they are checking; CWT aliases named with a `<TypeDef>` placeholder are retained as namespace-to-callable-type metadata. EvidenceGate and SemanticVerifier consume this catalog; they do not maintain event-key, flag-command, callable-type, entity-directory, or scope tables. Older or unavailable servers use a bounded Extension cache of the same active CWT source and mark the result degraded.
+`cwtools.ai.getSemanticCatalog` is the shared read-only boundary for deterministic consumers that need current-game structure. The LSP combines CWTools `TypeDefs()` with the active CWT alias rules and returns type paths, `name_field`, `type_key_filter`, rule categories, supported/pushed scopes, and typed `value`/`value_set`/`<type>` references together with a rule generation and content hash. Its versioned `directoryPaths` field independently walks every active TypeDef, validates and merges literal directory paths with their entity types, and is therefore not affected by the 4,000-entry presentation cap on `definitionTypes`. Callers request only rule names present in the files they are checking; CWT aliases named with a `<TypeDef>` placeholder are retained as namespace-to-callable-type metadata. EvidenceGate and SemanticVerifier consume this catalog; they do not maintain event-key, flag-command, callable-type, entity-directory, or scope tables. Older or unavailable servers use a bounded Extension cache of the same active CWT source and mark the result degraded.
 
 This is a reusable platform boundary rather than an Agent-owned rule base. The workspace symbol index classifies script definitions from catalog TypeDef paths/name fields/type-key filters and includes the catalog hash in its persistent-cache fingerprint. Vanilla Compare uses the same metadata for block identity and rejects ambiguous generic matches; localisation navigation uses generic assignment structure plus the actual localisation index instead of field/keyword lists. Other editor, validation, visualization, or indexing features that need mutable game semantics should query the CWTools/LSP model or stable profile helpers, not add a parallel game table.
 
 EvidenceGate treats references to project-extensible TypeDefs as phase-aware. A definition missing (or present only under the wrong type) during `pre_write` or a single-file `post_write` is pending because another planned file or sub-agent may still provide the correct definition. Only the parent task's integrated `final` pass may promote that still-confirmed absence or type mismatch to a conflict. This applies to every TypeDef discovered from the active semantic catalog, including static/scripted modifiers, rather than a hard-coded family list. Parse errors, proven scope incompatibilities, and engine modifier keys rejected by the active CWT modifier rules remain immediate conflicts.
+
+##### Game Directory Creation
+
+`directoryCompletions.ts` is a UI-independent aggregator. For the selected workspace parent it extracts only the next path segment, then merges authoritative CWT `directoryPaths`, conventional `GameProfile` roots, and observed immediate vanilla child directories. Existing workspace children are read afresh and removed. Vanilla reads never recurse and use a 128-entry, five-minute LRU/TTL cache keyed by game, vanilla root URI, and relative parent; configuration changes and disposal clear it. Built-in games reject `localisation_synced` from every source, while Generic accepts it only when active custom CWT declares it.
+
+`directoryCompletionCommand.ts` owns the Explorer/Command Palette command, workspace/game routing, Quick Pick lifecycle, cancellation, and creation. Repeated invocations use a monotonic generation and cancellation source so late LSP or file-system results cannot update the current picker. The command validates untrusted catalog, setting, picker, and directory inputs; uses `workspace.fs`, `Uri.joinPath`, and URI scheme/authority/path containment rather than local path resolution; re-stats the parent and target before writing; never overwrites; and reveals a successful result. This keeps local, multi-root, remote, and writable virtual file systems on the same boundary. The MCP remains read-only and does not expose directory creation.
 
 ##### Project Knowledge Pack
 
@@ -563,11 +569,17 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 
 ##### 动态语义目录
 
-`cwtools.ai.getSemanticCatalog` 是确定性消费者获取当前游戏结构的共享只读边界。LSP 把 CWTools `TypeDefs()` 与活动 CWT alias 规则组合，返回 type path、`name_field`、`type_key_filter`、规则类别、supported/push scope、typed `value`/`value_set`/`<type>` 引用，以及规则 generation/content hash；调用方只请求待检查文件实际出现的规则名，同时保留以 `<TypeDef>` 命名的 CWT alias，作为规则命名空间到可调用类型的元数据。EvidenceGate 与 SemanticVerifier 消费该目录，不再维护 event key、flag 指令、可调用类型、entity 目录或 scope 表。旧版或不可用 LSP 仅回退到同一活动 CWT 源的有界 Extension cache，并标记 degraded。
+`cwtools.ai.getSemanticCatalog` 是确定性消费者获取当前游戏结构的共享只读边界。LSP 把 CWTools `TypeDefs()` 与活动 CWT alias 规则组合，返回 type path、`name_field`、`type_key_filter`、规则类别、supported/push scope、typed `value`/`value_set`/`<type>` 引用，以及规则 generation/content hash；带版本的 `directoryPaths` 字段会独立遍历全部活动 TypeDef，校验并合并字面目录路径及其实体类型，因此不受 `definitionTypes` 4000 条展示上限影响。调用方只请求待检查文件实际出现的规则名，同时保留以 `<TypeDef>` 命名的 CWT alias，作为规则命名空间到可调用类型的元数据。EvidenceGate 与 SemanticVerifier 消费该目录，不再维护 event key、flag 指令、可调用类型、entity 目录或 scope 表。旧版或不可用 LSP 仅回退到同一活动 CWT 源的有界 Extension cache，并标记 degraded。
 
 这是一条可复用的平台边界，而不是 Agent 私有规则库。工作区符号索引依据目录中的 TypeDef path、name field 和 type-key filter 分类脚本定义，并把目录 hash 纳入持久缓存指纹；Vanilla Compare 复用同一元数据确定块身份，对通用歧义匹配选择拒绝；本地化跳转使用通用赋值结构与真实本地化索引，不再维护字段/关键字名单。编辑器、验证、可视化或索引功能需要动态游戏语义时，也应查询 CWTools/LSP 模型或稳定 profile helper，不应建立平行的游戏常量表。
 
 EvidenceGate 对项目可扩展 TypeDef 引用执行分阶段判定。`pre_write` 或单文件 `post_write` 时未找到定义（或只找到同名错误类型）只记为 pending，因为其它计划文件或子 Agent 仍可能补上正确类型；只有父任务合并后的 `final` 复验仍确认缺失或类型不符时，才升级为 conflict。该行为适用于活动语义目录发现的所有 TypeDef（包括 static/scripted modifier），不依赖固定实体族清单。解析错误、已证明的 scope 不兼容，以及活动 CWT modifier 规则否定的引擎 modifier key 仍是即时冲突。
+
+##### 游戏目录创建
+
+`directoryCompletions.ts` 是不依赖 UI 的聚合器。它针对所选工作区父目录只提取下一段路径，再合并权威的 CWT `directoryPaths`、约定性的 `GameProfile` 根目录，以及观察到的原版同层直接子目录；工作区现有子项每次重新读取并从候选移除。原版读取不递归，并使用最多 128 项、TTL 五分钟的 LRU 缓存，键包含游戏、原版根 URI 和相对父路径；配置变化和 dispose 都会清空。内置游戏会从所有来源拒绝 `localisation_synced`，Generic 只有在活动自定义 CWT 明确声明时才接受。
+
+`directoryCompletionCommand.ts` 负责 Explorer/命令面板入口、工作区与游戏路由、Quick Pick 生命周期、取消和创建。重复调用使用单调 generation 与取消源，迟到的 LSP 或文件系统结果不能刷新当前选择器。命令会校验不可信的目录、设置、选择器和文件系统输入；使用 `workspace.fs`、`Uri.joinPath` 以及 URI scheme/authority/path 包含关系，不依赖本地路径解析；写入前重新 stat 父目录和目标，绝不覆盖，并在成功后定位。由此本地、多根、Remote 与可写 virtual filesystem 共用同一安全边界。MCP 保持只读，不暴露目录创建。
 
 ##### 项目知识包
 

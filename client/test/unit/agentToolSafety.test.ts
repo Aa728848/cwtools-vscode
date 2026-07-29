@@ -1407,7 +1407,9 @@ describe('agent tool topic artifacts', () => {
         expect(result.status).to.equal('started');
         expect(result.processId).to.be.a('string');
         expect(handler.writeProcessStdin({ processId: result.processId!, text: 'hello background' }, context).success).to.equal(true);
-        for (let attempt = 0; attempt < 40; attempt++) {
+        // Windows sandbox/process brokers can take more than one second to attach
+        // stdio even after the background start record has been published.
+        for (let attempt = 0; attempt < 200; attempt++) {
             if (handler.readProcess({ processId: result.processId! }, context).process?.status !== 'running') break;
             await new Promise(resolve => setTimeout(resolve, 25));
         }

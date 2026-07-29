@@ -324,6 +324,11 @@
             ],
             "explorer/context": [
                 {
+                    "command": "cwtools.createGameDirectory",
+                    "when": "explorerResourceIsFolder",
+                    "group": "cwtools@1"
+                },
+                {
                     "command": "cwtools.images.convertToPng",
                     "when": "resourceExtname == .dds || resourceExtname == .tga || resourceExtname == .jpg || resourceExtname == .jpeg || resourceExtname == .bmp",
                     "group": "paradoxImages@1"
@@ -346,6 +351,11 @@
             ]
         },
         "commands": [
+            {
+                "command": "cwtools.createGameDirectory",
+                "title": "%commands.stellarisLanguageServices.createGameDirectory.title%",
+                "category": "CWTools"
+            },
             {
                 "command": "cwtools.ai.replayRun",
                 "title": "%commands.stellarisLanguageServices.ai.replayRun.title%",
@@ -929,6 +939,11 @@
                         "scope": "application",
                         "type": "string",
                         "description": "%configuration.stellarisLanguageServices.cache.eu5.description%"
+                    },
+                    "stellarisLanguageServices.cache.custom": {
+                        "scope": "application",
+                        "type": "string",
+                        "description": "%configuration.stellarisLanguageServices.cache.custom.description%"
                     },
                     "stellarisLanguageServices.maxFileSize": {
                         "scope": "resource",
@@ -1793,7 +1808,6 @@
                 "filenamePatterns": [
                     "**/localisation/**/*.yml",
                     "**/localization/**/*.yml",
-                    "**/localisation_synced/**/*.yml",
                     "**/*_l_*.yml"
                 ],
                 "configuration": "./language-configuration-localisation.json"
@@ -1805,7 +1819,7 @@
                     "PDX CSV"
                 ],
                 "filenamePatterns": [
-                    "**/{common,history,map,localisation,localization,localisation_synced}/**/*.csv"
+                    "**/{common,history,map,localisation,localization}/**/*.csv"
                 ],
                 "configuration": "./language-configuration-paradox-csv.json"
             },
@@ -2214,9 +2228,8 @@
                 "*.fxh": "pdx-shader",
                 "**/localisation/**/*.yml": "stellaris-localisation",
                 "**/localization/**/*.yml": "stellaris-localisation",
-                "**/localisation_synced/**/*.yml": "stellaris-localisation",
                 "**/*_l_*.yml": "stellaris-localisation",
-                "**/{common,history,map,localisation,localization,localisation_synced}/**/*.csv": "paradox-csv"
+                "**/{common,history,map,localisation,localization}/**/*.csv": "paradox-csv"
             }
         }
     },

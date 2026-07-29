@@ -409,7 +409,7 @@ didChange/didSave/watched change
 - CK2：CSV 解析、创建、修改、删除、Windows-1252 字符。
 - VIC2：声明编码下的非 ASCII 内容。
 - Jomini 游戏：`localization/` 目录。
-- Stellaris：`localisation/` 与 `localisation_synced/`。
+- Stellaris：`localisation/`（`localisation_synced/` 已废弃且游戏中不再存在）。
 
 ### 9.3 并发与生命周期
 

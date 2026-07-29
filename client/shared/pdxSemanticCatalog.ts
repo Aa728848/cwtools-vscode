@@ -17,12 +17,20 @@ export interface CwtShaderReference {
     extension?: string;
 }
 
+export interface PdxDirectoryPath {
+    path: string;
+    entityTypes: string[];
+}
+
 export interface PdxSemanticCatalog {
     status: 'ready' | 'partial' | 'unavailable';
     source: 'lsp' | 'cwt_fallback';
     gameProfile?: string;
     rulesGeneration?: number;
     rulesContentHash?: string;
+    directoryCatalogVersion?: 1;
+    directoryPaths?: PdxDirectoryPath[];
+    directoryPathsTruncated?: boolean;
     rules: Array<{
         name: string;
         category: PdxRuleCategory;
@@ -44,6 +52,24 @@ export interface PdxSemanticCatalog {
 }
 
 export type PdxDefinitionType = PdxSemanticCatalog['definitionTypes'][number];
+
+const URI_SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+const DYNAMIC_DIRECTORY_PATH_PATTERN = /[*?$<>{}[\]]/;
+
+/** Normalize a CWT directory path without accepting absolute or traversing values. */
+export function normalizePdxDirectoryPath(value: string): string | undefined {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.startsWith('/') || trimmed.startsWith('\\')
+        || URI_SCHEME_PATTERN.test(trimmed) || DYNAMIC_DIRECTORY_PATH_PATTERN.test(trimmed)
+        || trimmed.includes('\0')) return undefined;
+    const slashPath = trimmed.replace(/\\/g, '/').replace(/\/+$/, '');
+    const withoutGameRoot = slashPath.replace(/^game(?:\/|$)/i, '');
+    const segments = withoutGameRoot.split('/');
+    if (segments.length === 0 || segments.some(segment =>
+        !segment || segment === '.' || segment === '..'
+        || URI_SCHEME_PATTERN.test(segment) || segment.includes('\0'))) return undefined;
+    return segments.join('/');
+}
 
 /**
  * Resolve a script block to the active CWTools TypeDef that owns its file path.
@@ -182,12 +208,36 @@ export function parsePdxSemanticCatalog(
     const status = record.status === 'ready' || record.status === 'partial' || record.status === 'unavailable'
         ? record.status
         : rules.length > 0 && definitionTypes.length > 0 ? 'ready' : rules.length > 0 || definitionTypes.length > 0 ? 'partial' : 'unavailable';
+    const directoryPathsByPath = new Map<string, Set<string>>();
+    if (Array.isArray(record.directoryPaths)) {
+        for (const item of record.directoryPaths.slice(0, 100_000)) {
+            if (!item || typeof item !== 'object') continue;
+            const candidate = item as Record<string, unknown>;
+            if (typeof candidate.path !== 'string') continue;
+            const normalizedPath = normalizePdxDirectoryPath(candidate.path);
+            if (!normalizedPath || !Array.isArray(candidate.entityTypes)) continue;
+            const entityTypes = directoryPathsByPath.get(normalizedPath) ?? new Set<string>();
+            for (const entityType of candidate.entityTypes.slice(0, 512)) {
+                if (typeof entityType === 'string' && entityType.trim()) {
+                    entityTypes.add(entityType.trim().toLowerCase());
+                }
+            }
+            if (entityTypes.size > 0) directoryPathsByPath.set(normalizedPath, entityTypes);
+        }
+    }
+    const directoryPaths = Array.from(directoryPathsByPath, ([path, entityTypes]) => ({
+        path,
+        entityTypes: Array.from(entityTypes).sort((left, right) => left.localeCompare(right)),
+    })).sort((left, right) => left.path.localeCompare(right.path));
     return {
         status,
         source,
         gameProfile: typeof record.gameProfile === 'string' ? record.gameProfile : undefined,
         rulesGeneration: typeof record.rulesGeneration === 'number' ? record.rulesGeneration : undefined,
         rulesContentHash: typeof record.rulesContentHash === 'string' ? record.rulesContentHash : undefined,
+        directoryCatalogVersion: record.directoryCatalogVersion === 1 ? 1 : undefined,
+        directoryPaths,
+        directoryPathsTruncated: record.directoryPathsTruncated === true,
         rules,
         definitionTypes,
         warnings: Array.isArray(record.warnings)

@@ -59,6 +59,7 @@ import { parseWorkshopContentAppId, getGameIdForWorkshopAppId } from './workshop
 import { inferGameIdFromWorkspace, hasWorkspaceModDescriptor, workspaceHasParadoxStructure as workspaceHasParadoxStructureDetect } from './workspaceGameDetection';
 import { LspFeaturePriorityGate } from './lspFeaturePriority';
 import { LspPerformanceStats, type ValidationDiagnosticCounts } from './lspPerformanceStats';
+import { DirectoryCompletionCommand } from './directoryCompletionCommand';
 
 export let defaultClient: LanguageClient;
 
@@ -840,6 +841,7 @@ export async function activate(context: ExtensionContext) {
 	registerParadoxCsvFeatures(context);
 	registerRelatedResourceFeatures(context, indexService);
 	registerInspectionOverviewCommand(context);
+	new DirectoryCompletionCommand(() => defaultClient).register(context);
 
 	// Register completion provider for @ constants in .gui, .asset, .gfx files
 	context.subscriptions.push(

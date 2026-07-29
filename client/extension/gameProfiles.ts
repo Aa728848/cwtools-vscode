@@ -37,6 +37,8 @@ export interface GameFolderProfile {
 	gfxDirs: string[];
 	/** Subdirectory within the Steam install that contains the actual game data (e.g. 'game' for CK3). */
 	steamSubdir?: string;
+	/** Legacy directory names that must not be offered by directory creation UI. */
+	deprecatedDirs?: string[];
 }
 
 /** Preview capabilities available for a game. */
@@ -116,7 +118,7 @@ const STELLARIS_LOC_LANGS = [
 ];
 
 const STANDARD_LOC_PROFILE: LocalisationProfile = {
-	directories: ['localisation', 'localisation_synced'],
+	directories: ['localisation'],
 	fileExtensions: ['yml'],
 	encoding: 'utf8-bom',
 	defaultLanguageTag: 'l_english',
@@ -158,7 +160,7 @@ const GENERIC_PROFILE: GameProfile = {
 	rulesRemoteUrl: '',
 	localisation: {
 		...STANDARD_LOC_PROFILE,
-		directories: ['localisation', 'localisation_synced', 'localization'],
+		directories: ['localisation', 'localization'],
 	},
 	folders: {
 		scriptDirs: [
@@ -198,12 +200,13 @@ registerProfile({
 	rulesRemoteUrl: 'https://github.com/Aa728848/cwtools-stellaris-config',
 	localisation: {
 		...STANDARD_LOC_PROFILE,
-		directories: ['localisation', 'localisation_synced'],
+		directories: ['localisation'],
 	},
 	folders: {
 		scriptDirs: [...COMMON_SCRIPT_DIRS, 'map', 'map_data', 'prescripted_countries', 'flags', 'decisions'],
 		guiDirs: COMMON_GUI_DIRS,
 		gfxDirs: COMMON_GFX_DIRS,
+		deprecatedDirs: ['localisation_synced'],
 	},
 	previews: {
 		guiPreview: true,

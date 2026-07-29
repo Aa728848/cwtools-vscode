@@ -28,9 +28,9 @@ describe('Stellaris Localisation Grammar & Language Configuration', () => {
         expect(language.filenamePatterns).to.include.members([
             '**/localisation/**/*.yml',
             '**/localization/**/*.yml',
-            '**/localisation_synced/**/*.yml',
             '**/*_l_*.yml',
         ]);
+        expect(language.filenamePatterns).not.to.include('**/localisation_synced/**/*.yml');
 
         const registeredGrammar = grammars.find(entry => entry.language === 'stellaris-localisation');
         expect(registeredGrammar).to.deep.equal({

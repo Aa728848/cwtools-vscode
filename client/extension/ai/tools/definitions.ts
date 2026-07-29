@@ -1199,11 +1199,11 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_localisation',
-            description: 'MANDATORY for all .yml localisation file operations. Safely write PDXScript localisation entries. filePath MUST be a real localisation path under localisation/, localisation_synced/, or localization/; never write localisation YAML into .cwtools scratch/topic folders. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use edit_file, replace_lines, or write_file for .yml localisation files - ALWAYS use this tool instead.',
+            description: 'MANDATORY for all .yml localisation file operations. Safely write PDXScript localisation entries. filePath MUST be a real localisation path under localisation/ or localization/; never write localisation YAML into .cwtools scratch/topic folders. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use edit_file, replace_lines, or write_file for .yml localisation files - ALWAYS use this tool instead.',
             parameters: {
                 type: 'object',
                 properties: {
-                    filePath: { type: 'string', description: 'Path to the real .yml localisation file (absolute or relative to workspace), under localisation/, localisation_synced/, or localization/. Do not use .cwtools paths.' },
+                    filePath: { type: 'string', description: 'Path to the real .yml localisation file (absolute or relative to workspace), under localisation/ or localization/. Do not use .cwtools paths.' },
                     language: { type: 'string', description: 'Language header, e.g. "l_english", "l_simp_chinese", "l_braz_por". Used when creating a new file.' },
                     entries: {
                         type: 'array',

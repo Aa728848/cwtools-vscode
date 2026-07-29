@@ -246,13 +246,13 @@ function isLocalisationYmlPath(value: unknown): boolean {
     if (typeof value !== 'string') return false;
     const normalized = value.trim().replace(/\\/g, '/').toLowerCase();
     if (!normalized.endsWith('.yml')) return false;
-    return /(?:^|\/)(localisation|localisation_synced|localization)(?:\/|$)/.test(normalized);
+    return /(?:^|\/)(localisation|localization)(?:\/|$)/.test(normalized);
 }
 
 function promptMentionsLocalisationYml(prompt: unknown): boolean {
     if (typeof prompt !== 'string') return false;
     const normalized = prompt.replace(/\\/g, '/').toLowerCase();
-    return normalized.includes('.yml') && /(localisation|localisation_synced|localization)/.test(normalized);
+    return normalized.includes('.yml') && /(localisation|localization)/.test(normalized);
 }
 
 function normalizeDispatchTaskForLocalisationYml<T extends {

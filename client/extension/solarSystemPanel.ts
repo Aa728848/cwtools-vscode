@@ -609,7 +609,7 @@ export class SolarSystemPanel {
         };
 
         for (const root of searchRoots) {
-            for (const locDir of ['localisation', 'localisation_synced', 'localization']) {
+            for (const locDir of ['localisation', 'localization']) {
                 await scanDir(path.join(root, locDir));
             }
         }

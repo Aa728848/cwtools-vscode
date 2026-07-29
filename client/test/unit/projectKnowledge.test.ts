@@ -692,7 +692,7 @@ describe('project knowledge SQLite V2', () => {
         expect(secondManifest?.staleReasons).to.deep.equal([]);
     });
 
-    it('keeps saved files queued until the language-server model is ready', async () => {
+    it('keeps Git-style file changes queued without leaving progress active during startup validation', async () => {
         const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
         nextSnapshot = {
             ok: true,
@@ -734,13 +734,15 @@ describe('project knowledge SQLite V2', () => {
             watcherStubs[0]!.change?.({ fsPath: firstChanged });
             await clock.tickAsync(200);
             expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(0);
-            expect(progressCalls).to.have.length(1);
-            expect(activeProgressCount).to.equal(1);
+            expect(progressCalls).to.have.length(0);
+            expect(activeProgressCount).to.equal(0);
 
             watcherStubs[0]!.change?.({ fsPath: firstChanged });
-            watcherStubs[0]!.change?.({ fsPath: secondChanged });
+            watcherStubs[0]!.create?.({ fsPath: secondChanged });
             await clock.tickAsync(1200);
             expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(0);
+            expect(progressCalls).to.have.length(0);
+            expect(activeProgressCount).to.equal(0);
 
             validationStatus = {
                 ok: true,
@@ -762,7 +764,7 @@ describe('project knowledge SQLite V2', () => {
             generationMode: 'incremental',
             changedFiles: [firstChanged, secondChanged],
         });
-        expect(progressCalls[0]!.reports.some(report => report.message?.includes('Waiting for validation'))).to.equal(true);
+        expect(progressCalls).to.have.length(1);
         expect(progressCalls[0]!.reports.some(report => report.message?.includes('Updating changed project files'))).to.equal(true);
         expect(activeProgressCount).to.equal(0);
         const manifest = projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)!;

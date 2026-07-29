@@ -771,7 +771,6 @@ async function withProjectKnowledgeRefreshProgress<T>(
 const INCREMENTAL_REFRESH_DEBOUNCE_MS = 150;
 const INCREMENTAL_FOLLOW_UP_DELAY_MS = 50;
 const MODEL_READY_POLL_INITIAL_MS = 100;
-const MODEL_READY_POLL_MAX_MS = 250;
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -794,33 +793,17 @@ function isProjectKnowledgeModelReady(value: unknown): boolean | undefined {
         && pendingGlobalKinds.length === 0;
 }
 
-async function waitForProjectKnowledgeModelReady(
-    workspaceRoot: string,
-    progress?: vs.Progress<{ message?: string }>,
-): Promise<boolean> {
-    let delayMs = MODEL_READY_POLL_INITIAL_MS;
-    const stateKey = workspaceRootKey(workspaceRoot);
-    while (pendingRootRefreshes.has(stateKey)) {
-        progress?.report({
-            message: aiText(
-                'Waiting for validation to finish; saved files remain queued...',
-                '正在等待文件验证完成；已保存的文件会继续合并排队...',
-            ),
-        });
-        try {
-            const status = await vs.commands.executeCommand<unknown>('cwtools.ai.getValidationStatus');
-            const ready = isProjectKnowledgeModelReady(status);
-            // Older or temporarily unavailable servers remain guarded by the
-            // authoritative requireReady check on the export command.
-            if (ready !== false) return true;
-        } catch (error) {
-            ErrorReporter.debug('ProjectKnowledge', 'Validation readiness probe failed; deferring to export guard', error);
-            return true;
-        }
-        await new Promise<void>(resolve => setTimeout(resolve, delayMs));
-        delayMs = Math.min(delayMs * 2, MODEL_READY_POLL_MAX_MS);
+async function isProjectKnowledgeModelReadyNow(): Promise<boolean> {
+    try {
+        const status = await vs.commands.executeCommand<unknown>('cwtools.ai.getValidationStatus');
+        const ready = isProjectKnowledgeModelReady(status);
+        // Older or temporarily unavailable servers remain guarded by the
+        // authoritative requireReady check on the export command.
+        return ready !== false;
+    } catch (error) {
+        ErrorReporter.debug('ProjectKnowledge', 'Validation readiness probe failed; deferring to export guard', error);
+        return true;
     }
-    return false;
 }
 
 function scheduleRootRefresh(workspaceRoot: string, indexService: IndexService | undefined, delayMs = INCREMENTAL_REFRESH_DEBOUNCE_MS): void {
@@ -838,10 +821,15 @@ async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexSer
     let retryAfterModelReady = false;
     let fullRefreshAttempted = false;
     state.inFlight = (async () => {
+        if (!await isProjectKnowledgeModelReadyNow()) {
+            // Do not keep a Window progress notification alive throughout
+            // startup validation. Retain the coalesced files and retry after
+            // the model becomes ready; only the actual export owns progress.
+            retryAfterModelReady = true;
+            return;
+        }
         const fullRefreshForProgress = state.fullRefresh;
         await withProjectKnowledgeRefreshProgress(workspaceRoot, fullRefreshForProgress, async progress => {
-            if (!await waitForProjectKnowledgeModelReady(workspaceRoot, progress)) return;
-
             const files = Array.from(state.changedFiles);
             state.changedFiles.clear();
             const fullRefresh = state.fullRefresh;

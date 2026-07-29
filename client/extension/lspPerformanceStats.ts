@@ -50,6 +50,8 @@ export interface ValidationDiagnosticCounts {
 	hints: number;
 }
 
+export type ValidationCompletionPhase = 'shallow-complete' | 'deep-complete';
+
 interface PendingValidationPerformanceRequest extends ValidationPerformanceTrigger {
 	id: number;
 	startedAtMs: number;
@@ -83,6 +85,7 @@ export class LspPerformanceStats {
 	private validationTotalElapsedMs = 0;
 	private validationMaxElapsedMs = 0;
 	private readonly pendingValidations = new Map<string, PendingValidationPerformanceRequest>();
+	private readonly publishedValidationCounts = new Map<string, ValidationDiagnosticCounts>();
 
 	constructor(
 		private readonly log: LspPerformanceLogSink,
@@ -151,10 +154,12 @@ export class LspPerformanceStats {
 			const oldestUri = this.pendingValidations.keys().next().value;
 			if (typeof oldestUri === 'string') {
 				this.pendingValidations.delete(oldestUri);
+				this.publishedValidationCounts.delete(oldestUri);
 				this.validationDropped += 1;
 			}
 		}
 		this.pendingValidations.delete(trigger.uri);
+		this.publishedValidationCounts.delete(trigger.uri);
 		this.pendingValidations.set(trigger.uri, {
 			...trigger,
 			id: ++this.nextValidationId,
@@ -162,10 +167,25 @@ export class LspPerformanceStats {
 		});
 	}
 
-	finishValidation(uri: string, counts: ValidationDiagnosticCounts): boolean {
+	recordValidationPublication(uri: string, counts: ValidationDiagnosticCounts): boolean {
+		if (!this.pendingValidations.has(uri)) return false;
+		this.publishedValidationCounts.set(uri, counts);
+		return true;
+	}
+
+	finishValidation(uri: string, documentVersion: number, phase: ValidationCompletionPhase): boolean {
 		const request = this.pendingValidations.get(uri);
-		if (!request) return false;
+		if (!request || (documentVersion >= 0 && request.version !== documentVersion)) return false;
 		this.pendingValidations.delete(uri);
+		const counts = this.publishedValidationCounts.get(uri) ?? {
+			diagnostics: 0,
+			publishedDiagnostics: 0,
+			errors: 0,
+			warnings: 0,
+			information: 0,
+			hints: 0,
+		};
+		this.publishedValidationCounts.delete(uri);
 
 		const finishedAtMs = this.now();
 		const elapsedMs = Math.max(0, finishedAtMs - request.startedAtMs);
@@ -181,6 +201,7 @@ export class LspPerformanceStats {
 				`request=${request.id}`,
 				`trigger=${request.trigger}`,
 				`version=${request.version}`,
+				`phase=${phase}`,
 				`elapsedMs=${elapsedMs}`,
 				`diagnostics=${counts.diagnostics}`,
 				`publishedDiagnostics=${counts.publishedDiagnostics}`,
@@ -202,6 +223,7 @@ export class LspPerformanceStats {
 
 	forgetValidation(uri: string): void {
 		this.pendingValidations.delete(uri);
+		this.publishedValidationCounts.delete(uri);
 	}
 
 	completionSnapshot(): CompletionPerformanceSnapshot {

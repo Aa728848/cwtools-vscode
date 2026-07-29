@@ -9,7 +9,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import * as vs from 'vscode';
 import { workspace, ExtensionContext, window, Disposable, Uri, WorkspaceEdit, TextEdit, Range, commands } from 'vscode';
-import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, NotificationType, RevealOutputChannelOn } from 'vscode-languageclient/node';
+import { LanguageClient, LanguageClientOptions, NotificationType, RevealOutputChannelOn, State } from 'vscode-languageclient/node';
 
 import { FileExplorer, FileListItem } from './fileExplorer';
 import { GuiPanel } from './guiPanel';
@@ -60,6 +60,7 @@ import { inferGameIdFromWorkspace, hasWorkspaceModDescriptor, workspaceHasParado
 import { LspFeaturePriorityGate } from './lspFeaturePriority';
 import { LspPerformanceStats, type ValidationDiagnosticCounts } from './lspPerformanceStats';
 import { DirectoryCompletionCommand } from './directoryCompletionCommand';
+import { LanguageServerProcessController, ManagedLanguageClient } from './languageServerProcess';
 
 export let defaultClient: LanguageClient;
 
@@ -1803,13 +1804,6 @@ export async function activate(context: ExtensionContext) {
 			getSteamLibraryPaths,
 		}));
 
-		// If the extension is launched in debug mode then the debug server options are used
-		// Otherwise the run options are used
-		const serverOptions: ServerOptions = {
-			run: { command: serverExe, transport: TransportKind.stdio },
-			debug: { command: serverExe, transport: TransportKind.stdio }
-		}
-
 		const activeProfile = getProfileByLanguageId(language);
 		const globAlternatives = (values: string[]) => values.length === 1 ? values[0]! : `{${values.join(',')}}`;
 		const scriptDirectories = globAlternatives(Array.from(new Set(activeProfile.folders.scriptDirs)).sort());
@@ -1948,7 +1942,7 @@ export async function activate(context: ExtensionContext) {
 						information: diagnostics.filter(diagnostic => diagnostic.severity === vs.DiagnosticSeverity.Information).length,
 						hints: diagnostics.filter(diagnostic => diagnostic.severity === vs.DiagnosticSeverity.Hint).length,
 					};
-					lspPerformanceStats.finishValidation(uri.toString(), counts);
+					lspPerformanceStats.recordValidationPublication(uri.toString(), counts);
 				},
 				provideDocumentLinks: async (document, token, next) => {
 					const links = await next(document, token);
@@ -1972,7 +1966,26 @@ export async function activate(context: ExtensionContext) {
 			revealOutputChannelOn: RevealOutputChannelOn.Error
 		}
 
-		const client = new LanguageClient('cwtools', 'Paradox Language Server', serverOptions, clientOptions);
+		const processController = new LanguageServerProcessController({
+			command: serverExe,
+			cwd: workspaceRoot,
+			onEvent: event => {
+				appendMemDiagEntry({
+					category: 'Lifecycle',
+					timestamp: new Date().toLocaleTimeString('en-US', { hour12: false }),
+					message: [
+						'ClientServerProcess',
+						`stage=${event.stage}`,
+						event.pid === undefined ? undefined : `pid=${event.pid}`,
+						event.instanceId ? `instance=${event.instanceId}` : undefined,
+						event.code === undefined ? undefined : `code=${event.code}`,
+						event.signal === undefined ? undefined : `signal=${event.signal}`,
+						event.reason ? `reason=${event.reason}` : undefined,
+					].filter((value): value is string => value !== undefined).join(' '),
+				});
+			},
+		});
+		const client = new ManagedLanguageClient('cwtools', 'Paradox Language Server', processController, clientOptions);
 		defaultClient = client;
 		client.registerProposedFeatures();
 		interface loadingBarParams { enable: boolean; value: string; percentage?: number }
@@ -1993,6 +2006,7 @@ export async function activate(context: ExtensionContext) {
 		const updateFileList = new NotificationType<UpdateFileList>('updateFileList');
 		interface MonitorLogParams { category?: string; message: string; timestamp?: string }
 		const monitorLogNotification = new NotificationType<MonitorLogParams>('monitorLog');
+		const validationCompleteNotification = new NotificationType<unknown>('cwtools/validationComplete');
 		interface CompletionRefreshParams { uri: string; line: number; character: number; version: number }
 		const completionRefreshNotification = new NotificationType<CompletionRefreshParams>('completionRefresh');
 
@@ -2158,6 +2172,23 @@ export async function activate(context: ExtensionContext) {
 			};
 			appendMemDiagEntry(entry);
 		})
+		client.onNotification(validationCompleteNotification, (param: unknown) => {
+			if (
+				typeof param !== 'object'
+				|| param === null
+				|| !('uri' in param)
+				|| typeof param.uri !== 'string'
+				|| !('documentVersion' in param)
+				|| typeof param.documentVersion !== 'number'
+				|| !Number.isInteger(param.documentVersion)
+				|| !('phase' in param)
+				|| (param.phase !== 'shallow-complete' && param.phase !== 'deep-complete')
+			) {
+				ErrorReporter.warn('MemDiag', 'Ignored invalid validationComplete notification');
+				return;
+			}
+			lspPerformanceStats.finishValidation(param.uri, param.documentVersion, param.phase);
+		});
 		client.onNotification(completionRefreshNotification, (param: CompletionRefreshParams) => {
 			setTimeout(() => {
 				const editor = window.activeTextEditor;
@@ -2266,6 +2297,20 @@ export async function activate(context: ExtensionContext) {
 		// Push the disposable to the context's subscriptions so that the
 		// client can be deactivated on extension deactivation
 		context.subscriptions.push(new CwtoolsProvider());
+		context.subscriptions.push({
+			dispose: () => {
+				void client.stop().catch(error =>
+					ErrorReporter.warn('Extension', 'Failed to stop CWTools language client during disposal', error)
+				);
+			},
+		});
+		context.subscriptions.push(client.onDidChangeState(event => {
+			appendMemDiagEntry({
+				category: 'Lifecycle',
+				timestamp: new Date().toLocaleTimeString('en-US', { hour12: false }),
+				message: `LanguageClientState old=${State[event.oldState]} new=${State[event.newState]}`,
+			});
+		}));
 
 		safeRegisterCommand(context, "cwtools.openSetup", async () => {
 			await showSetupPanel(healthOptions());
@@ -2815,6 +2860,15 @@ export async function reloadExtension(prompt: string, buttonText?: string, force
 		if (!prompt || chosenAction === restartAction) {
 			await commands.executeCommand("cwtools.reloadExtension");
 		}
+	}
+}
+
+export async function deactivate(): Promise<void> {
+	if (!defaultClient) return;
+	try {
+		await defaultClient.stop();
+	} catch (error) {
+		ErrorReporter.warn('Extension', 'Failed to stop CWTools language client during deactivation', error);
 	}
 }
 // export default defaultClient;

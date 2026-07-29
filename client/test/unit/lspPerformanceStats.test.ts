@@ -37,7 +37,7 @@ describe('LspPerformanceStats', () => {
 		stats.recordValidationTrigger({ uri: 'file:///events/test.txt', file: 'events/test.txt', version: 5, trigger: 'change' });
 		now += 80;
 
-		expect(stats.finishValidation('file:///events/test.txt', {
+		expect(stats.recordValidationPublication('file:///events/test.txt', {
 			diagnostics: 5,
 			publishedDiagnostics: 3,
 			errors: 1,
@@ -45,6 +45,7 @@ describe('LspPerformanceStats', () => {
 			information: 1,
 			hints: 1,
 		})).to.equal(true);
+		expect(stats.finishValidation('file:///events/test.txt', 5, 'shallow-complete')).to.equal(true);
 		expect(stats.validationSnapshot()).to.deep.equal({
 			totalTriggers: 2,
 			completedRequests: 1,
@@ -53,11 +54,31 @@ describe('LspPerformanceStats', () => {
 			averageElapsedMs: 80,
 			maxElapsedMs: 80,
 		});
-		expect(entries[0]?.message).to.include('ClientValidationFeedback request=2 trigger=change version=5 elapsedMs=80');
+		expect(entries[0]?.message).to.include('ClientValidationFeedback request=2 trigger=change version=5 phase=shallow-complete elapsedMs=80');
 		expect(entries[0]?.message).to.include('diagnostics=5 publishedDiagnostics=3 errors=1 warnings=2 information=1 hints=1');
-		expect(stats.finishValidation('file:///events/test.txt', {
+		expect(stats.finishValidation('file:///events/test.txt', 5, 'deep-complete')).to.equal(false);
+	});
+
+	it('does not treat diagnostics-cleared publication or a stale validation phase as completion', () => {
+		let now = 2_500;
+		const entries: LspPerformanceLogEntry[] = [];
+		const stats = new LspPerformanceStats(entry => entries.push(entry), () => now);
+		const uri = 'file:///events/test.txt';
+		stats.recordValidationTrigger({ uri, file: 'events/test.txt', version: 7, trigger: 'change' });
+		now += 5;
+		expect(stats.recordValidationPublication(uri, {
 			diagnostics: 0, publishedDiagnostics: 0, errors: 0, warnings: 0, information: 0, hints: 0,
-		})).to.equal(false);
+		})).to.equal(true);
+		expect(stats.validationSnapshot().completedRequests).to.equal(0);
+		expect(entries).to.be.empty;
+		expect(stats.finishValidation(uri, 6, 'shallow-complete')).to.equal(false);
+
+		now += 75;
+		expect(stats.recordValidationPublication(uri, {
+			diagnostics: 2, publishedDiagnostics: 2, errors: 1, warnings: 1, information: 0, hints: 0,
+		})).to.equal(true);
+		expect(stats.finishValidation(uri, 7, 'deep-complete')).to.equal(true);
+		expect(entries[0]?.message).to.include('phase=deep-complete elapsedMs=80 diagnostics=2');
 	});
 
 	it('bounds pending validation state and forgets closed documents', () => {
@@ -69,12 +90,8 @@ describe('LspPerformanceStats', () => {
 		stats.forgetValidation('file:///b.txt');
 
 		expect(stats.validationSnapshot()).to.include({ totalTriggers: 3, droppedRequests: 1 });
-		expect(stats.finishValidation('file:///a.txt', {
-			diagnostics: 0, publishedDiagnostics: 0, errors: 0, warnings: 0, information: 0, hints: 0,
-		})).to.equal(false);
-		expect(stats.finishValidation('file:///b.txt', {
-			diagnostics: 0, publishedDiagnostics: 0, errors: 0, warnings: 0, information: 0, hints: 0,
-		})).to.equal(false);
+		expect(stats.finishValidation('file:///a.txt', 1, 'deep-complete')).to.equal(false);
+		expect(stats.finishValidation('file:///b.txt', 1, 'deep-complete')).to.equal(false);
 	});
 
 	it('sanitizes completion errors before adding them to MemDiag', () => {

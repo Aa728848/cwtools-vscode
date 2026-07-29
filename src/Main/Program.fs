@@ -1396,6 +1396,12 @@ type CompletionRuntimeState =
 
 type Server(client: ILanguageClient) =
     do setupLogger client
+    let serverProcessId = Environment.ProcessId
+    let serverInstanceId =
+        match Environment.GetEnvironmentVariable("CWTOOLS_SERVER_INSTANCE_ID") with
+        | value when not (String.IsNullOrWhiteSpace value) -> value.Trim()
+        | _ -> Guid.NewGuid().ToString("N")
+    let lifecycleIdentity = $"pid={serverProcessId} instance={serverInstanceId}"
     let docs = DocumentStore()
     let dirtyDocumentPaths = System.Collections.Concurrent.ConcurrentDictionary<string, byte>()
     let latestLintGenerations = System.Collections.Concurrent.ConcurrentDictionary<string, int64>()
@@ -1668,6 +1674,8 @@ type Server(client: ILanguageClient) =
         let privateMB = proc.PrivateMemorySize64 / 1048576L
         let fragmentedMB = gcInfo.FragmentedBytes / 1048576L
         $"mem[heap={heapMB}MB alloc={allocMB}MB working={workingSetMB}MB private={privateMB}MB fragmented={fragmentedMB}MB gc0={GC.CollectionCount(0)} gc1={GC.CollectionCount(1)} gc2={GC.CollectionCount(2)}]"
+
+    do monitorLog Lifecycle $"ServerLifecycle stage=started {lifecycleIdentity} {getPerfMemorySnapshot()}"
 
     let getMemorySnapshotJson () =
         use proc = Process.GetCurrentProcess()
@@ -4011,6 +4019,15 @@ type Server(client: ILanguageClient) =
                     let pendingKindsText = String.concat "," pendingKinds
                     monitorLog Lint
                         $"Validation phase={validationPhase} file={name} documentVersion={validatedDocumentVersion} modelEpoch={validatedModelEpoch} freshness={freshness} diagnostics={publishedCurrentDiagnostics.Length} pending={pendingKindsText}"
+                    client.CustomNotification(
+                        "cwtools/validationComplete",
+                        JsonValue.Record
+                            [| "uri", JsonValue.String(doc.ToString())
+                               "phase", JsonValue.String validationPhase
+                               "documentVersion",
+                                    JsonValue.Number(decimal (validatedDocumentVersion |> Option.defaultValue -1))
+                               "diagnostics", JsonValue.Number(decimal publishedCurrentDiagnostics.Length) |]
+                    )
 
                     if not (isTypeIndexOnlyRefreshPath name) then
                         visibleDiagnosticsList
@@ -4304,6 +4321,7 @@ type Server(client: ILanguageClient) =
     let delayedAnalyze (forceGlobalRefresh: bool) =
         match gameObj with
         | Some game ->
+            let analyzeSw = Stopwatch.StartNew()
             let timestamp = Stopwatch.GetTimestamp()
             let allocBefore = GC.GetTotalAllocatedBytes(false)
             let mutable refreshStatus = "not_needed"
@@ -4321,6 +4339,9 @@ type Server(client: ILanguageClient) =
                 && (skipLimitReached
                     || forceGlobalRefresh
                     || (not (isCompletionActive ()) && quietEnough && cooldownElapsed))
+            let pendingDomainsText = String.concat "," pendingDomainsBeforeAnalyze
+            monitorLog Lifecycle
+                $"AnalyzeLifecycle stage=analyze-begin {lifecycleIdentity} force={forceGlobalRefresh} doRefresh={doRefresh} pending={pendingDomainsText} {getPerfMemorySnapshot()}"
             let mutable didGlobalWork = false
             // Staged full refresh: run the heavy rules rebuild under a read
             // lock against a lookup clone so completion/hover stay responsive, then commit
@@ -4328,18 +4349,22 @@ type Server(client: ILanguageClient) =
             // staged result is discarded and retried after the next quiet period; the
             // heavy legacy RefreshCaches path is never run while holding the write lock.
             let stagedResourceEpoch = ResourceManagerEager.currentResource ()
-            let mutable stagedRefresh =
-                if doRefresh then
-                    try
-                        // PrepareRefreshCaches snapshots guarded inputs and builds
-                        // against a private lookup clone. Keeping the shared read
-                        // lock here lets one queued writer block every later reader.
-                        game.PrepareRefreshCaches()
-                    with e ->
-                        logDiag $"PrepareRefreshCaches failed; keeping refresh pending: {e.Message}"
-                        None
-                else
-                    None
+            let mutable stagedRefresh = None
+            if doRefresh then
+                let prepareSw = Stopwatch.StartNew()
+                let mutable prepareOutcome = "unavailable"
+                monitorLog Lifecycle
+                    $"AnalyzeLifecycle stage=prepare-before {lifecycleIdentity} resourceEpoch={stagedResourceEpoch} elapsedMs={analyzeSw.ElapsedMilliseconds} {getPerfMemorySnapshot()}"
+                try
+                    // The staged refresh owns its lookup clone and manager state.
+                    stagedRefresh <- game.PrepareRefreshCaches()
+                    prepareOutcome <- if stagedRefresh.IsSome then "prepared" else "unavailable"
+                with e ->
+                    prepareOutcome <- "failed"
+                    logDiag $"PrepareRefreshCaches failed; keeping refresh pending: {e.Message}"
+                prepareSw.Stop()
+                monitorLog Lifecycle
+                    $"AnalyzeLifecycle stage=prepare-after {lifecycleIdentity} outcome={prepareOutcome} elapsedMs={prepareSw.ElapsedMilliseconds} totalElapsedMs={analyzeSw.ElapsedMilliseconds} {getPerfMemorySnapshot()}"
             let mutable didLocRefresh = false
             let mutable didRefreshCaches = false
             let mutable gcPendingAfterRefresh = false
@@ -4356,11 +4381,23 @@ type Server(client: ILanguageClient) =
                     let stagedCommitted =
                         match stagedRefresh, resourceEpochStillCurrent with
                         | Some staged, true ->
-                            try
-                                game.CommitRefreshCaches staged
-                            with e ->
-                                logDiag $"CommitRefreshCaches failed; keeping refresh pending: {e.Message}"
-                                false
+                            let commitSw = Stopwatch.StartNew()
+                            let mutable commitOutcome = "rejected"
+                            monitorLog Lifecycle
+                                $"AnalyzeLifecycle stage=commit-before {lifecycleIdentity} resourceEpoch={stagedResourceEpoch} elapsedMs={analyzeSw.ElapsedMilliseconds} {getPerfMemorySnapshot()}"
+                            let committed =
+                                try
+                                    let result = game.CommitRefreshCaches staged
+                                    commitOutcome <- if result then "committed" else "rejected"
+                                    result
+                                with e ->
+                                    commitOutcome <- "failed"
+                                    logDiag $"CommitRefreshCaches failed; keeping refresh pending: {e.Message}"
+                                    false
+                            commitSw.Stop()
+                            monitorLog Lifecycle
+                                $"AnalyzeLifecycle stage=commit-after {lifecycleIdentity} outcome={commitOutcome} elapsedMs={commitSw.ElapsedMilliseconds} totalElapsedMs={analyzeSw.ElapsedMilliseconds} {getPerfMemorySnapshot()}"
+                            committed
                         | _ -> false
 
                     // Drop guard references to the old lookup before localisation and GC.
@@ -4661,6 +4698,9 @@ type Server(client: ILanguageClient) =
             let sm = CWTools.Utilities.StringResource.stringManager
             monitorLog Memory $"AnalyzePass cycleAllocMB={(allocTotal - allocBefore) / 1048576L} strings={sm.StringCount} ints={sm.IntCount} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
             maybePerfReport "delayedAnalyze"
+            analyzeSw.Stop()
+            monitorLog Lifecycle
+                $"AnalyzeLifecycle stage=analyze-complete {lifecycleIdentity} elapsedMs={analyzeSw.ElapsedMilliseconds} didGlobalWork={didGlobalWork} didRefresh={didRefreshCaches} status={refreshStatus} {getPerfMemorySnapshot()}"
             didGlobalWork, didRefreshCaches
         | None ->
             updateValidationRuntime (fun state ->

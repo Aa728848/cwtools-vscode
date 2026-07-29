@@ -603,7 +603,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
             { timeoutMs = timeoutMs
               getResult = fun () -> Some result }
 
-    Thread(fun () ->
+    let readLoop () =
         try
             // Read all messages on the main thread
             for m in readMessages receive do
@@ -725,9 +725,16 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                             processQueue.Add(ProcessRequest(id, task, cancel, isReadOnly, lockFallback))
                 | Parser.ResponseMessage(id, result) -> responseAgent.Post(Response(id, result))
 
-            processQueue.Add(Quit)
         with e ->
             dprintfn $"Exception in read thread {e}"
+
+    Thread(fun () ->
+        try
+            readLoop ()
+        finally
+            // A transport exception must terminate the server just like a clean EOF.
+            // Otherwise the main loop can remain blocked forever as an orphan process.
+            processQueue.Add(Quit)
 
     )
         .Start()

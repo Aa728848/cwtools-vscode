@@ -141,8 +141,8 @@ export function getRuleGroups(options: RulesConfigGroupOptions, runtime?: RulesR
 			label: localize('Bundled fallback rules', '内置备用规则'),
 			path: options.bundledRulesPath,
 			detail: localize(
-				`Automatically used only when a remote update fails and the bundled rules are newer than the stale cache.\n${options.bundledRulesPath}`,
-				`仅在远程更新失败且内置规则比旧缓存更新时自动启用。\n${options.bundledRulesPath}`
+				`Automatically used whenever a remote update fails. Existing cached rules are kept only if the bundled package is unavailable.\n${options.bundledRulesPath}`,
+				`远程更新失败时自动启用；仅当内置规则包不可用时才继续使用现有缓存。\n${options.bundledRulesPath}`
 			),
 			fileCount: bundled.count,
 			unit: bundled.unit,

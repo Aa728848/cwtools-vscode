@@ -571,8 +571,8 @@ function buildInstallHealth(options: InstallHealthOptions) {
 			ok: rules.source !== 'Missing',
 			detail: rules.source === 'Missing'
 				? localize(
-					'No active CWTools rules were found. latest/stable need a remote rules cache; bundled fallback is only used after a failed remote update when it is newer than the cache. manual needs a local rules folder.',
-					'未找到当前可用的 CWTools 规则。latest/stable 需要远程规则缓存；内置备用规则只会在远程更新失败且比缓存更新时使用。manual 需要本地规则目录。'
+					'No active CWTools rules were found. latest/stable use the bundled fallback automatically after a remote update failure. manual needs a local rules folder.',
+					'未找到当前可用的 CWTools 规则。latest/stable 在远程更新失败后会自动使用内置备用规则；manual 需要本地规则目录。'
 				)
 				: localize(
 					`${source} rules: ${rules.fileCount} files${rules.path ? ` at ${rules.path}` : ''}.`,

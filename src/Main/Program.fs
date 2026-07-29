@@ -4999,6 +4999,47 @@ type Server(client: ILanguageClient) =
                     logError $"Failed to update CWTools rules: {e.Message}"
                     None
 
+            let activateFallback () =
+                preferBundledRules <- true
+                let fallbackSource =
+                    getConfigSource cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
+
+                match fallbackSource with
+                | "bundled" ->
+                    rulesStatus <- "fallback"
+                    let warningMsg =
+                        uiText
+                            (sprintf "Failed to update CWTools rules for %A from the remote repository. Loaded the bundled fallback rules instead." activeGame)
+                            (sprintf "无法从远程仓库更新 %A 的 CWTools 规则，已改用内置备用规则。" activeGame)
+                    logWarning warningMsg
+                    client.ShowMessage(
+                        { ``type`` = MessageType.Warning
+                          message = warningMsg }
+                    )
+                | "remote" ->
+                    rulesStatus <- "fallback"
+                    let warningMsg =
+                        uiText
+                            (sprintf "Failed to update CWTools rules for %A from the remote repository. The bundled fallback was unavailable, so the existing cached rules were kept." activeGame)
+                            (sprintf "无法从远程仓库更新 %A 的 CWTools 规则；内置备用规则不可用，因此继续使用现有缓存规则。" activeGame)
+                    logWarning warningMsg
+                    client.ShowMessage(
+                        { ``type`` = MessageType.Warning
+                          message = warningMsg }
+                    )
+                | _ ->
+                    rulesStatus <- "missing"
+                    let errorMsg =
+                        uiText
+                            (sprintf "Failed to update or load CWTools rules for %A. No bundled fallback or usable remote cache was found. Reinstall the VSIX or run the package script again, then run 'CWTools: Run Installation Health Check'." activeGame)
+                            (sprintf "无法更新或加载 %A 的 CWTools 规则，未找到内置备用规则或可用的远程缓存。请重新安装 VSIX 或重新运行打包脚本，然后运行“CWTools: 运行安装健康检查”。" activeGame)
+                    rulesError <- Some errorMsg
+                    logError errorMsg
+                    client.ShowMessage(
+                        { ``type`` = MessageType.Error
+                          message = errorMsg }
+                    )
+
             match rulesResult with
             | Some (true, Some date) ->
                 rulesStatus <- "updated"
@@ -5007,34 +5048,9 @@ type Server(client: ILanguageClient) =
             | Some (false, Some _) ->
                 rulesStatus <- "up_to_date"
                 logInfo "CWTools rules are already up-to-date."
-            | Some (false, None) ->
-                preferBundledRules <- true
-                let fallbackConfigs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
-                if fallbackConfigs.Length > 0 then
-                    rulesStatus <- "fallback"
-                    let warningMsg =
-                        uiText
-                            (sprintf "Failed to update CWTools rules for %A from the remote repository. Using cached rules, or bundled fallback only if it is newer than the stale cache. Run 'CWTools: Run Installation Health Check' if validation looks incomplete." activeGame)
-                            (sprintf "Failed to update CWTools rules for %A from the remote repository. Using cached rules, or bundled fallback only if it is newer than the stale cache. Run 'CWTools: Run Installation Health Check' if validation looks incomplete." activeGame)
-                    logWarning warningMsg
-                    client.ShowMessage(
-                        { ``type`` = MessageType.Warning
-                          message = warningMsg }
-                    )
-                else
-                    rulesStatus <- "missing"
-                    let errorMsg =
-                        uiText
-                            (sprintf "Failed to update or load CWTools rules for %A. No usable remote cache was found at %s, and bundled fallback was not applicable. Reinstall the VSIX or run the package script again, then run 'CWTools: Run Installation Health Check'." activeGame cp)
-                            (sprintf "Failed to update or load CWTools rules for %A. No usable remote cache was found at %s, and bundled fallback was not applicable. Reinstall the VSIX or run the package script again, then run 'CWTools: Run Installation Health Check'." activeGame cp)
-                    rulesError <- Some errorMsg
-                    logError errorMsg
-                    client.ShowMessage(
-                        { ``type`` = MessageType.Error
-                          message = errorMsg }
-                    )
+            | Some (false, None) -> activateFallback ()
             | Some _ -> rulesStatus <- "unknown"
-            | None -> preferBundledRules <- true
+            | None -> activateFallback ()
 
             finishRules rulesStatus rulesError
 

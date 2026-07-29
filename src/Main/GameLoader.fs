@@ -7,7 +7,6 @@ open System.IO
 open CWTools.Games.Files
 open Main.Serialize
 open CWTools.Utilities.Utils
-open LibGit2Sharp
 open System.Text.Json
 
 // Store vanilla scripted variables path for hover (set after game load)
@@ -118,44 +117,6 @@ let private getRuleFilesFromZip (zipPath: string) : (string * string) list =
 let private readConfigFiles configFiles =
     configFiles |> List.map (fun f -> f, File.ReadAllText(f))
 
-let private tryGetCachedRulesCommitTime (folder: string) =
-    try
-        if Repository.IsValid folder then
-            use repository = new Repository(folder)
-            if isNull repository.Head.Tip then None
-            else Some(repository.Head.Tip.Committer.When.ToUnixTimeSeconds())
-        else
-            None
-    with e ->
-        logInfo $"Failed to read cached rules version from %s{folder}: %A{e}"
-        None
-
-let private tryGetBundledRulesCommitTime (zipPath: string) =
-    let versionPath = Path.ChangeExtension(zipPath, ".version.json")
-    try
-        if File.Exists versionPath then
-            use document = JsonDocument.Parse(File.ReadAllText(versionPath))
-            let mutable value = Unchecked.defaultof<JsonElement>
-            if document.RootElement.TryGetProperty("committedAtUnixSeconds", &value) then
-                Some(value.GetInt64())
-            else
-                None
-        else
-            None
-    with e ->
-        logInfo $"Failed to read bundled rules version from %s{versionPath}: %A{e}"
-        None
-
-let private shouldPreferBundledRules (cachePath: string option) (bundledRulesFolder: string option) =
-    match cachePath, bundledRulesFolder with
-    | Some cacheFolder, Some bundledPath when bundledPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ->
-        match tryGetCachedRulesCommitTime cacheFolder, tryGetBundledRulesCommitTime bundledPath with
-        | Some cachedTime, Some bundledTime when bundledTime > cachedTime ->
-            logInfo $"Bundled rules are newer than the stale cache (%d{bundledTime} > %d{cachedTime}); using bundled rules."
-            true
-        | _ -> false
-    | _ -> false
-
 let private resolveConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder preferBundledRules =
     let manualConfigFiles =
         match useManualRules, manualRulesFolder with
@@ -174,16 +135,14 @@ let private resolveConfigFiles cachePath useManualRules manualRulesFolder bundle
         | Some path, false -> readConfigFiles (getRuleFilesFromFolder path)
         | _ -> []
 
-    let useNewerBundledRules =
+    let useBundledFallback =
         preferBundledRules
         && not useManualRules
-        && cachedConfigFiles.Length > 0
         && bundledConfigFiles.Length > 0
-        && shouldPreferBundledRules cachePath bundledRulesFolder
 
     if manualConfigFiles.Length > 0 then readConfigFiles manualConfigFiles, "manual"
     elif useManualRules then [], "missing"
-    elif useNewerBundledRules then bundledConfigFiles, "bundled"
+    elif useBundledFallback then bundledConfigFiles, "bundled"
     elif cachedConfigFiles.Length > 0 then readConfigFiles cachedConfigFiles, "remote"
     else [], "missing"
 

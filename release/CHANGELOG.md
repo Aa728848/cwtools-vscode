@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [2.9.6] - 2026-07-29
+
+### 版本更新与打包 / Version Update & Packaging
+- **[打包] 升级版本号并打包**
+  English: [Package] Update version number and package.
+
 ## [2.9.5] - 2026-07-29
 
 ### 功能与优化 / Features & Optimizations

@@ -61,7 +61,10 @@ import { LspFeaturePriorityGate } from './lspFeaturePriority';
 import { LspPerformanceStats, type ValidationDiagnosticCounts } from './lspPerformanceStats';
 import { DirectoryCompletionCommand } from './directoryCompletionCommand';
 import { LanguageServerProcessController, ManagedLanguageClient } from './languageServerProcess';
-import { getLanguageClientDocumentSelector } from './languageSelectors';
+import {
+	getLanguageClientDocumentSelector,
+	shouldRequestLanguageServerSemanticTokens,
+} from './languageSelectors';
 
 export let defaultClient: LanguageClient;
 
@@ -1895,10 +1898,12 @@ export async function activate(context: ExtensionContext) {
 				},
 				provideDocumentSemanticTokens: async (document, token, next) => {
 					if (!editorFeaturesConfiguration().get<boolean>('semanticHighlighting.enabled', true)) return undefined;
+					if (!shouldRequestLanguageServerSemanticTokens(document)) return undefined;
 					return runBackgroundFeature(token, backgroundToken => next(document, backgroundToken));
 				},
 				provideDocumentSemanticTokensEdits: async (document, previousResultId, token, next) => {
 					if (!editorFeaturesConfiguration().get<boolean>('semanticHighlighting.enabled', true)) return undefined;
+					if (!shouldRequestLanguageServerSemanticTokens(document)) return undefined;
 					return runBackgroundFeature(token, backgroundToken => next(document, previousResultId, backgroundToken));
 				},
 				workspace: {

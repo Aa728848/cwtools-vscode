@@ -30,3 +30,15 @@ export function getScriptDocumentSelector(): FileLanguageSelector[] {
 		...getAllLanguageIds(),
 	]);
 }
+
+/**
+ * Localisation/YAML documents use their TextMate grammar plus rich-text
+ * decorations. PDX semantic tokens would classify the flat YAML as script and
+ * override those colours.
+ */
+export function shouldRequestLanguageServerSemanticTokens(
+	document: { languageId: string; fileName: string },
+): boolean {
+	return document.languageId !== LOCALISATION_LANGUAGE_ID
+		&& !/\.ya?ml$/i.test(document.fileName);
+}

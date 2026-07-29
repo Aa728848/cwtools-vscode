@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [2.9.5] - 2026-07-29
+
+### 功能与优化 / Features & Optimizations
+- **[优化] 增加异常崩溃监控**：增加异常崩溃监控。
+  English: [Optimization] Added crash monitoring.
+
+### 修复 / Fixes
+- **[修复] 修复多个补全和跳转问题**：修复多个补全和跳转问题。
+  English: [Fix] Fixed multiple completion and navigation issues.
+
 ## [2.9.3] - 2026-07-28
 
 ### 功能与优化 / Features & Optimizations

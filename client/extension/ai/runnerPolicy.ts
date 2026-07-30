@@ -15,21 +15,21 @@ const BUILD_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = 
     discovery: new Set([
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
-        'glob_files', 'workspace_symbols', 'document_symbols',
-        'get_lsp_status', 'todo_write', 'mcp_call',
+        'workspace_symbols', 'document_symbols',
+        'todo_write', 'mcp_call',
         'dispatch_agents',
     ]),
     evidence: new Set([
         'query_project_knowledge', 'query_rules', 'query_cwt_schema', 'query_scope',
         'search_rule_capabilities', 'get_file_context', 'read_file', 'get_pdx_block',
-        'get_design_blueprint_contract', 'write_design_blueprint', 'todo_write',
+        'get_design_blueprint_contract', 'todo_write',
         'grep', 'workspace_symbols', 'query_blackboard', 'merge_results',
     ]),
     validation: new Set([
         'query_rules', 'query_cwt_schema', 'query_scope', 'explain_scope',
         'parse_pdx_fragment', 'query_references', 'query_definition_by_name',
         'verify_pdx_identifier', 'get_diagnostics', 'get_completion_at', 'get_pdx_block',
-        'get_file_context', 'read_file', 'analyze_diagnostic_error', 'todo_write',
+        'get_file_context', 'read_file', 'todo_write',
     ]),
     write: new Set([
         'query_rules', 'query_scope', 'parse_pdx_fragment', 'verify_pdx_identifier',
@@ -48,7 +48,7 @@ const PLAN_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
     discovery: new Set([
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
-        'glob_files', 'workspace_symbols', 'document_symbols', 'get_lsp_status',
+        'workspace_symbols', 'document_symbols',
         'web_search', 'web_open', 'web_find', 'mcp_call',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
@@ -61,7 +61,7 @@ const PLAN_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
         'parse_pdx_fragment', 'query_references', 'query_definition_by_name',
         'verify_pdx_identifier', 'get_diagnostics',
         'get_file_context', 'read_file', 'get_design_blueprint_contract',
-        'write_design_blueprint', 'todo_write', 'grep', 'document_symbols',
+        'write_design_blueprint', 'todo_write', 'grep',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
     write: new Set(),
@@ -77,7 +77,7 @@ const EXPLORE_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> 
     discovery: new Set([
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
-        'glob_files', 'workspace_symbols', 'document_symbols', 'get_lsp_status',
+        'workspace_symbols', 'document_symbols',
         'web_search', 'web_open', 'web_find', 'mcp_call',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
@@ -86,7 +86,7 @@ const EXPLORE_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> 
         'query_rules', 'query_cwt_schema', 'query_scope', 'explain_scope',
         'query_references', 'query_definition_by_name', 'verify_pdx_identifier',
         'get_diagnostics', 'get_pdx_block', 'get_file_context', 'read_file',
-        'search_mod_files', 'workspace_symbols', 'document_symbols', 'explore_pdx_project',
+        'search_mod_files', 'workspace_symbols', 'explore_pdx_project',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
     write: new Set(),
@@ -102,7 +102,7 @@ const REVIEW_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> =
     discovery: new Set([
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
-        'glob_files', 'workspace_symbols', 'document_symbols', 'get_lsp_status',
+        'workspace_symbols', 'document_symbols',
         'get_diagnostics', 'analyze_diagnostic_error', 'find_sprite_candidates',
         'query_localisation_index', 'mcp_call',
     ]),
@@ -162,6 +162,21 @@ const MODE_STAGE_TOOLS: Partial<Record<AgentMode, Partial<Record<AgentToolStage,
     utility: UTILITY_STAGE_TOOLS,
 };
 
+const WRITE_EXECUTION_MODES = new Set<AgentMode>([
+    'build',
+    'utility',
+    'gui_expert',
+    'loc_translator',
+    'loc_writer',
+    'orchestrator',
+    'script',
+]);
+
+const NON_DELIVERY_WRITE_TOOLS = new Set([
+    'write_design_blueprint',
+    'save_workflow',
+]);
+
 const DISCOVERY_PROGRESS_TOOLS = new Set([
     'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
     'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
@@ -205,8 +220,49 @@ export function filterToolDefinitionsForStage(
     const allowed = normalizedStage ? modeStages[normalizedStage] : undefined;
     if (!allowed) return [];
     return tools.filter(tool =>
-        allowed.has(tool.function.name)
+        tool.function.name === 'select_tools'
+        || allowed.has(tool.function.name)
         || (allowed.has('mcp_call') && tool.function.name.startsWith('mcp_')));
+}
+
+/**
+ * Writable modes keep discovery narrow, then expose execution-critical deferred
+ * schemas without depending on the model to discover the disclosure protocol.
+ */
+export function shouldAutoDiscloseExecutionTools(
+    mode: AgentMode,
+    stage: AgentToolStage | undefined,
+    authorization: import('./types').AgentAuthorization,
+): boolean {
+    if (authorization !== 'workspace_write' || !WRITE_EXECUTION_MODES.has(mode)) return false;
+    const normalizedStage = normalizeToolStageForMode(mode, stage);
+    return normalizedStage === undefined || normalizedStage === 'write' || normalizedStage === 'finalize';
+}
+
+/**
+ * A workspace-write admission must not turn an internal discovery/evidence
+ * checkpoint into a second user approval boundary.
+ */
+export function shouldContinueAuthorizedExecution(
+    mode: AgentMode,
+    stage: AgentToolStage | undefined,
+    authorization: import('./types').AgentAuthorization,
+    executionActionObserved: boolean,
+): boolean {
+    if (authorization !== 'workspace_write' || !WRITE_EXECUTION_MODES.has(mode)) return false;
+    const normalizedStage = normalizeToolStageForMode(mode, stage);
+    return normalizedStage ? normalizedStage !== 'finalize' : !executionActionObserved;
+}
+
+export function isExecutionActionTool(toolName: string): boolean {
+    if (toolName === 'dispatch_agents') return true;
+    if (NON_DELIVERY_WRITE_TOOLS.has(toolName)) return false;
+    const effect = TOOL_REGISTRY.get(toolName as import('./types').AgentToolName)?.effect;
+    return effect === 'workspace_write'
+        || effect === 'shell'
+        || effect === 'git'
+        || effect === 'media'
+        || effect === 'process';
 }
 
 const STAGE_GUIDANCE: Record<AgentToolStage, string> = {

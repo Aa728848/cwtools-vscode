@@ -6,8 +6,11 @@ import {
     normalizeToolStageForMode,
     advanceToolStage,
     buildToolStageReminder,
+    isExecutionActionTool,
     resolveMaxToolIterations,
     resolveRunMaxOutputTokens,
+    shouldAutoDiscloseExecutionTools,
+    shouldContinueAuthorizedExecution,
     shouldRenewIterationLimit,
     SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS,
     TOP_LEVEL_ITERATION_SAFETY_CAP,
@@ -17,6 +20,7 @@ import { TOOL_DEFINITIONS as registeredTools, TOOL_REGISTRY } from '../../extens
 import { validateToolAccess } from '../../extension/ai/tools/permissions';
 
 const toolDefinitions = [
+    'select_tools',
     'read_file',
     'replace_lines',
     'query_workspace_index',
@@ -58,11 +62,68 @@ describe('runnerPolicy', () => {
         const filtered = filterToolDefinitionsForStage(toolDefinitions, 'build', stage);
         const names = filtered.map(t => t.function.name);
         expect(stage).to.equal('discovery');
+        expect(names).to.include('select_tools');
         expect(names).to.include('read_file');
         expect(names).to.include('query_workspace_index');
         expect(names).to.not.include('write_file');
         expect(names).to.not.include('replace_lines');
         expect(filterToolDefinitionsForStage(toolDefinitions, 'build', stage, true)).to.have.lengthOf(toolDefinitions.length);
+    });
+
+    it('keeps deferred-tool selection reachable throughout every valid staged mode', () => {
+        const stagesByMode = {
+            build: ['discovery', 'evidence', 'validation', 'write', 'finalize'],
+            plan: ['discovery', 'design', 'validation', 'write', 'finalize'],
+            explore: ['discovery', 'validation', 'write', 'finalize'],
+            review: ['discovery', 'validation', 'write', 'finalize'],
+            utility: ['discovery', 'validation', 'write', 'finalize'],
+        } as const;
+
+        for (const [mode, stages] of Object.entries(stagesByMode)) {
+            for (const stage of stages) {
+                const names = filterToolDefinitionsForStage(
+                    toolDefinitions,
+                    mode as keyof typeof stagesByMode,
+                    stage,
+                ).map(tool => tool.function.name);
+                expect(names, `${mode}:${stage}`).to.include('select_tools');
+            }
+        }
+    });
+
+    it('auto-discloses execution schemas for every writable runtime mode at the correct boundary', () => {
+        expect(shouldAutoDiscloseExecutionTools('build', 'discovery', 'workspace_write')).to.equal(false);
+        expect(shouldAutoDiscloseExecutionTools('build', 'write', 'workspace_write')).to.equal(true);
+        expect(shouldAutoDiscloseExecutionTools('utility', 'finalize', 'workspace_write')).to.equal(true);
+
+        for (const mode of ['gui_expert', 'loc_translator', 'loc_writer', 'orchestrator', 'script'] as const) {
+            expect(shouldAutoDiscloseExecutionTools(mode, undefined, 'workspace_write'), mode).to.equal(true);
+        }
+        for (const mode of ['plan', 'explore', 'review', 'script_reviewer', 'general'] as const) {
+            expect(shouldAutoDiscloseExecutionTools(mode, undefined, 'workspace_write'), mode).to.equal(false);
+        }
+        expect(shouldAutoDiscloseExecutionTools('script', undefined, 'read_only')).to.equal(false);
+    });
+
+    it('continues authorized execution across internal evidence stages without adding an approval stop', () => {
+        for (const stage of ['discovery', 'evidence', 'validation', 'write'] as const) {
+            expect(shouldContinueAuthorizedExecution('build', stage, 'workspace_write', false), stage).to.equal(true);
+        }
+        expect(shouldContinueAuthorizedExecution('build', 'finalize', 'workspace_write', true)).to.equal(false);
+        expect(shouldContinueAuthorizedExecution('script', undefined, 'workspace_write', false)).to.equal(true);
+        expect(shouldContinueAuthorizedExecution('script', undefined, 'workspace_write', true)).to.equal(false);
+        expect(shouldContinueAuthorizedExecution('plan', 'validation', 'workspace_write', false)).to.equal(false);
+        expect(shouldContinueAuthorizedExecution('utility', 'write', 'read_only', false)).to.equal(false);
+    });
+
+    it('distinguishes delivery execution from planning artifacts', () => {
+        expect(isExecutionActionTool('write_file')).to.equal(true);
+        expect(isExecutionActionTool('write_localisation')).to.equal(true);
+        expect(isExecutionActionTool('run_command')).to.equal(true);
+        expect(isExecutionActionTool('dispatch_agents')).to.equal(true);
+        expect(isExecutionActionTool('write_design_blueprint')).to.equal(false);
+        expect(isExecutionActionTool('save_workflow')).to.equal(false);
+        expect(isExecutionActionTool('read_file')).to.equal(false);
     });
 
     it('keeps Paradox MCP tools in discovery while General removes them before staging', () => {
@@ -98,7 +159,7 @@ describe('runnerPolicy', () => {
     });
 
     it('describes the current stage with a deterministic tool list', () => {
-        const reminder = buildToolStageReminder('build', 'validation', [toolDefinitions[2]!, toolDefinitions[0]!]);
+        const reminder = buildToolStageReminder('build', 'validation', [toolDefinitions[3]!, toolDefinitions[1]!]);
         expect(reminder).to.include('Current build tool stage: validation');
         expect(reminder).to.include('query_workspace_index, read_file');
         expect(reminder).to.include('before writing');

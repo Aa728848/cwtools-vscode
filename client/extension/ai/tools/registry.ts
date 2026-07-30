@@ -339,7 +339,7 @@ const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, ...ORCHESTRATI
 const REVIEW_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
 const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ..._MCP, ...ORCHESTRATION]);
 const LOC_MODES = new Set([
-    'read_file', 'write_file',
+    'select_tools', 'read_file', 'write_file',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
     'workspace_symbols', 'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_lsp_status', 'get_diagnostics',
     'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'todo_write', 'write_localisation', 'git_ops',

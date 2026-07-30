@@ -15,6 +15,7 @@ import {
     filterToolDefinitionsForMode,
     filterToolDefinitionsForStage,
     initialToolStageForMode,
+    shouldAutoDiscloseExecutionTools,
 } from '../../extension/ai/runnerPolicy';
 import { createToolDedupeKey, ToolDedupeService } from '../../extension/ai/runner/toolDedupe';
 import { ContextLimitTracker } from '../../extension/ai/runner/contextLimitTracker';
@@ -205,6 +206,43 @@ describe('tool disclosure and dedupe', () => {
         expect(service.initialTools([...pool, mcpTool], paradoxContext).some(tool => tool.function.name === mcpTool.function.name)).to.equal(false);
         expect(service.select({ groups: ['mcp'], reason: 'semantic query' }, [...pool, mcpTool], paradoxContext).loaded)
             .to.include(mcpTool.function.name);
+    });
+
+    it('makes critical deferred tools visible for every workspace-write execution surface', () => {
+        const service = new ToolDisclosureService();
+        const cases = [
+            { mode: 'build', domain: 'paradox', stage: 'write', expected: ['write_file', 'edit_file', 'replace_lines'] },
+            { mode: 'utility', domain: 'general', stage: 'write', expected: ['write_file', 'edit_file', 'replace_lines', 'run_command', 'dispatch_agents'] },
+            { mode: 'gui_expert', domain: 'paradox', stage: undefined, expected: ['write_file', 'edit_file', 'replace_lines', 'run_command', 'dispatch_agents'] },
+            { mode: 'loc_translator', domain: 'paradox', stage: undefined, expected: ['write_file', 'git_ops'] },
+            { mode: 'loc_writer', domain: 'paradox', stage: undefined, expected: ['write_file', 'git_ops'] },
+            { mode: 'orchestrator', domain: 'paradox', stage: undefined, expected: ['write_file', 'git_ops', 'dispatch_agents'] },
+            { mode: 'script', domain: 'paradox', stage: undefined, expected: ['write_file', 'git_ops', 'dispatch_agents'] },
+        ] as const;
+
+        for (const testCase of cases) {
+            const modePool = filterToolDefinitionsForMode(TOOL_DEFINITIONS, testCase.mode, {
+                domain: testCase.domain,
+            });
+            const stagePool = filterToolDefinitionsForStage(modePool, testCase.mode, testCase.stage);
+            const context = {
+                mode: testCase.mode,
+                domain: testCase.domain,
+                dynamicSupported: true,
+                loaded: new Set<string>(),
+            };
+            expect(
+                shouldAutoDiscloseExecutionTools(testCase.mode, testCase.stage, 'workspace_write'),
+                `${testCase.mode} disclosure boundary`,
+            ).to.equal(true);
+            service.select({
+                groups: ['file_write', 'command', 'git', 'media', 'orchestrator'],
+                reason: 'runtime-authorized execution surface',
+            }, stagePool, context);
+            const visible = service.initialTools(stagePool, context).map(tool => tool.function.name);
+            expect(visible, testCase.mode).to.include.members(testCase.expected);
+            expect(visible, `${testCase.mode}:select_tools`).to.include('select_tools');
+        }
     });
 
     it('canonicalizes arguments and coalesces concurrent read calls only', async () => {

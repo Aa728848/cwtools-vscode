@@ -55,8 +55,11 @@ import {
     normalizeToolStageForMode,
     advanceToolStage,
     buildToolStageReminder,
+    isExecutionActionTool,
     resolveMaxToolIterations,
     resolveRunMaxOutputTokens,
+    shouldAutoDiscloseExecutionTools,
+    shouldContinueAuthorizedExecution,
     shouldRenewIterationLimit,
     SLIM_SUB_AGENT_OUTPUT_BUDGET_RECOVERY_LIMIT,
     SLIM_SUB_AGENT_THINKING_CHAR_LIMIT,
@@ -1940,6 +1943,8 @@ export class AgentRunner {
         let outputRepetitionRecoveries = 0;
         let contextOverflowRecoveries = 0;
         let topLevelLengthRecoveries = 0;
+        let prematureExecutionFinalRecoveries = 0;
+        let executionActionObserved = false;
         let ineffectiveCompactionCount = 0;
         const updateFinalPromptMetric = () => {
             if (!runMetrics) return;
@@ -2069,10 +2074,17 @@ export class AgentRunner {
             loaded: new Set<string>(),
         };
         const toolDedupe = new ToolDedupeService();
-        availableTools = toolDisclosureService.initialTools(
-            filterToolDefinitionsForStage(stagedToolPool, mode, toolStage, legacyFullToolset),
-            disclosureContext,
-        );
+        const refreshAvailableTools = (): ToolDefinition[] => {
+            const stagePool = filterToolDefinitionsForStage(stagedToolPool, mode, toolStage, legacyFullToolset);
+            if (shouldAutoDiscloseExecutionTools(mode, toolStage, schedulingState.authorization)) {
+                toolDisclosureService.select({
+                    groups: ['file_write', 'command', 'git', 'media', 'orchestrator'],
+                    reason: 'Runtime-authorized execution surface',
+                }, stagePool, disclosureContext);
+            }
+            return toolDisclosureService.initialTools(stagePool, disclosureContext);
+        };
+        availableTools = refreshAvailableTools();
 
         // M3 Fix: remove per-call dynamic import — getProvider is already statically
         // imported at the top of this file; dynamic import added latency for nothing.
@@ -2993,7 +3005,33 @@ export class AgentRunner {
 
             // If no tool calls (either format), we're done — the final answer is no emit thinking block
             if (!toolCalls || toolCalls.length === 0) {
-                return this.cleanFinalContent(contentToString(assistantMessage.content));
+                const finalContent = this.cleanFinalContent(contentToString(assistantMessage.content));
+                const isExplicitQuestion = finalContent.includes(':::question');
+                if (!isExplicitQuestion
+                    && prematureExecutionFinalRecoveries < 3
+                    && shouldContinueAuthorizedExecution(
+                        mode,
+                        toolStage,
+                        schedulingState.authorization,
+                        executionActionObserved,
+                    )) {
+                    prematureExecutionFinalRecoveries++;
+                    messages.push({
+                        role: 'user',
+                        content: `<system-reminder>This task already has workspace-write authorization. `
+                            + `${toolStage ? `The current ${toolStage} stage is an internal execution checkpoint, not a user approval boundary. ` : ''}`
+                            + `Do not ask the user to say "execute", do not return manual edit instructions, and do not stop at evidence collection. `
+                            + `Continue now with the available tools until the requested execution and verification are complete. `
+                            + `Only ask a structured :::question when progress requires information that only the user can provide.</system-reminder>`,
+                    });
+                    emitStep({
+                        type: 'thinking',
+                        content: `Authorized execution continued automatically from ${toolStage ?? 'full'} mode after a premature final response.`,
+                        timestamp: Date.now(),
+                    });
+                    continue;
+                }
+                return finalContent;
             }
 
             // ── Delay emit thinking_content: emit only when it is confirmed that there are subsequent tool_calls ──
@@ -3702,6 +3740,9 @@ export class AgentRunner {
                     ? parsedCalls[j]!.targetPaths
                     : [`tool:${parsedCalls[j]!.toolName}`];
                 const resultSucceeded = record?.success !== false && record?.error === undefined && record?.skipped !== true;
+                if (resultSucceeded && isExecutionActionTool(parsedCalls[j]!.toolName)) {
+                    executionActionObserved = true;
+                }
                 if (terminalValidation) {
                     updateTerminalValidationState(terminalValidation, targetKeys, record);
                 }
@@ -3796,10 +3837,7 @@ export class AgentRunner {
                         revision: schedulingState.revision,
                     });
                 }
-                availableTools = toolDisclosureService.initialTools(
-                    filterToolDefinitionsForStage(stagedToolPool, mode, toolStage, legacyFullToolset),
-                    disclosureContext,
-                );
+                availableTools = refreshAvailableTools();
                 const nextToolNames = new Set(availableTools.map(tool => tool.function.name));
                 options?.runEventSink?.appendSoon('capabilities_changed', {
                     stage: toolStage,

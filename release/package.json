@@ -1736,6 +1736,74 @@
                         "minimum": 0,
                         "description": "%configuration.stellarisLanguageServices.ai.performance.compactionMinIntervalSeconds.description%"
                     },
+                    "stellarisLanguageServices.ai.performance.dynamicToolDisclosure.enabled": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.dynamicToolDisclosure.enabled.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.compactionTriggerRatio": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 0.8,
+                        "minimum": 0.5,
+                        "maximum": 0.95,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.compactionTriggerRatio.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.compactionBlockRatio": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 0.9,
+                        "minimum": 0.55,
+                        "maximum": 0.98,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.compactionBlockRatio.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.compactionReservedTokens": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 4096,
+                        "minimum": 0,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.compactionReservedTokens.description%"
+                    },
+                    "stellarisLanguageServices.ai.runtime.domainState.enabled": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.ai.runtime.domainState.enabled.description%"
+                    },
+                    "stellarisLanguageServices.ai.runtime.goalContinuation.enabled": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.ai.runtime.goalContinuation.enabled.description%"
+                    },
+                    "stellarisLanguageServices.ai.runtime.backgroundTasks.maxRunning": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 4,
+                        "minimum": 1,
+                        "maximum": 16,
+                        "description": "%configuration.stellarisLanguageServices.ai.runtime.backgroundTasks.maxRunning.description%"
+                    },
+                    "stellarisLanguageServices.ai.runtime.backgroundTasks.outputLimitBytes": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 33554432,
+                        "minimum": 1048576,
+                        "description": "%configuration.stellarisLanguageServices.ai.runtime.backgroundTasks.outputLimitBytes.description%"
+                    },
+                    "stellarisLanguageServices.ai.developer.faultInjection": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.ai.developer.faultInjection.description%"
+                    },
+                    "stellarisLanguageServices.ai.chat.sideQuestion.enabled": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.ai.chat.sideQuestion.enabled.description%"
+                    },
                     "stellarisLanguageServices.ai.performance.modelCallBudget": {
                         "scope": "window",
                         "type": "number",

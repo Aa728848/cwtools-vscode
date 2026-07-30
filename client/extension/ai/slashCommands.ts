@@ -18,6 +18,7 @@ export type SlashCommandId =
     | 'init'
     | 'clear'
     | 'compact'
+    | 'sideQuestion'
     | 'goal'
     | 'goalComplete'
     | 'goalBlocked'
@@ -59,6 +60,11 @@ const DEFINITIONS: readonly SlashCommandDefinition[] = [
     {
         id: 'compact', command: '/compact', argumentMode: 'none', completion: 'execute', duringRun: 'deny', risk: 'stateful', category: 'session',
         description: { en: 'Compact active Agent context while keeping the topic transcript', zh: '压缩 Agent 活动上下文，同时保留话题记录' },
+    },
+    {
+        id: 'sideQuestion', command: '/side', argumentMode: 'required', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'session',
+        argumentHint: { en: '<question>', zh: '<问题>' },
+        description: { en: 'Ask a tool-free question against the latest stable Agent snapshot without steering it', zh: '基于 Agent 最新稳定快照进行无工具旁路提问，不改变主任务' },
     },
     {
         id: 'goal', command: '/goal', argumentMode: 'required', completion: 'insert', duringRun: 'queue', risk: 'stateful', category: 'goal', acceptsColonArgument: true,

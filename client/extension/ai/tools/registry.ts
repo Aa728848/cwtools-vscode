@@ -3,6 +3,7 @@ import { TOOL_DEFINITIONS as SCHEMA_DEFINITIONS } from './definitions';
 import { analyzeSchema, flattenSchema } from './schemaFlatten';
 
 export type AgentToolName =
+    | 'select_tools' | 'create_goal' | 'get_goal' | 'update_goal' | 'set_goal_budget'
     | 'query_scope' | 'query_types' | 'query_rules' | 'query_cwt_schema' | 'query_override_modes' | 'search_rule_capabilities' | 'explain_scope' | 'parse_pdx_fragment' | 'remove_ignored_diagnostic'
     | 'query_localisation_index' | 'query_workspace_index' | 'explore_pdx_project' | 'query_project_profile' | 'query_project_knowledge' | 'query_interface_knowledge' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'query_references'
     | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
@@ -41,6 +42,8 @@ export type ToolConcurrencyClass =
     | 'interactive';
 
 export type ToolDomain = 'shared' | 'paradox';
+export type ToolDisclosure = 'always' | 'stage' | 'deferred';
+export type ToolIdempotency = 'none' | 'read' | 'deterministic' | 'effect-keyed';
 
 export interface ToolRegistryEntry {
     name: AgentToolName;
@@ -60,6 +63,11 @@ export interface ToolRegistryEntry {
     flatSchema?: ToolDefinition;
     /** Domain-safe schema used when a shared tool has mixed-domain parameters. */
     generalSchema?: ToolDefinition;
+    disclosure: ToolDisclosure;
+    group?: string;
+    providerCapability?: string;
+    estimatedSchemaTokens: number;
+    idempotency: ToolIdempotency;
 }
 
 export const TOOL_REGISTRY = new Map<AgentToolName, ToolRegistryEntry>();
@@ -69,6 +77,11 @@ export const TOOL_REGISTRY = new Map<AgentToolName, ToolRegistryEntry>();
  * deciding whether General Coding may receive it is a compile error.
  */
 const TOOL_DOMAINS = {
+    select_tools: 'shared',
+    create_goal: 'shared',
+    get_goal: 'shared',
+    update_goal: 'shared',
+    set_goal_budget: 'shared',
     query_scope: 'paradox',
     query_types: 'paradox',
     query_rules: 'paradox',
@@ -257,6 +270,7 @@ const GENERAL_WORKFLOW_SCHEMA: ToolDefinition = {
 
 // Categories to help assign modes
 const BASE_READ: AgentToolName[] = [
+    'select_tools', 'get_goal',
     'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_references', 'get_design_blueprint_contract',
     'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge', 'run_skill', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory', 'glob_files',
@@ -270,7 +284,7 @@ const EDIT: AgentToolName[] = [
     'write_file', 'edit_file', 'replace_lines',
     'write_localisation', 'write_design_blueprint', 'save_workflow', 'remove_ignored_diagnostic'
 ];
-const MEMORY: AgentToolName[] = ['todo_write', 'set_memory', 'get_memory', 'search_memory', 'save_memory'];
+const MEMORY: AgentToolName[] = ['todo_write', 'create_goal', 'update_goal', 'set_goal_budget', 'set_memory', 'get_memory', 'search_memory', 'save_memory'];
 const NETWORK: AgentToolName[] = ['web_search', 'web_open'];
 const UTILITY: AgentToolName[] = ['run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process', 'git_ops', 'analyze_diagnostic_error'];
 const MEDIA: AgentToolName[] = ['convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
@@ -278,7 +292,13 @@ const _MCP: AgentToolName[] = ['mcp_call'];
 const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results'];
 
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
-const SUB_AGENT_EXCLUDES_SET = new Set<string>(['web_search', 'web_open', 'web_find', 'run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process', 'git_ops', 'save_workflow', ...MEDIA]);
+const SUB_AGENT_EXCLUDES_SET = new Set<string>([
+    'web_search', 'web_open', 'web_find',
+    'run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process',
+    'git_ops', 'save_workflow',
+    ...MEDIA,
+    ...ORCHESTRATION,
+]);
 const FILE_SCOPED_WRITE_TOOLS_SET = new Set<string>([
     'write_file',
     'edit_file',
@@ -317,7 +337,7 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
 const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
 const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'git_ops', 'save_workflow']);
 const REVIEW_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
-const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ..._MCP]);
+const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ..._MCP, ...ORCHESTRATION]);
 const LOC_MODES = new Set([
     'read_file', 'write_file',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
@@ -330,7 +350,7 @@ const SCRIPT_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'set_memory', '
 // Legacy General mode is intentionally read-only. Writable general coding work
 // belongs to Utility mode, whose staged surface and policy gates are explicit.
 const GENERAL_MODES = new Set([...BASE_READ, ...NETWORK]);
-const UTILITY_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, 'mcp_call']);
+const UTILITY_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ...ORCHESTRATION, 'mcp_call']);
 
 for (const schema of SCHEMA_DEFINITIONS) {
     const name = schema.function.name as AgentToolName;
@@ -423,6 +443,21 @@ for (const schema of SCHEMA_DEFINITIONS) {
     const isReadOnly = effect === 'workspace_read'
         || effect === 'network'
         || (effect === 'none' && !mutating && !ORCHESTRATION.includes(name));
+    const disclosure = ['todo_write', 'read_file', 'grep', 'get_goal', 'select_tools'].includes(name)
+        ? 'always'
+        : (['write_file', 'edit_file', 'replace_lines', 'run_command', 'git_ops', 'mcp_call', 'dispatch_agents'].includes(name)
+            ? 'deferred'
+            : 'stage');
+    const group = effect === 'workspace_write' ? 'file_write'
+        : effect === 'workspace_read' ? (name.includes('shader') ? 'shader' : 'workspace_read')
+            : effect === 'network' ? 'web'
+                : effect === 'shell' || effect === 'process' ? 'command'
+                    : effect === 'git' ? 'git'
+                        : effect === 'media' ? 'media'
+                            : effect === 'mcp' ? 'mcp'
+                                : ORCHESTRATION.includes(name) ? 'orchestrator'
+                                    : MEMORY.includes(name) ? 'memory'
+                                        : 'support';
     TOOL_REGISTRY.set(name, {
         name,
         schema,
@@ -445,6 +480,15 @@ for (const schema of SCHEMA_DEFINITIONS) {
                 : name === 'save_workflow'
                     ? GENERAL_WORKFLOW_SCHEMA
                     : undefined,
+        disclosure,
+        group,
+        providerCapability: disclosure === 'deferred' ? 'dynamic_tools' : undefined,
+        estimatedSchemaTokens: Math.ceil(JSON.stringify(flatSchema ?? schema).length / 4),
+        idempotency: isReadOnly && effect !== 'network'
+            ? 'read'
+            : effect === 'none' && !mutating
+                ? 'deterministic'
+                : 'none',
     });
 }
 

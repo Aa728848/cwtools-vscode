@@ -35,6 +35,7 @@ const QUALITY_GATE_PREFLIGHT_CONCURRENCY = 4;
 export interface QualityGateReviewContext {
     taskGraph?: TaskGraph;
     workspaceRoot?: string;
+    handoffs?: import('../runner/agentHandoff').AgentHandoff[];
 }
 
 export const PDX_DIAGNOSTIC_EXTENSIONS = ['.txt', '.gui', '.gfx', '.asset', '.entity'] as const;
@@ -184,6 +185,19 @@ export class QualityGate {
         const semanticSection = semanticReport
             ? ['## Deterministic Semantic Report', semanticReport, '']
             : [];
+        const handoffSection = reviewContext?.handoffs?.length
+            ? [
+                '## Structured Builder Handoffs',
+                JSON.stringify(reviewContext.handoffs.map(handoff => ({
+                    summary: handoff.summary,
+                    changedFiles: handoff.changedFiles,
+                    verification: handoff.verification,
+                    unresolved: handoff.unresolved,
+                })), null, 2),
+                'Treat verification as a claim to check independently. Every unresolved item is a mandatory review target.',
+                '',
+            ]
+            : [];
         const paradoxReview = isParadoxTaskGraph(reviewContext?.taskGraph);
         const reviewChecklist = paradoxReview
             ? [
@@ -213,6 +227,7 @@ export class QualityGate {
             spriteSection,
             soundSection,
             ...semanticSection,
+            ...handoffSection,
             'Review Checklist:',
             ...reviewChecklist,
             '',
@@ -565,7 +580,21 @@ export class QualityGate {
     // Now use buildCombinedReviewPrompt(writtenFiles: string[]) uniformly.
     /** @deprecated Use buildCombinedReviewPrompt instead */
     buildReviewPrompt(builderResult: SubAgentResult, preFetchedDiagnostics?: string): string {
-        return this.buildCombinedReviewPrompt(builderResult.writtenFiles, preFetchedDiagnostics);
+        const files = [...new Set([
+            ...builderResult.writtenFiles,
+            ...(builderResult.handoff?.changedFiles ?? []),
+        ])].sort();
+        return [
+            this.buildCombinedReviewPrompt(files, preFetchedDiagnostics),
+            ...(builderResult.handoff ? [
+                '',
+                '## Builder structured handoff',
+                `Summary: ${builderResult.handoff.summary}`,
+                `Verification: ${builderResult.handoff.verification.join('; ') || 'not reported'}`,
+                `Unresolved: ${builderResult.handoff.unresolved.join('; ') || 'none reported'}`,
+                'Verify these claims independently; unresolved items are mandatory review targets.',
+            ] : []),
+        ].join('\n');
     }
 
     /** 

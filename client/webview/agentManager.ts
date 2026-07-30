@@ -33,6 +33,9 @@ type ManagerEnhancementState = {
     orchestrator: OrchestratorProgressMessage['progress'] | null;
     run: any | null;
     runEvents: any[];
+    activity?: ManagerSnapshotMessage['activity'];
+    runtimeInspector?: ManagerSnapshotMessage['runtimeInspector'];
+    transcript?: ManagerSnapshotMessage['transcript'];
     selectedRunEventId?: string;
     compactedMemoryContent?: string;
     cleanupResult?: { deletedCount: number; keptCount: number; reclaimedBytes: number };
@@ -71,6 +74,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     orchestrator: null,
     run: null,
     runEvents: [],
+    activity: undefined,
+    runtimeInspector: undefined,
+    transcript: undefined,
     selectedRunEventId: undefined,
     compactedMemoryContent: undefined,
     cleanupResult: undefined,
@@ -1345,10 +1351,17 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                     </div>
                 </section>
             ` : '';
+            const runtimeTasks = state.activity?.items.filter(item => item.kind === 'task' || item.kind === 'goal') ?? [];
             const tasksHtml = `
                 <section class="manager-activity-section manager-tasks-section">
-                    <div class="manager-activity-section-title"><strong>${ui.activity.tasks}</strong><span>${state.todos.length}</span></div>
+                    <div class="manager-activity-section-title"><strong>${ui.activity.tasks}</strong><span>${state.todos.length + runtimeTasks.length}</span></div>
                     <div class="manager-task-list">
+                        ${runtimeTasks.map(item => `
+                            <article class="manager-task-item manager-task-${escapeHtml(item.status)}">
+                                <span class="manager-task-mark">${escapeHtml(item.kind === 'goal' ? 'G' : 'T')}</span>
+                                <span>${escapeHtml(item.label)}${item.detail ? `<em>${escapeHtml(item.detail)}</em>` : ''}</span>
+                            </article>
+                        `).join('')}
                         ${state.todos.length ? state.todos.map(todo => `
                             <article class="manager-task-item manager-task-${escapeHtml(todo.status)}">
                                 <span class="manager-task-mark">${taskStatusMark(todo.status)}</span>
@@ -1358,7 +1371,76 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                     </div>
                 </section>
             `;
-            const hasActivity = !!run || !!progress || state.todos.length > 0 || state.artifacts.length > 0 || events.length > 0;
+            const runtime = state.runtimeInspector;
+            const runtimeInspectorHtml = runtime ? `
+                <details class="manager-activity-diagnostics" open>
+                    <summary>${locale === 'zh-cn' ? '运行时检查器' : 'Runtime Inspector'}</summary>
+                    <div class="manager-activity-diagnostics-body">
+                        <div class="manager-context-breakdown">
+                            <span>${locale === 'zh-cn' ? '配置' : 'Profile'}: ${escapeHtml(runtime.profile || '-')}</span>
+                            <span>${locale === 'zh-cn' ? '阶段' : 'Phase'}: ${escapeHtml(runtime.scheduling?.phase || '-')}</span>
+                            <span>${locale === 'zh-cn' ? '授权' : 'Authorization'}: ${escapeHtml(runtime.scheduling?.authorization || runtime.tools?.authorization || '-')}</span>
+                            <span>${locale === 'zh-cn' ? '调度' : 'Dispatch'}: ${escapeHtml(runtime.scheduling?.dispatch || '-')}</span>
+                            <span>${locale === 'zh-cn' ? '叠加能力' : 'Overlays'}: ${escapeHtml(runtime.overlays.join(', ') || '-')}</span>
+                            <span>${locale === 'zh-cn' ? '工具' : 'Tools'}: ${runtime.tools?.activated.length ?? 0}/${runtime.tools?.registered.length ?? 0} (${runtime.tools?.disclosed.length ?? 0} ${locale === 'zh-cn' ? '已披露' : 'disclosed'})</span>
+                            <span>${locale === 'zh-cn' ? '提示队列' : 'Prompts'}: ${runtime.prompts.running}/${runtime.prompts.total}</span>
+                            <span>${locale === 'zh-cn' ? '待交互' : 'Interactions'}: ${runtime.interactions.pending}/${runtime.interactions.total}</span>
+                            <span>${locale === 'zh-cn' ? '转录' : 'Transcript'}: ${runtime.transcript.turns} turns · #${runtime.transcript.sequence} · ${escapeHtml(runtime.transcript.grade)}</span>
+                            <span>${locale === 'zh-cn' ? '实体' : 'Entities'}: ${runtime.transcript.pendingEntities}/${runtime.transcript.entities} ${locale === 'zh-cn' ? '待处理' : 'pending'}</span>
+                            <span>${locale === 'zh-cn' ? '模型' : 'Model'}: ${escapeHtml(runtime.model?.requested || '-')}${runtime.model?.effective && runtime.model.effective !== runtime.model.requested ? ` → ${escapeHtml(runtime.model.effective)}` : ''}${runtime.model?.bindingSource ? ` · ${escapeHtml(runtime.model.bindingSource)}` : ''}</span>
+                            <span>${locale === 'zh-cn' ? '配置目录' : 'Profile catalog'}: r${runtime.profiles.revision} · ${runtime.profiles.profiles.length} profiles · ${runtime.profiles.sources.length} sources</span>
+                        </div>
+                        ${runtime.profiles.sources.some(source => source.error) ? `
+                            <div class="run-written-files">
+                                <strong>${locale === 'zh-cn' ? '配置源错误' : 'Profile source errors'}:</strong>
+                                <ul>${runtime.profiles.sources.filter(source => source.error).map(source =>
+                                    `<li><code>${escapeHtml(source.id)}</code> ${escapeHtml(source.error || '')}</li>`
+                                ).join('')}</ul>
+                            </div>
+                        ` : ''}
+                        ${runtime.permissions.length ? `
+                            <div class="run-written-files">
+                                <strong>${locale === 'zh-cn' ? '最近权限决策' : 'Recent permission decisions'}:</strong>
+                                <ul>${runtime.permissions.slice(-8).reverse().map(entry =>
+                                    `<li><code>${escapeHtml(entry.tool)}</code> ${escapeHtml(entry.decision)} · ${escapeHtml(entry.source)}</li>`
+                                ).join('')}</ul>
+                            </div>
+                        ` : ''}
+                    </div>
+                </details>
+            ` : '';
+            const transcriptTurns = state.transcript?.turns.slice(-6) ?? [];
+            const transcriptHtml = transcriptTurns.length > 0 ? `
+                <section class="manager-activity-section">
+                    <div class="manager-activity-section-title">
+                        <strong>${locale === 'zh-cn' ? '规范转录' : 'Canonical transcript'}</strong>
+                        <span>#${state.transcript?.sequence ?? 0}</span>
+                    </div>
+                    <div class="manager-task-list">
+                        ${transcriptTurns.map(turn => {
+                            const frames = turn.steps
+                                .flatMap(step => step.frames)
+                                .map(frame => frame.toolName
+                                    ? `${frame.toolName}: ${frame.status || frame.kind}`
+                                    : frame.text || frame.kind)
+                                .filter(Boolean)
+                                .join('\n')
+                                .slice(0, 800);
+                            return `
+                                <article class="manager-task-item manager-task-${escapeHtml(turn.state)}">
+                                    <span class="manager-task-mark">${escapeHtml(turn.state === 'completed' ? '✓' : turn.state === 'failed' ? '!' : '…')}</span>
+                                    <span>
+                                        <strong>${escapeHtml((turn.prompt || turn.turnId).slice(0, 160))}</strong>
+                                        ${frames ? `<em>${escapeHtml(frames)}</em>` : ''}
+                                    </span>
+                                </article>
+                            `;
+                        }).join('')}
+                    </div>
+                </section>
+            ` : '';
+            const hasActivity = !!run || !!progress || state.todos.length > 0 || runtimeTasks.length > 0
+                || state.artifacts.length > 0 || events.length > 0 || !!runtime;
 
             artifactListEl.innerHTML = `
                 <div class="manager-activity-page">
@@ -1385,6 +1467,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                     ` : hasActivity ? `<header class="manager-activity-header"><strong>${ui.activity.title}</strong><span>${m.runs.noRun}</span></header>` : `<div class="manager-review-empty"><strong>${ui.activity.noActivity}</strong><span>${m.runs.noRun}</span></div>`}
                     ${agentsHtml}
                     ${tasksHtml}
+                    ${runtimeInspectorHtml}
+                    ${transcriptHtml}
                     ${eventTimelineHtml ? `
                         <section class="manager-activity-section run-events-container">
                             <div class="manager-activity-section-title"><strong>${ui.activity.timeline}</strong><span>${events.length}</span></div>
@@ -1451,6 +1535,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         state.stats = snapshot.stats || state.stats;
         syncTopicScopedState(state.stats.currentTopicId);
         state.artifacts = snapshot.artifacts || [];
+        state.activity = snapshot.activity;
+        state.runtimeInspector = snapshot.runtimeInspector;
+        state.transcript = snapshot.transcript;
         lastWorkspaceRenderSignature = '';
         state.mode = snapshot.mode || state.mode;
         state.agentProfile = snapshot.agentProfile || state.agentProfile;
@@ -1525,6 +1612,21 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         switch (msg?.type) {
             case 'managerSnapshot':
                 updateFromSnapshot(msg as ManagerSnapshotMessage);
+                break;
+            case 'activitySnapshot':
+                state.activity = msg.activity;
+                renderOverview();
+                renderInspector();
+                break;
+            case 'runtimeInspectorSnapshot':
+                state.runtimeInspector = msg.runtimeInspector;
+                renderOverview();
+                renderInspector();
+                break;
+            case 'transcriptSnapshot':
+                state.transcript = msg.transcript;
+                renderOverview();
+                renderInspector();
                 break;
             case 'runSnapshot':
                 state.run = msg.snapshot;

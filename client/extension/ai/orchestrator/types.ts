@@ -126,6 +126,10 @@ export interface TaskNode {
     completedAt?: number;
     /** Token consumed by this node */
     tokenUsage?: TokenUsage;
+    /** Stable Agent identity reused across retry/resume tasks. */
+    agentId?: string;
+    /** Latest Task-plane execution id for lineage. */
+    lastTaskId?: string;
 }
 
 /** Task graph (DAG) */
@@ -182,10 +186,14 @@ export interface SubAgentResult {
     writtenFiles: string[];
     /** Number of execution steps */
     stepCount: number;
+    /** Durable child run whose transcript can seed a resumed Agent task. */
+    runId?: string;
     /** Whether the sub-Agent is stopped early because it needs clarification from the main Agent/user */
     needsClarification?: boolean;
     /** Clarification content that needs to be processed by the main Agent */
     clarification?: string;
+    /** Validated, structured parent-facing handoff. */
+    handoff?: import('../runner/agentHandoff').AgentHandoff;
 }
 
 // ───Agent registry type ─────────────────────────────────────────────────────

@@ -477,7 +477,9 @@ describe('RunLedger Unit Tests', () => {
         expect(capturedOptions[0].threadId).to.equal('thread_protocol');
         expect(capturedOptions[0].durableGoal).to.equal(false);
 
-        await runtime.setGoal('topic_protocol', 'thread_protocol', 'finish the long Paradox task');
+        const durableGoal = await runtime.setGoal('topic_protocol', 'thread_protocol', 'finish the long Paradox task', 10_000);
+        expect(durableGoal).to.include({ version: 2, status: 'active', tokenBudget: 10_000 });
+        expect(durableGoal.goalId).to.be.a('string').and.not.empty;
         await runtime.startTurn({
             userMessage: 'continue',
             context: { topicId: 'topic_protocol' },
@@ -646,8 +648,7 @@ function loadInputQueueModule() {
 }
 
 function loadProcessRegistryModule() {
-    delete require.cache[require.resolve('../../extension/ai/runner/processRegistry')];
-    return require('../../extension/ai/runner/processRegistry') as typeof import('../../extension/ai/runner/processRegistry');
+    return loadModuleWithVscodeStub('../../extension/ai/runner/processRegistry') as typeof import('../../extension/ai/runner/processRegistry');
 }
 
 function loadThreadStoreModule() {
@@ -664,6 +665,10 @@ function loadActiveTurnRegistryModule() {
 }
 
 function loadAgentRuntimeModule() {
+    delete require.cache[require.resolve('../../extension/ai/workspacePaths')];
+    delete require.cache[require.resolve('../../extension/ai/runner/goalStore')];
+    delete require.cache[require.resolve('../../extension/ai/runner/goalSupervisor')];
+    delete require.cache[require.resolve('../../extension/ai/runner/taskManager')];
     return loadModuleWithVscodeStub('../../extension/ai/runner/agentRuntime') as typeof import('../../extension/ai/runner/agentRuntime');
 }
 

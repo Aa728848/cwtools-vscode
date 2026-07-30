@@ -29,6 +29,38 @@ export type AgentRuntimeDomain = Exclude<AgentDomain, 'auto'>;
 export type AgentIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
 export type AgentExecutionStrategy = 'auto' | 'single' | 'multi';
 
+/** Maximum effect authority granted by the user for a run. Runtime transitions may only preserve or reduce it. */
+export type AgentAuthorization = 'read_only' | 'plan_write_only' | 'workspace_write';
+/** Evidence-driven runtime phase. This is intentionally independent from the legacy AgentMode adapter. */
+export type AgentRunPhase = 'inspect' | 'plan' | 'execute' | 'verify' | 'finalize';
+/** Runtime execution topology. */
+export type AgentDispatchMode = 'single' | 'parallel' | 'specialist';
+
+export interface AgentSchedulingState {
+    /** Concrete runtime profile selected from the catalog. Legacy mode is derived from the axes below. */
+    profileName?: string;
+    domainProfile: AgentRuntimeDomain;
+    authorization: AgentAuthorization;
+    phase: AgentRunPhase;
+    dispatch: AgentDispatchMode;
+    /** Orthogonal execution overlays such as planning, verification, and swarm coordination. */
+    overlays?: string[];
+    routeConfidence: number;
+    routeEvidence: string[];
+    phaseReason: string;
+    dispatchReason?: string;
+    revision: number;
+}
+
+export interface AdmissionDecision {
+    domainProfile: AgentRuntimeDomain;
+    authorization: AgentAuthorization;
+    initialPhase: 'inspect' | 'plan' | 'verify';
+    explicitDelegation: boolean;
+    confidence: number;
+    evidence: string[];
+}
+
 /**
  * User-facing reasoning selection. `none` disables thinking when the concrete
  * provider/model exposes a switch; `max` is normalized to the provider's
@@ -49,6 +81,8 @@ export interface AgentProfileSelection {
     domain: AgentDomain;
     intent: AgentIntent;
     strategy: AgentExecutionStrategy;
+    /** Optional named runtime profile loaded from AGENT.md. */
+    profileName?: string;
 }
 
 export interface ResolvedAgentProfile {
@@ -58,6 +92,10 @@ export interface ResolvedAgentProfile {
     strategy: Exclude<AgentExecutionStrategy, 'auto'>;
     mode: AgentMode;
     reason: string;
+    /** Admission decision retained separately from the legacy mode adapter. */
+    admission: AdmissionDecision;
+    /** Initial persisted runtime scheduler state. */
+    schedulingState: AgentSchedulingState;
 }
 
 /** Current-game entity/reference kind. Prefer exact names returned by TypeDefs/CWT. */
@@ -1811,12 +1849,14 @@ export interface AgentCheckpoint {
  * with the complete tool call context and reasoning history.
  */
 export interface AgentResumeState {
-    /** V3 adds atomic snapshots and transcript integrity metadata; V2 remains readable. */
-    version?: 2 | 3;
+    /** V4 adds replay anchors, typed pending work, model binding, and disclosure state. */
+    version?: 2 | 3 | 4;
     timestamp: number;
     mode: AgentMode;
     /** Resolved capability domain. Missing on older snapshots and inferred from mode. */
     domain?: AgentRuntimeDomain;
+    /** Optional scheduler state added without breaking V2/V3 restore. */
+    schedulingState?: AgentSchedulingState;
     messages: ChatMessage[];
     todos: TodoItem[];
     topicId: string;
@@ -1836,6 +1876,18 @@ export interface AgentResumeState {
     recoveredFromEventLog?: boolean;
     /** @deprecated V3 never persists session-only approval rules. */
     permissionRules?: import('./runner/permissionPolicy').PermissionRule[];
+    domainSequence?: number;
+    domainSnapshot?: import('./runner/state/domainModel').DomainSnapshot;
+    pendingStepRequests?: import('./runner/stepRequest').StepRequest[];
+    schedulingRevision?: number;
+    goalId?: string;
+    taskIds?: string[];
+    providerId?: string;
+    model?: string;
+    toolDisclosureState?: {
+        dynamicSupported: boolean;
+        loaded: string[];
+    };
 }
 
 // ─── Agent Execution ─────────────────────────────────────────────────────────
@@ -2221,6 +2273,17 @@ export type HostMessage =
     | { type: 'clearChat'; targetSurface?: 'chat' | 'manager' }
     | { type: 'modeChanged'; mode: AgentMode; label?: string }
     | { type: 'agentProfileChanged'; profile: AgentProfileSelection }
+    | {
+        type: 'runtimeProfiles';
+        revision: number;
+        profiles: Array<{
+            name: string;
+            description: string;
+            domain?: AgentRuntimeDomain;
+            authorizationCeiling: AgentAuthorization;
+            modelPreference?: 'primary' | 'secondary';
+        }>;
+    }
     | { type: 'workflowList'; workflows: Array<{ id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }>; currentWorkflowId?: string | null; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
     | { type: 'workflowChanged'; workflowId?: string | null; workflow?: { id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
@@ -2267,7 +2330,7 @@ export type HostMessage =
     | { type: 'artifactList'; artifacts: AgentArtifact[] }
     /** Multi-Agent coordinator progress push — Agent Lane UI */
     | { type: 'orchestratorProgress'; progress: OrchestratorProgressPayload }
-    | { type: 'runSnapshot'; snapshot: AgentRunRecord; events?: import('./runner/runLedger').AgentRunEvent[]; eventCount?: number; truncatedEventCount?: number; artifacts?: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }>; cacheStats?: import('./runner/runReducers').CacheStatsSnapshot }
+    | { type: 'runSnapshot'; snapshot: AgentRunRecord; events?: import('./runner/runLedger').AgentRunEvent[]; eventCount?: number; truncatedEventCount?: number; artifacts?: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }>; cacheStats?: import('./runner/runReducers').CacheStatsSnapshot; scheduling?: import('./runner/runReducers').SchedulingSnapshot }
     | { type: 'mentionSearchResults'; results: Array<{
         type?: ContextItemType;
         uri?: string;
@@ -2298,7 +2361,13 @@ export type HostMessage =
         isGenerating: boolean;
         liveStepCount: number;
         artifacts: AgentArtifact[];
-    } | { type: 'compactedMemoryResult'; content: string }
+        activity?: import('./runner/activityProjection').ActivityProjection;
+        runtimeInspector?: import('./runner/agentRuntime').AgentRuntimeInspector;
+        transcript?: import('../../shared/agentTranscript').AgentTranscriptSnapshot;
+    } | { type: 'activitySnapshot'; activity: import('./runner/activityProjection').ActivityProjection }
+    | { type: 'runtimeInspectorSnapshot'; runtimeInspector: import('./runner/agentRuntime').AgentRuntimeInspector }
+    | { type: 'transcriptSnapshot'; transcript: import('../../shared/agentTranscript').AgentTranscriptSnapshot }
+    | { type: 'compactedMemoryResult'; content: string }
     | { type: 'runArtifactsCleanupResult'; deletedCount: number; keptCount: number; reclaimedBytes: number }
     | { type: 'scratchFiles'; files: Array<{ name: string; relPath: string; size: number }> };
 
@@ -2471,6 +2540,8 @@ export interface AgentRunRecord {
     turnId?: string;
     status: AgentRunStatus;
     mode: AgentMode | string;
+    /** Runtime scheduling state; legacy records derive it from mode/domain. */
+    schedulingState?: AgentSchedulingState;
     workflowId?: string | null;
     providerId?: string;
     model?: string;

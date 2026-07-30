@@ -7,6 +7,10 @@ import type {
     AgentRuntimeDomain,
     ResolvedAgentProfile,
 } from './types';
+import {
+    admissionFromResolvedProfile,
+    schedulingStateFromAdmission,
+} from './runner/scheduling';
 
 export const DEFAULT_AGENT_PROFILE: Readonly<AgentProfileSelection> = Object.freeze({
     domain: 'auto',
@@ -45,10 +49,17 @@ export interface ModelAgentProfileDecision {
     intent: Exclude<AgentIntent, 'auto'>;
     strategy: Exclude<AgentExecutionStrategy, 'auto'>;
     reason: string;
+    confidence?: number;
+    evidence?: string[];
 }
 
 export function cloneAgentProfile(profile: AgentProfileSelection = DEFAULT_AGENT_PROFILE): AgentProfileSelection {
-    return { domain: profile.domain, intent: profile.intent, strategy: profile.strategy };
+    return {
+        domain: profile.domain,
+        intent: profile.intent,
+        strategy: profile.strategy,
+        ...(profile.profileName ? { profileName: profile.profileName } : {}),
+    };
 }
 
 /** Build the only profile exposed by the normal composer: domain is selectable; routing stays automatic. */
@@ -57,7 +68,10 @@ export function profileForUserDomain(domain: AgentDomain): AgentProfileSelection
 }
 
 export function sameAgentProfile(left: AgentProfileSelection, right: AgentProfileSelection): boolean {
-    return left.domain === right.domain && left.intent === right.intent && left.strategy === right.strategy;
+    return left.domain === right.domain
+        && left.intent === right.intent
+        && left.strategy === right.strategy
+        && left.profileName === right.profileName;
 }
 
 export function isAgentProfileSelection(value: unknown): value is AgentProfileSelection {
@@ -65,7 +79,17 @@ export function isAgentProfileSelection(value: unknown): value is AgentProfileSe
     const candidate = value as Partial<AgentProfileSelection>;
     return DOMAINS.has(candidate.domain as AgentDomain)
         && INTENTS.has(candidate.intent as AgentIntent)
-        && STRATEGIES.has(candidate.strategy as AgentExecutionStrategy);
+        && STRATEGIES.has(candidate.strategy as AgentExecutionStrategy)
+        && (candidate.profileName === undefined
+            || (typeof candidate.profileName === 'string' && /^[a-zA-Z0-9_.-]{1,80}$/.test(candidate.profileName)));
+}
+
+function schedulingForSelection(
+    admission: ResolvedAgentProfile['admission'],
+    selection: AgentProfileSelection,
+): ResolvedAgentProfile['schedulingState'] {
+    const schedulingState = schedulingStateFromAdmission(admission);
+    return selection.profileName ? { ...schedulingState, profileName: selection.profileName } : schedulingState;
 }
 
 export function isAgentMode(value: unknown): value is AgentMode {
@@ -140,11 +164,19 @@ export function parseModelAgentProfileDecision(raw: string): ModelAgentProfileDe
             || (candidate.strategy !== 'single' && candidate.strategy !== 'multi')) {
             return undefined;
         }
+        const confidence = typeof candidate.confidence === 'number'
+            ? Math.max(0, Math.min(1, candidate.confidence))
+            : undefined;
+        const evidence = Array.isArray(candidate.evidence)
+            ? candidate.evidence.filter((item): item is string => typeof item === 'string').map(item => item.slice(0, 240)).slice(0, 8)
+            : undefined;
         return {
             domain: candidate.domain,
             intent: candidate.intent as ModelAgentProfileDecision['intent'],
             strategy: candidate.strategy,
             reason: typeof candidate.reason === 'string' ? candidate.reason.trim().slice(0, 240) : '',
+            ...(confidence !== undefined ? { confidence } : {}),
+            ...(evidence !== undefined ? { evidence } : {}),
         };
     } catch {
         return undefined;
@@ -159,7 +191,18 @@ export function resolveAgentProfileFromModelDecision(
 ): ResolvedAgentProfile {
     const selection = normalizeAgentProfile(profile);
     const fallback = resolveAgentProfile(text, selection, hints);
-    const domain = selection.domain === 'auto' ? decision.domain : selection.domain;
+    const routeConfidence = decision.confidence ?? 0.65;
+    const keepPreviousDomain = selection.domain === 'auto'
+        && !!hints.previousDomain
+        && decision.domain !== hints.previousDomain
+        && routeConfidence < 0.8
+        && fallback.domain === hints.previousDomain;
+    // Apply hysteresis only when the deterministic route has no strong
+    // evidence for switching domains. Explicit file/language semantics in the
+    // fallback still switch immediately.
+    const domain = selection.domain === 'auto'
+        ? (keepPreviousDomain ? hints.previousDomain! : decision.domain)
+        : selection.domain;
     const explicitNoWrite = NO_WRITE_INTENT_RE.test(text) && !DIRECT_WRITE_OVERRIDE_RE.test(text);
     const directWriteRequested = DIRECT_WRITE_OVERRIDE_RE.test(text);
     const terseModificationAnswer = text.trim().length <= 80
@@ -174,18 +217,36 @@ export function resolveAgentProfileFromModelDecision(
                 ? 'execute'
             : decision.intent;
     const intent = selection.intent === 'auto' ? routedIntent : selection.intent;
+    const mutationAuthorizedPlan = intent === 'plan'
+        && fallback.intent === 'execute'
+        && !explicitNoWrite;
     // Existing multi-Agent modes are execution coordinators. Keep read-only and
     // plan turns on their dedicated safety modes even if a router returns multi.
-    const selectedStrategy = selection.strategy === 'auto' ? decision.strategy : selection.strategy;
+    // Multi-Agent is a runtime optimization. Automatic model routing may
+    // recommend it, but only an explicit user request commits at admission;
+    // broad tasks can still dispatch after repository-backed decomposition.
+    const selectedStrategy = selection.strategy === 'auto'
+        ? (MULTI_AGENT_RE.test(text) ? 'multi' : 'single')
+        : selection.strategy;
     const strategy = intent === 'execute' ? selectedStrategy : 'single';
-    return {
+    const base = {
         selection,
         domain,
         intent,
         strategy,
-        mode: resolveMode(domain, intent, strategy),
-        reason: `model routing${decision.reason ? `: ${decision.reason}` : ''}; fallback=${fallback.mode}`,
+        mode: mutationAuthorizedPlan
+            ? resolveMode(domain, 'execute', 'single')
+            : resolveMode(domain, intent, strategy),
+        reason: `model routing${decision.reason ? `: ${decision.reason}` : ''}; fallback=${fallback.mode}`
+            + (keepPreviousDomain ? '; domain switch deferred by routing hysteresis' : ''),
     };
+    const admission = admissionFromResolvedProfile(
+        base,
+        routeConfidence,
+        decision.evidence ?? [decision.reason || 'model-assisted routing'],
+        mutationAuthorizedPlan ? 'workspace_write' : undefined,
+    );
+    return { ...base, admission, schedulingState: schedulingForSelection(admission, selection) };
 }
 
 export function resolveAgentProfile(
@@ -232,8 +293,7 @@ export function resolveAgentProfile(
         strategy = selection.strategy;
     } else {
         const explicitMulti = MULTI_AGENT_RE.test(request);
-        const broadExecution = intent === 'execute' && BROAD_TASK_RE.test(request);
-        strategy = explicitMulti || broadExecution ? 'multi' : 'single';
+        strategy = explicitMulti ? 'multi' : 'single';
     }
     if (intent !== 'execute') strategy = 'single';
 
@@ -244,12 +304,29 @@ export function resolveAgentProfile(
     const intentReason = selection.intent === 'auto' ? 'request intent' : 'user selection';
     const strategyReason = selection.strategy === 'auto' ? 'task scope' : 'user selection';
 
-    return {
+    const base = {
         selection,
         domain,
         intent,
         strategy,
         mode,
-        reason: `domain: ${domainReason}; intent: ${intentReason}; strategy: ${strategyReason}`,
+        reason: `domain: ${domainReason}; intent: ${intentReason}; strategy: ${strategyReason}${BROAD_TASK_RE.test(request) ? '; runtime dispatch evaluation requested' : ''}`,
     };
+    const confidence = selection.domain !== 'auto'
+        ? 1
+        : hasGeneralCodeText || hasPdxText
+            ? 0.9
+            : hasPdxFile
+                ? 0.8
+                : hints.previousDomain
+                    ? 0.7
+                    : 0.55;
+    const evidence = [
+        `domain: ${domainReason}`,
+        `intent: ${intentReason}`,
+        `strategy: ${strategyReason}`,
+        ...(BROAD_TASK_RE.test(request) ? ['broad task requires runtime decomposition'] : []),
+    ];
+    const admission = admissionFromResolvedProfile(base, confidence, evidence);
+    return { ...base, admission, schedulingState: schedulingForSelection(admission, selection) };
 }

@@ -14,5 +14,9 @@ export type ChatSurfaceHostMessage =
     | { type: 'floatingCardResolved'; card: 'permission' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
     | { type: 'generationComplete' | 'generationError' }
     | { type: 'contextCompactionStatus'; step: unknown }
+    | { type: 'activitySnapshot'; activity: unknown }
+    | { type: 'runtimeProfiles'; revision: number; profiles: Array<{ name: string; description: string; domain?: string; authorizationCeiling: string; modelPreference?: string }> }
+    | { type: 'runtimeInspectorSnapshot'; runtimeInspector: unknown }
+    | { type: 'transcriptSnapshot'; transcript: unknown }
     | { type: 'artifactList'; artifacts: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }> }
     | { type: 'todoUpdate'; todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'done' }> };

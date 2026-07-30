@@ -154,6 +154,9 @@ ${stylesheetLinks}
         <button class="composer-menu-item" data-composer-action="media">${svgIconNoMargin('upload')}<span>Media</span></button>
         <button class="composer-menu-item" data-composer-action="mentions">${svgIconNoMargin('tag')}<span>Mentions</span></button>
         <button class="composer-menu-item" data-composer-action="workflows">${svgIconNoMargin('sparkles')}<span>Workflows</span></button>
+        <div class="composer-menu-divider"></div>
+        <button class="composer-menu-item" data-composer-action="plan">${svgIconNoMargin('clipboard')}<span>${t('Plan mode', '计划模式')}</span></button>
+        <button class="composer-menu-item" data-composer-action="goal">${svgIconNoMargin('flag')}<span>${t('Set goal', '设置 Goal')}</span></button>
     </div>
     <div id="modeMenu" class="composer-menu mode-menu" aria-hidden="true">
         <div class="composer-menu-section">

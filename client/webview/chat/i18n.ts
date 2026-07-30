@@ -138,6 +138,8 @@ export interface ChatI18nText {
             permissions: string;
             validation: string;
             context: string;
+            activity: string;
+            scheduling: string;
             subagents: string;
             other: string;
         };
@@ -444,6 +446,8 @@ const EN: ChatI18nText = {
             permissions: 'Permissions',
             validation: 'Validation',
             context: 'Context & Memory',
+            activity: 'Activity',
+            scheduling: 'Scheduling',
             subagents: 'Sub-Agents',
             other: 'Other',
         },
@@ -711,6 +715,8 @@ const ZH_CN: ChatI18nText = {
             permissions: '权限',
             validation: '校验',
             context: '上下文与记忆',
+            activity: '活动',
+            scheduling: '调度',
             subagents: '子 Agent',
             other: '其他',
         },

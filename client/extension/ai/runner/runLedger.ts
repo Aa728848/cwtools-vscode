@@ -3,10 +3,16 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { getPrivateTopicRootCandidates, getPrivateTopicStorageDir } from '../workspacePaths';
 import { ErrorReporter } from '../errorReporter';
-import { AgentRunRecord, type ChatMessage } from '../types';
+import {
+    AgentRunRecord,
+    type AdmissionDecision,
+    type AgentSchedulingState,
+    type ChatMessage,
+} from '../types';
 import { isPathInsideOrEqual } from '../../pathScope';
 import { atomicWriteJson, readJsonWithBackup, sha256Text } from './durableStorage';
 import { getHistoryPolicy } from './historyPolicy';
+import { schedulingStateFromAdmission } from './scheduling';
 import {
     applyModelRequestMessageArchive,
     type ModelRequestMessageArchive,
@@ -72,7 +78,34 @@ export type AgentRunEventType =
     | 'worktree_created'
     | 'worktree_diff_collected'
     | 'worktree_cleaned'
-    | 'evidence_gate_decision';
+    | 'evidence_gate_decision'
+    | 'admission_decided'
+    | 'phase_changed'
+    | 'capabilities_changed'
+    | 'prompt_queued'
+    | 'prompt_steered'
+    | 'dispatch_evaluated'
+    | 'agent_suspended'
+    | 'agent_requeued'
+    | 'provider_capacity_changed'
+    | 'route_outcome_evaluated'
+    | 'domain_op_applied'
+    | 'domain_replay_completed'
+    | 'goal_transitioned'
+    | 'goal_budget_exhausted'
+    | 'goal_continuation_queued'
+    | 'task_created'
+    | 'task_status_changed'
+    | 'task_notification_delivered'
+    | 'tool_disclosure_changed'
+    | 'tool_call_deduplicated'
+    | 'tool_repeat_escalated'
+    | 'context_limit_observed'
+    | 'compaction_retry'
+    | 'undo_started'
+    | 'undo_completed'
+    | 'side_question_started'
+    | 'side_question_completed';
 
 export interface AgentRunEvent {
     eventId: string;
@@ -148,6 +181,7 @@ export class RunLedger {
             workflowId?: string | null;
             threadId?: string;
             turnId?: string;
+            schedulingState?: AgentSchedulingState;
         },
     ): Promise<AgentRunRecord> {
         const runId = `run_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -165,6 +199,7 @@ export class RunLedger {
             turnId: metadata?.turnId,
             status: 'created',
             mode,
+            schedulingState: metadata?.schedulingState,
             workflowId: metadata?.workflowId,
             providerId: metadata?.providerId,
             model: metadata?.model,
@@ -225,6 +260,7 @@ export class RunLedger {
             workflowId: metadata?.workflowId,
             threadId: metadata?.threadId,
             turnId: metadata?.turnId,
+            schedulingState: metadata?.schedulingState,
         }, { agentId: metadata?.agentId });
 
         return record;
@@ -271,6 +307,22 @@ export class RunLedger {
             }
         } else if (type === 'metrics_updated') {
             run.metrics = { ...run.metrics, ...storedPayload.metrics };
+        } else if (type === 'phase_changed' && run.schedulingState && typeof storedPayload?.to === 'string') {
+            run.schedulingState = {
+                ...run.schedulingState,
+                phase: storedPayload.to,
+                phaseReason: typeof storedPayload.reason === 'string' ? storedPayload.reason : run.schedulingState.phaseReason,
+                revision: typeof storedPayload.revision === 'number'
+                    ? storedPayload.revision
+                    : run.schedulingState.revision + 1,
+            };
+        } else if (type === 'dispatch_evaluated' && run.schedulingState && storedPayload?.accepted === true) {
+            run.schedulingState = {
+                ...run.schedulingState,
+                dispatch: 'parallel',
+                dispatchReason: typeof storedPayload.reason === 'string' ? storedPayload.reason : run.schedulingState.dispatchReason,
+                revision: run.schedulingState.revision + 1,
+            };
         }
         const metrics = run.metrics;
         if (type === 'model_call_start') {
@@ -721,7 +773,49 @@ export class RunLedger {
         record.steps = [];
         record.writtenFiles = Array.isArray(record.writtenFiles) ? record.writtenFiles : [];
         for (const event of events) {
-            if (event.type === 'status_changed' && event.payload?.status) {
+            if (event.type === 'admission_decided') {
+                const payload = event.payload as Partial<AdmissionDecision>;
+                if ((payload.domainProfile === 'general' || payload.domainProfile === 'paradox')
+                    && (payload.authorization === 'read_only'
+                        || payload.authorization === 'plan_write_only'
+                        || payload.authorization === 'workspace_write')
+                    && (payload.initialPhase === 'inspect'
+                        || payload.initialPhase === 'plan'
+                        || payload.initialPhase === 'verify')) {
+                    record.schedulingState = schedulingStateFromAdmission({
+                        domainProfile: payload.domainProfile,
+                        authorization: payload.authorization,
+                        initialPhase: payload.initialPhase,
+                        explicitDelegation: payload.explicitDelegation === true,
+                        confidence: typeof payload.confidence === 'number' ? payload.confidence : 0,
+                        evidence: Array.isArray(payload.evidence)
+                            ? payload.evidence.filter((item): item is string => typeof item === 'string')
+                            : [],
+                    });
+                }
+            } else if (event.type === 'phase_changed' && record.schedulingState
+                && ['inspect', 'plan', 'execute', 'verify', 'finalize'].includes(event.payload?.to)) {
+                record.schedulingState = {
+                    ...record.schedulingState,
+                    phase: event.payload.to,
+                    phaseReason: typeof event.payload.reason === 'string'
+                        ? event.payload.reason
+                        : record.schedulingState.phaseReason,
+                    revision: typeof event.payload.revision === 'number'
+                        ? event.payload.revision
+                        : record.schedulingState.revision + 1,
+                };
+            } else if (event.type === 'dispatch_evaluated' && record.schedulingState
+                && event.payload?.accepted === true) {
+                record.schedulingState = {
+                    ...record.schedulingState,
+                    dispatch: 'parallel',
+                    dispatchReason: typeof event.payload.reason === 'string'
+                        ? event.payload.reason
+                        : record.schedulingState.dispatchReason,
+                    revision: record.schedulingState.revision + 1,
+                };
+            } else if (event.type === 'status_changed' && event.payload?.status) {
                 record.status = event.payload.status;
             } else if (event.type === 'complete') {
                 record.status = 'completed';

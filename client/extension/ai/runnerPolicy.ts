@@ -16,13 +16,14 @@ const BUILD_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = 
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
         'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
         'glob_files', 'workspace_symbols', 'document_symbols',
-        'get_lsp_status', 'todo_write', 'run_skill', 'mcp_call',
+        'get_lsp_status', 'todo_write', 'mcp_call',
+        'dispatch_agents',
     ]),
     evidence: new Set([
         'query_project_knowledge', 'query_rules', 'query_cwt_schema', 'query_scope',
         'search_rule_capabilities', 'get_file_context', 'read_file', 'get_pdx_block',
         'get_design_blueprint_contract', 'write_design_blueprint', 'todo_write',
-        'glob_files', 'grep', 'workspace_symbols', 'document_symbols',
+        'grep', 'workspace_symbols', 'query_blackboard', 'merge_results',
     ]),
     validation: new Set([
         'query_rules', 'query_cwt_schema', 'query_scope', 'explain_scope',
@@ -128,21 +129,28 @@ const UTILITY_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> 
         'document_symbols', 'workspace_symbols', 'get_diagnostics', 'get_lsp_status',
         'query_workspace_index', 'query_project_profile', 'web_search', 'web_open',
         'web_find', 'todo_write', 'run_skill',
+        'dispatch_agents',
     ]),
     design: new Set(),
-    validation: new Set(),
+    validation: new Set([
+        'read_file', 'get_file_context', 'grep', 'document_symbols',
+        'workspace_symbols', 'get_diagnostics', 'todo_write',
+        'query_blackboard', 'merge_results',
+    ]),
     write: new Set([
         'read_file', 'list_directory', 'glob_files', 'grep', 'get_file_context',
         'document_symbols', 'workspace_symbols', 'get_diagnostics',
         'write_file', 'edit_file', 'replace_lines',
         'run_command', 'list_processes', 'read_process',
         'write_process_stdin', 'terminate_process', 'git_ops', 'todo_write',
+        'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
     finalize: new Set([
         'read_file', 'get_file_context', 'grep', 'document_symbols', 'workspace_symbols',
         'get_diagnostics', 'write_file', 'edit_file', 'replace_lines',
         'run_command', 'list_processes', 'read_process', 'write_process_stdin',
         'terminate_process', 'git_ops', 'todo_write',
+        'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
 };
 

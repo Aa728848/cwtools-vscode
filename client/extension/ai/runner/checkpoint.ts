@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as pathModule from 'path';
 import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from '../workspacePaths';
-import type { AgentResumeState, ChatMessage, AgentMode, AgentRuntimeDomain } from '../types';
+import type { AgentResumeState, ChatMessage, AgentMode, AgentRuntimeDomain, AgentSchedulingState } from '../types';
 import { defaultDomainForMode } from '../agentProfile';
 import type { AgentToolExecutor } from '../agentTools';
 import { isPathInsideOrEqual } from '../../pathScope';
@@ -15,6 +15,12 @@ import {
 import { atomicWriteJson, readJsonWithBackup, sha256Text } from './durableStorage';
 import { runLedger } from './runLedger';
 import { getHistoryPolicy } from './historyPolicy';
+import { normalizeSchedulingState } from './scheduling';
+import type { DomainSnapshot } from './state/domainModel';
+import { goalStore } from './goalStore';
+import { agentTaskManager } from './taskManager';
+import { createStepRequest } from './stepRequest';
+import { migrateLegacyRuntimeState } from './state/migrations';
 
 export const RESUME_TAIL_MESSAGE_LIMIT = 24;
 const RESUME_SUMMARY_CHAR_LIMIT = 12000;
@@ -139,6 +145,7 @@ export async function saveResumeState(
     runId?: string,
     pendingToolCalls?: any[],
     domain: AgentRuntimeDomain = defaultDomainForMode(mode),
+    schedulingState?: AgentSchedulingState,
 ): Promise<void> {
     if (getHistoryPolicy().persistence !== 'full') return;
     try {
@@ -155,13 +162,36 @@ export async function saveResumeState(
         const compactedMessages = buildResumeMessages(normalizedMessages, summaryText);
         const transcript = await archiveFullTranscript(resumeDir, runId, normalizedMessages);
         const latestEvent = runId ? runLedger.getLatestEvent(runId) : undefined;
+        const runRecord = runId ? runLedger.getRun(runId) : undefined;
+        const runtimeThreadId = runRecord?.threadId ?? topicId;
+        const safeThreadId = runtimeThreadId.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        const domainSnapshot = readJsonWithBackup<DomainSnapshot>(
+            pathModule.join(resumeDir, 'agents', safeThreadId, 'domain', 'snapshot.json'),
+            (value): value is DomainSnapshot => !!value
+                && typeof value === 'object'
+                && (value as Partial<DomainSnapshot>).version === 1
+                && typeof (value as Partial<DomainSnapshot>).sequence === 'number',
+        )?.value;
+        const goal = await goalStore.getGoal(topicId, runtimeThreadId);
+        agentTaskManager.configure(topicId);
+        const taskIds = agentTaskManager.list()
+            .filter(task => task.threadId === runtimeThreadId)
+            .map(task => task.taskId);
+        const disclosedTools = runId
+            ? (runLedger.getSnapshot(runId)?.events ?? [])
+                .filter(event => event.type === 'tool_disclosure_changed')
+                .flatMap(event => Array.isArray(event.payload?.loaded)
+                    ? event.payload.loaded.filter((item: unknown): item is string => typeof item === 'string')
+                    : [])
+            : [];
         const durablePermissionRules = PermissionPolicyStore.getInstance().serialize({ includeSessionOnly: false });
 
         const resumeState: AgentResumeState = {
-            version: 3,
+            version: 4,
             timestamp: Date.now(),
             mode,
             domain,
+            schedulingState,
             messages: compactedMessages,
             todos: toolExecutor.getTodos(),
             topicId,
@@ -175,6 +205,20 @@ export async function saveResumeState(
             compacted: true,
             transcriptSha256: transcript?.sha256,
             transcriptMessageCount: transcript?.messageCount,
+            domainSequence: domainSnapshot?.sequence,
+            domainSnapshot,
+            pendingStepRequests: pendingToolCalls?.length
+                ? [createStepRequest('retry', { pendingToolCalls }, { sourceId: runId })]
+                : undefined,
+            schedulingRevision: schedulingState?.revision,
+            goalId: goal?.goalId,
+            taskIds,
+            providerId: runRecord?.providerId,
+            model: runRecord?.model,
+            toolDisclosureState: {
+                dynamicSupported: true,
+                loaded: [...new Set(disclosedTools)].sort(),
+            },
             ...(durablePermissionRules.length > 0 ? { permissionRules: durablePermissionRules } : {}),
         };
 
@@ -186,7 +230,7 @@ export async function saveResumeState(
 
 /**
  * Read the resumable state under the specified topicId.
- * Supports V3, V2, and the legacy unversioned format.
+ * Supports V4, V3, V2, and the legacy unversioned format.
  */
 export async function loadResumeState(topicId: string): Promise<AgentResumeState | null> {
     try {
@@ -234,6 +278,18 @@ export async function loadResumeState(topicId: string): Promise<AgentResumeState
         }
         raw.messages = prepareMessagesForResume(raw.messages);
         raw.domain = raw.domain ?? defaultDomainForMode(raw.mode);
+        raw.schedulingState = normalizeSchedulingState(raw.schedulingState, raw.mode, raw.domain);
+        if (!raw.domainSnapshot) {
+            raw.domainSnapshot = migrateLegacyRuntimeState({
+                agentId: raw.topicId || topicId,
+                mode: raw.mode,
+                schedulingState: raw.schedulingState,
+                context: { messages: raw.messages, toolSchemas: raw.toolDisclosureState?.loaded ?? [] },
+            });
+            raw.domainSequence = raw.domainSnapshot.sequence;
+            raw.version = 4;
+            await atomicWriteJson(resumePath, raw);
+        }
         raw.recoveredFromBackup = loaded.recoveredFromBackup;
         // A process restart ends the approval session. Only explicitly durable
         // rules may be restored; legacy V2 session-only approvals are ignored.

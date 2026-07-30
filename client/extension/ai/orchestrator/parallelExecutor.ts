@@ -21,6 +21,8 @@ import { ConflictDetector } from './conflictDetector';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, aiText } from '../messages';
 import type { RunEventSink } from '../runner/runContext';
+import { AdaptiveConcurrencyController, isProviderRateLimit } from '../runner/scheduling';
+import { agentTaskManager, type AgentTaskStatus } from '../runner/taskManager';
 
 /** Sub-agent executor injected by Orchestrator. */
 export type SubAgentExecutor = (
@@ -41,6 +43,9 @@ export class ParallelExecutor {
     private consumedTokens: TokenUsage;
     private conflictDetector: ConflictDetector;
     private graphEngine: TaskGraphEngine;
+    private readonly adaptiveCapacity: AdaptiveConcurrencyController;
+    private readonly retryEligibleAt = new Map<string, number>();
+    private eventSink?: RunEventSink;
 
     constructor(options?: {
         maxConcurrency?: number;
@@ -48,6 +53,8 @@ export class ParallelExecutor {
         eventSink?: RunEventSink;
     }) {
         this.maxConcurrency = options?.maxConcurrency ?? Math.min(4, os.cpus().length || 2);
+        this.adaptiveCapacity = new AdaptiveConcurrencyController(this.maxConcurrency);
+        this.eventSink = options?.eventSink;
         this.globalTokenBudget = options?.globalTokenBudget ?? 0;
         this.consumedTokens = { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
         this.conflictDetector = new ConflictDetector(options?.eventSink);
@@ -55,6 +62,7 @@ export class ParallelExecutor {
     }
 
     setEventSink(eventSink?: RunEventSink): void {
+        this.eventSink = eventSink;
         this.conflictDetector.setEventSink(eventSink);
     }
 
@@ -64,6 +72,9 @@ export class ParallelExecutor {
         executor: SubAgentExecutor,
         options: OrchestratorOptions,
     ): Promise<OrchestratorResult> {
+        // Retry eligibility belongs to one task graph. Provider capacity is
+        // intentionally retained, but stale node ids must not delay a later run.
+        this.retryEligibleAt.clear();
         const agentResults = new Map<string, SubAgentResult>();
         const totalTokenUsage: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
         const emitStep = options.onStep ?? (() => {});
@@ -141,7 +152,14 @@ export class ParallelExecutor {
         while (!this.graphEngine.isComplete(graph)) {
             options.abortSignal?.throwIfAborted();
 
-            const readyNodes = this.graphEngine.getReadyNodes(graph);
+            const allReadyNodes = this.graphEngine.getReadyNodes(graph);
+            const now = Date.now();
+            const readyNodes = allReadyNodes.filter(node => (this.retryEligibleAt.get(node.id) ?? 0) <= now);
+            if (readyNodes.length === 0 && allReadyNodes.length > 0) {
+                const nextEligibleAt = Math.min(...allReadyNodes.map(node => this.retryEligibleAt.get(node.id) ?? now));
+                await this.waitForRetry(Math.max(0, Math.min(30_000, nextEligibleAt - now)), options.abortSignal);
+                continue;
+            }
             if (readyNodes.length === 0) {
                 const summary = 'Task graph stalled: no executable nodes remain, but the graph is incomplete.';
                 emitStep({ type: 'error', content: summary, timestamp: Date.now() });
@@ -205,6 +223,10 @@ export class ParallelExecutor {
             `- Failed: ${progress.failed}`,
             `- Cancelled: ${progress.cancelled}`,
             `- Tokens: ${totalTokenUsage.total} (about CNY ${totalTokenUsage.estimatedCostCny.toFixed(4)})`,
+            ...[...agentResults.entries()]
+                .filter(([, result]) => result.success && result.handoff)
+                .sort(([left], [right]) => left.localeCompare(right))
+                .map(([nodeId, result]) => `- ${nodeId}: ${result.handoff!.summary}`),
         ].join('\n');
 
         return {
@@ -232,7 +254,38 @@ export class ParallelExecutor {
         }
 
         const promises = nodes.map(async (node) => {
-            const agentId = `agent_${node.id}_${Date.now().toString(36)}`;
+            const agentId = node.agentId ?? `agent_${graph.id}_${node.id}`;
+            node.agentId = agentId;
+            const previousTaskId = node.lastTaskId;
+            const managedTask = options.topicId && options.parentRunId
+                ? await agentTaskManager.create({
+                    kind: 'subagent',
+                    agentId,
+                    resumeAgentId: previousTaskId ? agentId : undefined,
+                    topicId: options.topicId,
+                    runId: options.parentRunId,
+                    threadId: options.topicId,
+                    parentTaskId: previousTaskId,
+                    domain: options.domain,
+                    authorization: options.readOnlyFanout ? 'read_only' : 'workspace_write',
+                    providerId: node.providerOverride ?? options.providerId,
+                    model: node.modelOverride ?? options.model,
+                })
+                : undefined;
+            if (managedTask) {
+                node.lastTaskId = managedTask.taskId;
+                this.eventSink?.appendSoon('task_created', {
+                    taskId: managedTask.taskId,
+                    agentId,
+                    kind: 'subagent',
+                    parentTaskId: managedTask.parentTaskId,
+                }, { agentId, status: 'pending' });
+                await agentTaskManager.transition(managedTask.taskId, 'running');
+                this.eventSink?.appendSoon('task_status_changed', {
+                    taskId: managedTask.taskId,
+                    status: 'running',
+                }, { agentId, status: 'running' });
+            }
 
             try {
                 const taggedStep = (step: AgentStep) => {
@@ -246,8 +299,23 @@ export class ParallelExecutor {
                     total: 0, input: 0, output: 0, estimatedCostCny: 0,
                 };
 
+                const dependencyHandoffs = node.dependencies
+                    .map(dependencyId => blackboard.readValue(`__handoff:${dependencyId}`))
+                    .filter((value): value is string => !!value);
+                const executionNode = dependencyHandoffs.length > 0
+                    ? {
+                        ...node,
+                        prompt: [
+                            node.prompt,
+                            '',
+                            '## Structured dependency handoffs',
+                            'Treat these as parent-validated summaries. Re-read authoritative files before editing.',
+                            ...dependencyHandoffs,
+                        ].join('\n'),
+                    }
+                    : node;
                 const result = await executor(
-                    node,
+                    executionNode,
                     blackboard,
                     nodeAccumulator,
                     options.abortSignal ?? new AbortController().signal,
@@ -260,6 +328,23 @@ export class ParallelExecutor {
                 node.tokenUsage = result.tokenUsage;
 
                 if (result.success) {
+                    this.retryEligibleAt.delete(node.id);
+                    const capacity = this.adaptiveCapacity.onSuccess();
+                    if (capacity.current !== capacity.previous) {
+                        this.eventSink?.appendSoon('provider_capacity_changed', {
+                            previous: capacity.previous,
+                            current: capacity.current,
+                            reason: 'stable successful sub-agent completions',
+                        });
+                    }
+                    if (result.handoff) {
+                        blackboard.write(
+                            `__handoff:${node.id}`,
+                            JSON.stringify(result.handoff),
+                            'free_text',
+                            node.id,
+                        );
+                    }
                     for (const contract of node.produces ?? []) {
                         blackboard.write(
                             `__entity:${contract.kind}:${contract.id}`,
@@ -276,7 +361,7 @@ export class ParallelExecutor {
                             node.id,
                         );
                     }
-                    this.graphEngine.markComplete(graph, node.id, result.output);
+                    this.graphEngine.markComplete(graph, node.id, result.handoff?.summary ?? result.output);
                     this.conflictDetector.clearIntent(agentId, blackboard);
                 } else {
                     if (options.abortSignal?.aborted || result.error === 'User cancelled') {
@@ -292,6 +377,8 @@ export class ParallelExecutor {
                             content: `Node ${node.id} needs parent-agent clarification; downstream nodes paused${cancelled.length ? `: ${cancelled.join(', ')}` : ''}`,
                             timestamp: Date.now(),
                         });
+                    } else if (isProviderRateLimit(result.error) && node.retryCount < node.maxRetries) {
+                        this.requeueRateLimitedNode(node, result.error);
                     } else if (isTimeoutLikeError(result.error)) {
                         const cancelled = this.graphEngine.markFailed(
                             graph,
@@ -322,6 +409,27 @@ export class ParallelExecutor {
                 }
 
                 results.set(node.id, result);
+                if (managedTask) {
+                    if (result.runId) await agentTaskManager.setContextRef(managedTask.taskId, result.runId);
+                    const parentFacingOutput = result.handoff
+                        ? JSON.stringify(result.handoff)
+                        : result.output;
+                    if (parentFacingOutput) await agentTaskManager.appendOutput(managedTask.taskId, parentFacingOutput);
+                    const taskStatus: AgentTaskStatus = result.success
+                        ? 'completed'
+                        : node.status === 'cancelled'
+                            ? 'killed'
+                            : isTimeoutLikeError(result.error)
+                                ? 'timed_out'
+                                : node.status === 'pending'
+                                    ? 'suspended'
+                                    : 'failed';
+                    await agentTaskManager.transition(managedTask.taskId, taskStatus, result.error ?? result.output);
+                    this.eventSink?.appendSoon('task_status_changed', {
+                        taskId: managedTask.taskId,
+                        status: taskStatus,
+                    }, { agentId, status: taskStatus === 'completed' ? 'done' : 'failed' });
+                }
             } catch (e) {
                 const error = e instanceof Error ? e.message : String(e);
                 const failResult: SubAgentResult = {
@@ -337,6 +445,8 @@ export class ParallelExecutor {
 
                 if (options.abortSignal?.aborted) {
                     node.status = 'cancelled';
+                } else if (isProviderRateLimit(error) && node.retryCount < node.maxRetries) {
+                    this.requeueRateLimitedNode(node, error);
                 } else if (isTimeoutLikeError(error)) {
                     this.graphEngine.markFailed(graph, node.id, error);
                 } else if (node.retryCount < node.maxRetries) {
@@ -347,6 +457,20 @@ export class ParallelExecutor {
                 }
 
                 this.conflictDetector.clearIntent(agentId, blackboard);
+                if (managedTask) {
+                    const taskStatus: AgentTaskStatus = options.abortSignal?.aborted
+                        ? 'killed'
+                        : isTimeoutLikeError(error)
+                            ? 'timed_out'
+                            : node.status === 'pending'
+                                ? 'suspended'
+                                : 'failed';
+                    await agentTaskManager.transition(managedTask.taskId, taskStatus, error);
+                    this.eventSink?.appendSoon('task_status_changed', {
+                        taskId: managedTask.taskId,
+                        status: taskStatus,
+                    }, { agentId, status: taskStatus === 'suspended' ? 'pending' : 'failed' });
+                }
             }
         });
 
@@ -361,7 +485,7 @@ export class ParallelExecutor {
         const entityOwners = new Map<string, string>();
 
         for (const node of readyNodes) {
-            if (batch.length >= this.maxConcurrency) break;
+            if (batch.length >= this.adaptiveCapacity.current) break;
 
             const conflict = this.findPlannedTargetConflict(node, fileOwners, entityOwners);
             if (conflict) {
@@ -411,5 +535,54 @@ export class ParallelExecutor {
 
     getConsumedTokens(): TokenUsage {
         return { ...this.consumedTokens };
+    }
+
+    private requeueRateLimitedNode(node: TaskNode, error: string | undefined): void {
+        node.retryCount++;
+        node.status = 'pending';
+        const delayMs = Math.min(30_000, 1_000 * (2 ** Math.max(0, node.retryCount - 1)));
+        const eligibleAt = Date.now() + delayMs;
+        this.retryEligibleAt.set(node.id, eligibleAt);
+        const capacity = this.adaptiveCapacity.onRateLimit();
+        this.eventSink?.appendSoon('agent_suspended', {
+            agentId: node.id,
+            reason: error ?? 'provider rate limit',
+            retryCount: node.retryCount,
+        }, { agentId: node.id, status: 'pending' });
+        this.eventSink?.appendSoon('agent_requeued', {
+            agentId: node.id,
+            attempt: node.retryCount,
+            eligibleAt: new Date(eligibleAt).toISOString(),
+            delayMs,
+        }, { agentId: node.id, status: 'pending' });
+        if (capacity.current !== capacity.previous) {
+            this.eventSink?.appendSoon('provider_capacity_changed', {
+                previous: capacity.previous,
+                current: capacity.current,
+                reason: 'provider rate limit',
+            });
+        }
+    }
+
+    private async waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+        if (delayMs <= 0) return;
+        await new Promise<void>((resolve, reject) => {
+            if (signal?.aborted) {
+                reject(signal.reason instanceof Error ? signal.reason : new Error('Agent batch cancelled.'));
+                return;
+            }
+            const cleanup = () => signal?.removeEventListener('abort', onAbort);
+            const finish = () => {
+                cleanup();
+                resolve();
+            };
+            const onAbort = () => {
+                clearTimeout(timer);
+                cleanup();
+                reject(signal?.reason instanceof Error ? signal.reason : new Error('Agent batch cancelled.'));
+            };
+            const timer = setTimeout(finish, delayMs);
+            signal?.addEventListener('abort', onAbort, { once: true });
+        });
     }
 }

@@ -13,6 +13,18 @@ describe('agent profile', () => {
     it('validates all three runtime dimensions at the boundary', () => {
         expect(isAgentProfileSelection(DEFAULT_AGENT_PROFILE)).to.equal(true);
         expect(isAgentProfileSelection({ domain: 'general', intent: 'execute', strategy: 'multi' })).to.equal(true);
+        expect(isAgentProfileSelection({
+            domain: 'general',
+            intent: 'execute',
+            strategy: 'multi',
+            profileName: 'workspace-reviewer',
+        })).to.equal(true);
+        expect(isAgentProfileSelection({
+            domain: 'general',
+            intent: 'execute',
+            strategy: 'multi',
+            profileName: '../unsafe',
+        })).to.equal(false);
         expect(isAgentProfileSelection({ domain: 'general', intent: 'build', strategy: 'multi' })).to.equal(false);
         expect(isAgentProfileSelection({ domain: 'general', intent: 'execute' })).to.equal(false);
     });
@@ -41,11 +53,11 @@ describe('agent profile', () => {
         )).to.equal(undefined);
     });
 
-    it('lets the model choose automatic intent and single/multi-Agent strategy', () => {
+    it('uses model intent but defers automatic multi-Agent strategy without explicit delegation', () => {
         expect(resolveAgentProfileFromModelDecision('large change', DEFAULT_AGENT_PROFILE, {
             domain: 'general', intent: 'execute', strategy: 'multi', reason: 'independent workstreams',
-        })).to.include({ domain: 'general', intent: 'execute', strategy: 'multi', mode: 'orchestrator' });
-        expect(resolveAgentProfileFromModelDecision('large mod change', DEFAULT_AGENT_PROFILE, {
+        })).to.include({ domain: 'general', intent: 'execute', strategy: 'single', mode: 'utility' });
+        expect(resolveAgentProfileFromModelDecision('use multiple agents for this mod change', DEFAULT_AGENT_PROFILE, {
             domain: 'paradox', intent: 'execute', strategy: 'multi', reason: 'independent workstreams',
         })).to.include({ domain: 'paradox', intent: 'execute', strategy: 'multi', mode: 'script' });
     });
@@ -54,7 +66,11 @@ describe('agent profile', () => {
         const routed = resolveAgentProfileFromModelDecision('重构整个运行器并调整恢复协议', DEFAULT_AGENT_PROFILE, {
             domain: 'general', intent: 'plan', strategy: 'multi', reason: 'coupled architecture change',
         });
-        expect(routed).to.include({ domain: 'general', intent: 'plan', strategy: 'single', mode: 'plan' });
+        expect(routed).to.include({ domain: 'general', intent: 'plan', strategy: 'single', mode: 'utility' });
+        expect(routed.admission).to.include({
+            authorization: 'workspace_write',
+            initialPhase: 'plan',
+        });
     });
 
     it('preserves a pinned domain and never uses multi-Agent for non-execution intents', () => {
@@ -74,9 +90,10 @@ describe('agent profile', () => {
 
     it('honors explicit dimensions while resolving Auto dimensions', () => {
         const resolved = resolveAgentProfile('Review this event chain', {
-            domain: 'general', intent: 'auto', strategy: 'single',
+            domain: 'general', intent: 'auto', strategy: 'single', profileName: 'workspace-reviewer',
         });
         expect(resolved).to.include({ domain: 'general', intent: 'review', strategy: 'single', mode: 'review' });
+        expect(resolved.schedulingState.profileName).to.equal('workspace-reviewer');
     });
 
     it('resolves Auto independently for every turn', () => {
@@ -144,15 +161,16 @@ describe('agent profile', () => {
         })).to.include({ domain: 'general', intent: 'plan', mode: 'plan' });
     });
 
-    it('uses Multi-Agent for broad Chinese execution requests', () => {
+    it('defers broad execution requests to runtime dispatch admission', () => {
         const resolved = resolveAgentProfile('修复所有本地化错误');
-        expect(resolved).to.include({ domain: 'paradox', intent: 'execute', strategy: 'multi', mode: 'script' });
+        expect(resolved).to.include({ domain: 'paradox', intent: 'execute', strategy: 'single', mode: 'build' });
+        expect(resolved.reason).to.contain('runtime dispatch evaluation requested');
     });
 
-    it('uses one Paradox agent for narrow writes and Paradox Multi-Agent for broad writes', () => {
+    it('uses one Paradox admission for narrow and broad writes unless delegation is explicit', () => {
         expect(resolveAgentProfile('修复这个 CWT 诊断报错').mode).to.equal('build');
         expect(resolveAgentProfile('Add one scripted_modifier to this Stellaris mod').mode).to.equal('build');
-        expect(resolveAgentProfile('Fix all localisation errors in this Stellaris mod').mode).to.equal('script');
+        expect(resolveAgentProfile('Fix all localisation errors in this Stellaris mod').mode).to.equal('build');
     });
 
     it('separates general coding from Paradox coordination', () => {
@@ -173,6 +191,33 @@ describe('agent profile', () => {
         const resolved = resolveAgentProfile('Fix the TypeScript routing for the Paradox Agent webview');
         expect(resolved.domain).to.equal('general');
         expect(resolved.mode).to.equal('utility');
+    });
+
+    it('defers low-confidence domain switches when deterministic evidence still favors continuity', () => {
+        const routed = resolveAgentProfileFromModelDecision('continue investigating this', DEFAULT_AGENT_PROFILE, {
+            domain: 'general',
+            intent: 'explore',
+            strategy: 'single',
+            reason: 'ambiguous follow-up',
+            confidence: 0.55,
+        }, {
+            previousDomain: 'paradox',
+        });
+        expect(routed).to.include({ domain: 'paradox', intent: 'explore', mode: 'explore' });
+        expect(routed.reason).to.contain('routing hysteresis');
+    });
+
+    it('switches domains immediately when explicit language evidence is present', () => {
+        const routed = resolveAgentProfileFromModelDecision('Fix the TypeScript webview state', DEFAULT_AGENT_PROFILE, {
+            domain: 'general',
+            intent: 'execute',
+            strategy: 'single',
+            reason: 'explicit repository language',
+            confidence: 0.55,
+        }, {
+            previousDomain: 'paradox',
+        });
+        expect(routed).to.include({ domain: 'general', intent: 'execute', mode: 'utility' });
     });
 
     it('keeps implementation-only legacy roles out of the user-facing profile', () => {

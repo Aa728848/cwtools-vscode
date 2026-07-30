@@ -5,6 +5,7 @@ import {
     reduceAgentGraph,
     reduceCacheStats,
     reduceRuntimeItems,
+    reduceScheduling,
     reduceAll,
 } from '../../extension/ai/runner/runReducers';
 import type { AgentRunEvent } from '../../extension/ai/runner/runLedger';
@@ -24,6 +25,37 @@ function ev(type: AgentRunEvent['type'], extra: Partial<AgentRunEvent> = {}, pay
 }
 
 describe('RunReducers — pure event projections (T3.2)', () => {
+    describe('reduceScheduling', () => {
+        it('projects admission, phase, prompt, dispatch, and capacity events', () => {
+            const snapshot = reduceScheduling([
+                ev('admission_decided', {}, {
+                    domainProfile: 'general',
+                    authorization: 'workspace_write',
+                    initialPhase: 'inspect',
+                    confidence: 0.9,
+                    evidence: ['TypeScript'],
+                }),
+                ev('phase_changed', {}, { to: 'execute', revision: 1 }),
+                ev('prompt_queued'),
+                ev('prompt_steered'),
+                ev('dispatch_evaluated', {}, { accepted: true }),
+                ev('provider_capacity_changed', {}, { current: 2 }),
+            ]);
+            expect(snapshot).to.include({
+                domainProfile: 'general',
+                authorization: 'workspace_write',
+                phase: 'execute',
+                dispatch: 'parallel',
+                routeConfidence: 0.9,
+                queuedPrompts: 1,
+                steeredPrompts: 1,
+                dispatchEvaluations: 1,
+                dispatchAccepted: 1,
+                providerCapacity: 2,
+            });
+        });
+    });
+
     describe('reduceRunState', () => {
         it('marks status running on run_created and completed from status_changed payload', () => {
             const events: AgentRunEvent[] = [
@@ -220,6 +252,36 @@ describe('RunReducers & Structured Events', () => {
         const ledger = RunLedger.getInstance();
         const run = await ledger.createRun('topic_1', 'edit', 'test prompt');
         expect(RunLedger.getLatestActiveRunId()).to.equal(run.runId);
+    });
+
+    it('rebuilds scheduling state from unapplied ledger events', () => {
+        const { RunLedger } = loadRunLedgerModule();
+        const ledger = RunLedger.getInstance();
+        const record = {
+            mode: 'utility',
+            steps: [],
+            writtenFiles: [],
+            metrics: {},
+        } as any;
+        (ledger as any).applyPersistedEvents(record, [
+            ev('admission_decided', {}, {
+                domainProfile: 'general',
+                authorization: 'workspace_write',
+                initialPhase: 'inspect',
+                explicitDelegation: false,
+                confidence: 0.9,
+                evidence: ['TypeScript'],
+            }),
+            ev('phase_changed', {}, { to: 'execute', reason: 'write stage', revision: 1 }),
+            ev('dispatch_evaluated', {}, { accepted: true, reason: 'independent tasks' }),
+        ]);
+
+        expect(record.schedulingState).to.include({
+            domainProfile: 'general',
+            authorization: 'workspace_write',
+            phase: 'execute',
+            dispatch: 'parallel',
+        });
     });
 });
 

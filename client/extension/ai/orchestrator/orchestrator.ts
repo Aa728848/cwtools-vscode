@@ -35,6 +35,8 @@ import { getAgentToolTargetFiles } from '../runner/toolScheduler';
 import { MUTATING_TOOLS, WRITE_TOOLS } from '../tools/registry';
 import { mergeTokenUsageTotals } from '../cacheCapability';
 import { defaultDomainForMode } from '../agentProfile';
+import { agentProfileCatalog } from '../runner/agentProfileCatalog';
+import { parseAgentHandoff, repairAgentHandoff, validateAgentHandoff } from '../runner/agentHandoff';
 
 // Type references of AgentRunner and AgentToolExecutor (to avoid circular dependencies, use import type)
 import type { AgentRunner, AgentRunnerOptions } from '../agentRunner';
@@ -181,8 +183,12 @@ export class Orchestrator {
             });
             const allWrittenFiles: string[] = [];
             for (const agentResult of result.agentResults.values()) {
-                allWrittenFiles.push(...agentResult.writtenFiles);
+                allWrittenFiles.push(
+                    ...agentResult.writtenFiles,
+                    ...(agentResult.handoff?.changedFiles ?? []),
+                );
             }
+            allWrittenFiles.splice(0, allWrittenFiles.length, ...new Set(allWrittenFiles));
             {
                 const paradoxWorkflow = [...taskGraph.nodes.values()].some(node => ['build', 'loc_writer', 'gui_expert'].includes(node.agentType));
                 if (paradoxWorkflow && allWrittenFiles.some(isPdxDiagnosticFile)) {
@@ -277,6 +283,9 @@ export class Orchestrator {
                     {
                         taskGraph,
                         workspaceRoot: this.agentRunner.toolExecutor.workspaceRoot,
+                        handoffs: [...result.agentResults.values()]
+                            .map(agentResult => agentResult.handoff)
+                            .filter((handoff): handoff is NonNullable<typeof handoff> => !!handoff),
                     },
                     result.totalTokenUsage,
                 );
@@ -786,6 +795,7 @@ export class Orchestrator {
                     tokenUsage: result.tokenUsage ?? { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
                     writtenFiles: [],
                     stepCount,
+                    runId: result.runId,
                     needsClarification: true,
                     clarification,
                 };
@@ -813,16 +823,33 @@ export class Orchestrator {
                     tokenUsage: result.tokenUsage ?? { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
                     writtenFiles: [],
                     stepCount,
+                    runId: result.runId,
                 };
+            }
+
+            const finalOutput = result.explanation || result.code || '';
+            const summaryProfileName = taskNode.agentType === 'review' || taskNode.agentType === 'script_reviewer'
+                ? 'reviewer'
+                : taskNode.agentType === 'explore' || taskNode.agentType === 'general'
+                    ? 'explore'
+                    : childDomain === 'paradox' ? 'paradox-coder' : 'general-coder';
+            const summaryPolicy = agentProfileCatalog.get(summaryProfileName)?.summaryPolicy;
+            let handoff = parseAgentHandoff(finalOutput, writtenFiles);
+            const missing = summaryPolicy ? validateAgentHandoff(handoff, summaryPolicy) : [];
+            const totalUsage = result.tokenUsage ?? { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
+            if (summaryPolicy && missing.length > 0 && summaryPolicy.retries > 0) {
+                handoff = repairAgentHandoff(finalOutput, writtenFiles, missing);
             }
 
             return {
                 nodeId: taskNode.id,
                 success: result.isValid,
-                output: result.explanation || result.code || '',
-                tokenUsage: result.tokenUsage ?? { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                output: finalOutput,
+                handoff,
+                tokenUsage: totalUsage,
                 writtenFiles,
                 stepCount,
+                runId: result.runId,
             };
         } catch (e) {
             clearSubAgentGuards();

@@ -1788,9 +1788,85 @@ const GET_BLUEPRINT_CONTRACT_TOOL: ToolDefinition = {
     },
 };
 
+const RUNTIME_CONTROL_TOOLS: ToolDefinition[] = [
+    {
+        type: 'function',
+        function: {
+            name: 'select_tools',
+            description: 'Load deferred tool schemas needed for the current task. Loading never grants permission and cannot cross the active domain or mode.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    tools: { type: 'array', items: { type: 'string' }, description: 'Exact tool names to load.' },
+                    groups: { type: 'array', items: { type: 'string' }, description: 'Tool groups to load.' },
+                    reason: { type: 'string', description: 'Why these tools are needed now.' },
+                },
+                required: ['reason'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'create_goal',
+            description: 'Create a durable goal only for an explicit long-running user objective.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    objective: { type: 'string' },
+                    completionCriterion: { type: 'array', items: { type: 'string' } },
+                    tokenBudget: { type: 'number' },
+                },
+                required: ['objective'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'get_goal',
+            description: 'Read the durable goal and its budget usage for this thread.',
+            parameters: { type: 'object', properties: {}, required: [] },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'update_goal',
+            description: 'Transition the durable goal. Completing requires evidence; blocking requires a concrete reason.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    status: { type: 'string', enum: ['active', 'paused', 'blocked', 'complete', 'cancelled'] },
+                    reason: { type: 'string' },
+                    evidence: { type: 'array', items: { type: 'string' } },
+                },
+                required: ['status'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'set_goal_budget',
+            description: 'Set positive hard limits for the current durable goal.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    tokens: { type: 'number' },
+                    turns: { type: 'number' },
+                    wallClockMs: { type: 'number' },
+                },
+                required: [],
+            },
+        },
+    },
+];
+
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
     ...RAW_TOOL_DEFINITIONS.map(tool => tool.function.name === 'write_design_blueprint'
         ? COMPACT_BLUEPRINT_WRITE_TOOL
         : tool),
     GET_BLUEPRINT_CONTRACT_TOOL,
+    ...RUNTIME_CONTROL_TOOLS,
 ];

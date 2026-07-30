@@ -20,7 +20,7 @@ export interface TimelineEvent {
     payload: any;
 }
 
-export type TimelineGroupId = 'model' | 'tools' | 'processes' | 'files' | 'permissions' | 'validation' | 'context' | 'subagents' | 'other';
+export type TimelineGroupId = 'model' | 'tools' | 'processes' | 'files' | 'permissions' | 'validation' | 'context' | 'activity' | 'scheduling' | 'subagents' | 'other';
 
 export interface TimelineGroup {
     id: TimelineGroupId;
@@ -66,6 +66,33 @@ const EVENT_GROUP_MAP: Record<string, TimelineGroupId> = {
     'worktree_diff_collected': 'files',
     'worktree_cleaned': 'files',
     'evidence_gate_decision': 'validation',
+    'admission_decided': 'scheduling',
+    'phase_changed': 'scheduling',
+    'capabilities_changed': 'scheduling',
+    'prompt_queued': 'scheduling',
+    'prompt_steered': 'scheduling',
+    'dispatch_evaluated': 'scheduling',
+    'agent_suspended': 'scheduling',
+    'agent_requeued': 'scheduling',
+    'provider_capacity_changed': 'scheduling',
+    'route_outcome_evaluated': 'scheduling',
+    'domain_op_applied': 'activity',
+    'domain_replay_completed': 'activity',
+    'goal_transitioned': 'activity',
+    'goal_budget_exhausted': 'activity',
+    'goal_continuation_queued': 'activity',
+    'task_created': 'activity',
+    'task_status_changed': 'activity',
+    'task_notification_delivered': 'activity',
+    'tool_disclosure_changed': 'tools',
+    'tool_call_deduplicated': 'tools',
+    'tool_repeat_escalated': 'tools',
+    'context_limit_observed': 'context',
+    'compaction_retry': 'context',
+    'undo_started': 'activity',
+    'undo_completed': 'activity',
+    'side_question_started': 'activity',
+    'side_question_completed': 'activity',
 };
 
 import type { ChatI18nText } from './i18n';
@@ -83,6 +110,8 @@ export function groupTimelineEvents(events: TimelineEvent[], i18n?: ChatI18nText
         permissions: [],
         validation: [],
         context: [],
+        activity: [],
+        scheduling: [],
         subagents: [],
         other: [],
     };
@@ -114,6 +143,8 @@ export function groupTimelineEvents(events: TimelineEvent[], i18n?: ChatI18nText
         permissions: { label: g?.permissions ?? 'Permissions',      icon: svgIcon('shield') },
         validation:  { label: g?.validation  ?? 'Validation',       icon: svgIcon('check') },
         context:     { label: g?.context     ?? 'Context & Memory', icon: svgIcon('package') },
+        activity:    { label: g?.activity    ?? 'Activity',         icon: svgIcon('clipboard') },
+        scheduling:  { label: g?.scheduling  ?? 'Scheduling',       icon: svgIcon('gitBranch') },
         subagents:   { label: g?.subagents   ?? 'Sub-Agents',       icon: svgIcon('bot') },
         other:       { label: g?.other       ?? 'Other',            icon: svgIcon('clipboard') },
     };

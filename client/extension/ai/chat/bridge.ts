@@ -11,7 +11,7 @@ import type { WebViewMessage } from '../types';
 import type { AIChatPanelProvider } from '../chatPanel';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, aiText } from '../messages';
-import { isAgentMode, isAgentProfileSelection, profileForUserDomain } from '../agentProfile';
+import { isAgentMode, isAgentProfileSelection } from '../agentProfile';
 
 export async function routeWebviewMessage(
     provider: AIChatPanelProvider,
@@ -74,11 +74,11 @@ export async function routeWebviewMessage(
             break;
         case 'pinTopic':
             provider.topicManager.setPinned(msg.topicId, msg.pinned);
-            provider.sendManagerSnapshot();
+            void provider.sendManagerSnapshot();
             break;
         case 'setTopicWorkspace':
             provider.topicManager.setWorkspace(msg.topicId, msg.workspaceId, msg.workspaceLabel);
-            provider.sendManagerSnapshot();
+            void provider.sendManagerSnapshot();
             break;
         case 'setShowArchived':
             provider.topicManager.setShowArchived(msg.show);
@@ -129,7 +129,7 @@ export async function routeWebviewMessage(
             else ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Rejected invalid Agent mode from Webview.');
             break;
         case 'switchAgentProfile':
-            if (isAgentProfileSelection(msg.profile)) provider.switchAgentProfile(profileForUserDomain(msg.profile.domain));
+            if (isAgentProfileSelection(msg.profile)) provider.switchAgentProfile(msg.profile);
             else ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Rejected invalid Agent profile from Webview.');
             break;
         case 'switchWorkflow':
@@ -274,11 +274,11 @@ export async function routeWebviewMessage(
             provider.sendWorkspaceFileList();
             break;
         case 'requestManagerSnapshot':
-            provider.sendManagerSnapshot();
+            void provider.sendManagerSnapshot();
             break;
         case 'ready':
             provider.restoreViewState(sourceSurface, true);
-            provider.sendManagerSnapshot();
+            void provider.sendManagerSnapshot();
             break;
         case 'requestMentionSearch': {
             try {

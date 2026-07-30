@@ -287,9 +287,42 @@ The composer exposes only the capability-domain selector. `AgentProfileSelection
 | --- | --- | --- |
 | Capability domain | `auto`, `paradox`, `general` | User-selectable; chooses automatic detection, CWT/LSP-aware Paradox behavior, or domain-neutral repository engineering |
 | Task intent | `auto`, then resolved to `execute`, `plan`, `explore`, or `review` | Automatically inferred from the request |
-| Execution strategy | `auto`, then resolved to `single` or `multi` | Automatically inferred from task scope |
+| Execution strategy | `auto`, initially resolved to `single` unless delegation is explicit | Runtime dispatch admission decides whether an evidence-backed task graph benefits from multiple Agents |
 
-On every non-Workflow turn, `chatPanel.ts` asks the configured model for a compact routing decision using the current request, recent conversation, active-file path, selected domain, and prior resolved domain. `agentProfile.ts` validates that decision and maps it to the internal mode; invalid or unavailable model routing uses its deterministic classifier as a safe fallback. A scoped mutation routes directly to Execute, while a genuinely complex mutation may route to Plan until its architecture or key choices are agreed; a clarification answer inherits the pending mutation authorization instead of remaining in Explore. Approving the resulting annotation card is an explicit execution transition: it bypasses another routing call and starts the General `orchestrator` or Paradox `script` Multi-Agent coordinator according to the plan's resolved domain. Workflows and legacy restore paths may still provide explicit internal intent/strategy values. Multi-Agent is otherwise permitted only for execution intent. Routing never changes the permission profile or approval policy, which remain user-owned. The resolved profile is attached to the user history message so the applied intent and single/multi-Agent strategy remain visible in the conversation and topic replay. The resolved domain and `turnMode` are fixed for that turn and persisted in the V3 checkpoint; legacy V2 snapshots infer a compatible domain from their stored mode. Loading a normal topic migrates hidden legacy intent/strategy selections back to automatic routing. Routing usage participates in provider usage and cache accounting.
+Every non-Workflow turn first runs deterministic admission. High-confidence decisions skip the auxiliary routing call; ambiguous decisions ask the configured model for domain, intent, confidence, and bounded evidence. `agentProfile.ts` validates the response, applies continuity hysteresis to low-confidence domain changes, and falls back deterministically when routing is unavailable. The router may recommend a strategy but cannot automatically commit an ordinary broad task to Multi-Agent; explicit delegation is retained, while all other fan-out is decided later from a validated task graph. Routing never changes the user-owned permission profile or approval policy.
+
+The resolved admission creates an `AgentSchedulingState` with four independent dimensions:
+
+| Scheduling dimension | Meaning |
+| --- | --- |
+| `domainProfile` | General repository engineering or Paradox/CWTools capabilities |
+| `authorization` | `read_only`, topic-local `plan_write_only`, or `workspace_write`; runtime transitions may only retain or reduce it |
+| `phase` | `inspect`, `plan`, `execute`, `verify`, or `finalize` |
+| `dispatch` | `single`, `parallel`, or `specialist` |
+
+Tool-stage progress drives phase changes and capability activation during the same Run. Creating a validated design blueprint can enter Plan after inspection; both the Runner and Tool Executor enforce the Plan guard, and validation can transition an authorized Run into Execute. Runtime dispatch requires distinct tasks, useful acceptance contracts, sufficient expected benefit, and no unordered writers for the same resource. Provider rate limits suspend and requeue children with exponential backoff, reduce concurrency, and recover capacity after stable completions. Prompt steering, approvals, retries, continuations, and background results use a typed priority queue. These decisions are persisted as Ledger events and Checkpoint state and projected into the Chat/Agent Manager timeline. Missing V2/V3 scheduling fields derive from `AgentMode`; malformed persisted scheduling state fails closed.
+
+##### Runtime Kernel and Durable Domains
+
+`AgentRuntime` serializes top-level work through `AgentLoopKernel`; typed `StepRequest` priorities cover prompts, steering, approvals, tool results, retries, Goal continuation, background results, and side-question results. Ordered hook slots, the model retry service, and `ToolExecutionPipeline` provide deterministic extension points without allowing hooks to widen authorization. `AgentRunner.run()` remains the compatibility entry point.
+
+Scheduling, Goal, Task, Context, Prompt, Interaction, Transcript, and Permission are replayable domain models. Each Agent owns a JSONL journal, an atomic checksummed snapshot, and a monotonic sequence. Transcript steps are persisted as incremental operation batches rather than repeated full snapshots; every successful checkpoint compacts the journal prefix already covered by that snapshot. Replay and legacy migration fail closed on unknown operations, malformed state, or sequence gaps. Resume V4 records the domain anchor, typed pending work, provider/model binding, Goal and Task references, transcript checksum, and disclosed tool schemas while retaining V2/V3 readers.
+
+`GoalSupervisor` enforces legal lifecycle transitions and token/turn/wall-clock budgets. `AgentTaskManager` is the shared plane for processes, sub-Agents, validation, compaction, hooks, and background reads; task output is bounded and paged, restart-orphaned work becomes `lost`, and terminal notifications are claimed at most once. Dynamic tool disclosure and read-only deduplication use Registry metadata, while context overflow learning and bounded compaction retries preserve the last stable context.
+
+Conversation Undo reconciles file snapshots with Goal, Todo, Task notification, Scheduling, Context, and tool-disclosure state and refuses to cross compaction boundaries or overwrite externally changed files. `ActivityProjection` is broadcast to both Chat and Agent Manager. Side questions use a stable, tool-free context fork and never enter the main input queue.
+
+#### Orthogonal Agent platform services
+
+`AgentMode` is now a compatibility adapter rather than the primary scheduler. `AgentSchedulingState` selects a concrete catalog `profileName` and independent overlays for planning, verification, finalization, parallel swarm, or specialist execution. Profiles come from built-ins, the user-level `.cwtools/agents` directory, and workspace `.agents/agents` or `.cwtools/agents` directories. Each `AGENT.md` has frontmatter for authority, tool patterns, subagents, model preference, and summary policy; its Markdown body is injected as isolated profile instructions after the stable base prompt. A same-name profile replaces another source only when it declares `override: true`. Sources are watched and reloaded through a serialized, debounced catalog; source errors and catalog revisions are visible in Runtime Inspector. Named profiles are selected automatically by admission and remain an internal policy mechanism rather than a normal composer choice. The effective profile caps authorization, binds a configured primary/secondary model, and intersects the mode's sub-Agent role allowlist. The exported catalog source interface is also the plugin integration point.
+
+Tool state has four observable layers: registered, profile-activated, progressively disclosed, and authorization-approved. The profile activation layer is enforced by adding every inactive registry tool to the Runner exclusion set; policy, Plan Guard, sandbox, and permission checks remain authoritative for the final approval layer.
+
+Prompt lifecycle and user interaction are separate runtime services. A `PromptQueueService` exposes launch and completion states, while `InteractionService` contains only cold approvals, questions, user tools, and plan reviews that genuinely need user input. Pending/running prompts become blocked and pending interactions become cancelled after restart, so a recovered host cannot display ghost work. Auto-approved and auto-reviewed permission requests never create interactions; all requested and resolved decisions enter the bounded, replayable Permission domain.
+
+The user-visible Transcript is independent from model Context memory. Browser-safe idempotent operations update live text, thinking, tool calls/results, todos, tasks, prompts, and interactions with monotonic batch sequences and append-offset gap detection. Entities are anchored to turns and are removed with their owner during Undo. Transport grades (`off`, `turn`, `block`, `delta`) redact reset snapshots to the same information boundary as streamed operations, and reverse turn pagination changes delivery cost without changing model context. Agent Manager consumes this canonical Transcript alongside the Ledger event timeline.
+
+`RuntimeScope` owns App, Session, and Agent services and disposes children before parents. Agent-scoped Domain Store, Loop Kernel, Transcript, tool activation, model binding, and Goal continuation state have no parallel ownership maps. Storage is addressed through append-log, atomic-document, and blob interfaces so domain persistence can be tested or moved without changing reducers. Successful child Agents produce a structured handoff containing summary, changed files, verification, and unresolved items; insufficient results receive one tool-free summary repair pass. Handoffs are persisted on the Blackboard, injected into dependent tasks, used by parent result merging, and supplied to the quality gate as claims requiring independent verification. Chat and Agent Manager share Runtime Inspector and Transcript projections; Inspector displays catalog revision/source errors, profile/overlays, scheduling authority, tool-layer counts, Prompt/Interaction/Transcript state, model binding and fallback provenance, scope ownership, and recent permission decisions.
 
 `AgentMode` remains an internal execution and backward-compatibility adapter:
 
@@ -299,6 +332,8 @@ On every non-Workflow turn, `chatPanel.ts` asks the configured model for a compa
 | `strategy=multi`, `domain=general` | `orchestrator` (General Multi-Agent) |
 | `strategy=single`, `intent=plan / explore / review` | `plan / explore / review` |
 | `strategy=single`, `intent=execute`, `domain=paradox / general` | `build / utility` |
+
+As an intentional exception, a requested mutation that the router places into an initial planning phase uses the `build`/`utility` compatibility pipeline with `phase=plan` and retained `workspace_write` authority. The Plan guard blocks source mutation until evidence advances the Run to Execute. A plan-only request continues to use `plan` with `plan_write_only`.
 
 The legacy read-only `general` mode and specialist roles (`gui_expert`, `script_reviewer`, `loc_translator`, `loc_writer`) remain for old sessions and internal sub-Agent execution; they are not the primary UI model. A topic persists its selected domain Profile, internal mode, active Workflow, and pre-Workflow return state. Activating a Workflow temporarily owns the Profile/mode; switching directly between Workflows preserves the original return state, turning the Workflow off restores it, and a manual domain change exits the Workflow.
 
@@ -736,15 +771,48 @@ sequenceDiagram
 
 ##### Agent Profile、内部模式与 Workflow
 
-输入框只向用户提供能力领域选择。`AgentProfileSelection` 为运行时与旧数据兼容继续保留三个字段，但普通输入框每次修改都会固定写入 `intent=auto` 和 `strategy=auto`：
+输入框只暴露能力领域选择。`AgentProfileSelection` 为运行时与旧数据兼容保留 `domain`、`intent`、`strategy` 和可选 `profileName`；普通领域按钮固定写入 `intent=auto` 和 `strategy=auto`，命名 Profile 由运行时自动选择：
 
 | 运行时维度 | 可选值 | 来源 |
 | --- | --- | --- |
 | 能力领域 | `auto`、`paradox`、`general` | 用户可选；分别表示自动识别、CWT/LSP 感知的 Paradox 能力或领域中立的仓库工程能力 |
 | 任务意图 | `auto`，随后解析为 `execute`、`plan`、`explore` 或 `review` | 根据请求自动判断 |
-| 执行策略 | `auto`，随后解析为 `single` 或 `multi` | 根据任务规模自动判断 |
+| 执行策略 | `auto`，除非用户显式委派，否则入口先解析为 `single` | 运行时 Dispatch Admission 根据有证据的任务图决定是否值得启用多 Agent |
 
-每个非 Workflow 回合中，`chatPanel.ts` 会让当前配置的模型根据当前请求、近期对话、活动文件路径、用户选择的领域和上一轮解析领域返回紧凑的路由判断。`agentProfile.ts` 验证该判断并映射为内部模式；模型路由不可用或结果无效时，使用确定性分类器作为安全回退。范围明确的修改直接进入 Execute；真正复杂的修改可以先进入 Plan，待架构或关键选择明确后再执行；用户回答修改澄清时会继承待处理的修改授权，不会继续停留在 Explore。批准生成的批注卡属于明确的执行转换：它跳过再次路由，并依据计划已解析的能力领域直接启动通用 `orchestrator` 或 Paradox `script` 多 Agent 协调器。Workflow 和旧数据恢复路径仍可在内部提供显式意图/策略；除此之外只有执行意图允许进入多 Agent。路由不会改变始终由用户控制的权限 Profile 或审批策略。解析后的 Profile 会附加到对应用户历史消息，使实际采用的意图和单/多 Agent 策略在聊天流及 Topic 恢复后继续可见。本轮解析出的领域与 `turnMode` 在该回合内保持不变并写入 V3 checkpoint；旧 V2 快照则依据保存的 mode 推断兼容领域。加载普通 Topic 时会把旧版隐藏的意图/策略选择迁移回自动路由。路由调用纳入 Provider 用量与缓存统计。
+每个非 Workflow 回合先运行确定性准入。高置信判断会跳过辅助路由调用；存在实质歧义时，当前模型返回领域、意图、置信度和有界证据。`agentProfile.ts` 会验证结果，对低置信跨域切换应用连续性迟滞，并在模型不可用时确定性回退。路由器可以提出策略建议，但普通宽任务不会再在入口自动固定为多 Agent；用户显式委派会被保留，其余 Fan-out 均在取得并验证任务图后决定。路由不会改变始终由用户控制的权限 Profile 或审批策略。
+
+解析后的准入会创建包含四个正交维度的 `AgentSchedulingState`：
+
+| 调度维度 | 含义 |
+| --- | --- |
+| `domainProfile` | 通用仓库工程或 Paradox/CWTools 能力 |
+| `authorization` | `read_only`、仅 Topic 计划制品可写的 `plan_write_only` 或 `workspace_write`；运行时只能保持或收紧 |
+| `phase` | `inspect`、`plan`、`execute`、`verify` 或 `finalize` |
+| `dispatch` | `single`、`parallel` 或 `specialist` |
+
+Tool Stage 在同一 Run 内驱动阶段转换和能力激活。生成通过校验的设计蓝图后可以从侦察进入 Plan；Runner 与 Tool Executor 双重执行 Plan Guard，验证后具有写授权的 Run 可以进入 Execute。运行时 Dispatch 要求任务互异、验收契约有效、预期收益足够，且不存在无顺序的同资源 Writer。Provider 限流会挂起并指数退避重排子 Agent、收缩并发，并在稳定成功后恢复容量。Steer、Approval、Retry、Continuation 和后台结果进入带类型和优先级的 Prompt 队列。所有决定均写入 Ledger 事件和 Checkpoint，并投影到 Chat/Agent Manager 时间线；V2/V3 缺失的新字段由 `AgentMode` 推导，畸形调度状态失败关闭。
+
+##### 运行内核与持久化领域
+
+`AgentRuntime` 通过 `AgentLoopKernel` 串行化顶层工作；带优先级的 typed `StepRequest` 覆盖用户 Prompt、Steer、审批结果、工具结果、Retry、Goal continuation、后台结果和旁路问答结果。有序 Hook、模型重试服务和 `ToolExecutionPipeline` 提供确定性的扩展点，Hook 不能扩大授权。`AgentRunner.run()` 保持为兼容入口。
+
+Scheduling、Goal、Task、Context、Prompt、Interaction、Transcript、Permission 使用可回放 Domain Model。每个 Agent 拥有独立 JSONL Journal、带校验和的原子 Snapshot 和单调递增 Sequence；Transcript 按增量 Op Batch 持久化，不再反复写入全量快照，成功 Checkpoint 后会压缩已被 Snapshot 覆盖的 Journal 前缀。未知 Op、畸形状态或 Sequence 缺口在 Replay/Migration 时失败关闭。Resume V4 保存 Domain 锚点、typed pending work、Provider/Model 绑定、Goal/Task 引用、Transcript 校验和及已披露工具 Schema，同时继续读取 V2/V3。
+
+`GoalSupervisor` 约束合法生命周期和 Token/Turn/墙钟预算。`AgentTaskManager` 统一承载进程、子 Agent、验证、压缩、Hook 与后台读取；输出有界并支持分页，重启后无法附着的任务进入 `lost`，终态通知最多领取一次。动态工具披露和只读去重由 Registry 元数据驱动，上下文溢出学习与有界压缩重试始终保留最后稳定 Context。
+
+Conversation Undo 会同时协调文件快照、Goal、Todo、Task 通知、Scheduling、Context 和工具披露状态；它拒绝跨越压缩边界，也不会覆盖被外部修改的文件。`ActivityProjection` 同时广播给 Chat 与 Agent Manager。Side Question 使用稳定、禁用全部工具的 Context Fork，且不会进入主输入队列。
+
+#### 正交 Agent 平台服务
+
+`AgentMode` 现在是兼容适配器，而不是主调度器。`AgentSchedulingState` 选择目录中的具体 `profileName`，并独立叠加计划、验证、收尾、并行 Swarm 或 Specialist 执行能力。Profile 来源包括内置目录、用户级 `.cwtools/agents`，以及工作区 `.agents/agents` 和 `.cwtools/agents`。每个 `AGENT.md` 用 Frontmatter 声明授权上限、工具模式、子 Agent、模型偏好和摘要策略，Markdown 正文会在稳定基础 Prompt 之后作为隔离的 Profile 指令注入；同名 Profile 只有显式声明 `override: true` 才能覆盖其他来源。Catalog 串行、去抖地热更新 Source，Inspector 展示 Catalog Revision 与 Source 错误；命名 Profile 由准入调度自动选择，作为内部策略而不再出现在普通输入框菜单中。生效的 Profile 会实际收紧授权、绑定配置的主/次模型，并与 Mode 的子 Agent 角色集合取交集。导出的 Profile Source 接口同时作为插件接入点。
+
+工具状态具有四个可观察层级：已注册、Profile 已激活、渐进式已披露、授权已批准。Profile 激活层会把 Registry 中所有未激活工具加入 Runner 排除集；最终批准仍由 Policy、Plan Guard、Sandbox 和 Permission 权威执行。
+
+Prompt 生命周期与用户交互拆分为独立运行时服务。`PromptQueueService` 暴露启动与完成状态；`InteractionService` 只保存真正需要用户输入的冷 Approval、Question、User Tool 和 Plan Review。重启恢复时，Pending/Running Prompt 会转为 Blocked，Pending Interaction 会转为 Cancelled，不会留下幽灵状态。自动放行与自动审查不会创建 Interaction，但请求与决议仍完整进入有界、可回放的 Permission Domain。
+
+面向用户的 Transcript 与模型 Context Memory 相互独立。浏览器安全的幂等操作以单调批次序列实时记录文本、思考、工具调用/结果、Todo、Task、Prompt 与 Interaction，并检测批次缺口与 Append Offset 缺口。Entity 锚定所属 Turn，Undo 删除 Turn 时同步清理；`off`、`turn`、`block`、`delta` 四档传输粒度会按同一边界脱敏 Reset Snapshot，逆向 Turn 分页只改变传输成本，不改变模型上下文。Agent Manager 在 Ledger 事件时间线之外直接消费这份规范 Transcript。
+
+`RuntimeScope` 管理 App、Session、Agent 三层服务，并按子级优先顺序释放。Agent 级 Domain Store、Loop Kernel、Transcript、工具激活、模型绑定和 Goal continuation 不再有平行所有权 Map。持久化通过 Append Log、Atomic Document、Blob 三类访问模式接口完成，使 Domain Reducer 不依赖具体存储介质。成功的子 Agent 必须返回包含 Summary、Changed Files、Verification、Unresolved 的结构化 Handoff；不足时只允许一次禁用全部工具的摘要修复。Handoff 会进入 Blackboard、依赖任务 Prompt、父级结果合并与 Quality Gate，Verification 仍必须独立验证。Chat 与 Agent Manager 共享 Runtime Inspector 和 Transcript Projection；Inspector 展示 Catalog Revision/Source 错误、Profile/Overlay、调度授权、工具四层数量、Prompt/Interaction/Transcript、模型绑定与回退来源、Scope 所有权和最近权限决议。
 
 `AgentMode` 继续作为内部执行与旧数据兼容层：
 
@@ -754,6 +822,8 @@ sequenceDiagram
 | `strategy=multi`、`domain=general` | `orchestrator`（通用多 Agent） |
 | `strategy=single`、`intent=plan / explore / review` | `plan / explore / review` |
 | `strategy=single`、`intent=execute`、`domain=paradox / general` | `build / utility` |
+
+有一个刻意保留的例外：用户已授权修改、但路由器判断应先规划的回合，会使用 `build`/`utility` 兼容工具流水线，同时设为 `phase=plan` 并保留 `workspace_write` 授权上限。Plan Guard 会在证据推动 Run 进入 Execute 前阻止源码修改；仅请求计划的回合仍使用 `plan + plan_write_only`。
 
 旧的只读 `general` 以及 `gui_expert`、`script_reviewer`、`loc_translator`、`loc_writer` 等专职角色仅用于旧会话兼容或内部子 Agent，不再作为主要 UI 概念。Topic 会持久化所选领域 Profile、内部 Mode、活动 Workflow 以及进入 Workflow 前的返回状态。Workflow 激活后临时接管 Profile/Mode；直接切换 Workflow 会保留最初返回状态，关闭时恢复，而手动修改能力领域会退出当前 Workflow。
 

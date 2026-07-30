@@ -155,7 +155,7 @@ describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
 
             const resumePath = path.join(tmpRoot, '.cwtools', topicId, 'resume_state.json');
             const saved = JSON.parse(fs.readFileSync(resumePath, 'utf-8'));
-            expect(saved.version).to.equal(3);
+            expect(saved.version).to.equal(4);
             expect(saved.domain).to.equal('paradox');
             expect(saved.compacted).to.equal(true);
             expect(saved.summaryRef).to.match(/summary\.md$/);
@@ -188,7 +188,7 @@ describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
 
             const loaded = await loadResumeState(topicId);
             expect(loaded?.recoveredFromBackup).to.equal(true);
-            expect(loaded?.version).to.equal(3);
+            expect(loaded?.version).to.equal(4);
             expect(loaded?.messages.some(message => message.content === 'generation one')).to.equal(true);
         } finally {
             fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -304,9 +304,10 @@ describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
             }), 'utf-8');
 
             const loaded = await loadResumeState(topicId);
-            expect(loaded?.version).to.equal(2);
+            expect(loaded?.version).to.equal(4);
             expect(loaded?.domain).to.equal('paradox');
             expect(loaded?.messages[0]?.content).to.equal('legacy context');
+            expect(loaded?.domainSnapshot?.version).to.equal(1);
             expect(store.getRules()).to.deep.equal([]);
         } finally {
             store.clear();

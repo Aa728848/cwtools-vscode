@@ -576,6 +576,28 @@ describe('dispatch_agents tool wiring', () => {
         expect(result.error).to.include('utility');
     });
 
+    it('intersects mode roles with the selected runtime profile sub-agent allowlist', async () => {
+        const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
+        const executor = new AgentToolExecutor({
+            onNotification: () => undefined,
+            sendNotification: () => undefined,
+        } as any, process.cwd());
+
+        const result = await executor.execute('dispatch_agents', {
+            tasks: [{ id: 'reviewer', agentType: 'review', prompt: 'review changes' }],
+        }, {
+            runnerOptions: {
+                mode: 'orchestrator',
+                agentProfileAllowedSubagents: ['explore'],
+                abortSignal: new AbortController().signal,
+            },
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include("Agent type 'review' is not allowed");
+        expect(result.error).to.include('explore');
+    });
+
     it('allows script mode to dispatch up to eight tasks but rejects nine', async () => {
         const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
         const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
@@ -943,6 +965,45 @@ describe('Orchestrator runtime safety', () => {
 
         expect(result.success).to.equal(true);
         expect(order).to.deep.equal(['A', 'B']);
+    });
+
+    it('executeGraph: persists and injects structured dependency handoffs', async () => {
+        const executor = new ParallelExecutor({ maxConcurrency: 2 });
+        const graph = TaskGraphEngine.createGraph('handoff propagation');
+        TaskGraphEngine.addNode(graph, 'A', 'explore', 'inspect source');
+        TaskGraphEngine.addNode(graph, 'B', 'build', 'implement result', { dependencies: ['A'] });
+        const blackboard = new Blackboard();
+        let dependentPrompt = '';
+
+        const result = await executor.executeGraph(
+            graph,
+            blackboard,
+            async (node) => {
+                if (node.id === 'B') dependentPrompt = node.prompt;
+                return {
+                    nodeId: node.id,
+                    success: true,
+                    output: `raw ${node.id}`,
+                    handoff: {
+                        version: 1,
+                        summary: `summary ${node.id}`,
+                        changedFiles: node.id === 'B' ? ['client/b.ts'] : [],
+                        verification: ['unit test'],
+                        unresolved: ['none'],
+                    },
+                    tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                    writtenFiles: [],
+                    stepCount: 1,
+                };
+            },
+            {},
+        );
+
+        expect(result.success).to.equal(true);
+        expect(blackboard.readValue('__handoff:A')).to.include('summary A');
+        expect(dependentPrompt).to.include('Structured dependency handoffs');
+        expect(dependentPrompt).to.include('summary A');
+        expect(result.summary).to.include('A: summary A');
     });
 
     it('executeGraph: keeps non-conflicting planned files in the same batch', async () => {
@@ -1383,6 +1444,58 @@ describe('Orchestrator runtime safety', () => {
         expect(result.success).to.equal(true);
         expect(capturedOptions.excludeTools).to.include.members([...MUTATING_TOOLS]);
         expect(capturedOptions.excludeTools).to.include.members(['dispatch_agents', 'merge_results']);
+    });
+
+    it('executeGraph: suspends and requeues a rate-limited child before retrying', async function () {
+        this.timeout(5_000);
+        const eventTypes: string[] = [];
+        const executor = new ParallelExecutor({
+            maxConcurrency: 2,
+            eventSink: {
+                appendSoon: (type: string) => {
+                    eventTypes.push(type);
+                },
+            } as any,
+        });
+        const graph = TaskGraphEngine.createGraph('rate limit recovery');
+        TaskGraphEngine.addNode(graph, 'A', 'explore', 'inspect', { maxRetries: 1 });
+        let calls = 0;
+
+        const result = await executor.executeGraph(
+            graph,
+            new Blackboard(),
+            async () => {
+                calls++;
+                if (calls === 1) {
+                    return {
+                        nodeId: 'A',
+                        success: false,
+                        output: '',
+                        error: '429 Too Many Requests',
+                        tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                        writtenFiles: [],
+                        stepCount: 1,
+                    };
+                }
+                return {
+                    nodeId: 'A',
+                    success: true,
+                    output: 'done',
+                    tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                    writtenFiles: [],
+                    stepCount: 1,
+                };
+            },
+            {},
+        );
+
+        expect(result.success).to.equal(true);
+        expect(calls).to.equal(2);
+        expect(eventTypes).to.include.members([
+            'agent_suspended',
+            'agent_requeued',
+            'provider_capacity_changed',
+        ]);
     });
 });
 

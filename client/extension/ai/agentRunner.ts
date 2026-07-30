@@ -24,6 +24,7 @@ import type {
     GetDiagnosticsResult,
     ToolDefinition,
     ReasoningEffort,
+    AgentSchedulingState,
 } from './types';
 import { contentToString } from './types';
 import { defaultDomainForMode } from './agentProfile';
@@ -66,7 +67,7 @@ import { PartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { atomicWriteText, sha256Text } from './runner/durableStorage';
 import { loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
-import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT, AUTO_COMPACTION_MIN_INTERVAL_MS, type CompactionBudgetOptions, type AutoCompactionThrottle } from './runner/compaction';
+import { maybeCompactHistory as _maybeCompactHistory, COMPACTION_THRESHOLD_RATIO, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT, AUTO_COMPACTION_MIN_INTERVAL_MS, type CompactionBudgetOptions, type AutoCompactionThrottle } from './runner/compaction';
 import { refreshLiveVsCodeContext } from './runner/liveContext';
 import { executeFallbackRetry, isFallbackEligibleApiError } from './runner/fallbackPolicy';
 import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles, toolScheduler } from './runner/toolScheduler';
@@ -75,9 +76,20 @@ import { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeTo
 import { OutputRepetitionDetector, type OutputRepetitionMatch } from './runner/outputRepetitionDetector';
 import { ReadTracker } from './runner/readTracker';
 import { TurnRunner } from './runner/turnRunner';
-import type { AgentInputQueue } from './runner/inputQueue';
+import type { AgentInputQueue, AgentQueuedInputKind } from './runner/inputQueue';
 import type { RunEventSink } from './runner/runContext';
 import { activeTurnRegistry } from './runner/activeTurnRegistry';
+import {
+    normalizeSchedulingState,
+    phaseForToolStage,
+    shouldEnterPlanFromTodos,
+    transitionSchedulingState,
+} from './runner/scheduling';
+import { toolDisclosureService, type ToolDisclosureContext } from './runner/toolDisclosure';
+import { ToolDedupeService } from './runner/toolDedupe';
+import { contextLimitTracker } from './runner/contextLimitTracker';
+import { createAgentRuntimeServices } from './runner/runtimeServices';
+import { runtimeFaultInjector } from './runner/faultInjection';
 import { threadStore } from './runner/threadStore';
 import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 import { buildApprovedPlanExecutionReminder } from './executePlanHandoff';
@@ -235,6 +247,8 @@ export interface AgentRunnerOptions {
     tokenBudget?: number;
     /** True when this run belongs to an active durable goal. Selects the goal emergency ceiling. */
     durableGoal?: boolean;
+    /** Host-authored evidence that the user explicitly requested durable long-running work. */
+    goalCreationAuthorized?: boolean;
     /** Override the reasoning-loop iteration limit. Used by orchestrator role budgets. */
     maxIterations?: number;
     /** Treat maxIterations as a renewable healthy-progress window instead of an absolute ceiling. */
@@ -247,6 +261,13 @@ export interface AgentRunnerOptions {
     approvedPlanExecution?: boolean;
     /** Resolved capability domain. General runs cannot access Paradox-only tools or prompts. */
     domain?: import('./types').AgentRuntimeDomain;
+    /** Admission and runtime phase state, persisted independently from legacy mode. */
+    schedulingState?: AgentSchedulingState;
+    /** Concrete catalog profile and its isolated operating instructions. */
+    agentProfileName?: string;
+    agentProfileInstructions?: string;
+    /** Dispatch roles allowed by the selected runtime profile. Undefined preserves mode defaults. */
+    agentProfileAllowedSubagents?: string[];
     /** Callback for real-time step updates (for UI) */
     onStep?: (step: AgentStep) => void;
     /** Called when an external runtime has allocated a durable run id. */
@@ -441,6 +462,7 @@ const globalPartitionedWriteQueue = new PartitionedWriteQueue();
 
 export class AgentRunner {
     public readonly readTracker = new ReadTracker();
+    private readonly runtimeServices = createAgentRuntimeServices();
     private writeQueue = globalPartitionedWriteQueue;
     private activeRunRecordPromise?: Promise<import('./types').AgentRunRecord>;
     private readonly turnRunner = new TurnRunner();
@@ -470,17 +492,38 @@ export class AgentRunner {
         return this.activeRunRecordPromise;
     }
 
-    public submitInput(runId: string, message: string, clientUserMessageId?: string, images?: string[]): boolean {
+    public submitInput(
+        runId: string,
+        message: string,
+        clientUserMessageId?: string,
+        images?: string[],
+        kind: AgentQueuedInputKind = 'steer',
+        operationId?: string,
+    ): boolean {
         const queue = this.activeInputQueues.get(runId);
         if (!queue) return false;
-        const item = queue.enqueue(message, clientUserMessageId, images);
+        const item = queue.enqueue(message, clientUserMessageId, images, kind, operationId);
         this.activeRunEventSinks.get(runId)?.appendSoon('input_queued', {
             inputId: item.id,
             clientUserMessageId,
             size: message.length,
             imageCount: images?.length ?? 0,
             preview: message.slice(0, 240),
+            kind,
+            operationId,
         }, { status: 'pending' });
+        this.activeRunEventSinks.get(runId)?.appendSoon('prompt_queued', {
+            promptId: item.id,
+            kind,
+            operationId,
+            clientUserMessageId,
+        }, { status: 'pending' });
+        if (kind === 'steer') {
+            this.activeRunEventSinks.get(runId)?.appendSoon('prompt_steered', {
+                promptId: item.id,
+                activePromptId: runId,
+            }, { status: 'pending' });
+        }
         return true;
     }
 
@@ -593,9 +636,10 @@ export class AgentRunner {
         mode: AgentMode,
         domain: import('./types').AgentRuntimeDomain,
         runId?: string,
-        pendingToolCalls?: any[]
+        pendingToolCalls?: any[],
+        schedulingState?: AgentSchedulingState,
     ): Promise<void> {
-        await saveCheckpointResumeState(topicId, mode, messages, this.toolExecutor, runId, pendingToolCalls, domain);
+        await saveCheckpointResumeState(topicId, mode, messages, this.toolExecutor, runId, pendingToolCalls, domain, schedulingState);
     }
 
     /** 
@@ -641,7 +685,34 @@ export class AgentRunner {
      * Returns true for 5xx server errors, network timeouts, and exhausted rate limits.
      */
     private isFallbackEligibleError(error: unknown): boolean {
-        return isFallbackEligibleApiError(error);
+        return isFallbackEligibleApiError(error)
+            || this.runtimeServices.retryPolicy.decide(error, 1).retry;
+    }
+
+    private async executeToolPipeline(
+        toolName: string,
+        args: Record<string, unknown>,
+        context?: import('./types').AgentToolContext,
+    ): Promise<unknown> {
+        runtimeFaultInjector.setEnabled(vs.workspace
+            .getConfiguration('stellarisLanguageServices.ai.developer')
+            .get<boolean>('faultInjection', false));
+        await runtimeFaultInjector.hit('before_tool', context?.runnerOptions?.abortSignal);
+        const pipeline = this.runtimeServices.createToolPipeline({
+            execute: pipelineContext => this.toolExecutor.execute(
+                pipelineContext.toolName,
+                pipelineContext.args,
+                context,
+            ),
+        });
+        const result = await pipeline.run({
+            invocationId: context?.runnerOptions?.runRecord?.runId ?? `tool_${Date.now()}`,
+            toolName,
+            args,
+            signal: context?.runnerOptions?.abortSignal,
+        });
+        await runtimeFaultInjector.hit('after_tool', context?.runnerOptions?.abortSignal);
+        return result;
     }
 
     /**
@@ -785,10 +856,15 @@ export class AgentRunner {
             : null;
         let mode = restoredResumeState?.mode ?? options?.mode ?? 'build';
         let domain = restoredResumeState?.domain ?? options?.domain ?? defaultDomainForMode(mode);
+        let schedulingState = normalizeSchedulingState(
+            restoredResumeState?.schedulingState ?? options?.schedulingState,
+            mode,
+            domain,
+        );
         const topicId = context.topicId || 'default';
         const threadId = options?.threadId ?? topicId;
         const turnId = options?.turnId ?? `turn_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        options = { ...options, mode, domain, abortSignal: turnAbortController.signal, threadId, turnId };
+        options = { ...options, mode, domain, schedulingState, abortSignal: turnAbortController.signal, threadId, turnId };
         const userPromptPreview = userMessage.substring(0, 100);
         const turnRuntimePromise = this.turnRunner.startTurn({
             topicId,
@@ -802,6 +878,7 @@ export class AgentRunner {
             workflowId: options?.workflowId,
             threadId,
             turnId,
+            schedulingState,
         });
         const runRecordPromise = turnRuntimePromise.then(runtime => runtime.run);
         this.activeRunRecordPromise = runRecordPromise;
@@ -814,8 +891,24 @@ export class AgentRunner {
             }).catch(() => {});
         };
         const updateRunStatus = (status: import('./types').AgentRunStatus) => {
-            runRecordPromise.then(r => {
-                runLedger.appendEvent(r.runId, 'status_changed', { status }).catch(() => {});
+            runRecordPromise.then(async r => {
+                const currentSchedulingState = options?.schedulingState;
+                if (status === 'completed' && currentSchedulingState && currentSchedulingState.phase !== 'finalize') {
+                    const previousPhase = currentSchedulingState.phase;
+                    const finalized = transitionSchedulingState(currentSchedulingState, {
+                        phase: 'finalize',
+                        reason: 'run completed',
+                    });
+                    if (options) options.schedulingState = finalized;
+                    schedulingState = finalized;
+                    await runLedger.appendEvent(r.runId, 'phase_changed', {
+                        from: previousPhase,
+                        to: finalized.phase,
+                        reason: finalized.phaseReason,
+                        revision: finalized.revision,
+                    });
+                }
+                await runLedger.appendEvent(r.runId, 'status_changed', { status });
                 if (status === 'completed' || status === 'failed' || status === 'paused') {
                     runMetrics.modelCalls = tokenAccumulator.apiCalls ?? 0;
                     runMetrics.compactionCalls = tokenAccumulator.compactionCalls ?? 0;
@@ -826,7 +919,7 @@ export class AgentRunner {
                         threadId,
                         status === 'completed' ? 'completed' : status === 'paused' ? 'interrupted' : 'failed',
                     ).catch(() => {});
-                    runLedger.appendEvent(r.runId, 'metrics_updated', {
+                    await runLedger.appendEvent(r.runId, 'metrics_updated', {
                         metrics: {
                             totalTokens: tokenAccumulator.total,
                             promptTokens: tokenAccumulator.input,
@@ -840,7 +933,7 @@ export class AgentRunner {
                             uncachedInputTokens: runMetrics.uncachedInputTokens,
                             toolCalls: runMetrics.toolCallCount
                         }
-                    }).catch(() => {});
+                    });
                 }
             }).catch(() => {});
         };
@@ -1019,7 +1112,24 @@ export class AgentRunner {
             runEventSink: turnRuntime.eventSink,
             inputQueue: turnRuntime.inputQueue,
             runRecord: turnRuntime.run,
+            schedulingState,
         };
+        await turnRuntime.eventSink.append('admission_decided', {
+            profileName: schedulingState.profileName ?? options.agentProfileName,
+            overlays: schedulingState.overlays ?? [],
+            domainProfile: schedulingState.domainProfile,
+            authorization: schedulingState.authorization,
+            initialPhase: schedulingState.phase,
+            explicitDelegation: schedulingState.dispatch !== 'single',
+            confidence: schedulingState.routeConfidence,
+            evidence: schedulingState.routeEvidence,
+        });
+        await turnRuntime.eventSink.append('phase_changed', {
+            from: null,
+            to: schedulingState.phase,
+            reason: schedulingState.phaseReason,
+            revision: schedulingState.revision,
+        });
         this.activeRunEventSinks.set(runId, turnRuntime.eventSink);
         this.activeInputQueues.set(runId, turnRuntime.inputQueue);
         const unregisterActiveTurn = activeTurnRegistry.register({
@@ -1154,6 +1264,15 @@ export class AgentRunner {
         });
         const initialStageReminder = buildToolStageReminder(mode, initialToolStage, promptToolDefinitions, domain);
         const dynamicBlock: ChatMessage[] = [...promptDynamicBlock];
+        if (options?.agentProfileInstructions?.trim()) {
+            dynamicBlock.unshift({
+                role: 'system',
+                content: [
+                    `[AGENT PROFILE: ${options.agentProfileName ?? schedulingState.profileName ?? 'custom'}]`,
+                    options.agentProfileInstructions.trim().slice(0, 32_000),
+                ].join('\n'),
+            });
+        }
         if (options?.approvedPlanExecution) {
             dynamicBlock.push({ role: 'user', content: buildApprovedPlanExecutionReminder() });
         }
@@ -1248,7 +1367,7 @@ export class AgentRunner {
 
         if (context.topicId) {
             options = { ...options, topicId: context.topicId, mode, domain };
-            await this.saveResumeState(context.topicId, messages, mode, domain, runId);
+            await this.saveResumeState(context.topicId, messages, mode, domain, runId, undefined, options.schedulingState ?? schedulingState);
         }
 
         const modeLabel: Record<string, string> = {
@@ -1330,7 +1449,7 @@ export class AgentRunner {
                 if (validationPending && !validationFailed) {
                     this.retainedResumeRuns.add(runId);
                     if (context.topicId) {
-                        await this.saveResumeState(context.topicId, messages, mode, domain, runId);
+                        await this.saveResumeState(context.topicId, messages, mode, domain, runId, undefined, options.schedulingState ?? schedulingState);
                     }
                     updateRunStatus('paused');
                     await clearResumeStateIfComplete();
@@ -1428,7 +1547,7 @@ export class AgentRunner {
             if (validationPending) {
                 this.retainedResumeRuns.add(runId);
                 if (context.topicId) {
-                    await this.saveResumeState(context.topicId, messages, mode, domain, runId);
+                    await this.saveResumeState(context.topicId, messages, mode, domain, runId, undefined, options.schedulingState ?? schedulingState);
                 }
                 updateRunStatus('paused');
             } else {
@@ -1456,7 +1575,7 @@ export class AgentRunner {
             }
 
             if (context.topicId) {
-                await this.saveResumeState(context.topicId, messages, mode, domain, runId);
+                await this.saveResumeState(context.topicId, messages, mode, domain, runId, undefined, options.schedulingState ?? schedulingState);
             }
             runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0);
 
@@ -1531,7 +1650,9 @@ export class AgentRunner {
             { aiService: this.aiService, promptBuilder: this.promptBuilder },
             options,
             tokenAccumulator,
-            undefined,
+            Math.max(0.5, Math.min(0.95, vs.workspace
+                .getConfiguration('stellarisLanguageServices.ai.performance')
+                .get<number>('compactionTriggerRatio', COMPACTION_THRESHOLD_RATIO))),
             {
                 ...budgetOptions,
                 // Cancel in-flight compaction with the turn so a cancelled run
@@ -1774,6 +1895,12 @@ export class AgentRunner {
         runMetrics?: AgentRunMetrics,
         terminalValidation?: TerminalValidationState,
     ): Promise<string> {
+        let schedulingState = normalizeSchedulingState(
+            options?.schedulingState,
+            mode,
+            options?.domain,
+        );
+        if (options) options.schedulingState = schedulingState;
         const runRecord = options?.runRecord ?? await this.activeRunRecordPromise!;
         this.readTracker.reset();
         // Per-run reset of edit failure counters (top-level runs only: sub-agents
@@ -1811,6 +1938,7 @@ export class AgentRunner {
         // Flag set to true when we need to exit the outer while loop
         let forceStop = false;
         let outputRepetitionRecoveries = 0;
+        let contextOverflowRecoveries = 0;
         let topLevelLengthRecoveries = 0;
         let ineffectiveCompactionCount = 0;
         const updateFinalPromptMetric = () => {
@@ -1931,7 +2059,20 @@ export class AgentRunner {
             ErrorReporter.debug('AgentRunner', `Workflow "${activeWorkflow.id}" tool policy applied: ${availableTools.length} tools available`);
         }
         const stagedToolPool = availableTools;
-        availableTools = filterToolDefinitionsForStage(stagedToolPool, mode, toolStage, legacyFullToolset);
+        const disclosureContext: ToolDisclosureContext = {
+            mode,
+            domain: options?.domain ?? defaultDomainForMode(mode),
+            dynamicSupported: !legacyFullToolset
+                && options?.useSlimPrompt !== true
+                && vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance')
+                    .get<boolean>('dynamicToolDisclosure.enabled', true),
+            loaded: new Set<string>(),
+        };
+        const toolDedupe = new ToolDedupeService();
+        availableTools = toolDisclosureService.initialTools(
+            filterToolDefinitionsForStage(stagedToolPool, mode, toolStage, legacyFullToolset),
+            disclosureContext,
+        );
 
         // M3 Fix: remove per-call dynamic import — getProvider is already statically
         // imported at the top of this file; dynamic import added latency for nothing.
@@ -1949,9 +2090,19 @@ export class AgentRunner {
             
         // Security permissions must never disable context safety. Full-access
         // mode may relax approvals, but the model still has the same window.
-        const contextLimit = baseContextLimit;
+        const contextLimit = contextLimitTracker.get(
+            _providerId0,
+            options?.model ?? _config0.model,
+            baseContextLimit,
+        ).effectiveLimit;
         
-        const midLoopThreshold = Math.floor(contextLimit * MID_LOOP_COMPACTION_RATIO);
+        const configuredBlockRatio = Math.max(0.55, Math.min(0.98,
+            vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance')
+                .get<number>('compactionBlockRatio', Math.max(MID_LOOP_COMPACTION_RATIO, 0.90))));
+        const configuredReservedTokens = Math.max(0,
+            vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance')
+                .get<number>('compactionReservedTokens', 4_096));
+        const midLoopThreshold = Math.floor((contextLimit - configuredReservedTokens) * configuredBlockRatio);
         const toolResultBudget = getToolResultBudget(baseContextLimit);
 
         const iterationWindow = resolveMaxToolIterations({
@@ -2021,6 +2172,8 @@ export class AgentRunner {
                 mode,
                 options.domain ?? defaultDomainForMode(mode),
                 runRecord.runId,
+                undefined,
+                options.schedulingState,
             );
             lastResumeSnapshotAt = now;
             lastResumeSnapshotIteration = iteration;
@@ -2226,7 +2379,7 @@ export class AgentRunner {
                             emitStep,
                             options,
                             tokenAccumulator,
-                            { reservedTokens: activeToolSchemaTokens, force: true },
+                            { reservedTokens: activeToolSchemaTokens + configuredReservedTokens, force: true },
                         );
                         refreshLiveVsCodeContext(messages);
                         afterTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
@@ -2374,6 +2527,8 @@ export class AgentRunner {
                     model: requestModel,
                     messageCount: messages.length,
                     toolCount: availableTools.length,
+                    toolSchemaEstimateTokens: estimateTokenCount(JSON.stringify(availableTools)),
+                    dynamicallyDisclosedToolCount: disclosureContext.loaded.size,
                     requestRef: requestArtifact?.ref,
                     requestSha256: requestArtifact?.sha256,
                 },
@@ -2384,6 +2539,10 @@ export class AgentRunner {
                 if (tokenAccumulator) {
                     tokenAccumulator.apiCalls = (tokenAccumulator.apiCalls ?? 0) + 1;
                 }
+                runtimeFaultInjector.setEnabled(vs.workspace
+                    .getConfiguration('stellarisLanguageServices.ai.developer')
+                    .get<boolean>('faultInjection', false));
+                await runtimeFaultInjector.hit('before_model', modelAbortController.signal);
                 response = await this.aiService.chatCompletion(messages, {
                     tools: availableTools,
                     providerId: options?.providerId,
@@ -2458,7 +2617,43 @@ export class AgentRunner {
                         tryAnnouncePath(toolName, argsBuf);
                     }
                 });
+                await runtimeFaultInjector.hit('after_model', modelAbortController.signal);
             } catch (err: any) {
+                const errorText = err instanceof Error ? err.message : String(err);
+                const statusCode = typeof err?.status === 'number' ? err.status : typeof err?.statusCode === 'number' ? err.statusCode : undefined;
+                const isContextOverflow = /context(?:_| )length|context window|maximum context|too many tokens/i.test(errorText)
+                    || (statusCode === 413 && messages.reduce((sum, message) => sum + estimateChatMessageTokens(message), 0) >= contextLimit * 0.75);
+                if (isContextOverflow && contextOverflowRecoveries < 2) {
+                    contextOverflowRecoveries++;
+                    const activeSchemaTokens = estimateTokenCount(JSON.stringify(availableTools));
+                    const estimatedTokens = messages.reduce((sum, message) => sum + estimateChatMessageTokens(message), 0)
+                        + activeSchemaTokens;
+                    const observedLimit = contextLimitTracker.observeOverflow(
+                        requestProviderId,
+                        requestModel,
+                        estimatedTokens,
+                    );
+                    await runLedger.appendEvent(runRecord.runId, 'context_limit_observed', {
+                        iteration,
+                        providerId: requestProviderId,
+                        model: requestModel,
+                        estimatedTokens,
+                        observedLimit,
+                    }, { invocationId: modelCallId, status: 'failed' });
+                    await runLedger.appendEvent(runRecord.runId, 'compaction_retry', {
+                        iteration,
+                        attempt: contextOverflowRecoveries,
+                        reason: errorText,
+                    }, { invocationId: modelCallId, status: 'running' });
+                    messages = await this.maybeCompactHistory(
+                        messages,
+                        emitStep,
+                        options,
+                        tokenAccumulator,
+                        { reservedTokens: activeSchemaTokens + configuredReservedTokens, force: true },
+                    );
+                    continue;
+                }
                 if (outputRepetition) {
                     await runLedger.appendEvent(
                         runRecord.runId,
@@ -2868,6 +3063,34 @@ export class AgentRunner {
             }
 
             if (!toolCalls) toolCalls = [];
+            toolDedupe.nextStep();
+            for (const toolCall of toolCalls) {
+                if (toolCall.function.name !== 'select_tools') continue;
+                let selectionArgs: Record<string, unknown> = {};
+                try {
+                    selectionArgs = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
+                } catch {
+                    // The normal argument-repair path will report malformed arguments.
+                }
+                const stagePool = filterToolDefinitionsForStage(stagedToolPool, mode, toolStage, legacyFullToolset);
+                const selection = toolDisclosureService.select({
+                    tools: Array.isArray(selectionArgs.tools)
+                        ? selectionArgs.tools.filter((value): value is string => typeof value === 'string')
+                        : undefined,
+                    groups: Array.isArray(selectionArgs.groups)
+                        ? selectionArgs.groups.filter((value): value is string => typeof value === 'string')
+                        : undefined,
+                    reason: typeof selectionArgs.reason === 'string' ? selectionArgs.reason : '',
+                }, stagePool, disclosureContext);
+                selectionArgs._selectionResult = selection;
+                toolCall.function.arguments = JSON.stringify(selectionArgs);
+                availableTools = toolDisclosureService.initialTools(stagePool, disclosureContext);
+                await runLedger.appendEvent(runRecord.runId, 'tool_disclosure_changed', {
+                    iteration,
+                    ...selection,
+                    activeToolCount: availableTools.length,
+                }, { invocationId: toolCall.id, status: selection.denied.length > 0 ? 'failed' : 'done' });
+            }
             // ── Deduplicate file-write calls ──────────────────────────────────
             // If the model emitted multiple write/edit calls targeting the same file
             // in one response, only keep the LAST one for each file.
@@ -3067,7 +3290,9 @@ export class AgentRunner {
                     continue;
                 }
 
-                if (mode === 'plan'
+                const runtimePlanPhase = options?.schedulingState?.phase === 'plan';
+                if (runtimePlanPhase
+                    || mode === 'plan'
                     || ((mode === 'orchestrator' || mode === 'script') && toolName === 'write_file')) {
                     const guard = validatePlanModeToolUse(
                         toolName,
@@ -3075,7 +3300,7 @@ export class AgentRunner {
                         this.toolExecutor.workspaceRoot,
                         options?.topicId,
                         ci.targetPaths,
-                        mode,
+                        runtimePlanPhase ? 'plan' : mode as 'plan' | 'orchestrator' | 'script',
                     );
                     if (!guard.allowed) {
                         emitStep({
@@ -3099,7 +3324,7 @@ export class AgentRunner {
                     }
                 }
                 if (toolName === 'git_ops') {
-                    const guard = validateGitOpsForMode(mode, toolArgs);
+                    const guard = validateGitOpsForMode(runtimePlanPhase ? 'plan' : mode, toolArgs);
                     if (!guard.allowed) {
                         emitStep({
                             type: 'validation',
@@ -3130,33 +3355,80 @@ export class AgentRunner {
                     }
                     await Promise.all(batchIndices.map(async idx => {
                         const callInfo = parsedCalls[idx]!;
-                        const runReadTool = async () => {
+                        const runReadTool = async (): Promise<unknown> => {
                             const releaseLock = await toolScheduler.acquireLock(callInfo.concurrencyClass, options?.abortSignal);
                             try {
                                 options?.abortSignal?.throwIfAborted();
                                 await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: callInfo.toolName }, { invocationId: callInfo.invocationId });
-                                const rawRes = await this.toolExecutor.execute(callInfo.toolName, callInfo.toolArgs, agentToolContext);
-                                toolResults[idx] = await this.processToolResult(
+                                const rawRes = await this.executeToolPipeline(callInfo.toolName, callInfo.toolArgs, agentToolContext);
+                                const processed = await this.processToolResult(
                                     callInfo.toolName,
                                     callInfo.invocationId,
                                     runRecord.runId,
                                     options?.topicId || 'default',
                                     rawRes
                                 );
-                                await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(callInfo.toolName, toolResults[idx]), { invocationId: callInfo.invocationId });
-                            } catch (e: any) {
-                                if (e?.name === 'AbortError') throw e;
-                                toolResults[idx] = { error: e instanceof Error ? e.message : String(e) };
-                                await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(callInfo.toolName, toolResults[idx]), { invocationId: callInfo.invocationId });
+                                await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(callInfo.toolName, processed), { invocationId: callInfo.invocationId });
+                                return processed;
                             } finally {
                                 releaseLock();
                             }
                         };
-                        const readPaths = callInfo.targetPaths.length > 0 ? callInfo.targetPaths : [];
-                        if (readPaths.length > 0) {
-                            await this.writeQueue.afterCurrentWrites(readPaths, runReadTool);
-                        } else {
-                            await runReadTool();
+                        try {
+                            const targetResourceRevision = callInfo.targetPaths.length > 0
+                                ? (await Promise.all(callInfo.targetPaths.map(async targetPath => {
+                                    try {
+                                        const stat = await fs.promises.stat(targetPath);
+                                        return `${targetPath}:${stat.size}:${stat.mtimeMs}`;
+                                    } catch {
+                                        return `${targetPath}:missing`;
+                                    }
+                                }))).join('|')
+                                : agentToolContext.authoritativeProjectRevision ?? '';
+                            const deduped = await toolDedupe.execute({
+                                invocationId: callInfo.invocationId,
+                                toolName: callInfo.toolName,
+                                args: callInfo.toolArgs,
+                                authorizationScope: options?.schedulingState?.authorization ?? mode,
+                                targetResourceRevision,
+                            }, async () => {
+                                const readPaths = callInfo.targetPaths.length > 0 ? callInfo.targetPaths : [];
+                                return readPaths.length > 0
+                                    ? this.writeQueue.afterCurrentWrites(readPaths, runReadTool)
+                                    : runReadTool();
+                            });
+                            toolResults[idx] = deduped.value;
+                            if (deduped.reused) {
+                                await runLedger.appendEvent(runRecord.runId, 'tool_call_deduplicated', {
+                                    toolName: callInfo.toolName,
+                                    sourceInvocationId: deduped.sourceInvocationId,
+                                }, { invocationId: callInfo.invocationId, status: 'done' });
+                                await runLedger.appendEvent(
+                                    runRecord.runId,
+                                    'tool_call_end',
+                                    this.summarizeToolResultForLedger(callInfo.toolName, toolResults[idx]),
+                                    { invocationId: callInfo.invocationId, status: 'done' },
+                                );
+                            }
+                            const repeatCount = toolDedupe.repeatCount(
+                                callInfo.toolName,
+                                callInfo.toolArgs,
+                                options?.schedulingState?.authorization ?? mode,
+                                targetResourceRevision,
+                            );
+                            if (repeatCount >= 2) {
+                                await runLedger.appendEvent(runRecord.runId, 'tool_repeat_escalated', {
+                                    toolName: callInfo.toolName,
+                                    repeatCount,
+                                    action: repeatCount >= 5 ? 'stop_or_narrow' : repeatCount >= 3 ? 'change_strategy' : 'observe',
+                                }, { invocationId: callInfo.invocationId, status: repeatCount >= 5 ? 'failed' : 'pending' });
+                                if (repeatCount >= 3) softLoopGuidancePending = true;
+                                if (repeatCount >= 5) needsHashValidation = true;
+                            }
+                        } catch (e: any) {
+                            if (e?.name === 'AbortError') throw e;
+                            toolResults[idx] = { error: e instanceof Error ? e.message : String(e) };
+                            await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(callInfo.toolName, toolResults[idx]), { invocationId: callInfo.invocationId });
                         }
                     }));
                 } else {
@@ -3165,7 +3437,7 @@ export class AgentRunner {
                         try {
                             options?.abortSignal?.throwIfAborted();
                             await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: ci.toolName }, { invocationId: ci.invocationId });
-                            const rawRes = await this.toolExecutor.execute(toolName, toolArgs, agentToolContext);
+                            const rawRes = await this.executeToolPipeline(toolName, toolArgs, agentToolContext);
                             toolResults[i] = await this.processToolResult(
                                 toolName,
                                 ci.invocationId,
@@ -3226,7 +3498,7 @@ export class AgentRunner {
                                 // non-PDX content (markdown/json), telling the model to switch
                                 // tools for no reason.
                                 const args = (confirmedWrittenFiles.has(primaryFilePath) || shouldAutoApplyWrite) ? { ...toolArgs, _autoApply: true } : toolArgs;
-                                const rawRes = await this.toolExecutor.execute(toolName, args, agentToolContext);
+                                const rawRes = await this.executeToolPipeline(toolName, args, agentToolContext);
                                 toolResults[i] = await this.processToolResult(
                                     toolName,
                                     ci.invocationId,
@@ -3237,7 +3509,7 @@ export class AgentRunner {
                                 const r = toolResults[i] as Record<string, unknown>;
                                 if (r && (r.success || r.confirmed) && primaryFilePath) confirmedWrittenFiles.add(primaryFilePath);
                             } else if (WRITE_TOOLS.has(toolName) && primaryFilePath && (confirmedWrittenFiles.has(primaryFilePath) || shouldAutoApplyWrite)) {
-                                const rawRes = await this.toolExecutor.execute(toolName, { ...toolArgs, _autoApply: true }, agentToolContext);
+                                const rawRes = await this.executeToolPipeline(toolName, { ...toolArgs, _autoApply: true }, agentToolContext);
                                 toolResults[i] = await this.processToolResult(
                                     toolName,
                                     ci.invocationId,
@@ -3246,7 +3518,7 @@ export class AgentRunner {
                                     rawRes
                                 );
                             } else {
-                                const rawRes = await this.toolExecutor.execute(toolName, toolArgs, agentToolContext);
+                                const rawRes = await this.executeToolPipeline(toolName, toolArgs, agentToolContext);
                                 toolResults[i] = await this.processToolResult(
                                     toolName,
                                     ci.invocationId,
@@ -3440,6 +3712,20 @@ export class AgentRunner {
                         !!todo && typeof todo === 'object' && (todo as Record<string, unknown>).status === 'done').length;
                     if (nextCompletedTodoCount > completedTodoCount) progressRevision++;
                     completedTodoCount = nextCompletedTodoCount;
+                    if (shouldEnterPlanFromTodos(schedulingState, todos)) {
+                        const previousPhase = schedulingState.phase;
+                        schedulingState = transitionSchedulingState(schedulingState, {
+                            phase: 'plan',
+                            reason: 'runtime task decomposition requires a design checkpoint',
+                        });
+                        if (options) options.schedulingState = schedulingState;
+                        options?.runEventSink?.appendSoon('phase_changed', {
+                            from: previousPhase,
+                            to: schedulingState.phase,
+                            reason: schedulingState.phaseReason,
+                            revision: schedulingState.revision,
+                        });
+                    }
                 }
                 if (Array.isArray(record?.diagnostics)) {
                     for (const targetKey of targetKeys) {
@@ -3463,12 +3749,64 @@ export class AgentRunner {
                         || record?.postWriteValidationPassed === false
                         || record?.requiresRepair === true,
                 });
+                if (record?.success !== false
+                    && record?.error === undefined
+                    && parsedCalls[j]!.toolName === 'write_design_blueprint'
+                    && schedulingState.phase !== 'plan') {
+                    const previousPhase = schedulingState.phase;
+                    schedulingState = transitionSchedulingState(schedulingState, {
+                        phase: 'plan',
+                        reason: 'design blueprint created after inspection',
+                    });
+                    if (options) options.schedulingState = schedulingState;
+                    options?.runEventSink?.appendSoon('phase_changed', {
+                        from: previousPhase,
+                        to: 'plan',
+                        reason: schedulingState.phaseReason,
+                        revision: schedulingState.revision,
+                    });
+                }
+            }
+            if (schedulingState.phase === 'plan'
+                && mode === 'utility'
+                && toolStage === 'discovery'
+                && nextToolStage === 'write') {
+                // A mutation-authorized planning admission uses Utility's
+                // validation surface as its design checkpoint before source
+                // editors become visible.
+                nextToolStage = 'validation';
             }
             if (nextToolStage !== toolStage) {
                 const previousStage = toolStage;
+                const previousToolNames = new Set(availableTools.map(tool => tool.function.name));
                 toolStage = nextToolStage;
                 if (tokenAccumulator) tokenAccumulator.toolStage = toolStage;
-                availableTools = filterToolDefinitionsForStage(stagedToolPool, mode, toolStage, legacyFullToolset);
+                const nextPhase = phaseForToolStage(toolStage, schedulingState.phase);
+                if (nextPhase !== schedulingState.phase) {
+                    const previousPhase = schedulingState.phase;
+                    schedulingState = transitionSchedulingState(schedulingState, {
+                        phase: nextPhase,
+                        reason: `tool stage advanced to ${toolStage ?? 'full'}`,
+                    });
+                    if (options) options.schedulingState = schedulingState;
+                    options?.runEventSink?.appendSoon('phase_changed', {
+                        from: previousPhase,
+                        to: nextPhase,
+                        reason: schedulingState.phaseReason,
+                        revision: schedulingState.revision,
+                    });
+                }
+                availableTools = toolDisclosureService.initialTools(
+                    filterToolDefinitionsForStage(stagedToolPool, mode, toolStage, legacyFullToolset),
+                    disclosureContext,
+                );
+                const nextToolNames = new Set(availableTools.map(tool => tool.function.name));
+                options?.runEventSink?.appendSoon('capabilities_changed', {
+                    stage: toolStage,
+                    added: [...nextToolNames].filter(name => !previousToolNames.has(name)).sort(),
+                    removed: [...previousToolNames].filter(name => !nextToolNames.has(name)).sort(),
+                    toolHash: hashToolDefinitionsForFingerprint(availableTools),
+                });
                 const stageReminder = buildToolStageReminder(mode, toolStage, availableTools, options?.domain);
                 if (stageReminder) {
                     messages.push({ role: 'user', content: stageReminder });
@@ -3515,7 +3853,7 @@ export class AgentRunner {
                             emitStep,
                             options,
                             tokenAccumulator,
-                            { reservedTokens: activeToolSchemaTokens, force: true },
+                            { reservedTokens: activeToolSchemaTokens + configuredReservedTokens, force: true },
                         );
                         refreshLiveVsCodeContext(messages);
                         afterEmergencyTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
@@ -3764,7 +4102,7 @@ export class AgentRunner {
             diagnosticService?: GetDiagnosticsResult['diagnosticService'];
             validationStatus?: GetDiagnosticsResult['validationStatus'];
         }> => {
-            const rawResult = await this.toolExecutor.execute('get_diagnostics', {
+            const rawResult = await this.executeToolPipeline('get_diagnostics', {
                 file: targetFile,
                 severity: 'error',
             }, agentToolContext) as GetDiagnosticsResult;
@@ -3976,7 +4314,7 @@ export class AgentRunner {
 
             let diagnosticAdvice: string | undefined;
             try {
-                const rawAnalysis = await this.toolExecutor.execute('analyze_diagnostic_error', {
+                const rawAnalysis = await this.executeToolPipeline('analyze_diagnostic_error', {
                     file: targetFile,
                     toolName: 'get_diagnostics',
                     diagnosticsSnapshot: rawDiagnosticResult ?? { diagnostics: result.errors },

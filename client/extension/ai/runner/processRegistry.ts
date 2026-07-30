@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { RunEventSink } from './runContext';
 import { atomicWriteJson, readJsonWithBackup } from './durableStorage';
+import { agentTaskManager, type AgentTaskStatus } from './taskManager';
 
 const MAX_PROCESS_RECORDS = 200;
 
@@ -17,6 +18,8 @@ export interface BackgroundProcessRecord {
     executionMode?: 'captured' | 'terminal';
     runId?: string;
     threadId?: string;
+    topicId?: string;
+    taskId?: string;
     completedAt?: number;
     exitCode?: number;
     outputPreview?: string;
@@ -61,7 +64,7 @@ export class ProcessRegistry {
         pid?: number,
         eventSink?: RunEventSink,
         sandbox?: { sandboxMode?: string; networkAccess?: boolean; authorization?: { type: 'full-access' | 'one-shot'; permissionId?: string } },
-        options: { executionMode?: 'captured' | 'terminal'; runId?: string; threadId?: string; terminate?: () => void; writeStdin?: (text: string) => void } = {},
+        options: { executionMode?: 'captured' | 'terminal'; runId?: string; threadId?: string; topicId?: string; terminate?: () => void; writeStdin?: (text: string) => void } = {},
     ): BackgroundProcessRecord {
         const record: BackgroundProcessRecord = {
             processId: `proc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -75,8 +78,10 @@ export class ProcessRegistry {
             executionMode: options.executionMode ?? 'captured',
             runId: options.runId,
             threadId: options.threadId,
+            topicId: options.topicId,
             status: 'running',
         };
+        record.taskId = record.processId;
         this.processes.set(record.processId, record);
         this.pruneCompletedRecords();
         if (options.terminate || options.writeStdin) this.controls.set(record.processId, { terminate: options.terminate, writeStdin: options.writeStdin });
@@ -92,6 +97,25 @@ export class ProcessRegistry {
             startedAt: record.startedAt,
             metadata: { sandboxMode: record.sandboxMode, networkAccess: record.networkAccess, authorization: record.authorization },
         }, { invocationId: record.processId, status: 'running' });
+        if (record.topicId && record.runId && record.threadId) {
+            eventSink?.appendSoon('task_created', {
+                taskId: record.taskId,
+                kind: 'process',
+                processId: record.processId,
+            }, { invocationId: record.taskId, status: 'pending' });
+            void agentTaskManager.create({
+                taskId: record.taskId,
+                kind: 'process',
+                topicId: record.topicId,
+                runId: record.runId,
+                threadId: record.threadId,
+            }).then(() => agentTaskManager.transition(record.taskId!, 'running'))
+                .then(() => eventSink?.appendSoon('task_status_changed', {
+                    taskId: record.taskId,
+                    status: 'running',
+                }, { invocationId: record.taskId, status: 'running' }))
+                .catch(() => {});
+        }
         this.persistSoon();
         return record;
     }
@@ -112,6 +136,7 @@ export class ProcessRegistry {
             processId, stream, size: text.length, preview: text.slice(0, 240),
         }, { status: 'running' });
         eventSink?.appendSoon('item_updated', { itemId: processId, type: 'process', status: 'inProgress', stream, preview: text.slice(0, 240) }, { invocationId: processId, status: 'running' });
+        if (record.taskId && record.topicId) void agentTaskManager.appendOutput(record.taskId, text).catch(() => {});
         this.persistSoon();
     }
 
@@ -132,6 +157,7 @@ export class ProcessRegistry {
             completedAt: record.completedAt,
             exitCode,
         }, { invocationId: processId, status: record.status === 'completed' ? 'done' : 'failed' });
+        this.transitionTask(record, record.status === 'completed' ? 'completed' : 'failed', eventSink);
         this.pruneCompletedRecords();
         this.persistSoon();
     }
@@ -152,6 +178,7 @@ export class ProcessRegistry {
             completedAt: record.completedAt,
             exitCode: -1,
         }, { invocationId: processId, status: 'cancelled' });
+        this.transitionTask(record, 'killed', eventSink);
         this.pruneCompletedRecords();
         this.persistSoon();
     }
@@ -200,6 +227,16 @@ export class ProcessRegistry {
                 await fs.promises.mkdir(path.dirname(file), { recursive: true });
                 await atomicWriteJson(file, records);
             })
+            .catch(() => {});
+    }
+
+    private transitionTask(record: BackgroundProcessRecord, status: AgentTaskStatus, eventSink?: RunEventSink): void {
+        if (!record.taskId || !record.topicId) return;
+        void agentTaskManager.transition(record.taskId, status, record.outputPreview)
+            .then(() => eventSink?.appendSoon('task_status_changed', {
+                taskId: record.taskId,
+                status,
+            }, { invocationId: record.taskId, status: status === 'completed' ? 'done' : 'failed' }))
             .catch(() => {});
     }
 }

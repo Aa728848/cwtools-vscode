@@ -7,6 +7,7 @@ import { AGENT } from '../messages';
 import type { AIService } from '../aiService';
 import type { PromptBuilder } from '../promptBuilder';
 import { OutputRepetitionDetector } from './outputRepetitionDetector';
+import { runtimeFaultInjector } from './faultInjection';
 import { estimateTokenCount, CHARS_PER_TOKEN } from '../agentRunner';
 import { cloneChatMessage, normalizeTranscriptForPersistence, splitTranscriptForCompaction } from './contextTranscript';
 import type { CompactionTranscriptSplit } from './contextTranscript';
@@ -226,6 +227,7 @@ export async function maybeCompactHistory(
     thresholdRatio: number = COMPACTION_THRESHOLD_RATIO,
     budgetOptions: CompactionBudgetOptions = {},
 ): Promise<ChatMessage[]> {
+    await runtimeFaultInjector.hit('during_compaction', budgetOptions?.abortSignal);
     const canonicalHistory = normalizeTranscriptForPersistence(history);
     const estimatedTokens = estimateMessagesTokens(canonicalHistory);
     if (estimatedTokens === 0 || (!budgetOptions.force && estimatedTokens < MIN_HISTORY_TOKENS_FOR_AUTO_COMPACTION)) {
@@ -356,34 +358,75 @@ export async function maybeCompactHistory(
               ].join('\n')
             : `Create a new anchored summary from the conversation history above.`;
 
-        const compactionInstruction = [
-            compactionSystemPrompt,
-            COMPACTION_SUMMARY_TEMPLATE,
-            pinnedSection,
-            messageContext,
-        ].filter(Boolean).join('\n\n');
-
-        const compactionMessages: ChatMessage[] = [
-            { role: 'system', content: deps.promptBuilder.buildCompactionPrompt() },
-            { role: 'user', content: compactionInstruction },
-        ];
-
-        // Fail fast before the paid request when the turn was already aborted,
-        // and propagate the signal so an in-flight compaction is cancelled too.
-        budgetOptions.abortSignal?.throwIfAborted();
-        if (tokenAccumulator) {
-            tokenAccumulator.apiCalls = (tokenAccumulator.apiCalls ?? 0) + 1;
-            tokenAccumulator.compactionCalls = (tokenAccumulator.compactionCalls ?? 0) + 1;
+        let activeMessageContext = messageContext;
+        let compactionMessages: ChatMessage[] = [];
+        let compactionResponse: Awaited<ReturnType<AIService['chatCompletion']>> | undefined;
+        let summary = '';
+        let lastCompactionError: unknown;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            const compactionInstruction = [
+                compactionSystemPrompt,
+                COMPACTION_SUMMARY_TEMPLATE,
+                pinnedSection,
+                activeMessageContext,
+            ].filter(Boolean).join('\n\n');
+            compactionMessages = [
+                { role: 'system', content: deps.promptBuilder.buildCompactionPrompt() },
+                { role: 'user', content: compactionInstruction },
+            ];
+            budgetOptions.abortSignal?.throwIfAborted();
+            if (tokenAccumulator) {
+                tokenAccumulator.apiCalls = (tokenAccumulator.apiCalls ?? 0) + 1;
+                tokenAccumulator.compactionCalls = (tokenAccumulator.compactionCalls ?? 0) + 1;
+            }
+            try {
+                const candidate = await deps.aiService.chatCompletion(compactionMessages, {
+                    temperature: 0.1,
+                    maxTokens: 2048,
+                    providerId,
+                    model,
+                    abortSignal: budgetOptions.abortSignal,
+                });
+                const candidateSummary = contentToString(candidate.choices?.[0]?.message?.content).trim();
+                const outputIncomplete = candidate.choices?.[0]?.finish_reason === 'length' || candidateSummary.length === 0;
+                if (!outputIncomplete) {
+                    compactionResponse = candidate;
+                    summary = candidateSummary;
+                    break;
+                }
+                lastCompactionError = new Error(candidateSummary.length === 0
+                    ? 'Compaction returned an empty summary.'
+                    : 'Compaction summary reached the model output limit before completion.');
+            } catch (error) {
+                lastCompactionError = error;
+                const text = error instanceof Error ? error.message : String(error);
+                const retryable = /429|rate.?limit|timeout|timed out|network|ECONN|5\d\d|context|too many tokens/i.test(text);
+                if (!retryable || attempt >= 3) throw error;
+            }
+            if (attempt < 3) {
+                const nextLength = Math.max(2_000, Math.floor(activeMessageContext.length * 0.65));
+                activeMessageContext = activeMessageContext.slice(-nextLength);
+                emitStep({
+                    type: 'compaction',
+                    content: `Compaction retry ${attempt + 1}/3 with a smaller input window.`,
+                    timestamp: Date.now(),
+                    compactionInfo: { state: 'start', kind: 'history' },
+                });
+                await new Promise<void>((resolve, reject) => {
+                    const signal = budgetOptions.abortSignal;
+                    const onAbort = () => {
+                        clearTimeout(timer);
+                        reject(signal?.reason ?? new Error('Compaction cancelled.'));
+                    };
+                    const timer = setTimeout(() => {
+                        signal?.removeEventListener('abort', onAbort);
+                        resolve();
+                    }, 250 * (2 ** (attempt - 1)));
+                    signal?.addEventListener('abort', onAbort, { once: true });
+                });
+            }
         }
-        const compactionResponse = await deps.aiService.chatCompletion(compactionMessages, {
-            temperature: 0.1,
-            maxTokens: 2048,
-            providerId,
-            model,
-            abortSignal: budgetOptions.abortSignal,
-        });
-
-        const summary = contentToString(compactionResponse.choices?.[0]?.message?.content);
+        if (!compactionResponse) throw lastCompactionError ?? new Error('Compaction failed without a response.');
         if (tokenAccumulator) {
             const responseModel = compactionResponse.model ?? model ?? 'unknown';
             const promptTokens = compactionResponse.usage?.prompt_tokens ?? estimateMessagesTokens(compactionMessages);
@@ -438,10 +481,6 @@ export async function maybeCompactHistory(
         if (summaryRepetition) {
             throw new Error(`Compaction summary entered a repeated-output cycle (${summaryRepetition.cycleChars} chars).`);
         }
-        if (compactionResponse.choices?.[0]?.finish_reason === 'length') {
-            throw new Error('Compaction summary reached the model output limit before completion.');
-        }
-
         if (summary.length > 0) {
             const compactionType = existingSummaryText ? AGENT.COMPACTION_INCREMENTAL : AGENT.COMPACTION_INITIAL;
             emitStep({

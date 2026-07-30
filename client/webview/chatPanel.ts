@@ -287,7 +287,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     type ProfileDomain = 'auto' | 'paradox' | 'general';
     type ProfileIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
     type ProfileStrategy = 'auto' | 'single' | 'multi';
-    type AgentProfileSelection = { domain: ProfileDomain; intent: ProfileIntent; strategy: ProfileStrategy };
+    type AgentProfileSelection = {
+        domain: ProfileDomain;
+        intent: ProfileIntent;
+        strategy: ProfileStrategy;
+        profileName?: string;
+    };
     let agentProfile: AgentProfileSelection = { domain: 'auto', intent: 'auto', strategy: 'auto' };
 
     function isAgentProfileSelection(value: unknown): value is AgentProfileSelection {
@@ -295,7 +300,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const candidate = value as Partial<AgentProfileSelection>;
         return ['auto', 'paradox', 'general'].includes(candidate.domain || '')
             && ['auto', 'execute', 'plan', 'explore', 'review'].includes(candidate.intent || '')
-            && ['auto', 'single', 'multi'].includes(candidate.strategy || '');
+            && ['auto', 'single', 'multi'].includes(candidate.strategy || '')
+            && (candidate.profileName === undefined
+                || (typeof candidate.profileName === 'string' && /^[a-zA-Z0-9_.-]{1,80}$/.test(candidate.profileName)));
     }
 
     function applyAgentProfile(profile: unknown): void {
@@ -2673,6 +2680,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 syncSettingsControlsToWriteTier();
                 refreshSettingsOverview();
                 setWriteModeMenuOpen(false);
+                input.focus();
                 vscode.postMessage({ type: 'quickChangeWriteMode', mode: quickWriteMode });
             });
             list.appendChild(btn);
@@ -2791,6 +2799,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             } else if (action === 'workflows') {
                 setInputText('/workflow:');
                 input.dispatchEvent(new Event('input', { bubbles: true }));
+            } else if (action === 'plan') {
+                switchMode('plan', /* fromUI */ true);
+            } else if (action === 'goal') {
+                setInputText('/goal ');
+                input.focus();
             }
         });
     });
@@ -3534,6 +3547,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             document.getElementById('modeSel') as HTMLSelectElement | null,
             document.getElementById('modeIndicator')
         );
+        document.querySelector<HTMLElement>('[data-composer-action="plan"]')
+            ?.classList.toggle('active', currentMode === 'plan');
         renderComposerChips();
     }
     
@@ -6118,6 +6133,22 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 applyAgentProfile(msg.profile);
                 break;
 
+            case 'runtimeProfiles':
+                // Runtime profiles are internal scheduling policy. Keep accepting
+                // the compatibility projection without exposing it in the composer.
+                break;
+
+            case 'runtimeInspectorSnapshot': {
+                // Detailed runtime diagnostics remain available in Agent Manager.
+                // The composer deliberately exposes only the capability domain.
+                const trigger = document.getElementById('quickModeTrigger');
+                if (trigger) trigger.title = tr(
+                    `Capability domain: ${getProfileSummary()}`,
+                    `能力领域：${getProfileSummary()}`,
+                );
+                break;
+            }
+
             case 'workflowList':
                 workflows = (msg.workflows || []) as WorkflowView[];
                 activeWorkflowId = msg.currentWorkflowId || null;
@@ -6194,6 +6225,20 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 scrollBottom();
                 break;
                 */
+            }
+
+            case 'activitySnapshot': {
+                const activity = msg.activity as {
+                    lifecycle?: string;
+                    turn?: { phase?: string; pendingApprovals?: unknown[]; activeToolCalls?: unknown[] };
+                    background?: unknown[];
+                };
+                document.body.dataset.agentLifecycle = activity.lifecycle || 'ready';
+                document.body.dataset.agentPhase = activity.turn?.phase || 'idle';
+                document.body.dataset.agentBackgroundCount = String(activity.background?.length ?? 0);
+                document.body.dataset.agentApprovalCount = String(activity.turn?.pendingApprovals?.length ?? 0);
+                document.body.dataset.agentToolCallCount = String(activity.turn?.activeToolCalls?.length ?? 0);
+                break;
             }
 
             case 'todoUpdate': renderTodos(msg.todos); break;

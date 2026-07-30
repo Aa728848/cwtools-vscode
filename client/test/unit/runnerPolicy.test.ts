@@ -32,13 +32,13 @@ const toolDefinitions = [
 })) as ToolDefinition[];
 
 describe('runnerPolicy', () => {
-    it('keeps core edit tools in build mode and excludes orchestration/media tools', () => {
+    it('keeps core edit tools and runtime dispatch in build mode', () => {
         const filtered = filterToolDefinitionsForMode(toolDefinitions, 'build');
         const names = filtered.map(t => t.function.name);
         expect(names).to.include('read_file');
         expect(names).to.include('query_workspace_index');
         expect(names).to.include('replace_lines');
-        expect(names).to.not.include('dispatch_agents');
+        expect(names).to.include('dispatch_agents');
         expect(names).to.include('mcp_call');
     });
 
@@ -257,6 +257,14 @@ describe('runnerPolicy', () => {
         expect(advanceToolStage('utility', 'write', 'edit_file', { success: true })).to.equal('finalize');
         const finalize = filterToolDefinitionsForStage(toolDefinitions, 'utility', 'finalize').map(t => t.function.name);
         expect(finalize).to.include.members(['read_file', 'run_command', 'write_file']);
+    });
+
+    it('keeps a read-only utility validation surface available for dynamic planning', () => {
+        const modeTools = filterToolDefinitionsForMode(registeredTools, 'utility', { domain: 'general' });
+        const validation = filterToolDefinitionsForStage(modeTools, 'utility', 'validation')
+            .map(tool => tool.function.name);
+        expect(validation).to.include.members(['read_file', 'get_diagnostics', 'todo_write']);
+        expect(validation).to.not.include.members(['write_file', 'edit_file', 'run_command']);
     });
 
     it('keeps localisation modes off generic yml patch paths', () => {

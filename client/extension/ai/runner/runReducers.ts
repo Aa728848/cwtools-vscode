@@ -17,6 +17,12 @@
 
 import type { AgentRunEvent, AgentRunEventType } from './runLedger';
 import type { RuntimeItem, RuntimeItemStatus, RuntimeItemType } from './runtimeItems';
+import type {
+    AgentAuthorization,
+    AgentDispatchMode,
+    AgentRunPhase,
+    AgentRuntimeDomain,
+} from '../types';
 
 // ─── Run state ───────────────────────────────────────────────────────────────
 
@@ -451,11 +457,161 @@ export function reducePolicyActivity(events: AgentRunEvent[]): PolicyActivitySna
     return snap;
 }
 
+// ─── Scheduling state ───────────────────────────────────────────────────────
+
+export interface SchedulingSnapshot {
+    domainProfile?: AgentRuntimeDomain;
+    authorization?: AgentAuthorization;
+    phase?: AgentRunPhase;
+    dispatch: AgentDispatchMode;
+    routeConfidence: number;
+    routeEvidence: string[];
+    phaseRevision: number;
+    queuedPrompts: number;
+    steeredPrompts: number;
+    dispatchEvaluations: number;
+    dispatchAccepted: number;
+    suspendedAgents: number;
+    requeuedAgents: number;
+    providerCapacity?: number;
+}
+
+export function reduceScheduling(events: AgentRunEvent[]): SchedulingSnapshot {
+    const snapshot: SchedulingSnapshot = {
+        dispatch: 'single',
+        routeConfidence: 0,
+        routeEvidence: [],
+        phaseRevision: 0,
+        queuedPrompts: 0,
+        steeredPrompts: 0,
+        dispatchEvaluations: 0,
+        dispatchAccepted: 0,
+        suspendedAgents: 0,
+        requeuedAgents: 0,
+    };
+    for (const event of events) {
+        const payload = (event.payload as Record<string, unknown>) ?? {};
+        switch (event.type) {
+            case 'admission_decided':
+                if (payload.domainProfile === 'general' || payload.domainProfile === 'paradox') {
+                    snapshot.domainProfile = payload.domainProfile;
+                }
+                if (payload.authorization === 'read_only'
+                    || payload.authorization === 'plan_write_only'
+                    || payload.authorization === 'workspace_write') {
+                    snapshot.authorization = payload.authorization;
+                }
+                if (payload.initialPhase === 'inspect' || payload.initialPhase === 'plan' || payload.initialPhase === 'verify') {
+                    snapshot.phase = payload.initialPhase;
+                }
+                snapshot.dispatch = payload.explicitDelegation === true ? 'parallel' : 'single';
+                snapshot.routeConfidence = typeof payload.confidence === 'number' ? payload.confidence : 0;
+                snapshot.routeEvidence = Array.isArray(payload.evidence)
+                    ? payload.evidence.filter((item): item is string => typeof item === 'string').slice(0, 12)
+                    : [];
+                break;
+            case 'phase_changed':
+                if (payload.to === 'inspect' || payload.to === 'plan' || payload.to === 'execute'
+                    || payload.to === 'verify' || payload.to === 'finalize') {
+                    snapshot.phase = payload.to;
+                }
+                snapshot.phaseRevision = typeof payload.revision === 'number'
+                    ? Math.max(snapshot.phaseRevision, payload.revision)
+                    : snapshot.phaseRevision + 1;
+                break;
+            case 'prompt_queued':
+                snapshot.queuedPrompts++;
+                break;
+            case 'prompt_steered':
+                snapshot.steeredPrompts++;
+                break;
+            case 'dispatch_evaluated':
+                snapshot.dispatchEvaluations++;
+                if (payload.accepted === true) {
+                    snapshot.dispatchAccepted++;
+                    snapshot.dispatch = 'parallel';
+                }
+                break;
+            case 'agent_suspended':
+                snapshot.suspendedAgents++;
+                break;
+            case 'agent_requeued':
+                snapshot.requeuedAgents++;
+                break;
+            case 'provider_capacity_changed':
+                if (typeof payload.current === 'number') snapshot.providerCapacity = payload.current;
+                break;
+        }
+    }
+    return snapshot;
+}
+
 // ─── Aggregate snapshot (one-shot helper for broadcasters) ───────────────────
 
 export interface RuntimeItemsSnapshot {
     items: RuntimeItem[];
     byId: Map<string, RuntimeItem>;
+}
+
+export interface ActivitySummarySnapshot {
+    domainSequence: number;
+    goalStatus?: string;
+    activeTasks: number;
+    lostTasks: number;
+    disclosedTools: number;
+    deduplicatedCalls: number;
+    contextOverflows: number;
+    sideQuestions: number;
+    undoCount: number;
+}
+
+export function reduceActivitySummary(events: AgentRunEvent[]): ActivitySummarySnapshot {
+    const snapshot: ActivitySummarySnapshot = {
+        domainSequence: 0,
+        activeTasks: 0,
+        lostTasks: 0,
+        disclosedTools: 0,
+        deduplicatedCalls: 0,
+        contextOverflows: 0,
+        sideQuestions: 0,
+        undoCount: 0,
+    };
+    for (const event of events) {
+        const payload = (event.payload as Record<string, unknown>) ?? {};
+        switch (event.type) {
+            case 'domain_op_applied':
+                if (typeof payload.sequence === 'number') snapshot.domainSequence = Math.max(snapshot.domainSequence, payload.sequence);
+                break;
+            case 'goal_transitioned':
+                if (typeof payload.status === 'string') snapshot.goalStatus = payload.status;
+                break;
+            case 'task_created':
+                snapshot.activeTasks++;
+                break;
+            case 'task_status_changed':
+                if (payload.status === 'lost') snapshot.lostTasks++;
+                if (['completed', 'failed', 'timed_out', 'killed', 'lost'].includes(String(payload.status))) {
+                    snapshot.activeTasks = Math.max(0, snapshot.activeTasks - 1);
+                }
+                break;
+            case 'tool_disclosure_changed':
+                snapshot.disclosedTools += Array.isArray(payload.loaded) ? payload.loaded.length : 0;
+                break;
+            case 'tool_call_deduplicated':
+                snapshot.deduplicatedCalls++;
+                break;
+            case 'context_limit_observed':
+                snapshot.contextOverflows++;
+                break;
+            case 'side_question_started':
+                snapshot.sideQuestions++;
+                break;
+            case 'undo_completed':
+                snapshot.undoCount++;
+                break;
+        }
+    }
+    return snapshot;
 }
 
 /** Rebuilds the latest state of permission, process, command, file, and tool items. */
@@ -496,6 +652,8 @@ export interface RunReducerSnapshot {
     cacheStats: CacheStatsSnapshot;
     policy: PolicyActivitySnapshot;
     runtimeItems: RuntimeItemsSnapshot;
+    scheduling: SchedulingSnapshot;
+    activity: ActivitySummarySnapshot;
 }
 
 export function reduceAll(events: AgentRunEvent[]): RunReducerSnapshot {
@@ -506,6 +664,8 @@ export function reduceAll(events: AgentRunEvent[]): RunReducerSnapshot {
         cacheStats: reduceCacheStats(events),
         policy: reducePolicyActivity(events),
         runtimeItems: reduceRuntimeItems(events),
+        scheduling: reduceScheduling(events),
+        activity: reduceActivitySummary(events),
     };
 }
 

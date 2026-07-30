@@ -771,7 +771,10 @@ export class ExternalToolHandler {
         };
     }
 
-    getTodos(): TodoItem[] { return [...this.currentTodos]; }
+    getTodos(): TodoItem[] { return this.currentTodos.map(todo => ({ ...todo })); }
+    restoreTodos(todos: readonly TodoItem[]): void {
+        this.currentTodos = todos.map(todo => ({ ...todo }));
+    }
     clearTodos(): void { this.currentTodos = []; }
 
     private canAccessProcess(record: ReturnType<typeof processRegistry.get>, context?: import('../types').AgentToolContext): boolean {
@@ -1209,6 +1212,7 @@ export class ExternalToolHandler {
                 executionMode: 'terminal',
                 runId: context?.runnerOptions?.runRecord?.runId,
                 threadId: context?.runnerOptions?.threadId,
+                topicId: context?.runnerOptions?.topicId,
                 terminate: () => terminal.dispose(),
                 writeStdin: text => terminal.sendText(text.replace(/\r?\n$/, ''), /\r?\n$/.test(text)),
             });
@@ -1299,6 +1303,7 @@ export class ExternalToolHandler {
                     executionMode: 'captured',
                     runId: context?.runnerOptions?.runRecord?.runId,
                     threadId: context?.runnerOptions?.threadId,
+                    topicId: context?.runnerOptions?.topicId,
                     terminate: () => this.terminateProcessTree(proc, spawn),
                     writeStdin: text => {
                         if (!proc.stdin || proc.stdin.destroyed) throw new Error('Process stdin is unavailable');
@@ -1381,6 +1386,7 @@ export class ExternalToolHandler {
                     executionMode: 'captured',
                     runId: context?.runnerOptions?.runRecord?.runId,
                     threadId: context?.runnerOptions?.threadId,
+                    topicId: context?.runnerOptions?.topicId,
                     terminate: () => this.terminateProcessTree(proc, spawn),
                 }).processId;
             } catch (e) {

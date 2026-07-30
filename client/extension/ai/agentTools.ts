@@ -59,6 +59,14 @@ import { ErrorReporter } from './errorReporter';
 import { mergeTokenUsageTotals } from './cacheCapability';
 import { MemoryParser } from './memoryParser';
 import { defaultDomainForMode } from './agentProfile';
+import {
+    authorizationAllowsEffect,
+    evaluateDispatchAdmission,
+    transitionSchedulingState,
+} from './runner/scheduling';
+import { goalStore, type DurableGoalStatus } from './runner/goalStore';
+import { goalSupervisor } from './runner/goalSupervisor';
+import { agentTaskManager } from './runner/taskManager';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
 const FINAL_EVIDENCE_CONCURRENCY = 4;
@@ -1293,6 +1301,15 @@ export class AgentToolExecutor {
         }
 
         const registryEntry = TOOL_REGISTRY.get(toolName as any);
+        const authorization = context?.runnerOptions?.schedulingState?.authorization;
+        if (registryEntry && authorization
+            && !authorizationAllowsEffect(authorization, registryEntry.effect, registryEntry.mutating ?? false)) {
+            return {
+                success: false,
+                error: `Scheduling authorization '${authorization}' blocks tool '${toolName}' (${registryEntry.effect}).`,
+                authorizationBlocked: true,
+            };
+        }
         if (vs.workspace.isTrusted === false && registryEntry) {
             const blockedEffects = new Set(['workspace_write', 'network', 'shell', 'git', 'media', 'mcp']);
             if (blockedEffects.has(registryEntry.effect) || registryEntry.mutating) {
@@ -1307,7 +1324,9 @@ export class AgentToolExecutor {
             }
         }
 
-        if (mode === 'plan'
+        const runtimePlanPhase = context?.runnerOptions?.schedulingState?.phase === 'plan';
+        if (runtimePlanPhase
+            || mode === 'plan'
             || ((mode === 'orchestrator' || mode === 'script') && toolName === 'write_file')) {
             const guard = validatePlanModeToolUse(
                 toolName,
@@ -1315,7 +1334,7 @@ export class AgentToolExecutor {
                 this.workspaceRoot,
                 context?.runnerOptions?.topicId,
                 undefined,
-                mode,
+                runtimePlanPhase ? 'plan' : mode as 'plan' | 'orchestrator' | 'script',
             );
             if (!guard.allowed) {
                 return {
@@ -1326,7 +1345,7 @@ export class AgentToolExecutor {
             }
         }
         if (toolName === 'git_ops') {
-            const guard = validateGitOpsForMode(mode, args);
+            const guard = validateGitOpsForMode(runtimePlanPhase ? 'plan' : mode, args);
             if (!guard.allowed) {
                 return {
                     success: false,
@@ -1534,12 +1553,19 @@ export class AgentToolExecutor {
                     : { allowed: true };
             };
 
-            await runAgentHooks('preToolUse', {
+            const preToolHook = await runAgentHooks('preToolUse', {
                 toolName,
                 args,
                 runId: context?.runnerOptions?.runRecord?.runId,
                 threadId: context?.runnerOptions?.threadId,
             });
+            if (!preToolHook.allowed) {
+                return {
+                    success: false,
+                    error: preToolHook.reason ?? `Tool ${toolName} was rejected by an Agent hook.`,
+                    hookBlocked: true,
+                };
+            }
 
             // Semantic evidence gate (plan §4): semantic PDX writes must carry
             // FileToolHandler invokes the async preflight after it has resolved
@@ -1812,6 +1838,115 @@ export class AgentToolExecutor {
                 result = this.externalHandler.webFind(args as any); break;
             case 'todo_write':
                 result = await this.externalHandler.todoWrite(args as any, context); break;
+            case 'select_tools':
+                result = args._selectionResult && typeof args._selectionResult === 'object'
+                    ? {
+                        success: true,
+                        ...args._selectionResult as Record<string, unknown>,
+                        message: 'Loaded schemas remain subject to mode, domain, stage, policy, and permission checks at execution time.',
+                    }
+                    : {
+                        success: false,
+                        error: 'select_tools must be evaluated by the active Agent runner.',
+                    };
+                break;
+            case 'get_goal': {
+                const topicId = context?.runnerOptions?.topicId ?? 'default';
+                const threadId = context?.runnerOptions?.threadId ?? topicId;
+                result = { success: true, goal: await goalStore.getGoal(topicId, threadId) ?? null };
+                break;
+            }
+            case 'create_goal': {
+                if (context?.runnerOptions?.useSlimPrompt) {
+                    result = { success: false, error: 'Sub-agents cannot create parent goals.' };
+                    break;
+                }
+                if (context?.runnerOptions?.goalCreationAuthorized !== true) {
+                    result = { success: false, error: 'Goal creation requires explicit long-running user intent.' };
+                    break;
+                }
+                const objective = typeof args.objective === 'string' ? args.objective.trim() : '';
+                if (!objective) {
+                    result = { success: false, error: 'objective is required.' };
+                    break;
+                }
+                const topicId = context?.runnerOptions?.topicId ?? 'default';
+                const threadId = context?.runnerOptions?.threadId ?? topicId;
+                const criteria = Array.isArray(args.completionCriterion)
+                    ? args.completionCriterion.filter((item): item is string => typeof item === 'string')
+                    : [];
+                const tokenBudget = typeof args.tokenBudget === 'number' ? args.tokenBudget : undefined;
+                result = { success: true, goal: await goalStore.setGoal(topicId, threadId, objective, tokenBudget, criteria) };
+                break;
+            }
+            case 'update_goal': {
+                const status = args.status as DurableGoalStatus;
+                const validStatuses: DurableGoalStatus[] = ['active', 'paused', 'blocked', 'complete', 'cancelled'];
+                if (!validStatuses.includes(status)) {
+                    result = { success: false, error: 'Invalid goal status.' };
+                    break;
+                }
+                const reason = typeof args.reason === 'string' ? args.reason.trim() : undefined;
+                const evidence = Array.isArray(args.evidence)
+                    ? args.evidence.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+                    : [];
+                if (status === 'complete' && (context?.runnerOptions?.useSlimPrompt || evidence.length === 0)) {
+                    result = { success: false, error: 'Completing a goal requires parent-agent completion evidence.' };
+                    break;
+                }
+                if (status === 'complete') {
+                    const incompleteTodos = context?.agentRunner?.toolExecutor.getTodos()
+                        .filter(todo => todo.status !== 'done') ?? [];
+                    const topicId = context?.runnerOptions?.topicId ?? 'default';
+                    agentTaskManager.configure(topicId);
+                    const activeTasks = agentTaskManager.list().filter(task =>
+                        task.status === 'queued' || task.status === 'running' || task.status === 'detached');
+                    if (incompleteTodos.length > 0 || activeTasks.length > 0
+                        || context?.runnerOptions?.schedulingState?.phase !== 'finalize') {
+                        result = {
+                            success: false,
+                            error: `Goal completion rejected: ${incompleteTodos.length} incomplete todo(s), ${activeTasks.length} active task(s), phase ${context?.runnerOptions?.schedulingState?.phase ?? 'unknown'}.`,
+                        };
+                        break;
+                    }
+                }
+                if (status === 'blocked' && !reason) {
+                    result = { success: false, error: 'Blocking a goal requires a concrete reason.' };
+                    break;
+                }
+                const topicId = context?.runnerOptions?.topicId ?? 'default';
+                const threadId = context?.runnerOptions?.threadId ?? topicId;
+                const transitioned = await goalSupervisor.transition(topicId, threadId, status, reason);
+                if (transitioned) {
+                    context?.runEventSink?.appendSoon('goal_transitioned', {
+                        goalId: transitioned.goalId,
+                        status: transitioned.status,
+                        reason,
+                        evidenceCount: evidence.length,
+                    }, { status: transitioned.status === 'blocked' ? 'failed' : 'done' });
+                }
+                result = transitioned
+                    ? { success: true, goal: transitioned }
+                    : { success: false, error: 'No durable goal exists for this thread.' };
+                break;
+            }
+            case 'set_goal_budget': {
+                if (context?.runnerOptions?.useSlimPrompt) {
+                    result = { success: false, error: 'Sub-agents cannot change parent goal budgets.' };
+                    break;
+                }
+                const topicId = context?.runnerOptions?.topicId ?? 'default';
+                const threadId = context?.runnerOptions?.threadId ?? topicId;
+                result = {
+                    success: true,
+                    goal: await goalStore.setBudget(topicId, threadId, {
+                        tokens: typeof args.tokens === 'number' ? args.tokens : undefined,
+                        turns: typeof args.turns === 'number' ? args.turns : undefined,
+                        wallClockMs: typeof args.wallClockMs === 'number' ? args.wallClockMs : undefined,
+                    }),
+                };
+                break;
+            }
             // ignore_validation_error - REMOVED: AI must fix errors, not suppress them
             case 'remove_ignored_diagnostic':
                 result = await this.externalHandler.removeIgnoredDiagnostic(args as any, context); break;
@@ -2768,6 +2903,12 @@ export class AgentToolExecutor {
                 // was carried in AgentToolContext. Model-visible calls always
                 // arrive with an explicit coordinator mode.
                 : ['explore', 'plan', 'utility', 'review', 'build', 'loc_writer', 'gui_expert']);
+        const profileRoles = runnerOptsForLimits?.agentProfileAllowedSubagents;
+        if (profileRoles) {
+            for (const role of [...allowedAgentTypes]) {
+                if (!profileRoles.includes(role)) allowedAgentTypes.delete(role);
+            }
+        }
         const invalidAgentType = normalizedTasks.find(task => !allowedAgentTypes.has(task.agentType));
         if (invalidAgentType) {
             return {
@@ -2788,6 +2929,60 @@ export class AgentToolExecutor {
             ['build', 'loc_writer', 'gui_expert', 'utility'].includes(task.agentType)
             || (task.plannedFiles?.length ?? 0) > 0
         );
+        const evaluatedDispatchAdmission = evaluateDispatchAdmission(
+            normalizedTasks.map(task => ({
+                id: task.id,
+                objective: task.prompt,
+                dependencies: task.dependencies,
+                expectedWrites: task.plannedFiles,
+                acceptanceCriteria: task.acceptanceChecks?.map(check => check.description),
+                role: task.agentType,
+            })),
+            {
+                explicitDelegation: runnerOptsForLimits?.schedulingState?.dispatch !== 'single'
+                    || parentMode === 'orchestrator'
+                    || parentMode === 'script',
+                availableTokenBudget: runnerOptsForLimits?.tokenBudget,
+            },
+        );
+        // Stored coordinator workflows and host-side callers historically used
+        // a one-node graph for isolation. Preserve that compatibility while
+        // requiring two independent nodes for the new build/utility runtime
+        // dispatch path.
+        const legacySingleNodeCoordinator = normalizedTasks.length === 1
+            && (!parentMode || parentMode === 'orchestrator' || parentMode === 'script' || !!blueprintFile);
+        const dispatchAdmission = legacySingleNodeCoordinator
+            ? {
+                accepted: true,
+                score: 0,
+                reason: 'Legacy coordinator single-node compatibility.',
+                conflicts: [],
+            }
+            : evaluatedDispatchAdmission;
+        runnerOptsForLimits?.runEventSink?.appendSoon('dispatch_evaluated', {
+            accepted: dispatchAdmission.accepted,
+            score: dispatchAdmission.score,
+            reason: dispatchAdmission.reason,
+            taskCount: normalizedTasks.length,
+            conflicts: dispatchAdmission.conflicts,
+        }, { status: dispatchAdmission.accepted ? 'done' : 'failed' });
+        if (!dispatchAdmission.accepted) {
+            return {
+                success: false,
+                error: `Runtime dispatch admission rejected this graph: ${dispatchAdmission.reason}`,
+                dispatchAdmission,
+            };
+        }
+        if (runnerOptsForLimits?.schedulingState?.dispatch === 'single') {
+            runnerOptsForLimits.schedulingState = transitionSchedulingState(
+                runnerOptsForLimits.schedulingState,
+                {
+                    dispatch: 'parallel',
+                    reason: dispatchAdmission.reason,
+                    dispatchReason: dispatchAdmission.reason,
+                },
+            );
+        }
         if (requiresStructuredWriteContract && hasWriteTasks) {
             const invalidWriter = normalizedTasks.find(task =>
                 ['build', 'loc_writer', 'gui_expert'].includes(task.agentType)
@@ -2903,7 +3098,8 @@ export class AgentToolExecutor {
             });
             const parentRunPromise = context?.agentRunner?.getActiveRunRecordPromise?.()
                 ?? this.parentAgentRunner.getActiveRunRecordPromise?.();
-            const parentRun = await parentRunPromise?.catch(() => undefined);
+            const parentRun = runnerOptsForLimits?.runRecord
+                ?? await parentRunPromise?.catch(() => undefined);
 
             // Build execution options (read first from AgentToolContext, fallback to old instance fields)
             const runnerOpts = runnerOptsForLimits;
@@ -3018,6 +3214,8 @@ export class AgentToolExecutor {
                 tokenUsed: number;
                 stepCount?: number;
                 outputSummary?: string;
+                verification?: string[];
+                unresolved?: string[];
                 error?: string;
                 needsClarification?: boolean;
                 clarification?: string;
@@ -3039,6 +3237,7 @@ export class AgentToolExecutor {
                             error: agentResult.error,
                             needsClarification: agentResult.needsClarification,
                             clarification: agentResult.clarification,
+                            handoff: agentResult.handoff,
                         },
                         { agentId: id, status: agentResult.success ? 'done' : 'failed' }
                     ).catch(() => {});
@@ -3062,10 +3261,15 @@ export class AgentToolExecutor {
                     produces: taskMeta?.produces ?? [],
                     consumes: taskMeta?.consumes ?? [],
                     success: agentResult.success,
-                    filesWritten: agentResult.writtenFiles,
+                    filesWritten: [...new Set([
+                        ...agentResult.writtenFiles,
+                        ...(agentResult.handoff?.changedFiles ?? []),
+                    ])].sort(),
                     tokenUsed: agentResult.tokenUsage.total,
                     stepCount: agentResult.stepCount,
-                    outputSummary: compactAgentOutputForReport(agentResult.output),
+                    outputSummary: compactAgentOutputForReport(agentResult.handoff?.summary ?? agentResult.output),
+                    verification: agentResult.handoff?.verification,
+                    unresolved: agentResult.handoff?.unresolved,
                     error: agentResult.error ? agentResult.error.slice(0, 1000) : undefined,
                     needsClarification: agentResult.needsClarification,
                     clarification: agentResult.clarification ? agentResult.clarification.slice(0, 2000) : undefined,
@@ -3141,7 +3345,13 @@ export class AgentToolExecutor {
         const strategy = args.strategy === 'concatenate' || args.strategy === 'summary' ? args.strategy : 'structured';
         const selectedIds = [...new Set(requestedNodeIds)];
         const allWrittenFiles = new Set<string>();
-        const agentOutputs: Array<{ id: string; output: string; files: string[] }> = [];
+        const agentOutputs: Array<{
+            id: string;
+            output: string;
+            files: string[];
+            verification?: string[];
+            unresolved?: string[];
+        }> = [];
 
         //Smart truncation: the upper limit for a single Agent is 2000 characters, and the total budget is 8000 characters
         const MAX_PER_AGENT = 2000;
@@ -3150,21 +3360,34 @@ export class AgentToolExecutor {
 
         for (const id of selectedIds) {
             const agentResult = r.agentResults.get(id)!;
-            for (const file of agentResult.writtenFiles) allWrittenFiles.add(file);
+            const files = [...new Set([
+                ...agentResult.writtenFiles,
+                ...(agentResult.handoff?.changedFiles ?? []),
+            ])].sort();
+            for (const file of files) allWrittenFiles.add(file);
             const remaining = Math.max(0, MAX_TOTAL - totalOutputLen);
             const perAgentLimit = strategy === 'concatenate' ? MAX_PER_AGENT : strategy === 'summary' ? 800 : 1200;
             const limit = Math.min(perAgentLimit, remaining);
-            let output = agentResult.output;
+            let output = agentResult.handoff?.summary ?? agentResult.output;
             if (output.length > limit) {
-                output = compactAgentOutputForReport(agentResult.output, limit) || '';
+                output = compactAgentOutputForReport(output, limit) || '';
             }
             totalOutputLen += output.length;
-            agentOutputs.push({ id, output, files: agentResult.writtenFiles });
+            agentOutputs.push({
+                id,
+                output,
+                files,
+                verification: agentResult.handoff?.verification,
+                unresolved: agentResult.handoff?.unresolved,
+            });
         }
 
         const fileGroups = [...allWrittenFiles].map(file => ({
             file,
-            nodeIds: selectedIds.filter(id => r.agentResults.get(id)?.writtenFiles.includes(file)),
+            nodeIds: selectedIds.filter(id => {
+                const result = r.agentResults.get(id);
+                return result?.writtenFiles.includes(file) || result?.handoff?.changedFiles.includes(file);
+            }),
         }));
         const entityContracts = selectedIds.map(id => {
             const node = graph?.nodes.get(id);
@@ -3207,6 +3430,10 @@ export class AgentToolExecutor {
     // - Public accessors for external consumers -
 
     getTodos(): TodoItem[] { return this.externalHandler.getTodos(); }
+    restoreTodos(todos: readonly TodoItem[]): void {
+        this.externalHandler.restoreTodos(todos);
+        this.onTodoUpdate?.(this.externalHandler.getTodos());
+    }
     clearTodos(): void { this.externalHandler.clearTodos(); }
     clearOrchestratorValidation(runId: string): void { this._orchestratorValidationByRun.delete(runId); }
     getOrchestratorValidation(runId: string): { success: boolean; summary: string; pendingOnly?: boolean } | undefined {

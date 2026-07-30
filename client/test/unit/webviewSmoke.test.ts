@@ -29,6 +29,7 @@ describe('webview smoke checks', () => {
 
     it('chat webview source exposes expected bootstrap controls', () => {
         const html = fs.readFileSync(path.join(root, 'client/extension/ai/chatHtml.ts'), 'utf8');
+        const host = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
         const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
         const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
 
@@ -44,6 +45,13 @@ describe('webview smoke checks', () => {
         expect(script).to.include("agentProfile = { domain, intent: 'auto', strategy: 'auto' }");
         expect(script).to.include('updateAgentDomain(domain);\n                setModeMenuOpen(false);');
         expect(css).not.to.include('.composer-write-mode-trigger.write-mode-elevated {');
+        expect(css).not.to.include('.write-mode-item-danger.active { border-color: var(--error); }');
+        expect(css).to.include('#quickWriteModeTrigger.write-mode-elevated:focus');
+        expect(css).to.include('border-color: transparent !important;');
+        expect(css).to.include('outline: none !important;');
+        expect(css).to.include('box-shadow: none !important;');
+        expect(css).to.include('.write-mode-menu .write-mode-item-danger:focus-visible { outline: none; box-shadow: none; }');
+        expect(script).to.include('setWriteModeMenuOpen(false);\n                input.focus();');
         expect(html).to.include('id="quickModelTrigger"');
         expect(html).to.include('id="quickReasoningEffort"');
         expect(html).to.include('id="quickReasoningTrigger"');
@@ -55,6 +63,13 @@ describe('webview smoke checks', () => {
         expect(html).to.include('role="listbox"');
         expect(html).to.include('id="btnWorkspace"');
         expect(html).to.include('data-composer-action="workflows"');
+        expect(html).to.include('data-composer-action="plan"');
+        expect(html).to.include('data-composer-action="goal"');
+        expect(html).not.to.include('id="runtimeProfileMenuList"');
+        expect(script).to.include("switchMode('plan', /* fromUI */ true);");
+        expect(script).to.include("setInputText('/goal ');");
+        expect(script).not.to.include('function renderRuntimeProfiles()');
+        expect(host).to.include('profileForUserDomain(normalizedStoredProfile.domain)');
         expect(html).to.include('id="artifactDrawer"');
         expect(html).to.include("'mermaid.min.js'");
         expect(script).to.include("case 'workflowList'");

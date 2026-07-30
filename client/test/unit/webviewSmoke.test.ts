@@ -46,7 +46,7 @@ describe('webview smoke checks', () => {
         expect(script).to.include('updateAgentDomain(domain);\n                setModeMenuOpen(false);');
         expect(css).not.to.include('.composer-write-mode-trigger.write-mode-elevated {');
         expect(css).not.to.include('.write-mode-item-danger.active { border-color: var(--error); }');
-        expect(css).to.include('#quickWriteModeTrigger.write-mode-elevated:focus');
+        expect(css).to.include('#quickWriteModeTrigger:focus-visible');
         expect(css).to.include('border-color: transparent !important;');
         expect(css).to.include('outline: none !important;');
         expect(css).to.include('box-shadow: none !important;');

@@ -907,21 +907,18 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 .composer-write-mode-trigger { max-width: 132px; flex: 0 1 auto; }
 .composer-mode-trigger { max-width: 116px; flex: 0 1 auto; }
 .composer-reasoning-trigger { width: max-content; min-width: 0; max-width: 132px; flex: 0 0 auto; justify-content: space-between; }
-#quickWriteModeTrigger.write-mode-elevated,
-#quickWriteModeTrigger.write-mode-danger,
-#quickWriteModeTrigger.write-mode-elevated:hover,
-#quickWriteModeTrigger.write-mode-danger:hover,
-#quickWriteModeTrigger.write-mode-elevated:focus,
-#quickWriteModeTrigger.write-mode-danger:focus,
-#quickWriteModeTrigger.write-mode-elevated:focus-visible,
-#quickWriteModeTrigger.write-mode-danger:focus-visible,
-#quickWriteModeTrigger.write-mode-elevated:active,
-#quickWriteModeTrigger.write-mode-danger:active,
-#quickWriteModeTrigger.write-mode-elevated.active,
-#quickWriteModeTrigger.write-mode-danger.active {
+#quickWriteModeTrigger,
+#quickWriteModeTrigger:hover,
+#quickWriteModeTrigger:focus,
+#quickWriteModeTrigger:focus-visible,
+#quickWriteModeTrigger:active,
+#quickWriteModeTrigger.active {
     border-color: transparent !important;
     outline: none !important;
     box-shadow: none !important;
+}
+#quickWriteModeTrigger.write-mode-elevated,
+#quickWriteModeTrigger.write-mode-danger {
     background: transparent !important;
     color: var(--error);
 }

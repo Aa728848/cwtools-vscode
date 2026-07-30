@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [2.9.7] - 2026-07-30
+
+### 功能与优化 / Features & Optimizations
+- **[优化] 优化项目索引和Agent运行**
+  English: [Optimization] Optimize project indexing and agent execution.
+
 ## [2.9.6] - 2026-07-29
 
 ### 版本更新与打包 / Version Update & Packaging

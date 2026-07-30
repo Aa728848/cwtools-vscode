@@ -202,6 +202,8 @@ let private buildEdges maxEdges (nodes: GraphDataItem list) =
                               Some("kind", JsonValue.String(edgeKindForTarget targetType))
                               targetType |> Option.map (fun value -> "targetType", JsonValue.String value)
                               Some("isOutgoing", JsonValue.Boolean isOutgoing)
+                              Some("direction", JsonValue.String "source_to_target")
+                              Some("causality", JsonValue.String "typed_reference_only")
                               Some("resolved", JsonValue.Boolean resolved)
                               Some("provenance", JsonValue.String "cwtools-computed")
                               Some("confidence", JsonValue.String "semantic")
@@ -219,6 +221,8 @@ let private referenceFactJson typeGroup (reference: ReferenceDetails) =
           Some("line", JsonValue.Number(decimal (int reference.position.StartLine)))
           Some("column", JsonValue.Number(decimal (int reference.position.StartColumn)))
           Some("isOutgoing", JsonValue.Boolean reference.isOutgoing)
+          Some("direction", JsonValue.String(if reference.isOutgoing then "source_to_target" else "target_to_source"))
+          Some("causality", JsonValue.String "typed_reference_only")
           Some("referenceType", JsonValue.String(reference.referenceType.ToString()))
           reference.referenceLabel |> Option.map (fun value -> "label", JsonValue.String value)
           reference.associatedType |> Option.map (fun value -> "associatedType", JsonValue.String value) ]

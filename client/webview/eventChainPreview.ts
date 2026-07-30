@@ -38,7 +38,10 @@ interface EventNode {
     line: number;
     endLine: number;
     namespace: string;
+    isTriggeredOnly?: boolean;
+    isHidden?: boolean;
     meanTimeToHappen?: boolean;
+    entryStatus?: 'triggered_only' | 'mtth_present' | 'referenced' | 'unknown' | 'external_definition';
 }
 
 type EventConditionRelation = 'requires' | 'alternative' | 'blocks' | 'complex';
@@ -109,14 +112,6 @@ const cy = cytoscape({
             style: {
                 'border-color': '#fff176',
                 'border-width': 3,
-            },
-        },
-        {
-            selector: 'node[?isEntry]',
-            style: {
-                'background-color': '#071f18',
-                'border-color': '#59c99c',
-                'border-width': 2,
             },
         },
         {
@@ -393,9 +388,6 @@ function focusReadableStart() {
     if (visibleNodes.length === 0) return;
 
     let focusNodes = visibleNodes.filter(node => Boolean(node.data('isSeed')));
-    if (focusNodes.length === 0) {
-        focusNodes = visibleNodes.filter(node => Boolean(node.data('isEntry')));
-    }
     const anchor = (focusNodes.length > 0 ? focusNodes[0] : visibleNodes[0]) as cytoscape.NodeSingular | undefined;
     if (anchor) revealNode(anchor);
 }
@@ -463,7 +455,6 @@ function clearSelection() {
 function getNodeKind(data: Record<string, unknown>): string {
     if (data.isExternal) return t('External definition', '外部定义');
     if (data.isOrphan) return t('External reference', '外部引用');
-    if (data.isEntry) return t('Entry definition', '入口定义');
     return t('Definition', '定义');
 }
 
@@ -549,7 +540,9 @@ function updateDetails(node: cytoscape.NodeSingular | null) {
     const canOpen = Boolean(data.file && data.line);
     const badges = [
         data.isSeed ? t('Seed', '种子') : '',
-        data.isEntry ? t('Entry', '入口') : '',
+        data.entryStatus === 'mtth_present' ? t('MTTH present', '包含 MTTH') : '',
+        data.entryStatus === 'triggered_only' ? t('Triggered only', '仅被触发') : '',
+        data.entryStatus === 'unknown' ? t('Entry evidence unknown', '入口证据未知') : '',
         data.meanTimeToHappen ? 'MTTH' : '',
         data.isExternal || data.isOrphan ? t('External reference', '图外引用') : '',
     ].filter(Boolean);
@@ -843,14 +836,10 @@ function renderGraph() {
     emptyEl.classList.remove('visible');
     detailPanel?.classList.remove('hidden');
 
-    // Find which nodes have no incoming edges (entry points)
-    const hasIncoming = new Set(edges.map(e => e.target));
-
     // Build cytoscape elements
     const elements: cytoscape.ElementDefinition[] = [];
 
     for (const node of nodes) {
-        const isEntry = !hasIncoming.has(node.id);
         elements.push({
             data: {
                 id: node.id,
@@ -861,9 +850,11 @@ function renderGraph() {
                 line: node.line,
                 endLine: node.endLine,
                 namespace: node.namespace,
+                isTriggeredOnly: node.isTriggeredOnly || undefined,
+                isHidden: node.isHidden || undefined,
                 meanTimeToHappen: node.meanTimeToHappen || undefined,
+                entryStatus: node.entryStatus ?? 'unknown',
                 isSeed: seedIds.has(node.id) || undefined,
-                isEntry: isEntry || undefined,
                 isOrphan: false,
             },
         });
@@ -880,7 +871,7 @@ function renderGraph() {
                     eventType: isExternalSource ? 'external_source' : 'external',
                     isOrphan: !isExternalSource || undefined,
                     isExternal: isExternalSource || undefined,
-                    isEntry: isExternalSource || undefined,
+                    entryStatus: isExternalSource ? 'external_definition' : 'unknown',
                 },
             });
             nodeIds.add(id);

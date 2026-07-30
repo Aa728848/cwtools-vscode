@@ -8,6 +8,7 @@ open System.Text.RegularExpressions
 open FSharp.Data
 open Microsoft.Data.Sqlite
 open CWTools.Games
+open CWTools.Process
 open CWTools.Utilities.Position
 open CWTools.Utilities.StringResource
 
@@ -99,7 +100,8 @@ type private EventNodeFact =
       origin: string
       isTriggeredOnly: bool
       isHidden: bool
-      hasMeanTimeToHappen: bool }
+      hasMeanTimeToHappen: bool
+      factsKnown: bool }
 
 type private EventEdgeFact =
     { sourceKind: string
@@ -861,7 +863,75 @@ let private topologyJson (topology: TopologyFacts) =
             |> List.toArray))
           Some("truncated", JsonValue.Boolean topology.truncated) ]
 
-let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options: ExportOptions) (definitions: DefinitionFact list) (topology: TopologyFacts) : EventGraphFacts =
+type private EventSyntaxFact =
+    { title: string option
+      isTriggeredOnly: bool
+      isHidden: bool
+      hasMeanTimeToHappen: bool }
+
+let orientTypedReference sourceId targetId isOutgoing =
+    if isOutgoing then sourceId, targetId else targetId, sourceId
+
+let private tryParsePdxBoolean (value: string) =
+    match value.Trim().ToLowerInvariant() with
+    | "yes" | "true" | "1" -> Some true
+    | "no" | "false" | "0" -> Some false
+    | _ -> None
+
+let private tryDirectLeafValue key (node: Node) =
+    node.Leaves
+    |> Seq.tryFind (fun leaf -> leaf.Key.Equals(key, StringComparison.OrdinalIgnoreCase))
+    |> Option.map (fun leaf -> leaf.ValueText)
+
+let rec private descendantNodes (node: Node) =
+    seq {
+        yield node
+        for child in node.Nodes do
+            yield! descendantNodes child
+    }
+
+let private collectEventSyntaxFacts (game: IGame<'T>) (definitions: DefinitionFact list) =
+    let pathComparer = if OperatingSystem.IsWindows() then StringComparer.OrdinalIgnoreCase else StringComparer.Ordinal
+    let rootsByFile = Dictionary<string, ResizeArray<Node>>(pathComparer)
+    for struct (entity, _) in game.AllEntities() do
+        let file = normalizePath entity.filepath
+        let roots =
+            match rootsByFile.TryGetValue file with
+            | true, values -> values
+            | false, _ ->
+                let values = ResizeArray<Node>()
+                rootsByFile.[file] <- values
+                values
+        roots.Add entity.rawEntity
+
+    definitions
+    |> Seq.choose (fun definition ->
+        match rootsByFile.TryGetValue(normalizePath definition.file) with
+        | false, _ -> None
+        | true, roots ->
+            roots
+            |> Seq.collect descendantNodes
+            |> Seq.filter (fun node ->
+                int node.Position.StartLine <= definition.line
+                && int node.Position.EndLine >= definition.endLine)
+            |> Seq.sortBy (fun node -> int node.Position.EndLine - int node.Position.StartLine)
+            |> Seq.tryHead
+            |> Option.map (fun node ->
+                let booleanField key =
+                    tryDirectLeafValue key node
+                    |> Option.bind tryParsePdxBoolean
+                    |> Option.defaultValue false
+                let fact =
+                    { title = tryDirectLeafValue "title" node
+                      isTriggeredOnly = booleanField "is_triggered_only"
+                      isHidden = booleanField "hide_window"
+                      hasMeanTimeToHappen =
+                        node.Nodes
+                        |> Seq.exists (fun child -> child.Key.Equals("mean_time_to_happen", StringComparison.OrdinalIgnoreCase)) }
+                (normalizePath definition.file, definition.line, definition.id.ToLowerInvariant()), fact))
+    |> Map.ofSeq
+
+let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options: ExportOptions) (definitions: DefinitionFact list) (topology: TopologyFacts) (game: IGame<'T>) : EventGraphFacts =
     let pathComparer = if OperatingSystem.IsWindows() then StringComparer.OrdinalIgnoreCase else StringComparer.Ordinal
     let eventDefinitions =
         definitions
@@ -876,21 +946,24 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
     let nodes = ResizeArray<EventNodeFact>()
     let edges = ResizeArray<EventEdgeFact>()
     let logic = ResizeArray<EventLogicFact>()
+    let syntaxFacts = collectEventSyntaxFacts game eventDefinitions
 
     for definition in eventDefinitions do
         let eventType = definition.subtypes |> List.tryHead |> Option.defaultValue definition.entityType
+        let syntaxFact = syntaxFacts |> Map.tryFind (normalizePath definition.file, definition.line, definition.id.ToLowerInvariant())
         nodes.Add
             { eventId = definition.id
               eventType = eventType
-              title = None
+              title = syntaxFact |> Option.bind (fun fact -> fact.title)
               file = normalizePath definition.file
               logicalPath = normalizePath definition.logicalPath
               line = definition.line
               endLine = definition.endLine
               origin = definition.origin
-              isTriggeredOnly = false
-              isHidden = false
-              hasMeanTimeToHappen = false }
+              isTriggeredOnly = syntaxFact |> Option.exists (fun fact -> fact.isTriggeredOnly)
+              isHidden = syntaxFact |> Option.exists (fun fact -> fact.isHidden)
+              hasMeanTimeToHappen = syntaxFact |> Option.exists (fun fact -> fact.hasMeanTimeToHappen)
+              factsKnown = syntaxFact.IsSome }
 
     let nodeByFile = Dictionary<string, EventNodeFact list>(pathComparer)
     for file, values in nodes |> Seq.groupBy (fun node -> normalizePath node.file) do
@@ -910,10 +983,12 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
                 | false, _ -> None
             match sourceNode with
             | Some node ->
+                let sourceId, targetEventId =
+                    orientTypedReference node.eventId reference.targetId reference.isOutgoing
                 edges.Add
                     { sourceKind = "event"
-                      sourceId = node.eventId
-                      targetEventId = reference.targetId
+                      sourceId = sourceId
+                      targetEventId = targetEventId
                       edgeType = "typed_reference"
                       label = reference.label
                       sourceFile = reference.sourceFile
@@ -922,9 +997,9 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
                 reference.associatedType
                 |> Option.iter (fun scope ->
                     logic.Add
-                        { eventId = node.eventId
+                        { eventId = sourceId
                           relationType = "scope_bridge"
-                          subject = reference.targetId
+                          subject = targetEventId
                           scope = Some scope
                           phase = "reference"
                           sourceFile = reference.sourceFile
@@ -940,6 +1015,7 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
                             && reference.line <= definition.endLine)
                     | false, _ -> None
                 sourceDefinition
+                |> Option.filter (fun _ -> reference.isOutgoing)
                 |> Option.iter (fun definition ->
                     edges.Add
                         { sourceKind = definition.entityType
@@ -957,8 +1033,8 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
       edges = (if options.completeExport then distinctEdges else distinctEdges |> Seq.truncate 30000) |> Seq.toList
       logic = (if options.completeExport then distinctLogic else distinctLogic |> Seq.truncate 30000) |> Seq.toList }
 
-let private collectEventGraph options definitions topology =
-    collectEventGraphWithKnownIds Set.empty options definitions topology
+let private collectEventGraph options definitions topology game =
+    collectEventGraphWithKnownIds Set.empty options definitions topology game
 
 let private overrideModesJson (game: IGame) =
     game.OverrideModes()
@@ -1080,7 +1156,8 @@ CREATE TABLE event_nodes (
   origin TEXT NOT NULL,
   is_triggered_only INTEGER NOT NULL,
   is_hidden INTEGER NOT NULL,
-  has_mtth INTEGER NOT NULL
+  has_mtth INTEGER NOT NULL,
+  facts_known INTEGER NOT NULL
 );
 CREATE TABLE event_edges (
   id INTEGER PRIMARY KEY,
@@ -1177,7 +1254,7 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
         command.ExecuteNonQuery() |> ignore
 
     let generatedAt = DateTimeOffset.UtcNow
-    insertMetadata "schema_version" "2"
+    insertMetadata "schema_version" "3"
     insertMetadata "status" runtime.status
     insertMetadata "game" activeGame
     insertMetadata "generated_at" (generatedAt.ToString("O"))
@@ -1322,15 +1399,16 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
 
     use eventNodeCommand = connection.CreateCommand()
     eventNodeCommand.Transaction <- transaction
-    eventNodeCommand.CommandText <- "INSERT INTO event_nodes(event_id, event_type, title, file_path, logical_path, line, end_line, origin, is_triggered_only, is_hidden, has_mtth) VALUES ($id, $type, $title, $file, $logical, $line, $end, $origin, $triggered, $hidden, $mtth)"
+    eventNodeCommand.CommandText <- "INSERT INTO event_nodes(event_id, event_type, title, file_path, logical_path, line, end_line, origin, is_triggered_only, is_hidden, has_mtth, facts_known) VALUES ($id, $type, $title, $file, $logical, $line, $end, $origin, $triggered, $hidden, $mtth, $factsKnown)"
     prepareCommandParameters eventNodeCommand
         [ "$id", box ""; "$type", box ""; "$title", box ""; "$file", box ""; "$logical", box ""; "$line", box 0
-          "$end", box 0; "$origin", box ""; "$triggered", box 0; "$hidden", box 0; "$mtth", box 0 ]
+          "$end", box 0; "$origin", box ""; "$triggered", box 0; "$hidden", box 0; "$mtth", box 0; "$factsKnown", box 0 ]
     for node in eventGraph.nodes do
         setPreparedCommandParameters eventNodeCommand
             [ "$id", box node.eventId; "$type", box node.eventType; "$title", box (node.title |> Option.toObj); "$file", box node.file
               "$logical", box node.logicalPath; "$line", box node.line; "$end", box node.endLine; "$origin", box node.origin
-              "$triggered", box (if node.isTriggeredOnly then 1 else 0); "$hidden", box (if node.isHidden then 1 else 0); "$mtth", box (if node.hasMeanTimeToHappen then 1 else 0) ]
+              "$triggered", box (if node.isTriggeredOnly then 1 else 0); "$hidden", box (if node.isHidden then 1 else 0)
+              "$mtth", box (if node.hasMeanTimeToHappen then 1 else 0); "$factsKnown", box (if node.factsKnown then 1 else 0) ]
         eventNodeCommand.ExecuteNonQuery() |> ignore
     use eventEdgeCommand = connection.CreateCommand()
     eventEdgeCommand.Transaction <- transaction
@@ -1559,6 +1637,24 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
         connection.Open()
         let metadata = readMetadata connection
         let getMetadata key fallback = match metadata.TryGetValue key with true, value -> value | _ -> fallback
+        let knowledgeSchemaVersion =
+            match Int32.TryParse(getMetadata "schema_version" "0") with
+            | true, value -> value
+            | _ -> 0
+        let eventFactsKnownExpression = if knowledgeSchemaVersion >= 3 then "facts_known" else "0"
+        let eventEntryStatusExpression =
+            "CASE WHEN " + eventFactsKnownExpression + " = 0 THEN 'unknown' "
+            + "WHEN is_triggered_only <> 0 THEN 'triggered_only' "
+            + "WHEN has_mtth <> 0 THEN 'mtth_present' "
+            + "WHEN EXISTS (SELECT 1 FROM event_edges entry_edge WHERE entry_edge.target_event_id = event_nodes.event_id COLLATE NOCASE AND entry_edge.source_kind <> 'event') THEN 'external_reference' "
+            + "WHEN EXISTS (SELECT 1 FROM event_edges entry_edge WHERE entry_edge.target_event_id = event_nodes.event_id COLLATE NOCASE) THEN 'referenced' "
+            + "ELSE 'unknown' END"
+        let eventHasIndexedCallerExpression =
+            "EXISTS (SELECT 1 FROM event_edges caller_edge WHERE caller_edge.target_event_id = event_nodes.event_id COLLATE NOCASE)"
+        let incomingCoverage =
+            if (getMetadata "topology_truncated" "false").Equals("true", StringComparison.OrdinalIgnoreCase)
+            then "partial"
+            else "complete"
         let limit = clamp 1 300 options.limit
         let tokens = queryTokens options
         let identifiers = queryIdentifiers options
@@ -1656,6 +1752,7 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                 let typeGroup = reader.GetString 3
                 let line = int (reader.GetInt64 4)
                 let domain = reader.GetString 9
+                let isOutgoing = reader.GetInt64 5 <> 0L
                 let key = $"reference|{sourceFile}|{line}|{targetId}|{typeGroup}"
                 if evidence.Count < limit
                    && allowedDomain domain
@@ -1669,7 +1766,9 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                               Some("targetId", JsonValue.String targetId)
                               Some("typeGroup", JsonValue.String typeGroup)
                               Some("line", JsonValue.Number(decimal line))
-                              Some("isOutgoing", JsonValue.Boolean(reader.GetInt64 5 <> 0L))
+                              Some("isOutgoing", JsonValue.Boolean isOutgoing)
+                              Some("direction", JsonValue.String(if isOutgoing then "source_to_target" else "target_to_source"))
+                              Some("causality", JsonValue.String "typed_reference_only")
                               Some("referenceType", JsonValue.String(reader.GetString 6))
                               stringOrNone reader 7 |> Option.map (fun value -> "label", JsonValue.String value)
                               stringOrNone reader 8 |> Option.map (fun value -> "associatedType", JsonValue.String value)
@@ -1725,7 +1824,10 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                     sqliteTokenPredicate nodeCommand tokens [ "event_id"; "event_type"; "title"; "file_path"; "logical_path" ]
                 else
                     sqliteIndexedIdentifierPredicate nodeCommand "eventNode" identifiers [ "event_id" ]
-            nodeCommand.CommandText <- "SELECT event_id, event_type, title, file_path, logical_path, line, end_line, origin, is_triggered_only, is_hidden, has_mtth FROM event_nodes" + combineSqlPredicates [ nodeSearchPredicate ] + " LIMIT $limit"
+            nodeCommand.CommandText <-
+                "SELECT event_id, event_type, title, file_path, logical_path, line, end_line, origin, is_triggered_only, is_hidden, has_mtth, "
+                + eventFactsKnownExpression + ", " + eventEntryStatusExpression + ", " + eventHasIndexedCallerExpression
+                + " FROM event_nodes" + combineSqlPredicates [ nodeSearchPredicate ] + " LIMIT $limit"
             addParameter nodeCommand "$limit" (box (max 200 (limit * 10)))
             use nodeReader = nodeCommand.ExecuteReader()
             while nodeReader.Read() && eventNodes.Count < limit do
@@ -1733,6 +1835,7 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                 let eventType = nodeReader.GetString 1
                 let file = nodeReader.GetString 3
                 if matchesTokens tokens [ eventId; eventType; file; stringOrNone nodeReader 2 |> Option.defaultValue "" ] then
+                    let factsKnown = nodeReader.GetInt64 11 <> 0L
                     returnedNodeIds.Add eventId |> ignore
                     eventNodes.Add(
                         jsonRecord
@@ -1740,8 +1843,13 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                               stringOrNone nodeReader 2 |> Option.map (fun value -> "title", JsonValue.String value)
                               Some("file", JsonValue.String file); Some("logicalPath", JsonValue.String(nodeReader.GetString 4))
                               Some("line", JsonValue.Number(decimal (nodeReader.GetInt64 5))); Some("endLine", JsonValue.Number(decimal (nodeReader.GetInt64 6)))
-                              Some("origin", JsonValue.String(nodeReader.GetString 7)); Some("isTriggeredOnly", JsonValue.Boolean(nodeReader.GetInt64 8 <> 0L))
-                              Some("isHidden", JsonValue.Boolean(nodeReader.GetInt64 9 <> 0L)); Some("hasMeanTimeToHappen", JsonValue.Boolean(nodeReader.GetInt64 10 <> 0L)) ])
+                              Some("origin", JsonValue.String(nodeReader.GetString 7)); Some("factsKnown", JsonValue.Boolean factsKnown)
+                              (if factsKnown then Some("isTriggeredOnly", JsonValue.Boolean(nodeReader.GetInt64 8 <> 0L)) else None)
+                              (if factsKnown then Some("isHidden", JsonValue.Boolean(nodeReader.GetInt64 9 <> 0L)) else None)
+                              (if factsKnown then Some("hasMeanTimeToHappen", JsonValue.Boolean(nodeReader.GetInt64 10 <> 0L)) else None)
+                              Some("entryStatus", JsonValue.String(nodeReader.GetString 12))
+                              Some("hasIndexedCaller", JsonValue.Boolean(nodeReader.GetInt64 13 <> 0L))
+                              Some("incomingCoverage", JsonValue.String incomingCoverage) ])
             nodeReader.Close()
             use edgeCommand = connection.CreateCommand()
             let edgeSearchPredicate =
@@ -1763,6 +1871,8 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                         jsonRecord
                             [ Some("sourceKind", JsonValue.String(edgeReader.GetString 0)); Some("sourceId", JsonValue.String sourceId)
                               Some("targetEventId", JsonValue.String targetId); Some("edgeType", JsonValue.String edgeType)
+                              Some("direction", JsonValue.String "source_to_target")
+                              Some("causality", JsonValue.String "directed_typed_reference")
                               stringOrNone edgeReader 4 |> Option.map (fun value -> "label", JsonValue.String value)
                               Some("sourceFile", JsonValue.String(edgeReader.GetString 5)); Some("line", JsonValue.Number(decimal (edgeReader.GetInt64 6)))
                               Some("confidence", JsonValue.String(edgeReader.GetString 7)) ])
@@ -1833,7 +1943,9 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                         addParameter relatedNodeCommand parameter (box eventId)
                         parameter)
                 relatedNodeCommand.CommandText <-
-                    "SELECT event_id, event_type, title, file_path, logical_path, line, end_line, origin, is_triggered_only, is_hidden, has_mtth FROM event_nodes WHERE event_id COLLATE NOCASE IN ("
+                    "SELECT event_id, event_type, title, file_path, logical_path, line, end_line, origin, is_triggered_only, is_hidden, has_mtth, "
+                    + eventFactsKnownExpression + ", " + eventEntryStatusExpression + ", " + eventHasIndexedCallerExpression
+                    + " FROM event_nodes WHERE event_id COLLATE NOCASE IN ("
                     + String.concat "," nodeParameters
                     + ") LIMIT $limit"
                 addParameter relatedNodeCommand "$limit" (box limit)
@@ -1841,14 +1953,20 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                 while relatedNodeReader.Read() && eventNodes.Count < limit do
                     let eventId = relatedNodeReader.GetString 0
                     if returnedNodeIds.Add eventId then
+                        let factsKnown = relatedNodeReader.GetInt64 11 <> 0L
                         eventNodes.Add(
                             jsonRecord
                                 [ Some("eventId", JsonValue.String eventId); Some("eventType", JsonValue.String(relatedNodeReader.GetString 1))
                                   stringOrNone relatedNodeReader 2 |> Option.map (fun value -> "title", JsonValue.String value)
                                   Some("file", JsonValue.String(relatedNodeReader.GetString 3)); Some("logicalPath", JsonValue.String(relatedNodeReader.GetString 4))
                                   Some("line", JsonValue.Number(decimal (relatedNodeReader.GetInt64 5))); Some("endLine", JsonValue.Number(decimal (relatedNodeReader.GetInt64 6)))
-                                  Some("origin", JsonValue.String(relatedNodeReader.GetString 7)); Some("isTriggeredOnly", JsonValue.Boolean(relatedNodeReader.GetInt64 8 <> 0L))
-                                  Some("isHidden", JsonValue.Boolean(relatedNodeReader.GetInt64 9 <> 0L)); Some("hasMeanTimeToHappen", JsonValue.Boolean(relatedNodeReader.GetInt64 10 <> 0L)) ])
+                                  Some("origin", JsonValue.String(relatedNodeReader.GetString 7)); Some("factsKnown", JsonValue.Boolean factsKnown)
+                                  (if factsKnown then Some("isTriggeredOnly", JsonValue.Boolean(relatedNodeReader.GetInt64 8 <> 0L)) else None)
+                                  (if factsKnown then Some("isHidden", JsonValue.Boolean(relatedNodeReader.GetInt64 9 <> 0L)) else None)
+                                  (if factsKnown then Some("hasMeanTimeToHappen", JsonValue.Boolean(relatedNodeReader.GetInt64 10 <> 0L)) else None)
+                                  Some("entryStatus", JsonValue.String(relatedNodeReader.GetString 12))
+                                  Some("hasIndexedCaller", JsonValue.Boolean(relatedNodeReader.GetInt64 13 <> 0L))
+                                  Some("incomingCoverage", JsonValue.String incomingCoverage) ])
 
         let unresolved = ResizeArray<JsonValue>()
         if options.includeUnresolved then
@@ -1868,7 +1986,7 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
             [ Some("ok", JsonValue.Boolean true)
               Some("status", JsonValue.String(getMetadata "status" "stale"))
               Some("source", JsonValue.String "cwtools-project-knowledge-sqlite")
-              Some("schemaVersion", JsonValue.Number 2m)
+              Some("schemaVersion", JsonValue.Number(decimal knowledgeSchemaVersion))
               Some("databasePath", JsonValue.String(normalizePath databasePath))
               Some("generatedAt", JsonValue.String(getMetadata "generated_at" ""))
               Some("game", JsonValue.String(getMetadata "game" "unknown"))
@@ -1887,14 +2005,17 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
               Some("eventGraph", jsonRecord
                 [ Some("nodes", JsonValue.Array(eventNodes.ToArray()))
                   Some("edges", JsonValue.Array(eventEdges.ToArray()))
-                  Some("logic", JsonValue.Array(eventLogic.ToArray())) ])
+                  Some("logic", JsonValue.Array(eventLogic.ToArray()))
+                  Some("incomingCoverage", JsonValue.String incomingCoverage)
+                  Some("causalityPolicy", JsonValue.String "Only directed typed references and explicit execution facts are evidence; IDs, source order, layout, and missing edges are not.") ])
               Some("unresolved", JsonValue.Array(unresolved.ToArray()))
               Some("requiredNextChecks", jsonStringArray
                 [ "Use query_cwt_schema/query_rules/query_scope for legality before writing."
                   "For shader evidence, use query_shader_compile_unit/query_shader_callers/explain_shader_reachability before editing."
                   "For interface shaders, trace gui_uses_interface_sprite -> interface_sprite_selects_shader_file and verify renderer inputs/subtype before editing effectFile or Effect names."
                   "Read exact source blocks referenced by event structure and logic evidence."
-                  "Verify event scope bridges and state lifecycles before approving complex blueprints." ]) ]
+                  "Verify event scope bridges and state lifecycles before approving complex blueprints."
+                  "Never infer event or entity causality from numeric IDs, file/source order, proximity, graph layout, or a missing incoming edge." ]) ]
 
 let private exportProjectKnowledgeRebuild (activeGame: string) (projectRoots: string list) (rawOptions: ExportOptions) (runtime: RuntimeMetadata) (game: IGame<'T>) =
     let normalizedOptions = normalizeOptions rawOptions
@@ -1968,7 +2089,7 @@ let private exportProjectKnowledgeRebuild (activeGame: string) (projectRoots: st
     let options = { collectionOptions with domains = []; changedFiles = []; generationMode = generationMode }
     let definitions = selectDefinitions options availableDefinitions
     let domains = domainSummaries options definitions
-    let eventGraph = collectEventGraph options availableDefinitions topology
+    let eventGraph = collectEventGraph options availableDefinitions topology game
     let warnings = ResizeArray<string>()
     if runtime.status <> "ready" then warnings.Add("The knowledge snapshot was exported while CWTools was loading or stale.")
     if topology.truncated then warnings.Add("Topology and event relationships are partial because the configured export limits were reached.")
@@ -1988,7 +2109,7 @@ let private exportProjectKnowledgeRebuild (activeGame: string) (projectRoots: st
             [ Some("ok", JsonValue.Boolean true)
               Some("status", JsonValue.String publishedRuntime.status)
               Some("source", JsonValue.String "cwtools-project-knowledge-sqlite")
-              Some("schemaVersion", JsonValue.Number 2m)
+              Some("schemaVersion", JsonValue.Number 3m)
               Some("game", JsonValue.String activeGame)
               Some("generatedAtUnixMs", JsonValue.Number(decimal (generatedAt.ToUnixTimeMilliseconds())))
               Some("graphVersion", JsonValue.Number(decimal runtime.graphVersion))
@@ -2105,7 +2226,7 @@ let private tryIncrementalProjectKnowledgeExport
                         match metadata.TryGetValue "schema_version" with
                         | true, value -> value
                         | _ -> ""
-                    if schemaVersion <> "2" then
+                    if schemaVersion <> "3" then
                         Some(incrementalExportError "stale" "The project knowledge schema changed; reload the project to rebuild it.")
                     else
                         let knownEventIds =
@@ -2116,7 +2237,7 @@ let private tryIncrementalProjectKnowledgeExport
                             while reader.Read() do values.Add(reader.GetString 0)
                             values |> Set.ofSeq
                         let eventGraph =
-                            collectEventGraphWithKnownIds knownEventIds collectionOptions freshDefinitions freshTopology
+                            collectEventGraphWithKnownIds knownEventIds collectionOptions freshDefinitions freshTopology game
                         use transaction = connection.BeginTransaction()
                         executeSql connection (Some transaction) """
 CREATE TEMP TABLE changed_paths(path TEXT PRIMARY KEY);
@@ -2265,16 +2386,17 @@ WHERE lower(target_event_id) IN (
 
                         use eventNodeCommand = connection.CreateCommand()
                         eventNodeCommand.Transaction <- transaction
-                        eventNodeCommand.CommandText <- "INSERT INTO event_nodes(event_id, event_type, title, file_path, logical_path, line, end_line, origin, is_triggered_only, is_hidden, has_mtth) VALUES ($id, $type, $title, $file, $logical, $line, $end, $origin, $triggered, $hidden, $mtth)"
+                        eventNodeCommand.CommandText <- "INSERT INTO event_nodes(event_id, event_type, title, file_path, logical_path, line, end_line, origin, is_triggered_only, is_hidden, has_mtth, facts_known) VALUES ($id, $type, $title, $file, $logical, $line, $end, $origin, $triggered, $hidden, $mtth, $factsKnown)"
                         prepareCommandParameters eventNodeCommand
                             [ "$id", box ""; "$type", box ""; "$title", box ""; "$file", box ""; "$logical", box ""; "$line", box 0
-                              "$end", box 0; "$origin", box ""; "$triggered", box 0; "$hidden", box 0; "$mtth", box 0 ]
+                              "$end", box 0; "$origin", box ""; "$triggered", box 0; "$hidden", box 0; "$mtth", box 0; "$factsKnown", box 0 ]
                         for node in eventGraph.nodes do
                             setPreparedCommandParameters eventNodeCommand
                                 [ "$id", box node.eventId; "$type", box node.eventType; "$title", box (node.title |> Option.toObj)
                                   "$file", box node.file; "$logical", box node.logicalPath; "$line", box node.line; "$end", box node.endLine
                                   "$origin", box node.origin; "$triggered", box (if node.isTriggeredOnly then 1 else 0)
-                                  "$hidden", box (if node.isHidden then 1 else 0); "$mtth", box (if node.hasMeanTimeToHappen then 1 else 0) ]
+                                  "$hidden", box (if node.isHidden then 1 else 0); "$mtth", box (if node.hasMeanTimeToHappen then 1 else 0)
+                                  "$factsKnown", box (if node.factsKnown then 1 else 0) ]
                             eventNodeCommand.ExecuteNonQuery() |> ignore
                         use eventEdgeCommand = connection.CreateCommand()
                         eventEdgeCommand.Transaction <- transaction
@@ -2486,7 +2608,7 @@ ORDER BY lower(d.entity_type), lower(d.symbol_id), d.id
                                 [ Some("ok", JsonValue.Boolean true)
                                   Some("status", JsonValue.String runtime.status)
                                   Some("source", JsonValue.String "cwtools-project-knowledge-sqlite")
-                                  Some("schemaVersion", JsonValue.Number 2m)
+                                  Some("schemaVersion", JsonValue.Number 3m)
                                   Some("game", JsonValue.String activeGame)
                                   Some("generatedAtUnixMs", JsonValue.Number(decimal (generatedAt.ToUnixTimeMilliseconds())))
                                   Some("graphVersion", JsonValue.Number(decimal runtime.graphVersion))

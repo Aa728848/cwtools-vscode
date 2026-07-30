@@ -65,20 +65,20 @@ describe('project knowledge contract', () => {
     }
   });
 
-  it('routes V2 knowledge queries through the read-only SQLite LSP command', async () => {
+  it('routes V3 knowledge queries through the read-only SQLite LSP command', async () => {
     const workspaceRoot = fs.mkdtempSync(`${tempBase}-`);
     try {
       const knowledgeRoot = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
       fs.mkdirSync(knowledgeRoot, { recursive: true });
       fs.writeFileSync(path.join(knowledgeRoot, 'manifest.json'), JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 3,
         status: 'ready',
         generatedAt: '2026-01-01T00:00:00.000Z',
         game: 'stellaris',
         graphVersion: 9,
         domains: ['events'],
         staleReasons: [],
-        database: { path: 'knowledge.sqlite', format: 'sqlite', schemaVersion: 2 },
+        database: { path: 'knowledge.sqlite', format: 'sqlite', schemaVersion: 3 },
       }), 'utf8');
       fs.writeFileSync(path.join(knowledgeRoot, 'knowledge.sqlite'), 'test');
       const calls: Array<{ command: string; args?: unknown[] }> = [];

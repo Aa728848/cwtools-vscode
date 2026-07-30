@@ -15,6 +15,9 @@ describe('game knowledge', () => {
         expect(knowledge).to.include('query_override_modes');
         expect(knowledge).to.include('active game profile');
         expect(knowledge).to.include('source/revision');
+        expect(knowledge).to.include('numeric suffixes');
+        expect(knowledge).to.include('no indexed incoming edge');
+        expect(knowledge).to.include('not an entry point');
 
         for (const fixedFact of [
             'save_event_target_as',

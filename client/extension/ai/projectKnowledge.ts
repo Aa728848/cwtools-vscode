@@ -15,11 +15,11 @@ import type {
     QueryProjectKnowledgeResult,
 } from './types';
 
-export const PROJECT_KNOWLEDGE_SCHEMA_VERSION = 2;
+export const PROJECT_KNOWLEDGE_SCHEMA_VERSION = 3;
 export const PROJECT_KNOWLEDGE_RELATIVE_DIR = path.join('.cwtools', 'project', 'knowledge');
 
 export interface ProjectKnowledgeManifest {
-    schemaVersion: 1 | 2;
+    schemaVersion: 1 | 2 | 3;
     generatedAt: string;
     generationMode: 'full' | 'incremental';
     status: 'ready' | 'partial' | 'stale' | 'loading' | 'unavailable' | 'error';
@@ -53,7 +53,7 @@ export interface ProjectKnowledgeManifest {
     database?: {
         path: string;
         format: 'sqlite';
-        schemaVersion: 2;
+        schemaVersion: 2 | 3;
     };
 }
 
@@ -422,7 +422,7 @@ export async function generateProjectKnowledge(
         database: {
             path: 'knowledge.sqlite',
             format: 'sqlite',
-            schemaVersion: 2,
+            schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
         },
     };
     // The database is atomically replaced by the server. Publish the compact
@@ -470,7 +470,7 @@ export function writeUnavailableProjectKnowledge(
         database: {
             path: 'knowledge.sqlite',
             format: 'sqlite',
-            schemaVersion: 2,
+            schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
         },
     };
     writeJson(getProjectKnowledgeManifestPath(workspaceRoot), manifest);
@@ -704,7 +704,7 @@ export function buildProjectKnowledgePrompt(workspaceRoot: string): string {
     const manifest = readProjectKnowledgeManifest(workspaceRoot);
     if (!manifest) return '';
     const staleReasons = manifest.staleReasons ?? [];
-    return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: ${manifest.schemaVersion >= 2 ? 'manifest + SQLite V2' : 'legacy JSON V1'}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace + ${manifest.counts.vanillaDefinitions ?? 0} vanilla; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; typed graph: ${manifest.counts.eventNodes ?? 0} entry nodes / ${manifest.counts.eventEdges ?? 0} structural edges / ${manifest.counts.eventLogic ?? 0} logic facts\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Enumerate the involved TypeDefs and dependency families from the current semantic catalog, then load their project/vanilla patterns, typed topology, unresolved facts, and relevant graph slices. A blueprint must cite exact evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
+    return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: ${manifest.schemaVersion >= 2 ? `manifest + SQLite V${manifest.schemaVersion}` : 'legacy JSON V1'}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace + ${manifest.counts.vanillaDefinitions ?? 0} vanilla; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; typed graph: ${manifest.counts.eventNodes ?? 0} event nodes / ${manifest.counts.eventEdges ?? 0} directed edges / ${manifest.counts.eventLogic ?? 0} logic facts\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}Event IDs, numeric/source order, and missing incoming edges are never entry or causality evidence. For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Enumerate the involved TypeDefs and dependency families from the current semantic catalog, then load their project/vanilla patterns, typed topology, unresolved facts, and relevant graph slices. A blueprint must cite exact directed evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
 }
 
 const FULL_REFRESH_STALE_REASONS = new Set([

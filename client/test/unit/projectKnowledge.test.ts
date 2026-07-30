@@ -148,7 +148,7 @@ function loadProjectKnowledge() {
     }
 }
 
-describe('project knowledge SQLite V2', () => {
+describe('project knowledge SQLite V3', () => {
     const projectKnowledge = loadProjectKnowledge();
     let workspaceRoot: string;
 
@@ -190,7 +190,7 @@ describe('project knowledge SQLite V2', () => {
         nextSnapshot = {
             ok: true,
             status: 'ready',
-            schemaVersion: 2,
+            schemaVersion: 3,
             game: 'stellaris',
             graphVersion: 1,
             completeExport: true,
@@ -219,7 +219,7 @@ describe('project knowledge SQLite V2', () => {
             complete: true,
         });
 
-        expect(manifest.schemaVersion).to.equal(2);
+        expect(manifest.schemaVersion).to.equal(3);
         expect(manifest.artifacts).to.deep.equal(['knowledge.sqlite']);
         expect(manifest.counts.eventLogic).to.equal(9);
         expect(manifest.completeExport).to.equal(true);
@@ -287,7 +287,7 @@ describe('project knowledge SQLite V2', () => {
         nextSnapshot = {
             ok: true,
             status: 'ready',
-            schemaVersion: 2,
+            schemaVersion: 3,
             game: 'stellaris',
             graphVersion: 1,
             generatedAtUnixMs: Date.now(),

@@ -10,6 +10,11 @@ let private assertTrue name condition =
 let private assertFalse name condition =
     if condition then failwith $"{name}: expected false"
 
+let outgoingSource, outgoingTarget = orientTypedReference "kuat_legacy.38" "kuat_legacy.39" true
+let incomingSource, incomingTarget = orientTypedReference "container_event" "referenced_event" false
+assertTrue "outgoing typed reference preserves source-to-target direction" (outgoingSource = "kuat_legacy.38" && outgoingTarget = "kuat_legacy.39")
+assertTrue "incoming typed reference reverses target-to-source direction" (incomingSource = "referenced_event" && incomingTarget = "container_event")
+
 let root =
     Path.Combine(Path.GetTempPath(), "cwtools-project-knowledge-temp-cleanup-" + Guid.NewGuid().ToString("N"))
 

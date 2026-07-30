@@ -107,7 +107,7 @@ The core constraint of this layer is: if the shared index can answer the query, 
 
 ##### CWTools Semantic Graph
 
-`src/Main/SemanticGraph.fs` builds a bounded semantic subgraph directly from the loaded CWTools `Types()`, `GetEventGraphData`, and per-file `ComputedData` caches. It does not maintain a second parser or a lexical reference database. `cwtools.ai.exploreProject` ranks typed entry points, traverses at most three hops, caps nodes/edges, and returns provenance, file facts, truncation, and validation/load freshness. The extension and MCP expose it as `explore_pdx_project`, the preferred first tool for project-structure and dependency questions; exact rule, scope, type, and block tools remain the write-time verification layer.
+`src/Main/SemanticGraph.fs` builds a bounded semantic subgraph directly from the loaded CWTools `Types()`, `GetEventGraphData`, and per-file `ComputedData` caches. It does not maintain a second parser or a lexical reference database. `cwtools.ai.exploreProject` ranks typed seed definitions, traverses at most three hops, caps nodes/edges, and returns provenance, file facts, truncation, and validation/load freshness. The extension and MCP expose it as `explore_pdx_project`, the preferred first tool for project-structure and dependency questions; exact rule, scope, type, and block tools remain the write-time verification layer.
 
 Because the graph reads the existing game model, scripted-type refreshes and ordinary file updates become visible through the same cache/locking lifecycle as diagnostics and completion. User buffer changes are debounced into `UpdateFile`; agent writes and watched file-system changes force a disk-backed update; creates, changes, and deletes update or remove typed indexes; and graph reads hold the game-state read lock while incremental commits/full refreshes hold the write lock. Query-only graph caches are invalidated on every relevant workspace mutation. Standalone MCP uses a bounded Chokidar watcher to forward the same LSP watched-file events. Empty results from a loading or stale snapshot are explicitly non-authoritative.
 
@@ -127,7 +127,7 @@ EvidenceGate treats references to project-extensible TypeDefs as phase-aware. A 
 
 ##### Project Knowledge Pack
 
-`/init` has a quick profile phase and a deep semantic phase. The quick profile discovers actual PDX content directories and stable registered game metadata; it does not manufacture a fixed list of entity families or inject samples from selected folders. `chatInit.ts` keeps a `ProgressLocation.Window` indicator in VS Code's lower-left status area while it waits for CWTools, exports the database, and publishes the artifacts. The deep phase calls the internal `cwtools.ai.exportProjectKnowledge` command against one coherently locked `IGame` snapshot, then atomically writes a normalized SQLite V2 database. Workspace definitions, embedded vanilla definitions, definition stacks, reference topology, archetypes, resource overwrite state, active CWT override modes, unresolved facts, and typed graph facts therefore share one generation boundary. Graph nodes and edges are derived from CWTools definition types and reference topology; the exporter and semantic graph use generic typed-reference edges instead of command-name or entity-name classifiers. Compatibility columns in the SQLite event tables remain readable for older manifests, but they are not populated by hard-coded gameplay inference.
+`/init` has a quick profile phase and a deep semantic phase. The quick profile discovers actual PDX content directories and stable registered game metadata; it does not manufacture a fixed list of entity families or inject samples from selected folders. `chatInit.ts` keeps a `ProgressLocation.Window` indicator in VS Code's lower-left status area while it waits for CWTools, exports the database, and publishes the artifacts. The deep phase calls the internal `cwtools.ai.exportProjectKnowledge` command against one coherently locked `IGame` snapshot, then atomically writes a normalized SQLite V3 database. Workspace definitions, embedded vanilla definitions, definition stacks, reference topology, archetypes, resource overwrite state, active CWT override modes, unresolved facts, and typed graph facts therefore share one generation boundary. Graph nodes and edges are derived from CWTools definition types and reference topology; the exporter and semantic graph use generic typed-reference edges instead of command-name or entity-name classifiers. V3 extracts event execution facts from the same parsed CWTools nodes, preserves incoming/outgoing reference direction, and reports missing caller evidence as unknown rather than inferring entry status from IDs, source order, or layout.
 
 The persistent layout is intentionally compact:
 
@@ -598,7 +598,7 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 
 ##### CWTools 语义图
 
-`src/Main/SemanticGraph.fs` 直接基于已加载的 CWTools `Types()`、`GetEventGraphData` 和逐文件 `ComputedData` 缓存构建有界语义子图，不维护第二套解析器或词法引用数据库。`cwtools.ai.exploreProject` 对 typed entry point 排序，最多遍历三跳，并限制节点/边数量，同时返回 provenance、文件语义事实、截断信息以及校验/加载 freshness。Extension 与 MCP 将其暴露为 `explore_pdx_project`，作为项目结构和依赖问题的首选入口；精确规则、作用域、类型和 block 工具仍负责写入前验证。
+`src/Main/SemanticGraph.fs` 直接基于已加载的 CWTools `Types()`、`GetEventGraphData` 和逐文件 `ComputedData` 缓存构建有界语义子图，不维护第二套解析器或词法引用数据库。`cwtools.ai.exploreProject` 对 typed seed definition 排序，最多遍历三跳，并限制节点/边数量，同时返回 provenance、文件语义事实、截断信息以及校验/加载 freshness。Extension 与 MCP 将其暴露为 `explore_pdx_project`，作为项目结构和依赖问题的首选入口；精确规则、作用域、类型和 block 工具仍负责写入前验证。
 
 语义图复用现有 game model，因此 scripted type 增量刷新和普通文件更新会沿诊断与补全相同的缓存/锁生命周期生效。用户未保存缓冲区经过防抖后进入 `UpdateFile`；Agent 写入和文件系统 watcher 事件强制从磁盘更新；创建、修改和删除会更新或移除 typed index；语义图读取持有 game-state 读锁，而增量提交和完整刷新持有写锁。任何相关工作区变更都会使纯 query 语义图缓存失效。Standalone MCP 通过有界 Chokidar watcher 转发相同的 LSP 文件事件。加载中或 stale snapshot 的空结果会被明确标记为非权威。
 
@@ -618,7 +618,7 @@ EvidenceGate 对项目可扩展 TypeDef 引用执行分阶段判定。`pre_write
 
 ##### 项目知识包
 
-`/init` 现在分为快速画像阶段和深度语义阶段。快速画像只发现实际存在的 PDX 内容目录和稳定的注册游戏元数据，不再构造固定实体族清单，也不从指定目录注入类型样本。`chatInit.ts` 在等待 CWTools、导出数据库和发布产物期间，通过 `ProgressLocation.Window` 在 VS Code 左下角持续显示构建进度。深度阶段通过内部命令 `cwtools.ai.exportProjectKnowledge` 从同一个一致加锁的 `IGame` 快照原子生成规范化 SQLite V2 数据库，因此工作区定义、原版缓存定义、定义栈、引用拓扑、范例、资源覆盖状态、活动 CWT 覆盖模式、未解决事实和 typed graph facts 共享同一代数据边界。图节点和边由 CWTools definition type 与 reference topology 派生；导出器和语义图使用通用 typed-reference edge，不再为各游戏子系统维护指令名或实体名分类器。SQLite 事件表中的兼容字段继续供旧 manifest 读取，但不会由硬编码玩法推断填充。
+`/init` 现在分为快速画像阶段和深度语义阶段。快速画像只发现实际存在的 PDX 内容目录和稳定的注册游戏元数据，不再构造固定实体族清单，也不从指定目录注入类型样本。`chatInit.ts` 在等待 CWTools、导出数据库和发布产物期间，通过 `ProgressLocation.Window` 在 VS Code 左下角持续显示构建进度。深度阶段通过内部命令 `cwtools.ai.exportProjectKnowledge` 从同一个一致加锁的 `IGame` 快照原子生成规范化 SQLite V3 数据库，因此工作区定义、原版缓存定义、定义栈、引用拓扑、范例、资源覆盖状态、活动 CWT 覆盖模式、未解决事实和 typed graph facts 共享同一代数据边界。图节点和边由 CWTools definition type 与 reference topology 派生；导出器和语义图使用通用 typed-reference edge，不再为各游戏子系统维护指令名或实体名分类器。V3 从同一批 CWTools 解析节点提取事件执行事实，保留引用的传入/传出方向，并把缺失调用者证据报告为未知，不再根据 ID、源码顺序或图布局推断入口。
 
 持久化结构保持为两个核心产物：
 

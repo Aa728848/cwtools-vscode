@@ -83,9 +83,14 @@ export interface EventNode {
         typeName: string;
         value: string;
     };
+    isTriggeredOnly?: boolean;
+    isHidden?: boolean;
     meanTimeToHappen?: boolean;
+    entryStatus?: EventEntryStatus;
     triggerConditions?: EventTriggerCondition[];
 }
+
+export type EventEntryStatus = 'triggered_only' | 'mtth_present' | 'referenced' | 'unknown' | 'external_definition';
 
 export interface EventEdge {
     source: string;
@@ -162,6 +167,13 @@ function eventReferenceRules(catalog: PdxSemanticCatalog): EventReferenceRule[] 
 
 function scalar(node: PdxNode | undefined): string | undefined {
     return node?.value === undefined ? undefined : String(node.value);
+}
+
+function booleanScalar(node: PdxNode | undefined): boolean | undefined {
+    const value = scalar(node)?.trim().toLowerCase();
+    if (value === 'yes' || value === 'true' || value === '1') return true;
+    if (value === 'no' || value === 'false' || value === '0') return false;
+    return undefined;
 }
 
 function valueForReference(node: PdxNode, reference: CwtRuleValueReference): string | undefined {
@@ -424,30 +436,38 @@ export function parseEventFile(content: string, filePath: string, catalog: PdxSe
     const nodes: EventNode[] = [];
     const edges: EventEdge[] = [];
     for (const root of parsePdx(content)) {
-        if (!root.children || (eventKeys.size > 0 && !eventKeys.has(root.key.toLowerCase()))) continue;
-        const id = scalar(root.children.find(child => child.key.toLowerCase() === nameField));
+        const children = root.children;
+        if (!children || (eventKeys.size > 0 && !eventKeys.has(root.key.toLowerCase()))) continue;
+        const id = scalar(children.find(child => child.key.toLowerCase() === nameField));
         if (!id) continue;
         const endLine = Math.max(root.line, findBlockEndLine(lines, root.line - 1));
-        const semanticReferences = collectSemanticReferences(root.children, catalog);
-        const meanTimeToHappen = root.children.some(child => child.key.toLowerCase() === 'mean_time_to_happen');
+        const semanticReferences = collectSemanticReferences(children, catalog);
+        const directChild = (key: string) => children.find(child => child.key.toLowerCase() === key);
+        const title = scalar(directChild('title'));
+        const isTriggeredOnly = booleanScalar(directChild('is_triggered_only'));
+        const isHidden = booleanScalar(directChild('hide_window'));
+        const meanTimeToHappen = children.some(child => child.key.toLowerCase() === 'mean_time_to_happen');
         const triggerConditions = meanTimeToHappen
-            ? root.children
+            ? children
                 .filter(child => child.key.toLowerCase() === 'trigger' && child.children)
                 .flatMap(child => collectTriggerConditions(child.children ?? [], catalog))
             : [];
         nodes.push({
             id,
             type: root.key,
+            title,
             file: filePath,
             line: root.line,
             endLine,
             namespace: id.includes('.') ? id.split('.')[0]! : definition.name,
             semanticReferences,
             definitionIdentity: { typeName: definition.name, value: id },
+            isTriggeredOnly,
+            isHidden,
             meanTimeToHappen,
             triggerConditions,
         });
-        addEventReferenceEdges(id, root.children, catalog, edges);
+        addEventReferenceEdges(id, children, catalog, edges);
     }
     return { nodes, edges };
 }
@@ -527,6 +547,9 @@ export function mergeGraphs(graphs: EventGraph[]): EventGraph {
             if (!existing) {
                 nodeMap.set(node.id, node);
             } else {
+                if (existing.title === undefined) existing.title = node.title;
+                if (existing.isTriggeredOnly === undefined) existing.isTriggeredOnly = node.isTriggeredOnly;
+                if (existing.isHidden === undefined) existing.isHidden = node.isHidden;
                 for (const reference of node.semanticReferences) {
                     if (!existing.semanticReferences.some(item => item.typeName === reference.typeName
                         && item.value === reference.value
@@ -549,6 +572,29 @@ export function mergeGraphs(graphs: EventGraph[]): EventGraph {
         for (const edge of graph.edges) edgeMap.set(`${edge.source}\u0000${edge.target}\u0000${edge.edgeType}\u0000${edge.label ?? ''}\u0000${edge.conditionRelation ?? ''}`, edge);
     }
     return { nodes: [...nodeMap.values()], edges: [...edgeMap.values()] };
+}
+
+/**
+ * Classify entry evidence without treating a missing indexed caller as proof.
+ * Numeric IDs, source order, and graph layout never participate in this result.
+ */
+export function annotateEventEntryStatus(graph: EventGraph): EventGraph {
+    const incoming = new Set(graph.edges.map(edge => edge.target));
+    return {
+        nodes: graph.nodes.map(node => ({
+            ...node,
+            entryStatus: node.namespace.startsWith('__')
+                ? 'external_definition'
+                : node.isTriggeredOnly === true
+                    ? 'triggered_only'
+                    : node.meanTimeToHappen === true
+                        ? 'mtth_present'
+                        : incoming.has(node.id)
+                            ? 'referenced'
+                            : 'unknown',
+        })),
+        edges: graph.edges,
+    };
 }
 
 /** Connect typed value writers only to MTTH events whose root trigger requires them. */

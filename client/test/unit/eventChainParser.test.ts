@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { buildDefinitionReferenceEdges, buildMtthConditionEdges, extractConnectedSubgraph, mergeGraphs, parseCommonFile, parseEventFile, selectEventSeedIds } from '../../extension/eventChainParser';
+import { annotateEventEntryStatus, buildDefinitionReferenceEdges, buildMtthConditionEdges, extractConnectedSubgraph, mergeGraphs, parseCommonFile, parseEventFile, selectEventSeedIds } from '../../extension/eventChainParser';
 import { parsePdxSemanticCatalog, type PdxSemanticCatalog } from '../../shared/pdxSemanticCatalog';
 
 const CATALOG: PdxSemanticCatalog = {
@@ -19,6 +19,35 @@ const CATALOG: PdxSemanticCatalog = {
 };
 
 describe('event chain CWT semantics', () => {
+    it('extracts event execution facts and never infers entry from ID or source order', () => {
+        const graph = parseEventFile(`
+realm_event = {
+    event_key = realm_test.39
+    title = realm_test.39.title
+    is_triggered_only = yes
+    hide_window = yes
+}
+realm_event = {
+    event_key = realm_test.40
+}
+realm_event = {
+    event_key = realm_test.41
+    mean_time_to_happen = { days = 10 }
+}
+`, 'events/execution_facts.txt', CATALOG);
+        const classified = annotateEventEntryStatus(graph);
+
+        expect(classified.nodes.find(node => node.id === 'realm_test.39')).to.deep.include({
+            title: 'realm_test.39.title',
+            isTriggeredOnly: true,
+            isHidden: true,
+            entryStatus: 'triggered_only',
+        });
+        expect(classified.nodes.find(node => node.id === 'realm_test.40')?.entryStatus).to.equal('unknown');
+        expect(classified.nodes.find(node => node.id === 'realm_test.41')?.entryStatus).to.equal('mtth_present');
+        expect(classified.edges).to.deep.equal([]);
+    });
+
     it('derives event keys, name fields, calls, and typed references from the semantic catalog', () => {
         const graph = parseEventFile(`
 namespace = realm_test

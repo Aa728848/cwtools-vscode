@@ -19,6 +19,7 @@ import {
     mergeGraphs,
     buildMtthConditionEdges,
     buildDefinitionReferenceEdges,
+    annotateEventEntryStatus,
     extractConnectedSubgraph,
     selectEventSeedIds,
     type EventGraph,
@@ -273,12 +274,12 @@ eventsOnlyGraph.edges.push(...buildMtthConditionEdges(eventsOnlyGraph));
 // Traverse the complete high-confidence component. Generic typed read/write
 // edges are excluded earlier, so a node cap is sufficient protection against
 // malformed or unusually broad definition sets.
-const subgraph = extractConnectedSubgraph(
+const subgraph = annotateEventEntryStatus(extractConnectedSubgraph(
 eventsOnlyGraph,
 seedIds,
 Number.POSITIVE_INFINITY,
 EVENT_CHAIN_NODE_LIMIT,
-);
+));
 
 return { graph: subgraph, seedIds: Array.from(seedIds) };
 }

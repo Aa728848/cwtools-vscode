@@ -25,6 +25,8 @@ This prompt intentionally contains no game-version rule tables, scope lists, ent
 ### Decision boundary
 CWT structure, hard facts, completions, typed definitions, parse results, and fresh diagnostics are legality evidence. CWT comments, documentation, project examples, and vanilla archetypes help explain intent but do not prove runtime gameplay behaviour. If active sources are missing or disagree, keep the fact unresolved and report the source/revision instead of filling it from model memory.
 
+IDs/numeric suffixes and source order/layout never prove causality. Typed edges prove only direction/kind. Treat no indexed incoming edge as \`unknown\`, not an entry point; stale/partial gaps prove nothing.
+
 Executable statements may be order-sensitive. Preserve source order unless current rule evidence and a verified archetype establish that reordering is safe. Validate the integrated final file after writing.
 
 ### Shader safety gate (.shader / .fxh)

@@ -2255,17 +2255,24 @@ type Server(client: ILanguageClient) =
                 let filePath = getPathFromDoc p.textDocument.uri
                 let validationInProgress = (validationRuntimeSnapshot ()).inProgress
                 let writerBusy = isGameStateWriteBusy ()
+                let heavyPathWindow =
+                    isCompletionFallbackHeavyPath filePath
+                    && isCompletionHeavySaveFallbackWindow ()
+                    && (isCompletionHeavyTypingWindow () || isCompletionActive ())
                 let shouldFallback =
-                    writerBusy
-                    || validationInProgress
-                    || (isCompletionFallbackHeavyPath filePath
-                        && isCompletionHeavySaveFallbackWindow ()
-                        && (isCompletionHeavyTypingWindow () || isCompletionActive ()))
+                    Main.CompletionFallbackPolicy.shouldUseImmediateFallback
+                        writerBusy
+                        validationInProgress
+                        heavyPathWindow
                 if shouldFallback then
                     let fallback =
                         tryBuildStaleCompletionFallback p false
                         |> Option.orElseWith (fun () ->
-                            if writerBusy || validationInProgress then
+                            if
+                                Main.CompletionFallbackPolicy.canReturnEmptyFallback
+                                    writerBusy
+                                    validationInProgress
+                            then
                                 Some({ isIncomplete = true; items = [] }, None)
                             else
                                 None)

@@ -3578,8 +3578,12 @@ export class LspToolHandler {
 
     // - getCompletionAt -
 
-    async getCompletionAt(args: { file: string; line: number; column: number; limit?: number }): Promise<GetCompletionAtResult> {
+    async getCompletionAt(
+        args: { file: string; line: number; column: number; limit?: number },
+        toolContext?: import('../types').AgentToolContext,
+    ): Promise<GetCompletionAtResult> {
         let context: GetCompletionAtResult['context'] | undefined;
+        const generalDomain = toolContext?.runnerOptions?.domain === 'general';
         try {
             const requestedLimit = Number.isFinite(args.limit) ? Math.trunc(args.limit as number) : 30;
             const limit = Math.max(1, Math.min(200, requestedLimit));
@@ -3593,7 +3597,7 @@ export class LspToolHandler {
                 linePrefix = lineText.slice(0, boundedColumn);
                 tokenPrefix = linePrefix.match(/[A-Za-z0-9_.:-]+$/)?.[0];
             }
-            try {
+            if (!generalDomain) try {
                 const rawContext = await this.lspRequest<Record<string, unknown> | null>(
                     'cwtools.ai.getCompletionContext',
                     [uri.toString(), args.line, args.column],
@@ -3627,7 +3631,9 @@ export class LspToolHandler {
                 }
             } catch { /* Context enrichment only. */ }
             if (!context) {
-                const scope = await this.queryScopeForCompletionContext({ file: args.file, line: args.line, column: args.column }).catch(() => undefined);
+                const scope = generalDomain
+                    ? undefined
+                    : await this.queryScopeForCompletionContext({ file: args.file, line: args.line, column: args.column }).catch(() => undefined);
                 context = {
                     file: args.file,
                     line: args.line,
@@ -3683,11 +3689,17 @@ export class LspToolHandler {
                 context,
                 totalAvailable: 0,
                 _warning: 'Completion provider did not return a result. This is not proof that no values are valid at this position.',
-                _nextSteps: [
-                    'Confirm the file is openable and uses a CWTools-supported PDX language mode.',
-                    'Call get_diagnostics to check whether the language server is still loading or reporting stale diagnostics.',
-                    'Retry get_completion_at after validation/loading becomes fresh if the server is busy.',
-                ],
+                _nextSteps: generalDomain
+                    ? [
+                        'Confirm the file is openable and has an active language extension.',
+                        'Call get_diagnostics and inspect the project language-server configuration.',
+                        'Retry get_completion_at after the language provider has finished loading.',
+                    ]
+                    : [
+                        'Confirm the file is openable and uses a CWTools-supported PDX language mode.',
+                        'Call get_diagnostics to check whether the language server is still loading or reporting stale diagnostics.',
+                        'Retry get_completion_at after validation/loading becomes fresh if the server is busy.',
+                    ],
             };
         } catch (error) {
             return {
@@ -3695,11 +3707,17 @@ export class LspToolHandler {
                 context,
                 totalAvailable: 0,
                 _warning: `Completion lookup failed: ${error instanceof Error ? error.message : String(error)}. Empty completions are not authoritative.`,
-                _nextSteps: [
-                    'Call get_diagnostics to inspect LSP availability and loading/validation status.',
-                    'Verify the requested 0-based line and column are inside the current file.',
-                    'Use query_rules/query_types as fallback evidence before assuming the value is invalid.',
-                ],
+                _nextSteps: generalDomain
+                    ? [
+                        'Call get_diagnostics to inspect language-provider availability.',
+                        'Verify the requested 0-based line and column are inside the current file.',
+                        'Use hover_symbol or inspect project documentation as fallback evidence.',
+                    ]
+                    : [
+                        'Call get_diagnostics to inspect LSP availability and loading/validation status.',
+                        'Verify the requested 0-based line and column are inside the current file.',
+                        'Use query_rules/query_types as fallback evidence before assuming the value is invalid.',
+                    ],
             };
         }
     }
@@ -4039,6 +4057,77 @@ export class LspToolHandler {
         };
     }
 
+    async goToDefinition(args: { file: string; line: number; column: number }): Promise<unknown> {
+        const uri = vs.Uri.file(args.file);
+        const position = new vs.Position(args.line, args.column);
+        try {
+            const definitions = await this.vsCommand<Array<vs.Location | vs.LocationLink>>(
+                'vscode.executeDefinitionProvider',
+                [uri, position],
+            );
+            const locations = (definitions ?? []).slice(0, 100).map(definition => {
+                const targetUri = 'uri' in definition ? definition.uri : definition.targetUri;
+                const range = 'uri' in definition
+                    ? definition.range
+                    : definition.targetSelectionRange ?? definition.targetRange;
+                return {
+                    file: path.relative(this.ctx.workspaceRoot, targetUri.fsPath).replace(/\\/g, '/'),
+                    line: range.start.line,
+                    column: range.start.character,
+                };
+            });
+            return { locations, lineNumberBase: 0 };
+        } catch (error) {
+            return { locations: [], lineNumberBase: 0, error: error instanceof Error ? error.message : String(error) };
+        }
+    }
+
+    async findReferencesAt(args: { file: string; line: number; column: number; limit?: number }): Promise<unknown> {
+        const uri = vs.Uri.file(args.file);
+        const position = new vs.Position(args.line, args.column);
+        const limit = Math.max(1, Math.min(500, Math.trunc(args.limit ?? 100)));
+        try {
+            const references = await this.vsCommand<vs.Location[]>(
+                'vscode.executeReferenceProvider',
+                [uri, position],
+            );
+            return {
+                references: (references ?? []).slice(0, limit).map(reference => ({
+                    file: path.relative(this.ctx.workspaceRoot, reference.uri.fsPath).replace(/\\/g, '/'),
+                    line: reference.range.start.line,
+                    column: reference.range.start.character,
+                })),
+                total: references?.length ?? 0,
+                lineNumberBase: 0,
+            };
+        } catch (error) {
+            return { references: [], total: 0, lineNumberBase: 0, error: error instanceof Error ? error.message : String(error) };
+        }
+    }
+
+    async hoverSymbol(args: { file: string; line: number; column: number }): Promise<unknown> {
+        const uri = vs.Uri.file(args.file);
+        const position = new vs.Position(args.line, args.column);
+        try {
+            const hovers = await this.vsCommand<vs.Hover[]>('vscode.executeHoverProvider', [uri, position]);
+            const text = (hovers ?? []).flatMap(hover =>
+                hover.contents.map(content =>
+                    typeof content === 'string' ? content : (content as vs.MarkdownString).value))
+                .join('\n\n')
+                .slice(0, 12_000);
+            return { text, found: text.length > 0 };
+        } catch (error) {
+            return { text: '', found: false, error: error instanceof Error ? error.message : String(error) };
+        }
+    }
+
+    async renameSymbol(
+        args: { file: string; line: number; column: number; newName: string },
+        context?: import('../types').AgentToolContext,
+    ): Promise<unknown> {
+        return this.lspOperation({ ...args, operation: 'rename' }, context);
+    }
+
     // lspOperation
     async lspOperation(args: {
         operation: 'goToDefinition' | 'findReferences' | 'hover' | 'rename';
@@ -4099,10 +4188,32 @@ export class LspToolHandler {
                         'vscode.executeDocumentRenameProvider', [uri, position, args.newName]
                     );
                     if (!edit) return { error: 'Rename is not supported at this position.' };
-                    const changes: Array<{ file: string; edits: number }> = [];
-                    edit.entries().forEach(([u, edits]) => {
-                        changes.push({ file: path.relative(this.ctx.workspaceRoot, u.fsPath).replace(/\\/g, '/'), edits: edits.length });
-                    });
+                    const entries = edit.entries();
+                    if (entries.length === 0) return { error: 'Rename provider returned an empty workspace edit.' };
+                    const outside = entries.find(([target]) =>
+                        target.scheme !== 'file' || !isPathInsideOrEqual(target.fsPath, this.ctx.workspaceRoot));
+                    if (outside) {
+                        return { error: `Rename was rejected because it targets a path outside the active workspace: ${outside[0].toString()}` };
+                    }
+                    const changes: Array<{ file: string; edits: number }> = entries.map(([target, edits]) => ({
+                        file: path.relative(this.ctx.workspaceRoot, target.fsPath).replace(/\\/g, '/'),
+                        edits: edits.length,
+                    }));
+                    const readTracker = context?.agentRunner?.readTracker;
+                    for (const [target] of entries) {
+                        let previousContent: string | null = null;
+                        try {
+                            previousContent = fs.readFileSync(target.fsPath, 'utf8');
+                        } catch (error) {
+                            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+                                return { error: `Rename could not snapshot ${target.fsPath}: ${error instanceof Error ? error.message : String(error)}` };
+                            }
+                        }
+                        readTracker?.markRead(target.fsPath);
+                        const writeAccess = readTracker?.canWrite(target.fsPath);
+                        if (writeAccess && !writeAccess.ok) return { error: writeAccess.reason };
+                        context?.onBeforeFileWrite?.(target.fsPath, previousContent);
+                    }
                     // Permission check: rename modifies multiple files, require user confirmation
                     // in 'confirm' mode (consistent with edit_file/write_file permission model).
                     const shouldBypassConfirmation = context?.runnerOptions?.forceAutoApplyWrites === true
@@ -4116,6 +4227,7 @@ export class LspToolHandler {
                     }
                     const applied = await vs.workspace.applyEdit(edit);
                     if (!applied) return { error: 'Rename failed because the workspace rejected the edit.' };
+                    for (const [target] of entries) readTracker?.markWritten(target.fsPath);
                     return {
                         changes,
                         message: `Rename applied across ${changes.length} file(s), ${changes.reduce((s, c) => s + c.edits, 0)} edit(s).`,

@@ -59,6 +59,7 @@ import { ErrorReporter } from './errorReporter';
 import { mergeTokenUsageTotals } from './cacheCapability';
 import { MemoryParser } from './memoryParser';
 import { defaultDomainForMode } from './agentProfile';
+import { isMcpServerAllowedForDomain } from './mcpCapability';
 import {
     authorizationAllowsEffect,
     evaluateDispatchAdmission,
@@ -67,6 +68,7 @@ import {
 import { goalStore, type DurableGoalStatus } from './runner/goalStore';
 import { goalSupervisor } from './runner/goalSupervisor';
 import { agentTaskManager } from './runner/taskManager';
+import { deriveUserExecutionPolicy } from './orchestrator/userExecutionPolicy';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
 const FINAL_EVIDENCE_CONCURRENCY = 4;
@@ -1717,7 +1719,7 @@ export class AgentToolExecutor {
             case 'query_interface_knowledge':
                 result = queryInterfaceKnowledge(args); break;
             case 'run_skill':
-                result = this.runSkill(args); break;
+                result = this.runSkill(args, context); break;
             case 'query_rules':
                 result = await this.lspHandler.queryRules(args as any); break;
             case 'query_cwt_schema':
@@ -1748,11 +1750,19 @@ export class AgentToolExecutor {
             case 'grep':
                 result = await this.lspHandler.grep(args as any, context); break;
             case 'get_completion_at':
-                result = await this.lspHandler.getCompletionAt(args as any); break;
+                result = await this.lspHandler.getCompletionAt(args as any, context); break;
             case 'document_symbols':
                 result = await this.lspHandler.documentSymbols(args as any); break;
             case 'workspace_symbols':
                 result = await this.lspHandler.workspaceSymbols(args as any, context); break;
+            case 'go_to_definition':
+                result = await this.lspHandler.goToDefinition(args as any); break;
+            case 'find_references':
+                result = await this.lspHandler.findReferencesAt(args as any); break;
+            case 'hover_symbol':
+                result = await this.lspHandler.hoverSymbol(args as any); break;
+            case 'rename_symbol':
+                result = await this.lspHandler.renameSymbol(args as any, context); break;
             case 'verify_pdx_identifier':
                 result = await this.lspHandler.verifyPdxIdentifier(args as any); break;
             case 'get_pdx_block':
@@ -1977,10 +1987,10 @@ export class AgentToolExecutor {
                 result = await this.memoryHandler.setMemory(args as any, context); break;
             case 'set_memory_disabled': break;
             case 'get_memory':
-                result = await this.memoryHandler.getMemory(args as any); break;
+                result = await this.memoryHandler.getMemory(args as any, context); break;
             case 'get_memory_disabled': break;
             case 'search_memory':
-                result = this.memoryHandler.searchMemory(args as any); break;
+                result = this.memoryHandler.searchMemory(args as any, context); break;
             case 'search_memory_disabled': break;
 
             // - Persistent memory (cross-session, written to the topic-scoped .cwtools-memory.md) -
@@ -2016,7 +2026,7 @@ export class AgentToolExecutor {
         return result;
     }
 
-    private runSkill(args: Record<string, unknown>): unknown {
+    private runSkill(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
         const name = typeof args.name === 'string' ? args.name.trim() : '';
         if (!name) {
             return {
@@ -2029,7 +2039,8 @@ export class AgentToolExecutor {
             workspaceRoot: this.workspaceRoot,
             globalStoragePath: this.globalStoragePath,
             extensionPath: this.extensionPath,
-        });
+        }, context?.runnerOptions?.domain
+            ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build'));
         if (!loaded.success) return loaded;
 
         const argumentSummary = args.arguments === undefined
@@ -2588,7 +2599,11 @@ export class AgentToolExecutor {
         }
     }
 
-    private dynamicMcpToolCache?: { at: number; defs: import('./types').ToolDefinition[] };
+    private dynamicMcpToolCache?: {
+        domain: import('./types').AgentRuntimeDomain;
+        at: number;
+        defs: import('./types').ToolDefinition[];
+    };
     /** Reverse map for registered dynamic names — avoids ambiguous parsing when server names contain '_'. */
     private dynamicMcpToolNames = new Map<string, { server: string; tool: string }>();
     private static readonly MCP_TOOL_CACHE_TTL_MS = 300_000;
@@ -2603,15 +2618,19 @@ export class AgentToolExecutor {
         const { isToolAllowedForMode } = require('./tools/permissions') as typeof import('./tools/permissions');
         if (!isToolAllowedForMode('mcp_call', mode, domain)) return [];
 
-        if (this.dynamicMcpToolCache && Date.now() - this.dynamicMcpToolCache.at < AgentToolExecutor.MCP_TOOL_CACHE_TTL_MS) {
+        const runtimeDomain = domain ?? defaultDomainForMode(mode);
+        if (this.dynamicMcpToolCache
+            && this.dynamicMcpToolCache.domain === runtimeDomain
+            && Date.now() - this.dynamicMcpToolCache.at < AgentToolExecutor.MCP_TOOL_CACHE_TTL_MS) {
             return this.dynamicMcpToolCache.defs;
         }
-        const servers = cfg.get<any[]>('mcp.servers') || [];
+        const servers = cfg.get<import('./types').MCPServerConfig[]>('mcp.servers') || [];
         const defs: import('./types').ToolDefinition[] = [];
         const nameMap = new Map<string, { server: string; tool: string }>();
         for (const server of servers) {
             const serverName = server?.name;
-            if (!serverName || server?.enabled === false) continue;
+            if (!serverName || (server as { enabled?: boolean }).enabled === false
+                || !isMcpServerAllowedForDomain(server, runtimeDomain)) continue;
             try {
                 const client = await this.getMcpClient(serverName);
                 const listed = await Promise.race([
@@ -2640,7 +2659,7 @@ export class AgentToolExecutor {
             }
         }
         this.dynamicMcpToolNames = nameMap;
-        this.dynamicMcpToolCache = { at: Date.now(), defs };
+        this.dynamicMcpToolCache = { domain: runtimeDomain, at: Date.now(), defs };
         return defs;
     }
 
@@ -2724,6 +2743,21 @@ export class AgentToolExecutor {
             } else {
                 return { success: false, error: permission.reason };
             }
+        }
+
+        const runtimeDomain = context?.runnerOptions?.domain
+            ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
+        const configuredServers = vs.workspace.getConfiguration('stellarisLanguageServices.ai')
+            .get<import('./types').MCPServerConfig[]>('mcp.servers', []);
+        const configuredServer = configuredServers.find(server => server.name === serverName);
+        if (!configuredServer) {
+            return { success: false, error: `MCP server '${serverName}' not found in configuration.` };
+        }
+        if (!isMcpServerAllowedForDomain(configuredServer, runtimeDomain)) {
+            return {
+                success: false,
+                error: `MCP server '${serverName}' is not explicitly enabled for the '${runtimeDomain}' capability domain.`,
+            };
         }
 
         const CONNECTION_ERRORS = /ECONNREFUSED|EPIPE|disconnect|not connected|ECONNRESET/i;
@@ -2814,6 +2848,12 @@ export class AgentToolExecutor {
         }> | undefined;
 
         const runnerOptsForLimits = context?.runnerOptions ?? this.parentRunnerOptions;
+        const originalUserMessage = runnerOptsForLimits?.originalUserMessage
+            ?? (typeof args.userPrompt === 'string' ? args.userPrompt : undefined);
+        const userExecutionPolicy = deriveUserExecutionPolicy(
+            originalUserMessage,
+            args.userConstraints,
+        );
         const runtimeDomain = runnerOptsForLimits?.domain
             ?? (runnerOptsForLimits?.mode === 'orchestrator' ? 'general' : 'paradox');
         const isScriptMode = runtimeDomain === 'paradox' && runnerOptsForLimits?.mode === 'script';
@@ -2889,6 +2929,26 @@ export class AgentToolExecutor {
             };
         }
         const normalizedTasks = tasks.map(task => normalizeDispatchTaskForLocalisationYml(task));
+        if (userExecutionPolicy.localisationOwnership === 'user') {
+            const localisationWriter = normalizedTasks.find(task =>
+                task.agentType === 'loc_writer'
+                || (Array.isArray(task.plannedFiles) && task.plannedFiles.some(isLocalisationYmlPath))
+                || (Array.isArray(task.produces) && task.produces.some(contract =>
+                    !!contract
+                    && typeof contract === 'object'
+                    && (contract.operation === 'localise'
+                        || (typeof contract.kind === 'string' && contract.kind.toLowerCase() === 'localisation')))));
+            if (localisationWriter) {
+                return {
+                    success: false,
+                    error: aiText(
+                        `Task '${localisationWriter.id}' conflicts with the user's retained ownership of localisation. Remove localisation writes from the graph and dispatch only the work the user delegated.`,
+                        `任务“${localisationWriter.id}”与用户保留的本地化所有权冲突。请从任务图中移除本地化写入，只调度用户已经委派的工作。`,
+                    ),
+                    userExecutionPolicy,
+                };
+            }
+        }
         const parentMode = runnerOptsForLimits?.mode;
         const readOnlyFanoutMode = parentMode === 'plan' || parentMode === 'explore';
         const allowedAgentTypes = new Set(readOnlyFanoutMode
@@ -3067,8 +3127,9 @@ export class AgentToolExecutor {
             }
 
             // Build TaskGraph
-            const userPrompt = (args.userPrompt as string) || featureManifest?.objective || 'Multi-agent collaboration task';
+            const userPrompt = originalUserMessage || featureManifest?.objective || 'Multi-agent collaboration task';
             const graph = TaskGraphEngine.createGraph(userPrompt, featureManifest);
+            graph.metadata.userExecutionPolicy = userExecutionPolicy;
 
             for (const task of normalizedTasks) {
                 TaskGraphEngine.addNode(
@@ -3121,6 +3182,8 @@ export class AgentToolExecutor {
                 parentRunId: parentRun?.runId ?? parentRunSink?.runId,
                 durableGoal: runnerOpts?.durableGoal,
                 readOnlyFanout: parentMode === 'explore',
+                originalUserMessage,
+                userExecutionPolicy,
                 runEventSink: parentRunSink,
                 onStep: context?.onStep,
                 onBeforeFileWrite,

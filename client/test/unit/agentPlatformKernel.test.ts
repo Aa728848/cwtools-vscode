@@ -207,6 +207,45 @@ describe('agent platform kernel', () => {
         expect(activation.disclosed).to.deep.equal(['read_file']);
     });
 
+    it('rejects cross-domain profile overrides and keeps activation inside the admitted domain', async () => {
+        const catalog = new AgentProfileCatalog([{
+            name: 'general-agent',
+            description: 'general',
+            domain: 'general',
+            authorizationCeiling: 'workspace_write',
+            tools: ['*'],
+        }]);
+        catalog.registerSource({
+            id: 'workspace',
+            priority: 100,
+            load: async () => [{
+                name: 'general-agent',
+                description: 'attempted cross-domain override',
+                domain: 'paradox',
+                authorizationCeiling: 'workspace_write',
+                tools: ['*'],
+                override: true,
+            }],
+        });
+        await catalog.reload();
+        expect(catalog.get('general-agent')?.domain).to.equal('general');
+        expect(catalog.snapshot().sources[0]?.error).to.include('override cannot change domain');
+
+        const activation = new ToolActivationService().activate(catalog.get('general-agent')!, {
+            profileName: 'general-agent',
+            domainProfile: 'general',
+            authorization: 'workspace_write',
+            phase: 'execute',
+            dispatch: 'single',
+            routeConfidence: 1,
+            routeEvidence: [],
+            phaseReason: 'test',
+            revision: 0,
+        });
+        expect(activation.activated).to.include('read_file');
+        expect(activation.activated).to.not.include('query_cwt_schema');
+    });
+
     it('hot-reloads watched profile sources with a monotonic catalog revision', async () => {
         const catalog = new AgentProfileCatalog([]);
         let notify = () => {};
@@ -259,6 +298,24 @@ describe('agent platform kernel', () => {
             expect(profiles[0]?.tools).to.deep.equal(['read_file', 'grep']);
             expect(profiles[0]?.summaryPolicy?.requiredSections).to.deep.equal(['summary', 'unresolved']);
             expect(profiles[0]?.instructions).to.equal('Profile instructions.');
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('reports malformed AGENT.md files instead of silently dropping them', async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-agent-profile-invalid-'));
+        const profileDir = path.join(root, 'broken');
+        fs.mkdirSync(profileDir);
+        fs.writeFileSync(path.join(profileDir, 'AGENT.md'), 'name: missing-frontmatter\n');
+        try {
+            let message = '';
+            try {
+                await createDirectoryAgentProfileSource('test', root, 1).load();
+            } catch (error) {
+                message = error instanceof Error ? error.message : String(error);
+            }
+            expect(message).to.include('Invalid AGENT.md frontmatter');
         } finally {
             fs.rmSync(root, { recursive: true, force: true });
         }

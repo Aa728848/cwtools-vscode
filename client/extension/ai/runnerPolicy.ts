@@ -1,6 +1,7 @@
 import type { AgentMode, AgentRuntimeDomain, AgentToolStage, ToolDefinition } from './types';
 import { defaultDomainForMode } from './agentProfile';
 import { TOOL_REGISTRY } from './tools/registry';
+import { evaluateEffectiveToolPolicy } from './runner/effectiveToolPolicy';
 
 export interface ToolFilterOptions {
     domain?: AgentRuntimeDomain;
@@ -35,6 +36,7 @@ const BUILD_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = 
         'query_rules', 'query_scope', 'parse_pdx_fragment', 'verify_pdx_identifier',
         'get_diagnostics', 'read_file', 'get_file_context', 'get_pdx_block',
         'write_file', 'edit_file', 'replace_lines',
+        'rename_symbol',
         'write_localisation', 'todo_write',
     ]),
     finalize: new Set([
@@ -126,30 +128,36 @@ const REVIEW_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> =
 const UTILITY_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
     discovery: new Set([
         'read_file', 'list_directory', 'glob_files', 'grep', 'get_file_context',
-        'document_symbols', 'workspace_symbols', 'get_diagnostics', 'get_lsp_status',
-        'query_workspace_index', 'query_project_profile', 'web_search', 'web_open',
-        'web_find', 'todo_write', 'run_skill',
+        'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references',
+        'hover_symbol', 'get_completion_at', 'get_diagnostics',
+        'web_search', 'web_open', 'web_find', 'mcp_call', 'todo_write', 'run_skill',
         'dispatch_agents',
     ]),
     design: new Set(),
     validation: new Set([
         'read_file', 'get_file_context', 'grep', 'document_symbols',
-        'workspace_symbols', 'get_diagnostics', 'todo_write',
+        'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol',
+        'get_completion_at', 'get_diagnostics', 'mcp_call', 'todo_write', 'run_skill',
         'query_blackboard', 'merge_results',
     ]),
     write: new Set([
         'read_file', 'list_directory', 'glob_files', 'grep', 'get_file_context',
-        'document_symbols', 'workspace_symbols', 'get_diagnostics',
-        'write_file', 'edit_file', 'replace_lines',
+        'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references',
+        'hover_symbol', 'get_completion_at', 'get_diagnostics',
+        'write_file', 'edit_file', 'replace_lines', 'rename_symbol',
         'run_command', 'list_processes', 'read_process',
         'write_process_stdin', 'terminate_process', 'git_ops', 'todo_write',
+        'mcp_call', 'run_skill',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
     finalize: new Set([
         'read_file', 'get_file_context', 'grep', 'document_symbols', 'workspace_symbols',
+        'go_to_definition', 'find_references', 'hover_symbol', 'get_completion_at',
         'get_diagnostics', 'write_file', 'edit_file', 'replace_lines',
+        'rename_symbol',
         'run_command', 'list_processes', 'read_process', 'write_process_stdin',
         'terminate_process', 'git_ops', 'todo_write',
+        'mcp_call', 'run_skill',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
 };
@@ -161,6 +169,68 @@ const MODE_STAGE_TOOLS: Partial<Record<AgentMode, Partial<Record<AgentToolStage,
     review: REVIEW_STAGE_TOOLS,
     utility: UTILITY_STAGE_TOOLS,
 };
+
+/**
+ * Cross-stage support capabilities must remain selectable after a run advances.
+ * Mode/domain/authorization policy is applied before this filter, so this list
+ * cannot grant a capability that the effective run policy already rejected.
+ */
+const CROSS_STAGE_SUPPORT_TOOLS = new Set([
+    'run_skill',
+    'get_goal', 'create_goal', 'update_goal', 'set_goal_budget',
+    'set_memory', 'get_memory', 'search_memory', 'save_memory',
+    'mcp_call',
+]);
+const BUILD_WRITE_ON_DEMAND_TOOLS = new Set([
+    'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
+]);
+
+export function isSelectableStageSupportTool(
+    toolName: string,
+    mode: AgentMode,
+    stage: AgentToolStage | undefined,
+): boolean {
+    if (CROSS_STAGE_SUPPORT_TOOLS.has(toolName) || toolName.startsWith('mcp_')) return true;
+    const normalizedStage = normalizeToolStageForMode(mode, stage);
+    return mode === 'build'
+        && (normalizedStage === 'write' || normalizedStage === 'finalize')
+        && BUILD_WRITE_ON_DEMAND_TOOLS.has(toolName);
+}
+
+/**
+ * Add support schemas to the pool used by select_tools. Passing `loaded`
+ * produces the smaller model-visible pool after a selection has succeeded.
+ */
+export function extendStageToolPoolWithSupport(
+    stageTools: readonly ToolDefinition[],
+    eligibleTools: readonly ToolDefinition[],
+    mode: AgentMode,
+    stage: AgentToolStage | undefined,
+    loaded?: ReadonlySet<string>,
+): ToolDefinition[] {
+    const merged = new Map(stageTools.map(tool => [tool.function.name, tool]));
+    for (const tool of eligibleTools) {
+        const name = tool.function.name;
+        if (!merged.has(name)
+            && isSelectableStageSupportTool(name, mode, stage)
+            && (loaded === undefined || loaded.has(name))) {
+            merged.set(name, tool);
+        }
+    }
+    return [...merged.values()];
+}
+
+/**
+ * Workflow allowlists are an explicit, narrower capability contract. Their
+ * read-only tools remain usable across internal stages; mutating tools still
+ * have to enter through the normal stage and authorization gates.
+ */
+export function getWorkflowStageSupportTools(toolNames: readonly string[]): ReadonlySet<string> {
+    return new Set(toolNames.filter(toolName => {
+        const entry = TOOL_REGISTRY.get(toolName as import('./types').AgentToolName);
+        return entry?.isReadOnly === true;
+    }));
+}
 
 const WRITE_EXECUTION_MODES = new Set<AgentMode>([
     'build',
@@ -192,7 +262,8 @@ const VALIDATION_PROGRESS_TOOLS = new Set([
     'query_definition_by_name', 'query_references', 'explain_scope', 'todo_write',
 ]);
 const STAGED_WRITE_TOOLS = new Set([
-    'write_file', 'edit_file', 'replace_lines', 'write_localisation',
+    'write_file', 'edit_file', 'replace_lines', 'rename_symbol', 'write_localisation',
+    'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
 ]);
 
 export function initialToolStageForMode(mode: AgentMode): AgentToolStage | undefined {
@@ -212,6 +283,7 @@ export function filterToolDefinitionsForStage(
     mode: AgentMode,
     stage: AgentToolStage | undefined,
     legacyFullToolset = false,
+    workflowSupportTools?: ReadonlySet<string>,
 ): ToolDefinition[] {
     if (legacyFullToolset || !stage) return [...tools];
     const normalizedStage = normalizeToolStageForMode(mode, stage);
@@ -221,6 +293,7 @@ export function filterToolDefinitionsForStage(
     if (!allowed) return [];
     return tools.filter(tool =>
         tool.function.name === 'select_tools'
+        || workflowSupportTools?.has(tool.function.name) === true
         || allowed.has(tool.function.name)
         || (allowed.has('mcp_call') && tool.function.name.startsWith('mcp_')));
 }
@@ -379,15 +452,12 @@ export function filterToolDefinitionsForMode(
             return !['dispatch_agents', 'query_blackboard', 'merge_results'].includes(entry.name);
         }
         
-        return entry.allowedModes.has(mode);
+        return evaluateEffectiveToolPolicy(entry.name, {
+            mode,
+            domain,
+            isSubAgent: options.useSlimPrompt,
+        }).allowed;
     });
-
-    if (options.useSlimPrompt) {
-        filtered = filtered.filter(t => {
-            const entry = TOOL_REGISTRY.get(t.function.name as import('./types').AgentToolName);
-            return entry?.allowSubAgent === true || (mode === 'utility' && entry?.name === 'run_command');
-        });
-    }
 
     if (options.excludeTools && options.excludeTools.length > 0) {
         const excluded = new Set(options.excludeTools);

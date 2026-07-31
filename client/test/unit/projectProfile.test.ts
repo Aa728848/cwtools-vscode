@@ -1,7 +1,14 @@
 import { expect } from 'chai';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { buildProjectProfile } from '../../extension/ai/projectProfile';
+import {
+    buildProjectProfile,
+    extractCustomRules,
+    getProjectProfilePath,
+    queryProjectProfile,
+    readProjectProfile,
+} from '../../extension/ai/projectProfile';
 
 describe('ProjectProfile localisation detection', () => {
     const tempBase = path.resolve(__dirname, '../../..', '.tmp-test-profile');
@@ -39,7 +46,7 @@ describe('ProjectProfile localisation detection', () => {
             }
 
             const profile = buildProjectProfile(workspaceRoot);
-            
+
             // 验证语言标识是否精准提取并正确映射为 l_<lang>
             // 预期的语言只有 l_english, l_french, l_simp_chinese
             expect(profile.localisation.languages).to.deep.equal([
@@ -102,5 +109,67 @@ describe('ProjectProfile localisation detection', () => {
         } finally {
             cleanupWorkspace(workspaceRoot);
         }
+    });
+});
+
+describe('Paradox project profile boundaries', () => {
+    let workspaceRoot: string;
+
+    beforeEach(() => {
+        workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-project-profile-'));
+    });
+
+    afterEach(() => {
+        fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    });
+
+    it('preserves Custom Rules from CRLF CWTOOLS.md content', () => {
+        const rules = [
+            '# CWTools Agent Project Rules',
+            '',
+            '## Custom Rules',
+            '- KEEP_THIS_RULE',
+            '- KEEP_THIS_RULE_TOO',
+            '',
+        ].join('\r\n');
+
+        expect(extractCustomRules(rules)).to.equal('- KEEP_THIS_RULE\r\n- KEEP_THIS_RULE_TOO');
+    });
+
+    it('normalizes legacy schemaVersion 1 profiles without identifiers.byType', () => {
+        const profile = buildProjectProfile(workspaceRoot);
+        const legacy = JSON.parse(JSON.stringify(profile)) as { identifiers: { byType?: unknown } };
+        delete legacy.identifiers.byType;
+        const profilePath = getProjectProfilePath(workspaceRoot);
+        fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+        fs.writeFileSync(profilePath, JSON.stringify(legacy), 'utf8');
+
+        expect(readProjectProfile(workspaceRoot)?.identifiers.byType).to.deep.equal({});
+    });
+
+    it('normalizes the minimal legacy profile consumed by project-knowledge refreshes', () => {
+        const profilePath = getProjectProfilePath(workspaceRoot);
+        fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+        fs.writeFileSync(profilePath, JSON.stringify({
+            schemaVersion: 1,
+            game: { id: 'stellaris' },
+        }), 'utf8');
+
+        const profile = readProjectProfile(workspaceRoot);
+        expect(profile?.game.displayName).to.equal('stellaris');
+        expect(profile?.workspaceKind).to.equal('generic');
+        expect(profile?.routing.recommendedWorkflowByIntent).to.deep.equal([]);
+    });
+
+    it('rejects malformed and oversized profile files instead of throwing into prompt or LSP callers', () => {
+        const profilePath = getProjectProfilePath(workspaceRoot);
+        fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+        fs.writeFileSync(profilePath, '{"schemaVersion":1,"game":null}', 'utf8');
+        expect(readProjectProfile(workspaceRoot)).to.equal(null);
+        expect(queryProjectProfile(workspaceRoot).status).to.equal('error');
+
+        fs.writeFileSync(profilePath, 'x'.repeat(2 * 1024 * 1024 + 1), 'utf8');
+        expect(readProjectProfile(workspaceRoot)).to.equal(null);
+        expect(queryProjectProfile(workspaceRoot).status).to.equal('error');
     });
 });

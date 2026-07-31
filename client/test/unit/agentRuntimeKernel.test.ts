@@ -187,8 +187,8 @@ describe('tool disclosure and dedupe', () => {
         const initial = service.initialTools(pool, context);
         expect(initial.some(tool => tool.function.name === 'run_command')).to.equal(false);
         const selected = service.select({ tools: ['run_command', 'mcp_call'], reason: 'validate' }, pool, context);
-        expect(selected.loaded).to.deep.equal(['run_command']);
-        expect(selected.denied).to.deep.equal(['mcp_call']);
+        expect(selected.loaded).to.deep.equal(['mcp_call', 'run_command']);
+        expect(selected.denied).to.deep.equal([]);
         const mcpTool = {
             type: 'function' as const,
             function: {

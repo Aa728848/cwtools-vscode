@@ -34,6 +34,10 @@ function loadPromptBuilder() {
     }
 }
 
+function withoutRepositoryInstructions(prompt: string): string {
+    return prompt.replace(/<project-instructions>[\s\S]*?<\/project-instructions>/g, '');
+}
+
 describe('PromptBuilder 快照与稳定性测试', () => {
     it('验证 build 模式的系统提示词关键特征', () => {
         const { PromptBuilder } = loadPromptBuilder();
@@ -179,7 +183,8 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         ];
 
         for (const prompt of prompts) {
-            for (const term of forbidden) expect(prompt, term).to.not.include(term);
+            const platformPrompt = withoutRepositoryInstructions(prompt);
+            for (const term of forbidden) expect(platformPrompt, term).to.not.include(term);
             expect(prompt).to.include('repository');
         }
 

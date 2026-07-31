@@ -45,7 +45,7 @@ import {
 } from '../../../shared/agentTranscript';
 import { agentProfileCatalog, ToolActivationService, type ToolActivationSnapshot } from './agentProfileCatalog';
 import { createDirectoryAgentProfileSource } from './agentProfileSources';
-import { getProjectWorkspaceRoot } from '../workspacePaths';
+import { getProjectWorkspaceRoots } from '../workspacePaths';
 import { schedulingStateFromLegacyMode } from './scheduling';
 import { ErrorReporter } from '../errorReporter';
 
@@ -153,13 +153,13 @@ export class AgentRuntime {
     private readonly profilesReady: Promise<void>;
 
     constructor(private readonly runner: AgentRunner) {
-        const root = getProjectWorkspaceRoot();
+        const roots = getProjectWorkspaceRoots();
         const sources = [
             { id: `user:${os.homedir().toLowerCase()}`, directory: path.join(os.homedir(), '.cwtools', 'agents'), priority: 100 },
-            ...(root ? [
-                { id: `workspace-agents:${root.toLowerCase()}`, directory: path.join(root, '.agents', 'agents'), priority: 200 },
-                { id: `workspace-cwtools:${root.toLowerCase()}`, directory: path.join(root, '.cwtools', 'agents'), priority: 300 },
-            ] : []),
+            ...roots.flatMap((root, index) => [
+                { id: `workspace-agents:${root.toLowerCase()}`, directory: path.join(root, '.agents', 'agents'), priority: 200 + index },
+                { id: `workspace-cwtools:${root.toLowerCase()}`, directory: path.join(root, '.cwtools', 'agents'), priority: 300 + index },
+            ]),
         ];
         for (const source of sources) {
             if (registeredProfileRoots.has(source.id)) continue;
@@ -269,10 +269,12 @@ export class AgentRuntime {
         const priorOnStep = request.options?.onStep;
         const effectiveOptions = {
             ...request.options,
-            domain: profile.domain ?? request.options?.domain,
+            // The admitted domain is user/runtime-owned. Profiles may only
+            // narrow tools and authorization; they cannot cross this boundary.
+            domain: schedulingState.domainProfile,
             schedulingState: {
                 ...schedulingState,
-                domainProfile: profile.domain ?? schedulingState.domainProfile,
+                domainProfile: schedulingState.domainProfile,
                 authorization: toolSnapshot.authorization,
                 phase: profilePhase,
                 phaseReason: profilePhase === schedulingState.phase

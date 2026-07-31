@@ -14,7 +14,7 @@ import { diagnosticCodeString } from '../diagnosticI18n';
 import { SOURCE } from './messages';
 import type { Blackboard } from './orchestrator/blackboard';
 import type { BlackboardEntry } from './orchestrator/types';
-import { getProjectWorkspaceRoot } from './workspacePaths';
+import { getProjectWorkspaceRoot, resolveProjectWorkspacePath } from './workspacePaths';
 
 function isAgentTempPath(filePath: string): boolean {
     return /(?:^|[\\/])\.(?:cwtools|cwtools-ai)[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
@@ -50,8 +50,8 @@ export class ContextReferenceManager {
         const workspaceFolders = vs.workspace.workspaceFolders;
         if (!workspaceFolders || workspaceFolders.length === 0) return undefined;
 
-        const rootPath = workspaceFolders[0]!.uri.fsPath;
-        const targetPath = path.resolve(path.isAbsolute(refPath) ? refPath : path.join(rootPath, refPath));
+        const targetPath = resolveProjectWorkspacePath(refPath);
+        if (!targetPath) return undefined;
         const isWindows = process.platform === 'win32';
         const normalizedTarget = isWindows ? targetPath.toLowerCase() : targetPath;
 

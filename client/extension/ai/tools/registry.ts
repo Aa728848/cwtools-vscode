@@ -8,6 +8,7 @@ export type AgentToolName =
     | 'query_localisation_index' | 'query_workspace_index' | 'explore_pdx_project' | 'query_project_profile' | 'query_project_knowledge' | 'query_interface_knowledge' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'query_references'
     | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
+    | 'go_to_definition' | 'find_references' | 'hover_symbol' | 'rename_symbol'
     | 'verify_pdx_identifier' | 'todo_write' | 'read_file' | 'write_file' | 'edit_file'
     | 'replace_lines' | 'list_directory' | 'get_lsp_status' | 'get_diagnostics' | 'analyze_diagnostic_error'
     | 'glob_files' | 'lsp_operation' | 'web_search' | 'web_open' | 'web_find' | 'run_command' | 'list_processes' | 'read_process' | 'write_process_stdin' | 'terminate_process'
@@ -97,18 +98,22 @@ const TOOL_DOMAINS = {
     query_project_profile: 'paradox',
     query_project_knowledge: 'paradox',
     query_interface_knowledge: 'paradox',
-    run_skill: 'paradox',
+    run_skill: 'shared',
     get_ignored_diagnostics: 'paradox',
     get_pdx_block: 'paradox',
-    query_references: 'paradox',
+    query_references: 'shared',
     get_file_context: 'shared',
     search_mod_files: 'paradox',
     find_sprite_candidates: 'paradox',
     find_sound_candidates: 'paradox',
     grep: 'shared',
-    get_completion_at: 'paradox',
+    get_completion_at: 'shared',
     document_symbols: 'shared',
     workspace_symbols: 'shared',
+    go_to_definition: 'shared',
+    find_references: 'shared',
+    hover_symbol: 'shared',
+    rename_symbol: 'shared',
     verify_pdx_identifier: 'paradox',
     todo_write: 'shared',
     read_file: 'shared',
@@ -137,19 +142,16 @@ const TOOL_DOMAINS = {
     get_entity_info: 'paradox',
     query_static_modifiers: 'paradox',
     query_variables: 'paradox',
-    // These stores predate runtime domains and contain untyped historical
-    // entries. Keep them Paradox-only until persistence is domain-versioned.
-    set_memory: 'paradox',
-    get_memory: 'paradox',
-    search_memory: 'paradox',
-    save_memory: 'paradox',
+    set_memory: 'shared',
+    get_memory: 'shared',
+    search_memory: 'shared',
+    save_memory: 'shared',
     convert_image_to_dds: 'paradox',
     convert_audio: 'paradox',
     deploy_mod_asset: 'paradox',
-    // Configured MCP servers are not capability-typed. Keep the entire MCP
-    // client surface out of General Coding so a server cannot re-introduce
-    // CWTools/Paradox semantics through a generic dynamic tool name.
-    mcp_call: 'paradox',
+    // Per-server capability metadata is enforced again immediately before
+    // listing or executing a configured MCP tool.
+    mcp_call: 'shared',
     write_localisation: 'paradox',
     write_design_blueprint: 'paradox',
     save_workflow: 'shared',
@@ -273,7 +275,8 @@ const BASE_READ: AgentToolName[] = [
     'select_tools', 'get_goal',
     'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_references', 'get_design_blueprint_contract',
     'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge', 'run_skill', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
-    'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory', 'glob_files',
+    'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol',
+    'verify_pdx_identifier', 'read_file', 'list_directory', 'glob_files',
     'lsp_operation', 'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name', 'web_find',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables', 'get_pdx_block', 'get_ignored_diagnostics',
@@ -281,7 +284,7 @@ const BASE_READ: AgentToolName[] = [
     'explain_shader_reachability', 'validate_shader', 'compare_shader_with_vanilla'
 ];
 const EDIT: AgentToolName[] = [
-    'write_file', 'edit_file', 'replace_lines',
+    'write_file', 'edit_file', 'replace_lines', 'rename_symbol',
     'write_localisation', 'write_design_blueprint', 'save_workflow', 'remove_ignored_diagnostic'
 ];
 const MEMORY: AgentToolName[] = ['todo_write', 'create_goal', 'update_goal', 'set_goal_budget', 'set_memory', 'get_memory', 'search_memory', 'save_memory'];
@@ -296,6 +299,7 @@ const SUB_AGENT_EXCLUDES_SET = new Set<string>([
     'web_search', 'web_open', 'web_find',
     'run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process',
     'git_ops', 'save_workflow',
+    'rename_symbol',
     ...MEDIA,
     ...ORCHESTRATION,
 ]);
@@ -337,7 +341,7 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
 const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
 const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'git_ops', 'save_workflow']);
 const REVIEW_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
-const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ..._MCP, ...ORCHESTRATION]);
+const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION]);
 const LOC_MODES = new Set([
     'select_tools', 'read_file', 'write_file',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
@@ -382,6 +386,10 @@ for (const schema of SCHEMA_DEFINITIONS) {
         } else {
             concurrencyClass = 'parallel';
         }
+    } else if (name === 'rename_symbol') {
+        effect = 'workspace_write';
+        riskLevel = 2;
+        concurrencyClass = 'global-exclusive';
     } else if (EDIT.includes(name)) {
         effect = 'workspace_write';
         riskLevel = 2;

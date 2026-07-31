@@ -38,8 +38,6 @@ export interface OpenPlanFileMessage { type: 'openPlanFile'; filePath: string }
 export interface OpenArtifactMessage { type: 'openArtifact'; artifactId: string; file?: string }
 export interface OpenContextReferenceMessage { type: 'openContextReference'; context: unknown }
 export interface PermissionResponseMessage { type: 'permissionResponse'; permissionId: string; allowed: boolean; alwaysAllow?: boolean }
-export interface ApproveTransactionMessage { type: 'approveTransaction'; txId: string }
-export interface RejectTransactionMessage { type: 'rejectTransaction'; txId: string }
 export interface ConfirmWriteFileMessage { type: 'confirmWriteFile'; messageId: string }
 export interface CancelWriteFileMessage { type: 'cancelWriteFile'; messageId: string }
 export interface RequestUsageStatsMessage { type: 'requestUsageStats' }
@@ -77,8 +75,6 @@ export type WebviewToHostMessage =
     | OpenArtifactMessage
     | OpenContextReferenceMessage
     | PermissionResponseMessage
-    | ApproveTransactionMessage
-    | RejectTransactionMessage
     | ConfirmWriteFileMessage
     | CancelWriteFileMessage
     | RequestUsageStatsMessage

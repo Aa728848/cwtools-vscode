@@ -140,17 +140,23 @@ describe('enforced central tool policy', () => {
 
         const mcpCall = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, context) as any;
         expect(mcpCall.success).to.equal(false);
-        expect(mcpCall.error).to.include('Paradox-only capability');
+        expect(mcpCall.error).to.include('not found in configuration');
 
         const memoryCall = await executor.execute('set_memory', { key: 'secret', value: 'value' }, context) as any;
-        expect(memoryCall.success).to.equal(false);
-        expect(memoryCall.error).to.include('Paradox-only capability');
+        expect(memoryCall.success).to.equal(true);
+        const generalMemory = await executor.execute('get_memory', { key: 'secret' }, context) as any;
+        expect(generalMemory).to.deep.include({ found: true, value: 'value' });
+        const paradoxMemory = await executor.execute('get_memory', { key: 'secret' }, {
+            runnerOptions: { mode: 'build', domain: 'paradox' },
+        } as any) as any;
+        expect(paradoxMemory).to.deep.equal({ found: false });
 
         executor.blackboard.write('domain:paradox:topic:session:secret', 'paradox value', 'free_text', 'test');
         const generalBlackboard = await executor.execute('query_blackboard', { key: 'secret' }, {
             runnerOptions: { mode: 'orchestrator', domain: 'general' },
         } as any) as any;
-        expect(generalBlackboard).to.deep.equal({ found: false });
+        expect(generalBlackboard.found).to.equal(true);
+        expect(generalBlackboard.entry.value).to.equal('value');
         const paradoxBlackboard = await executor.execute('query_blackboard', { key: 'secret' }, {
             runnerOptions: { mode: 'script', domain: 'paradox' },
         } as any) as any;
@@ -966,6 +972,8 @@ describe('agent sprite candidate tool contract', () => {
         const taskProperties = (definition.function.parameters.properties as any).tasks.items.properties;
         expect((definition.function.parameters.properties as any).tasks.maxItems).to.equal(8);
         expect(taskProperties.plannedFiles.description).to.include('Expected project files this writer will modify');
+        expect((definition.function.parameters.properties as any).userConstraints.properties)
+            .to.have.keys(['localisationOwnership', 'warningHandling']);
     });
 
     it('queries the shared localisation index when IndexService is provided', async () => {
@@ -2290,6 +2298,7 @@ describe('agent tool progress and aborts', () => {
     });
 
     it('forwards top-level dynamic MCP args to the MCP call', async () => {
+        stubConfigOverrides['mcp.servers'] = [{ name: 'filesystem', capabilityDomain: 'paradox' }];
         const executor = createExecutor();
         const callTool = sinon.stub().resolves({ ok: true });
         sinon.stub(executor as any, 'getMcpClient').resolves({ callTool });
@@ -2305,6 +2314,7 @@ describe('agent tool progress and aborts', () => {
     });
 
     it('keeps mcp_call nested arguments intact', async () => {
+        stubConfigOverrides['mcp.servers'] = [{ name: 'filesystem', capabilityDomain: 'paradox' }];
         const executor = createExecutor();
         const callTool = sinon.stub().resolves({ ok: true });
         sinon.stub(executor as any, 'getMcpClient').resolves({ callTool });

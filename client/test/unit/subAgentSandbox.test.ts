@@ -124,6 +124,40 @@ describe('SubAgentSandbox', () => {
 
     // ── 2. 沙盒物理拦截逻辑校验 ──
     describe('enforceSubAgentSafety', () => {
+        it('blocks localisation paths that the user retained, regardless of writer role', () => {
+            const sandbox = {
+                agentId: 'user_owned_localisation',
+                role: 'build',
+                mode: 'build' as any,
+                deniedWriteScopes: ['localisation'],
+                permissionPolicy: 'delegate_to_parent' as const,
+            };
+
+            const britishSpelling = enforceSubAgentSafety(
+                sandbox,
+                'write_file',
+                { TargetFile: 'localisation/english/demo_l_english.yml' },
+                process.cwd(),
+            );
+            const americanSpelling = enforceSubAgentSafety(
+                sandbox,
+                'write_file',
+                { TargetFile: 'localization/english/demo_l_english.yml' },
+                process.cwd(),
+            );
+            const unrelatedWrite = enforceSubAgentSafety(
+                sandbox,
+                'write_file',
+                { TargetFile: 'events/demo_events.txt' },
+                process.cwd(),
+            );
+
+            expect(britishSpelling.allowed).to.equal(false);
+            expect(americanSpelling.allowed).to.equal(false);
+            expect(britishSpelling.reason).to.include('user-owned scope');
+            expect(unrelatedWrite.allowed).to.equal(true);
+        });
+
         it('只读沙盒调用写入类工具时应该直接被物理拦截', () => {
             const sandbox = {
                 agentId: 'explorer_test',

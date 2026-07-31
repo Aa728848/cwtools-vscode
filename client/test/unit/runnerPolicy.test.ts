@@ -2,6 +2,8 @@ import { expect } from 'chai';
 import {
     filterToolDefinitionsForMode,
     filterToolDefinitionsForStage,
+    extendStageToolPoolWithSupport,
+    getWorkflowStageSupportTools,
     initialToolStageForMode,
     normalizeToolStageForMode,
     advanceToolStage,
@@ -91,6 +93,103 @@ describe('runnerPolicy', () => {
         }
     });
 
+    it('keeps Paradox skill, memory, goal, and MCP support reachable across staged runs', () => {
+        const supportNames = [
+            'run_skill', 'get_goal', 'create_goal', 'update_goal', 'set_goal_budget',
+            'set_memory', 'get_memory', 'search_memory', 'save_memory', 'mcp_call',
+        ];
+        const supportDefinitions = registeredTools.filter(tool => supportNames.includes(tool.function.name));
+        const dynamicMcp = {
+            type: 'function',
+            function: { name: 'mcp_cwtools_query_rules', description: '', parameters: {} },
+        } as ToolDefinition;
+        const stagesByMode = {
+            build: ['discovery', 'evidence', 'validation', 'write', 'finalize'],
+            plan: ['discovery', 'design', 'validation', 'finalize'],
+            explore: ['discovery', 'validation', 'finalize'],
+            review: ['discovery', 'validation', 'finalize'],
+        } as const;
+
+        for (const [mode, stages] of Object.entries(stagesByMode)) {
+            const modeTools = filterToolDefinitionsForMode(
+                [...supportDefinitions, dynamicMcp],
+                mode as keyof typeof stagesByMode,
+                { domain: 'paradox' },
+            );
+            const modeNames = new Set(modeTools.map(tool => tool.function.name));
+            for (const stage of stages) {
+                const stageTools = filterToolDefinitionsForStage(
+                    modeTools,
+                    mode as keyof typeof stagesByMode,
+                    stage,
+                );
+                const stagedNames = extendStageToolPoolWithSupport(
+                    stageTools,
+                    modeTools,
+                    mode as keyof typeof stagesByMode,
+                    stage,
+                ).map(tool => tool.function.name);
+                for (const name of modeNames) {
+                    expect(stagedNames, `${mode}:${stage}:${name}`).to.include(name);
+                }
+            }
+        }
+    });
+
+    it('keeps workflow-declared read tools reachable without releasing workflow writes early', () => {
+        const workflowContracts = {
+            'loc-generation': ['query_localisation_index', 'read_file', 'write_file', 'write_localisation'],
+            'asset-wiring': ['query_localisation_index', 'find_sprite_candidates', 'find_sound_candidates', 'read_file', 'write_file'],
+        } as const;
+        for (const [workflowId, workflowTools] of Object.entries(workflowContracts)) {
+            const allowed = new Set<string>(workflowTools);
+            const modeTools = filterToolDefinitionsForMode(registeredTools, 'build', { domain: 'paradox' })
+                .filter(tool => allowed.has(tool.function.name));
+            const support = getWorkflowStageSupportTools(workflowTools);
+            const discovery = filterToolDefinitionsForStage(
+                modeTools,
+                'build',
+                'discovery',
+                false,
+                support,
+            ).map(tool => tool.function.name);
+
+            expect(discovery, workflowId).to.include('query_localisation_index');
+            expect(discovery, workflowId).to.not.include.members(['write_file', 'write_localisation']);
+        }
+
+        const assetAllowed = new Set<string>(workflowContracts['asset-wiring']);
+        const assetTools = filterToolDefinitionsForMode(registeredTools, 'build', { domain: 'paradox' })
+            .filter(tool => assetAllowed.has(tool.function.name));
+        const assetDiscovery = filterToolDefinitionsForStage(
+            assetTools,
+            'build',
+            'discovery',
+            false,
+            getWorkflowStageSupportTools(workflowContracts['asset-wiring']),
+        ).map(tool => tool.function.name);
+        expect(assetDiscovery).to.include.members(['find_sprite_candidates', 'find_sound_candidates']);
+    });
+
+    it('makes Paradox media tools available only at the write boundary', () => {
+        const mediaTools = ['convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
+        const paradoxBuild = filterToolDefinitionsForMode(registeredTools, 'build', { domain: 'paradox' });
+        const paradoxGui = filterToolDefinitionsForMode(registeredTools, 'gui_expert', { domain: 'paradox' })
+            .map(tool => tool.function.name);
+        const discovery = filterToolDefinitionsForStage(paradoxBuild, 'build', 'discovery')
+            .map(tool => tool.function.name);
+        const writeBase = filterToolDefinitionsForStage(paradoxBuild, 'build', 'write');
+        const write = extendStageToolPoolWithSupport(writeBase, paradoxBuild, 'build', 'write')
+            .map(tool => tool.function.name);
+        const general = filterToolDefinitionsForMode(registeredTools, 'utility', { domain: 'general' })
+            .map(tool => tool.function.name);
+
+        expect(paradoxGui).to.include.members(mediaTools);
+        expect(discovery).to.not.include.members(mediaTools);
+        expect(write).to.include.members(mediaTools);
+        expect(general).to.not.include.members(mediaTools);
+    });
+
     it('auto-discloses execution schemas for every writable runtime mode at the correct boundary', () => {
         expect(shouldAutoDiscloseExecutionTools('build', 'discovery', 'workspace_write')).to.equal(false);
         expect(shouldAutoDiscloseExecutionTools('build', 'write', 'workspace_write')).to.equal(true);
@@ -126,7 +225,7 @@ describe('runnerPolicy', () => {
         expect(isExecutionActionTool('read_file')).to.equal(false);
     });
 
-    it('keeps Paradox MCP tools in discovery while General removes them before staging', () => {
+    it('keeps MCP schemas domain-neutral while execution enforces each server declaration', () => {
         const dynamicMcp = {
             type: 'function',
             function: { name: 'mcp_cwtools_query_rules', description: '', parameters: {} },
@@ -138,7 +237,7 @@ describe('runnerPolicy', () => {
 
         const general = filterToolDefinitionsForMode(registeredTools, 'utility', { domain: 'general' })
             .map(tool => tool.function.name);
-        expect(general).to.not.include('mcp_call');
+        expect(general).to.include('mcp_call');
     });
 
     it('advances build stages only after successful evidence and write steps', () => {
@@ -261,14 +360,14 @@ describe('runnerPolicy', () => {
             .map(tool => tool.function.name);
         expect(generalUtility).to.include.members([
             'read_file', 'write_file', 'edit_file', 'replace_lines', 'grep', 'document_symbols', 'workspace_symbols',
-            'get_diagnostics', 'run_command', 'git_ops',
+            'go_to_definition', 'find_references', 'hover_symbol', 'get_completion_at', 'rename_symbol',
+            'get_diagnostics', 'run_command', 'git_ops', 'run_skill',
+            'set_memory', 'get_memory', 'search_memory', 'save_memory', 'mcp_call',
         ]);
         expect(generalUtility).to.not.include.members([
             'query_cwt_schema', 'query_scope', 'query_types', 'verify_pdx_identifier',
             'query_localisation_index', 'find_sprite_candidates', 'find_sound_candidates',
             'write_localisation', 'write_design_blueprint', 'get_pdx_block',
-            'mcp_call',
-            'set_memory', 'get_memory', 'search_memory', 'save_memory',
         ]);
 
         const paradoxPlan = filterToolDefinitionsForMode(registeredTools, 'plan', { domain: 'paradox' })
@@ -279,7 +378,8 @@ describe('runnerPolicy', () => {
             domain: 'general',
             legacyFullToolset: true,
         }).map(tool => tool.function.name);
-        expect(legacyGeneral).to.not.include.members(['query_cwt_schema', 'mcp_call']);
+        expect(legacyGeneral).to.not.include('query_cwt_schema');
+        expect(legacyGeneral).to.include('mcp_call');
 
         const generalDispatch = filterToolDefinitionsForMode(registeredTools, 'orchestrator', { domain: 'general' })
             .find(tool => tool.function.name === 'dispatch_agents');
@@ -293,8 +393,8 @@ describe('runnerPolicy', () => {
     it('rejects hallucinated Paradox calls at the execution boundary for General Coding', () => {
         expect(validateToolAccess('query_cwt_schema', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
         expect(validateToolAccess('write_localisation', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
-        expect(validateToolAccess('mcp_call', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
-        expect(validateToolAccess('mcp_filesystem_read_file', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
+        expect(validateToolAccess('mcp_call', { mode: 'utility', domain: 'general' }).allowed).to.equal(true);
+        expect(validateToolAccess('mcp_filesystem_read_file', { mode: 'utility', domain: 'general' }).allowed).to.equal(true);
         expect(validateToolAccess('get_diagnostics', { mode: 'utility', domain: 'general' }).allowed).to.equal(true);
         expect(validateToolAccess('run_command', {
             mode: 'utility',

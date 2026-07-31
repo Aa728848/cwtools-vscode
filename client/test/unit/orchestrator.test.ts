@@ -576,6 +576,37 @@ describe('dispatch_agents tool wiring', () => {
         expect(result.error).to.include('utility');
     });
 
+    it('rejects localisation child work retained by the user', async () => {
+        const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
+        const executor = new AgentToolExecutor({
+            onNotification: () => undefined,
+            sendNotification: () => undefined,
+        } as any, process.cwd());
+
+        const result = await executor.execute('dispatch_agents', {
+            userConstraints: {
+                localisationOwnership: 'user',
+                warningHandling: 'ignore',
+            },
+            tasks: [{
+                id: 'write_loc',
+                agentType: 'loc_writer',
+                prompt: 'Write localisation.',
+                plannedFiles: ['localisation/english/demo_l_english.yml'],
+            }],
+        }, {
+            runnerOptions: {
+                mode: 'script',
+                domain: 'paradox',
+                originalUserMessage: '本地化由我自己写',
+                abortSignal: new AbortController().signal,
+            },
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include('retained ownership of localisation');
+    });
+
     it('intersects mode roles with the selected runtime profile sub-agent allowlist', async () => {
         const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
         const executor = new AgentToolExecutor({
@@ -1531,10 +1562,12 @@ describe('Orchestrator quality propagation', () => {
         const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
         let fixCalls = 0;
         let reviewCalls = 0;
+        const executedNodes: string[] = [];
         const runner = { toolExecutor: { workspaceRoot: process.cwd() } };
         const orchestrator = new Orchestrator(runner as any);
         (orchestrator as any).executor.executeGraph = async () => executionResult();
         (orchestrator as any).executeSubAgent = async (node: any) => {
+            executedNodes.push(node.id);
             if (node.id !== 'loc_sweep') fixCalls++;
             return {
                 nodeId: node.id, success: true, output: '', writtenFiles: [],
@@ -1544,7 +1577,7 @@ describe('Orchestrator quality propagation', () => {
         (orchestrator as any).qualityGate.reviewOutput = async () => gateResult(++reviewCalls >= passOnReview);
         (orchestrator as any).qualityGate.getConfig = () => ({ autoFix: true, maxFixCycles });
         (orchestrator as any).qualityGate.buildFixPrompt = () => 'fix';
-        return { orchestrator, counts: () => ({ fixCalls, reviewCalls }) };
+        return { orchestrator, counts: () => ({ fixCalls, reviewCalls }), executedNodes };
     }
 
     it('re-runs the quality gate after auto-fix and passes only after re-review', async () => {
@@ -1559,6 +1592,53 @@ describe('Orchestrator quality propagation', () => {
         expect(result.success).to.equal(true);
         expect(result.qualityGate?.passed).to.equal(true);
         expect(counts()).to.deep.equal({ reviewCalls: 2, fixCalls: 1 });
+    });
+
+    it('does not create the automatic localisation child when the user retained localisation', async () => {
+        const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
+        const { orchestrator, executedNodes } = makeOrchestrator(3, 1);
+        const graph = TaskGraphEngine.createGraph('本地化由我自己写');
+        graph.metadata.userExecutionPolicy = {
+            localisationOwnership: 'user',
+            warningHandling: 'ignore',
+        };
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        builder.status = 'done';
+
+        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+
+        expect(result.success).to.equal(true);
+        expect(executedNodes).to.not.include('loc_sweep');
+    });
+
+    it('keeps automatic localisation enabled by default', async () => {
+        const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
+        const { orchestrator, executedNodes } = makeOrchestrator(3, 1);
+        const graph = TaskGraphEngine.createGraph('实现完整事件功能');
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        builder.status = 'done';
+
+        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+
+        expect(result.success).to.equal(true);
+        expect(executedNodes).to.include('loc_sweep');
+    });
+
+    it('does not repair localisation warnings when the user ignores non-error diagnostics', async () => {
+        const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
+        const { orchestrator, executedNodes } = makeOrchestrator(3, 1);
+        const graph = TaskGraphEngine.createGraph('忽略黄色警告');
+        graph.metadata.userExecutionPolicy = {
+            localisationOwnership: 'agent',
+            warningHandling: 'ignore',
+        };
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        builder.status = 'done';
+
+        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+
+        expect(result.success).to.equal(true);
+        expect(executedNodes).to.not.include('loc_sweep');
     });
 
     it('propagates persistent quality-gate failure into the orchestrator result', async () => {
@@ -1702,6 +1782,23 @@ describe('QualityGate', () => {
         expect(prompt).to.include('.txt, .gui, .gfx, .asset, .entity');
         expect(prompt).to.include('LSP diagnostic target files include: events/test.txt, interface/test.gui, interface/sprites.gfx, sound/test.asset');
         expect(prompt).to.not.include('localisation/test_l_english.yml, interface/sprites.gfx');
+    });
+
+    it('tells the quality reviewer that user-owned localisation warnings are non-blocking', () => {
+        const qg = new QualityGate();
+        const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
+        const graph = TaskGraphEngine.createGraph('本地化由用户处理');
+        graph.metadata.userExecutionPolicy = {
+            localisationOwnership: 'user',
+            warningHandling: 'ignore',
+        };
+
+        const prompt = qg.buildCombinedReviewPrompt(['events/test.txt'], undefined, { taskGraph: graph });
+
+        expect(prompt).to.include('Localisation ownership: user');
+        expect(prompt).to.include('Warning handling: ignore');
+        expect(prompt).to.include('Error-severity LSP diagnostics remain blocking');
+        expect(prompt).to.include('Do not request, suggest, or perform localisation writes');
     });
 
     it('parseReviewResult: 识别通过结果', () => {

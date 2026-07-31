@@ -25,6 +25,7 @@ import type {
     ToolDefinition,
     ReasoningEffort,
     AgentSchedulingState,
+    AgentRuntimeDomain,
 } from './types';
 import { contentToString } from './types';
 import { defaultDomainForMode } from './agentProfile';
@@ -51,6 +52,8 @@ import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStor
 import {
     filterToolDefinitionsForMode,
     filterToolDefinitionsForStage,
+    extendStageToolPoolWithSupport,
+    getWorkflowStageSupportTools,
     initialToolStageForMode,
     normalizeToolStageForMode,
     advanceToolStage,
@@ -262,6 +265,8 @@ export interface AgentRunnerOptions {
     initialToolStage?: AgentToolStage;
     /** The user approved a design-complete plan; coordinators must execute it without a second design pass. */
     approvedPlanExecution?: boolean;
+    /** Original top-level user turn used to preserve user-owned work across orchestration. */
+    originalUserMessage?: string;
     /** Resolved capability domain. General runs cannot access Paradox-only tools or prompts. */
     domain?: import('./types').AgentRuntimeDomain;
     /** Admission and runtime phase state, persisted independently from legacy mode. */
@@ -528,33 +533,6 @@ export class AgentRunner {
             }, { status: 'pending' });
         }
         return true;
-    }
-
-    // ─── Transaction Management ────────────────────────────────────────────────
-    public pendingTransactions = new Map<string, Map<string, string>>();
-
-    public async commitTransaction(txId: string): Promise<boolean> {
-        const vfs = this.pendingTransactions.get(txId);
-        if (!vfs) return false;
-
-        try {
-            for (const [filePath, content] of vfs.entries()) {
-                const fs = await import('fs');
-                const path = await import('path');
-                const dir = path.dirname(filePath);
-                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-                fs.writeFileSync(filePath, content, 'utf-8');
-            }
-            this.pendingTransactions.delete(txId);
-            return true;
-        } catch (e) {
-            ErrorReporter.fatal(SOURCE.AGENT_RUNNER, `Failed to commit transaction ${txId}`, e);
-            return false;
-        }
-    }
-
-    public discardTransaction(txId: string): boolean {
-        return this.pendingTransactions.delete(txId);
     }
 
     // ─── Batch 2.3: Checkpoint save/load ─────────────────────────────────────
@@ -867,7 +845,16 @@ export class AgentRunner {
         const topicId = context.topicId || 'default';
         const threadId = options?.threadId ?? topicId;
         const turnId = options?.turnId ?? `turn_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        options = { ...options, mode, domain, schedulingState, abortSignal: turnAbortController.signal, threadId, turnId };
+        options = {
+            ...options,
+            mode,
+            domain,
+            schedulingState,
+            abortSignal: turnAbortController.signal,
+            threadId,
+            turnId,
+            originalUserMessage: options?.originalUserMessage ?? userMessage,
+        };
         const userPromptPreview = userMessage.substring(0, 100);
         const turnRuntimePromise = this.turnRunner.startTurn({
             topicId,
@@ -1877,12 +1864,16 @@ export class AgentRunner {
      * response mentions a stored memory key verbatim, count it as an actual use.
      * Persistence is debounced inside MemoryParser; failures never break the loop.
      */
-    private trackMemoryKeyReferences(topicId: string | undefined, assistantText: string): void {
+    private trackMemoryKeyReferences(
+        topicId: string | undefined,
+        assistantText: string,
+        domain: AgentRuntimeDomain,
+    ): void {
         if (!assistantText) return;
         try {
             const wsRoot = getProjectWorkspaceRoot();
             if (!wsRoot) return;
-            new MemoryParser(wsRoot, topicId).markMemoryUsedInText(topicId, assistantText);
+            new MemoryParser(wsRoot, topicId).markMemoryUsedInText(topicId, assistantText, domain);
         } catch (e) {
             ErrorReporter.debug(SOURCE.AGENT_RUNNER, 'Failed to track memory key references', e);
         }
@@ -2063,6 +2054,9 @@ export class AgentRunner {
             }
             ErrorReporter.debug('AgentRunner', `Workflow "${activeWorkflow.id}" tool policy applied: ${availableTools.length} tools available`);
         }
+        const workflowStageSupportTools = activeWorkflow?.toolPolicy.strategy === 'allowlist'
+            ? getWorkflowStageSupportTools(activeWorkflow.toolPolicy.tools)
+            : undefined;
         const stagedToolPool = availableTools;
         const disclosureContext: ToolDisclosureContext = {
             mode,
@@ -2075,7 +2069,20 @@ export class AgentRunner {
         };
         const toolDedupe = new ToolDedupeService();
         const refreshAvailableTools = (): ToolDefinition[] => {
-            const stagePool = filterToolDefinitionsForStage(stagedToolPool, mode, toolStage, legacyFullToolset);
+            const baseStagePool = filterToolDefinitionsForStage(
+                stagedToolPool,
+                mode,
+                toolStage,
+                legacyFullToolset,
+                workflowStageSupportTools,
+            );
+            const stagePool = extendStageToolPoolWithSupport(
+                baseStagePool,
+                stagedToolPool,
+                mode,
+                toolStage,
+                disclosureContext.loaded,
+            );
             if (shouldAutoDiscloseExecutionTools(mode, toolStage, schedulingState.authorization)) {
                 toolDisclosureService.select({
                     groups: ['file_write', 'command', 'git', 'media', 'orchestrator'],
@@ -2973,7 +2980,11 @@ export class AgentRunner {
 
             // Plan §8: count long-term memory usage only when the model's response
             // actually references a stored memory key (verbatim match, debounced).
-            this.trackMemoryKeyReferences(options?.topicId, contentToString(assistantMessage.content));
+            this.trackMemoryKeyReferences(
+                options?.topicId,
+                contentToString(assistantMessage.content),
+                options?.domain ?? defaultDomainForMode(mode),
+            );
 
             // ── M3: Length Truncation Fallback ──
             if (choice.finish_reason === 'length') {
@@ -3110,7 +3121,19 @@ export class AgentRunner {
                 } catch {
                     // The normal argument-repair path will report malformed arguments.
                 }
-                const stagePool = filterToolDefinitionsForStage(stagedToolPool, mode, toolStage, legacyFullToolset);
+                const baseStagePool = filterToolDefinitionsForStage(
+                    stagedToolPool,
+                    mode,
+                    toolStage,
+                    legacyFullToolset,
+                    workflowStageSupportTools,
+                );
+                const selectionPool = extendStageToolPoolWithSupport(
+                    baseStagePool,
+                    stagedToolPool,
+                    mode,
+                    toolStage,
+                );
                 const selection = toolDisclosureService.select({
                     tools: Array.isArray(selectionArgs.tools)
                         ? selectionArgs.tools.filter((value): value is string => typeof value === 'string')
@@ -3119,10 +3142,17 @@ export class AgentRunner {
                         ? selectionArgs.groups.filter((value): value is string => typeof value === 'string')
                         : undefined,
                     reason: typeof selectionArgs.reason === 'string' ? selectionArgs.reason : '',
-                }, stagePool, disclosureContext);
+                }, selectionPool, disclosureContext);
                 selectionArgs._selectionResult = selection;
                 toolCall.function.arguments = JSON.stringify(selectionArgs);
-                availableTools = toolDisclosureService.initialTools(stagePool, disclosureContext);
+                const visibleStagePool = extendStageToolPoolWithSupport(
+                    baseStagePool,
+                    stagedToolPool,
+                    mode,
+                    toolStage,
+                    disclosureContext.loaded,
+                );
+                availableTools = toolDisclosureService.initialTools(visibleStagePool, disclosureContext);
                 await runLedger.appendEvent(runRecord.runId, 'tool_disclosure_changed', {
                     iteration,
                     ...selection,

@@ -8,14 +8,13 @@ import { TOOL_REGISTRY, WRITE_TOOLS, SUB_AGENT_EXCLUDES } from './registry';
 import type { AgentMode, AgentToolName } from '../types';
 import type { AgentRuntimeDomain } from '../types';
 import { defaultDomainForMode } from '../agentProfile';
+import { evaluateEffectiveToolPolicy } from '../runner/effectiveToolPolicy';
 
 /**
  * Check if a tool is allowed under the current Agent operation mode.
  */
 export function isToolAllowedForMode(toolName: string, mode: AgentMode, domain: AgentRuntimeDomain = defaultDomainForMode(mode)): boolean {
-    const entry = TOOL_REGISTRY.get(toolName as AgentToolName);
-    if (!entry) return false;
-    return entry.allowedModes.has(mode) && !(domain === 'general' && entry.domain === 'paradox');
+    return evaluateEffectiveToolPolicy(toolName, { mode, domain }).allowed;
 }
 
 /**
@@ -58,15 +57,19 @@ export function validateToolAccess(
     }
 
     const domain = options.domain ?? defaultDomainForMode(options.mode);
-    if (domain === 'general' && entry.domain === 'paradox') {
+    const decision = evaluateEffectiveToolPolicy(entry.name, {
+        mode: options.mode,
+        domain,
+        isSubAgent: options.isSubAgent,
+    });
+    if (decision.reason === 'domain') {
         return {
             allowed: false,
             reason: `Tool '${toolName}' is a Paradox-only capability and is unavailable in General Coding.`,
         };
     }
 
-    // 1. Mode check
-    if (!entry.allowedModes.has(options.mode)) {
+    if (decision.reason === 'mode') {
         const governedNote = governedByMcpCall
             ? ' Dynamic MCP tools follow the mcp_call policy.'
             : '';
@@ -77,17 +80,16 @@ export function validateToolAccess(
     }
 
     // 2. Sub-agent sandbox check
-    const generalUtilityCommand = domain === 'general'
-        && options.mode === 'utility'
-        && entry.name === 'run_command';
-    if (options.isSubAgent && !entry.allowSubAgent && !generalUtilityCommand) {
+    if (decision.reason === 'subagent') {
         return {
             allowed: false,
             reason: `Tool '${toolName}' is disabled in sub-agent sandbox context to enforce safety bounds.`
         };
     }
 
-    return { allowed: true };
+    return decision.allowed
+        ? { allowed: true }
+        : { allowed: false, reason: `Tool '${toolName}' is unavailable under the effective runtime policy.` };
 }
 
 export type McpPermissionAction = 'allow' | 'ask' | 'deny';

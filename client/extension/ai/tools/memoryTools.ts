@@ -10,6 +10,13 @@ import * as path from 'path';
 import { getPrivateTopicStorageDir } from '../workspacePaths';
 import { aiText } from '../messages';
 import { defaultDomainForMode } from '../agentProfile';
+import type { BlackboardEntry, BlackboardEntryType } from '../orchestrator/types';
+
+const MAX_BLACKBOARD_PAYLOAD_BYTES = 2 * 1024 * 1024;
+const BLACKBOARD_ENTRY_TYPES = new Set<BlackboardEntryType>([
+    'file_snapshot', 'scope_info', 'diag_result', 'entity_registry',
+    'entity_relation', 'acceptance_evidence', 'write_intent', 'free_text',
+]);
 
 // ─── Context type ────────────────────────────────────────────────────────────
 
@@ -32,57 +39,102 @@ export function blackboardDomainPrefix(context?: import('../types').AgentToolCon
 export class MemoryToolHandler {
     constructor(private ctx: MemoryToolContext) {}
 
+    private getBlackboardDirectory(context?: import('../types').AgentToolContext): string {
+        const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId ?? 'session';
+        return path.resolve(getPrivateTopicStorageDir(topicId, this.ctx.workspaceRoot), 'blackboard');
+    }
+
+    private readStoredPayload(
+        value: string,
+        context?: import('../types').AgentToolContext,
+    ): { content?: string; filePath?: string; fullLength?: number; error?: string } {
+        if (!value.startsWith('file://')) return { content: value, fullLength: value.length };
+        const blackboardDir = this.getBlackboardDirectory(context);
+        const requestedPath = path.resolve(value.slice(7));
+        const relative = path.relative(blackboardDir, requestedPath);
+        if (relative.startsWith('..') || path.isAbsolute(relative)) {
+            return { error: 'Stored memory file reference is outside the current topic blackboard.' };
+        }
+        try {
+            const realDirectory = fs.realpathSync(blackboardDir);
+            const realPath = fs.realpathSync(requestedPath);
+            const realRelative = path.relative(realDirectory, realPath);
+            if (realRelative.startsWith('..') || path.isAbsolute(realRelative)) {
+                return { error: 'Stored memory file reference resolves outside the current topic blackboard.' };
+            }
+            const stat = fs.statSync(realPath);
+            if (!stat.isFile() || stat.size > MAX_BLACKBOARD_PAYLOAD_BYTES) {
+                return { error: 'Stored memory payload is unavailable or exceeds the size limit.' };
+            }
+            const content = fs.readFileSync(realPath, 'utf-8');
+            return { content, filePath: realPath, fullLength: content.length };
+        } catch {
+            return { error: 'Stored memory payload file was not found.' };
+        }
+    }
+
     /** set_memory tool execution */
     async setMemory(args: import('../types').SetMemoryArgs, context?: import('../types').AgentToolContext): Promise<unknown> {
         const { key, value } = args;
+        const domainPrefix = blackboardDomainPrefix(context);
+        const scopedKey = `${domainPrefix}${key}`;
         if (!key || typeof value !== 'string') {
             return { success: false, message: 'Invalid arguments' };
+        } else if (Buffer.byteLength(value, 'utf8') > MAX_BLACKBOARD_PAYLOAD_BYTES) {
+            return { success: false, message: 'Memory payload exceeds the 2 MiB size limit.' };
         } else if (value.length > 500) {
-            const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId ?? 'session';
-            const blackboardDir = path.join(getPrivateTopicStorageDir(topicId, this.ctx.workspaceRoot), 'blackboard');
+            const blackboardDir = this.getBlackboardDirectory(context);
             fs.mkdirSync(blackboardDir, { recursive: true });
-            const safeKey = key.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const safeKey = scopedKey.replace(/[^a-zA-Z0-9_-]/g, '_').slice(-180);
             const filePath = path.join(blackboardDir, `${safeKey}.txt`);
             fs.writeFileSync(filePath, value, 'utf-8');
-            this.ctx.blackboard.legacySet(key, `file://${filePath}`);
+            this.ctx.blackboard.legacySet(scopedKey, `file://${filePath}`);
             return { success: true, message: `Successfully saved large payload (${value.length} chars) to high-capacity storage. Reference stored in blackboard. You MUST now output your final text response to complete your sub-task.` };
         } else {
-            this.ctx.blackboard.legacySet(key, value);
+            this.ctx.blackboard.legacySet(scopedKey, value);
             return { success: true, message: `Stored value in memory under key '${key}'.` };
         }
     }
 
     /** get_memory tool execution */
-    async getMemory(args: import('../types').GetMemoryArgs): Promise<unknown> {
+    async getMemory(args: import('../types').GetMemoryArgs, context?: import('../types').AgentToolContext): Promise<unknown> {
         const { key } = args;
         if (!key) {
             return { found: false };
         } else {
-            const mem = this.ctx.blackboard.legacyGet(key);
-            if (mem && typeof mem.value === 'string' && mem.value.startsWith('file://')) {
-                const filePath = mem.value.slice(7);
-                try {
-                    const content = fs.readFileSync(filePath, 'utf-8');
-                    const truncated = content.length > 3000 
-                        ? content.substring(0, 3000) + `\n...[truncated, full ${content.length} chars at ${filePath}]`
-                        : content;
-                    return { found: true, value: truncated, _sourceFile: filePath, _fullLength: content.length };
-                } catch {
-                    return { found: false, error: `File not found: ${filePath}` };
-                }
+            const domain = context?.runnerOptions?.domain
+                ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
+            const mem = this.ctx.blackboard.legacyGet(`${blackboardDomainPrefix(context)}${key}`);
+            const resolved = mem.found || domain !== 'paradox' ? mem : this.ctx.blackboard.legacyGet(key);
+            if (resolved && typeof resolved.value === 'string' && resolved.value.startsWith('file://')) {
+                const payload = this.readStoredPayload(resolved.value, context);
+                if (payload.error || payload.content === undefined) return { found: false, error: payload.error };
+                const truncated = payload.content.length > 3000
+                    ? payload.content.substring(0, 3000) + `\n...[truncated, full ${payload.fullLength} chars]`
+                    : payload.content;
+                return { found: true, value: truncated, _sourceFile: payload.filePath, _fullLength: payload.fullLength };
             } else {
-                return mem;
+                return resolved;
             }
         }
     }
 
     /** search_memory tool execution */
-    searchMemory(args: { query: string }): unknown {
+    searchMemory(args: { query: string }, context?: import('../types').AgentToolContext): unknown {
         const { query } = args;
         if (!query) {
             return { success: false, message: 'Missing query argument' };
         } else {
-            return this.ctx.blackboard.legacySearch(query);
+            const prefix = blackboardDomainPrefix(context);
+            const matches = this.ctx.blackboard.queryByPrefix(prefix)
+                .filter(entry => entry.key.toLowerCase().includes(query.toLowerCase())
+                    || entry.value.toLowerCase().includes(query.toLowerCase()))
+                .slice(0, 50)
+                .map(entry => ({
+                    key: entry.key.slice(prefix.length),
+                    preview: entry.value.length > 150 ? `${entry.value.slice(0, 150)}...` : entry.value,
+                }));
+            return { found: matches.length > 0, count: matches.length, matches };
         }
     }
 
@@ -95,9 +147,12 @@ export class MemoryToolHandler {
             const { MemoryParser } = await import('../memoryParser');
             const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId;
             const parser = new MemoryParser(this.ctx.workspaceRoot, topicId);
+            const domain = context?.runnerOptions?.domain
+                ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
             const result = await parser.appendMemory({
                 key,
                 content,
+                domain,
                 priority: priority || 'normal',
                 confidence: args.confidence,
                 expiresAt: args.expiresInDays && args.expiresInDays > 0
@@ -111,7 +166,7 @@ export class MemoryToolHandler {
             // Plan §8: re-saving an existing key means the model actively worked
             // with that memory — count it as an actual use (debounced persistence).
             if (result.success && result.existed) {
-                parser.markMemoryUsed(topicId, [key]);
+                parser.markMemoryUsed(topicId, [key], domain);
             }
             return result;
         }
@@ -127,18 +182,16 @@ export class MemoryToolHandler {
             ...entry,
             key: entry.key.startsWith(domainPrefix) ? entry.key.slice(domainPrefix.length) : entry.key,
         });
-        const resolveFileRef = async (entry: any) => {
+        const resolveFileRef = async (entry: BlackboardEntry) => {
             if (entry && typeof entry.value === 'string' && entry.value.startsWith('file://')) {
-                const filePath = entry.value.slice(7);
-                try {
-                    const content = fs.readFileSync(filePath, 'utf-8');
-                    const truncated = content.length > 3000 
-                        ? content.substring(0, 3000) + `\n...[truncated, full ${content.length} chars at ${filePath}]`
-                        : content;
-                    return exposeEntry({ ...entry, value: truncated, _sourceFile: filePath, _fullLength: content.length });
-                } catch {
-                    return exposeEntry(entry);
+                const payload = this.readStoredPayload(entry.value, context);
+                if (payload.error || payload.content === undefined) {
+                    return exposeEntry({ ...entry, value: `[unavailable memory payload: ${payload.error ?? 'unknown error'}]` });
                 }
+                const truncated = payload.content.length > 3000
+                    ? payload.content.substring(0, 3000) + `\n...[truncated, full ${payload.fullLength} chars]`
+                    : payload.content;
+                return exposeEntry({ ...entry, value: truncated });
             }
             return exposeEntry(entry);
         };
@@ -156,10 +209,13 @@ export class MemoryToolHandler {
             const resolved = await Promise.all(entries.slice(0, 50).map(resolveFileRef));
             return { found: resolved.length > 0, count: entries.length, entries: resolved };
         } else if (qbType) {
+            if (!BLACKBOARD_ENTRY_TYPES.has(qbType as BlackboardEntryType)) {
+                return { success: false, message: `Unsupported blackboard entry type: ${qbType}` };
+            }
             const entries = this.ctx.blackboard.queryByPrefix(domainPrefix)
                 .filter(entry => entry.type === qbType);
             if (domain === 'paradox') {
-                entries.push(...this.ctx.blackboard.queryByType(qbType as any)
+                entries.push(...this.ctx.blackboard.queryByType(qbType as BlackboardEntryType)
                     .filter(entry => !entry.key.startsWith('domain:')));
             }
             const resolved = await Promise.all(entries.slice(0, 50).map(resolveFileRef));

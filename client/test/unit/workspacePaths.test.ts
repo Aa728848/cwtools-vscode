@@ -3,9 +3,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-let workspaceFolders: Array<{ uri: { fsPath: string } }> = [];
+let workspaceFolders: Array<{ name?: string; uri: { fsPath: string } }> = [];
 
 const vscodeStub = {
+    window: {
+        activeTextEditor: undefined as { document: { uri: { fsPath: string } } } | undefined,
+    },
     workspace: {
         get workspaceFolders() { return workspaceFolders; },
         getConfiguration: () => ({ get: () => undefined }),
@@ -66,6 +69,24 @@ describe('workspace AI storage paths', () => {
             primaryRoot,
             legacyRoot,
         ]);
+    });
+
+    it('resolves explicitly qualified paths in a multi-root workspace', () => {
+        const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-second-root-'));
+        workspaceFolders = [
+            { name: 'first', uri: { fsPath: projectRoot } },
+            { name: 'second', uri: { fsPath: secondRoot } },
+        ];
+        try {
+            const workspacePaths = loadWorkspacePaths();
+            expect(workspacePaths.getProjectWorkspaceRoots()).to.deep.equal([projectRoot, secondRoot]);
+            expect(workspacePaths.resolveProjectWorkspacePath('second/src/index.ts'))
+                .to.equal(path.join(secondRoot, 'src', 'index.ts'));
+            expect(workspacePaths.resolveProjectWorkspacePath('second/../escape.ts')).to.equal(undefined);
+            expect(workspacePaths.resolveProjectWorkspacePath('../escape.ts')).to.equal(undefined);
+        } finally {
+            fs.rmSync(secondRoot, { recursive: true, force: true });
+        }
     });
 
     it('renames a legacy storage root when .cwtools does not exist', () => {

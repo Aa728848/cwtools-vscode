@@ -202,6 +202,7 @@ sequenceDiagram
 | `aiService.ts` | Multi-provider HTTP/SSE clients, request formatting, fallback policies, and custom wire formats (`customApiFormat`) |
 | `codex/` | Browser PKCE OAuth, VS Code SecretStorage credentials, automatic token refresh, account status, compatibility models, and quota windows for the ChatGPT subscription provider |
 | `promptBuilder.ts` / `prompt/sections/` | Prompt builder facade, project context, and mode system instructions |
+| `projectInstructions.ts` | Bounded General-domain loader for root and path-scoped standard repository instructions |
 | `providers.ts` / `providers/models/` | Provider registry, default models, capabilities, pricing, and prompt caching discounts |
 | `types.ts` | Messages, tools, profiles, internal modes, contexts, Artifacts, and setting schemas |
 | `runnerPolicy.ts` | Mode-based tool exclusions, iteration limits, and sub-agent output token budgets |
@@ -232,6 +233,7 @@ sequenceDiagram
 | `workflowRegistry.ts` / `workflowI18n.ts` | Workflow metadata, allowed tools, validation targets, and localization |
 | `inlineProvider.ts` | AI inline (FIM) code completions |
 | `mcpClient.ts` | Model Context Protocol client over stdio/SSE |
+| `mcpCapability.ts` | Enforceable per-server capability-domain declaration; legacy entries default to Paradox |
 | `toolCallParser.ts` / `jsonRepair.ts` | Loose JSON repairs and fallback tool-call extraction for non-standard models |
 
 ##### Runner Pipeline (`runner/`)
@@ -251,6 +253,7 @@ sequenceDiagram
 | `commandPreflight.ts` | Quote-aware shell sequence parsing plus unified `allow` / `prompt` / `forbidden` command policy decisions |
 | `permissionPolicy.ts` | Resolves low-risk automatic grants and scopes via `cwdScope` |
 | `policyEngine.ts` | Enforced hierarchical permission profiles, protected-path rules, and actionable denials |
+| `effectiveToolPolicy.ts` | Shared static intersection of domain, mode, profile patterns, authorization, and sub-Agent gates |
 | `autoReviewer.ts` | Optional read-only LLM reviewer with exact-action caching and denial circuit breaking |
 | `runtimeItems.ts` | Canonical command, process, and permission item lifecycle types |
 | `sessionPermissions.ts` | Workspace-session permission profile overrides; never persisted by the quick selector |
@@ -291,6 +294,8 @@ The composer exposes only the capability-domain selector. `AgentProfileSelection
 
 Every non-Workflow turn first runs deterministic admission. High-confidence decisions skip the auxiliary routing call; ambiguous decisions ask the configured model for domain, intent, confidence, and bounded evidence. `agentProfile.ts` validates the response, applies continuity hysteresis to low-confidence domain changes, and falls back deterministically when routing is unavailable. The router may recommend a strategy but cannot automatically commit an ordinary broad task to Multi-Agent; explicit delegation is retained, while all other fan-out is decided later from a validated task graph. Routing never changes the user-owned permission profile or approval policy.
 
+The admitted `domainProfile` is a Run invariant. Catalog profiles, Workflows, resume data, and child Agents may narrow tools or authorization but cannot replace that domain. General frozen prompts load bounded root `AGENTS.md`, `CLAUDE.md`, and `.github/copilot-instructions.md`; the dynamic prompt adds nested `AGENTS.md` files applicable to the current target. Paradox deliberately keeps generated `CWTOOLS.md` as its top-level project source. Once `/init` has produced `.cwtools/project/profile.json`, the mode-specific profile card replaces full `CWTOOLS.md` prompt injection; its preserved Custom Rules remain injected and are inherited in bounded form by slim child Agents. Changes to either root instruction source invalidate the frozen-prompt fingerprint.
+
 The resolved admission creates an `AgentSchedulingState` with four independent dimensions:
 
 | Scheduling dimension | Meaning |
@@ -314,7 +319,7 @@ Conversation Undo reconciles file snapshots with Goal, Todo, Task notification, 
 
 #### Orthogonal Agent platform services
 
-`AgentMode` is now a compatibility adapter rather than the primary scheduler. `AgentSchedulingState` selects a concrete catalog `profileName` and independent overlays for planning, verification, finalization, parallel swarm, or specialist execution. Profiles come from built-ins, the user-level `.cwtools/agents` directory, and workspace `.agents/agents` or `.cwtools/agents` directories. Each `AGENT.md` has frontmatter for authority, tool patterns, subagents, model preference, and summary policy; its Markdown body is injected as isolated profile instructions after the stable base prompt. A same-name profile replaces another source only when it declares `override: true`. Sources are watched and reloaded through a serialized, debounced catalog; source errors and catalog revisions are visible in Runtime Inspector. Named profiles are selected automatically by admission and remain an internal policy mechanism rather than a normal composer choice. The effective profile caps authorization, binds a configured primary/secondary model, and intersects the mode's sub-Agent role allowlist. The exported catalog source interface is also the plugin integration point.
+`AgentMode` is now a compatibility adapter rather than the primary scheduler. `AgentSchedulingState` selects a concrete catalog `profileName` and independent overlays for planning, verification, finalization, parallel swarm, or specialist execution. Profiles come from built-ins, the user-level `.cwtools/agents` directory, and every workspace root's `.agents/agents` or `.cwtools/agents` directory. Each `AGENT.md` has frontmatter for authority, tool patterns, subagents, model preference, and summary policy; its Markdown body is injected as isolated profile instructions after the stable base prompt. A same-name profile replaces another source only when it declares `override: true`; schema violations and attempts to change an existing profile's capability domain are reported in Runtime Inspector. Sources are watched and reloaded through a serialized, debounced catalog. Named profiles are selected automatically by admission and remain an internal policy mechanism rather than a normal composer choice. The effective profile caps authorization, binds a configured primary/secondary model, and intersects the mode's sub-Agent role allowlist. The exported catalog source interface is also the plugin integration point.
 
 Tool state has four observable layers: registered, profile-activated, progressively disclosed, and authorization-approved. The profile activation layer is enforced by adding every inactive registry tool to the Runner exclusion set; policy, Plan Guard, sandbox, and permission checks remain authoritative for the final approval layer.
 
@@ -351,9 +356,12 @@ The Runner restricts tools based on the active Workflow and appends supplementar
 
 ##### Tool Constraints
 
-- `tools/registry.ts` is the single source of truth for tool properties (`effect`, `riskLevel`, `concurrencyClass`, and `domain`). Every tool must be classified as `shared` or `paradox`; the General boundary rejects Paradox tools both while building schemas and immediately before execution.
-- General Coding receives only ordinary repository tools and domain-safe schemas. It excludes CWTools/PDXScript queries, project/game indexes, localisation, media conversion, skills, EvidenceGate, CWTools diagnostics, and all MCP calls. MCP remains Paradox-only until server configuration carries enforceable capability metadata.
-- Legacy persistent-memory tools remain Paradox-only because their stored records predate domain metadata. General Multi-Agent uses its conversation/checkpoint context plus a domain-prefixed Blackboard view; `query_blackboard` and `merge_results` cannot read results from a previous Paradox run or another topic.
+- `tools/registry.ts` is the single source of truth for tool properties (`effect`, `riskLevel`, `concurrencyClass`, and `domain`). `effectiveToolPolicy.ts` computes the same static intersection of domain, mode, profile patterns, authorization, and child role for activation, schema filtering, permission checks, and execution; a legacy full-toolset flag cannot cross the domain boundary.
+- General Coding receives ordinary repository tools plus provider-neutral `go_to_definition`, `find_references`, `hover_symbol`, completion, diagnostics, and guarded workspace-wide `rename_symbol`. It excludes CWTools/PDXScript queries, project/game indexes, localisation, media conversion, EvidenceGate, and CWTools-only diagnostics.
+- Skills and structured memory are available in both domains. Skills may declare `capability-domain`; legacy `.cwtools/skills` and bundled skills default to Paradox, while `.agents/skills` defaults to both. Memory format V5 records a domain on each entry; General can read only `general` entries, while missing-domain legacy entries remain Paradox-only. Blackboard keys are also domain/topic-prefixed, and large-payload file references may resolve only inside the current Topic's private blackboard directory.
+- A Workflow allowlist remains narrower than the mode policy. Its read-only tools stay reachable across internal runner stages, while writes, media conversion/deployment, command, and Git effects still require their normal stage, authorization, and permission gates.
+- MCP server configuration declares `capabilityDomain=paradox|general|both`; disclosure and execution both enforce it, and missing legacy metadata defaults to Paradox. The bundled outbound `cwtools-mcp` remains a separate read-only Paradox semantic service.
+- General context references and profile discovery are multi-root aware: the active editor selects the default root, paths can use a workspace-folder qualifier, traversal outside the selected root is rejected, and profile sources are registered for every root.
 - Writes to `.yml` localization files must call `write_localisation`, not generic text replacers.
 - General and Paradox execution share the same three source-editing primitives: `write_file`, `edit_file`, and `replace_lines`. PDXScript changes should obtain exact context with `get_pdx_block`, then use the smallest guarded edit so untouched comments and source text remain unchanged. Localisation remains the exception and must use `write_localisation`.
 - The executable tool paths for `apply_patch`, `multi_replace_file_content`, and `edit_pdx_block` have been removed. Historical Webview rendering may still recognize old names. `ast_mutate` remains retired and receives migration guidance to use `edit_file` or `replace_lines`.
@@ -692,6 +700,7 @@ sequenceDiagram
 | `aiService.ts` | 各 AI Provider HTTP/SSE 客户端、请求适配、回退和 custom 线协议分发（`customApiFormat`） |
 | `codex/` | ChatGPT 订阅 Provider 的浏览器 PKCE OAuth、VS Code SecretStorage 凭据、Token 自动刷新、账户状态、兼容模型与额度窗口 |
 | `promptBuilder.ts` / `prompt/sections/` | Prompt facade、项目上下文和模式系统提示词 |
+| `projectInstructions.ts` | 有界加载通用领域根规则和目标路径适用的标准仓库指令 |
 | `providers.ts` / `providers/models/` | Provider facade、默认模型、能力、价格和缓存折扣 |
 | `types.ts` | 消息、工具、Profile、内部模式、上下文、Artifact、设置类型 |
 | `runnerPolicy.ts` | 模式级工具过滤、迭代上限和 slim sub-agent 输出预算 |
@@ -722,6 +731,7 @@ sequenceDiagram
 | `workflowRegistry.ts` / `workflowI18n.ts` | workflow 元数据、工具策略、阶段定义和本地化 |
 | `inlineProvider.ts` | AI 内联补全 |
 | `mcpClient.ts` | MCP stdio/SSE 客户端 |
+| `mcpCapability.ts` | 可执行的 MCP Server 能力领域声明；旧条目默认 Paradox |
 | `toolCallParser.ts` / `jsonRepair.ts` | 非标准工具调用和不完整 JSON 修复 |
 
 ##### Runner 执行管线（`runner/`）
@@ -741,6 +751,7 @@ sequenceDiagram
 | `commandPreflight.ts` | 引号感知的 Shell 序列解析，以及统一的 `allow` / `prompt` / `forbidden` 命令策略决策 |
 | `permissionPolicy.ts` | 低风险预批准规则和 `cwdScope` 校验 |
 | `policyEngine.ts` | 强制执行的分层权限 profile、受保护路径规则和可操作拒绝 |
+| `effectiveToolPolicy.ts` | 统一求取领域、模式、Profile、授权与子 Agent 门控的静态交集 |
 | `autoReviewer.ts` | 可选只读 LLM 审批 reviewer：精确 action 缓存、拒绝熔断、失败回退到用户 |
 | `runtimeItems.ts` | 命令、进程与权限请求的统一 Item 生命周期类型 |
 | `sessionPermissions.ts` | 当前工作区会话的权限 profile 覆盖；快捷选择不会持久化为全局设置 |
@@ -781,6 +792,8 @@ sequenceDiagram
 
 每个非 Workflow 回合先运行确定性准入。高置信判断会跳过辅助路由调用；存在实质歧义时，当前模型返回领域、意图、置信度和有界证据。`agentProfile.ts` 会验证结果，对低置信跨域切换应用连续性迟滞，并在模型不可用时确定性回退。路由器可以提出策略建议，但普通宽任务不会再在入口自动固定为多 Agent；用户显式委派会被保留，其余 Fan-out 均在取得并验证任务图后决定。路由不会改变始终由用户控制的权限 Profile 或审批策略。
 
+准入后的 `domainProfile` 是 Run 不变量。Catalog Profile、Workflow、恢复数据和子 Agent 只能收紧工具或授权，不能替换领域。通用领域的冻结提示词有界加载根目录 `AGENTS.md`、`CLAUDE.md` 和 `.github/copilot-instructions.md`，动态提示词再加入当前目标路径适用的嵌套 `AGENTS.md`；Paradox 则刻意继续以生成的 `CWTOOLS.md` 作为顶层项目来源。`/init` 生成 `.cwtools/project/profile.json` 后，由对应模式卡替代整份 `CWTOOLS.md` 的 Prompt 注入；其中保留的 Custom Rules 仍会注入，并以有界形式传给 slim 子 Agent。任一根规则源变化都会使冻结提示词指纹失效。
+
 解析后的准入会创建包含四个正交维度的 `AgentSchedulingState`：
 
 | 调度维度 | 含义 |
@@ -804,7 +817,7 @@ Conversation Undo 会同时协调文件快照、Goal、Todo、Task 通知、Sche
 
 #### 正交 Agent 平台服务
 
-`AgentMode` 现在是兼容适配器，而不是主调度器。`AgentSchedulingState` 选择目录中的具体 `profileName`，并独立叠加计划、验证、收尾、并行 Swarm 或 Specialist 执行能力。Profile 来源包括内置目录、用户级 `.cwtools/agents`，以及工作区 `.agents/agents` 和 `.cwtools/agents`。每个 `AGENT.md` 用 Frontmatter 声明授权上限、工具模式、子 Agent、模型偏好和摘要策略，Markdown 正文会在稳定基础 Prompt 之后作为隔离的 Profile 指令注入；同名 Profile 只有显式声明 `override: true` 才能覆盖其他来源。Catalog 串行、去抖地热更新 Source，Inspector 展示 Catalog Revision 与 Source 错误；命名 Profile 由准入调度自动选择，作为内部策略而不再出现在普通输入框菜单中。生效的 Profile 会实际收紧授权、绑定配置的主/次模型，并与 Mode 的子 Agent 角色集合取交集。导出的 Profile Source 接口同时作为插件接入点。
+`AgentMode` 现在是兼容适配器，而不是主调度器。`AgentSchedulingState` 选择目录中的具体 `profileName`，并独立叠加计划、验证、收尾、并行 Swarm 或 Specialist 执行能力。Profile 来源包括内置目录、用户级 `.cwtools/agents`，以及每个工作区根的 `.agents/agents` 和 `.cwtools/agents`。每个 `AGENT.md` 用 Frontmatter 声明授权上限、工具模式、子 Agent、模型偏好和摘要策略，Markdown 正文会在稳定基础 Prompt 之后作为隔离的 Profile 指令注入；同名 Profile 只有显式声明 `override: true` 才能覆盖其他来源，Schema 错误与试图改变已有 Profile 能力领域的覆盖会显示在 Runtime Inspector。Catalog 串行、去抖地热更新 Source；命名 Profile 由准入调度自动选择，作为内部策略而不再出现在普通输入框菜单中。生效的 Profile 会实际收紧授权、绑定配置的主/次模型，并与 Mode 的子 Agent 角色集合取交集。导出的 Profile Source 接口同时作为插件接入点。
 
 工具状态具有四个可观察层级：已注册、Profile 已激活、渐进式已披露、授权已批准。Profile 激活层会把 Registry 中所有未激活工具加入 Runner 排除集；最终批准仍由 Policy、Plan Guard、Sandbox 和 Permission 权威执行。
 
@@ -851,9 +864,12 @@ Runner 会在模式工具集基础上应用 Workflow tool policy，并把 Workfl
 
 当前约束：
 
-- `tools/registry.ts` 是工具读写分类和 mode gating 的事实来源；每个 entry 同时携带 `effect`、`riskLevel`、`concurrencyClass` 和 `domain`。每个工具必须显式分类为 `shared` 或 `paradox`；通用边界在构建 schema 和实际执行前都会拦截 Paradox 工具。
-- 通用编码只获得普通仓库工具和领域安全 schema；CWTools/PDXScript 查询、项目/游戏索引、本地化、媒体转换、Skill、EvidenceGate、CWTools 诊断以及所有 MCP 调用均不进入通用领域。只有 MCP Server 配置具备可强制执行的能力元数据后，才会考虑向通用领域开放 MCP。
-- 旧持久记忆中的记录早于领域元数据，因此相关 memory 工具暂时只向 Paradox 开放。通用多 Agent 使用当前对话/checkpoint 上下文和按领域加前缀的 Blackboard 视图；`query_blackboard` 与 `merge_results` 不能读取上一轮 Paradox 运行或其他 Topic 的结果。
+- `tools/registry.ts` 是工具属性（`effect`、`riskLevel`、`concurrencyClass`、`domain`）的事实来源；`effectiveToolPolicy.ts` 为激活、Schema 过滤、权限校验和执行统一求取领域、模式、Profile 工具模式、授权与子角色的静态交集，旧 full-toolset 开关也不能跨越领域边界。
+- 通用编码获得普通仓库工具，以及供应商无关的 `go_to_definition`、`find_references`、`hover_symbol`、补全、诊断和受保护的工作区级 `rename_symbol`；CWTools/PDXScript 查询、项目/游戏索引、本地化、媒体转换、EvidenceGate 与 CWTools 专用诊断仍不会进入通用领域。
+- Skill 与结构化长期记忆同时向两个领域开放。Skill 可声明 `capability-domain`；旧 `.cwtools/skills` 与内置 Skill 默认属于 Paradox，`.agents/skills` 默认用于两个领域。V5 记忆为每条记录保存领域；通用领域只能读取 `general` 记录，缺失领域的旧记录仍只属于 Paradox。Blackboard 键同样带领域与 Topic 前缀，大载荷文件引用只能解析到当前 Topic 的私有 blackboard 目录。
+- Workflow allowlist 始终比 Mode 策略更窄；其中只读工具跨 Runner 内部阶段保持可达，而写入、媒体转换/部署、命令和 Git 效果仍必须经过正常阶段、授权及权限门。
+- MCP Server 配置声明 `capabilityDomain=paradox|general|both`，工具披露和实际执行都会强制校验；缺失该元数据的旧配置默认仅允许 Paradox。随包输出的 `cwtools-mcp` 仍是独立、只读的 Paradox 语义服务。
+- 通用上下文引用和 Profile 发现支持多根工作区：活动编辑器选择默认根，路径可带工作区文件夹限定符，越出所选根的遍历会被拒绝，并为每个根注册 Profile Source。
 - `tools/permissions.ts` 从 registry 读取权限元数据，统一执行 mode/sub-agent 访问校验。
 - `tools/argRepair.ts` 在 Runner 执行工具前修复常见参数名和类型漂移。
 - `runner/toolInvocation.ts` 在执行前归一化 tool call，派生风险元数据，提取目标文件并生成稳定 `invocationId`。

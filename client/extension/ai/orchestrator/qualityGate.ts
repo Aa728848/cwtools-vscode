@@ -12,6 +12,7 @@ import { aiText } from '../messages';
 import type { RunEventSink } from '../runner/runContext';
 import { SemanticVerifier } from './semanticVerifier';
 import { mergeTokenUsageTotals } from '../cacheCapability';
+import type { UserExecutionPolicy } from './userExecutionPolicy';
 
 /** Quality gate configuration */
 export interface QualityGateConfig {
@@ -172,6 +173,22 @@ export class QualityGate {
         const spriteSection = hasSpriteDiagnostics ? `\n${SPRITE_REPAIR_PROTOCOL}\n` : '';
         const soundSection = hasSoundDiagnostics ? `\n${SOUND_REPAIR_PROTOCOL}\n` : '';
         const featureManifest = reviewContext?.taskGraph?.metadata.featureManifest;
+        const userExecutionPolicy = reviewContext?.taskGraph?.metadata.userExecutionPolicy;
+        const userPolicySection = userExecutionPolicy
+            ? [
+                '## Host-Enforced User Execution Policy',
+                `- Localisation ownership: ${userExecutionPolicy.localisationOwnership}`,
+                `- Warning handling: ${userExecutionPolicy.warningHandling}`,
+                '- Error-severity LSP diagnostics remain blocking regardless of warning preferences.',
+                ...(userExecutionPolicy.localisationOwnership === 'user'
+                    ? ['- The user retained localisation work. Do not request, suggest, or perform localisation writes. Missing-localisation warnings are non-blocking; an error-severity diagnostic must still be reported as blocking user action.']
+                    : []),
+                ...(userExecutionPolicy.warningHandling === 'ignore'
+                    ? ['- Do not include warning/info/hint diagnostics in logicIssuesCount, acceptanceFailures, or fixSuggestions. You may mention them as non-blocking observations only.']
+                    : []),
+                '',
+            ]
+            : [];
         const requestSection = reviewContext?.taskGraph
             ? [
                 '## Original User Request',
@@ -221,6 +238,7 @@ export class QualityGate {
             '## Quality Gate Review Task',
             '',
             ...requestSection,
+            ...userPolicySection,
             'Please review the code quality of the following files:',
             fileList,
             diagnosticsSection,
@@ -241,7 +259,7 @@ export class QualityGate {
             '  "acceptanceFailures": ["<required criterion without evidence>"]',
             '}',
             '```',
-            'IMPORTANT: Do not output PASSED or FAILED. The system will automatically fail the quality gate if any LSP errors exist. You only need to report semantic or logic issues.',
+            'IMPORTANT: Do not output PASSED or FAILED. The system automatically fails the quality gate for error-severity LSP diagnostics. Warning/info/hint diagnostics follow the Host-Enforced User Execution Policy and must never be promoted to errors.',
         ].join('\n');
     }
 
@@ -601,7 +619,12 @@ export class QualityGate {
 * Generate repair prompt. 
 * Based on Reviewer's review report, build repair instructions. 
 */
-    buildFixPrompt(reviewReport: string, writtenFiles: string[], paradoxReview = true): string {
+    buildFixPrompt(
+        reviewReport: string,
+        writtenFiles: string[],
+        paradoxReview = true,
+        userExecutionPolicy?: UserExecutionPolicy,
+    ): string {
         const hasSpriteIssues = /Expected value of type sprite|type sprite|spriteType|picture|GFX_/i.test(reviewReport);
         const hasSoundIssues = /show_sound|Expected value of type sound|type sound|sound\s*=|music|\.asset/i.test(reviewReport);
         return [
@@ -617,6 +640,12 @@ export class QualityGate {
             ...writtenFiles.map(f => `- ${f}`),
             '',
             'Fix Requirements:',
+            ...(userExecutionPolicy?.warningHandling === 'ignore'
+                ? ['- Do not repair warning/info/hint diagnostics; only error-severity diagnostics and verified functional defects are blocking.']
+                : []),
+            ...(userExecutionPolicy?.localisationOwnership === 'user'
+                ? ['- Localisation is user-owned. Do not create or modify localisation files, and do not remove or rename valid script references merely to silence missing-localisation warnings.']
+                : []),
             ...(paradoxReview
                 ? [
                     '1. Only fix the specific issues listed in the review report. Fix all real LSP errors and logic conflicts.',

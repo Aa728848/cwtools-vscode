@@ -3,6 +3,7 @@ import * as path from 'path';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
 import { getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from './workspacePaths';
+import type { AgentRuntimeDomain } from './types';
 
 /** Classification of a memory entry's provenance. */
 export type MemoryKind = 'user_fact' | 'project_fact' | 'inferred' | 'ephemeral';
@@ -11,6 +12,8 @@ export type MemoryKind = 'user_fact' | 'project_fact' | 'inferred' | 'ephemeral'
 export interface MemoryEntry {
     key: string;
     content: string;
+    /** Missing on legacy entries, which belong to the Paradox domain. */
+    domain?: AgentRuntimeDomain;
     priority: 'high' | 'normal' | 'low';
     source?: string;
     confidence?: number;
@@ -52,6 +55,8 @@ export interface MemoryRetrievalContext {
     pathScope?: string[];
     /** Include stale entries, annotated with `stale=true`, instead of excluding them. */
     includeStale?: boolean;
+    /** Capability-domain namespace. Legacy entries are visible only to Paradox. */
+    domain?: AgentRuntimeDomain;
 }
 
 /** Validate one untrusted entry parsed from memory.json. Returns null when unusable. */
@@ -66,6 +71,7 @@ function sanitizeMemoryEntry(raw: unknown): MemoryEntry | null {
     return {
         key: record.key,
         content: record.content,
+        domain: record.domain === 'general' || record.domain === 'paradox' ? record.domain : undefined,
         priority: record.priority === 'high' || record.priority === 'low' ? record.priority : 'normal',
         source: typeof record.source === 'string' ? record.source : undefined,
         confidence: num(record.confidence),
@@ -109,7 +115,7 @@ export class MemoryParser {
     static readonly MEMORY_FILE_NAME = '.cwtools-memory.md';
     static readonly STRUCTURED_MEMORY_FILE_NAME = 'memory.json';
     /** Structured file format version written by this build. Readers stay lenient. */
-    static readonly STRUCTURED_MEMORY_VERSION = 4;
+    static readonly STRUCTURED_MEMORY_VERSION = 5;
     /** Half-life scale for freshness/last-used decay in retrieval scoring. */
     private static readonly FRESHNESS_DECAY_MS = 30 * 24 * 60 * 60 * 1000;
     private static readonly KNOWN_WORKSPACE_LIMIT = 16;
@@ -280,6 +286,7 @@ export class MemoryParser {
                 const date = new Date(entry.updatedAt ?? entry.createdAt ?? Date.now()).toISOString().slice(0, 10);
                 const priority = entry.priority !== 'normal' ? ` [${entry.priority}]` : '';
                 const metadata = JSON.stringify({
+                    domain: entry.domain,
                     source: entry.source,
                     confidence: entry.confidence,
                     kind: entry.kind,
@@ -456,10 +463,15 @@ export class MemoryParser {
 
             const structured = this.readStructuredEntries(topicId);
             if (structured.length > 0) {
-                this.synchronizeProjectFactRevision(structured);
+                const requestedDomain = context?.domain ?? 'paradox';
+                const scoped = structured.filter(entry =>
+                    entry.domain === requestedDomain
+                    || (requestedDomain === 'paradox' && entry.domain === undefined));
+                if (scoped.length === 0) return '';
+                this.synchronizeProjectFactRevision(scoped);
                 const now = Date.now();
-                const staleProjectFactPrompt = this.buildStaleProjectFactPrompt(structured, context, now);
-                const usable = structured.filter(entry =>
+                const staleProjectFactPrompt = this.buildStaleProjectFactPrompt(scoped, context, now);
+                const usable = scoped.filter(entry =>
                     (!entry.expiresAt || entry.expiresAt > now)
                     && (context?.includeStale === true || entry.stale !== true));
                 const keywords = context?.taskText ? MemoryParser.tokenizeTaskText(context.taskText) : [];
@@ -486,6 +498,8 @@ export class MemoryParser {
                 return [activeMemoryPrompt, staleProjectFactPrompt].filter(Boolean).join('\n');
             }
 
+            // Unversioned Markdown memory predates capability domains.
+            if (context?.domain === 'general') return '';
             const candidates = this.getMemoryReadCandidates(topicId);
             const signature = candidates.map(memoryPath => {
                 if (!fs.existsSync(memoryPath)) return `${memoryPath}:missing`;
@@ -536,10 +550,18 @@ export class MemoryParser {
      * mentions the key, or `save_memory` rewrites an existing key) — never from
      * prompt building. Returns how many of the given keys matched stored entries.
      */
-    public markMemoryUsed(topicId: string | undefined, keys: string[]): number {
+    public markMemoryUsed(
+        topicId: string | undefined,
+        keys: string[],
+        domain: AgentRuntimeDomain = 'paradox',
+    ): number {
         if (!this.workspaceRoot || !Array.isArray(keys) || keys.length === 0) return 0;
         const tid = topicId ?? this.topicId;
-        const existingKeys = new Set(this.readStructuredEntries(tid).map(entry => entry.key.toLowerCase()));
+        const domainKey = (key: string, entryDomain: AgentRuntimeDomain = domain) =>
+            `${entryDomain}:${key.trim().toLowerCase()}`;
+        const existingKeys = new Set(this.readStructuredEntries(tid)
+            .filter(entry => (entry.domain ?? 'paradox') === domain)
+            .map(entry => domainKey(entry.key)));
         const pendingKey = `${path.resolve(this.workspaceRoot)}::${tid || 'default'}`;
         let pending = MemoryParser.pendingUsage.get(pendingKey);
         if (!pending) {
@@ -550,7 +572,7 @@ export class MemoryParser {
         let matched = 0;
         for (const key of keys) {
             if (typeof key !== 'string') continue;
-            const normalizedKey = key.trim().toLowerCase();
+            const normalizedKey = domainKey(key);
             if (!normalizedKey || !existingKeys.has(normalizedKey)) continue;
             const stat = pending.counts.get(normalizedKey) ?? { count: 0, lastUsedAt: 0 };
             stat.count += 1;
@@ -572,13 +594,17 @@ export class MemoryParser {
      * Record usage for every stored memory key that appears verbatim in `text`
      * (e.g. an assistant response). Returns how many distinct keys matched.
      */
-    public markMemoryUsedInText(topicId: string | undefined, text: string): number {
+    public markMemoryUsedInText(
+        topicId: string | undefined,
+        text: string,
+        domain: AgentRuntimeDomain = 'paradox',
+    ): number {
         if (!this.workspaceRoot || !text) return 0;
         const tid = topicId ?? this.topicId;
         const keys = this.readStructuredEntries(tid)
-            .filter(entry => text.includes(entry.key))
+            .filter(entry => (entry.domain ?? 'paradox') === domain && text.includes(entry.key))
             .map(entry => entry.key);
-        return this.markMemoryUsed(tid, keys);
+        return this.markMemoryUsed(tid, keys, domain);
     }
 
     /** Persist all pending debounced usage stats immediately (tests, deactivation). */
@@ -605,7 +631,7 @@ export class MemoryParser {
             const entries = parser.readStructuredEntries();
             let changed = false;
             for (const entry of entries) {
-                const stat = pending.counts.get(entry.key.toLowerCase());
+                const stat = pending.counts.get(`${entry.domain ?? 'paradox'}:${entry.key.toLowerCase()}`);
                 if (!stat) continue;
                 entry.usageCount = (entry.usageCount ?? 0) + stat.count;
                 entry.lastUsedAt = stat.lastUsedAt;
@@ -676,7 +702,10 @@ export class MemoryParser {
             const entries = this.readStructuredEntries(topicId);
             this.synchronizeProjectFactRevision(entries);
             const normalizedKey = entry.key.trim().slice(0, 160);
-            const existing = entries.find(candidate => candidate.key.toLowerCase() === normalizedKey.toLowerCase());
+            const requestedDomain = entry.domain ?? 'paradox';
+            const existing = entries.find(candidate =>
+                candidate.key.toLowerCase() === normalizedKey.toLowerCase()
+                && (candidate.domain ?? 'paradox') === requestedDomain);
             const requestedSource = entry.source ?? 'agent:save_memory';
             const existingKind = existing?.kind ?? MemoryParser.inferKind(existing?.source);
             const genericAgentRewrite = requestedSource === 'agent:save_memory' || requestedSource.startsWith('run:');
@@ -707,6 +736,7 @@ export class MemoryParser {
                 ...entry,
                 key: normalizedKey,
                 content,
+                domain: requestedDomain,
                 source,
                 // Re-saving a key revalidates it: stale/revision come from the new
                 // entry only, never carried over from the superseded one.
@@ -723,7 +753,9 @@ export class MemoryParser {
                 usageCount: existing?.usageCount ?? 0,
                 scope: entry.scope ?? 'private',
             };
-            const consolidated = entries.filter(candidate => candidate.key.toLowerCase() !== normalized.key.toLowerCase());
+            const consolidated = entries.filter(candidate =>
+                candidate.key.toLowerCase() !== normalized.key.toLowerCase()
+                || (candidate.domain ?? 'paradox') !== requestedDomain);
             consolidated.push(normalized);
             const priorityScore = { high: 3, normal: 2, low: 1 } as const;
             consolidated.sort((a, b) =>

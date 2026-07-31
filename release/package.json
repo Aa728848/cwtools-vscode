@@ -1661,6 +1661,16 @@
                                     ],
                                     "description": "Transport type"
                                 },
+                                "capabilityDomain": {
+                                    "type": "string",
+                                    "enum": [
+                                        "paradox",
+                                        "general",
+                                        "both"
+                                    ],
+                                    "default": "paradox",
+                                    "description": "Capability domain allowed to receive this server. Missing values remain Paradox-only."
+                                },
                                 "command": {
                                     "type": "string",
                                     "description": "Command for stdio transport"

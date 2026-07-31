@@ -161,6 +161,8 @@ export interface FeatureManifest {
 export interface MCPServerConfig {
     name: string;
     type: 'stdio' | 'sse';
+    /** Explicit trust classification. Legacy/missing values are Paradox-only. */
+    capabilityDomain?: 'paradox' | 'general' | 'both';
     // For stdio
     command?: string;
     args?: string[];
@@ -1277,6 +1279,10 @@ export type AgentToolName =
     | 'get_completion_at'
     | 'document_symbols'
     | 'workspace_symbols'
+    | 'go_to_definition'
+    | 'find_references'
+    | 'hover_symbol'
+    | 'rename_symbol'
     | 'verify_pdx_identifier'
     | 'todo_write'
     | 'read_file'
@@ -2249,8 +2255,6 @@ export type WebViewMessage =
     | { type: 'importTopic'; data: string }
     | { type: 'requestUsageStats' }
     | { type: 'promptClearUsageStats' }
-    | { type: 'approveTransaction'; txId: string }
-    | { type: 'rejectTransaction'; txId: string }
     | { type: 'clearUsageStats' }
     | { type: 'requestMentionSearch'; query: string }
     | { type: 'requestManagerSnapshot' }

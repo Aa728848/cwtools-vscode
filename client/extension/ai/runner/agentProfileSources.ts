@@ -98,11 +98,16 @@ export function createDirectoryAgentProfileSource(
             const profiles: RuntimeAgentProfile[] = [];
             for (const file of files) {
                 try {
+                    const raw = await fs.promises.readFile(file, 'utf8');
+                    if (raw.length > 64_000) {
+                        throw new Error(`Agent profile exceeds 64000 characters: ${file}`);
+                    }
                     const parsed = parseAgentMarkdown(
-                        await fs.promises.readFile(file, 'utf8'),
+                        raw,
                         path.basename(path.dirname(file)),
                     );
-                    if (parsed) profiles.push(parsed);
+                    if (!parsed) throw new Error(`Invalid AGENT.md frontmatter: ${file}`);
+                    profiles.push(parsed);
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
                 }

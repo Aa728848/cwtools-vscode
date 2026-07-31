@@ -221,7 +221,7 @@
   "configuration.stellarisLanguageServices.ai.web.openaiModel.description": "仅在明确选择 OpenAI 搜索供应商时使用的 Responses 模型。留空则使用内置默认值。",
   "configuration.stellarisLanguageServices.ai.web.cacheTtlMs.description": "有界内存搜索结果缓存的生存时间（毫秒）；这不是预索引缓存。",
   "configuration.stellarisLanguageServices.ai.web.allowSyntheticProxyAddresses.description": "允许受控沙箱或企业合成 DNS 代理解析出的 198.18.0.0/15 地址。直接 IP 访问和其他所有私有地址段仍会被阻止。",
-  "configuration.stellarisLanguageServices.ai.mcp.servers.description": "MCP（模型上下文协议）服务器配置，用于扩展 AI 工具能力。",
+  "configuration.stellarisLanguageServices.ai.mcp.servers.description": "MCP（模型上下文协议）服务器配置。每个服务器需声明用于 Paradox、通用编码或两者；旧条目默认仅允许 Paradox。",
   "configuration.stellarisLanguageServices.ai.orchestrator.agentModels.description": "协调模式子 Agent 的自定义模型配置（如 explorer, reviewer）。",
   "configuration.stellarisLanguageServices.ai.performance.legacyFullToolset.description": "使用旧版宽工具集，而不是按模式过滤工具。",
   "configuration.stellarisLanguageServices.ai.performance.fullProjectRulesInBuild.description": "在 Build 模式提示词中注入完整项目规则文件，而不是精简摘要。",

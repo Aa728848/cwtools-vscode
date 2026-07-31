@@ -5352,41 +5352,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             svgIcon('edit') + tr(`Request to apply batch changes (${cardInfo.filesRequested?.length || 0} file(s)):`, `请求批量应用更改 (${cardInfo.filesRequested?.length || 0} 个文件):`) +
             '<ul style="margin: 4px 0; padding-left: 16px; font-size: 11px; font-family: monospace; opacity: 0.8; max-height: 60px; overflow-y: auto;">' + filesListHTML + '</ul>' +
             `<span class="diff-card-hint">${tr('All changes are prepared in memory first', '所有的修改会在内存中隔离准备')}</span></div>` +
-            '<div class="diff-card-actions">' +
-            '<button class="diff-accept-btn" data-txid="' + safeId + '">' + svgIcon('check') + tr('Accept batch commit', '接受批量提交') + '</button>' +
-            '<button class="diff-reject-btn" data-txid="' + safeId + '">' + svgIcon('x') + tr('Reject', '拒绝') + '</button>' +
-            '</div>';
-            
-        const actions = card.querySelector('.diff-card-actions') as HTMLElement | null;
-        if (actions) {
-            const previewBtn = document.createElement('button');
-            previewBtn.className = 'diff-preview-btn';
-            previewBtn.type = 'button';
-            previewBtn.innerHTML = svgIcon('search') + tr('View details', '查看详情');
-            previewBtn.style.display = 'none';
-            actions.insertBefore(previewBtn, actions.firstChild);
-        }
-        (card.querySelector('.diff-accept-btn') as HTMLButtonElement).addEventListener('click', function () {
-            this.disabled = true; (card.querySelector('.diff-reject-btn') as HTMLButtonElement).disabled = true;
-            this.innerHTML = svgIcon('check') + tr('Accepted', '已接受');
-            vscode.postMessage({ type: 'approveTransaction', txId: cardInfo.id });
-            dismissCard(div, 800);
-        });
-        (card.querySelector('.diff-reject-btn') as HTMLButtonElement).addEventListener('click', function () {
-            this.disabled = true; (card.querySelector('.diff-accept-btn') as HTMLButtonElement).disabled = true;
-            this.textContent = tr('Rejected', '已拒绝');
-            vscode.postMessage({ type: 'rejectTransaction', txId: cardInfo.id });
-            dismissCard(div, 800);
-        });
-        const pendingActions = card.querySelector('.diff-card-actions') as HTMLElement | null;
-        if (pendingActions) {
-            const previewBtn = document.createElement('button');
-            previewBtn.className = 'diff-preview-btn';
-            previewBtn.type = 'button';
-            previewBtn.innerHTML = svgIcon('search') + tr('View details', '查看详情');
-            previewBtn.style.display = 'none';
-            pendingActions.insertBefore(previewBtn, pendingActions.firstChild);
-        }
+            `<div class="diff-card-hint">${tr(
+                `Legacy transaction ${safeId} is retained for history only; direct transaction commits were removed in favor of the guarded write pipeline.`,
+                `旧事务 ${safeId} 仅保留用于历史显示；直接事务提交已移除，统一使用受保护的写入管线。`,
+            )}</div>`;
         div.appendChild(card);
         chatArea.appendChild(div);
         scrollBottom();
@@ -7731,6 +7700,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     <option value="stdio" ${(t.type || 'stdio') === 'stdio' ? 'selected' : ''}>stdio</option>
                     <option value="sse" ${t.type === 'sse' ? 'selected' : ''}>sse</option>
                 </select>
+                <select class="settings-select mcp-domain" title="${tr('Capability domain', '能力领域')}" style="width:105px">
+                    <option value="paradox" ${(server.capabilityDomain || 'paradox') === 'paradox' ? 'selected' : ''}>Paradox</option>
+                    <option value="general" ${server.capabilityDomain === 'general' ? 'selected' : ''}>General</option>
+                    <option value="both" ${server.capabilityDomain === 'both' ? 'selected' : ''}>${tr('Both', '两者')}</option>
+                </select>
                 <button class="mcp-delete-btn" title="${tr('Delete', '删除')}">${svgIconNoMargin('trash')}</button>
             </div>
             <div class="mcp-transport-content"></div>
@@ -7823,16 +7797,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const mcpServers = Array.from(document.querySelectorAll('.mcp-server-block')).map(block => {
             const type = (block.querySelector('.mcp-type') as HTMLSelectElement).value;
             const name = (block.querySelector('.mcp-name') as HTMLInputElement).value.trim();
+            const capabilityDomain = (block.querySelector('.mcp-domain') as HTMLSelectElement | null)?.value || 'paradox';
             if (type === 'stdio') {
                 const command = (block.querySelector('.mcp-command') as HTMLInputElement | null)?.value.trim() || '';
                 const argsStr = (block.querySelector('.mcp-args') as HTMLInputElement | null)?.value.trim() || '';
                 const args = argsStr ? argsStr.split(/\s+/) : [];
                 const envText = (block.querySelector('.mcp-env') as HTMLTextAreaElement | null)?.value || '';
                 const env = parseEnvText(envText);
-                return { name, type, command, args, ...(env ? { env } : {}) };
+                return { name, type, capabilityDomain, command, args, ...(env ? { env } : {}) };
             } else {
                 const url = (block.querySelector('.mcp-url') as HTMLInputElement | null)?.value.trim() || '';
-                return { name, type, url };
+                return { name, type, capabilityDomain, url };
             }
         });
 

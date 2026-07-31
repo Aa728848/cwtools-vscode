@@ -387,7 +387,7 @@ function focusReadableStart() {
     const visibleNodes = getVisibleNodes();
     if (visibleNodes.length === 0) return;
 
-    let focusNodes = visibleNodes.filter(node => Boolean(node.data('isSeed')));
+    const focusNodes = visibleNodes.filter(node => Boolean(node.data('isSeed')));
     const anchor = (focusNodes.length > 0 ? focusNodes[0] : visibleNodes[0]) as cytoscape.NodeSingular | undefined;
     if (anchor) revealNode(anchor);
 }

@@ -15,6 +15,7 @@ import type { ChatMessage, AgentMode, AgentRuntimeDomain, ToolDefinition } from 
 import { defaultDomainForMode } from './agentProfile';
 import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
 import { MemoryParser } from './memoryParser';
+import { buildGeneralProjectInstructionsPrompt } from './projectInstructions';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText, getAiMessageLocale } from './messages';
 import { getExistingPrivateTopicFilePath, getPrivateTopicStorageDir } from './workspacePaths';
@@ -285,7 +286,9 @@ export class PromptBuilder {
         const gameName = runtimeDomain === 'paradox' ? getGameDisplayName(gameId) : 'repository';
         const basePrompt = this.getModePrompt(mode, gameKnowledge, gameName, false, runtimeDomain);
         const supplement = this.getModelSupplement(providerId);
-        const projectRules = runtimeDomain === 'paradox' ? this.getProjectRulesPrompt(mode) : '';
+        const projectRules = runtimeDomain === 'paradox'
+            ? this.getProjectRulesPrompt(mode)
+            : buildGeneralProjectInstructionsPrompt(this.workspaceRoot);
         
         let finalPrompt = '';
 
@@ -371,11 +374,11 @@ export class PromptBuilder {
             if (projectKnowledge) finalPrompt += projectKnowledge + '\n';
         }
 
-        if (includeMemory && runtimeDomain === 'paradox') {
+        if (includeMemory) {
             // Direct prompt-builder callers may not have a current user task.
             // AgentRunner keeps includeMemory=false here and supplies task/path
             // retrieval context through buildDynamicPromptBlock instead.
-            const memoryPrompt = this.memoryParser.getMemoryPrompt(topicId, { gameId });
+            const memoryPrompt = this.memoryParser.getMemoryPrompt(topicId, { gameId, domain: runtimeDomain });
             if (memoryPrompt) finalPrompt += memoryPrompt + '\n';
         }
 
@@ -388,7 +391,7 @@ export class PromptBuilder {
         finalPrompt += basePrompt;
         if (supplement) finalPrompt += '\n' + supplement;
         
-        const skillsPrompt = runtimeDomain === 'paradox' ? this.getAgentSkillsPrompt() : '';
+        const skillsPrompt = this.getAgentSkillsPrompt(runtimeDomain);
         if (skillsPrompt) finalPrompt += '\n' + skillsPrompt;
 
         return finalPrompt;
@@ -523,11 +526,14 @@ export class PromptBuilder {
                 const profile = this.parseProjectProfile();
                 profileHash = profile ? shortSha256(JSON.stringify(profile)) : 'none';
             } catch { incomplete = true; }
-            try { skillsHash = this.computeSkillsIndexHash(); } catch { incomplete = true; }
+            try { skillsHash = this.computeSkillsIndexHash(domain); } catch { incomplete = true; }
         } else {
-            rulesHash = 'none';
+            try {
+                const instructions = buildGeneralProjectInstructionsPrompt(this.workspaceRoot);
+                rulesHash = instructions ? shortSha256(instructions) : 'none';
+            } catch { incomplete = true; }
             profileHash = 'none';
-            skillsHash = 'none';
+            try { skillsHash = this.computeSkillsIndexHash(domain); } catch { incomplete = true; }
         }
         try { flagsHash = this.computePromptFlagsHash(); } catch { incomplete = true; }
         const components: FrozenPromptFingerprintComponents = {
@@ -558,12 +564,12 @@ export class PromptBuilder {
      * frozen prompt (plan §7.1). listSkills() is sorted by name, so the hash
      * is deterministic.
      */
-    private computeSkillsIndexHash(): string {
+    private computeSkillsIndexHash(domain: AgentRuntimeDomain): string {
         const skills = listSkills({
             workspaceRoot: this.workspaceRoot,
             globalStoragePath: this.globalStoragePath,
             extensionPath: this.extensionPath,
-        });
+        }, domain);
         if (skills.length === 0) return 'none';
         const parts = skills.map(skill => {
             let fileSig = 'unreadable';
@@ -571,7 +577,7 @@ export class PromptBuilder {
                 const stat = fs.statSync(skill.filePath);
                 fileSig = `${stat.mtimeMs}:${stat.size}`;
             } catch { /* keep fallback marker */ }
-            return [skill.name, skill.description, skill.runAs ?? '', (skill.allowedTools ?? []).join(','), fileSig].join('|');
+            return [skill.name, skill.description, skill.capabilityDomain, skill.runAs ?? '', (skill.allowedTools ?? []).join(','), fileSig].join('|');
         });
         return shortSha256(parts.join('\n'));
     }
@@ -650,6 +656,14 @@ export class PromptBuilder {
     ): ChatMessage[] {
         const dynamicParts: string[] = [];
         const runtimeDomain = runtime?.domain ?? defaultDomainForMode(runtime?.mode ?? 'build');
+        if (runtimeDomain === 'general' && runtime?.pathScope?.[0]) {
+            const scopedInstructions = buildGeneralProjectInstructionsPrompt(
+                this.workspaceRoot,
+                runtime.pathScope[0],
+                false,
+            );
+            if (scopedInstructions) dynamicParts.push(scopedInstructions);
+        }
         if (runtimeDomain === 'paradox') {
             const projectKnowledge = buildProjectKnowledgePrompt(this.workspaceRoot);
             if (projectKnowledge) dynamicParts.push(projectKnowledge);
@@ -676,11 +690,12 @@ export class PromptBuilder {
             if (blueprintPrompt) dynamicParts.push(blueprintPrompt);
         }
 
-        if (runtimeDomain === 'paradox') {
+        {
             const memoryPrompt = this.memoryParser.getMemoryPrompt(topicId, {
                 taskText: runtime?.taskText,
-                gameId: this.detectGameLanguageId(),
+                gameId: runtimeDomain === 'paradox' ? this.detectGameLanguageId() : 'general',
                 pathScope: runtime?.pathScope,
+                domain: runtimeDomain,
             });
             if (memoryPrompt) dynamicParts.push(memoryPrompt);
         }
@@ -858,25 +873,25 @@ export class PromptBuilder {
             const parsed: ParsedProjectRules = { raw: content };
 
             // Extract sections by ## headers
-            const modInfoMatch = content.match(/## Mod Info\n([\s\S]*?)(?=\n## |$)/);
+            const modInfoMatch = content.match(/## Mod Info\r?\n([\s\S]*?)(?=\r?\n## |$)/);
             if (modInfoMatch) parsed.modInfo = modInfoMatch[1]!.trim();  
 
-            const structureMatch = content.match(/## Project Structure\n([\s\S]*?)(?=\n## |$)/);
+            const structureMatch = content.match(/## Project Structure\r?\n([\s\S]*?)(?=\r?\n## |$)/);
             if (structureMatch) parsed.projectStructure = structureMatch[1]!.trim();  
 
-            const idsMatch = content.match(/## Known Identifiers\n([\s\S]*?)(?=\n## |$)/);
+            const idsMatch = content.match(/## Known Identifiers\r?\n([\s\S]*?)(?=\r?\n## |$)/);
             if (idsMatch) parsed.knownIdentifiers = idsMatch[1]!.trim();  
 
-            const guidelinesMatch = content.match(/## Agent Guidelines\n([\s\S]*?)(?=\n## |$)/);
+            const guidelinesMatch = content.match(/## Agent Guidelines\r?\n([\s\S]*?)(?=\r?\n## |$)/);
             if (guidelinesMatch) parsed.agentGuidelines = guidelinesMatch[1]!.trim();  
 
-            const customMatch = content.match(/## Custom Rules\n([\s\S]*)/);
+            const customMatch = content.match(/## Custom Rules\r?\n([\s\S]*)/);
             if (customMatch && customMatch[1]!.trim() && !customMatch[1]!.includes('<!-- Add')) {  
                 parsed.customRules = customMatch[1]!.trim();  
             }
 
             // Extract namespaces list
-            const nsMatch = content.match(/### Event Namespaces\n([\s\S]*?)(?=\n### |\n## |$)/);
+            const nsMatch = content.match(/### Event Namespaces\r?\n([\s\S]*?)(?=\r?\n### |\r?\n## |$)/);
             if (nsMatch) {
                  
                 parsed.namespaces = (nsMatch[1]!.match(/`([^`]+)`/g) || []).map(s => s.replace(/`/g, ''));
@@ -967,6 +982,10 @@ export class PromptBuilder {
      */
     private getSlimProjectRulesPrompt(): string {
         const profile = this.parseProjectProfile();
+        const parsed = this.parseProjectRules();
+        const customRules = parsed?.customRules
+            ? `<project-rules>Custom Rules inherited from CWTOOLS.md:\n${this.truncateProjectRuleSection(parsed.customRules, 1600)}</project-rules>`
+            : '';
         if (profile) {
             const namespaces = profile.identifiers.namespaces.slice(0, 30);
             const parts: string[] = [
@@ -976,15 +995,14 @@ export class PromptBuilder {
             ];
             if (namespaces.length) parts.push(`Namespaces: ${namespaces.join(', ')}`);
             if (profile.localisation.languages.length) parts.push(`Localisation: ${profile.localisation.languages.join(', ')}`);
-            return `<project-hint>${parts.join(' | ')}</project-hint>`;
+            return [`<project-hint>${parts.join(' | ')}</project-hint>`, customRules].filter(Boolean).join('\n');
         }
-        const parsed = this.parseProjectRules();
         if (!parsed) return '';
         const parts: string[] = [];
         if (parsed.modInfo) parts.push(`Mod: ${parsed.modInfo.replace(/\n/g, ' | ').replace(/- \*\*/g, '').replace(/\*\*/g, '')}`);
         if (parsed.namespaces?.length) parts.push(`Namespaces: ${parsed.namespaces.join(', ')}`);
-        if (parts.length === 0) return '';
-        return `<project-hint>${parts.join(' | ')}</project-hint>`;
+        const projectHint = parts.length > 0 ? `<project-hint>${parts.join(' | ')}</project-hint>` : '';
+        return [projectHint, customRules].filter(Boolean).join('\n');
     }
 
     /**
@@ -1071,13 +1089,13 @@ ${trimmed}
      * Scans installed Agent Skills and exposes only a compact index.
      * Full SKILL.md bodies are loaded on demand through run_skill.
      */
-    private getAgentSkillsPrompt(): string {
+    private getAgentSkillsPrompt(domain: AgentRuntimeDomain): string {
         try {
             return buildSkillIndexPrompt({
                 workspaceRoot: this.workspaceRoot,
                 globalStoragePath: this.globalStoragePath,
                 extensionPath: this.extensionPath,
-            });
+            }, domain);
         } catch (e) {
             ErrorReporter.debug(SOURCE.PROMPT_BUILDER, 'Error reading agent skills', e);
             return '';

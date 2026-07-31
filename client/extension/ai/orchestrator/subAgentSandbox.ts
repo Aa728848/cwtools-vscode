@@ -19,6 +19,8 @@ export interface SubAgentSandbox {
     allowedTools?: Set<string>;
     readScope?: string[];
     writeScope?: string[];
+    /** Workspace-relative scopes that remain user-owned and cannot be written by this child. */
+    deniedWriteScopes?: string[];
     plannedEntities?: string[];
     permissionPolicy: 'deny' | 'delegate_to_parent' | 'allow_readonly';
     vfsOverlay?: Map<string, string>;
@@ -35,7 +37,8 @@ const LEGACY_TOPIC_ARTIFACT_SCOPE = '.cwtools-ai';
 export function buildSubAgentSandbox(
     taskNode: TaskNode,
     workspaceRoot: string,
-    parentWritableRoots?: string[]
+    parentWritableRoots?: string[],
+    deniedWriteScopes?: string[],
 ): SubAgentSandbox {
     const profile = getAgentProfile(taskNode.agentType);
     const role = taskNode.agentType;
@@ -45,6 +48,7 @@ export function buildSubAgentSandbox(
         role,
         mode: profile.mode,
         permissionPolicy: 'delegate_to_parent',
+        deniedWriteScopes: deniedWriteScopes?.length ? [...deniedWriteScopes] : undefined,
     };
 
     // ─── 1. 计算允许的工具集 ───
@@ -128,7 +132,7 @@ function targetMatchesWriteScope(targetFile: string, writeScope: string[], works
         }
 
         if (scopeLower === 'localisation') {
-            if (relTarget.toLowerCase().includes('localisation')) return true;
+            if (/(?:^|\/)(?:localisation|localization)(?:\/|$)/.test(relTarget.toLowerCase())) return true;
             continue;
         }
 
@@ -179,6 +183,27 @@ export function enforceSubAgentSafety(
     // ─── 1. 判断是否属于按文件路径写入类工具 ───
     if (FILE_SCOPED_WRITE_TOOLS.has(toolName)) {
         const targetFiles = getAgentToolTargetFiles(toolName, args || {}, workspaceRoot);
+        let targetFile = '';
+        if (targetFiles.length > 0) {
+            targetFile = targetFiles[0]!;
+        } else if (args && typeof args === 'object') {
+            const fallbackTarget = args.TargetFile || args.filePath || args.targetRelativePath || args.file;
+            targetFile = typeof fallbackTarget === 'string' ? fallbackTarget : '';
+        }
+        if (sandbox.deniedWriteScopes?.length) {
+            const targetsToCheck = targetFiles.length > 0 ? targetFiles : targetFile ? [targetFile] : [];
+            const deniedTarget = targetsToCheck.find(target =>
+                targetMatchesWriteScope(target, sandbox.deniedWriteScopes!, workspaceRoot));
+            if (deniedTarget) {
+                return {
+                    allowed: false,
+                    reason: aiText(
+                        `Sub-agent sandbox blocked the write because '${deniedTarget}' belongs to a user-owned scope [${sandbox.deniedWriteScopes.join(', ')}].`,
+                        `子 Agent 沙盒已阻止写入：'${deniedTarget}' 属于用户自行处理的范围 [${sandbox.deniedWriteScopes.join(', ')}]。`,
+                    ),
+                };
+            }
+        }
         const isPlanCardArtifactWrite = sandbox.mode === 'plan'
             && targetFiles.length > 0
             && targetFiles.every(target => isPlanModeCardArtifactFile(target, workspaceRoot));
@@ -198,14 +223,6 @@ export function enforceSubAgentSafety(
                     `子任务角色 '${sandbox.role}' (${sandbox.mode}) 属于只读角色，禁止调用物理写入工具 '${toolName}'`,
                 ),
             };
-        }
-
-        // 提取写入文件的具体路径参数
-        let targetFile: string = '';
-        if (targetFiles.length > 0) {
-            targetFile = targetFiles[0]!;
-        } else if (args && typeof args === 'object') {
-            targetFile = args.TargetFile || args.filePath || args.targetRelativePath || args.file || '';
         }
 
         if (!targetFile) {

@@ -63,7 +63,8 @@ const DESIGN_BLUEPRINT_AUTHORING_GUIDANCE = `### Paradox Dynamic Coupling Assess
 const PARADOX_DISPATCH_AUTHORING_GUIDANCE = `### Structured dispatch preflight for Paradox write waves
 - Prefer an approved blueprint when one exists: pass the exact current-topic \`design_blueprint.json\` emitted by the host as \`blueprintFile\` and let its schemaVersion 2 manifest and task DAG remain canonical. Do not guess another topic path, point at the Markdown companion, or reconstruct its tasks by hand. Plan and Explore fan-out never executes a \`blueprintFile\`.
 - Without a blueprint, dispatch writers only from the approved design. Supply a feature objective and stable acceptance criteria, give each writer exact in-workspace \`plannedFiles\` and the relevant \`produces\`/\`consumes\` contracts, make localisation consume its owner, and make dependencies reflect producer/consumer order and shared-file serialization.
-- Before each call, check the current mode's allowed roles and wave-size limit, then cross-check task IDs, files, entity contracts, dependencies, and acceptance checks as one payload. Read-only discovery waves stay free of writer roles and write intent.`;
+- Before each call, check the current mode's allowed roles and wave-size limit, then cross-check task IDs, files, entity contracts, dependencies, and acceptance checks as one payload. Read-only discovery waves stay free of writer roles and write intent.
+- User scope is authoritative. If the user retains localisation work or explicitly ignores warnings, encode that decision in \`userConstraints\`; never create a localisation task for user-owned work. Error-severity diagnostics remain blocking even when warnings are ignored.`;
 
 function generalRules(isSlim: boolean): string {
     return isSlim
@@ -200,6 +201,7 @@ Do not modify project files directly. Build a bounded dependency graph, dispatch
 3. Give writers exact \`plannedFiles\` when known. If targets are unknown, dispatch a read-only discovery wave first.
 4. Keep prompts bounded; sub-agents execute slices and do not redesign the parent task.
 5. Run a dependent review for high-risk integration changes, merge results, and report files, tests, failures, and remaining risks.
+6. Preserve explicit user exclusions and ownership in \`userConstraints\`. Warning preferences may relax warnings only; error-severity diagnostics remain blocking.
 
 ## Explicit Plan Handoff
 For a genuinely complex or risky change that must stop for approval instead of executing in this turn:

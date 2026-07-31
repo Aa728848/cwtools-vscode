@@ -346,7 +346,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_references',
-            description: 'Find all references to a specific identifier in the mod files. Use this to understand how an event, trigger, or effect is used across the codebase.',
+            description: 'Find references to an identifier through the active language provider, with a bounded workspace text-search fallback.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -459,7 +459,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'get_completion_at',
-            description: 'Get auto-completion suggestions and structured context at a specific position. The CWTools language server returns candidates from both the current mod and the vanilla game cache, plus line/token/scope context for deciding what values can go here.',
+            description: 'Get auto-completion suggestions and bounded context at a specific position through the active VS Code language provider. In Paradox projects, CWTools may enrich the result with game-aware scope and schema context.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -705,8 +705,74 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'go_to_definition',
+            description: 'Find the definition of the symbol at a 0-based file position through the active VS Code language provider. Works with any installed language extension.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file: { type: 'string', description: 'Absolute file path inside the workspace.' },
+                    line: { type: 'number', description: 'Line number (0-based).' },
+                    column: { type: 'number', description: 'Column number (0-based).' },
+                },
+                required: ['file', 'line', 'column'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'find_references',
+            description: 'Find references to the symbol at a 0-based file position through the active VS Code language provider. Results are bounded and workspace-relative.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file: { type: 'string', description: 'Absolute file path inside the workspace.' },
+                    line: { type: 'number', description: 'Line number (0-based).' },
+                    column: { type: 'number', description: 'Column number (0-based).' },
+                    limit: { type: 'number', description: 'Maximum references to return (default 100, max 500).' },
+                },
+                required: ['file', 'line', 'column'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'hover_symbol',
+            description: 'Get bounded hover/type documentation for the symbol at a 0-based file position through the active VS Code language provider.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file: { type: 'string', description: 'Absolute file path inside the workspace.' },
+                    line: { type: 'number', description: 'Line number (0-based).' },
+                    column: { type: 'number', description: 'Column number (0-based).' },
+                },
+                required: ['file', 'line', 'column'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'rename_symbol',
+            description: 'Rename the symbol at a 0-based file position using the active VS Code language provider. Applies one guarded workspace-wide edit after validating every target, capturing snapshots, and passing normal write policy.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file: { type: 'string', description: 'Absolute file path inside the workspace.' },
+                    line: { type: 'number', description: 'Line number (0-based).' },
+                    column: { type: 'number', description: 'Column number (0-based).' },
+                    newName: { type: 'string', description: 'New symbol name.' },
+                },
+                required: ['file', 'line', 'column', 'newName'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'lsp_operation',
-            description: 'Perform a Language Server Protocol (LSP) operation on a file position. Supports: goToDefinition (find where an identifier is defined), findReferences (find all usages), hover (get type/scope info at position), rename (preview rename refactor). Requires an open or cached file.',
+            description: 'Legacy Paradox LSP adapter retained for old workflows. New agents should use go_to_definition, find_references, hover_symbol, and the guarded rename_symbol tool.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1570,13 +1636,29 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'dispatch_agents',
-            description: 'Dispatch a bounded task DAG using only the roles authorized by the current coordinator domain. Declare dependencies and planned files so overlapping writes and producer/consumer work can be serialized safely.',
+            description: 'Dispatch a bounded task DAG using only roles authorized by the current coordinator domain. Declare dependencies, planned files, and explicit userConstraints.',
             parameters: {
                 type: 'object',
                 properties: {
                     blueprintFile: {
                         type: 'string',
                         description: 'Approved topic-scoped design_blueprint.json. When provided, its featureManifest and taskPlan replace model-supplied tasks as the canonical approved contract.',
+                    },
+                    userConstraints: {
+                        type: 'object',
+                        description: 'Constraints derived only from the explicit user request.',
+                        properties: {
+                            localisationOwnership: {
+                                type: 'string',
+                                enum: ['agent', 'user'],
+                                description: '"user" blocks child localisation writes and the automatic sweep.',
+                            },
+                            warningHandling: {
+                                type: 'string',
+                                enum: ['enforce', 'ignore'],
+                                description: '"ignore" makes non-error diagnostics non-blocking. Errors remain enforced.',
+                            },
+                        },
                     },
                     tasks: {
                         type: 'array',

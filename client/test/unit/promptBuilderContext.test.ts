@@ -36,6 +36,10 @@ function loadPromptBuilder() {
     }
 }
 
+function withoutRepositoryInstructions(prompt: string): string {
+    return prompt.replace(/<project-instructions>[\s\S]*?<\/project-instructions>/g, '');
+}
+
 describe('PromptBuilder context budgeting', () => {
     const tempBase = path.resolve(__dirname, '../../..', '.tmp-test');
 
@@ -72,7 +76,7 @@ describe('PromptBuilder context budgeting', () => {
         expect(prompt).to.include('edit that script directly');
         expect(prompt).to.include('execute it from the project root');
         expect(prompt).to.include('Prefer `python "relative/path/to/script.py"` over wrapper files');
-        expect(prompt).to.not.match(/\b(?:Paradox|PDXScript|CWTools|CWT)\b/i);
+        expect(withoutRepositoryInstructions(prompt)).to.not.match(/\b(?:Paradox|PDXScript|CWTools|CWT)\b/i);
     });
 
     it('injects the /init project profile card instead of full CWTOOLS.md when available', () => {
@@ -249,7 +253,7 @@ describe('PromptBuilder context budgeting', () => {
         } else {
             expect(prompt).to.include('/bin/sh');
         }
-        expect(prompt).to.not.match(/\b(?:Paradox|PDXScript|CWTools|CWT)\b/i);
+        expect(withoutRepositoryInstructions(prompt)).to.not.match(/\b(?:Paradox|PDXScript|CWTools|CWT)\b/i);
         expect(prompt).to.not.include('cmd.exe');
         expect(prompt).to.not.include('%VAR%');
     });
@@ -273,6 +277,29 @@ describe('PromptBuilder context budgeting', () => {
         expect(prompt).to.include('BLOCKED_FOR_ORCHESTRATOR');
         expect(String(context[0]!.content)).to.not.include('run_command cwd');
         expect(String(context[0]!.content)).to.not.include('Agent Helper Script');
+    });
+
+    it('inherits bounded Paradox Custom Rules in slim sub-agent prompts', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const workspaceRoot = makeWorkspace();
+        try {
+            fs.writeFileSync(path.join(workspaceRoot, 'CWTOOLS.md'), [
+                '# CWTools Agent Project Rules',
+                '',
+                '## Custom Rules',
+                '- SLIM_MUST_KEEP_THIS_RULE',
+                '',
+            ].join('\r\n'), 'utf8');
+            const builder = new PromptBuilder(workspaceRoot);
+
+            const paradoxPrompt = builder.buildSlimSystemPromptForMode('build', undefined, undefined, undefined, 'paradox');
+            const generalPrompt = builder.buildSlimSystemPromptForMode('utility', undefined, undefined, undefined, 'general');
+
+            expect(paradoxPrompt).to.include('SLIM_MUST_KEEP_THIS_RULE');
+            expect(generalPrompt).to.not.include('SLIM_MUST_KEEP_THIS_RULE');
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
     });
 
     it('lets slim utility sub-agents run scoped repository verification commands', () => {

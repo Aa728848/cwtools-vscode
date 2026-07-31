@@ -4,6 +4,7 @@ import {
     evaluateMcpPermission,
     validateToolAccess,
 } from '../../extension/ai/tools/permissions';
+import { isMcpServerAllowedForDomain } from '../../extension/ai/mcpCapability';
 
 describe('mcp tool name parsing', () => {
     it('parses dynamic mcp_<server>_<tool> names', () => {
@@ -24,8 +25,7 @@ describe('dynamic MCP access validation', () => {
             mode: 'utility',
             domain: 'general',
         });
-        expect(generalAccess.allowed).to.equal(false);
-        expect(generalAccess.reason).to.include('Paradox-only capability');
+        expect(generalAccess.allowed).to.equal(true);
 
         const paradoxAccess = validateToolAccess('mcp_filesystem_read_file', {
             mode: 'build',
@@ -53,6 +53,17 @@ describe('dynamic MCP access validation', () => {
         const access = validateToolAccess('made_up_tool', { mode: 'general' });
         expect(access.allowed).to.equal(false);
         expect(access.reason).to.include('Unknown tool');
+    });
+});
+
+describe('MCP capability domains', () => {
+    it('keeps legacy servers Paradox-only and requires an explicit General declaration', () => {
+        expect(isMcpServerAllowedForDomain(undefined, 'paradox')).to.equal(true);
+        expect(isMcpServerAllowedForDomain(undefined, 'general')).to.equal(false);
+        expect(isMcpServerAllowedForDomain({ capabilityDomain: 'general' }, 'general')).to.equal(true);
+        expect(isMcpServerAllowedForDomain({ capabilityDomain: 'general' }, 'paradox')).to.equal(false);
+        expect(isMcpServerAllowedForDomain({ capabilityDomain: 'both' }, 'general')).to.equal(true);
+        expect(isMcpServerAllowedForDomain({ capabilityDomain: 'both' }, 'paradox')).to.equal(true);
     });
 });
 

@@ -6,6 +6,7 @@ import type {
     AgentToolName,
 } from '../types';
 import { TOOL_REGISTRY } from '../tools/registry';
+import { evaluateEffectiveToolPolicy, matchesToolPattern } from './effectiveToolPolicy';
 
 export interface AgentSummaryPolicy {
     minCharacters: number;
@@ -115,19 +116,63 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
     },
 ];
 
-function matchesPattern(name: string, pattern: string): boolean {
-    if (pattern === '*') return true;
-    if (!pattern.includes('*')) return name === pattern;
-    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
-    return new RegExp(`^${escaped}$`).test(name);
-}
-
-function validateProfile(profile: RuntimeAgentProfile): boolean {
-    return !!profile
-        && typeof profile.name === 'string'
-        && profile.name.trim().length > 0
-        && typeof profile.description === 'string'
-        && AUTHORITY_RANK[profile.authorizationCeiling] !== undefined;
+function profileValidationError(profile: RuntimeAgentProfile): string | undefined {
+    if (!profile || typeof profile.name !== 'string' || !/^[a-zA-Z0-9_.-]{1,80}$/.test(profile.name)) {
+        return 'profile name must match [a-zA-Z0-9_.-] and be at most 80 characters';
+    }
+    if (typeof profile.description !== 'string' || profile.description.trim().length === 0 || profile.description.length > 1_000) {
+        return `${profile.name}: description must contain 1-1000 characters`;
+    }
+    if (profile.instructions !== undefined && (typeof profile.instructions !== 'string' || profile.instructions.length > 32_000)) {
+        return `${profile.name}: instructions exceed 32000 characters`;
+    }
+    if (profile.domain !== undefined && profile.domain !== 'general' && profile.domain !== 'paradox') {
+        return `${profile.name}: invalid capability domain`;
+    }
+    if (AUTHORITY_RANK[profile.authorizationCeiling] === undefined) {
+        return `${profile.name}: invalid authorization ceiling`;
+    }
+    for (const patterns of [profile.tools, profile.disallowedTools]) {
+        if (patterns === undefined) continue;
+        if (!Array.isArray(patterns) || patterns.length > 256) return `${profile.name}: invalid tool-pattern list`;
+        for (const pattern of patterns) {
+            if (typeof pattern !== 'string' || pattern.length === 0 || pattern.length > 120
+                || ![...TOOL_REGISTRY.keys()].some(name => matchesToolPattern(name, pattern))) {
+                return `${profile.name}: tool pattern "${String(pattern)}" matches no registered tool`;
+            }
+        }
+    }
+    if (profile.subagents !== undefined
+        && (!Array.isArray(profile.subagents)
+            || profile.subagents.length > 32
+            || profile.subagents.some(role => typeof role !== 'string' || !/^[a-zA-Z0-9_.-]{1,80}$/.test(role)))) {
+        return `${profile.name}: invalid subagent list`;
+    }
+    if (profile.modelPreference !== undefined
+        && profile.modelPreference !== 'primary'
+        && profile.modelPreference !== 'secondary') {
+        return `${profile.name}: invalid model preference`;
+    }
+    if (profile.override !== undefined && typeof profile.override !== 'boolean') {
+        return `${profile.name}: override must be boolean`;
+    }
+    const summary = profile.summaryPolicy;
+    if (summary
+        && (!Number.isInteger(summary.minCharacters)
+            || summary.minCharacters < 0
+            || summary.minCharacters > 100_000
+            || !Number.isInteger(summary.retries)
+            || summary.retries < 0
+            || summary.retries > 3
+            || !Array.isArray(summary.requiredSections)
+            || summary.requiredSections.some(section =>
+                section !== 'summary'
+                && section !== 'changedFiles'
+                && section !== 'verification'
+                && section !== 'unresolved'))) {
+        return `${profile.name}: invalid summary policy`;
+    }
+    return undefined;
 }
 
 export class AgentProfileCatalog {
@@ -170,9 +215,17 @@ export class AgentProfileCatalog {
         const ordered = [...this.sources.values()].sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
         for (const source of ordered) {
             try {
-                const profiles = (await source.load()).filter(validateProfile);
+                const loadedProfiles = await source.load();
+                const invalid = loadedProfiles
+                    .map(profileValidationError)
+                    .filter((message): message is string => !!message);
+                const profiles = loadedProfiles.filter(profile => !profileValidationError(profile));
                 this.sourceProfiles.set(source.id, profiles.map(profile => ({ ...profile })));
-                this.sourceErrors.delete(source.id);
+                if (invalid.length > 0) {
+                    this.sourceErrors.set(source.id, invalid.slice(0, 3).join('; '));
+                } else {
+                    this.sourceErrors.delete(source.id);
+                }
                 this.remerge();
                 for (const listener of this.listeners) listener(source.id);
             } catch (error) {
@@ -254,6 +307,15 @@ export class AgentProfileCatalog {
         for (const source of orderedSources) {
             for (const profile of this.sourceProfiles.get(source.id) ?? []) {
                 if (merged.has(profile.name) && profile.override !== true) continue;
+                const existing = merged.get(profile.name);
+                // A profile may narrow a domain-specific built-in but must never
+                // turn the user's selected capability domain into another one.
+                if (existing?.domain && profile.domain && existing.domain !== profile.domain) {
+                    const message = `${profile.name}: override cannot change domain ${existing.domain} to ${profile.domain}`;
+                    const current = this.sourceErrors.get(source.id);
+                    if (!current?.includes(message)) this.sourceErrors.set(source.id, current ? `${current}; ${message}` : message);
+                    continue;
+                }
                 merged.set(profile.name, profile);
             }
         }
@@ -289,11 +351,20 @@ export class ToolActivationService {
             ? scheduling.authorization
             : profile.authorizationCeiling;
         const registered: string[] = [...TOOL_REGISTRY.keys()].sort();
-        const allow = profile.tools ?? ['*'];
-        const deny = profile.disallowedTools ?? [];
+        const effectiveMode = scheduling.dispatch !== 'single'
+            ? scheduling.domainProfile === 'general' ? 'orchestrator' : 'script'
+            : authorization === 'read_only'
+                ? scheduling.phase === 'verify' || profile.name === 'reviewer' ? 'review' : 'explore'
+                : authorization === 'plan_write_only' || scheduling.phase === 'plan'
+                    ? 'plan'
+                    : scheduling.domainProfile === 'general' ? 'utility' : 'build';
         const activated: string[] = registered.filter(name =>
-            allow.some(pattern => matchesPattern(name, pattern))
-            && !deny.some(pattern => matchesPattern(name, pattern)));
+            evaluateEffectiveToolPolicy(name, {
+                mode: effectiveMode,
+                domain: scheduling.domainProfile,
+                authorization,
+                profile,
+            }).allowed);
         this.snapshotValue = {
             profileName: profile.name,
             registered,

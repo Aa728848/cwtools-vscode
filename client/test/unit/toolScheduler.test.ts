@@ -41,6 +41,10 @@ describe('ToolScheduler V2 concurrencyClass Dispatch (P2-3)', () => {
             .to.equal('C:/project/events/test.txt');
         expect(normalize(mod.getAgentToolTargetFiles('get_file_context', { file: 'common/test.txt' }, 'C:/project')[0]!))
             .to.equal('C:/project/common/test.txt');
+        expect(normalize(mod.getAgentToolTargetFiles('hover_symbol', { file: 'src/main.ts' }, 'C:/project')[0]!))
+            .to.equal('C:/project/src/main.ts');
+        expect(normalize(mod.getAgentToolTargetFiles('rename_symbol', { file: 'src/main.ts' }, 'C:/project')[0]!))
+            .to.equal('C:/project/src/main.ts');
     });
 
     it('waits same-file read barriers until the current write finishes and preserves return values', async () => {

@@ -82,6 +82,15 @@ describe('tool definitions', () => {
         expect(parameters.properties).to.not.have.property('fileContent');
     });
 
+    it('registers provider-neutral navigation and guarded rename tools for both domains', () => {
+        for (const name of ['go_to_definition', 'find_references', 'hover_symbol', 'rename_symbol']) {
+            expect(TOOL_DEFINITIONS.some(def => def.function.name === name), name).to.equal(true);
+            expect(TOOL_REGISTRY.get(name)?.domain, name).to.equal('shared');
+        }
+        expect(TOOL_REGISTRY.get('rename_symbol')?.isWrite).to.equal(true);
+        expect(TOOL_REGISTRY.get('rename_symbol')?.concurrencyClass).to.equal('global-exclusive');
+    });
+
     it('registers get_lsp_status as a lightweight read-only LSP status tool', () => {
         const tool = TOOL_DEFINITIONS.find(def => def.function.name === 'get_lsp_status');
         expect(tool).to.not.equal(undefined);

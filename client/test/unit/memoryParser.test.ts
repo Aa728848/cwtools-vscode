@@ -95,6 +95,37 @@ describe('MemoryParser topic storage', () => {
         expect(pruned.entries[0].key).to.equal('private convention');
     });
 
+    it('isolates structured memory by capability domain while retaining legacy entries for Paradox', async () => {
+        const { MemoryParser } = loadMemoryParserModule();
+        const parser = new MemoryParser(workspaceRoot, 'topic_domains');
+        await parser.appendMemory({
+            key: 'shared-name',
+            content: 'Paradox-only legacy-compatible fact.',
+            priority: 'normal',
+        });
+        await parser.appendMemory({
+            key: 'shared-name',
+            content: 'General repository fact.',
+            priority: 'normal',
+            domain: 'general',
+        });
+
+        const paradoxPrompt = parser.getMemoryPrompt('topic_domains', { domain: 'paradox' });
+        const generalPrompt = parser.getMemoryPrompt('topic_domains', { domain: 'general' });
+        expect(paradoxPrompt).to.include('Paradox-only legacy-compatible fact.');
+        expect(paradoxPrompt).to.not.include('General repository fact.');
+        expect(generalPrompt).to.include('General repository fact.');
+        expect(generalPrompt).to.not.include('Paradox-only legacy-compatible fact.');
+
+        expect(parser.markMemoryUsed('topic_domains', ['shared-name'], 'general')).to.equal(1);
+        MemoryParser.flushUsageWrites();
+        const entries = JSON.parse(fs.readFileSync(parser.getStructuredMemoryFilePath(), 'utf8')).entries;
+        const paradoxEntry = entries.find((entry: { domain?: string }) => (entry.domain ?? 'paradox') === 'paradox');
+        const generalEntry = entries.find((entry: { domain?: string }) => entry.domain === 'general');
+        expect(paradoxEntry.usageCount ?? 0).to.equal(0);
+        expect(generalEntry.usageCount).to.equal(1);
+    });
+
     it('selects top-k entries by task relevance within a strict budget', async () => {
         const { MemoryParser } = loadMemoryParserModule();
         const parser = new MemoryParser(workspaceRoot, 'topic_topk');

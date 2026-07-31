@@ -9,23 +9,176 @@ import type {
 import { getAllProfiles } from '../gameProfiles';
 
 export const PROJECT_PROFILE_RELATIVE_PATH = path.join('.cwtools', 'project', 'profile.json');
+const MAX_PROJECT_PROFILE_BYTES = 2 * 1024 * 1024;
+const PROFILE_WORKSPACE_KINDS = new Set(['paradox_mod', 'extension_source', 'mixed', 'generic']);
+const PROFILE_GAME_CONFIDENCE = new Set(['high', 'medium', 'low']);
+const PROFILE_AGENT_MODES = new Set([
+    'build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert',
+    'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script',
+]);
+const PROFILE_LSP_STATES = new Set(['unknown', 'ready', 'not_ready']);
+const PROFILE_INDEX_STATES = new Set(['unknown', 'ready', 'partial', 'indexing', 'idle', 'unavailable']);
+const PROFILE_VANILLA_STATES = new Set(['unknown', 'configured', 'missing']);
 
 export function getProjectProfilePath(workspaceRoot: string): string {
     return path.join(workspaceRoot, PROJECT_PROFILE_RELATIVE_PATH);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+    return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+
+function isStringArrayRecord(value: unknown): value is Record<string, string[]> {
+    return isRecord(value) && Object.values(value).every(isStringArray);
+}
+
+function normalizeLegacyProjectProfile(value: unknown): unknown {
+    if (!isRecord(value)
+        || value.schemaVersion !== 1
+        || !isRecord(value.game)
+        || typeof value.game.id !== 'string') return value;
+    const game = value.game;
+    const localisation = value.localisation === undefined ? {} : value.localisation;
+    const identifiers = value.identifiers === undefined ? {} : value.identifiers;
+    const routing = value.routing === undefined ? {} : value.routing;
+    const validation = value.validation === undefined ? {} : value.validation;
+    if (!isRecord(localisation)
+        || !isRecord(identifiers)
+        || !isRecord(routing)
+        || !isRecord(validation)) return value;
+    return {
+        ...value,
+        generatedAt: value.generatedAt ?? '',
+        workspaceRoot: value.workspaceRoot ?? '',
+        workspaceKind: value.workspaceKind ?? 'generic',
+        projectName: value.projectName ?? '',
+        game: {
+            ...game,
+            displayName: game.displayName ?? game.id,
+            confidence: game.confidence ?? 'low',
+            evidence: game.evidence ?? [],
+        },
+        keyDirectories: value.keyDirectories ?? [],
+        localisation: {
+            ...localisation,
+            roots: localisation.roots ?? [],
+            languages: localisation.languages ?? [],
+            encoding: localisation.encoding ?? 'unknown',
+            sampleFiles: localisation.sampleFiles ?? [],
+        },
+        identifiers: {
+            ...identifiers,
+            namespaces: identifiers.namespaces ?? [],
+            variablePrefixes: identifiers.variablePrefixes ?? [],
+            byType: identifiers.byType ?? {},
+        },
+        routing: {
+            ...routing,
+            recommendedWorkflowByIntent: routing.recommendedWorkflowByIntent ?? [],
+            preferredReadTools: routing.preferredReadTools ?? [],
+            avoidPatterns: routing.avoidPatterns ?? [],
+        },
+        validation: {
+            ...validation,
+            lspReady: validation.lspReady ?? 'unknown',
+            indexStatus: validation.indexStatus ?? 'unknown',
+            vanillaCache: validation.vanillaCache ?? 'unknown',
+        },
+        promptCards: value.promptCards ?? {},
+        efficiencyHints: value.efficiencyHints ?? [],
+    };
+}
+
+/** Validate the generated profile before it reaches prompts, LSP, or MCP paths. */
+export function isProjectProfile(value: unknown): value is ProjectProfile {
+    if (!isRecord(value)
+        || value.schemaVersion !== 1
+        || typeof value.generatedAt !== 'string'
+        || typeof value.workspaceRoot !== 'string'
+        || !PROFILE_WORKSPACE_KINDS.has(String(value.workspaceKind))
+        || typeof value.projectName !== 'string'
+        || !isRecord(value.game)
+        || typeof value.game.id !== 'string'
+        || typeof value.game.displayName !== 'string'
+        || !PROFILE_GAME_CONFIDENCE.has(String(value.game.confidence))
+        || !isStringArray(value.game.evidence)
+        || !Array.isArray(value.keyDirectories)
+        || !isRecord(value.localisation)
+        || !isStringArray(value.localisation.roots)
+        || !isStringArray(value.localisation.languages)
+        || typeof value.localisation.encoding !== 'string'
+        || !isStringArray(value.localisation.sampleFiles)
+        || !isRecord(value.identifiers)
+        || !isStringArray(value.identifiers.namespaces)
+        || !isStringArray(value.identifiers.variablePrefixes)
+        || !isStringArrayRecord(value.identifiers.byType)
+        || !isRecord(value.routing)
+        || !Array.isArray(value.routing.recommendedWorkflowByIntent)
+        || !isStringArray(value.routing.preferredReadTools)
+        || !isStringArray(value.routing.avoidPatterns)
+        || !isRecord(value.validation)
+        || !PROFILE_LSP_STATES.has(String(value.validation.lspReady))
+        || !PROFILE_INDEX_STATES.has(String(value.validation.indexStatus))
+        || !PROFILE_VANILLA_STATES.has(String(value.validation.vanillaCache))
+        || !isRecord(value.promptCards)
+        || !Object.values(value.promptCards).every(item => typeof item === 'string')
+        || !isStringArray(value.efficiencyHints)) {
+        return false;
+    }
+    if (!value.keyDirectories.every(directory =>
+        isRecord(directory)
+        && typeof directory.key === 'string'
+        && typeof directory.path === 'string'
+        && typeof directory.exists === 'boolean'
+        && (directory.fileCount === undefined
+            || (typeof directory.fileCount === 'number' && Number.isFinite(directory.fileCount) && directory.fileCount >= 0)))) {
+        return false;
+    }
+    if (!value.routing.recommendedWorkflowByIntent.every(route =>
+        isRecord(route)
+        && typeof route.intent === 'string'
+        && typeof route.workflowId === 'string'
+        && PROFILE_AGENT_MODES.has(String(route.mode))
+        && typeof route.reason === 'string')) {
+        return false;
+    }
+    if (value.modInfo !== undefined
+        && (!isRecord(value.modInfo)
+            || (value.modInfo.name !== undefined && typeof value.modInfo.name !== 'string')
+            || (value.modInfo.version !== undefined && typeof value.modInfo.version !== 'string')
+            || (value.modInfo.tags !== undefined && !isStringArray(value.modInfo.tags)))) {
+        return false;
+    }
+    for (const key of ['scriptedTriggers', 'scriptedEffects', 'events', 'onActions', 'staticModifiers']) {
+        const legacyValue = value.identifiers[key];
+        if (legacyValue !== undefined && !isStringArray(legacyValue)) return false;
+    }
+    return true;
+}
+
+function readProjectProfileFile(profilePath: string): ProjectProfile | null {
+    try {
+        const stat = fs.statSync(profilePath);
+        if (!stat.isFile() || stat.size > MAX_PROJECT_PROFILE_BYTES) return null;
+        const parsed = normalizeLegacyProjectProfile(JSON.parse(fs.readFileSync(profilePath, 'utf8')) as unknown);
+        return isProjectProfile(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
 export function readProjectProfile(workspaceRoot: string): ProjectProfile | null {
     const profilePath = getProjectProfilePath(workspaceRoot);
     if (fs.existsSync(profilePath)) {
-        const raw = fs.readFileSync(profilePath, 'utf8');
-        const parsed = JSON.parse(raw) as ProjectProfile;
-        return parsed?.schemaVersion === 1 ? parsed : null;
+        return readProjectProfileFile(profilePath);
     }
     const legacyPath = path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json');
     if (fs.existsSync(legacyPath)) {
-        const raw = fs.readFileSync(legacyPath, 'utf8');
-        const parsed = JSON.parse(raw) as ProjectProfile;
-        return parsed?.schemaVersion === 1 ? parsed : null;
+        return readProjectProfileFile(legacyPath);
     }
     return null;
 }
@@ -162,7 +315,7 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
 
 export function extractCustomRules(existingContent: string | null | undefined): string {
     if (!existingContent) return '';
-    const match = existingContent.match(/## Custom Rules\n([\s\S]*)/);
+    const match = existingContent.match(/## Custom Rules\r?\n([\s\S]*)/);
     if (!match) return '';
     const custom = match[1]?.trimEnd() ?? '';
     return custom.includes('<!-- Add your project-specific rules here') ? '' : custom;
@@ -226,6 +379,14 @@ export function queryProjectProfile(workspaceRoot: string, args: QueryProjectPro
     try {
         const profile = readProjectProfile(workspaceRoot);
         if (!profile) {
+            const legacyPath = path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json');
+            if (fs.existsSync(profilePath) || fs.existsSync(legacyPath)) {
+                return {
+                    status: 'error',
+                    profilePath,
+                    error: 'Project profile is malformed, unreadable, or exceeds the 2 MiB size limit. Run /init to regenerate it.',
+                };
+            }
             return {
                 status: 'missing',
                 profilePath,

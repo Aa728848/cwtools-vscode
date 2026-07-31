@@ -149,14 +149,6 @@ export async function routeWebviewMessage(
             provider.postMessage({ type: 'floatingCardResolved', card: 'write', id: msg.messageId });
             void provider.resolveWriteConfirmation(msg.messageId, false);
             break;
-        case 'approveTransaction':
-            provider.postMessage({ type: 'floatingCardResolved', card: 'transaction', id: msg.txId });
-            void provider.agentRunner.commitTransaction(msg.txId);
-            break;
-        case 'rejectTransaction':
-            provider.postMessage({ type: 'floatingCardResolved', card: 'transaction', id: msg.txId });
-            provider.agentRunner.discardTransaction(msg.txId);
-            break;
         case 'quickChangeModel':
             await provider.settingsManager.quickChangeModel(msg.model);
             break;

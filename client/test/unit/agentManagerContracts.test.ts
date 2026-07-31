@@ -216,7 +216,8 @@ describe('agent manager cross-surface contracts', () => {
         expect(hostTypes).to.include("type: 'floatingCardResolved'");
         expect(hostBridge).to.include("card: 'permission'");
         expect(hostBridge).to.include("card: 'write'");
-        expect(hostBridge).to.include("card: 'transaction'");
+        expect(hostBridge).to.not.include("card: 'transaction'");
+        expect(hostBridge).to.not.include("case 'approveTransaction'");
         expect(hostBridge).to.include("card: 'walkthrough'");
         expect(webview).to.include("case 'floatingCardResolved'");
         expect(webview).to.include('function resolveFloatingCard');

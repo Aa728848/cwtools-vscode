@@ -14,6 +14,7 @@ import type {
     TokenUsage,
     ReasoningEffort,
 } from '../types';
+import type { UserExecutionPolicy } from './userExecutionPolicy';
 export type {
     AcceptanceCheck,
     AcceptanceCheckType,
@@ -146,6 +147,8 @@ export interface TaskGraph {
         createdAt: number;
         /** Optional machine-checkable feature contract for write-heavy script tasks. */
         featureManifest?: FeatureManifest;
+        /** Host-derived user ownership and diagnostic preferences for this graph. */
+        userExecutionPolicy?: UserExecutionPolicy;
     };
 }
 
@@ -273,6 +276,10 @@ export interface OrchestratorOptions {
     durableGoal?: boolean;
     /** Force every child into a read-only tool surface for Explore-mode evidence fan-out. */
     readOnlyFanout?: boolean;
+    /** The original top-level user turn, preserved across child execution. */
+    originalUserMessage?: string;
+    /** Host-enforced user ownership and warning policy. */
+    userExecutionPolicy?: UserExecutionPolicy;
     /** Explicit parent event sink for orchestration events. */
     runEventSink?: import('../runner/runContext').RunEventSink;
     /** Step callback */

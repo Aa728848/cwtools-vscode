@@ -1,5 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import type { AgentRuntimeDomain } from './types';
+
+export type SkillCapabilityDomain = AgentRuntimeDomain | 'both';
 
 export interface SkillIndexEntry {
     name: string;
@@ -7,6 +10,7 @@ export interface SkillIndexEntry {
     source: 'built-in' | 'user' | 'project';
     runAs?: string;
     allowedTools?: string[];
+    capabilityDomain: SkillCapabilityDomain;
     filePath: string;
 }
 
@@ -75,18 +79,32 @@ function parseAllowedTools(value: string | undefined): string[] | undefined {
     return tools.length > 0 ? tools : undefined;
 }
 
-function readSkillEntry(skillMd: string, fallbackName: string, source: SkillIndexEntry['source']): SkillIndexEntry | undefined {
+function readSkillEntry(
+    skillMd: string,
+    fallbackName: string,
+    source: SkillIndexEntry['source'],
+    defaultDomain: SkillCapabilityDomain,
+): SkillIndexEntry | undefined {
     try {
         const raw = fs.readFileSync(skillMd, 'utf8');
         const parsed = parseFrontmatter(raw);
         const name = parsed.frontmatter.name || fallbackName;
         const description = parsed.frontmatter.description || firstUsefulLine(parsed.body) || 'No description provided.';
+        const declaredDomain = parsed.frontmatter['capability-domain']
+            || parsed.frontmatter.capabilitydomain
+            || parsed.frontmatter.domain;
+        const capabilityDomain: SkillCapabilityDomain = declaredDomain === 'general'
+            || declaredDomain === 'paradox'
+            || declaredDomain === 'both'
+            ? declaredDomain
+            : defaultDomain;
         return {
             name,
             description,
             source,
             runAs: parsed.frontmatter.runas || parsed.frontmatter['run-as'],
             allowedTools: parseAllowedTools(parsed.frontmatter['allowed-tools'] || parsed.frontmatter.allowedtools),
+            capabilityDomain,
             filePath: skillMd,
         };
     } catch {
@@ -94,7 +112,12 @@ function readSkillEntry(skillMd: string, fallbackName: string, source: SkillInde
     }
 }
 
-function scanSkillDir(dir: string, source: SkillIndexEntry['source'], out: Map<string, SkillIndexEntry>): void {
+function scanSkillDir(
+    dir: string,
+    source: SkillIndexEntry['source'],
+    defaultDomain: SkillCapabilityDomain,
+    out: Map<string, SkillIndexEntry>,
+): void {
     if (!dir || !fs.existsSync(dir)) return;
     let entries: fs.Dirent[];
     try {
@@ -107,31 +130,33 @@ function scanSkillDir(dir: string, source: SkillIndexEntry['source'], out: Map<s
         if (!entry.isDirectory()) continue;
         const skillMd = path.join(dir, entry.name, 'SKILL.md');
         if (!fs.existsSync(skillMd)) continue;
-        const skill = readSkillEntry(skillMd, entry.name, source);
+        const skill = readSkillEntry(skillMd, entry.name, source, defaultDomain);
         if (skill) out.set(skill.name.toLowerCase(), skill);
     }
 }
 
-export function listSkills(roots: SkillLookupRoots): SkillIndexEntry[] {
+export function listSkills(roots: SkillLookupRoots, domain?: AgentRuntimeDomain): SkillIndexEntry[] {
     const skills = new Map<string, SkillIndexEntry>();
 
     if (roots.extensionPath) {
-        scanSkillDir(path.join(roots.extensionPath, 'resources', 'skills'), 'built-in', skills);
+        scanSkillDir(path.join(roots.extensionPath, 'resources', 'skills'), 'built-in', 'paradox', skills);
     }
     if (roots.globalStoragePath) {
-        scanSkillDir(path.join(roots.globalStoragePath, '.agents', 'skills'), 'user', skills);
+        scanSkillDir(path.join(roots.globalStoragePath, '.agents', 'skills'), 'user', 'both', skills);
     }
     if (roots.workspaceRoot) {
-        scanSkillDir(path.join(roots.workspaceRoot, '.agents', 'skills'), 'project', skills);
-        scanSkillDir(path.join(roots.workspaceRoot, '.cwtools', 'skills'), 'project', skills);
-        scanSkillDir(path.join(roots.workspaceRoot, '.cwtools-ai', 'skills'), 'project', skills);
+        scanSkillDir(path.join(roots.workspaceRoot, '.agents', 'skills'), 'project', 'both', skills);
+        scanSkillDir(path.join(roots.workspaceRoot, '.cwtools', 'skills'), 'project', 'paradox', skills);
+        scanSkillDir(path.join(roots.workspaceRoot, '.cwtools-ai', 'skills'), 'project', 'paradox', skills);
     }
 
-    return [...skills.values()].sort((a, b) => a.name.localeCompare(b.name));
+    return [...skills.values()]
+        .filter(skill => !domain || skill.capabilityDomain === 'both' || skill.capabilityDomain === domain)
+        .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function buildSkillIndexPrompt(roots: SkillLookupRoots): string {
-    const skills = listSkills(roots);
+export function buildSkillIndexPrompt(roots: SkillLookupRoots, domain?: AgentRuntimeDomain): string {
+    const skills = listSkills(roots, domain);
     if (skills.length === 0) return '';
 
     const lines = skills.map(skill => {
@@ -139,6 +164,7 @@ export function buildSkillIndexPrompt(roots: SkillLookupRoots): string {
             `source: ${skill.source}`,
             skill.runAs ? `runAs: ${skill.runAs}` : '',
             skill.allowedTools?.length ? `tools: ${skill.allowedTools.join(',')}` : '',
+            `domain: ${skill.capabilityDomain}`,
         ].filter(Boolean).join('; ');
         return `- ${skill.name}: ${skill.description}${suffix ? ` (${suffix})` : ''}`;
     });
@@ -150,14 +176,18 @@ export function buildSkillIndexPrompt(roots: SkillLookupRoots): string {
 
     return [
         '## Installed Agent Skills',
-        'Skill bodies are not embedded in the system prompt. When a skill is relevant, call `run_skill` with its exact name, then follow the returned SKILL.md instructions.',
+        'Skill bodies are not embedded in the system prompt. When a skill is relevant, load `run_skill` through `select_tools` if needed, call it with the exact skill name, then follow the returned SKILL.md instructions.',
         body,
     ].join('\n');
 }
 
-export function loadSkill(name: string, roots: SkillLookupRoots): { success: true; skill: SkillIndexEntry; content: string; truncated: boolean } | { success: false; error: string; availableSkills: string[] } {
+export function loadSkill(
+    name: string,
+    roots: SkillLookupRoots,
+    domain?: AgentRuntimeDomain,
+): { success: true; skill: SkillIndexEntry; content: string; truncated: boolean } | { success: false; error: string; availableSkills: string[] } {
     const normalized = name.trim().toLowerCase();
-    const skills = listSkills(roots);
+    const skills = listSkills(roots, domain);
     const skill = skills.find(s => s.name.toLowerCase() === normalized);
     if (!skill) {
         return {

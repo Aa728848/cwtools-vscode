@@ -133,6 +133,7 @@ export class Orchestrator {
                 ['build', 'loc_writer', 'gui_expert', 'script_reviewer'].includes(node.agentType))
                 ? 'paradox'
                 : 'general'),
+            userExecutionPolicy: options.userExecutionPolicy ?? taskGraph.metadata.userExecutionPolicy,
         };
         const emitStep = options.onStep ?? (() => {});
         this.blackboard.setEventSink(options.runEventSink);
@@ -191,7 +192,23 @@ export class Orchestrator {
             allWrittenFiles.splice(0, allWrittenFiles.length, ...new Set(allWrittenFiles));
             {
                 const paradoxWorkflow = [...taskGraph.nodes.values()].some(node => ['build', 'loc_writer', 'gui_expert'].includes(node.agentType));
-                if (paradoxWorkflow && allWrittenFiles.some(isPdxDiagnosticFile)) {
+                const userOwnsLocalisation = options.userExecutionPolicy?.localisationOwnership === 'user';
+                const userIgnoresWarnings = options.userExecutionPolicy?.warningHandling === 'ignore';
+                if (paradoxWorkflow && (userOwnsLocalisation || userIgnoresWarnings)) {
+                    emitStep({
+                        type: 'orchestrator_progress',
+                        content: userOwnsLocalisation
+                            ? aiText(
+                                '$(info) Skipped automatic localisation writing because the user retained ownership of localisation.',
+                                '$(info) 用户已保留本地化处理权，已跳过自动本地化写入。',
+                            )
+                            : aiText(
+                                '$(info) Skipped the localisation-warning sweep because the user asked to ignore non-error diagnostics.',
+                                '$(info) 用户要求忽略非错误级诊断，已跳过本地化警告扫描。',
+                            ),
+                        timestamp: Date.now(),
+                    });
+                } else if (paradoxWorkflow && allWrittenFiles.some(isPdxDiagnosticFile)) {
                 // --- Localization Sweep Phase (Loc Sweep Phase) ---
                 emitStep({
                     type: 'orchestrator_progress',
@@ -305,7 +322,12 @@ export class Orchestrator {
                         for (let fixCycle = 0; fixCycle < config.maxFixCycles && !reviewResult.passed; fixCycle++) {
                         emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.AUTOFIX_START, timestamp: Date.now() });
                         
-                        const fixPrompt = this.qualityGate.buildFixPrompt(reviewResult.reviewReport, allWrittenFiles, paradoxWorkflow);
+                        const fixPrompt = this.qualityGate.buildFixPrompt(
+                            reviewResult.reviewReport,
+                            allWrittenFiles,
+                            paradoxWorkflow,
+                            options.userExecutionPolicy,
+                        );
                         const fixNode: TaskNode = {
                             id: `quality_gate_autofix_${fixCycle + 1}`,
                             agentType: paradoxWorkflow ? 'build' : 'utility',
@@ -428,7 +450,13 @@ export class Orchestrator {
 
         const workspaceRoot = this.agentRunner.toolExecutor?.workspaceRoot || process.cwd();
         const { buildSubAgentSandbox } = require('./subAgentSandbox');
-        const sandbox = buildSubAgentSandbox(taskNode, workspaceRoot);
+        const userOwnsLocalisation = orchestratorOptions.userExecutionPolicy?.localisationOwnership === 'user';
+        const sandbox = buildSubAgentSandbox(
+            taskNode,
+            workspaceRoot,
+            undefined,
+            userOwnsLocalisation ? ['localisation'] : undefined,
+        );
         orchestratorOptions.runEventSink?.appendSoon('subagent_policy_derived', {
             agentId: taskNode.id,
             role: taskNode.agentType,
@@ -445,6 +473,7 @@ export class Orchestrator {
             'git_ops',
             'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
             ...(onlyLocalisationYmlWrites ? LOCALISATION_GENERIC_WRITE_TOOLS : []),
+            ...(userOwnsLocalisation ? ['write_localisation'] : []),
             ...(orchestratorOptions.readOnlyFanout
                 ? [...MUTATING_TOOLS, 'dispatch_agents', 'merge_results']
                 : []),
@@ -467,6 +496,7 @@ export class Orchestrator {
             topicId: orchestratorOptions.topicId,
             parentRunId: orchestratorOptions.parentRunId,
             durableGoal: orchestratorOptions.durableGoal,
+            originalUserMessage: orchestratorOptions.originalUserMessage,
             agentId: taskNode.id,
             threadId: `${orchestratorOptions.parentRunId ?? orchestratorOptions.topicId ?? 'orchestrator'}/${taskNode.id}`,
             turnId: taskNode.id,

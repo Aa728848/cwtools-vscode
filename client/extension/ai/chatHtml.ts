@@ -300,7 +300,6 @@ ${stylesheetLinks}
                         <button class="detect-btn" id="codexLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
                     </div>
                     <div class="settings-hint" id="codexQuotaStatus" style="margin-top:6px"></div>
-                    <div class="settings-hint" style="margin-top:4px">${t('Uses ChatGPT Plus/Pro quota through OAuth. Tokens are stored in VS Code SecretStorage and refreshed automatically. Requests run through this extension\'s native Agent, tools, MCP permissions, and sandbox; Codex CLI and the Codex desktop app are not used or changed.', '通过 OAuth 使用 ChatGPT Plus/Pro 额度。Token 保存在 VS Code SecretStorage 中并自动刷新。请求由本插件原生 Agent、工具、MCP 权限与沙盒执行；不使用也不修改 Codex CLI 或 Codex 桌面端。')}</div>
                 </div>
                 <div class="settings-group" id="endpointGroup">
                     <label class="settings-label">${svgIcon('link')} Endpoint <span style="opacity:0.5;font-weight:400">${t('(optional)', '(可选)')}</span></label>

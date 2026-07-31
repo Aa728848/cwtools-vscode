@@ -138,14 +138,13 @@ export function renderActivityGroup(group: CodexActivityGroup, options: CodexRen
     const children = group.events.length > 0
         ? `<div class="codex-activity-group-items">${group.events.map(event => renderActivityRow(event, options, true)).join('')}</div>`
         : '';
-    return `<div class="codex-activity-group codex-activity-group-collapsed codex-group-${group.kind} codex-status-${group.status}" data-activity-group-id="${escapeHtml(group.id)}">
+    return `<div class="codex-activity-group codex-activity-group-collapsed codex-group-${group.kind}" data-activity-group-id="${escapeHtml(group.id)}">
         <button type="button" class="codex-activity-summary codex-activity-group-toggle" data-codex-activity-group-toggle aria-expanded="false">
             <span class="codex-activity-icon">${svgIconNoMargin(iconNameFor(group))}</span>
             <span class="codex-activity-main">
                 <span class="codex-activity-title">${escapeHtml(group.label)}</span>
             </span>
             ${duration ? `<span class="codex-activity-duration">${escapeHtml(duration)}</span>` : ''}
-            <span class="codex-activity-status">${statusIcon(group.status)}</span>
             <span class="codex-activity-disclosure" aria-hidden="true">›</span>
         </button>
         ${children}

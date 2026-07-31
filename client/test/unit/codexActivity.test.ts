@@ -302,6 +302,28 @@ describe('Codex activity view model', () => {
         expect(html).not.to.include('<span class="codex-activity-detail">ok</span>');
     });
 
+    it('keeps grouped status feedback on each tool row and out of the group summary', () => {
+        const i18n = getChatI18n('en');
+        const model = build([
+            { type: 'tool_call', toolName: 'run_command', invocationId: '1', toolArgs: { command: 'npm run compile' }, timestamp: 1000 },
+            { type: 'tool_result', toolName: 'run_command', invocationId: '1', toolResult: { success: true, exitCode: 0 }, timestamp: 1200 },
+            { type: 'tool_call', toolName: 'run_command', invocationId: '2', toolArgs: { command: 'npm run lint' }, timestamp: 1300 },
+            { type: 'tool_result', toolName: 'run_command', invocationId: '2', toolResult: { success: false, exitCode: 1, error: 'lint failed' }, timestamp: 1500 },
+        ]);
+        const group = firstGroup(model, 'command');
+        const html = renderCodexTurnItems(model.items, { labels: i18n.codex });
+        const groupStart = html.indexOf('<div class="codex-activity-group');
+        const childrenStart = html.indexOf('<div class="codex-activity-group-items">', groupStart);
+        const groupSummary = html.slice(groupStart, childrenStart);
+
+        expect(group.status).to.equal('failed');
+        expect(groupSummary).not.to.include('codex-status-');
+        expect(groupSummary).not.to.include('codex-activity-status');
+        expect(html).to.include('codex-activity-command codex-status-success');
+        expect(html).to.include('codex-activity-command codex-status-failed');
+        expect(html.match(/class="codex-activity-status"/g)).to.have.lengthOf(2);
+    });
+
     it('renders assistant turns with a collapsible status control', () => {
         const i18n = getChatI18n('en');
         const html = renderAssistantTurnCodex('Done', [

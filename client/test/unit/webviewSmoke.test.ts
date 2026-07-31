@@ -46,10 +46,16 @@ describe('webview smoke checks', () => {
         expect(script).to.include('updateAgentDomain(domain);\n                setModeMenuOpen(false);');
         expect(css).not.to.include('.composer-write-mode-trigger.write-mode-elevated {');
         expect(css).not.to.include('.write-mode-item-danger.active { border-color: var(--error); }');
-        expect(css).to.include('#quickWriteModeTrigger:focus-visible');
-        expect(css).to.include('border-color: transparent !important;');
+        expect(css).to.include('.composer-write-mode-trigger:focus-visible');
+        expect(css).to.include('border: 0 !important;');
         expect(css).to.include('outline: none !important;');
         expect(css).to.include('box-shadow: none !important;');
+        expect(css).not.to.include('#quickWriteModeTrigger:focus-visible');
+        expect(css).not.to.include('#quickWriteModeTrigger.write-mode-danger {\n    background: transparent !important;\n    color: var(--error);');
+        expect(css).to.include('#quickWriteModeTrigger.write-mode-danger { color: var(--warning); }');
+        expect(css).to.include('.write-mode-menu .write-mode-item-danger span:first-child { color: var(--warning); }');
+        expect(css).not.to.include('.sandbox-backend-unavailable');
+        expect(script).not.to.include("classList.toggle('sandbox-backend-unavailable'");
         expect(css).to.include('.write-mode-menu .write-mode-item-danger:focus-visible { outline: none; box-shadow: none; }');
         expect(script).to.include('setWriteModeMenuOpen(false);\n                input.focus();');
         expect(html).to.include('id="quickModelTrigger"');

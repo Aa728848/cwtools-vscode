@@ -6300,7 +6300,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 {
                     const trigger = document.getElementById('quickWriteModeTrigger');
                     const unavailable = msg.current?.sandboxBackend?.available === false && !msg.current?.securitySandboxDisabled;
-                    trigger?.classList.toggle('sandbox-backend-unavailable', unavailable);
                     if (trigger) {
                         const baseTitle = trigger.dataset.baseTitle || trigger.title;
                         trigger.dataset.baseTitle = baseTitle;

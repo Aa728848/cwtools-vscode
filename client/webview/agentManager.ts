@@ -65,7 +65,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     artifacts: [],
     todos: [],
     mode: 'build',
-    agentProfile: { domain: 'auto', intent: 'auto', strategy: 'auto' },
+    agentProfile: { domain: 'paradox', intent: 'auto', strategy: 'auto' },
     resolvedAgentProfile: undefined,
     workflowId: null,
     isGenerating: false,

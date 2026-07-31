@@ -161,7 +161,6 @@ ${stylesheetLinks}
     <div id="modeMenu" class="composer-menu mode-menu" aria-hidden="true">
         <div class="composer-menu-section">
             <div class="model-menu-title">${t('Capability domain', '能力领域')}</div>
-            <button class="composer-menu-item" data-profile-domain="auto">${svgIconNoMargin('sparkles')}<span>${t('Auto detect', '自动识别')}</span></button>
             <button class="composer-menu-item" data-profile-domain="paradox">${svgIconNoMargin('code')}<span>${t('Paradox / CWTools', 'Paradox / CWTools')}</span></button>
             <button class="composer-menu-item" data-profile-domain="general">${svgIconNoMargin('zap')}<span>${t('General coding', '通用编码')}</span></button>
         </div>
@@ -203,7 +202,7 @@ ${stylesheetLinks}
                     <span class="composer-chevron" aria-hidden="true">v</span>
                 </button>
                 <button class="composer-model-trigger composer-mode-trigger" id="quickModeTrigger" title="${t('Select capability domain', '选择能力领域')}" aria-haspopup="listbox" aria-expanded="false">
-                    <span id="quickModeLabel">${t('Auto', '自动')}</span>
+                    <span id="quickModeLabel">Paradox</span>
                     <span class="composer-chevron" aria-hidden="true">v</span>
                 </button>
                 <div class="composer-chip-row" id="composerChipRow"></div>

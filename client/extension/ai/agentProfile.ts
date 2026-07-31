@@ -13,7 +13,7 @@ import {
 } from './runner/scheduling';
 
 export const DEFAULT_AGENT_PROFILE: Readonly<AgentProfileSelection> = Object.freeze({
-    domain: 'auto',
+    domain: 'paradox',
     intent: 'auto',
     strategy: 'auto',
 });
@@ -55,7 +55,9 @@ export interface ModelAgentProfileDecision {
 
 export function cloneAgentProfile(profile: AgentProfileSelection = DEFAULT_AGENT_PROFILE): AgentProfileSelection {
     return {
-        domain: profile.domain,
+        // `auto` is retained in the wire type only for legacy topic imports.
+        // Capability domains are user-owned and default to Paradox.
+        domain: profile.domain === 'general' ? 'general' : 'paradox',
         intent: profile.intent,
         strategy: profile.strategy,
         ...(profile.profileName ? { profileName: profile.profileName } : {}),
@@ -64,7 +66,7 @@ export function cloneAgentProfile(profile: AgentProfileSelection = DEFAULT_AGENT
 
 /** Build the only profile exposed by the normal composer: domain is selectable; routing stays automatic. */
 export function profileForUserDomain(domain: AgentDomain): AgentProfileSelection {
-    return { domain, intent: 'auto', strategy: 'auto' };
+    return { domain: domain === 'general' ? 'general' : 'paradox', intent: 'auto', strategy: 'auto' };
 }
 
 export function sameAgentProfile(left: AgentProfileSelection, right: AgentProfileSelection): boolean {
@@ -106,10 +108,10 @@ export function normalizeAgentProfile(value: unknown): AgentProfileSelection {
 
 export function profileForLegacyMode(mode: AgentMode): AgentProfileSelection {
     switch (mode) {
-        case 'plan': return { domain: 'auto', intent: 'plan', strategy: 'single' };
-        case 'explore': return { domain: 'auto', intent: 'explore', strategy: 'single' };
+        case 'plan': return { domain: 'paradox', intent: 'plan', strategy: 'single' };
+        case 'explore': return { domain: 'paradox', intent: 'explore', strategy: 'single' };
         case 'review':
-        case 'script_reviewer': return { domain: 'auto', intent: 'review', strategy: 'single' };
+        case 'script_reviewer': return { domain: 'paradox', intent: 'review', strategy: 'single' };
         case 'utility':
         case 'general': return { domain: 'general', intent: 'execute', strategy: 'single' };
         case 'orchestrator': return { domain: 'general', intent: 'execute', strategy: 'multi' };

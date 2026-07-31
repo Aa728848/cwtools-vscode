@@ -37,11 +37,13 @@ describe('webview smoke checks', () => {
         expect(html).to.include('id="modeSel"');
         expect(html).to.include('id="composerAddBtn"');
         expect(html).to.include('id="quickModeTrigger"');
-        expect(html).to.include('data-profile-domain="auto"');
+        expect(html).not.to.include('data-profile-domain="auto"');
         expect(html).to.include('data-profile-domain="paradox"');
         expect(html).to.include('data-profile-domain="general"');
+        expect(html).to.include('<span id="quickModeLabel">Paradox</span>');
         expect(html).not.to.include('data-profile-intent=');
         expect(html).not.to.include('data-profile-strategy=');
+        expect(script).to.include("let agentProfile: AgentProfileSelection = { domain: 'paradox', intent: 'auto', strategy: 'auto' };");
         expect(script).to.include("agentProfile = { domain, intent: 'auto', strategy: 'auto' }");
         expect(script).to.include('updateAgentDomain(domain);\n                setModeMenuOpen(false);');
         expect(css).not.to.include('.composer-write-mode-trigger.write-mode-elevated {');

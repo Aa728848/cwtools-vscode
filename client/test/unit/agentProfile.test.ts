@@ -36,6 +36,9 @@ describe('agent profile', () => {
         expect(profileForUserDomain('general')).to.deep.equal({
             domain: 'general', intent: 'auto', strategy: 'auto',
         });
+        expect(profileForUserDomain('auto')).to.deep.equal({
+            domain: 'paradox', intent: 'auto', strategy: 'auto',
+        });
     });
 
     it('parses strict model routing decisions from plain or fenced JSON', () => {
@@ -53,10 +56,10 @@ describe('agent profile', () => {
         )).to.equal(undefined);
     });
 
-    it('uses model intent but defers automatic multi-Agent strategy without explicit delegation', () => {
+    it('uses model intent without letting routing override the selected domain', () => {
         expect(resolveAgentProfileFromModelDecision('large change', DEFAULT_AGENT_PROFILE, {
             domain: 'general', intent: 'execute', strategy: 'multi', reason: 'independent workstreams',
-        })).to.include({ domain: 'general', intent: 'execute', strategy: 'single', mode: 'utility' });
+        })).to.include({ domain: 'paradox', intent: 'execute', strategy: 'single', mode: 'build' });
         expect(resolveAgentProfileFromModelDecision('use multiple agents for this mod change', DEFAULT_AGENT_PROFILE, {
             domain: 'paradox', intent: 'execute', strategy: 'multi', reason: 'independent workstreams',
         })).to.include({ domain: 'paradox', intent: 'execute', strategy: 'multi', mode: 'script' });
@@ -66,7 +69,7 @@ describe('agent profile', () => {
         const routed = resolveAgentProfileFromModelDecision('重构整个运行器并调整恢复协议', DEFAULT_AGENT_PROFILE, {
             domain: 'general', intent: 'plan', strategy: 'multi', reason: 'coupled architecture change',
         });
-        expect(routed).to.include({ domain: 'general', intent: 'plan', strategy: 'single', mode: 'utility' });
+        expect(routed).to.include({ domain: 'paradox', intent: 'plan', strategy: 'single', mode: 'build' });
         expect(routed.admission).to.include({
             authorization: 'workspace_write',
             initialPhase: 'plan',
@@ -142,11 +145,11 @@ describe('agent profile', () => {
         expect(routed).to.include({ intent: 'explore', strategy: 'single', mode: 'explore' });
     });
 
-    it('lets explicit general coding evidence override Paradox conversation continuity', () => {
+    it('keeps the default Paradox domain despite general coding evidence', () => {
         const resolved = resolveAgentProfile('修复 TypeScript webview 的状态更新', undefined, {
             previousDomain: 'paradox',
         });
-        expect(resolved).to.include({ domain: 'general', intent: 'execute', mode: 'utility' });
+        expect(resolved).to.include({ domain: 'paradox', intent: 'execute', mode: 'build' });
     });
 
     it('honors explicit no-write constraints before write keywords', () => {
@@ -156,7 +159,7 @@ describe('agent profile', () => {
         expect(resolveAgentProfile('只检查这个事件有没有问题，不要改动', undefined, {
             previousDomain: 'paradox',
         })).to.include({ domain: 'paradox', intent: 'review', mode: 'review' });
-        expect(resolveAgentProfile('只给一个实现方案，不要修改代码', undefined, {
+        expect(resolveAgentProfile('只给一个实现方案，不要修改代码', profileForUserDomain('general'), {
             previousDomain: 'general',
         })).to.include({ domain: 'general', intent: 'plan', mode: 'plan' });
     });
@@ -174,26 +177,26 @@ describe('agent profile', () => {
     });
 
     it('separates general coding from Paradox coordination', () => {
-        expect(resolveAgentProfile('Create a Python converter for this CSV file').mode).to.equal('utility');
-        expect(resolveAgentProfile('Use multiple agents to refactor this TypeScript API').mode).to.equal('orchestrator');
+        expect(resolveAgentProfile('Create a Python converter for this CSV file', profileForUserDomain('general')).mode).to.equal('utility');
+        expect(resolveAgentProfile('Use multiple agents to refactor this TypeScript API', profileForUserDomain('general')).mode).to.equal('orchestrator');
         expect(resolveAgentProfile('Use multiple agents to repair this Stellaris event chain').mode).to.equal('script');
     });
 
-    it('lets explicit general-code semantics override an unrelated active Paradox file', () => {
+    it('does not let request semantics override the selected Paradox domain', () => {
         const resolved = resolveAgentProfile('Fix the TypeScript webview state handling', undefined, {
             activeFile: 'events/example.txt',
         });
-        expect(resolved.domain).to.equal('general');
-        expect(resolved.mode).to.equal('utility');
+        expect(resolved.domain).to.equal('paradox');
+        expect(resolved.mode).to.equal('build');
     });
 
-    it('treats Paradox Agent implementation work as repository coding', () => {
+    it('uses Paradox for repository implementation work until the user selects General', () => {
         const resolved = resolveAgentProfile('Fix the TypeScript routing for the Paradox Agent webview');
-        expect(resolved.domain).to.equal('general');
-        expect(resolved.mode).to.equal('utility');
+        expect(resolved.domain).to.equal('paradox');
+        expect(resolved.mode).to.equal('build');
     });
 
-    it('defers low-confidence domain switches when deterministic evidence still favors continuity', () => {
+    it('ignores model domain changes when Paradox is selected', () => {
         const routed = resolveAgentProfileFromModelDecision('continue investigating this', DEFAULT_AGENT_PROFILE, {
             domain: 'general',
             intent: 'explore',
@@ -204,15 +207,15 @@ describe('agent profile', () => {
             previousDomain: 'paradox',
         });
         expect(routed).to.include({ domain: 'paradox', intent: 'explore', mode: 'explore' });
-        expect(routed.reason).to.contain('routing hysteresis');
+        expect(routed.reason).to.not.contain('routing hysteresis');
     });
 
-    it('switches domains immediately when explicit language evidence is present', () => {
-        const routed = resolveAgentProfileFromModelDecision('Fix the TypeScript webview state', DEFAULT_AGENT_PROFILE, {
-            domain: 'general',
+    it('keeps a manually selected General domain despite the model decision', () => {
+        const routed = resolveAgentProfileFromModelDecision('Fix the TypeScript webview state', profileForUserDomain('general'), {
+            domain: 'paradox',
             intent: 'execute',
             strategy: 'single',
-            reason: 'explicit repository language',
+            reason: 'incorrect domain classification',
             confidence: 0.55,
         }, {
             previousDomain: 'paradox',
@@ -222,7 +225,7 @@ describe('agent profile', () => {
 
     it('keeps implementation-only legacy roles out of the user-facing profile', () => {
         expect(profileForLegacyMode('loc_writer')).to.deep.equal({ domain: 'paradox', intent: 'execute', strategy: 'single' });
-        expect(profileForLegacyMode('script_reviewer')).to.deep.equal({ domain: 'auto', intent: 'review', strategy: 'single' });
+        expect(profileForLegacyMode('script_reviewer')).to.deep.equal({ domain: 'paradox', intent: 'review', strategy: 'single' });
         expect(profileForLegacyMode('orchestrator')).to.deep.equal({ domain: 'general', intent: 'execute', strategy: 'multi' });
     });
 });

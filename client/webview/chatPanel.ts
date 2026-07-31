@@ -293,7 +293,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         strategy: ProfileStrategy;
         profileName?: string;
     };
-    let agentProfile: AgentProfileSelection = { domain: 'auto', intent: 'auto', strategy: 'auto' };
+    let agentProfile: AgentProfileSelection = { domain: 'paradox', intent: 'auto', strategy: 'auto' };
 
     function isAgentProfileSelection(value: unknown): value is AgentProfileSelection {
         if (!value || typeof value !== 'object') return false;
@@ -307,7 +307,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function applyAgentProfile(profile: unknown): void {
         if (!isAgentProfileSelection(profile)) return;
-        agentProfile = { ...profile };
+        agentProfile = {
+            ...profile,
+            domain: profile.domain === 'general' ? 'general' : 'paradox',
+        };
         applyComposerModeLabels();
         renderComposerChips();
         const trigger = document.getElementById('quickModeTrigger');
@@ -2182,9 +2185,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function getProfileSummary(): string {
-        return agentProfile.domain === 'auto'
-            ? tr('Auto', '自动')
-            : agentProfile.domain === 'paradox' ? 'Paradox' : tr('General', '通用');
+        return agentProfile.domain === 'general' ? tr('General', '通用') : 'Paradox';
     }
 
     function applyComposerModeLabels(): void {
@@ -2773,15 +2774,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const modeMenu = document.getElementById('modeMenu');
         setModeMenuOpen(!modeMenu?.classList.contains('show'));
     });
-    const updateAgentDomain = (domain: ProfileDomain) => {
+    const updateAgentDomain = (domain: Exclude<ProfileDomain, 'auto'>) => {
         agentProfile = { domain, intent: 'auto', strategy: 'auto' };
         vscode.postMessage({ type: 'switchAgentProfile', profile: agentProfile });
         renderComposerChips();
     };
     document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-domain]').forEach(item => {
         item.addEventListener('click', () => {
-            const domain = item.dataset.profileDomain as ProfileDomain | undefined;
-            if (domain) {
+            const domain = item.dataset.profileDomain;
+            if (domain === 'paradox' || domain === 'general') {
                 updateAgentDomain(domain);
                 setModeMenuOpen(false);
             }

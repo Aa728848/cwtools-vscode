@@ -9,8 +9,8 @@ describe('AgentSessionCoordinator', () => {
         expect(session.currentMode).to.equal('build');
         expect(session.previousMode).to.equal('build');
         expect(session.currentWorkflowId).to.equal(null);
-        expect(session.agentProfile).to.deep.equal({ domain: 'auto', intent: 'auto', strategy: 'auto' });
-        expect(session.previousAgentProfile).to.deep.equal({ domain: 'auto', intent: 'auto', strategy: 'auto' });
+        expect(session.agentProfile).to.deep.equal({ domain: 'paradox', intent: 'auto', strategy: 'auto' });
+        expect(session.previousAgentProfile).to.deep.equal({ domain: 'paradox', intent: 'auto', strategy: 'auto' });
         expect(session.liveSteps).to.deep.equal([]);
         expect(session.isGenerating).to.equal(false);
         expect([...session.artifacts.values()]).to.deep.equal([]);
@@ -39,7 +39,7 @@ describe('AgentSessionCoordinator', () => {
         expect(session.previousMode).to.equal('build');
         expect(session.currentWorkflowId).to.equal('workflow.plan');
         expect(session.agentProfile).to.deep.equal({ domain: 'general', intent: 'execute', strategy: 'multi' });
-        expect(session.previousAgentProfile).to.deep.equal({ domain: 'auto', intent: 'review', strategy: 'single' });
+        expect(session.previousAgentProfile).to.deep.equal({ domain: 'paradox', intent: 'review', strategy: 'single' });
         expect(session.liveSteps).to.have.length(1);
         expect(session.isGenerating).to.equal(true);
         expect(session.artifacts.get('a1')?.title).to.equal('Plan');

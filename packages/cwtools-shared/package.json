@@ -1,6 +1,15 @@
 {
   "name": "cwtools-shared",
   "version": "0.1.0",
+  "description": "Shared protocol and tool contracts for the CWTools MCP server",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aa728848/cwtools-mcp.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [

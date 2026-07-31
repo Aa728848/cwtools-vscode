@@ -10,6 +10,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import type { SharedToolResult } from 'cwtools-shared';
 import type { CwtoolsMcpConfig } from '../config';
+import { detectExtensionBridgeManifestPath } from '../hosts/vscodeCache';
 import { listResources } from './resources';
 import { listRegisteredTools } from './toolRegistrar';
 import { toMcpCallToolResult } from './toolHandlers';
@@ -273,7 +274,13 @@ function resolveBridgeManifestPath(config: CwtoolsMcpConfig): string {
   const envPath = process.env.CWTOOLS_MCP_BRIDGE_MANIFEST;
   if (envPath) return path.resolve(envPath);
   const scriptPath = process.argv[1] ? path.resolve(process.argv[1]) : __filename;
-  return path.join(path.dirname(scriptPath), BRIDGE_MANIFEST_FILE);
+  const scriptSibling = path.join(path.dirname(scriptPath), BRIDGE_MANIFEST_FILE);
+  if (fs.existsSync(scriptSibling)) return scriptSibling;
+  // Independently installed (npx / npm -g) proxies live nowhere near the
+  // extension's globalStorage — fall back to the manifest the active
+  // VS Code-compatible host writes there.
+  const detected = detectExtensionBridgeManifestPath();
+  return detected ?? scriptSibling;
 }
 
 function normalizeCallToolResult(result: McpCallToolResult): McpCallToolResult {
@@ -306,7 +313,7 @@ function unavailableResult(error: unknown): SharedToolResult {
     },
     nextSteps: [
       'Open the workspace in a VS Code-compatible host with the CWTools extension installed and active.',
-      'Make sure the external agent uses the cwtools-mcp.cjs copied under that host globalStorage/mcp directory.',
+      'Point the MCP client at cwtools-mcp (npx -y cwtools-mcp) or pass --bridge-manifest to the host globalStorage/mcp/bridge-manifest.json.',
       'Use --standalone only if you intentionally want a separate CWTools Server process.',
     ],
   };

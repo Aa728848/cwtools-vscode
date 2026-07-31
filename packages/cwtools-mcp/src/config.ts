@@ -14,7 +14,8 @@ export interface CwtoolsMcpConfig {
   // (a .zip is rejected) — the server loads rules from a folder, not an archive.
   rulesPath?: string;
   // Extension-host bridge manifest. Defaults to bridge-manifest.json next to
-  // the launched cwtools-mcp script, which is where the extension writes it.
+  // the launched cwtools-mcp script, falling back to auto-detected host
+  // globalStorage locations (where the extension writes it).
   bridgeManifestPath?: string;
   stdio: boolean;
   http: boolean;
@@ -167,11 +168,13 @@ export function helpText(): string {
     '',
     'Default bridge mode:',
     '  The script connects to the extension-host MCP bridge written by the active',
-    '  VS Code-compatible host next to this script as bridge-manifest.json. It does',
-    '  not start a second CWTools language server. The client workspace (MCP roots,',
-    '  environment workspace, cwd, or --workspace when supplied) must match the bridge',
-    '  workspace exactly. If the compatible host is closed or the workspace does not',
-    '  match, tool calls return an actionable unavailable error.',
+    '  VS Code-compatible host. The manifest (bridge-manifest.json) is looked up next',
+    '  to this script first, then auto-detected under the host globalStorage of VS Code,',
+    '  Insiders, VSCodium, Cursor, and Antigravity. It does not start a second CWTools',
+    '  language server. The client workspace (MCP roots, environment workspace, cwd,',
+    '  or --workspace when supplied) must match the bridge workspace exactly. If the',
+    '  compatible host is closed or the workspace does not match, tool calls return an',
+    '  actionable unavailable error.',
     '  Use --standalone only when you intentionally want the legacy self-hosted LSP mode.',
     '',
     'Vanilla data (needed for vanilla IDs and correct mod-vs-vanilla diagnostics):',

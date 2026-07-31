@@ -78,6 +78,18 @@ export function detectExtensionServerPath(): string | undefined {
   return fs.existsSync(candidate) ? candidate : undefined;
 }
 
+// The bridge manifest the active extension host writes under
+// globalStorage/<extension>/mcp/bridge-manifest.json. Lets an independently
+// installed (npx / global npm) cwtools-mcp discover the running extension
+// without a --bridge-manifest override.
+export function detectExtensionBridgeManifestPath(): string | undefined {
+  for (const base of globalStorageBases()) {
+    const candidate = path.join(base, PRIMARY_EXTENSION_DIR, 'mcp', 'bridge-manifest.json');
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
 // True when dir holds at least one .cwt rule file at its top level.
 function containsRuleFiles(dir: string): boolean {
   try {

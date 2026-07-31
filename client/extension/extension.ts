@@ -1100,29 +1100,9 @@ export async function activate(context: ExtensionContext) {
 		}
 	}, 5000);
 
-	// Sync the bundled MCP server to a version-independent globalStorage path so
-	// external agents (Codex / Claude Code) can point at a stable location that
-	// keeps following extension updates instead of a versioned extension path.
-	const stableMcpDir = path.join(context.globalStorageUri.fsPath, 'mcp');
-	const stableMcpPath = path.join(stableMcpDir, 'cwtools-mcp.cjs');
-	setTimeout(async () => {
-		try {
-			const bundledMcp = path.join(context.extensionPath, 'bin', 'mcp', 'cwtools-mcp.cjs');
-			if (fs.existsSync(bundledMcp)) {
-				const legacyMcpPaths = legacyPublisherStoragePaths(context)
-					.filter(legacyStorage => fs.existsSync(legacyStorage))
-					.map(legacyStorage => path.join(legacyStorage, 'mcp', 'cwtools-mcp.cjs'));
-				for (const targetMcpPath of [stableMcpPath, ...legacyMcpPaths]) {
-					await fs.promises.mkdir(path.dirname(targetMcpPath), { recursive: true });
-					await fs.promises.copyFile(bundledMcp, targetMcpPath);
-				}
-				ErrorReporter.debug('Extension', `Synced MCP server to stable path ${stableMcpPath}`);
-			}
-		} catch (e) {
-			ErrorReporter.debug('Extension', 'Failed to sync MCP server to globalStorage', e);
-		}
-	}, 2000);
-
+	// The MCP server moved to the standalone cwtools-mcp package (npx -y cwtools-mcp)
+	// and is no longer bundled or synced to globalStorage. Copies synced by older
+	// versions still work: the bridge manifest protocol below is unchanged.
 	// ─── AI Module Integration (registered at top-level so panel works immediately) ──
 	const aiService = new AIService(context);
 	// Retire the legacy global endpoint into the per-provider map early so quick-switching

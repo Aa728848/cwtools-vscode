@@ -76,9 +76,8 @@ For CWT rule authoring details, see [CWT Rule Configuration Guide](./docs/cwt-ru
 | `npm run test` | Compile and run VS Code integration tests |
 | `npm run check:release` | Verify release package metadata and necessary output |
 | `npm run verify` | Integrated local validation: lint, compile, unit tests, release gate |
-| `npm run build:shared` / `build:mcp` | Build MCP subpackages (`packages/cwtools-shared` / `cwtools-mcp`) |
-| `npm run generate:mcp-schema` | Regenerate MCP tool schema from upstream `definitions.ts`+`registry.ts` |
-| `npm run test:contracts` | MCP contract tests (schema drift, read-only policy, tool routing, deep tools) |
+| `npm run generate:mcp-schema` | Regenerate MCP tool schema from upstream `definitions.ts`+`registry.ts` (writes into `submodules/cwtools-mcp`) |
+| `npm run build` / `test:contracts` (inside `submodules/cwtools-mcp`) | Build the MCP packages and run MCP contract tests (schema drift, read-only policy, tool routing, deep tools) |
 | `dotnet build src/LSP/` | Build LSP protocol and parsing layers |
 | `dotnet build src/Main/` | Build `CWTools Server` |
 
@@ -289,10 +288,10 @@ Key constraints for tools:
 - Custom Provider uses `cwtools.ai.customApiFormat` to support 4 network protocols. Custom endpoints are stored in `cwtools.ai.providerEndpoints`.
 - `usageTracker.ts` persists token usage and costs across sessions.
 
-##### MCP Server (`packages/`)
+##### MCP Server (`submodules/cwtools-mcp/`)
 
-`packages/cwtools-shared` and `packages/cwtools-mcp` are read-only MCP services bundled inside the extension.
-- **Do not write schema by hand**: Generated to `cwtools-shared/src/generated/mcpTools.ts` via `tools/generate-mcp-schema.cjs` from `definitions.ts` + `registry.ts`. Keep `cwtools-shared/src/tools/names.ts` and the script whitelist in sync. Verify using `npm run generate:mcp-schema` and `npm run test:contracts`.
+`submodules/cwtools-mcp/` is a separate repository vendored as a submodule; it holds the read-only MCP packages `cwtools-shared` and `cwtools-mcp`. The extension VSIX does not bundle the MCP server — external agents install it standalone (`npx -y cwtools-mcp`). Commit MCP changes inside the submodule first, then bump the root pointer.
+- **Do not write schema by hand**: Generated to `cwtools-shared/src/generated/mcpTools.ts` via `tools/generate-mcp-schema.cjs` from `definitions.ts` + `registry.ts`. Keep `cwtools-shared/src/tools/names.ts` and the script whitelist in sync. Verify using `npm run generate:mcp-schema` (root) and `npm run test:contracts` (inside the submodule).
 - **Enforce Read-Only**: Reject non-whitelist tools inside `cwtools-mcp`'s `createToolCallHandler`.
 - Add new capabilities as a `cwtools.ai.*` LSP command first (and check `LanguageServer.fs` `isReadCmd` for reads), then route inside `cwtools-shared/src/tools/toolHandlers.ts`. Do not duplicate parser logic inside MCP.
 - `cwtools-shared` cannot import `vscode` or extension contexts. Inject dependencies via `HostServices`.
@@ -321,7 +320,7 @@ Choose tests based on your modifications:
 | AI Tool Execution | `editFileReplacer.test.ts`, `argRepair.test.ts`, `toolInvocation.test.ts` |
 | Diagnostics i18n / ReadTracker / Command Safety | `diagnosticI18n.test.ts`, `readTracker.test.ts`, `runCommandReadonly.test.ts`, `commandPreflight.test.ts` |
 | Project Profile / `/init` | `projectProfile.test.ts` |
-| MCP Services | `npm run generate:mcp-schema` and `npm run test:contracts` |
+| MCP Services | `npm run generate:mcp-schema` (root) and `npm run test:contracts` (inside `submodules/cwtools-mcp`) |
 | IndexService / GameProfile | Related unit tests |
 | Webview | `npm run compile`, check console in host |
 | F# LSP | `dotnet build src/LSP/` |
@@ -439,9 +438,8 @@ CWT 规则编写细节见 [CWT 规则配置开发指南](./docs/cwt-rule-config.
 | `npm run test` | 编译后运行 VS Code 集成测试 |
 | `npm run check:release` | 检查发布包元数据和必要产物 |
 | `npm run verify` | 本地综合验证：lint、compile、unit、release gate |
-| `npm run build:shared` / `build:mcp` | 构建 MCP 子包（`packages/cwtools-shared` / `cwtools-mcp`） |
-| `npm run generate:mcp-schema` | 从上游 `definitions.ts`+`registry.ts` 重生成 MCP 工具 schema |
-| `npm run test:contracts` | MCP 合约测试（schema 漂移、只读策略、工具路由、深层工具） |
+| `npm run generate:mcp-schema` | 从上游 `definitions.ts`+`registry.ts` 重生成 MCP 工具 schema（写入 `submodules/cwtools-mcp`） |
+| `npm run build` / `test:contracts`（在 `submodules/cwtools-mcp` 内执行） | 构建 MCP 子包并运行 MCP 合约测试（schema 漂移、只读策略、工具路由、深层工具） |
 | `dotnet build src/LSP/` | 构建 LSP 协议/解析层 |
 | `dotnet build src/Main/` | 构建 `CWTools Server` |
 
@@ -660,9 +658,9 @@ Webview 运行在浏览器沙盒中：
 
 ##### 通用 MCP 服务（`packages/`）
 
-`packages/cwtools-shared` 与 `packages/cwtools-mcp` 是随插件分发的**只读** MCP 服务，供 Codex / Claude Code 等外部 Agent 调用。开发约定：
+`submodules/cwtools-mcp/` 是独立仓库以 submodule 形式挂回，内含**只读** MCP 包 `cwtools-shared` 与 `cwtools-mcp`，供 Codex / Claude Code 等外部 Agent 调用。扩展 VSIX 不再随包携带 MCP——外部 Agent 独立安装（`npx -y cwtools-mcp`）。MCP 改动先在 submodule 内提交推送，再更新根仓库指针。开发约定：
 
-- 工具 schema **不手写**：由 `tools/generate-mcp-schema.cjs` 从上游 `definitions.ts` + `registry.ts` 生成到 `cwtools-shared/src/generated/mcpTools.ts`。首期工具白名单同时存在于 `cwtools-shared/src/tools/names.ts` 与生成脚本，两处必须一致。改动后运行 `npm run generate:mcp-schema`，并用 `npm run test:contracts` 验证无漂移。
+- 工具 schema **不手写**：由 `tools/generate-mcp-schema.cjs` 从上游 `definitions.ts` + `registry.ts` 生成到 `cwtools-shared/src/generated/mcpTools.ts`。首期工具白名单同时存在于 `cwtools-shared/src/tools/names.ts` 与生成脚本，两处必须一致。改动后运行 `npm run generate:mcp-schema`（根仓库），并在 submodule 内用 `npm run test:contracts` 验证无漂移。
 - **保持只读**：不要在 MCP 暴露写工具；`cwtools-mcp` 的 `createToolCallHandler` 会对任何非白名单工具返回 `tool_not_available`。文件写入交给宿主 Agent。
 - 新语义能力先在 `src/LSP`/`src/Main` 增加 `cwtools.ai.*` 命令（只读命令同时加入 `LanguageServer.fs` 的 `isReadCmd`），再在 `cwtools-shared/src/tools/toolHandlers.ts` 的 dispatcher 接线，不要在 MCP 内重写 CWTools 语义。
 - `cwtools-shared` 禁止 import `vscode`/`vscode-languageclient`/webview/extension context；宿主能力经 `HostServices` 注入。
@@ -691,7 +689,7 @@ Webview 运行在浏览器沙盒中：
 | AI Tool Execution (replacer/arg repair) | `editFileReplacer.test.ts`、`argRepair.test.ts`、`toolInvocation.test.ts` |
 | 诊断 i18n / ReadTracker / 命令安全 | `diagnosticI18n.test.ts`、`readTracker.test.ts`、`runCommandReadonly.test.ts`、`commandPreflight.test.ts` |
 | Project Profile / `/init` | `projectProfile.test.ts` |
-| 通用 MCP 服务 (`packages/`) | `npm run generate:mcp-schema`（如改工具）+ `npm run test:contracts`；真实验证跑 `release/bin/mcp/cwtools-mcp.cjs` |
+| 通用 MCP 服务 (`submodules/cwtools-mcp/`) | `npm run generate:mcp-schema`（如改工具，根仓库）+ submodule 内 `npm run test:contracts`；真实验证跑 submodule 构建出的 `cwtools-mcp` CLI |
 | IndexService / GameProfile | 相关单测 + `npm run test:unit` |
 | Webview | `npm run compile`，在开发宿主中打开对应面板检查控制台 |
 | F# LSP | `dotnet build src/LSP/` |

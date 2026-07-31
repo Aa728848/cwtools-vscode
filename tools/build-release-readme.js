@@ -43,11 +43,6 @@ function marketplaceReadme(markdown) {
     );
 
     output = output.replaceAll(
-        '[packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md)',
-        '[packages/cwtools-mcp/README.md](https://github.com/Aa728848/cwtools-vscode/blob/master/packages/cwtools-mcp/README.md)'
-    );
-
-    output = output.replaceAll(
         '[.agents/workflows/package.md](./.agents/workflows/package.md)',
         '[.agents/workflows/package.md](https://github.com/Aa728848/cwtools-vscode/blob/master/.agents/workflows/package.md)'
     );

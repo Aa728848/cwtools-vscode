@@ -1,17 +1,11 @@
 {
   "name": "cwtools-vscode",
   "version": "2.9.7",
-  "workspaces": [
-    "packages/cwtools-shared",
-    "packages/cwtools-mcp"
-  ],
   "scripts": {
     "compile": "tsc -p ./.config/tsconfig.extension.json && rollup -c",
-    "build:shared": "npm run build -w cwtools-shared",
-    "build:mcp": "npm run build -w cwtools-mcp",
     "build:docs": "node tools/build-github-docs.js && node tools/build-release-readme.js",
-    "test:contracts": "npm run test:contracts -w cwtools-shared && npm run test:contracts -w cwtools-mcp",
     "generate:mcp-schema": "node tools/generate-mcp-schema.cjs",
+    "check:mcp-schema": "node tools/generate-mcp-schema.cjs --check",
     "pack": "powershell -ExecutionPolicy Bypass -File ./package.ps1",
     "pack:install": "powershell -ExecutionPolicy Bypass -File ./package.ps1 -Install",
     "pack:quick": "powershell -ExecutionPolicy Bypass -File ./package.ps1 -SkipServer -Install",

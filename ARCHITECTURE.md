@@ -22,7 +22,7 @@ and two submodule data/code sources:
 3. Webview Sandbox UI: `client/webview/`
 4. .NET/F# Language Server: `src/LSP/` and `src/Main/`
 5. Shared Platform Capabilities: `client/extension/gameProfiles.ts` and `client/extension/indexing/`
-6. Out-of-the-Box MCP Server: `packages/cwtools-shared/` and `packages/cwtools-mcp/` (a read-only semantic service bundled with the extension for external agents like Codex or Claude Code, see the "Out-of-the-Box MCP Server" section)
+6. Standalone MCP Server: `submodules/cwtools-mcp/` (separate repository holding `cwtools-shared` and `cwtools-mcp`, a read-only semantic service installed standalone by external agents like Codex or Claude Code, see the "Standalone MCP Server" section)
 7. Submodules: `submodules/cwtools/` for the upstream F# library and `submodules/cwtools-stellaris-config/` for Stellaris CWT rules/config data
 
 ```mermaid
@@ -35,7 +35,7 @@ flowchart TD
     LSP["CWTools Server\nsrc/Main + src/LSP"]
     CW["CWTools F# library\nsubmodules/cwtools"]
     RULES["Stellaris CWT rules\nsubmodules/cwtools-stellaris-config"]
-    MCP["MCP Server (read-only)\npackages/cwtools-mcp"]
+    MCP["MCP Server (read-only)\nsubmodules/cwtools-mcp"]
     EXT["External Agents\nCodex / Claude Code"]
 
     VS --> GP
@@ -402,9 +402,9 @@ Both paths structure DAG sub-tasks, bound parallel execution, share results thro
 - `runReplay.ts` discovers runs and their full prompt artifacts after restart, then runs Mode A replays matching historic outputs by canonical tool arguments.
 - `readTracker.ts` blocks write attempts if files were modified externally since their last read.
 
-#### Out-of-the-Box MCP Server
+#### Standalone MCP Server
 
-The packages `packages/cwtools-shared` and `packages/cwtools-mcp` implement a **read-only** Model Context Protocol (MCP) server. It exports 34 semantic tools of CWTools to external hosts, including seven Shader queries.
+The packages `cwtools-shared` and `cwtools-mcp` (in the `submodules/cwtools-mcp/` submodule, a separate repository) implement a **read-only** Model Context Protocol (MCP) server. It exports 34 semantic tools of CWTools to external hosts, including seven Shader queries. The extension VSIX does not bundle it; external agents install it standalone (`npx -y cwtools-mcp`) and it bridges back into the active extension host.
 
 ##### Scope & Structure
 
@@ -521,7 +521,7 @@ cwtools-vscode/
 3. Webview 沙盒 UI：`client/webview/`
 4. .NET/F# 语言服务器：`src/LSP/` 与 `src/Main/`
 5. 共享平台能力：`client/extension/gameProfiles.ts` 与 `client/extension/indexing/`
-6. 通用 MCP 服务：`packages/cwtools-shared/` 与 `packages/cwtools-mcp/`（随插件分发的只读语义服务，供 Codex / Claude Code 等外部 Agent 调用，见「通用 MCP 服务」一节）
+6. 独立 MCP 服务：`submodules/cwtools-mcp/`（独立仓库，内含 `cwtools-shared` 与 `cwtools-mcp`，供 Codex / Claude Code 等外部 Agent 独立安装调用的只读语义服务，见「独立 MCP 服务」一节）
 7. 子模块：`submodules/cwtools/` 提供上游 F# 库，`submodules/cwtools-stellaris-config/` 提供 Stellaris CWT 规则/配置数据
 
 ```mermaid
@@ -534,7 +534,7 @@ flowchart TD
     LSP["CWTools Server\nsrc/Main + src/LSP"]
     CW["CWTools F# library\nsubmodules/cwtools"]
     RULES["Stellaris CWT rules\nsubmodules/cwtools-stellaris-config"]
-    MCP["MCP Server (read-only)\npackages/cwtools-mcp"]
+    MCP["MCP Server (read-only)\nsubmodules/cwtools-mcp"]
     EXT["External Agents\nCodex / Claude Code"]
 
     VS --> GP
@@ -1017,9 +1017,9 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 `tools/schemaFlatten.ts` 为弱工具调用能力的 Provider 自动展平深层嵌套的 tool schema（深度 > 2 或叶子 > 10 时触发），执行工具前由 `nestArguments()` 反向还原为嵌套结构。
 
-#### 通用 MCP 服务
+#### 独立 MCP 服务
 
-`packages/cwtools-shared/` 与 `packages/cwtools-mcp/` 是两个 npm workspace 子包，构成一个**只读**的 Model Context Protocol 服务，把本项目的 PDX 语义能力（类型/规则/作用域/诊断/定义引用/补全/深层语义）平台化输出给 Codex、Claude Code 等外部 Agent。文件写入不由 MCP 负责，交给宿主 Agent 自带环境。
+`submodules/cwtools-mcp/`（独立仓库，以 submodule 挂回）内的 `cwtools-shared/` 与 `cwtools-mcp/` 两个 npm workspace 子包，构成一个**只读**的 Model Context Protocol 服务，把本项目的 PDX 语义能力（类型/规则/作用域/诊断/定义引用/补全/深层语义）平台化输出给 Codex、Claude Code 等外部 Agent。扩展 VSIX 不再随包携带；外部 Agent 独立安装（`npx -y cwtools-mcp`）后通过 bridge 连回已激活的扩展宿主。文件写入不由 MCP 负责，交给宿主 Agent 自带环境。
 
 ##### 分层与边界
 
@@ -1139,9 +1139,9 @@ Shader 支持覆盖 `.shader` 和 `.fxh`，涉及：
 | `npm run test` | 编译后运行 VS Code 集成测试 |
 | `npm run check:release` | 发布前质量门 |
 | `npm run verify` | `lint + compile + unit + release gate` 综合验证 |
-| `npm run build:shared` / `build:mcp` | 构建 MCP 子包（`packages/cwtools-shared` / `cwtools-mcp`） |
-| `npm run generate:mcp-schema` | 从上游 `definitions.ts`+`registry.ts` 重生成 MCP 工具 schema |
-| `npm run test:contracts` | MCP 合约测试（schema 漂移、只读策略、工具路由、深层工具） |
+| `npm run generate:mcp-schema` | 从上游 `definitions.ts`+`registry.ts` 重生成 MCP 工具 schema（写入 `submodules/cwtools-mcp`）；构建与合约测试在 `submodules/cwtools-mcp` 内执行 `npm run build` / `npm run test:contracts` |
+| `npm run build`（在 `submodules/cwtools-mcp` 内执行） | 构建 MCP 子包（`cwtools-shared` / `cwtools-mcp`） |
+| `npm run test:contracts` | MCP 合约测试（在 `submodules/cwtools-mcp` 内执行；schema 漂移、只读策略、工具路由、深层工具） |
 
 规则同步脚本（`tools/rules-sync/`）：
 
@@ -1170,7 +1170,7 @@ npx @vscode/vsce package
 
 打包前需要准备 TypeScript/Webview 输出和三平台服务端输出。推荐在根目录下运行 `package.ps1` 脚本（或使用快捷指令 `npm run pack:install` / `npm run pack:quick`），可一键自动化执行所有环境的编译、静态资源复制、包体打包及本地强制升级安装。
 
-打包流程还会构建并用 esbuild 把 MCP 打成单文件 `release/bin/mcp/cwtools-mcp.cjs` 随 VSIX 分发；插件激活时再复制到 globalStorage 稳定路径（见「通用 MCP 服务」）。注意 VS Code 对**同版本号**重装不替换已装文件，交付改动须升版本号（`npm run pack:install -- -Version <x>`，并同步根/release `package.json` 与 CHANGELOG）。
+MCP 已迁移到独立仓库 `submodules/cwtools-mcp/`，默认不随 VSIX 分发（外部 Agent 通过 `npx -y cwtools-mcp` 独立安装）；需要旧行为时可用 `package.ps1 -IncludeMcp` 从 submodule 构建并把单文件 `release/bin/mcp/cwtools-mcp.cjs` 打进 VSIX。注意 VS Code 对**同版本号**重装不替换已装文件，交付改动须升版本号（`npm run pack:install -- -Version <x>`，并同步根/release `package.json` 与 CHANGELOG）。
 
 打包时会将 `submodules/cwtools-stellaris-config/config/` 压缩为 `release/rules/stellaris-rules.zip` 作为 fallback 规则（正常情况下通过 GitHub 拉取规则，仅在网络不可用时启用此 fallback）。F# 服务端使用 `System.IO.Compression.ZipFile` 直接从内存读取 ZIP 内容，无需解压到磁盘。
 

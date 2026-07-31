@@ -14,6 +14,10 @@
     Skips the F# .NET server compilation step to save time.
 .PARAMETER SkipClient
     Skips typescript and webview Rollup compilation.
+.PARAMETER IncludeMcp
+    Opt-in: builds the MCP server from submodules/cwtools-mcp and bundles it into
+    the VSIX at bin/mcp. By default the VSIX ships without the MCP server, which is
+    installed standalone (npx -y cwtools-mcp) from its own repository.
 .EXAMPLE
     .\package.ps1 -Install
 .EXAMPLE
@@ -27,7 +31,8 @@ param (
     [string]$Version,
     [switch]$Install,
     [switch]$SkipServer,
-    [switch]$SkipClient
+    [switch]$SkipClient,
+    [switch]$IncludeMcp
 )
 
 $StartTime = Get-Date
@@ -162,27 +167,37 @@ if (-not $SkipClient) {
     Write-Host "[3/6 & 4/6] (SKIPPED) Skip Webview compilation and asset copying." -ForegroundColor Gray
 }
 
-# 5. Build and bundle the MCP server (shipped inside the extension at bin/mcp)
-if (-not $SkipClient) {
-    Write-Host "[5/6] Building and bundling MCP server (bin/mcp)..." -ForegroundColor Yellow
-    npm run build:mcp
-    if ($LASTEXITCODE -ne 0) {
+# 5. (Opt-in) Build and bundle the MCP server (shipped inside the extension at bin/mcp)
+# The MCP server moved to the submodules/cwtools-mcp repository and is installed
+# standalone (npx -y cwtools-mcp); the VSIX no longer carries it by default.
+if ($IncludeMcp) {
+    Write-Host "[5/6] Building and bundling MCP server from submodule (bin/mcp)..." -ForegroundColor Yellow
+    $McpSubmodule = Join-Path $PSScriptRoot "submodules/cwtools-mcp"
+    if (-not (Test-Path (Join-Path $McpSubmodule "packages/cwtools-mcp"))) {
+        Write-Error "cwtools-mcp submodule not found at $McpSubmodule. Run: git submodule update --init"
+        exit 1
+    }
+    Push-Location $McpSubmodule
+    npm run build -w cwtools-mcp
+    $McpBuildExit = $LASTEXITCODE
+    Pop-Location
+    if ($McpBuildExit -ne 0) {
         Write-Error "MCP TypeScript build failed!"
-        exit $LASTEXITCODE
+        exit $McpBuildExit
     }
     $McpOut = Join-Path $PSScriptRoot "release/bin/mcp/cwtools-mcp.cjs"
     $McpOutDir = Split-Path $McpOut -Parent
     if (-not (Test-Path $McpOutDir)) {
         New-Item -ItemType Directory -Path $McpOutDir -Force | Out-Null
     }
-    npx esbuild packages/cwtools-mcp/dist/cli.js --bundle --platform=node --format=cjs --target=node18 --outfile=$McpOut
+    npx esbuild submodules/cwtools-mcp/packages/cwtools-mcp/dist/cli.js --bundle --platform=node --format=cjs --target=node18 --outfile=$McpOut
     if ($LASTEXITCODE -ne 0) {
         Write-Error "MCP bundling failed!"
         exit $LASTEXITCODE
     }
     Write-Host "[OK] MCP server bundled to release/bin/mcp/cwtools-mcp.cjs" -ForegroundColor Green
 } else {
-    Write-Host "[5/6] (SKIPPED) Skip MCP build and bundling." -ForegroundColor Gray
+    Write-Host "[5/6] (SKIPPED) MCP server is not bundled by default (use -IncludeMcp to opt in)." -ForegroundColor Gray
 }
 
 # 6. Package VSIX Universal Bundle

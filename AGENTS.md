@@ -82,10 +82,11 @@ changing these docs; it also regenerates `release/README.md` from `README.md`.
 - `client/extension/ai/`: AI runtime, tools, workflows, memory, and orchestration.
 - `client/webview/`: browser-sandboxed Webviews.
 - `src/LSP/`, `src/Main/`: .NET 10 / F# language server.
-- `packages/cwtools-shared/`, `packages/cwtools-mcp/`: bundled read-only MCP
-  server.
 - `submodules/cwtools/`: upstream F# library.
 - `submodules/cwtools-stellaris-config/`: Stellaris CWT rules data.
+- `submodules/cwtools-mcp/`: standalone read-only MCP server (`cwtools-shared` +
+  `cwtools-mcp` packages), a separate repository vendored as a submodule. The
+  extension VSIX does not bundle it; users install it via `npx -y cwtools-mcp`.
 
 Reuse shared platform helpers such as `gameProfiles.ts`, `indexing/`,
 `pathScope.ts`, and `fileExtensions.ts` rather than duplicating them.
@@ -93,7 +94,10 @@ Reuse shared platform helpers such as `gameProfiles.ts`, `indexing/`,
 Submodules have separate ownership. Commit a `submodules/cwtools` change inside
 that submodule first, then update the root pointer. Treat
 `cwtools-stellaris-config` as rules content, and do not mix the two kinds of
-change in one undifferentiated commit.
+change in one undifferentiated commit. The same rule applies to
+`submodules/cwtools-mcp`: MCP changes are committed and pushed inside that
+repository first (it has its own release cycle and npm publishing), then the
+root pointer is bumped.
 
 ## Task-Specific Constraints
 
@@ -120,16 +124,20 @@ tool names or retired model-visible patch tools.
 New run-event types must update reducers and Webview renderers. Resume changes
 must retain V2 compatibility. Read `ARCHITECTURE.md` before large runner changes.
 
-### MCP (`packages/`)
+### MCP (`submodules/cwtools-mcp/`)
 
 - The MCP server is read-only and must reject non-whitelisted writes.
 - Add new semantic capability as a `cwtools.ai.*` LSP command first.
 - Keep tool names and schema generation inputs synchronized; do not hand-edit
-  `packages/cwtools-shared/src/generated/mcpTools.ts`.
+  `submodules/cwtools-mcp/packages/cwtools-shared/src/generated/mcpTools.ts`.
 - Add read-only LSP commands to `LanguageServer.fs` `isReadCmd`.
-- After MCP tool changes, run schema generation, package builds, and contract
-  tests. Delivery to an installed same-version extension requires a version
-  bump and reinstall.
+- Tool-schema workflow after changing `client/extension/ai/tools/definitions.ts`:
+  run `npm run generate:mcp-schema` (writes into the submodule), commit and push
+  inside `submodules/cwtools-mcp`, then bump the root submodule pointer. Publish
+  a new `cwtools-mcp` version from that repository so external agents pick up
+  the change.
+- MCP builds and contract tests run inside the submodule:
+  `cd submodules/cwtools-mcp && npm run build && npm run test:contracts`.
 
 ### F# and shader work (`src/`, `submodules/cwtools/`)
 
@@ -150,8 +158,8 @@ Run the narrowest useful checks, then broaden according to risk:
   `npm run check:release -- --skip-compile --skip-test`.
 - Extension TypeScript or Webview: `npm run compile`, then targeted unit tests.
 - AI runtime/tools: targeted unit tests, then `npm run test:unit`.
-- MCP: `npm run generate:mcp-schema`, `npm run build:shared`,
-  `npm run build:mcp`, and `npm run test:contracts`.
+- MCP: `npm run generate:mcp-schema`, then inside `submodules/cwtools-mcp`:
+  `npm run build` and `npm run test:contracts`.
 - F# backend: `dotnet build src/LSP/` and/or `dotnet build src/Main/`.
 - Broad pre-release gate: `npm run verify`.
 

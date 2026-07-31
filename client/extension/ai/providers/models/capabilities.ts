@@ -152,7 +152,7 @@ export function isModelFIMCapable(model: string, providerId: string): boolean {
  * Single source of truth for thinking models that CANNOT disable thinking.
  */
 export const ALWAYS_THINKING_PREFIXES: string[] = [
-    'deepseek-reasoner', 'deepseek-r1', 'DeepSeek-R1',
+    'deepseek-r1', 'DeepSeek-R1',
     'o1', 'o3', 'o4-mini',
     'glm-z1', 'GLM-Z1',
     'gemini-2.5-pro', 'gemini-3.1-pro',

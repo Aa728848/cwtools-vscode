@@ -457,7 +457,7 @@ export class AIService {
              *   - Claude: no action needed (thinking not sent by default)
              *   - MiniMax: no API toggle (rely on <think> stripping)
              *   - OpenAI/DeepSeek: reasoning_effort='low' when full disable is unavailable
-             * Models that ALWAYS think (o1/o3/deepseek-reasoner/glm-z1/gemini-pro)
+             * Models that ALWAYS think (o1/o3/glm-z1/gemini-pro)
              * should be blocked before calling this method.
              */
             disableThinking?: boolean;

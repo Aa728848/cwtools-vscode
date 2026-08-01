@@ -6369,38 +6369,83 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         requestHitRate: typeof record.requestHitRate === 'number' ? record.requestHitRate : 0,
                     };
                 };
-                const renderCacheDimension = (label: string, groups: Record<string, unknown> | undefined) => {
-                    const entries = Object.entries(groups || {})
+                const renderCacheDimension = (
+                    label: string,
+                    groups: Record<string, unknown> | undefined,
+                    compactKeys = false,
+                ) => {
+                    const allEntries = Object.entries(groups || {})
                         .sort((left, right) => cacheBucket(right[1]).requests - cacheBucket(left[1]).requests)
-                        .slice(0, 6);
+                    const entries = allEntries.slice(0, 6);
                     if (entries.length === 0) return '';
-                    return `<div style="font-size:11px; margin-top:3px;"><span style="opacity:0.55;">${escapeHtml(label)}:</span> ${entries.map(([key, value]) => {
+                    const chips = entries.map(([key, value]) => {
                         const bucket = cacheBucket(value);
-                        return `<span title="${escapeHtml(`${bucket.hitRequests}/${bucket.requests} requests`)}">${escapeHtml(key)} ${bucket.requestHitRate.toFixed(1)}%</span>`;
-                    }).join(' · ')}</div>`;
+                        const hitRate = Math.max(0, Math.min(100, bucket.requestHitRate));
+                        const displayKey = compactKeys && key.length > 20
+                            ? `${key.slice(0, 8)}…${key.slice(-6)}`
+                            : key;
+                        const requestSummary = tr(
+                            `${bucket.hitRequests}/${bucket.requests} requests hit`,
+                            `${bucket.hitRequests}/${bucket.requests} 次命中`,
+                        );
+                        return `<span class="usage-cache-chip" title="${escapeHtml(`${key} · ${requestSummary}`)}">
+                            <span class="usage-cache-chip-name">${escapeHtml(displayKey)}</span>
+                            <strong>${hitRate.toFixed(1)}%</strong>
+                            <span class="usage-cache-chip-count">${escapeHtml(requestSummary)}</span>
+                            <span class="usage-cache-chip-meter"><i style="width:${hitRate}%;"></i></span>
+                        </span>`;
+                    }).join('');
+                    const overflow = allEntries.length > entries.length
+                        ? `<span class="usage-cache-overflow">+${allEntries.length - entries.length}</span>`
+                        : '';
+                    return `<div class="usage-cache-dimension">
+                        <span class="usage-cache-dimension-label">${escapeHtml(label)}</span>
+                        <div class="usage-cache-values">${chips}${overflow}</div>
+                    </div>`;
                 };
 
                 // ── Summary ──
                 html += `<div style="margin-bottom: 10px; font-weight: 600; font-size: 13px;">
                     ${tr('Total tokens', '总计消耗')}: <span style="color:var(--accent);">${stats.totalTokens.toLocaleString()}</span> tokens<br>
                     ${tr('Estimated cost', '预估成本')}: <span style="color:#4caf50;">¥${typeof stats.totalCostCny === 'number' ? stats.totalCostCny.toFixed(2) : '0.00'}</span><br>
-                    ${cache ? `${tr('Cache requests', '缓存请求')}: <span style="color:var(--vscode-charts-green, #388a34);">${Number(cache.requestHitRate || 0).toFixed(1)}%</span> <span style="font-size:11px; opacity:0.6;">(${tr('cached input tokens', '缓存输入 token')} ${Number(cache.cachedInputTokenRatio || 0).toFixed(1)}%, ${tr('token hit rate', 'token 命中率')} ${Number(cache.cacheHitRate || 0).toFixed(1)}%, ${tr('saved tokens', '节省 token')} ${Number(cache.totalCachedTokens || 0).toLocaleString()}, ${tr('saved about', '约节省')} ¥${Number(cache.estimatedSavingsCny || 0).toFixed(2)})</span><br>` : ''}
+                    ${cache ? `${tr('Cache requests', '缓存请求')}: <span style="color:var(--vscode-charts-green, #388a34);">${Number(cache.requestHitRate || 0).toFixed(1)}%</span><br>` : ''}
                     <span style="font-size:11px; opacity:0.6;">${tr(`${stats.totalCalls ?? 0} call(s)`, `共 ${stats.totalCalls ?? 0} 次调用`)}</span>
                 </div>`;
 
                 if (cache) {
-                    html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px; margin-bottom: 10px;">';
-                    html += `<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">${tr('Cache request breakdown', '缓存请求分组')}</div>`;
+                    html += '<section class="usage-cache-panel">';
+                    html += `<div class="usage-cache-heading">
+                        <span>${tr('Cache request breakdown', '缓存请求分组')}</span>
+                        <small>${tr('Request-level hit rate', '按请求统计命中率')}</small>
+                    </div>`;
+                    html += `<div class="usage-cache-overview">
+                        <div class="usage-cache-metric"><span>${tr('Cache requests', '缓存请求')}</span><strong>${Number(cache.requestHitRate || 0).toFixed(1)}%</strong></div>
+                        <div class="usage-cache-metric"><span>${tr('cached input tokens', '缓存输入 token')}</span><strong>${Number(cache.cachedInputTokenRatio || 0).toFixed(1)}%</strong></div>
+                        <div class="usage-cache-metric"><span>${tr('token hit rate', 'token 命中率')}</span><strong>${Number(cache.cacheHitRate || 0).toFixed(1)}%</strong></div>
+                        <div class="usage-cache-metric"><span>${tr('saved tokens', '节省 token')}</span><strong>${Number(cache.totalCachedTokens || 0).toLocaleString()}</strong><small>${tr('saved about', '约节省')} ¥${Number(cache.estimatedSavingsCny || 0).toFixed(2)}</small></div>
+                    </div>`;
+                    html += '<div class="usage-cache-dimensions">';
                     html += renderCacheDimension(tr('Provider', '供应商'), cache.byProvider);
                     html += renderCacheDimension(tr('Model', '模型'), cache.byModel);
                     html += renderCacheDimension(tr('Agent mode', 'Agent 模式'), cache.byAgentMode);
                     html += renderCacheDimension(tr('Tool stage', '工具阶段'), cache.byToolStage);
-                    html += renderCacheDimension(tr('Prompt fingerprint', '提示词指纹'), cache.byPromptFingerprint);
-                    const invalidations = Object.entries(cache.invalidationReasons || {});
-                    if (invalidations.length > 0) {
-                        html += `<div style="font-size:11px; margin-top:3px;"><span style="opacity:0.55;">${tr('Zero-hit reasons', '零命中原因')}:</span> ${invalidations.map(([reason, count]) => `${escapeHtml(reason)} ${Number(count)}`).join(' · ')}</div>`;
-                    }
                     html += '</div>';
+                    const promptFingerprintCount = Object.keys(cache.byPromptFingerprint || {}).length;
+                    if (promptFingerprintCount > 0) {
+                        html += `<details class="usage-cache-advanced">
+                            <summary>${tr('Prompt fingerprint', '提示词指纹')} <span>${promptFingerprintCount}</span></summary>
+                            ${renderCacheDimension(tr('Prompt variants', '提示词版本'), cache.byPromptFingerprint, true)}
+                        </details>`;
+                    }
+                    const invalidations = Object.entries(cache.invalidationReasons || {})
+                        .sort((left, right) => Number(right[1]) - Number(left[1]));
+                    if (invalidations.length > 0) {
+                        html += `<div class="usage-cache-misses">
+                            <span>${tr('Zero-hit reasons', '零命中原因')}</span>
+                            <div>${invalidations.map(([reason, count]) => `<span title="${escapeHtml(reason)}">${escapeHtml(reason.replace(/_/g, ' '))}<strong>${Number(count)}</strong></span>`).join('')}</div>
+                        </div>`;
+                    }
+                    html += '</section>';
                 }
 
                 // ── Provider breakdown ──

@@ -2181,6 +2181,208 @@ body.script-mode .token-usage-fill { background: #2aa198 !important; }
     color: var(--vscode-charts-green, #388a34);
 }
 
+/* Token settings: request-level prefix-cache breakdown */
+.usage-cache-panel {
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.22));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--vscode-editor-inactiveSelectionBackground, transparent) 42%, transparent);
+}
+
+.usage-cache-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 11px;
+    font-weight: 650;
+}
+
+.usage-cache-heading small {
+    color: var(--vscode-descriptionForeground);
+    font-size: 9.5px;
+    font-weight: 400;
+}
+
+.usage-cache-overview {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.usage-cache-metric {
+    min-width: 0;
+    padding: 7px 8px;
+    border-radius: 6px;
+    background: var(--vscode-editor-background);
+    box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.12);
+}
+
+.usage-cache-metric > span,
+.usage-cache-metric > small {
+    display: block;
+    overflow: hidden;
+    color: var(--vscode-descriptionForeground);
+    font-size: 9.5px;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.usage-cache-metric > strong {
+    display: block;
+    overflow: hidden;
+    margin-top: 1px;
+    color: var(--vscode-charts-green, #4da746);
+    font-size: 14px;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.usage-cache-dimensions {
+    display: grid;
+    gap: 6px;
+}
+
+.usage-cache-dimension {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    align-items: start;
+    gap: 7px;
+    min-width: 0;
+}
+
+.usage-cache-dimension-label {
+    padding-top: 5px;
+    overflow: hidden;
+    color: var(--vscode-descriptionForeground);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.usage-cache-values {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+}
+
+.usage-cache-chip {
+    display: grid;
+    grid-template-columns: minmax(60px, 1fr) auto;
+    gap: 1px 8px;
+    min-width: min(180px, 100%);
+    max-width: 100%;
+    padding: 4px 6px 5px;
+    border: 1px solid rgba(128, 128, 128, 0.16);
+    border-radius: 5px;
+    background: var(--vscode-editor-background);
+    font-size: 10px;
+}
+
+.usage-cache-chip-name {
+    overflow: hidden;
+    font-family: var(--vscode-editor-font-family, monospace);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.usage-cache-chip > strong {
+    color: var(--vscode-charts-green, #4da746);
+    font-variant-numeric: tabular-nums;
+}
+
+.usage-cache-chip-count {
+    overflow: hidden;
+    color: var(--vscode-descriptionForeground);
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.usage-cache-chip-meter {
+    align-self: center;
+    height: 3px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(128, 128, 128, 0.16);
+}
+
+.usage-cache-chip-meter > i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--vscode-charts-green, #4da746);
+}
+
+.usage-cache-overflow {
+    align-self: center;
+    padding: 2px 5px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 9px;
+}
+
+.usage-cache-advanced {
+    margin-top: 8px;
+    border-top: 1px dashed rgba(128, 128, 128, 0.22);
+    padding-top: 6px;
+}
+
+.usage-cache-advanced > summary {
+    cursor: pointer;
+    color: var(--vscode-descriptionForeground);
+    font-size: 10px;
+    list-style-position: inside;
+    user-select: none;
+}
+
+.usage-cache-advanced > summary > span {
+    margin-left: 3px;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(128, 128, 128, 0.14);
+    font-size: 9px;
+}
+
+.usage-cache-advanced .usage-cache-dimension {
+    grid-template-columns: 76px minmax(0, 1fr);
+    margin-top: 6px;
+}
+
+.usage-cache-misses {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 7px;
+    margin-top: 8px;
+    padding-top: 7px;
+    border-top: 1px dashed rgba(128, 128, 128, 0.22);
+    color: var(--vscode-descriptionForeground);
+    font-size: 10px;
+}
+
+.usage-cache-misses > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.usage-cache-misses > div > span {
+    padding: 2px 5px;
+    border-radius: 999px;
+    background: rgba(217, 119, 6, 0.12);
+    color: var(--vscode-charts-orange, #d97706);
+}
+
+.usage-cache-misses strong {
+    margin-left: 5px;
+    font-variant-numeric: tabular-nums;
+}
+
 /* ── Stage H: Micro-interactions ── */
 @keyframes fadeSlideIn {
     from { opacity: 0; transform: translateY(4px); }

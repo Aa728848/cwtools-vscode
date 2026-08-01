@@ -231,6 +231,19 @@ describe('Codex activity view model', () => {
         expect(model.items.some(item => item.type === 'text' && item.text.content.includes('Tool Arg Repair'))).to.equal(false);
     });
 
+    it('hides legacy authorized-execution recovery telemetry from the transcript', () => {
+        const model = build([
+            {
+                type: 'thinking',
+                content: 'Authorized execution continued automatically from write mode after a premature final response.',
+                timestamp: 1000,
+            },
+        ]);
+
+        expect(model.items.some(item => item.type === 'text'
+            && item.text.content.includes('Authorized execution continued automatically'))).to.equal(false);
+    });
+
     it('hides prefix cache stats from the transcript', () => {
         const model = build([
             {

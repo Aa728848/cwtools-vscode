@@ -328,6 +328,26 @@ export function shouldContinueAuthorizedExecution(
     return normalizedStage ? normalizedStage !== 'finalize' : !executionActionObserved;
 }
 
+/**
+ * Accept ordinary-language clarification responses even when a provider fails
+ * to emit the structured question-card syntax. Without this guard, writable
+ * runs can replay the same clarification as a premature-final recovery.
+ */
+export function finalResponseRequiresUserInput(content: string): boolean {
+    const text = content.trim();
+    if (!text) return false;
+    if (text.includes(':::question')) return true;
+
+    // The decision normally appears at the end of a longer analysis. Keeping
+    // this bounded avoids treating an earlier discussion of missing inputs as
+    // the final state of an otherwise executable response.
+    const tail = text.slice(-2_000);
+    return /\b(?:please|could you|can you)\s+(?:clarify|specify|provide|describe|choose|confirm)\b/i.test(tail)
+        || /\b(?:cannot|can't|unable to)\s+(?:safely\s+)?(?:continue|proceed|implement|modify|change)[\s\S]{0,160}\b(?:without|until)\b/i.test(tail)
+        || /(?:没有|缺少|尚无|未提供|不清楚)[^。！？\n]{0,100}(?:修改目标|变更要求|故障描述|具体需求|具体要求|目标代码|操作范围)/.test(tail)
+        || /(?:请|需要)[^。！？\n]{0,40}(?:说明|明确|提供|选择|确认|补充)[^。！？\n]{0,80}(?:修改目标|变更要求|故障|需求|要求|范围|操作)/.test(tail);
+}
+
 export function isExecutionActionTool(toolName: string): boolean {
     if (toolName === 'dispatch_agents') return true;
     if (NON_DELIVERY_WRITE_TOOLS.has(toolName)) return false;

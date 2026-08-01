@@ -65,6 +65,7 @@ import {
     resolveRunMaxOutputTokens,
     shouldAutoDiscloseExecutionTools,
     shouldContinueAuthorizedExecution,
+    finalResponseRequiresUserInput,
     shouldRenewIterationLimit,
     SLIM_SUB_AGENT_OUTPUT_BUDGET_RECOVERY_LIMIT,
     SLIM_SUB_AGENT_THINKING_CHAR_LIMIT,
@@ -3096,8 +3097,8 @@ export class AgentRunner {
             // If no tool calls (either format), we're done — the final answer is no emit thinking block
             if (!toolCalls || toolCalls.length === 0) {
                 const finalContent = this.cleanFinalContent(contentToString(assistantMessage.content));
-                const isExplicitQuestion = finalContent.includes(':::question');
-                if (!isExplicitQuestion
+                const requiresUserInput = finalResponseRequiresUserInput(finalContent);
+                if (!requiresUserInput
                     && prematureExecutionFinalRecoveries < 3
                     && shouldContinueAuthorizedExecution(
                         mode,
@@ -3114,11 +3115,10 @@ export class AgentRunner {
                             + `Continue now with the available tools until the requested execution and verification are complete. `
                             + `Only ask a structured :::question when progress requires information that only the user can provide.</system-reminder>`,
                     });
-                    emitStep({
-                        type: 'thinking',
-                        content: `Authorized execution continued automatically from ${toolStage ?? 'full'} mode after a premature final response.`,
-                        timestamp: Date.now(),
-                    });
+                    ErrorReporter.debug(
+                        SOURCE.AGENT_RUNNER,
+                        `Authorized execution recovery ${prematureExecutionFinalRecoveries}/3 from ${toolStage ?? 'full'} stage.`,
+                    );
                     continue;
                 }
                 return finalContent;

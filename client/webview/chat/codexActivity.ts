@@ -113,7 +113,8 @@ function resultSummary(result: Record<string, unknown>, isCommand: boolean): str
 function isInternalThinkingNote(content: string): boolean {
     const text = content.trim();
     return /^\[(?:Tool Arg Repair|Tool Name Repair|VLM Image|SYSTEM)\]/i.test(text)
-        || /^Repaired tool name:/i.test(text);
+        || /^Repaired tool name:/i.test(text)
+        || /^Authorized execution continued automatically from .* after a premature final response\.?$/i.test(text);
 }
 
 function lastActivityKind(items: CodexTurnItem[]): CodexActivityEvent['kind'] | undefined {

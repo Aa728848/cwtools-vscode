@@ -131,8 +131,12 @@ describe('webview smoke checks', () => {
         expect(script).to.include("renderCacheDimension(tr('Model', '模型'), cache.byModel)");
         expect(script).to.include("renderCacheDimension(tr('Agent mode', 'Agent 模式'), cache.byAgentMode)");
         expect(script).to.include("renderCacheDimension(tr('Tool stage', '工具阶段'), cache.byToolStage)");
-        expect(script).to.include("renderCacheDimension(tr('Prompt fingerprint', '提示词指纹'), cache.byPromptFingerprint)");
+        expect(script).to.include("renderCacheDimension(tr('Prompt variants', '提示词版本'), cache.byPromptFingerprint, true)");
         expect(script).to.include("tr('Zero-hit reasons', '零命中原因')");
+        expect(script).to.include('class="usage-cache-overview"');
+        expect(script).to.include('class="usage-cache-chip"');
+        expect(script).to.include("`${key.slice(0, 8)}…${key.slice(-6)}`");
+        expect(script).to.include('class="usage-cache-advanced"');
     });
 
     it('chat webview modules expose split UI contracts', () => {

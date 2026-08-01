@@ -13,6 +13,7 @@ import {
     resolveRunMaxOutputTokens,
     shouldAutoDiscloseExecutionTools,
     shouldContinueAuthorizedExecution,
+    finalResponseRequiresUserInput,
     shouldRenewIterationLimit,
     SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS,
     TOP_LEVEL_ITERATION_SAFETY_CAP,
@@ -213,6 +214,19 @@ describe('runnerPolicy', () => {
         expect(shouldContinueAuthorizedExecution('script', undefined, 'workspace_write', true)).to.equal(false);
         expect(shouldContinueAuthorizedExecution('plan', 'validation', 'workspace_write', false)).to.equal(false);
         expect(shouldContinueAuthorizedExecution('utility', 'write', 'read_only', false)).to.equal(false);
+    });
+
+    it('recognizes plain-language clarification finals so writable runs do not replay them', () => {
+        expect(finalResponseRequiresUserInput(':::question\nWhat should be changed?')).to.equal(true);
+        expect(finalResponseRequiresUserInput(
+            '当前没有具体的修改目标或代码变更要求。请说明你希望执行的具体操作。',
+        )).to.equal(true);
+        expect(finalResponseRequiresUserInput(
+            'I cannot safely modify the project without a concrete target. Please specify the desired change.',
+        )).to.equal(true);
+        expect(finalResponseRequiresUserInput(
+            'Implementation and verification are complete. Three files were changed.',
+        )).to.equal(false);
     });
 
     it('distinguishes delivery execution from planning artifacts', () => {

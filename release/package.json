@@ -1644,7 +1644,10 @@
                     "stellarisLanguageServices.ai.hooks.failureMode": {
                         "scope": "window",
                         "type": "string",
-                        "enum": ["ignore", "block"],
+                        "enum": [
+                            "ignore",
+                            "block"
+                        ],
                         "enumDescriptions": [
                             "%configuration.stellarisLanguageServices.ai.hooks.failureMode.ignore%",
                             "%configuration.stellarisLanguageServices.ai.hooks.failureMode.block%"

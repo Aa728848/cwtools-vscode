@@ -150,7 +150,11 @@ describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
                 messages,
                 { getTodos: () => [{ content: 'resume task', status: 'pending' }] } as any,
                 runId,
-                [{ id: 'call_pending' }]
+                [{
+                    id: 'call_pending',
+                    type: 'function',
+                    function: { name: 'read_file', arguments: '{}' },
+                }]
             );
 
             const resumePath = path.join(tmpRoot, '.cwtools', topicId, 'resume_state.json');
@@ -165,7 +169,14 @@ describe('ResumeState V2/V3 Message Transcript Normalization Tests', () => {
             expect(saved.transcriptMessageCount).to.equal(messages.length);
             expect(saved.messages.length).to.be.lessThan(messages.length);
             expect(JSON.stringify(saved.messages)).to.include('[SYSTEM RESUME MEMORY]');
-            expect(saved.pendingToolCalls).to.deep.equal([{ id: 'call_pending' }]);
+            expect(saved.pendingToolCalls).to.equal(undefined);
+            expect(saved.pendingStepRequests).to.have.length(1);
+            expect(saved.pendingStepRequests?.[0]?.kind).to.equal('retry');
+            expect((saved.pendingStepRequests?.[0]?.payload as any)?.pendingToolCalls).to.deep.equal([{
+                id: 'call_pending',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{}' },
+            }]);
         } finally {
             fs.rmSync(tmpRoot, { recursive: true, force: true });
             vscodeStub.workspace.workspaceFolders = [];

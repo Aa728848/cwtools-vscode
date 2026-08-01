@@ -7,6 +7,7 @@ import {
     sessionFileWriteMode,
     sessionPolicyPreset,
     setSessionPermissionMode,
+    shouldReviewOpaqueCommandBeforePolicy,
 } from '../../extension/ai/runner/sessionPermissions';
 
 describe('session permission profiles', () => {
@@ -35,5 +36,12 @@ describe('session permission profiles', () => {
         expect(sessionApprovalsReviewer(workspace)).to.equal('user');
         expect(sessionPolicyPreset(workspace)).to.equal('full-access');
         expect(isSessionFullAccess(workspace)).to.equal(true);
+    });
+
+    it('routes opaque commands through the model only in auto-review mode', () => {
+        expect(shouldReviewOpaqueCommandBeforePolicy('auto_review', 'run_command', true, false)).to.equal(true);
+        expect(shouldReviewOpaqueCommandBeforePolicy('user', 'run_command', true, false)).to.equal(false);
+        expect(shouldReviewOpaqueCommandBeforePolicy('auto_review', 'run_command', false, false)).to.equal(false);
+        expect(shouldReviewOpaqueCommandBeforePolicy('auto_review', 'run_command', true, true)).to.equal(false);
     });
 });

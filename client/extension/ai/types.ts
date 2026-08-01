@@ -325,6 +325,8 @@ export interface ChatMessage {
      * using DeepSeek's thinking mode, otherwise API returns 400.
      */
     reasoning_content?: string | null;
+    /** Internal marker serialized as DeepSeek's `prefix` field only on its official beta endpoint. */
+    provider_prefix?: boolean;
     /** Raw Responses output items, replayed unchanged to preserve reasoning and item phases. */
     responses_output_items?: Array<Record<string, unknown>>;
     /** Signed Anthropic thinking blocks required when continuing a tool-use turn. */
@@ -1148,6 +1150,22 @@ export interface GetMemoryResult {
     value?: string;
 }
 
+export interface SaveMemoryArgs {
+    key: string;
+    content: string;
+    priority?: 'high' | 'normal' | 'low';
+    confidence?: number;
+    expiresInDays?: number;
+    /** Expected current per-key revision. Use 0 when creating a key. */
+    expectedRevision?: number;
+}
+
+export interface ForgetMemoryArgs {
+    key: string;
+    mode?: 'archive' | 'delete';
+    expectedRevision?: number;
+}
+
 // ─── Agent Tool Context ────────────────────────────────────────────────────────
 
 /** 
@@ -1312,7 +1330,10 @@ export type AgentToolName =
     | 'set_memory'
     | 'get_memory'
     | 'search_memory'
+    | 'history'
     | 'save_memory'
+    | 'forget_memory'
+    | 'memory_recall_trace'
     // ── CWTools Deep API tools ──
     | 'query_definition'
     | 'query_definition_by_name'
@@ -1345,6 +1366,33 @@ export type AgentToolName =
     | 'dispatch_agents'
     | 'query_blackboard'
     | 'merge_results';
+
+export interface HistorySearchArgs {
+    query: string;
+    scope?: 'workspace' | 'topic';
+    topicId?: string;
+    around?: number;
+    limit?: number;
+    includeToolResults?: boolean;
+}
+
+export interface HistorySearchResult {
+    available: boolean;
+    query: string;
+    searchedMessages: number;
+    truncated: boolean;
+    reason?: string;
+    warning?: string;
+    results: Array<{
+        topicId: string;
+        runId: string;
+        messageIndex: number;
+        role: ChatMessage['role'];
+        score: number;
+        excerpt: string;
+        context: Array<{ role: ChatMessage['role']; content: string }>;
+    }>;
+}
 
 // ─── File Tool Types ─────────────────────────────────────────────────────────
 
@@ -1879,7 +1927,8 @@ export interface AgentResumeState {
     status?: AgentRunStatus;
     summaryRef?: string;
     fullTranscriptRef?: string;
-    pendingToolCalls?: any[];
+    /** @deprecated V4 migrates this field into pendingStepRequests. */
+    pendingToolCalls?: ToolCall[];
     lastStableEventId?: string;
     lastStableSequence?: number;
     tailMessageCount?: number;

@@ -310,6 +310,8 @@ export class Orchestrator {
                 if (reviewResult.passed) {
                     emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.QG_PASS, timestamp: Date.now() });
                 } else {
+                    const recoveryStorm = this.executor.getRecoveryStormBudget();
+                    recoveryStorm.record('reviewer_rejection', 'quality_gate_initial', reviewResult.reviewReport);
                     emitStep({ type: 'error', content: ORCHESTRATOR_MSG.QG_FAIL(reviewResult.logicIssues), timestamp: Date.now() });
                     const config = this.qualityGate.getConfig();
                     const hasRepairableIssues = reviewResult.diagnosticErrors > 0
@@ -320,6 +322,11 @@ export class Orchestrator {
 
                     if (config.autoFix && !reviewResult.operationalFailure && hasRepairableIssues) {
                         for (let fixCycle = 0; fixCycle < config.maxFixCycles && !reviewResult.passed; fixCycle++) {
+                        if (recoveryStorm.decision) {
+                            options.runEventSink?.appendSoon('error', { kind: 'recovery_storm', ...recoveryStorm.decision }, { status: 'failed' });
+                            emitStep({ type: 'error', content: recoveryStorm.decision.reason!, timestamp: Date.now() });
+                            break;
+                        }
                         emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.AUTOFIX_START, timestamp: Date.now() });
                         
                         const fixPrompt = this.qualityGate.buildFixPrompt(
@@ -358,6 +365,10 @@ export class Orchestrator {
                             emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.AUTOFIX_DONE, timestamp: Date.now() });
                             // Here you can recurse or trigger the review again, but in a simple implementation only execute autoFix once
                         } else {
+                            const fixStorm = recoveryStorm.record('no_progress', fixNode.id, fixResult.error ?? fixResult.output);
+                            if (fixStorm.tripped) {
+                                options.runEventSink?.appendSoon('error', { kind: 'recovery_storm', ...fixStorm }, { status: 'failed' });
+                            }
                             emitStep({ type: 'error', content: ORCHESTRATOR_MSG.AUTOFIX_FAIL, timestamp: Date.now() });
                         }
                         reviewResult = await this.qualityGate.reviewOutput(
@@ -372,6 +383,9 @@ export class Orchestrator {
                         );
                         if (reviewResult.passed) {
                             emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.QG_PASS, timestamp: Date.now() });
+                        }
+                        if (!reviewResult.passed) {
+                            recoveryStorm.record('reviewer_rejection', `quality_gate_${fixCycle + 1}`, reviewResult.reviewReport);
                         }
                         }
                     }

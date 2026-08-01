@@ -88,6 +88,21 @@ describe('PermissionPolicyStore Unit Tests', () => {
         expect(store.restore([sessionRule], { allowSessionOnly: false })).to.equal(0);
         expect(store.getRules()).to.deep.equal([]);
     });
+
+    it('treats inline and data-driven executors as opaque and never learns prefixes', () => {
+        const { deriveCommandPrefix, hasInlineEvalPayload } = loadPermissionPolicyModule();
+        for (const command of [
+            'python -c "print(1)"',
+            'node -e "console.log(1)"',
+            'eval echo',
+            'Invoke-Expression $payload',
+            'iex $payload',
+            'xargs rm',
+        ]) {
+            expect(hasInlineEvalPayload(command), command).to.equal(true);
+            expect(deriveCommandPrefix(command), command).to.deep.equal([]);
+        }
+    });
 });
 
 function loadPermissionPolicyModule() {

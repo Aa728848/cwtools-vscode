@@ -26,6 +26,7 @@ import type {
     ReasoningEffort,
     AgentSchedulingState,
     AgentRuntimeDomain,
+    ToolCall,
 } from './types';
 import { contentToString } from './types';
 import { estimateTokenCount, estimateChatMessageTokens, hasImageContent, CHARS_PER_TOKEN } from './runner/tokenEstimation';
@@ -88,6 +89,7 @@ import { TurnRunner } from './runner/turnRunner';
 import type { AgentInputQueue, AgentQueuedInputKind } from './runner/inputQueue';
 import type { RunEventSink } from './runner/runContext';
 import { activeTurnRegistry } from './runner/activeTurnRegistry';
+import { isRetryStepRequest, type RetryStepRequest, type StepRequest } from './runner/stepRequest';
 import {
     normalizeSchedulingState,
     phaseForToolStage,
@@ -97,6 +99,7 @@ import {
 import { toolDisclosureService, type ToolDisclosureContext } from './runner/toolDisclosure';
 import { ToolDedupeService } from './runner/toolDedupe';
 import { contextLimitTracker } from './runner/contextLimitTracker';
+import { RecoveryCoordinator } from './runner/recoveryCoordinator';
 import { createAgentRuntimeServices } from './runner/runtimeServices';
 import { runtimeFaultInjector } from './runner/faultInjection';
 import { threadStore } from './runner/threadStore';
@@ -548,7 +551,7 @@ export class AgentRunner {
         mode: AgentMode,
         domain: import('./types').AgentRuntimeDomain,
         runId?: string,
-        pendingToolCalls?: any[],
+        pendingToolCalls?: ToolCall[],
         schedulingState?: AgentSchedulingState,
     ): Promise<void> {
         await saveCheckpointResumeState(topicId, mode, messages, this.toolExecutor, runId, pendingToolCalls, domain, schedulingState);
@@ -1296,6 +1299,7 @@ export class AgentRunner {
         // messages into top-level instructions preserving their relative order,
         // so this reorder does not conflict with that merge.
         let messages: ChatMessage[];
+        let restoredStepRequests: StepRequest[] = [];
         
         if (options?.resumeFromState && context.topicId) {
             const resumeState = restoredResumeState;
@@ -1307,9 +1311,7 @@ export class AgentRunner {
                 if (resumeState.todos && resumeState.todos.length > 0) {
                     void this.toolExecutor.getExternalToolHandler().todoWrite({ todos: resumeState.todos });
                 }
-                if (resumeState.pendingToolCalls && resumeState.pendingToolCalls.length > 0) {
-                    (this as any).initialPendingToolCalls = resumeState.pendingToolCalls;
-                }
+                restoredStepRequests = (resumeState.pendingStepRequests ?? []).filter(isRetryStepRequest);
                 emitStep({
                     type: 'thinking',
                     content: aiText('Restored context from checkpoint and continuing...', '已从断点快照中恢复上下文并继续执行...'),
@@ -1377,6 +1379,7 @@ export class AgentRunner {
                 options?.onBeforeFileWrite,
                 runMetrics,
                 terminalValidation,
+                restoredStepRequests,
             );
             runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0);
 
@@ -1900,6 +1903,7 @@ export class AgentRunner {
         onFileWrite?: (filePath: string, prevContent: string | null) => void,
         runMetrics?: AgentRunMetrics,
         terminalValidation?: TerminalValidationState,
+        restoredStepRequests: readonly StepRequest[] = [],
     ): Promise<string> {
         let schedulingState = normalizeSchedulingState(
             options?.schedulingState,
@@ -1932,6 +1936,7 @@ export class AgentRunner {
             options?.model ?? this.aiService.getConfig().model,
             tokens,
         );
+        const recoveryCoordinator = new RecoveryCoordinator();
 
         const agentToolContext: import('./types').AgentToolContext = {
             runnerOptions: options,
@@ -2324,14 +2329,15 @@ export class AgentRunner {
             iteration++;
             if (runMetrics) runMetrics.iterations = iteration;
 
-            let toolCalls: any[] | undefined = undefined;
+            let toolCalls: ToolCall[] | undefined = undefined;
             let needsHashValidation = false;
             let softLoopGuidancePending = false;
 
-            const initialPending = (this as any).initialPendingToolCalls;
-            if (iteration === 1 && initialPending && initialPending.length > 0) {
-                (this as any).initialPendingToolCalls = undefined;
-                toolCalls = initialPending;
+            const restoredRetry = iteration === 1
+                ? restoredStepRequests.find((request): request is RetryStepRequest => isRetryStepRequest(request))
+                : undefined;
+            if (restoredRetry && restoredRetry.payload.pendingToolCalls.length > 0) {
+                toolCalls = restoredRetry.payload.pendingToolCalls;
                 emitStep({
                     type: 'thinking',
                     content: aiText(
@@ -2666,13 +2672,19 @@ export class AgentRunner {
                     }
                 });
                 await runtimeFaultInjector.hit('after_model', modelAbortController.signal);
-            } catch (err: any) {
-                const errorText = err instanceof Error ? err.message : String(err);
-                const statusCode = typeof err?.status === 'number' ? err.status : typeof err?.statusCode === 'number' ? err.statusCode : undefined;
-                const isContextOverflow = /context(?:_| )length|context window|maximum context|too many tokens/i.test(errorText)
-                    || (statusCode === 413 && messages.reduce((sum, message) => sum + estimateChatMessageTokens(message), 0) >= contextLimit * 0.75);
-                if (isContextOverflow && contextOverflowRecoveries < 2) {
-                    contextOverflowRecoveries++;
+            } catch (err: unknown) {
+                const estimatedMessageTokens = messages.reduce((sum, message) => sum + estimateChatMessageTokens(message), 0);
+                const recoveryError = recoveryCoordinator.classify(err, {
+                    estimatedTokens: estimatedMessageTokens,
+                    contextLimit,
+                });
+                const errorText = recoveryError.message;
+                if (recoveryError.kind === 'cancelled') throw recoveryError.cause;
+                const overflowAttempt = recoveryError.kind === 'context_overflow'
+                    ? recoveryCoordinator.claim('context_overflow', 2)
+                    : undefined;
+                if (overflowAttempt !== undefined) {
+                    contextOverflowRecoveries = overflowAttempt;
                     const activeSchemaTokens = estimateTokenCount(JSON.stringify(availableTools));
                     const estimatedTokens = messages.reduce((sum, message) => sum + estimateChatMessageTokens(message), 0)
                         + activeSchemaTokens;
@@ -2756,18 +2768,21 @@ export class AgentRunner {
                     }
                     return stopForSlimOutputBudget();
                 }
-                if (err && err.message && (err.message.includes('terminated') || err.message.includes('socket hang up') || err.message.includes('ECONNRESET'))) {
+                const transportAttempt = recoveryError.kind === 'transport'
+                    ? recoveryCoordinator.claim('transport', 2)
+                    : undefined;
+                if (transportAttempt !== undefined) {
                     await runLedger.appendEvent(
                         runRecord.runId,
                         'model_call_end',
-                        { iteration, success: false, error: err.message },
+                        { iteration, success: false, error: recoveryError.message, recoveryKind: recoveryError.kind, attempt: transportAttempt },
                         { invocationId: modelCallId, status: 'failed' }
                     );
                     emitStep({
                         type: 'error',
                         content: aiText(
-                            `Server connection dropped unexpectedly (${err.message}). This usually means the output exceeded a hard limit. Triggering chunked recovery...`,
-                            `服务端异常断开 (${err.message}). 这通常是因为输出超出物理上限。自动触发切片恢复...`,
+                            `Server connection dropped unexpectedly (${recoveryError.message}). This usually means the output exceeded a hard limit. Triggering chunked recovery...`,
+                            `服务端异常断开 (${recoveryError.message}). 这通常是因为输出超出物理上限。自动触发切片恢复...`,
                         ),
                         timestamp: Date.now(),
                     });

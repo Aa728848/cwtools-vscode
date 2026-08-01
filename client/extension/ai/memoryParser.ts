@@ -43,6 +43,19 @@ export interface MemoryEntry {
     /** When and why project evidence invalidated this entry. */
     staleAt?: number;
     staleReason?: string;
+    /** Monotonic per-key revision used for optimistic concurrency control. */
+    storeRevision?: number;
+    /** Archived entries remain recoverable on disk but are excluded from recall. */
+    archivedAt?: number;
+}
+
+export interface MemoryRecallTrace {
+    topicId: string;
+    domain: AgentRuntimeDomain;
+    timestamp: number;
+    candidateCount: number;
+    selected: Array<{ key: string; score: number; storeRevision: number }>;
+    excluded: { expired: number; stale: number; archived: number; domain: number };
 }
 
 /** Optional retrieval context for top-k memory selection (plan §8). */
@@ -87,6 +100,8 @@ function sanitizeMemoryEntry(raw: unknown): MemoryEntry | null {
         stale: record.stale === true ? true : undefined,
         staleAt: num(record.staleAt),
         staleReason: typeof record.staleReason === 'string' ? record.staleReason : undefined,
+        storeRevision: num(record.storeRevision),
+        archivedAt: num(record.archivedAt),
     };
 }
 
@@ -128,6 +143,9 @@ export class MemoryParser {
         updatedAt: number;
     }>();
     private static projectRevisionCounter = 0;
+    private static topicWriteQueues = new Map<string, Promise<void>>();
+    private static recallTraces = new Map<string, MemoryRecallTrace>();
+    private static readonly RECALL_TRACE_LIMIT = 128;
 
     /**
      * Process-wide pending usage increments, keyed by workspace+topic so multiple
@@ -149,6 +167,41 @@ export class MemoryParser {
     private static workspaceKey(workspaceRoot: string): string {
         const resolved = path.resolve(workspaceRoot);
         return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    }
+
+    private topicKey(topicId = this.topicId): string {
+        return `${MemoryParser.workspaceKey(this.workspaceRoot)}::${topicId || 'default'}`;
+    }
+
+    private async withTopicWriteLock<T>(topicId: string | undefined, action: () => Promise<T> | T): Promise<T> {
+        const key = this.topicKey(topicId);
+        const previous = MemoryParser.topicWriteQueues.get(key) ?? Promise.resolve();
+        let release!: () => void;
+        const current = new Promise<void>(resolve => { release = resolve; });
+        const tail = previous.then(() => current);
+        MemoryParser.topicWriteQueues.set(key, tail);
+        await previous;
+        try {
+            return await action();
+        } finally {
+            release();
+            if (MemoryParser.topicWriteQueues.get(key) === tail) MemoryParser.topicWriteQueues.delete(key);
+        }
+    }
+
+    private recordRecallTrace(trace: MemoryRecallTrace): void {
+        const key = this.topicKey(trace.topicId) + `::${trace.domain}`;
+        MemoryParser.recallTraces.delete(key);
+        MemoryParser.recallTraces.set(key, trace);
+        while (MemoryParser.recallTraces.size > MemoryParser.RECALL_TRACE_LIMIT) {
+            const oldest = MemoryParser.recallTraces.keys().next().value as string | undefined;
+            if (oldest === undefined) break;
+            MemoryParser.recallTraces.delete(oldest);
+        }
+    }
+
+    public getRecallTrace(topicId = this.topicId, domain: AgentRuntimeDomain = 'paradox'): MemoryRecallTrace | undefined {
+        return MemoryParser.recallTraces.get(this.topicKey(topicId) + `::${domain}`);
     }
 
     private static rememberTopic(workspaceRoot: string, topicId: string): void {
@@ -295,6 +348,8 @@ export class MemoryParser {
                     stale: entry.stale,
                     staleAt: entry.staleAt,
                     staleReason: entry.staleReason,
+                    storeRevision: entry.storeRevision,
+                    archivedAt: entry.archivedAt,
                     usageCount: entry.usageCount,
                     expiresAt: entry.expiresAt,
                     scope: entry.scope,
@@ -467,13 +522,21 @@ export class MemoryParser {
                 const scoped = structured.filter(entry =>
                     entry.domain === requestedDomain
                     || (requestedDomain === 'paradox' && entry.domain === undefined));
-                if (scoped.length === 0) return '';
+                if (scoped.length === 0) {
+                    this.recordRecallTrace({
+                        topicId: topicId || 'default', domain: requestedDomain, timestamp: Date.now(),
+                        candidateCount: 0, selected: [],
+                        excluded: { expired: 0, stale: 0, archived: 0, domain: structured.length },
+                    });
+                    return '';
+                }
                 this.synchronizeProjectFactRevision(scoped);
                 const now = Date.now();
                 const staleProjectFactPrompt = this.buildStaleProjectFactPrompt(scoped, context, now);
                 const usable = scoped.filter(entry =>
                     (!entry.expiresAt || entry.expiresAt > now)
-                    && (context?.includeStale === true || entry.stale !== true));
+                    && (context?.includeStale === true || entry.stale !== true)
+                    && !entry.archivedAt);
                 const keywords = context?.taskText ? MemoryParser.tokenizeTaskText(context.taskText) : [];
                 const gameId = context?.gameId?.toLowerCase();
                 const pathHints = (context?.pathScope ?? []).map(hint => hint.toLowerCase()).filter(Boolean);
@@ -484,14 +547,27 @@ export class MemoryParser {
                         || (b.entry.updatedAt ?? 0) - (a.entry.updatedAt ?? 0)
                         || a.entry.key.localeCompare(b.entry.key));
                 const blocks: string[] = [];
+                const selected: MemoryRecallTrace['selected'] = [];
                 let budget = MemoryParser.MAX_MEMORY_CHARS;
-                for (const { entry } of ranked) {
+                for (const { entry, score } of ranked) {
                     if (blocks.length >= MemoryParser.TOP_K_MEMORY_ENTRIES) break;
                     const block = this.formatEntryBlock(entry);
                     if (block.length > budget) continue;
                     blocks.push(block);
+                    selected.push({ key: entry.key, score: Math.round(score * 1000) / 1000, storeRevision: entry.storeRevision ?? 1 });
                     budget -= block.length;
                 }
+                this.recordRecallTrace({
+                    topicId: topicId || 'default', domain: requestedDomain, timestamp: now,
+                    candidateCount: usable.length,
+                    selected,
+                    excluded: {
+                        expired: scoped.filter(entry => !!entry.expiresAt && entry.expiresAt <= now).length,
+                        stale: context?.includeStale === true ? 0 : scoped.filter(entry => entry.stale === true).length,
+                        archived: scoped.filter(entry => !!entry.archivedAt).length,
+                        domain: structured.length - scoped.length,
+                    },
+                });
                 const activeMemoryPrompt = blocks.length > 0
                     ? `<workspace-memory>\n# LONG-TERM AGENT MEMORY\nThese are the ${blocks.length} most relevant private, structured hints with provenance (selected by task relevance, priority, confidence, freshness, and actual usage). They do not override current user instructions, safety policy, diagnostics, or verified project evidence.\n\n${blocks.join('\n\n')}\n</workspace-memory>\n`
                     : '';
@@ -691,8 +767,16 @@ export class MemoryParser {
     public async appendMemory(
         entry: MemoryEntry,
         topicId = this.topicId,
-        options?: { authoritativeProjectRevision?: string },
-    ): Promise<{ success: boolean; message: string; existed?: boolean; revalidatedProjectFact?: boolean }> {
+        options?: { authoritativeProjectRevision?: string; expectedRevision?: number },
+    ): Promise<{ success: boolean; message: string; existed?: boolean; revalidatedProjectFact?: boolean; storeRevision?: number }> {
+        return this.withTopicWriteLock(topicId, () => this.appendMemoryUnlocked(entry, topicId, options));
+    }
+
+    private async appendMemoryUnlocked(
+        entry: MemoryEntry,
+        topicId = this.topicId,
+        options?: { authoritativeProjectRevision?: string; expectedRevision?: number },
+    ): Promise<{ success: boolean; message: string; existed?: boolean; revalidatedProjectFact?: boolean; storeRevision?: number }> {
         try {
             if (!this.workspaceRoot) {
                 return { success: false, message: 'No workspace root' };
@@ -706,6 +790,15 @@ export class MemoryParser {
             const existing = entries.find(candidate =>
                 candidate.key.toLowerCase() === normalizedKey.toLowerCase()
                 && (candidate.domain ?? 'paradox') === requestedDomain);
+            const currentStoreRevision = existing ? (existing.storeRevision ?? 1) : 0;
+            if (options?.expectedRevision !== undefined && options.expectedRevision !== currentStoreRevision) {
+                return {
+                    success: false,
+                    existed: !!existing,
+                    storeRevision: currentStoreRevision,
+                    message: `Memory revision conflict for "${entry.key}": expected ${options.expectedRevision}, actual ${currentStoreRevision}. Re-read the memory before retrying.`,
+                };
+            }
             const requestedSource = entry.source ?? 'agent:save_memory';
             const existingKind = existing?.kind ?? MemoryParser.inferKind(existing?.source);
             const genericAgentRewrite = requestedSource === 'agent:save_memory' || requestedSource.startsWith('run:');
@@ -746,6 +839,8 @@ export class MemoryParser {
                 stale: undefined,
                 staleAt: undefined,
                 staleReason: undefined,
+                storeRevision: currentStoreRevision + 1,
+                archivedAt: undefined,
                 confidence: Math.max(0, Math.min(1, entry.confidence ?? 0.8)),
                 createdAt: existing?.createdAt ?? now,
                 updatedAt: now,
@@ -786,11 +881,48 @@ export class MemoryParser {
                     : `Memory saved: "${entry.key}"`,
                 existed: !!existing,
                 revalidatedProjectFact,
+                storeRevision: normalized.storeRevision,
             };
         } catch (e: any) {
             ErrorReporter.debug(SOURCE.MEMORY_PARSER, 'Error appending memory', e);
             return { success: false, message: `Failed to save memory: ${e?.message ?? e}` };
         }
+    }
+
+    public async forgetMemory(
+        key: string,
+        domain: AgentRuntimeDomain = 'paradox',
+        mode: 'archive' | 'delete' = 'archive',
+        topicId = this.topicId,
+        expectedRevision?: number,
+    ): Promise<{ success: boolean; message: string; storeRevision?: number }> {
+        return this.withTopicWriteLock(topicId, async () => {
+            const entries = this.readStructuredEntries(topicId);
+            const index = entries.findIndex(entry => entry.key.toLowerCase() === key.trim().toLowerCase()
+                && (entry.domain ?? 'paradox') === domain);
+            if (index < 0) return { success: false, message: `Memory not found: "${key}"`, storeRevision: 0 };
+            const entry = entries[index]!;
+            const currentRevision = entry.storeRevision ?? 1;
+            if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
+                return {
+                    success: false,
+                    storeRevision: currentRevision,
+                    message: `Memory revision conflict for "${key}": expected ${expectedRevision}, actual ${currentRevision}.`,
+                };
+            }
+            if (mode === 'delete') {
+                entries.splice(index, 1);
+                this.writeStructuredEntries(entries, topicId);
+                this.cache.clear();
+                return { success: true, message: `Memory permanently deleted: "${key}"` };
+            }
+            entry.archivedAt = Date.now();
+            entry.updatedAt = entry.archivedAt;
+            entry.storeRevision = currentRevision + 1;
+            this.writeStructuredEntries(entries, topicId);
+            this.cache.clear();
+            return { success: true, message: `Memory archived: "${key}"`, storeRevision: entry.storeRevision };
+        });
     }
 
     /**

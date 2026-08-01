@@ -23,6 +23,8 @@ import { SOURCE, aiText } from '../messages';
 import type { RunEventSink } from '../runner/runContext';
 import { AdaptiveConcurrencyController, isProviderRateLimit } from '../runner/scheduling';
 import { agentTaskManager, type AgentTaskStatus } from '../runner/taskManager';
+import { getAgentProfile } from './agentRegistry';
+import { RecoveryStormBudget, classifyStormFailure } from './recoveryStormBudget';
 
 /** Sub-agent executor injected by Orchestrator. */
 export type SubAgentExecutor = (
@@ -46,6 +48,7 @@ export class ParallelExecutor {
     private readonly adaptiveCapacity: AdaptiveConcurrencyController;
     private readonly retryEligibleAt = new Map<string, number>();
     private eventSink?: RunEventSink;
+    private readonly recoveryStorm = new RecoveryStormBudget();
 
     constructor(options?: {
         maxConcurrency?: number;
@@ -66,6 +69,10 @@ export class ParallelExecutor {
         this.conflictDetector.setEventSink(eventSink);
     }
 
+    getRecoveryStormBudget(): RecoveryStormBudget {
+        return this.recoveryStorm;
+    }
+
     async executeGraph(
         graph: TaskGraph,
         blackboard: Blackboard,
@@ -75,6 +82,7 @@ export class ParallelExecutor {
         // Retry eligibility belongs to one task graph. Provider capacity is
         // intentionally retained, but stale node ids must not delay a later run.
         this.retryEligibleAt.clear();
+        this.recoveryStorm.reset();
         const agentResults = new Map<string, SubAgentResult>();
         const totalTokenUsage: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
         const emitStep = options.onStep ?? (() => {});
@@ -153,8 +161,15 @@ export class ParallelExecutor {
             options.abortSignal?.throwIfAborted();
 
             const allReadyNodes = this.graphEngine.getReadyNodes(graph);
+            if (this.recoveryStorm.decision) {
+                for (const node of allReadyNodes) {
+                    const profile = getAgentProfile(node.agentType);
+                    if (profile.toolBudget !== 'read_only' && profile.toolBudget !== 'plan') node.status = 'cancelled';
+                }
+            }
             const now = Date.now();
-            const readyNodes = allReadyNodes.filter(node => (this.retryEligibleAt.get(node.id) ?? 0) <= now);
+            const readyNodes = allReadyNodes.filter(node => node.status === 'pending'
+                && (this.retryEligibleAt.get(node.id) ?? 0) <= now);
             if (readyNodes.length === 0 && allReadyNodes.length > 0) {
                 const nextEligibleAt = Math.min(...allReadyNodes.map(node => this.retryEligibleAt.get(node.id) ?? now));
                 await this.waitForRetry(Math.max(0, Math.min(30_000, nextEligibleAt - now)), options.abortSignal);
@@ -364,8 +379,21 @@ export class ParallelExecutor {
                     this.graphEngine.markComplete(graph, node.id, result.handoff?.summary ?? result.output);
                     this.conflictDetector.clearIntent(agentId, blackboard);
                 } else {
+                    const stormCategory = classifyStormFailure(result.error, result.output);
+                    const stormDecision = stormCategory
+                        ? this.recoveryStorm.record(stormCategory, node.id, result.error ?? result.output)
+                        : undefined;
+                    if (stormDecision?.tripped) {
+                        this.eventSink?.appendSoon('error', {
+                            kind: 'recovery_storm',
+                            ...stormDecision,
+                        }, { agentId, status: 'failed' });
+                        options.onStep?.({ type: 'error', content: stormDecision.reason!, timestamp: Date.now() });
+                    }
                     if (options.abortSignal?.aborted || result.error === 'User cancelled') {
                         node.status = 'cancelled';
+                    } else if (stormDecision?.tripped) {
+                        this.graphEngine.markFailed(graph, node.id, stormDecision.reason ?? 'Parent recovery storm tripped');
                     } else if (result.needsClarification) {
                         const cancelled = this.graphEngine.markFailed(
                             graph,
@@ -443,8 +471,17 @@ export class ParallelExecutor {
                 };
                 results.set(node.id, failResult);
 
+                const stormCategory = classifyStormFailure(error);
+                const stormDecision = stormCategory ? this.recoveryStorm.record(stormCategory, node.id, error) : undefined;
+                if (stormDecision?.tripped) {
+                    this.eventSink?.appendSoon('error', { kind: 'recovery_storm', ...stormDecision }, { agentId, status: 'failed' });
+                    options.onStep?.({ type: 'error', content: stormDecision.reason!, timestamp: Date.now() });
+                }
+
                 if (options.abortSignal?.aborted) {
                     node.status = 'cancelled';
+                } else if (stormDecision?.tripped) {
+                    this.graphEngine.markFailed(graph, node.id, stormDecision.reason ?? 'Parent recovery storm tripped');
                 } else if (isProviderRateLimit(error) && node.retryCount < node.maxRetries) {
                     this.requeueRateLimitedNode(node, error);
                 } else if (isTimeoutLikeError(error)) {

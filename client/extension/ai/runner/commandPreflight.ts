@@ -15,6 +15,7 @@ export interface CommandSegment {
     classification: 'readonly' | 'write' | 'network' | 'interpreter' | 'destructive' | 'unknown';
     decision: CommandPolicyDecision;
     reason: string;
+    opaqueExecution: boolean;
     matchedRule?: string[];
 }
 
@@ -24,6 +25,7 @@ export interface CommandPreflightResult {
     riskLevel: 0 | 1 | 2 | 3;
     segments: CommandSegment[];
     structured: boolean;
+    opaqueExecution: boolean;
     requiresPermission: boolean;
     requiresEscalation: boolean;
     blockedReason?: string;
@@ -40,6 +42,7 @@ interface SegmentClassification {
     decision: CommandPolicyDecision;
     reason: string;
     riskLevel: 0 | 1 | 2 | 3;
+    opaqueExecution: boolean;
 }
 
 const READONLY_COMMANDS = new Set([
@@ -253,8 +256,9 @@ function result(
     decision: CommandPolicyDecision,
     riskLevel: SegmentClassification['riskLevel'],
     reason: string,
+    opaqueExecution = false,
 ): SegmentClassification {
-    return { classification, decision, riskLevel, reason };
+    return { classification, decision, riskLevel, reason, opaqueExecution };
 }
 
 function readOnly(reason = aiText('Known read-only command', '已知只读命令')): SegmentClassification {
@@ -273,8 +277,9 @@ function prompt(
     classification: 'write' | 'network' | 'interpreter' | 'unknown',
     riskLevel: 1 | 2,
     reason: string,
+    opaqueExecution = false,
 ): SegmentClassification {
-    return result(classification, 'prompt', riskLevel, reason);
+    return result(classification, 'prompt', riskLevel, reason, opaqueExecution);
 }
 
 function forbidden(reason: string): SegmentClassification {
@@ -406,12 +411,31 @@ function classifySegment(parsed: ParsedCommandSegment): SegmentClassification {
             !current || DECISION_SEVERITY[segment.decision] > DECISION_SEVERITY[current.decision] ? segment : current,
         undefined);
         if (mostSevere) {
-            return result(mostSevere.classification, nested.decision, nested.riskLevel, mostSevere.reason);
+            return result(
+                mostSevere.classification,
+                nested.decision,
+                nested.riskLevel,
+                mostSevere.reason,
+                nested.opaqueExecution,
+            );
         }
     }
     if (['powershell', 'pwsh'].includes(baseCmd)
         && lowerArgs.some(arg => ['-encodedcommand', '-enc', '-e'].includes(arg))) {
-        return prompt('interpreter', 2, aiText('Encoded PowerShell cannot be inspected safely', '无法安全检查编码后的 PowerShell 命令'));
+        return prompt('interpreter', 2, aiText('Encoded PowerShell cannot be inspected safely', '无法安全检查编码后的 PowerShell 命令'), true);
+    }
+    const opaqueInterpreter = (
+        (['node'].includes(baseCmd) && lowerArgs.some(arg => ['-e', '--eval', '-p', '--print'].includes(arg)))
+        || (['python', 'python3', 'py'].includes(baseCmd) && lowerArgs.includes('-c'))
+        || (['perl', 'ruby', 'lua'].includes(baseCmd) && lowerArgs.includes('-e'))
+        || (baseCmd === 'php' && lowerArgs.includes('-r'))
+        || ['eval', 'invoke-expression', 'iex', 'xargs'].includes(baseCmd)
+    );
+    if (opaqueInterpreter) {
+        return prompt('interpreter', 2, aiText(
+            'Inline or data-driven code execution is opaque to command preflight and requires explicit approval',
+            '内联或数据驱动的代码执行无法由命令预检完整审查，需要明确批准',
+        ), true);
     }
 
     const git = classifyGitCommand(words);
@@ -427,7 +451,7 @@ function classifySegment(parsed: ParsedCommandSegment): SegmentClassification {
         return prompt('interpreter', 2, aiText(
             'Complex shell syntax cannot be proven safe by the structured parser',
             '结构化解析器无法证明复杂 Shell 语法安全',
-        ));
+        ), true);
     }
     if (baseCmd === 'rg' && lowerArgs.some(arg => arg === '--pre' || arg.startsWith('--pre=')
         || arg === '--hostname-bin' || arg.startsWith('--hostname-bin=') || arg === '--search-zip' || arg === '-z')) {
@@ -500,6 +524,7 @@ export function preflightCommand(
             classification: classification.classification,
             decision: classification.decision,
             reason: classification.reason,
+            opaqueExecution: classification.opaqueExecution,
         };
         const ruled = applyConfiguredRules(base, parsedSegment.words, configuredRules);
         const decisionRisk = ruled.decision === 'forbidden' ? 3 : ruled.decision === 'prompt' ? 1 : 0;
@@ -527,6 +552,7 @@ export function preflightCommand(
         riskLevel,
         segments,
         structured: parsed.structured,
+        opaqueExecution: segments.some(segment => segment.opaqueExecution),
         requiresPermission,
         requiresEscalation,
         blockedReason,

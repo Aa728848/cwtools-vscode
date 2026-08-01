@@ -8,7 +8,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import type { TodoItem, TodoWriteResult } from '../types';
 import { preflightCommand, type ConfiguredCommandPolicyRule } from '../runner/commandPreflight';
-import { PermissionPolicyStore } from '../runner/permissionPolicy';
+import { hasInlineEvalPayload, PermissionPolicyStore } from '../runner/permissionPolicy';
 import { processRegistry } from '../runner/processRegistry';
 import { BrokeredSandboxRunner, DirectSandboxRunner, detectSandboxBackendAsync, type SandboxRunner } from '../runner/sandboxRunner';
 import { getPrivateTopicRootCandidates, getPrivateTopicScratchDir, getPrivateTopicStorageDir } from '../workspacePaths';
@@ -961,6 +961,7 @@ export class ExternalToolHandler {
         const commandRules = vs.workspace.getConfiguration('stellarisLanguageServices.ai')
             .get<ConfiguredCommandPolicyRule[]>('shell.commandRules', []);
         const preflight = preflightCommand(args.command, commandRules);
+        const opaqueExecution = preflight.opaqueExecution || hasInlineEvalPayload(args.command);
         const isReadOnlyCommand = this.isReadOnlyRunCommand(args.command);
         const isAutoApproveSafeCommand = preflight.decision === 'allow';
 
@@ -1069,7 +1070,9 @@ export class ExternalToolHandler {
         // Command auto-runs only when the tool classifies it as safe or it matches pre-approved session policy.
         // All agent modes share this gate; mode-specific privileges were removed so the
         // approval boundary (learned rules -> auto-review -> user) is the single decision point.
-        let requiresPermission = configuredRuleRequiresPrompt || (!safeAutoApprove && !approvedByPolicy);
+        let requiresPermission = opaqueExecution
+            || configuredRuleRequiresPrompt
+            || (!safeAutoApprove && !approvedByPolicy);
         
         // Escalation overrides MUST always prompt user regardless of policy/auto configurations
         if (preflight.requiresEscalation || currentEscalationReason) {
@@ -1090,6 +1093,7 @@ export class ExternalToolHandler {
             const preflightPayload = {
                 command: args.command,
                 cwd,
+                opaqueExecution,
                 classification: preflight.segments.map(s => s.classification),
                 riskLevel: preflight.riskLevel,
                 escalation: !!currentEscalationReason || args.unsandboxed === true || gitMetadataMutation,

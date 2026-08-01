@@ -33,6 +33,7 @@ import {
     getModelReasoningCapability,
     normalizeReasoningEffort,
 } from './providers';
+import { resolveProviderCapabilities } from './providers/capabilities';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
 import { ChatGptOAuthService } from './codex/oauthService';
@@ -163,6 +164,23 @@ export function normalizeCustomApiFormat(value: unknown): CustomApiFormat {
         default:
             return DEFAULT_CUSTOM_API_FORMAT;
     }
+}
+
+function mergeCompletionUsage(
+    first: ChatCompletionResponse['usage'],
+    second: ChatCompletionResponse['usage'],
+): ChatCompletionResponse['usage'] {
+    if (!first) return second;
+    if (!second) return first;
+    const firstCached = first.cached_tokens ?? first.prompt_tokens_details?.cached_tokens ?? first.prompt_cache_hit_tokens ?? 0;
+    const secondCached = second.cached_tokens ?? second.prompt_tokens_details?.cached_tokens ?? second.prompt_cache_hit_tokens ?? 0;
+    return {
+        prompt_tokens: first.prompt_tokens + second.prompt_tokens,
+        completion_tokens: first.completion_tokens + second.completion_tokens,
+        total_tokens: first.total_tokens + second.total_tokens,
+        cached_tokens: firstCached + secondCached,
+        cache_creation_tokens: (first.cache_creation_tokens ?? 0) + (second.cache_creation_tokens ?? 0),
+    };
 }
 
 function normalizeConfiguredReasoningEffort(value: unknown): ReasoningEffort {
@@ -595,27 +613,80 @@ export class AIService {
         }, requestTimeoutMs);
 
         try {
-            if (effectiveApiFormat === 'openai-responses') {
-                return await this.callOpenAIResponses(endpoint, apiKey, request, providerId, controller, {
-                    onThinking: options?.onThinking,
-                    onTextDelta: options?.onTextDelta,
-                    onToolCallDelta: options?.onToolCallDelta,
-                    promptCacheKey: options?.promptCacheKey,
-                    reasoningSummary: options?.onThinking && !disableThinking ? 'auto' : undefined,
-                });
+            const execute = async (
+                requestEndpoint: string,
+                requestBody: ChatCompletionRequest,
+            ): Promise<ChatCompletionResponse> => {
+                if (effectiveApiFormat === 'openai-responses') {
+                    return await this.callOpenAIResponses(requestEndpoint, apiKey, requestBody, providerId, controller, {
+                        onThinking: options?.onThinking,
+                        onTextDelta: options?.onTextDelta,
+                        onToolCallDelta: options?.onToolCallDelta,
+                        promptCacheKey: options?.promptCacheKey,
+                        reasoningSummary: options?.onThinking && !disableThinking ? 'auto' : undefined,
+                    });
+                }
+                if (effectiveApiFormat === 'gemini-generate-content') {
+                    return await this.callGeminiGenerateContent(requestEndpoint, apiKey, requestBody, providerId, controller, options?.onTextDelta, options?.onToolCallDelta, options?.onThinking);
+                }
+                if (effectiveApiFormat === 'anthropic-messages') {
+                    return await this.callClaude(requestEndpoint, apiKey, requestBody, controller, options?.onThinking, options?.onTextDelta, options?.onToolCallDelta, providerId);
+                }
+                if (provider.supportsStreaming) {
+                    return await this.callOpenAICompatibleStreaming(requestEndpoint, apiKey, { ...requestBody, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta, options?.onToolCallDelta);
+                }
+                return await this.callOpenAICompatible(requestEndpoint, apiKey, requestBody, providerId, controller);
+            };
+
+            let response = await execute(endpoint, request);
+            const capabilities = resolveProviderCapabilities(providerId, endpoint, effectiveApiFormat);
+            const continuationEndpoint = capabilities.prefixContinuationEndpoint;
+            // DeepSeek's prefix continuation is provider-native and only safe for a
+            // pure text/reasoning truncation. Tool and structured turns continue via
+            // the normal runner loop so their protocol state cannot be corrupted.
+            for (let continuationAttempt = 0;
+                continuationAttempt < 2
+                && capabilities.prefixContinuation === 'supported'
+                && continuationEndpoint
+                && response.choices?.[0]?.finish_reason === 'length';
+                continuationAttempt++) {
+                const message = response.choices[0]!.message;
+                if ((message.tool_calls?.length ?? 0) > 0) break;
+                const content = typeof message.content === 'string' ? message.content : '';
+                const reasoning = message.reasoning_content ?? '';
+                if (!content && !reasoning) break;
+
+                const prefixMessage: ChatMessage = {
+                    role: 'assistant',
+                    content,
+                    ...(reasoning ? { reasoning_content: reasoning } : {}),
+                    provider_prefix: true,
+                };
+                const continuationRequest: ChatCompletionRequest = {
+                    ...request,
+                    messages: [...request.messages, prefixMessage],
+                    tools: undefined,
+                    tool_choice: undefined,
+                };
+                const continued = await execute(continuationEndpoint, continuationRequest);
+                const continuedMessage = continued.choices?.[0]?.message;
+                if (!continuedMessage || (continuedMessage.tool_calls?.length ?? 0) > 0) break;
+                const continuedContent = typeof continuedMessage.content === 'string' ? continuedMessage.content : '';
+                const continuedReasoning = continuedMessage.reasoning_content ?? '';
+                response = {
+                    ...continued,
+                    choices: continued.choices.map((choice, index) => index === 0 ? {
+                        ...choice,
+                        message: {
+                            ...choice.message,
+                            content: content + continuedContent,
+                            reasoning_content: reasoning + continuedReasoning || undefined,
+                        },
+                    } : choice),
+                    usage: mergeCompletionUsage(response.usage, continued.usage),
+                };
             }
-            if (effectiveApiFormat === 'gemini-generate-content') {
-                return await this.callGeminiGenerateContent(endpoint, apiKey, request, providerId, controller, options?.onTextDelta, options?.onToolCallDelta, options?.onThinking);
-            }
-            if (effectiveApiFormat === 'anthropic-messages') {
-                return await this.callClaude(endpoint, apiKey, request, controller, options?.onThinking, options?.onTextDelta, options?.onToolCallDelta, providerId);
-            }
-            // OpenAI Chat Completions is the remaining protocol after explicit routing above.
-            if (provider.supportsStreaming) {
-                return await this.callOpenAICompatibleStreaming(endpoint, apiKey, { ...request, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta, options?.onToolCallDelta);
-            } else {
-                return await this.callOpenAICompatible(endpoint, apiKey, request, providerId, controller);
-            }
+            return response;
         } catch (err) {
             if (timedOutError) throw timedOutError;
             throw err;
@@ -851,6 +922,7 @@ export class AIService {
                 ...(message.tool_call_id !== undefined ? { tool_call_id: message.tool_call_id } : {}),
                 ...(message.name !== undefined ? { name: message.name } : {}),
                 ...(message.reasoning_content !== undefined ? { reasoning_content: message.reasoning_content } : {}),
+                ...(providerId === 'deepseek' && message.provider_prefix === true ? { prefix: true } : {}),
             })),
         };
 

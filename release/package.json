@@ -1641,6 +1641,25 @@
                         "default": "",
                         "description": "%configuration.stellarisLanguageServices.ai.ffmpegPath.description%"
                     },
+                    "stellarisLanguageServices.ai.hooks.failureMode": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": ["ignore", "block"],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.hooks.failureMode.ignore%",
+                            "%configuration.stellarisLanguageServices.ai.hooks.failureMode.block%"
+                        ],
+                        "default": "ignore",
+                        "description": "%configuration.stellarisLanguageServices.ai.hooks.failureMode.description%"
+                    },
+                    "stellarisLanguageServices.ai.hooks.timeoutMs": {
+                        "scope": "window",
+                        "type": "number",
+                        "minimum": 100,
+                        "maximum": 10000,
+                        "default": 2000,
+                        "description": "%configuration.stellarisLanguageServices.ai.hooks.timeoutMs.description%"
+                    },
                     "stellarisLanguageServices.ai.mcp.servers": {
                         "scope": "window",
                         "type": "array",

@@ -432,6 +432,41 @@ describe('MemoryParser topic storage', () => {
         expect(prompt).to.not.include('invalid entry without string key');
         expect(prompt).to.not.include('entry without any key');
     });
+
+    it('serializes concurrent writes and rejects stale expected revisions', async () => {
+        const { MemoryParser } = loadMemoryParserModule();
+        const first = new MemoryParser(workspaceRoot, 'topic_cas');
+        const second = new MemoryParser(workspaceRoot, 'topic_cas');
+        const [one, two] = await Promise.all([
+            first.appendMemory({ key: 'shared', content: 'one', priority: 'normal' }),
+            second.appendMemory({ key: 'shared', content: 'two', priority: 'normal' }),
+        ]);
+        expect([one.storeRevision, two.storeRevision].sort()).to.deep.equal([1, 2]);
+
+        const conflict = await first.appendMemory(
+            { key: 'shared', content: 'stale update', priority: 'normal' },
+            'topic_cas',
+            { expectedRevision: 1 },
+        );
+        expect(conflict.success).to.equal(false);
+        expect(conflict.storeRevision).to.equal(2);
+        expect(first.getMemoryPrompt('topic_cas')).to.not.include('stale update');
+    });
+
+    it('archives memory from recall and exposes a metadata-only retrieval trace', async () => {
+        const { MemoryParser } = loadMemoryParserModule();
+        const parser = new MemoryParser(workspaceRoot, 'topic_trace');
+        const saved = await parser.appendMemory({ key: 'trace key', content: 'recallable value', priority: 'normal' });
+        expect(parser.getMemoryPrompt('topic_trace', { taskText: 'trace key' })).to.include('recallable value');
+        const trace = parser.getRecallTrace('topic_trace');
+        expect(trace?.selected[0]).to.include({ key: 'trace key', storeRevision: 1 });
+        expect(JSON.stringify(trace)).to.not.include('recallable value');
+
+        const archived = await parser.forgetMemory('trace key', 'paradox', 'archive', 'topic_trace', saved.storeRevision);
+        expect(archived.success).to.equal(true);
+        expect(parser.getMemoryPrompt('topic_trace', { taskText: 'trace key' })).to.not.include('recallable value');
+        expect(parser.getRecallTrace('topic_trace')?.excluded.archived).to.equal(1);
+    });
 });
 
 function loadMemoryParserModule() {

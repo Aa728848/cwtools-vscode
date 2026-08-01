@@ -30,6 +30,7 @@ import { FileToolHandler, findFiles } from './tools/fileTools';
 import { LspToolHandler } from './tools/lspTools';
 import { ExternalToolHandler } from './tools/externalTools';
 import { MemoryToolHandler, blackboardDomainPrefix } from './tools/memoryTools';
+import { searchAgentHistory } from './tools/historyTool';
 import type { IndexService } from '../indexing/indexService';
 import { validateToolAccess, evaluateMcpPermission } from './tools/permissions';
 import { readProjectProfile, queryProjectProfile } from './projectProfile';
@@ -177,6 +178,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_project_profile: 5_000,
     query_project_knowledge: 10_000,
     query_interface_knowledge: 5_000,
+    history: 10_000,
     query_rules: 45_000,
     query_override_modes: 45_000,
     search_rule_capabilities: 45_000,
@@ -378,6 +380,8 @@ export class AgentToolExecutor {
     private externalHandler: ExternalToolHandler;
     private memoryHandler: MemoryToolHandler;
     private readonly diagnosticAnalysisCounts = new Map<string, { count: number; lastSeen: number }>();
+    private readonly activeSkillPolicies = new Map<string, { skillName: string; allowedTools: Set<string> }>();
+    private static readonly ACTIVE_SKILL_POLICY_LIMIT = 64;
     /** Lazily constructed semantic evidence gate (plan §4 P0). */
     private evidenceGate?: EvidenceGate;
 
@@ -1280,6 +1284,16 @@ export class AgentToolExecutor {
                 error: access.reason
             };
         }
+        const skillPolicyKey = this.getSkillPolicyKey(context);
+        const skillPolicy = skillPolicyKey ? this.activeSkillPolicies.get(skillPolicyKey) : undefined;
+        if (skillPolicy && toolName !== 'run_skill' && !skillPolicy.allowedTools.has(toolName)) {
+            return {
+                success: false,
+                error: `Active skill '${skillPolicy.skillName}' does not allow tool '${toolName}'. Load another skill or use one of its declared allowed-tools.`,
+                skillPolicyDenied: true,
+                allowedTools: [...skillPolicy.allowedTools].sort(),
+            };
+        }
         if (runtimeDomain === 'general' && toolName === 'save_workflow') {
             const workflowMode = typeof args.mode === 'string' ? args.mode : 'utility';
             const generalWorkflowModes = new Set(['plan', 'explore', 'utility', 'review', 'orchestrator']);
@@ -1992,11 +2006,30 @@ export class AgentToolExecutor {
             case 'search_memory':
                 result = this.memoryHandler.searchMemory(args as any, context); break;
             case 'search_memory_disabled': break;
+            case 'history': {
+                result = searchAgentHistory(this.workspaceRoot, args as any, {
+                    topicId: context?.runnerOptions?.topicId,
+                    domain: context?.runnerOptions?.domain,
+                });
+                const count = typeof result === 'object' && result !== null
+                    && 'results' in result && Array.isArray(result.results) ? result.results.length : 0;
+                context?.runEventSink?.appendSoon('blackboard_read', {
+                    source: 'history',
+                    queryLength: typeof args.query === 'string' ? args.query.length : 0,
+                    scope: args.scope === 'topic' ? 'topic' : 'workspace',
+                    resultCount: count,
+                }, { status: 'done' });
+                break;
+            }
 
             // - Persistent memory (cross-session, written to the topic-scoped .cwtools-memory.md) -
             case 'save_memory':
                 result = await this.memoryHandler.saveMemory(args as any, context); break;
             case 'save_memory_disabled': break;
+            case 'forget_memory':
+                result = await this.memoryHandler.forgetMemory(args as any, context); break;
+            case 'memory_recall_trace':
+                result = await this.memoryHandler.getRecallTrace(context); break;
 
             // - MCP tool call -
             case 'mcp_call':
@@ -2043,6 +2076,30 @@ export class AgentToolExecutor {
             ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build'));
         if (!loaded.success) return loaded;
 
+        const declaredTools = loaded.skill.allowedTools;
+        if (declaredTools?.length) {
+            const unknownTool = declaredTools.find(tool => !TOOL_REGISTRY.has(tool as import('./types').AgentToolName));
+            if (unknownTool) {
+                return {
+                    success: false,
+                    error: `Skill '${loaded.skill.name}' declares unknown allowed-tool '${unknownTool}'. Fix its SKILL.md frontmatter before use.`,
+                };
+            }
+            const policyKey = this.getSkillPolicyKey(context);
+            if (policyKey) {
+                this.activeSkillPolicies.delete(policyKey);
+                this.activeSkillPolicies.set(policyKey, {
+                    skillName: loaded.skill.name,
+                    allowedTools: new Set(declaredTools),
+                });
+                while (this.activeSkillPolicies.size > AgentToolExecutor.ACTIVE_SKILL_POLICY_LIMIT) {
+                    const oldest = this.activeSkillPolicies.keys().next().value as string | undefined;
+                    if (oldest === undefined) break;
+                    this.activeSkillPolicies.delete(oldest);
+                }
+            }
+        }
+
         const argumentSummary = args.arguments === undefined
             ? ''
             : `\n\n<skill-arguments>\n${JSON.stringify(args.arguments, null, 2)}\n</skill-arguments>`;
@@ -2055,7 +2112,15 @@ export class AgentToolExecutor {
             truncated: loaded.truncated,
             content: `<skill name="${loaded.skill.name}">\n${loaded.content}\n</skill>${argumentSummary}`,
             guidance: 'Follow this SKILL.md for the current task. If runAs says subagent, use dispatch_agents only when orchestration is already appropriate and available.',
+            policyEnforced: !!declaredTools?.length && !!this.getSkillPolicyKey(context),
         };
+    }
+
+    private getSkillPolicyKey(context?: import('./types').AgentToolContext): string | undefined {
+        const runId = context?.runnerOptions?.runRecord?.runId;
+        if (runId) return `run:${runId}`;
+        const threadId = context?.runnerOptions?.threadId;
+        return threadId ? `thread:${threadId}` : undefined;
     }
 
     private saveWorkflow(args: Record<string, unknown>): unknown {

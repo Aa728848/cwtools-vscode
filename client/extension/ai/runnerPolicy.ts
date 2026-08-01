@@ -177,8 +177,9 @@ const MODE_STAGE_TOOLS: Partial<Record<AgentMode, Partial<Record<AgentToolStage,
  */
 const CROSS_STAGE_SUPPORT_TOOLS = new Set([
     'run_skill',
+    'history',
     'get_goal', 'create_goal', 'update_goal', 'set_goal_budget',
-    'set_memory', 'get_memory', 'search_memory', 'save_memory',
+    'set_memory', 'get_memory', 'search_memory', 'save_memory', 'forget_memory', 'memory_recall_trace',
     'mcp_call',
 ]);
 const BUILD_WRITE_ON_DEMAND_TOOLS = new Set([

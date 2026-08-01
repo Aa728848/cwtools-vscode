@@ -50,3 +50,15 @@ export function isSessionFullAccess(workspaceRoot: string): boolean {
     return getSessionPermissionMode(workspaceRoot) === 'full';
 }
 
+/** Opaque commands in Auto Review must reach the reviewer before learned policy rules. */
+export function shouldReviewOpaqueCommandBeforePolicy(
+    reviewerMode: string | undefined,
+    tool: string,
+    opaqueExecution: boolean,
+    isEscalationRequest: boolean,
+): boolean {
+    return reviewerMode === 'auto_review'
+        && tool === 'run_command'
+        && opaqueExecution
+        && !isEscalationRequest;
+}

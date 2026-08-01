@@ -124,6 +124,30 @@ describe('enforced central tool policy', () => {
         expect(events.some(event => event.type === 'policy_resolved' && event.payload.shadow === false && event.payload.action === 'allow')).to.equal(true);
     });
 
+    it('enforces a loaded skill allowed-tools policy for the current run', async () => {
+        const skillDir = path.join(workspaceRoot, '.agents', 'skills', 'read-only-skill');
+        fs.mkdirSync(skillDir, { recursive: true });
+        fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
+            '---',
+            'name: read-only-skill',
+            'description: read only',
+            'allowed-tools: read_file',
+            '---',
+            'Read the requested file.',
+        ].join('\n'), 'utf8');
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        const context = {
+            runnerOptions: { mode: 'build', domain: 'general', topicId: 'skill-policy', runRecord: { runId: 'skill-run' } },
+        } as any;
+
+        const loaded = await executor.execute('run_skill', { name: 'read-only-skill' }, context) as any;
+        expect(loaded.success).to.equal(true);
+        expect(loaded.policyEnforced).to.equal(true);
+        const denied = await executor.execute('get_diagnostics', {}, context) as any;
+        expect(denied.skillPolicyDenied).to.equal(true);
+        expect(denied.allowedTools).to.deep.equal(['read_file']);
+    });
+
     it('enforces the General Coding domain even for unadvertised direct tool calls', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         const context = {
@@ -1446,7 +1470,7 @@ describe('agent tool topic artifacts', () => {
         expect(preflight.networkEnforcement).to.equal('declared-only');
     });
 
-    it('runs ordinary workspace mutations inside the sandbox without an approval prompt', async () => {
+    it('requires approval for opaque inline code even when it runs inside the sandbox', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         let permissionRequests = 0;
         const result = await handler.runCommand({
@@ -1461,8 +1485,27 @@ describe('agent tool topic artifacts', () => {
         } as any);
 
         expect(result.exitCode).to.equal(0);
-        expect(permissionRequests).to.equal(0);
+        expect(permissionRequests).to.equal(1);
         expect(fs.readFileSync(path.join(workspaceRoot, 'sandboxed.txt'), 'utf8')).to.equal('ok');
+    });
+
+    it('does not let learned approval rules bypass data-driven command review', async () => {
+        PermissionPolicyStore.getInstance().addRule({
+            tool: 'run_command', commandPrefix: ['xargs'], cwdScope: workspaceRoot, riskMax: 3, sessionOnly: true,
+        });
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        let permissionRequests = 0;
+        const result = await handler.runCommand({ command: 'xargs echo', timeoutMs: 10_000 }, {
+            ...makeContext('opaque-data-command'),
+            onPermissionRequest: async (_id: string, _tool: string, _description: string, _command?: string, context?: any) => {
+                permissionRequests++;
+                expect(context?.preflight?.opaqueExecution).to.equal(true);
+                return false;
+            },
+        } as any);
+
+        expect(permissionRequests).to.equal(1);
+        expect(result.exitCode).to.equal(1);
     });
 
     it('honors a specific configured allow rule for Git metadata without broad Git approval', async () => {

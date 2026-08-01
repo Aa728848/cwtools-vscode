@@ -179,6 +179,23 @@ describe('CommandPreflight Unit Tests', () => {
         const destructive = preflightCommand('rm -rf build', [{ prefix: ['rm', '-rf'], decision: 'allow' }]);
         expect(destructive.decision).to.equal('forbidden');
     });
+
+    it('requires approval for opaque inline and data-driven execution', () => {
+        const { preflightCommand } = loadCommandPreflightModule();
+        for (const command of [
+            'python -c "print(1)"',
+            'node --eval "console.log(1)"',
+            'ruby -e "puts 1"',
+            'xargs rm',
+            'pwsh -Command Invoke-Expression',
+            'bash -lc "xargs rm"',
+        ]) {
+            const result = preflightCommand(command);
+            expect(result.decision, command).to.equal('prompt');
+            expect(result.opaqueExecution, command).to.equal(true);
+            expect(result.segments[0]!.classification, command).to.equal('interpreter');
+        }
+    });
 });
 
 function loadCommandPreflightModule() {

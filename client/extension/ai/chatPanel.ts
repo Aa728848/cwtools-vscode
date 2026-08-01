@@ -54,7 +54,11 @@ import { runLedger, type AgentRunEvent } from './runner/runLedger';
 import { AgentRuntime } from './runner/agentRuntime';
 import { agentProfileCatalog } from './runner/agentProfileCatalog';
 import { PermissionPolicyStore, deriveCommandPrefix, hasInlineEvalPayload } from './runner/permissionPolicy';
-import { getSessionPermissionMode, sessionApprovalsReviewer } from './runner/sessionPermissions';
+import {
+    getSessionPermissionMode,
+    sessionApprovalsReviewer,
+    shouldReviewOpaqueCommandBeforePolicy,
+} from './runner/sessionPermissions';
 import type { RuntimeItem } from './runner/runtimeItems';
 import { isSecuritySandboxDisabled } from './workspaceSandbox';
 import { AutoReviewer } from './runner/autoReviewer';
@@ -2946,6 +2950,25 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             return resolveAutomatically('full-access');
         }
 
+        const reviewerMode = sessionApprovalsReviewer(getProjectWorkspaceRoot())
+            ?? vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('approvals.reviewer', 'user');
+        const opaqueExecution = context?.preflight?.opaqueExecution === true
+            || (!!command && hasInlineEvalPayload(command));
+
+        // Auto Review must inspect each opaque payload before any learned rule
+        // can resolve it. Reviewer uncertainty/failure falls back to the user.
+        if (shouldReviewOpaqueCommandBeforePolicy(
+            reviewerMode,
+            tool,
+            opaqueExecution,
+            isEscalationRequest,
+        )) {
+            return this.runAutoReview(id, tool, description, command, context).then(decision => {
+                if (decision !== undefined) return decision;
+                return this.promptUserPermission(id, tool, description, command, context, requestMode, permissionRunId);
+            });
+        }
+
         // 联动 PermissionPolicyStore 进行高精细粒度低风险命令豁免，保障安全边界
         if (tool === 'run_command' && !isEscalationRequest) {
             const riskLevel = context?.preflight?.riskLevel ?? 0;
@@ -2964,8 +2987,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // Auto-review: reviewer swap at the approval boundary; ask_user falls through to the card.
         // Mode-agnostic: utility/build/script all share this exact funnel.
-        const reviewerMode = sessionApprovalsReviewer(getProjectWorkspaceRoot())
-            ?? vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('approvals.reviewer', 'user');
         if (reviewerMode === 'auto_review' && !isEscalationRequest) {
             return this.runAutoReview(id, tool, description, command, context).then(decision => {
                 if (decision !== undefined) return decision;
@@ -3105,7 +3126,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             networkHosts: preflight?.networkHosts,
             systemReason: description,
             escalation: !!preflight?.escalation || !!preflight?.requiresEscalation,
-            inlineEval: !!command && hasInlineEvalPayload(command),
+            inlineEval: preflight?.opaqueExecution === true || (!!command && hasInlineEvalPayload(command)),
             userMessages: this.conversationMessages
                 .filter(message => message.role === 'user')
                 .slice(-4)

@@ -18,6 +18,35 @@ export interface StepRequest<T = unknown> {
     sourceId?: string;
 }
 
+export interface RetryStepPayload {
+    pendingToolCalls: ToolCall[];
+}
+
+export type RetryStepRequest = StepRequest<RetryStepPayload> & { kind: 'retry' };
+
+function isToolCall(value: unknown): value is ToolCall {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as Partial<ToolCall>;
+    return typeof candidate.id === 'string'
+        && candidate.type === 'function'
+        && !!candidate.function
+        && typeof candidate.function.name === 'string'
+        && typeof candidate.function.arguments === 'string';
+}
+
+/** Validate persisted retry work before it re-enters the tool policy pipeline. */
+export function isRetryStepRequest(value: unknown): value is RetryStepRequest {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as Partial<StepRequest<Partial<RetryStepPayload>>>;
+    return candidate.kind === 'retry'
+        && typeof candidate.id === 'string'
+        && Number.isFinite(candidate.priority)
+        && Number.isFinite(candidate.createdAt)
+        && !!candidate.payload
+        && Array.isArray(candidate.payload.pendingToolCalls)
+        && candidate.payload.pendingToolCalls.every(isToolCall);
+}
+
 const PRIORITY: Record<StepRequestKind, number> = {
     approval_result: 100,
     steer: 90,
@@ -54,3 +83,4 @@ export function compareStepRequests(left: StepRequest, right: StepRequest): numb
         || left.createdAt - right.createdAt
         || left.id.localeCompare(right.id);
 }
+import type { ToolCall } from '../types';

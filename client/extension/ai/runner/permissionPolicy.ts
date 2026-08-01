@@ -13,6 +13,11 @@ const BASE_COMMAND_EVAL_FLAGS: Record<string, Set<string>> = {
     deno: new Set(['eval']),
 };
 
+// These executors consume code or command arguments from data rather than a
+// statically inspectable script file. They must cross the approval boundary on
+// every invocation and must never produce a learned prefix rule.
+const OPAQUE_EXECUTORS = new Set(['eval', 'invoke-expression', 'iex', 'xargs']);
+
 /** Normalize a flag token: strip leading/trailing quotes independently, cut at '=', lowercase. */
 function normalizeFlagToken(rawToken: string): string {
     let t = rawToken.trim().replace(/^['"]+/, '').replace(/['"]+$/, '').trim().toLowerCase();
@@ -45,9 +50,11 @@ function isNodeEvalCluster(rawToken: string): boolean {
 
 export function hasInlineEvalPayload(command: string): boolean {
     const tokens = command.trim().replace(/\s+/g, ' ').split(' ').filter(Boolean);
+    if (tokens.length === 0) return false;
+    const base = normalizeBaseCommand(tokens[0]!);
+    if (OPAQUE_EXECUTORS.has(base)) return true;
     if (tokens.length <= 1) return false;
     if (tokens.some(isInlineEvalToken)) return true;
-    const base = normalizeBaseCommand(tokens[0]!);
     const baseEvalFlags = BASE_COMMAND_EVAL_FLAGS[base];
     if (baseEvalFlags && tokens.slice(1).some(tok => baseEvalFlags.has(normalizeFlagToken(tok)))) return true;
     if ((base === 'node' || base === 'nodejs') && tokens.slice(1).some(isNodeEvalCluster)) return true;

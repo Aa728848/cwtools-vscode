@@ -15,7 +15,7 @@ export type AgentToolName =
     | 'query_definition' | 'query_definition_by_name' | 'query_scripted_effects'
     | 'query_scripted_triggers' | 'query_enums' | 'get_entity_info'
     | 'query_static_modifiers' | 'query_variables' | 'set_memory'
-    | 'get_memory' | 'search_memory' | 'save_memory'
+    | 'get_memory' | 'search_memory' | 'history' | 'save_memory' | 'forget_memory' | 'memory_recall_trace'
     | 'convert_image_to_dds' | 'convert_audio' | 'deploy_mod_asset' | 'mcp_call'
     | 'write_localisation' | 'write_design_blueprint' | 'save_workflow' | 'git_ops' | 'dispatch_agents'
     | 'query_blackboard' | 'merge_results' | 'get_design_blueprint_contract'
@@ -145,7 +145,10 @@ const TOOL_DOMAINS = {
     set_memory: 'shared',
     get_memory: 'shared',
     search_memory: 'shared',
+    history: 'shared',
     save_memory: 'shared',
+    forget_memory: 'shared',
+    memory_recall_trace: 'shared',
     convert_image_to_dds: 'paradox',
     convert_audio: 'paradox',
     deploy_mod_asset: 'paradox',
@@ -274,7 +277,7 @@ const GENERAL_WORKFLOW_SCHEMA: ToolDefinition = {
 const BASE_READ: AgentToolName[] = [
     'select_tools', 'get_goal',
     'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_references', 'get_design_blueprint_contract',
-    'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge', 'run_skill', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
+    'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge', 'run_skill', 'history', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol',
     'verify_pdx_identifier', 'read_file', 'list_directory', 'glob_files',
     'lsp_operation', 'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name', 'web_find',
@@ -287,7 +290,7 @@ const EDIT: AgentToolName[] = [
     'write_file', 'edit_file', 'replace_lines', 'rename_symbol',
     'write_localisation', 'write_design_blueprint', 'save_workflow', 'remove_ignored_diagnostic'
 ];
-const MEMORY: AgentToolName[] = ['todo_write', 'create_goal', 'update_goal', 'set_goal_budget', 'set_memory', 'get_memory', 'search_memory', 'save_memory'];
+const MEMORY: AgentToolName[] = ['todo_write', 'create_goal', 'update_goal', 'set_goal_budget', 'set_memory', 'get_memory', 'search_memory', 'save_memory', 'forget_memory', 'memory_recall_trace'];
 const NETWORK: AgentToolName[] = ['web_search', 'web_open'];
 const UTILITY: AgentToolName[] = ['run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process', 'git_ops', 'analyze_diagnostic_error'];
 const MEDIA: AgentToolName[] = ['convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
@@ -321,6 +324,7 @@ const MUTATING_TOOLS_SET = new Set<string>([
     'git_ops',
     'set_memory',
     'save_memory',
+    'forget_memory',
     'merge_results',
     'write_process_stdin',
     'terminate_process',

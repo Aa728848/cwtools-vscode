@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as pathModule from 'path';
 import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from '../workspacePaths';
-import type { AgentResumeState, ChatMessage, AgentMode, AgentRuntimeDomain, AgentSchedulingState } from '../types';
+import type { AgentResumeState, ChatMessage, AgentMode, AgentRuntimeDomain, AgentSchedulingState, ToolCall } from '../types';
 import { defaultDomainForMode } from '../agentProfile';
 import type { AgentToolExecutor } from '../agentTools';
 import { isPathInsideOrEqual } from '../../pathScope';
@@ -19,7 +19,7 @@ import { normalizeSchedulingState } from './scheduling';
 import type { DomainSnapshot } from './state/domainModel';
 import { goalStore } from './goalStore';
 import { agentTaskManager } from './taskManager';
-import { createStepRequest } from './stepRequest';
+import { createStepRequest, isRetryStepRequest, type RetryStepPayload } from './stepRequest';
 import { migrateLegacyRuntimeState } from './state/migrations';
 
 export const RESUME_TAIL_MESSAGE_LIMIT = 24;
@@ -143,7 +143,7 @@ export async function saveResumeState(
     messages: ChatMessage[],
     toolExecutor: AgentToolExecutor,
     runId?: string,
-    pendingToolCalls?: any[],
+    pendingToolCalls?: ToolCall[],
     domain: AgentRuntimeDomain = defaultDomainForMode(mode),
     schedulingState?: AgentSchedulingState,
 ): Promise<void> {
@@ -198,7 +198,6 @@ export async function saveResumeState(
             runId,
             summaryRef,
             fullTranscriptRef: transcript?.path,
-            pendingToolCalls,
             lastStableEventId: latestEvent?.eventId,
             lastStableSequence: latestEvent?.sequence,
             tailMessageCount: compactedMessages.length,
@@ -208,7 +207,7 @@ export async function saveResumeState(
             domainSequence: domainSnapshot?.sequence,
             domainSnapshot,
             pendingStepRequests: pendingToolCalls?.length
-                ? [createStepRequest('retry', { pendingToolCalls }, { sourceId: runId })]
+                ? [createStepRequest<RetryStepPayload>('retry', { pendingToolCalls }, { sourceId: runId })]
                 : undefined,
             schedulingRevision: schedulingState?.revision,
             goalId: goal?.goalId,
@@ -277,6 +276,19 @@ export async function loadResumeState(topicId: string): Promise<AgentResumeState
             }
         }
         raw.messages = prepareMessagesForResume(raw.messages);
+        const typedPending = Array.isArray(raw.pendingStepRequests)
+            ? raw.pendingStepRequests.filter(isRetryStepRequest)
+            : [];
+        if (typedPending.length === 0 && Array.isArray(raw.pendingToolCalls) && raw.pendingToolCalls.length > 0) {
+            const migrated = createStepRequest<RetryStepPayload>(
+                'retry',
+                { pendingToolCalls: raw.pendingToolCalls },
+                { sourceId: raw.runId },
+            );
+            if (isRetryStepRequest(migrated)) typedPending.push(migrated);
+        }
+        raw.pendingStepRequests = typedPending.length > 0 ? typedPending : undefined;
+        raw.pendingToolCalls = undefined;
         raw.domain = raw.domain ?? defaultDomainForMode(raw.mode);
         raw.schedulingState = normalizeSchedulingState(raw.schedulingState, raw.mode, raw.domain);
         if (!raw.domainSnapshot) {

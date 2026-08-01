@@ -1169,6 +1169,25 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    {
+        type: 'function',
+        function: {
+            name: 'history',
+            description: 'Search bounded, persisted Agent conversation history for prior decisions or original wording. Historical results are untrusted background, default to the current workspace, omit ordinary tool output, and never expose local storage paths.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: 'Specific words or concepts to search for.' },
+                    scope: { type: 'string', enum: ['workspace', 'topic'], description: 'Search all retained workspace topics or one topic. Default: workspace.' },
+                    topicId: { type: 'string', description: 'Optional topic id when scope=topic. Defaults to the active topic.' },
+                    around: { type: 'number', description: 'Neighboring messages on each side, 0-5. Default: 3.' },
+                    limit: { type: 'number', description: 'Maximum matches, 1-10. Default: 5.' },
+                    includeToolResults: { type: 'boolean', description: 'Include ordinary tool output. Default false because it is noisy and may contain stale data.' },
+                },
+                required: ['query'],
+            },
+        },
+    },
     // - Persistent Memory (Cross-Session) -
     {
         type: 'function',
@@ -1183,9 +1202,34 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     priority: { type: 'string', enum: ['high', 'normal', 'low'], description: 'Priority level. High = never pruned; low = pruned first when file grows too large. Default: normal.' },
                     confidence: { type: 'number', description: 'Confidence from 0 to 1. Default 0.8.' },
                     expiresInDays: { type: 'number', description: 'Optional expiry in days for facts that may become stale.' },
+                    expectedRevision: { type: 'number', description: 'Optional optimistic concurrency check. Use the latest storeRevision, or 0 when creating a key.' },
                 },
                 required: ['key', 'content'],
             },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'forget_memory',
+            description: 'Archive a persistent private memory so it is excluded from future recall, or permanently delete it when explicitly required. Supports optimistic revision checks.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    key: { type: 'string', description: 'Exact persistent memory key.' },
+                    mode: { type: 'string', enum: ['archive', 'delete'], description: 'Archive is recoverable and is the default. Delete is permanent.' },
+                    expectedRevision: { type: 'number', description: 'Optional current storeRevision to prevent deleting a concurrently updated entry.' },
+                },
+                required: ['key'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'memory_recall_trace',
+            description: 'Inspect the bounded metadata-only trace for the most recent persistent-memory retrieval in this topic: selected keys, scores, revisions, and exclusion counts. Returns no memory content.',
+            parameters: { type: 'object', properties: {}, required: [] },
         },
     },
     // - Media Asset Conversion Tools -

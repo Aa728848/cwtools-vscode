@@ -30,3 +30,4 @@ cwtools.local.props
 .vs/
 .tmp-test
 .tmp
+/.reasonix

@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-08-01
+
+### AI Agent 可靠性 / AI Agent Reliability
+- **[功能] 类型化、分级且有界的恢复机制**：区分取消、上下文溢出、限流、传输故障、沙箱不可用、权限拒绝、工具校验和 Provider 故障，分别执行有界恢复；Checkpoint 持久化经过校验的重试请求，并通过父级恢复风暴预算阻止跨子任务的无效重复修改。
+  English: [Feature] Added typed, classified, and bounded recovery for cancellation, context overflow, rate limits, transport failures, sandbox unavailability, permission denial, tool validation, and provider failures. Checkpoints now persist validated retry requests, while a parent recovery-storm budget stops repeated unproductive mutations across child tasks.
+- **[功能] 有界历史检索工具**：新增只读 `history` 工具，仅检索扩展私有的持久化对话记录；限制文件、消息、结果和字符规模，默认排除 system/tool 内容并脱敏本地路径。
+  English: [Feature] Added a bounded read-only `history` tool for extension-private persisted transcripts, with file/message/result/character limits, system/tool exclusion by default, and local-path redaction.
+
+### Provider 与上下文 / Providers & Context
+- **[优化] Provider 能力按实际协议与端点判定**：不再仅按 Provider 名称推断能力；官方 DeepSeek Chat Completions 在纯文本或推理响应因长度截断时支持最多两次 Beta prefix continuation，并合并统计全部续写用量。
+  English: [Optimization] Provider capabilities are now derived from the effective protocol and endpoint instead of provider names. Official DeepSeek Chat Completions can perform up to two Beta prefix continuations for length-truncated text/reasoning responses, with usage merged across all continuation calls.
+
+### 记忆、Skill 与 Hook / Memory, Skills & Hooks
+- **[功能] 加强持久记忆治理**：按 Topic 串行写入，增加单调版本、`expectedRevision` 乐观并发控制、可恢复归档、显式永久删除，以及不包含记忆正文的有界召回轨迹。
+  English: [Feature] Strengthened persistent-memory governance with per-topic serialized writes, monotonic revisions, `expectedRevision` optimistic concurrency, recoverable archives, explicit permanent deletion, and bounded metadata-only recall traces.
+- **[安全] 强制执行 Skill 与 Hook 权限边界**：Skill 的 `allowed-tools` 成为当前 Run 的真实工具上限；Hook 配置经过大小与结构校验，仅运行白名单 VS Code 命令，并支持有界超时与 ignore/block 失败模式。
+  English: [Security] Skill `allowed-tools` now form an enforced per-run tool ceiling. Hook configuration is size/schema validated, limited to allowlisted VS Code commands, and supports bounded timeouts plus explicit ignore/block failure modes.
+
+### Shell 审批安全 / Shell Approval Safety
+- **[安全] 不透明命令逐次审查**：`python -c`、`node -e`、`eval`、`xargs`、复杂 Shell 语法及嵌套等价形式不能复用历史放行规则。自动审核模式会先由模型检查安全性、用户意图和权限范围，无法确定时转人工；用户明确选择当前会话的完全放行模式后则直接执行。
+  English: [Security] Opaque commands such as `python -c`, `node -e`, `eval`, `xargs`, complex shell syntax, and nested equivalents cannot reuse learned approvals. Auto Review sends each invocation to the reviewer model for safety, user-intent, and permission-scope checks, falling back to the user when uncertain; explicit session Full Access executes directly.
+
+### 测试与文档 / Tests & Documentation
+- **[质量] 补充恢复、Provider、历史、记忆、Hook、命令预检与权限路由回归测试，并同步更新架构和交付文档。**
+  English: [Quality] Added regression coverage for recovery, providers, history, memory, hooks, command preflight, and permission routing, with synchronized architecture and delivery documentation.
+
 ## [2.9.7] - 2026-07-30
 
 ### 功能与优化 / Features & Optimizations

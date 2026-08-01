@@ -44,6 +44,7 @@ import { registerInspectionOverviewCommand } from './inspectionOverview';
 import { formatMemDiagEntry, memDiagLanguageForLocale } from './memDiagFormatter';
 import { configurePrivateAgentStorage, configureWorkspaceCacheStorage, getProjectWorkspaceRoot, getPrivateAiStorageRoot, migrateLegacyAiStorageRoot, migrateLegacyPrivateAgentState } from './ai/workspacePaths';
 import { configureHistoryPolicy, enforceHistoryRetention } from './ai/runner/historyPolicy';
+import { TokenCalibrationTable, readCalibrationSnapshot } from './ai/runner/tokenCalibration';
 import { sha256Text } from './ai/runner/durableStorage';
 import { processRegistry } from './ai/runner/processRegistry';
 import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
@@ -1143,7 +1144,16 @@ export async function activate(context: ExtensionContext) {
 		ErrorReporter.warn('MCP', 'Failed to start extension-host MCP bridge', e)
 	);
 	const promptBuilder = new PromptBuilder(workspaceRoot, context.globalStorageUri.fsPath, context.extensionPath);
-	const agentRunner = new AgentRunner(aiService, toolExecutor, promptBuilder);
+	// Real-usage token calibration (P0 design 3): created before the Runner and
+	// injected; persisted snapshots are validated field-by-field on load and
+	// written single-flight by the table itself.
+	const tokenCalibration = new TokenCalibrationTable(
+		readCalibrationSnapshot(context.globalState.get('cwtools.ai.tokenCalibration.v1')),
+		snapshot => Promise.resolve(context.globalState.update('cwtools.ai.tokenCalibration.v1', snapshot)),
+		error => ErrorReporter.warn('TokenCalibration', 'Failed to persist token calibration data', error),
+	);
+	context.subscriptions.push({ dispose: () => { void tokenCalibration.flush(); } });
+	const agentRunner = new AgentRunner(aiService, toolExecutor, promptBuilder, tokenCalibration);
 	const usageTracker = new UsageTracker(context);
 	const chatStorageUri = historyPersistence === 'off'
 		? undefined

@@ -28,6 +28,7 @@ import type {
     AgentRuntimeDomain,
 } from './types';
 import { contentToString } from './types';
+import { estimateTokenCount, estimateChatMessageTokens, hasImageContent, CHARS_PER_TOKEN } from './runner/tokenEstimation';
 import { defaultDomainForMode } from './agentProfile';
 import * as vs from 'vscode';
 import * as fs from 'fs';
@@ -37,18 +38,18 @@ import * as path from 'path';
 import { AIService } from './aiService';
 import { AgentToolExecutor, TOOL_DEFINITIONS } from './agentTools';
 import { PromptBuilder, hashToolDefinitionsForFingerprint, orderMessagesForStablePrefix } from './promptBuilder';
-import { getProvider, isModelVisionCapable } from './providers';
+import { getEffectiveEndpoint, getProvider, getProviderApiFormat, isModelVisionCapable } from './providers';
 import { getModelPricing, getCacheDiscountFactor } from './pricing';
 import { buildProviderCallTokenUsage } from './providerCallUsage';
 import { parseDsmlToolCalls as _parseDsmlToolCalls, stripDsmlMarkup as _stripDsmlMarkup, stripThinkBlocks as _stripThinkBlocks, cleanFinalContent as _cleanFinalContent } from './toolCallParser';
 import { tryRepairJson as _tryRepairJson } from './jsonRepair';
 import { repairToolArgs } from './tools/argRepair';
-import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compactMessagesInPlace, getToolResultBudget } from './contextBudget';
+import { budgetToolResult as _budgetToolResult, getToolResultBudget } from './contextBudget';
 import type { CompactMessagesOptions } from './contextBudget';
 import { AGENT, SOURCE, aiText } from './messages';
 import { ErrorReporter } from './errorReporter';
 import { MemoryParser } from './memoryParser';
-import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from './workspacePaths';
+import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates, canonicalPathKey } from './workspacePaths';
 import {
     filterToolDefinitionsForMode,
     filterToolDefinitionsForStage,
@@ -73,8 +74,10 @@ import { PartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { atomicWriteText, sha256Text } from './runner/durableStorage';
 import { loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
-import { maybeCompactHistory as _maybeCompactHistory, COMPACTION_THRESHOLD_RATIO, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT, AUTO_COMPACTION_MIN_INTERVAL_MS, type CompactionBudgetOptions, type AutoCompactionThrottle } from './runner/compaction';
+import { maybeCompactHistory as _maybeCompactHistory, COMPACTION_THRESHOLD_RATIO, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT, AUTO_COMPACTION_MIN_INTERVAL_MS, resolveCompactionContextLimit, type CompactionBudgetOptions, type AutoCompactionThrottle } from './runner/compaction';
 import { refreshLiveVsCodeContext } from './runner/liveContext';
+import { runContextMaintenance } from './runner/contextMaintenance';
+import { TokenCalibrationTable, buildCalibrationKey } from './runner/tokenCalibration';
 import { executeFallbackRetry, isFallbackEligibleApiError } from './runner/fallbackPolicy';
 import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles, toolScheduler } from './runner/toolScheduler';
 import { buildToolInvocation } from './runner/toolInvocation';
@@ -125,6 +128,9 @@ export { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } fr
 export { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeToolResultHash } from './runner/doomLoopDetector';
 export { AgentAbortError, checkCancellation, isAbortError } from './runner/cancellation';
 export { StepEmitter } from './runner/stepEmitter';
+// Token estimation primitives live in runner/tokenEstimation (extracted to avoid
+// runner/ modules importing this god-file). Re-exported for existing consumers.
+export { estimateTokenCount, estimateChatMessageTokens, estimateChatMessagesTokens, CHARS_PER_TOKEN } from './runner/tokenEstimation';
 
 
 // Maximum validation-retry rounds (reduced: edit_file now returns inline LSP diagnostics)
@@ -132,98 +138,6 @@ const MAX_VALIDATION_RETRIES = 2;
 const VALIDATION_DIAGNOSTIC_FRESHNESS_RECHECK_DELAYS_MS = [500, 1500, 3000];
 const MAX_OUTPUT_REPETITION_RECOVERIES = 1;
 const MAX_TOP_LEVEL_LENGTH_RECOVERIES = 1;
-// Token estimation: Dual-path strategy for balancing speed and accuracy.
-// Path 1 (fast): Short text (<1000 chars) uses character-ratio interpolation.
-// Path 2 (precise): Longer text uses sub-word segmentation heuristic for
-//   better accuracy in compaction/context-window decisions (~10% more precise
-//   than pure char ratio, without requiring an external tokenizer dependency).
-const CHARS_PER_TOKEN_ASCII = 4;
-const CHARS_PER_TOKEN_CJK = 1.5;
-/** Threshold for switching to precise estimation */
-const PRECISE_TOKEN_THRESHOLD = 1000;
- 
-const CJK_RANGE = /[\u3000-\u9fff\uf900-\ufaff\ufe30-\ufe4f]/g;
-
-/** Fast char-ratio estimation (original method) */
-function estimateTokensFast(text: string): number {
-    const sample = text.length > 4000 ? text.substring(0, 4000) : text;
-    const cjkMatches = sample.match(CJK_RANGE);
-    const cjkRatio = cjkMatches ? cjkMatches.length / sample.length : 0;
-    const charsPerToken = CHARS_PER_TOKEN_ASCII * (1 - cjkRatio) + CHARS_PER_TOKEN_CJK * cjkRatio;
-    return Math.ceil(text.length / charsPerToken);
-}
-
-/**
- * Precise sub-word segmentation heuristic.
- * Counts: word boundaries (split on whitespace/punctuation), CJK chars (each ≈ 1 token),
- * numbers (each digit sequence ≈ 1-2 tokens), and code tokens (operators, brackets).
- * Accuracy: typically within 10-15% of BPE tokenizers on mixed CJK/English code text.
- */
-function estimateTokensPrecise(text: string): number {
-    let tokens = 0;
-    // Sample up to 8000 chars for estimation, then extrapolate
-    const sample = text.length > 8000 ? text.substring(0, 8000) : text;
-    const ratio = text.length / sample.length;
-
-    // Count CJK characters (each is typically 1 token in most tokenizers)
-    const cjkMatches = sample.match(CJK_RANGE);
-    const cjkCount = cjkMatches ? cjkMatches.length : 0;
-    tokens += cjkCount;
-
-    // Remove CJK chars and count remaining as English/code
-    const nonCjk = sample.replace(CJK_RANGE, ' ');
-
-    // Split on whitespace to get word-like segments
-    const words = nonCjk.split(/\s+/).filter(w => w.length > 0);
-    for (const word of words) {
-        if (word.length <= 3) {
-            tokens += 1; // Short words = 1 token
-        } else if (word.length <= 7) {
-            tokens += 1; // Medium words ≈ 1 token
-        } else if (word.length <= 12) {
-            tokens += 2; // Long words ≈ 2 sub-word tokens
-        } else {
-            // Very long words (identifiers, URLs): ~1 token per 4 chars
-            tokens += Math.ceil(word.length / 4);
-        }
-    }
-
-    return Math.ceil(tokens * ratio);
-}
-
-/**
- * Estimate token count for a string.
- * Uses fast path for short text, precise path for longer text
- * (compaction decisions, context window calculations).
- */
-export function estimateTokenCount(text: string): number {
-    if (text.length < PRECISE_TOKEN_THRESHOLD) {
-        return estimateTokensFast(text);
-    }
-    return estimateTokensPrecise(text);
-}
-
-/** Include provider-native continuation state in context-window estimates. */
-export function estimateChatMessageTokens(message: ChatMessage): number {
-    if (message.responses_output_items?.length) {
-        return estimateTokenCount(JSON.stringify(message.responses_output_items)) + 4;
-    }
-    const parts = [contentToString(message.content)];
-    if (message.tool_calls?.length) parts.push(JSON.stringify(message.tool_calls));
-    if (message.anthropic_thinking_blocks?.length) {
-        parts.push(JSON.stringify(message.anthropic_thinking_blocks));
-    } else if (message.reasoning_content) {
-        parts.push(message.reasoning_content);
-    }
-    return estimateTokenCount(parts.join('\n')) + 4;
-}
-
-
-
-
-
-// Backward-compat alias for non-text token estimation (images etc.)
-export const CHARS_PER_TOKEN = 4;
 // Compact when conversation exceeds this fraction of provider context
 // Default context limit if unknown
 // How many recent messages to keep un-compressed during compaction
@@ -481,9 +395,26 @@ export class AgentRunner {
     constructor(
         private aiService: AIService,
         public readonly toolExecutor: AgentToolExecutor,
-        private promptBuilder: PromptBuilder
+        private promptBuilder: PromptBuilder,
+        private tokenCalibration?: TokenCalibrationTable,
     ) {
         this.toolExecutor.parentAgentRunner = this;
+    }
+
+    /** Response-side calibration key: fallback samples never hit the primary key. */
+    private calibrationKeyFor(providerId: string, model: string | undefined): string {
+        const config = this.aiService.getConfig();
+        const effectiveModel = model ?? getProvider(providerId).defaultModel;
+        return buildCalibrationKey(
+            providerId,
+            effectiveModel,
+            getProviderApiFormat(providerId, effectiveModel, config.customApiFormat),
+            getEffectiveEndpoint(providerId, this.aiService.getEndpointForProvider(providerId)),
+        );
+    }
+
+    private calibrateContextEstimate(providerId: string, model: string | undefined, estimate: number): number {
+        return this.tokenCalibration?.apply(this.calibrationKeyFor(providerId, model), estimate) ?? estimate;
     }
 
     /** Per-runner throttle state for automatic (non-forced) compaction. */
@@ -1292,12 +1223,63 @@ export class AgentRunner {
         // Tool schemas are part of every model request even though they are not
         // represented in ChatMessage[]. Reserve their full known size here.
         const toolSchemaTokens = estimateTokenCount(JSON.stringify(promptToolDefinitions));
+        // Context Maintenance Coordinator (admission): estimate first — histories
+        // under the threshold are returned untouched; otherwise free-prune in
+        // place and only escalate to the paid summarizer when still over.
+        const admissionConfig = this.aiService.getConfig();
+        const admissionProviderId = options?.providerId ?? admissionConfig.provider;
+        const admissionModel = options?.model ?? admissionConfig.model;
+        const admissionPreserveMimo = admissionProviderId.startsWith('mimo')
+            || (admissionModel ?? '').toLowerCase().startsWith('mimo-v2');
+        const admissionMaintenance = runContextMaintenance(conversationHistory, 'admission', {
+            toolResultBudget: getToolResultBudget(
+                admissionConfig.maxContextTokens > 0
+                    ? admissionConfig.maxContextTokens
+                    : (getProvider(admissionProviderId).maxContextTokens || DEFAULT_CONTEXT_LIMIT)),
+            compactionOptions: {
+                preserveTailBytes: supportsOpenAiStylePrefixCache(admissionProviderId, admissionConfig.customApiFormat)
+                    || admissionPreserveMimo,
+                preserveReasoningContentForToolCalls: admissionPreserveMimo,
+            },
+            extraTokens: fixedPromptTokens + toolSchemaTokens,
+            calibrateEstimate: (t) => this.calibrateContextEstimate(admissionProviderId, admissionModel, t),
+            // NOTE: when this prunes, conversationHistory is mutated in place even
+            // if the paid summarizer later fails or is throttled. That is
+            // intentional (free prune first) and safe: squeezing is lossy only
+            // for re-derivable tool output, and canonicalization still runs.
+            summarizeThreshold: Math.floor(
+                resolveCompactionContextLimit(admissionProviderId, admissionModel, options?.maxContextTokens ?? admissionConfig.maxContextTokens)
+                * Math.max(0.5, Math.min(0.95, vs.workspace
+                    .getConfiguration('stellarisLanguageServices.ai.performance')
+                    .get<number>('compactionTriggerRatio', COMPACTION_THRESHOLD_RATIO)))),
+        });
+        if (admissionMaintenance.action === 'pruned-below-threshold') {
+            refreshLiveVsCodeContext(conversationHistory);
+            emitStep({
+                type: 'compaction',
+                content: AGENT.COMPACTION_PRUNED(admissionMaintenance.beforeTokens, admissionMaintenance.afterTokens),
+                timestamp: Date.now(),
+                compactionInfo: {
+                    state: 'complete',
+                    kind: 'history',
+                    beforeTokens: admissionMaintenance.beforeTokens,
+                    afterTokens: admissionMaintenance.afterTokens,
+                },
+            });
+        }
+        // Always pass through the paid path: for 'untouched'/'pruned-below-threshold'
+        // the precomputed estimate is under threshold, so the wrapper returns the
+        // canonicalized transcript without a summarizer call (preserving the
+        // canonicalization side effect); for 'summarize' it compacts.
         const compactedHistory = await this.maybeCompactHistory(
             conversationHistory,
             emitStep,
             options,
             tokenAccumulator,
-            { reservedTokens: fixedPromptTokens + toolSchemaTokens },
+            {
+                reservedTokens: fixedPromptTokens + toolSchemaTokens,
+                precomputedRequestTokens: admissionMaintenance.afterTokens,
+            },
         );
         if (compactedHistory !== conversationHistory) {
             // Keep the full transcript in ChatTopicManager, but replace the active
@@ -1581,6 +1563,7 @@ export class AgentRunner {
                 runMetrics,
             };
         } finally {
+            await this.tokenCalibration?.flush();
             this.retainedResumeRuns.delete(runId);
             unregisterActiveTurn();
             parentAbortSignal?.removeEventListener('abort', forwardParentAbort);
@@ -1648,6 +1631,14 @@ export class AgentRunner {
                 // Cancel in-flight compaction with the turn so a cancelled run
                 // never completes a billed summarization call.
                 abortSignal: options?.abortSignal,
+                // Real-usage calibration for the summarizer call itself.
+                onUsageSample: (sample) => {
+                    this.tokenCalibration?.record(
+                        this.calibrationKeyFor(sample.providerId, sample.model),
+                        sample.estimated,
+                        sample.actual,
+                    );
+                },
                 // Throttle only automatic compaction; mid-loop, emergency, and
                 // manual compaction must always run.
                 autoThrottle: budgetOptions?.force ? undefined : this.autoCompactionThrottle,
@@ -1664,6 +1655,27 @@ export class AgentRunner {
     ): Promise<{ compacted: boolean; steps: AgentStep[] }> {
         if (history.length < 2) return { compacted: false, steps: [] };
         const steps: AgentStep[] = [];
+        // Manual compaction is an explicit user request: free-prune first to
+        // shrink the summarizer input, but always produce a summary.
+        const manualConfig = this.aiService.getConfig();
+        const manualProviderId = options?.providerId ?? manualConfig.provider;
+        const manualModel = options?.model ?? manualConfig.model;
+        const manualPreserveMimo = manualProviderId.startsWith('mimo')
+            || (manualModel ?? '').toLowerCase().startsWith('mimo-v2');
+        const manualSchemaTokens = estimateTokenCount(JSON.stringify(TOOL_DEFINITIONS));
+        runContextMaintenance(history, 'manual', {
+            toolResultBudget: getToolResultBudget(
+                manualConfig.maxContextTokens > 0
+                    ? manualConfig.maxContextTokens
+                    : (getProvider(manualProviderId).maxContextTokens || DEFAULT_CONTEXT_LIMIT)),
+            compactionOptions: {
+                preserveTailBytes: supportsOpenAiStylePrefixCache(manualProviderId, manualConfig.customApiFormat)
+                    || manualPreserveMimo,
+                preserveReasoningContentForToolCalls: manualPreserveMimo,
+            },
+            extraTokens: manualSchemaTokens,
+            summarizeThreshold: 0,
+        });
         const compacted = await this.maybeCompactHistory(
             history,
             step => {
@@ -1677,7 +1689,7 @@ export class AgentRunner {
             tokenAccumulator,
             {
                 force: true,
-                reservedTokens: estimateTokenCount(JSON.stringify(TOOL_DEFINITIONS)),
+                reservedTokens: manualSchemaTokens,
             },
         );
         if (compacted === history) return { compacted: false, steps };
@@ -1913,6 +1925,14 @@ export class AgentRunner {
             preserveReasoningContentForToolCalls: preserveMimoReasoningContent,
         };
 
+        // Calibrated estimate closure for in-loop threshold decisions (P0 design 3):
+        // cold table returns the raw estimate unchanged.
+        const calibrateLoopEstimate = (tokens: number): number => this.calibrateContextEstimate(
+            options?.providerId ?? this.aiService.getConfig().provider,
+            options?.model ?? this.aiService.getConfig().model,
+            tokens,
+        );
+
         const agentToolContext: import('./types').AgentToolContext = {
             runnerOptions: options,
             agentRunner: this,
@@ -1920,6 +1940,9 @@ export class AgentRunner {
             tokenAccumulator: tokenAccumulator,
             onStep: emitStep,
             onPermissionRequest: options?.onPermissionRequest,
+            // Per-run scope for the anchor-failure guard: sub-agents share the
+            // executor, so each run contributes only its own scoped signatures.
+            scopeId: runRecord.runId,
             onBeforeFileWrite: onFileWrite,
             onTodoUpdate: options?.onTodoUpdate
         };
@@ -2368,8 +2391,8 @@ export class AgentRunner {
             // and compact if approaching the context window limit.
             if (iteration > 1 && (iteration - 1) % MID_LOOP_COMPACTION_INTERVAL === 0) {
                 const activeToolSchemaTokens = estimateTokenCount(JSON.stringify(availableTools));
-                const loopTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
-                    + activeToolSchemaTokens;
+                const loopTokens = calibrateLoopEstimate(messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
+                    + activeToolSchemaTokens);
                 if (loopTokens > midLoopThreshold) {
                     emitStep({
                         type: 'compaction',
@@ -2388,11 +2411,17 @@ export class AgentRunner {
                         { kind: 'mid_loop', beforeTokens: loopTokens, threshold: midLoopThreshold },
                         { status: 'running' }
                     );
-                    this.compactMessagesInPlace(messages, toolResultBudget, compactionOptions);
+                    const midLoopMaintenance = runContextMaintenance(messages, 'mid_loop', {
+                        toolResultBudget,
+                        compactionOptions,
+                        extraTokens: activeToolSchemaTokens,
+                        calibrateEstimate: calibrateLoopEstimate,
+                        summarizeThreshold: midLoopThreshold,
+                        ineffectivenessGate: true,
+                    });
                     refreshLiveVsCodeContext(messages);
-                    let afterTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
-                        + activeToolSchemaTokens;
-                    if (afterTokens > midLoopThreshold && afterTokens >= loopTokens * 0.90) {
+                    let afterTokens = midLoopMaintenance.afterTokens;
+                    if (midLoopMaintenance.action === 'summarize') {
                         messages = await this.maybeCompactHistory(
                             messages,
                             emitStep,
@@ -2401,8 +2430,8 @@ export class AgentRunner {
                             { reservedTokens: activeToolSchemaTokens + configuredReservedTokens, force: true },
                         );
                         refreshLiveVsCodeContext(messages);
-                        afterTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
-                            + activeToolSchemaTokens;
+                        afterTokens = calibrateLoopEstimate(messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
+                            + activeToolSchemaTokens);
                     }
                     if (afterTokens > midLoopThreshold && afterTokens >= loopTokens * 0.95) {
                         ineffectiveCompactionCount++;
@@ -2664,6 +2693,16 @@ export class AgentRunner {
                         attempt: contextOverflowRecoveries,
                         reason: errorText,
                     }, { invocationId: modelCallId, status: 'running' });
+                    // Provider-reported overflow is authoritative: free-prune only
+                    // to shrink the summarizer input, then always summarize.
+                    runContextMaintenance(messages, 'overflow', {
+                        toolResultBudget,
+                        compactionOptions,
+                        extraTokens: activeSchemaTokens,
+                        calibrateEstimate: calibrateLoopEstimate,
+                        summarizeThreshold: 0,
+                    });
+                    refreshLiveVsCodeContext(messages);
                     messages = await this.maybeCompactHistory(
                         messages,
                         emitStep,
@@ -2808,6 +2847,23 @@ export class AgentRunner {
                 const totalTokens = response.usage?.total_tokens ?? (promptTokens + completionTokens);
 
                 const responseProviderId = (response as any).__providerId ?? options?.providerId ?? activeProviderConfig.provider;
+                // P0 design 3: feed the real-usage calibration table. Only a real
+                // prompt_tokens counts (the estimation fallback above would be
+                // self-referential). Estimate side mirrors the decision paths.
+                if (
+                    response.usage?.prompt_tokens !== undefined
+                    && response.usage.prompt_tokens > 0
+                    && this.tokenCalibration
+                    && !hasImageContent(messages)
+                ) {
+                    const calibrationEstimate = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
+                        + estimateTokenCount(JSON.stringify(availableTools));
+                    this.tokenCalibration.record(
+                        this.calibrationKeyFor(responseProviderId, response.model ?? options?.model ?? ''),
+                        calibrationEstimate,
+                        response.usage.prompt_tokens,
+                    );
+                }
                 const pricing = getModelPricing(response.model ?? options?.model ?? '', responseProviderId);
                  // Cache-aware cost calculation: cached tokens billed at discounted rate
                 const cachedTokens = response.usage?.cached_tokens ?? 
@@ -3531,8 +3587,10 @@ export class AgentRunner {
                     const isSupersededWrite = SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has(toolName) && primaryFilePath &&
                         lastWriteIndexByFile.get(primaryFilePath) !== i;
 
-                    // Collect all file paths that this tool touches for partitioned locking
-                    const lockPaths = filePaths.length > 0 ? filePaths : ['__global__'];
+                    // Collect all file paths that this tool touches for partitioned locking.
+                    // Canonical keys make relative/absolute/case aliases share one lock.
+                    const lockPaths = (filePaths.length > 0 ? filePaths : ['__global__'])
+                        .map(p => p === '__global__' ? p : canonicalPathKey(p, this.toolExecutor.workspaceRoot));
                     const waitTimeoutMs = options?.writeQueueWaitTimeoutMs ?? (options?.useSlimPrompt ? 60_000 : 90_000);
 
                     try {
@@ -3891,8 +3949,8 @@ export class AgentRunner {
             // creates an invalid orphaned tool_result sequence.
             if (!forceStop) {
                 const activeToolSchemaTokens = estimateTokenCount(JSON.stringify(availableTools));
-                const emergencyTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
-                    + activeToolSchemaTokens;
+                const emergencyTokens = calibrateLoopEstimate(messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
+                    + activeToolSchemaTokens);
                 if (emergencyTokens > contextLimit * 0.92) {
                     emitStep({
                         type: 'compaction',
@@ -3911,11 +3969,16 @@ export class AgentRunner {
                         { kind: 'emergency', beforeTokens: emergencyTokens, contextLimit },
                         { status: 'running' }
                     );
-                    this.compactMessagesInPlace(messages, toolResultBudget, compactionOptions);
+                    const emergencyMaintenance = runContextMaintenance(messages, 'emergency', {
+                        toolResultBudget,
+                        compactionOptions,
+                        extraTokens: activeToolSchemaTokens,
+                        calibrateEstimate: calibrateLoopEstimate,
+                        summarizeThreshold: contextLimit * MID_LOOP_COMPACTION_RATIO,
+                    });
                     refreshLiveVsCodeContext(messages);
-                    let afterEmergencyTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
-                        + activeToolSchemaTokens;
-                    if (afterEmergencyTokens > contextLimit * MID_LOOP_COMPACTION_RATIO) {
+                    let afterEmergencyTokens = emergencyMaintenance.afterTokens;
+                    if (emergencyMaintenance.action === 'summarize') {
                         messages = await this.maybeCompactHistory(
                             messages,
                             emitStep,
@@ -3924,8 +3987,8 @@ export class AgentRunner {
                             { reservedTokens: activeToolSchemaTokens + configuredReservedTokens, force: true },
                         );
                         refreshLiveVsCodeContext(messages);
-                        afterEmergencyTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
-                            + activeToolSchemaTokens;
+                        afterEmergencyTokens = calibrateLoopEstimate(messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
+                            + activeToolSchemaTokens);
                     }
                     await runLedger.appendEvent(
                         runRecord.runId,
@@ -4112,9 +4175,6 @@ export class AgentRunner {
         return _budgetToolResult(result, maxChars);
     }
 
-    private compactMessagesInPlace(messages: ChatMessage[], toolResultBudget: number, options?: CompactMessagesOptions): void {
-        _compactMessagesInPlace(messages, toolResultBudget, options);
-    }
     /** 
 * Verification loop: Check the LSP diagnosis of the target file after inference, and if there are errors, hand them over to AI for repair. 
 * Use get_diagnostics to directly read the diagnostic panel (zero side effects), replacing the old validate_code (temporary file method). 
@@ -4158,6 +4218,8 @@ export class AgentRunner {
             runEventSink: options?.runEventSink,
             onStep: emitStep,
             onPermissionRequest: options?.onPermissionRequest,
+            // Same run as the main loop: share its anchor-guard scope.
+            scopeId: validationRunRecord?.runId,
             onTodoUpdate: options?.onTodoUpdate
         };
 

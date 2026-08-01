@@ -6,8 +6,11 @@ const vscodeStub = {
             get: <T>(_key: string, defaultValue?: T): T | undefined => defaultValue,
         }),
         workspaceFolders: [],
+        textDocuments: [],
+        isTrusted: true,
     },
     window: {
+        activeTextEditor: undefined,
         createOutputChannel: () => ({
             appendLine: () => undefined,
             show: () => undefined,
@@ -15,11 +18,23 @@ const vscodeStub = {
             dispose: () => undefined,
         }),
     },
+    languages: {
+        getDiagnostics: () => [],
+    },
+    DiagnosticSeverity: { Error: 0, Warning: 1 },
 };
 
-function loadAgentRunner() {
+function loadAgentRunner(options: { freshLiveContext?: boolean } = {}) {
     const moduleLoader = require('module') as { _load: (...args: any[]) => any };
     const originalLoad = moduleLoader._load;
+    const agentRunnerPath = require.resolve('../../extension/ai/agentRunner');
+    const liveContextPath = require.resolve('../../extension/ai/runner/liveContext');
+    const cachedAgentRunner = require.cache[agentRunnerPath];
+    const cachedLiveContext = require.cache[liveContextPath];
+    if (options.freshLiveContext) {
+        delete require.cache[agentRunnerPath];
+        delete require.cache[liveContextPath];
+    }
     moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
         if (request === 'vscode') return vscodeStub;
         return originalLoad.apply(this, [request, ...args]);
@@ -28,6 +43,12 @@ function loadAgentRunner() {
         return require('../../extension/ai/agentRunner') as typeof import('../../extension/ai/agentRunner');
     } finally {
         moduleLoader._load = originalLoad;
+        if (options.freshLiveContext) {
+            delete require.cache[agentRunnerPath];
+            delete require.cache[liveContextPath];
+            if (cachedAgentRunner) require.cache[agentRunnerPath] = cachedAgentRunner;
+            if (cachedLiveContext) require.cache[liveContextPath] = cachedLiveContext;
+        }
     }
 }
 
@@ -136,5 +157,41 @@ describe('AgentRunner 状态机与工具调度测试 (阶段 0 基线)', () => {
             expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('write_file')).to.equal(true);
             expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('replace_lines')).to.equal(false);
         });
+    });
+});
+
+describe('AgentRunner 手动上下文压缩集成', () => {
+    it('低于自动阈值时仍执行一次用户请求的 summarizer', async () => {
+        const { AgentRunner } = loadAgentRunner({ freshLiveContext: true });
+        let calls = 0;
+        const aiService = {
+            getConfig: () => ({
+                provider: 'openai',
+                model: 'gpt-test',
+                endpoint: '',
+                customApiFormat: 'openai-chat-completions',
+                maxContextTokens: 128_000,
+            }),
+            getEndpointForProvider: () => '',
+            chatCompletion: async () => {
+                calls++;
+                return {
+                    choices: [{ message: { role: 'assistant', content: 'MANUAL_SUMMARY' }, finish_reason: 'stop' }],
+                };
+            },
+        };
+        const toolExecutor = { parentAgentRunner: undefined };
+        const promptBuilder = { buildCompactionPrompt: () => 'compact' };
+        const runner = new AgentRunner(aiService as any, toolExecutor as any, promptBuilder as any);
+        const history = [
+            { role: 'user' as const, content: 'short request' },
+            { role: 'assistant' as const, content: 'short answer' },
+        ];
+
+        const result = await runner.compactActiveHistory(history);
+
+        expect(calls).to.equal(1);
+        expect(result.compacted).to.equal(true);
+        expect(history.some(message => String(message.content).includes('MANUAL_SUMMARY'))).to.equal(true);
     });
 });

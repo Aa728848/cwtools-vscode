@@ -8,7 +8,7 @@ import type { AIService } from '../aiService';
 import type { PromptBuilder } from '../promptBuilder';
 import { OutputRepetitionDetector } from './outputRepetitionDetector';
 import { runtimeFaultInjector } from './faultInjection';
-import { estimateTokenCount, CHARS_PER_TOKEN } from '../agentRunner';
+import { estimateTokenCount, estimateChatMessagesTokens, CHARS_PER_TOKEN } from './tokenEstimation';
 import { cloneChatMessage, normalizeTranscriptForPersistence, splitTranscriptForCompaction } from './contextTranscript';
 import type { CompactionTranscriptSplit } from './contextTranscript';
 import * as crypto from 'crypto';
@@ -102,6 +102,14 @@ export interface CompactionBudgetOptions {
     abortSignal?: AbortSignal;
     /** Shared throttle state for automatic compaction; ignored when force is set. */
     autoThrottle?: AutoCompactionThrottle;
+    /**
+     * Unified request-size estimate from the Context Maintenance Coordinator.
+     * When present, replaces the local content-only estimate for the threshold
+     * decision so all paid entries share one accounting convention.
+     */
+    precomputedRequestTokens?: number;
+    /** Real-usage calibration hook (P0 design 3); invoked once per completed summarizer call. */
+    onUsageSample?: (sample: { estimated: number; actual: number; providerId: string; model: string }) => void;
 }
 
 export function resolveCompactionContextLimit(
@@ -230,7 +238,14 @@ export async function maybeCompactHistory(
     await runtimeFaultInjector.hit('during_compaction', budgetOptions?.abortSignal);
     const canonicalHistory = normalizeTranscriptForPersistence(history);
     const estimatedTokens = estimateMessagesTokens(canonicalHistory);
-    if (estimatedTokens === 0 || (!budgetOptions.force && estimatedTokens < MIN_HISTORY_TOKENS_FOR_AUTO_COMPACTION)) {
+    if (
+        estimatedTokens === 0
+        || (
+            !budgetOptions.force
+            && budgetOptions.precomputedRequestTokens === undefined
+            && estimatedTokens < MIN_HISTORY_TOKENS_FOR_AUTO_COMPACTION
+        )
+    ) {
         return canonicalHistory;
     }
 
@@ -240,7 +255,8 @@ export async function maybeCompactHistory(
     const configuredLimit = options?.maxContextTokens ?? config.maxContextTokens;
     const modelLimit = resolveCompactionContextLimit(providerId, model, configuredLimit);
     const compactionThreshold = Math.floor(modelLimit * thresholdRatio);
-    const estimatedRequestTokens = estimatedTokens + Math.max(0, budgetOptions.reservedTokens ?? 0);
+    const estimatedRequestTokens = budgetOptions.precomputedRequestTokens
+        ?? (estimatedTokens + Math.max(0, budgetOptions.reservedTokens ?? 0));
 
     if (!budgetOptions.force && estimatedRequestTokens <= compactionThreshold) {
         return canonicalHistory;
@@ -427,6 +443,18 @@ export async function maybeCompactHistory(
             }
         }
         if (!compactionResponse) throw lastCompactionError ?? new Error('Compaction failed without a response.');
+        // Real-usage calibration sample: only a provider-returned prompt_tokens
+        // counts; the estimate side covers exactly the sent compactionMessages.
+        if (compactionResponse.usage?.prompt_tokens !== undefined && compactionResponse.usage.prompt_tokens > 0) {
+            const responseProviderId = (compactionResponse as { __providerId?: unknown }).__providerId;
+            budgetOptions.onUsageSample?.({
+                estimated: estimateChatMessagesTokens(compactionMessages),
+                actual: compactionResponse.usage.prompt_tokens,
+                // Response-side identity: a fallback never pollutes the primary key.
+                providerId: typeof responseProviderId === 'string' ? responseProviderId : providerId,
+                model: compactionResponse.model ?? model ?? 'unknown',
+            });
+        }
         if (tokenAccumulator) {
             const responseModel = compactionResponse.model ?? model ?? 'unknown';
             const promptTokens = compactionResponse.usage?.prompt_tokens ?? estimateMessagesTokens(compactionMessages);

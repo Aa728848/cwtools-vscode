@@ -1175,6 +1175,13 @@ export interface AgentToolContext {
     /** Host-recorded workspace revision observed by a successful authoritative read in this run. */
     authoritativeProjectRevision?: string;
     escalation?: boolean;
+    /**
+     * Owning run scope for per-run tool state (anchor-failure guard signatures).
+     * Top-level runs pass their runId; sub-agents pass their own runId so
+     * sibling sub-agents sharing one executor never consume each other's
+     * failure budgets. Set by AgentRunner when building this context.
+     */
+    scopeId?: string;
 }
 
 // Union type for all tool args/results
@@ -1432,6 +1439,8 @@ export interface ReplaceLinesResult {
     pendingGlobalKinds?: string[];
     /** If agentFileWriteMode === 'confirm', write was queued, not yet applied */
     pendingDiff?: string;
+    /** On safety-guard/anchor-guard failure: preview of the current line range. */
+    currentContentPreview?: string;
 }
 
 export interface AstMutateArgs {

@@ -15,10 +15,19 @@ import { tokenize, TokenType } from '../../pdxTokenizer';
 import type { ValidationError } from '../types';
 import { getCachedFile, setCachedFile } from '../fileCache';
 import { getToolResultBudget } from '../contextBudget';
-import { fuzzyReplace, stripLineNumberPrefixes } from './replacerSuite';
+import { fuzzyReplace, stripLineNumberPrefixes, previewMatch, unicodeNormalize } from './replacerSuite';
+import {
+    GUARDED_ERROR_CLASSES,
+    ReplacerError,
+    replacerKindToErrorClass,
+    signatureKey,
+    hashAnchor,
+    type EditErrorClass,
+    type FailureSignature,
+} from './editFailure';
 import { diagnosticMetadata } from './diagnosticMetadata';
 import { diagnosticCodeString } from '../../diagnosticI18n';
-import { getPrivateTopicStorageDir } from '../workspacePaths';
+import { getPrivateTopicStorageDir, canonicalPathKey } from '../workspacePaths';
 import {
     isSecuritySandboxDisabled,
     resolveWorkspacePathInput,
@@ -76,7 +85,91 @@ export class FileToolHandler {
     /** Per-file edit failure counter - escalates errors for all file types */
     private editFailCount = new Map<string, number>();
 
+    /**
+     * Anchor-aware repeated write-failure guard (P0 design 1). Keyed by
+     * signatureKey({scopeId, tool, pathKey, anchorHash, errorClass}); values
+     * count consecutive failures of the SAME anchor. Clearing is preview-first
+     * and evidence-based: a signature only dies when the side-effect-free
+     * preview proves the anchor now succeeds (replace_lines self-correction
+     * often changes line numbers with the file content untouched, so a
+     * content-hash precondition would false-block it). Sub-agents share this
+     * executor, so the scopeId in every key keeps sibling budgets isolated.
+     */
+    private failureSignatures = new Map<string, { count: number }>();
+    private static readonly ANCHOR_GUARD_MAX_SIGNATURES = 256;
+    private static readonly ANCHOR_GUARD_BLOCK_THRESHOLD = 2;
+
     constructor(private ctx: FileToolContext) { }
+
+    /** Canonical file key shared by locks, counters and guard signatures. */
+    private pathKey(filePath: string): string {
+        return canonicalPathKey(filePath, this.ctx.workspaceRoot);
+    }
+
+    private scopeOf(context?: import('../types').AgentToolContext): string {
+        return context?.scopeId ?? 'top';
+    }
+
+    /**
+     * Normalize an anchor the same way the replacer/guards do before matching
+     * (line-number prefixes, line endings, unicode), so the guard signature is
+     * stable across formatting-equivalent intents.
+     */
+    private normalizeAnchorText(raw: string): string {
+        const stripped = stripLineNumberPrefixes(raw) ?? raw;
+        return unicodeNormalize(this.convertLineEnding(this.normalizeLineEndings(stripped), '\n'));
+    }
+
+    /**
+     * Pre-execution anchor-guard check. Returns a block message when this
+     * exact anchor failed >= threshold times and a side-effect-free preview
+     * shows it still cannot succeed. Clears the signature (evidence-based)
+     * when the file changed and the anchor is satisfiable again.
+     */
+    private checkAnchorGuard(
+        base: Omit<FailureSignature, 'errorClass'>,
+        filePath: string,
+        preview: () => EditErrorClass | null,
+    ): string | null {
+        const trackedKeys = [...GUARDED_ERROR_CLASSES].map(errorClass => ({
+            errorClass,
+            key: signatureKey({ ...base, errorClass }),
+        }));
+        if (!trackedKeys.some(({ key }) =>
+            (this.failureSignatures.get(key)?.count ?? 0) >= FileToolHandler.ANCHOR_GUARD_BLOCK_THRESHOLD)) {
+            return null;
+        }
+
+        const currentErrorClass = preview();
+        if (currentErrorClass === null) {
+            for (const { key } of trackedKeys) this.failureSignatures.delete(key);
+            return null;
+        }
+        if (!GUARDED_ERROR_CLASSES.has(currentErrorClass)) return null;
+
+        const key = signatureKey({ ...base, errorClass: currentErrorClass });
+        const state = this.failureSignatures.get(key);
+        if (!state || state.count < FileToolHandler.ANCHOR_GUARD_BLOCK_THRESHOLD) return null;
+        const basename = path.basename(filePath);
+        return `edit BLOCKED by anchor guard for ${basename}: this exact edit (same file + same anchor) already failed ${state.count} times with ${currentErrorClass} and the anchor still cannot succeed. Do NOT retry it unchanged. MANDATORY: call read_file/get_file_context on this file to see its CURRENT content, then choose a different anchor (or fresh line numbers for replace_lines). If the section was already modified as intended, move on instead of re-applying.`;
+    }
+
+    /** Record one consecutive failure of the same anchor (bounded LRU). */
+    private recordAnchorFailure(
+        base: Omit<FailureSignature, 'errorClass'>,
+        errorClass: EditErrorClass,
+    ): void {
+        if (!GUARDED_ERROR_CLASSES.has(errorClass)) return;
+        const key = signatureKey({ ...base, errorClass });
+        const prev = this.failureSignatures.get(key);
+        if (prev) this.failureSignatures.delete(key); // refresh LRU position
+        this.failureSignatures.set(key, { count: (prev?.count ?? 0) + 1 });
+        while (this.failureSignatures.size > FileToolHandler.ANCHOR_GUARD_MAX_SIGNATURES) {
+            const oldest = this.failureSignatures.keys().next().value;
+            if (oldest === undefined) break;
+            this.failureSignatures.delete(oldest);
+        }
+    }
 
     /**
      * Build tiered escalation hints based on per-file edit failure count.
@@ -98,25 +191,40 @@ export class FileToolHandler {
     }
 
     private recordEditFailure(filePath: string): string {
-        const failCount = (this.editFailCount.get(filePath) || 0) + 1;
-        this.editFailCount.set(filePath, failCount);
+        const key = this.pathKey(filePath);
+        const failCount = (this.editFailCount.get(key) || 0) + 1;
+        this.editFailCount.set(key, failCount);
         return this.buildEditEscalationHint(filePath, failCount);
     }
 
-    resetEditFailureTracking(): void {
-        this.editFailCount.clear();
+    /**
+     * Top-level runs reset everything; a sub-agent scope resets only its own
+     * guard signatures (sub-agents share this executor with the parent run).
+     */
+    resetEditFailureTracking(scopeId?: string): void {
+        if (!scopeId) {
+            this.editFailCount.clear();
+            this.failureSignatures.clear();
+            return;
+        }
+        for (const key of [...this.failureSignatures.keys()]) {
+            if (key.startsWith(`${scopeId}\u0000`)) this.failureSignatures.delete(key);
+        }
     }
 
     private async executeWithLock<T>(filePath: string, operation: () => Promise<T> | T): Promise<T> {
         if (!this.ctx.vfsLocks) return operation();
 
-        const prevLock = this.ctx.vfsLocks.get(filePath) || Promise.resolve();
+        // Canonical lock key: relative/absolute/case aliases of the same file
+        // share one lock instead of acquiring independent ones.
+        const lockKey = this.pathKey(filePath);
+        const prevLock = this.ctx.vfsLocks.get(lockKey) || Promise.resolve();
         let release!: () => void;
         const newLock = new Promise<void>(resolve => release = resolve);
-        
-        this.ctx.vfsLocks.set(filePath, prevLock.then(() => newLock));
+
+        this.ctx.vfsLocks.set(lockKey, prevLock.then(() => newLock));
         await prevLock;
-        
+
         try {
             return await operation();
         } finally {
@@ -751,6 +859,7 @@ export class FileToolHandler {
             const fileExists = fs.existsSync(filePath);
             const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
             let newContent: string;
+            let guardBase: Omit<FailureSignature, 'errorClass'> | null = null;
 
             try {
                 if (args.oldString.length === 0) {
@@ -762,10 +871,31 @@ export class FileToolHandler {
                 } else {
                     const oldText = this.convertLineEnding(this.normalizeLineEndings(args.oldString), this.detectLineEnding(originalContent));
                     const nextText = this.convertLineEnding(this.normalizeLineEndings(args.newString), this.detectLineEnding(originalContent));
+                    if (args.replaceAll !== true) {
+                        guardBase = {
+                            scopeId: this.scopeOf(context),
+                            tool: 'edit_file',
+                            pathKey: this.pathKey(filePath),
+                            anchorHash: hashAnchor(this.normalizeAnchorText(args.oldString)),
+                        };
+                        // Anchor guard: intercept the 3rd+ identical failing edit
+                        // after a side-effect-free preview proves it still fails.
+                        const blocked = this.checkAnchorGuard(guardBase, filePath, () => {
+                            const match = previewMatch(originalContent, oldText);
+                            if (match === 'matched') return null;
+                            return match === 'ambiguous' ? 'anchor_ambiguous' : 'anchor_not_found';
+                        });
+                        if (blocked) {
+                            return { success: false, message: blocked };
+                        }
+                    }
                     newContent = this.replace(originalContent, oldText, nextText, args.replaceAll === true);
                 }
             } catch (e) {
                 const hint = this.recordEditFailure(filePath);
+                if (guardBase && e instanceof ReplacerError) {
+                    this.recordAnchorFailure(guardBase, replacerKindToErrorClass(e.kind));
+                }
                 return { success: false, message: `edit_file failed for ${path.basename(filePath)}: ${e instanceof Error ? e.message : String(e)}${hint}` };
             }
 
@@ -802,7 +932,7 @@ export class FileToolHandler {
                 return { success: false, message: `Write failed: ${String(e)}` };
             }
 
-            this.editFailCount.delete(filePath);
+            this.editFailCount.delete(this.pathKey(filePath));
             const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch, context);
             const diagnostics = freshResult.diagnostics;
             const oldLineCount = originalContent.length === 0 ? 0 : originalContent.split(/\r?\n/).length;
@@ -958,6 +1088,45 @@ export class FileToolHandler {
 
 
 
+    /**
+     * Pure expected* safety-guard validation for replace_lines, shared by the
+     * execution path and the anchor guard's side-effect-free preview.
+     */
+    private validateReplaceLineGuards(args: import('../types').ReplaceLinesArgs, normalizedCurrentRange: string): string[] {
+        const guardErrors: string[] = [];
+        if (typeof args.expectedContent === 'string') {
+            // Models copy expectedContent straight from numbered read_file
+            // output — strip `N | ` prefixes before comparing, otherwise the
+            // guard fails spuriously and sends the model into a retry loop.
+            const expectedRaw = stripLineNumberPrefixes(args.expectedContent) ?? args.expectedContent;
+            const expected = this.convertLineEnding(this.normalizeLineEndings(expectedRaw), '\n');
+            if (normalizedCurrentRange !== expected) {
+                guardErrors.push('expectedContent did not match the current line range');
+            }
+        }
+        if (typeof args.expectedHash === 'string' && args.expectedHash.trim()) {
+            const actualHash = crypto.createHash('sha256').update(normalizedCurrentRange, 'utf8').digest('hex');
+            if (actualHash.toLowerCase() !== args.expectedHash.trim().toLowerCase()) {
+                guardErrors.push(`expectedHash did not match current line range (actual sha256: ${actualHash})`);
+            }
+        }
+        if (typeof args.expectedStartText === 'string' && args.expectedStartText.trim()) {
+            const expectedStartRaw = stripLineNumberPrefixes(args.expectedStartText) ?? args.expectedStartText;
+            const expectedStart = this.convertLineEnding(this.normalizeLineEndings(expectedStartRaw), '\n').trimStart();
+            if (!normalizedCurrentRange.trimStart().startsWith(expectedStart)) {
+                guardErrors.push('expectedStartText did not match the current line range');
+            }
+        }
+        if (typeof args.expectedEndText === 'string' && args.expectedEndText.trim()) {
+            const expectedEndRaw = stripLineNumberPrefixes(args.expectedEndText) ?? args.expectedEndText;
+            const expectedEnd = this.convertLineEnding(this.normalizeLineEndings(expectedEndRaw), '\n').trimEnd();
+            if (!normalizedCurrentRange.trimEnd().endsWith(expectedEnd)) {
+                guardErrors.push('expectedEndText did not match the current line range');
+            }
+        }
+        return guardErrors;
+    }
+
     async replaceLines(args: import('../types').ReplaceLinesArgs, context?: import('../types').AgentToolContext): Promise<import('../types').ReplaceLinesResult> {
         if (!args.filePath || typeof args.filePath !== 'string') {
             return { success: false, message: 'Error: missing or invalid "filePath".' };
@@ -988,45 +1157,37 @@ export class FileToolHandler {
             const ending = this.detectLineEnding(originalContent);
             const currentRange = lines.slice(startLine - 1, endLine).join('\n');
             const normalizedCurrentRange = this.convertLineEnding(this.normalizeLineEndings(currentRange), '\n');
-            const guardErrors: string[] = [];
 
-            if (typeof args.expectedContent === 'string') {
-                // Models copy expectedContent straight from numbered read_file
-                // output — strip `N | ` prefixes before comparing, otherwise the
-                // guard fails spuriously and sends the model into a retry loop.
-                const expectedRaw = stripLineNumberPrefixes(args.expectedContent) ?? args.expectedContent;
-                const expected = this.convertLineEnding(this.normalizeLineEndings(expectedRaw), '\n');
-                if (normalizedCurrentRange !== expected) {
-                    guardErrors.push('expectedContent did not match the current line range');
-                }
+            // Anchor guard: the expected* guards ARE this tool's anchor; the
+            // side-effect-free preview re-runs them (never fuzzyReplace).
+            const anchorParts = [args.expectedContent, args.expectedHash, args.expectedStartText, args.expectedEndText]
+                .filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+            const replaceGuardBase: Omit<FailureSignature, 'errorClass'> = {
+                scopeId: this.scopeOf(context),
+                tool: 'replace_lines',
+                pathKey: this.pathKey(filePath),
+                anchorHash: hashAnchor(anchorParts.length > 0
+                    ? this.normalizeAnchorText(anchorParts.join('\n'))
+                    : `lines:${startLine}-${endLine}`),
+            };
+            const blocked = this.checkAnchorGuard(replaceGuardBase, filePath,
+                () => this.validateReplaceLineGuards(args, normalizedCurrentRange).length === 0
+                    ? null
+                    : 'anchor_stale');
+            if (blocked) {
+                const blockedPreview = normalizedCurrentRange.split('\n').slice(0, 12).join('\n');
+                return { success: false, message: blocked, currentContentPreview: blockedPreview };
             }
-            if (typeof args.expectedHash === 'string' && args.expectedHash.trim()) {
-                const actualHash = crypto.createHash('sha256').update(normalizedCurrentRange, 'utf8').digest('hex');
-                if (actualHash.toLowerCase() !== args.expectedHash.trim().toLowerCase()) {
-                    guardErrors.push(`expectedHash did not match current line range (actual sha256: ${actualHash})`);
-                }
-            }
-            if (typeof args.expectedStartText === 'string' && args.expectedStartText.trim()) {
-                const expectedStartRaw = stripLineNumberPrefixes(args.expectedStartText) ?? args.expectedStartText;
-                const expectedStart = this.convertLineEnding(this.normalizeLineEndings(expectedStartRaw), '\n').trimStart();
-                if (!normalizedCurrentRange.trimStart().startsWith(expectedStart)) {
-                    guardErrors.push('expectedStartText did not match the current line range');
-                }
-            }
-            if (typeof args.expectedEndText === 'string' && args.expectedEndText.trim()) {
-                const expectedEndRaw = stripLineNumberPrefixes(args.expectedEndText) ?? args.expectedEndText;
-                const expectedEnd = this.convertLineEnding(this.normalizeLineEndings(expectedEndRaw), '\n').trimEnd();
-                if (!normalizedCurrentRange.trimEnd().endsWith(expectedEnd)) {
-                    guardErrors.push('expectedEndText did not match the current line range');
-                }
-            }
+
+            const guardErrors = this.validateReplaceLineGuards(args, normalizedCurrentRange);
             if (guardErrors.length > 0) {
+                this.recordAnchorFailure(replaceGuardBase, 'anchor_stale');
                 const preview = normalizedCurrentRange.split('\n').slice(0, 12).join('\n');
                 return {
                     success: false,
                     message: `replace_lines safety check failed for ${path.basename(filePath)} lines ${startLine}-${endLine}: ${guardErrors.join('; ')}. The file may have changed since the line numbers were chosen. Re-read the current context with get_file_context/read_file, then retry with updated line numbers and expectedContent.` + this.recordEditFailure(filePath),
                     currentContentPreview: preview,
-                } as any;
+                };
             }
 
             const newContentRaw = stripLineNumberPrefixes(args.newContent) ?? args.newContent;
@@ -1067,7 +1228,7 @@ export class FileToolHandler {
                 return { success: false, message: `Write failed: ${String(e)}` };
             }
 
-            this.editFailCount.delete(filePath);
+            this.editFailCount.delete(this.pathKey(filePath));
             const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch, context);
             const diagnostics = freshResult.diagnostics;
             let message = `replace_lines: replaced lines ${startLine}-${endLine} in ${path.basename(filePath)}`;
@@ -1524,7 +1685,7 @@ export class FileToolHandler {
                 if (readTracker) { readTracker.markWritten(filePath); }
 
                 // Clear failure counter for this file since we succeeded
-                this.editFailCount.delete(filePath);
+                this.editFailCount.delete(this.pathKey(filePath));
 
                 const diff = this.buildUnifiedDiff(filePath, originalContent, withBom);
 
@@ -2135,7 +2296,7 @@ export class FileToolHandler {
                     execFileSync('git', ['checkout', 'HEAD', '--', relPath], { cwd: wsRoot, encoding: 'utf-8', timeout: 15_000 });
 
                     // Reset edit failure counter since the file is now back to a known-good state
-                    this.editFailCount.delete(absPath);
+                    this.editFailCount.delete(this.pathKey(absPath));
 
                     return {
                         success: true,

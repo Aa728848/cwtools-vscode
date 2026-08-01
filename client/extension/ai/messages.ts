@@ -74,6 +74,8 @@ const AGENT_TEXT = {
             `Emergency context compaction (${tokens} tokens > ${limit} limit)`,
         COMPACTION_PHASE_DONE: (beforeTokens: number, afterTokens: number) =>
             `Context compaction complete (${beforeTokens} -> ${afterTokens} tokens)`,
+        COMPACTION_PRUNED: (beforeTokens: number, afterTokens: number) =>
+            `Context pruned in place; no summarization needed (${beforeTokens} -> ${afterTokens} tokens)`,
         COMPACTION_THRASHING:
             'Context remained over budget after repeated compaction. The run stopped to avoid a compaction/retry loop. Narrow the task or start a new topic.',
         OUTPUT_REPETITION_RETRY: (kind: string, cycleChars: number) =>
@@ -116,6 +118,8 @@ const AGENT_TEXT = {
             `紧急上下文压缩 (${tokens} tokens > ${limit} 上限)`,
         COMPACTION_PHASE_DONE: (beforeTokens: number, afterTokens: number) =>
             `上下文压缩完成 (${beforeTokens} -> ${afterTokens} tokens)`,
+        COMPACTION_PRUNED: (beforeTokens: number, afterTokens: number) =>
+            `上下文已就地裁剪，无需调用摘要 (${beforeTokens} -> ${afterTokens} tokens)`,
         COMPACTION_THRASHING:
             '上下文连续压缩后仍无法释放足够空间，已停止运行以避免压缩/重试死循环。请缩小任务范围或新建话题。',
         OUTPUT_REPETITION_RETRY: (kind: string, cycleChars: number) =>
@@ -154,6 +158,8 @@ export const AGENT = {
     COMPACTION_EMERGENCY: (tokens: number, limit: number) => AGENT_TEXT[currentLocale].COMPACTION_EMERGENCY(tokens, limit),
     COMPACTION_PHASE_DONE: (beforeTokens: number, afterTokens: number) =>
         AGENT_TEXT[currentLocale].COMPACTION_PHASE_DONE(beforeTokens, afterTokens),
+    COMPACTION_PRUNED: (beforeTokens: number, afterTokens: number) =>
+        AGENT_TEXT[currentLocale].COMPACTION_PRUNED(beforeTokens, afterTokens),
     get COMPACTION_THRASHING() { return AGENT_TEXT[currentLocale].COMPACTION_THRASHING; },
     OUTPUT_REPETITION_RETRY: (kind: string, cycleChars: number) =>
         AGENT_TEXT[currentLocale].OUTPUT_REPETITION_RETRY(kind, cycleChars),

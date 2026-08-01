@@ -2,6 +2,24 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as vs from 'vscode';
 
+/**
+ * Canonical key for file-path- keyed state (locks, failure counters, guard
+ * signatures). Resolves relative paths against `base` (defaults to the
+ * extension host cwd, matching path.resolve), normalizes separators, and
+ * lowercases on win32 so `common/a.txt`, `./common/A.TXT` and the absolute
+ * form share one lock/counter entry.
+ */
+export function canonicalPathKey(filePath: string, base?: string): string {
+    let resolved: string;
+    try {
+        resolved = base && !path.isAbsolute(filePath) ? path.resolve(base, filePath) : path.resolve(filePath);
+    } catch {
+        resolved = filePath;
+    }
+    resolved = resolved.replace(/\\/g, '/');
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
 let privateAgentStorageRoot = '';
 let workspaceCacheStorageRoot = '';
 

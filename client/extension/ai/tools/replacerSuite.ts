@@ -4,6 +4,7 @@
  * Extracted from FileToolHandler for independent testability.
  * Ported from: opencode/packages/opencode/src/tool/edit.ts
  */
+import { ReplacerError } from './editFailure';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -26,8 +27,7 @@ function levenshtein(a: string, b: string): number {
 // ─── Strategy generators ────────────────────────────────────────────────────
 
 /** Strip BOM, normalize CRLF, and normalize common unicode variants (full-width ↔ half-width) */
-function unicodeNormalize(s: string): string {
-    return s
+export function unicodeNormalize(s: string): string {    return s
         .replace(/\uFEFF/g, '')                    // BOM
         .replace(/\r\n/g, '\n').replace(/\r/g, '\n') // CRLF
         .replace(/\u00A0/g, ' ')                    // NBSP → space
@@ -326,6 +326,36 @@ const REPLACERS = [
     similarityReplacer,
 ] as const;
 
+/** Shared match search: first replacer-produced candidate that exists in content. */
+function findSearchString(content: string, oldString: string): string | null {
+    const findMatch = (find: string): string | null => {
+        for (const replacer of REPLACERS) {
+            for (const search of replacer(content, find)) {
+                if (content.indexOf(search) !== -1) return search;
+            }
+        }
+        return null;
+    };
+    const direct = findMatch(oldString);
+    if (direct !== null) return direct;
+    const stripped = stripLineNumberPrefixes(oldString);
+    if (stripped !== null && stripped !== oldString) return findMatch(stripped);
+    return null;
+}
+
+/**
+ * Side-effect-free anchor check for the write-failure guard (P0 design 1):
+ * reports whether oldString would match uniquely right now, without building
+ * any replacement. Mirrors fuzzyReplace's search (including line-number-prefix
+ * stripping) so a preview pass implies the real replace would find its anchor.
+ */
+export function previewMatch(content: string, oldString: string): 'matched' | 'ambiguous' | 'not_found' {
+    if (oldString.length === 0) return 'not_found';
+    const search = findSearchString(content, oldString);
+    if (search === null || search.length === 0) return 'not_found';
+    return content.indexOf(search) !== content.lastIndexOf(search) ? 'ambiguous' : 'matched';
+}
+
 export function fuzzyReplace(content: string, oldString: string, newString: string, replaceAll: boolean): string {
     if (oldString === newString) throw new Error('oldString and newString are identical — no change needed');
 
@@ -354,8 +384,9 @@ export function fuzzyReplace(content: string, oldString: string, newString: stri
         const idx = content.indexOf(search);
         if (replaceAll) return search.length > 0 ? content.split(search).join(replacement) : content;
         const lastIdx = content.lastIndexOf(search);
-        if (idx !== lastIdx) throw new Error(
-            'Multiple matches found. Provide more context in oldString to make it unique, or use replaceAll=true.'
+        if (idx !== lastIdx) throw new ReplacerError(
+            'multiple_matches',
+            'Multiple matches found. Provide more context in oldString to make it unique, or use replaceAll=true.',
         );
         return content.substring(0, idx) + replacement + content.substring(idx + search.length);
     }
@@ -370,5 +401,5 @@ export function fuzzyReplace(content: string, oldString: string, newString: stri
     } else {
         errMsg += '\nTip: use read_file first to get the exact text, then provide an identical fragment in oldString.';
     }
-    throw new Error(errMsg);
+    throw new ReplacerError('no_match', errMsg);
 }

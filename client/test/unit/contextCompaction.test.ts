@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ChatMessage, TokenUsage } from '../../extension/ai/types';
+import { runContextMaintenance } from '../../extension/ai/runner/contextMaintenance';
 
 const vscodeStub = {
     workspace: {
@@ -150,6 +151,55 @@ describe('compaction efficiency (unified summary plan §5.1)', () => {
         };
         return { aiService: aiService as any, getCalls: () => calls };
     }
+
+    it('honors a coordinator request estimate even when history-only tokens are below the legacy minimum', async () => {
+        const { maybeCompactHistory, clearCompactionSummaryCache } = loadCompaction();
+        clearCompactionSummaryCache();
+        const { aiService, getCalls } = makeAiServiceStub(4_000);
+        const result = await maybeCompactHistory(
+            makeSpacedHistory(2, 1_000),
+            () => undefined,
+            { aiService, promptBuilder: promptBuilderStub },
+            runnerOptions,
+            undefined,
+            undefined,
+            {
+                // Full request (fixed prompt + schemas + history) is over the
+                // 80% threshold even though history alone is under 2,048.
+                precomputedRequestTokens: 3_500,
+            },
+        );
+        expect(getCalls()).to.equal(1);
+        expect(result.some(message => String(message.content).includes('SUMMARY'))).to.equal(true);
+    });
+
+    it('turns an authoritative overflow decision into an actual summarizer request', async () => {
+        const { maybeCompactHistory, clearCompactionSummaryCache } = loadCompaction();
+        clearCompactionSummaryCache();
+        const history = makeSpacedHistory(2, 600);
+        const maintenance = runContextMaintenance(history, 'overflow', {
+            toolResultBudget: 2_000,
+            extraTokens: 0,
+            summarizeThreshold: 1_000_000,
+        });
+        expect(maintenance.action).to.equal('summarize');
+
+        const { aiService, getCalls } = makeAiServiceStub(128_000);
+        const result = maintenance.action === 'summarize'
+            ? await maybeCompactHistory(
+                maintenance.messages,
+                () => undefined,
+                { aiService, promptBuilder: promptBuilderStub },
+                runnerOptions,
+                undefined,
+                undefined,
+                { force: true },
+            )
+            : maintenance.messages;
+
+        expect(getCalls()).to.equal(1);
+        expect(result.some(message => String(message.content).includes('SUMMARY'))).to.equal(true);
+    });
 
     it('passes the caller abort signal to the paid summarization request', async () => {
         const { maybeCompactHistory, clearCompactionSummaryCache } = loadCompaction();

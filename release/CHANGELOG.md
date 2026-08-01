@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+## [2.10.1] - 2026-08-01
+
+### Agent 界面与任务可见性 / Agent UI & Task Visibility
+- **[优化] 独立 Agent 界面采用紧凑的运行面板**：在输入区上方持续显示当前任务进度和权威改动文件统计，支持弹出查看任务清单、逐文件增删行数及一键进入审阅工作区。
+  English: [Optimization] The standalone Agent view now keeps a compact run panel above the composer with live task progress and authoritative changed-file totals, plus popovers for task details, per-file line deltas, and direct review access.
+- **[修复] 子 Agent 任务不再覆盖主 Agent 任务**：Todo 状态按 Agent/Run 隔离，子任务只在所属子 Agent 界面展示，根任务继续独立持久化。
+  English: [Fix] Child-Agent todos no longer overwrite the root task. Todo state is scoped by Agent/Run, child tasks render only in their owning Agent view, and root tasks retain independent persistence.
+- **[优化] 超长用户输入折叠显示**：达到 800 字符或 10 行的输入默认显示为带行数、字符数和五行预览的可展开卡片，完整原文仍用于模型请求、历史恢复和编辑重发。
+  English: [Optimization] User inputs of at least 800 characters or 10 lines now collapse into an expandable card with line/character counts and a five-line preview, while the complete original text remains available to the model, history restore, and edit-resend flows.
+
+### 运行恢复与缓存统计 / Execution Recovery & Cache Statistics
+- **[修复] 避免写模式澄清回复重复续跑**：Runner 能识别普通中英文的缺少目标/需要补充信息回复并正常停下；自动恢复遥测不再泄漏到对话，历史记录中的旧提示也会被过滤。
+  English: [Fix] Writable runs now recognize ordinary Chinese and English clarification responses that require more input, preventing repeated automatic continuation. Recovery telemetry stays internal, and legacy visible recovery notes are filtered from transcripts.
+- **[优化] 重做 Token 缓存请求分组**：缓存请求、缓存输入、Token 命中和节省量改用指标卡；Provider、模型、Agent 模式和工具阶段显示命中次数与命中率，提示词指纹默认折叠缩写，零命中原因单独展示。
+  English: [Optimization] Token cache statistics now use metric cards for request hits, cached input, token hit rate, and savings. Provider/model/Agent-mode/tool-stage groups show hit counts and rates, prompt fingerprints are compact and collapsed by default, and zero-hit reasons are separated for faster scanning.
+
+### 编排与安全 / Orchestration & Safety
+- **[可靠性] 收紧多 Agent 任务图依赖修复**：仅接受唯一的大小写、规范化或编辑距离匹配，修复后重新检测循环，避免模糊依赖被错误连接。
+  English: [Reliability] Multi-Agent task-graph dependency healing now accepts only unique case-insensitive, normalized, or edit-distance matches and rechecks cycles after healing, preventing ambiguous dependencies from being linked incorrectly.
+- **[安全] 加固命令与科技树 Webview 边界**：Git 命令周围的复杂 Shell 语法重新进入审批；科技树仅读取允许根目录内的真实文件，并对 PNG Data URI、大小和源行号进行边界验证。
+  English: [Security] Complex shell syntax around Git commands now returns to approval, while the technology-tree Webview restricts source reads to real files under allowed roots and validates PNG data URIs, size limits, and source line numbers.
+- **[安全] 多 Skill 权限取交集并在 Run 结束时清理**，避免连续加载 Skill 扩大当前运行的工具权限。
+  English: [Security] Multiple Skill tool policies now intersect and are cleared when the Run finishes, preventing sequential Skill loads from widening the active tool boundary.
+
+### 测试 / Tests
+- **[质量] 新增 Agent 跨界面契约、任务隔离、恢复策略、缓存 UI、长输入、编排依赖、命令预检和科技树输入安全回归测试。**
+  English: [Quality] Added regression coverage for cross-surface Agent contracts, task isolation, recovery policy, cache UI, long inputs, orchestration dependencies, command preflight, and technology-tree input safety.
+
 ## [2.10.0] - 2026-08-01
 
 ### AI Agent 可靠性 / AI Agent Reliability

@@ -148,6 +148,7 @@ describe('webview smoke checks', () => {
             'markdown.ts',
             'mermaidRenderer.ts',
             'messageSelectionActions.ts',
+            'userMessagePresentation.ts',
             'annotations.ts',
             'contextMentions.ts',
             'i18n.ts',
@@ -159,6 +160,19 @@ describe('webview smoke checks', () => {
             const source = fs.readFileSync(path.join(root, 'client/webview/chat', moduleName), 'utf8');
             expect(source).to.match(/export (function|interface|type|const)/);
         }
+    });
+
+    it('renders long user input as an expandable summary card on both chat surfaces', () => {
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
+        const manager = fs.readFileSync(path.join(root, 'client/webview/agentManager.ts'), 'utf8');
+
+        expect(script).to.include('buildUserMessagePresentation(text)');
+        expect(script).to.include("card.className = 'long-user-input-card'");
+        expect(script).to.include("tr('Expand', '展开全文')");
+        expect(script).to.include("tr('Collapse', '收起')");
+        expect(css).to.include('.long-user-input-card[open] .long-user-input-full');
+        expect(manager).to.include("import './chatPanel'");
     });
 
     it('chat webview keeps visual shell contracts for browser regression coverage', () => {

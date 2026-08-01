@@ -55,6 +55,7 @@ import { type WorkflowView } from './chat/workflows';
 import { createMarkdownRenderer } from './chat/markdown';
 import { startMermaidRendering } from './chat/mermaidRenderer';
 import { startMessageSelectionActions } from './chat/messageSelectionActions';
+import { buildUserMessagePresentation } from './chat/userMessagePresentation';
 import { createAnnotationCard, type AnnotationCardOptions } from './chat/annotations';
 import { renderAssistantTurnCodex } from './chat/codexConversation';
 import {
@@ -5180,6 +5181,62 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return chipsContainer;
     }
 
+    function appendUserMessageText(bubble: HTMLElement, text: string): void {
+        const presentation = buildUserMessagePresentation(text);
+        if (!presentation.isLong) {
+            const textNode = document.createElement('div');
+            textNode.className = 'user-message-text';
+            textNode.textContent = text;
+            bubble.appendChild(textNode);
+            return;
+        }
+
+        bubble.classList.add('long-user-input-bubble');
+        const card = document.createElement('details');
+        card.className = 'long-user-input-card';
+
+        const summary = document.createElement('summary');
+        summary.className = 'long-user-input-summary';
+        summary.setAttribute('aria-label', tr('Expand or collapse long user input', '展开或收起长输入'));
+
+        const icon = document.createElement('span');
+        icon.className = 'long-user-input-icon';
+        icon.innerHTML = svgIconNoMargin('file');
+
+        const heading = document.createElement('span');
+        heading.className = 'long-user-input-heading';
+        const title = document.createElement('strong');
+        title.textContent = tr('Long input', '长输入');
+        const meta = document.createElement('span');
+        meta.textContent = tr(
+            `${presentation.lineCount} lines · ${presentation.characterCount.toLocaleString()} characters`,
+            `${presentation.lineCount} 行 · ${presentation.characterCount.toLocaleString()} 字符`,
+        );
+        heading.append(title, meta);
+
+        const toggle = document.createElement('span');
+        toggle.className = 'long-user-input-toggle';
+        const expandLabel = document.createElement('span');
+        expandLabel.className = 'long-user-input-toggle-expand';
+        expandLabel.textContent = tr('Expand', '展开全文');
+        const collapseLabel = document.createElement('span');
+        collapseLabel.className = 'long-user-input-toggle-collapse';
+        collapseLabel.textContent = tr('Collapse', '收起');
+        toggle.append(expandLabel, collapseLabel);
+        summary.append(icon, heading, toggle);
+
+        const preview = document.createElement('div');
+        preview.className = 'long-user-input-preview';
+        preview.textContent = presentation.preview;
+
+        const full = document.createElement('div');
+        full.className = 'long-user-input-full';
+        full.textContent = text;
+
+        card.append(summary, preview, full);
+        bubble.appendChild(card);
+    }
+
     function addUserMessage(text: string, msgIdx: number, images?: string[], contexts?: ActiveContext[], resolvedAgentProfile?: unknown) {
         emptyState.style.display = 'none';
         const div = document.createElement('div');
@@ -5232,12 +5289,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
         const textToShow = remainingText.trim();
         if (textToShow) {
-            const textNode = document.createElement('div');
-            textNode.style.whiteSpace = 'pre-wrap';
-            textNode.textContent = textToShow;
-            bubble.appendChild(textNode);
+            appendUserMessageText(bubble, textToShow);
         } else if (!structuredChips && !foundAny) {
-            bubble.textContent = text;
+            appendUserMessageText(bubble, text);
         }
         }
 

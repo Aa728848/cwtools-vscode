@@ -24,10 +24,42 @@ import { getChatI18n } from '../../webview/chat/i18n';
 import { applyModeUi } from '../../webview/chat/modes';
 import { renderMarkdown } from '../../webview/chat/markdown';
 import { mentionResultToActiveContext, stripConsumedMentionText, type ActiveContext } from '../../webview/chat/contextMentions';
+import {
+    buildUserMessagePresentation,
+    LONG_USER_MESSAGE_CHARACTER_THRESHOLD,
+    LONG_USER_MESSAGE_LINE_THRESHOLD,
+} from '../../webview/chat/userMessagePresentation';
 import { buildSlashCommands, filterSlashCommands, getSlashCommandFilter, renderSlashCommandItems } from '../../webview/chat/slashCommands';
 import { getSlashCommandDescriptors, resolveSlashCommand, suggestSlashCommands } from '../../extension/ai/slashCommands';
 import { buildWorkflowSummary, getWorkflowSlashCommand, normalizeWorkflowLabels, type WorkflowView } from '../../webview/chat/workflows';
 import { buildExploreModeSystemPrompt, buildPlanModeSystemPrompt } from '../../extension/ai/prompt/sections/modePrompts';
+
+describe('long user message presentation', () => {
+    it('keeps ordinary messages inline', () => {
+        expect(buildUserMessagePresentation('short\nmessage')).to.deep.equal({
+            isLong: false,
+            lineCount: 2,
+            characterCount: 13,
+            preview: 'short\nmessage',
+        });
+    });
+
+    it('collapses long single-paragraph input and bounds its preview', () => {
+        const presentation = buildUserMessagePresentation('a'.repeat(LONG_USER_MESSAGE_CHARACTER_THRESHOLD));
+        expect(presentation.isLong).to.equal(true);
+        expect(presentation.lineCount).to.equal(1);
+        expect(presentation.preview.endsWith('…')).to.equal(true);
+        expect(presentation.preview.length).to.be.lessThan(LONG_USER_MESSAGE_CHARACTER_THRESHOLD);
+    });
+
+    it('collapses pasted multi-line input and normalizes CRLF for line counting', () => {
+        const text = Array.from({ length: LONG_USER_MESSAGE_LINE_THRESHOLD }, (_, index) => `line ${index + 1}`).join('\r\n');
+        const presentation = buildUserMessagePresentation(text);
+        expect(presentation.isLong).to.equal(true);
+        expect(presentation.lineCount).to.equal(LONG_USER_MESSAGE_LINE_THRESHOLD);
+        expect(presentation.preview).to.equal('line 1\nline 2\nline 3\nline 4\nline 5\n…');
+    });
+});
 
 describe('chat artifact model helpers', () => {
     const artifacts: ArtifactRecord[] = [

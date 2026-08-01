@@ -18,6 +18,11 @@ import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { getLocalisationDirectoryGlob } from './gameProfiles';
 import { parseLocFile, stripLocalisationColorMarkers } from './indexing/locParser';
 import {
+    decodeTechTreePngDataUri,
+    normalizeTechTreeLine,
+    resolveAllowedTechTreeSourcePath,
+} from './techTreeSafety';
+import {
     applyTechLocalisation,
     parseTechFile,
     mergeTechGraphs,
@@ -37,6 +42,10 @@ function getNonce(): string {
 
 function panelText(en: string, zh: string): string {
     return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 const TECH_ICON_DIR = 'gfx/interface/icons/technologies';
@@ -126,8 +135,10 @@ export class TechTreePanel {
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
         this._disposables.push(
-            this._panel.webview.onDidReceiveMessage(async msg => {
-                if (!msg?.command) return;
+            this._panel.webview.onDidReceiveMessage(async (message: unknown) => {
+                if (!isUnknownRecord(message)) return;
+                const msg = message;
+                if (typeof msg.command !== 'string') return;
                 switch (msg.command) {
                     case 'ready':
                         await this._scanAndRender();
@@ -533,45 +544,32 @@ export class TechTreePanel {
         this._iconCache.delete(filePath);
     }
 
-    private async _goToTech(filePath: string, line: number) {
-        if (!filePath) return;
+    private async _goToTech(filePath: unknown, line: unknown) {
+        if (normalizeTechTreeLine(line, 1) === undefined) return;
         const uri = this._resolveSourceUri(filePath);
         if (!uri) return;
 
         const doc = await vscode.workspace.openTextDocument(uri);
+        const lineIndex = normalizeTechTreeLine(line, doc.lineCount);
+        if (lineIndex === undefined) return;
         const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
-        const pos = new vscode.Position(Math.max(0, line - 1), 0);
+        const pos = new vscode.Position(lineIndex, 0);
         editor.selection = new vscode.Selection(pos, pos);
         editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
     }
 
-    private _resolveSourceUri(filePath: string): vscode.Uri | undefined {
-        if (path.isAbsolute(filePath)) {
-            return vscode.Uri.file(filePath);
-        }
-
-        for (const folder of vscode.workspace.workspaceFolders ?? []) {
-            const candidate = vscode.Uri.joinPath(folder.uri, filePath);
-            if (fs.existsSync(candidate.fsPath)) return candidate;
-        }
-
-        for (const root of this._searchRoots) {
-            const candidate = path.join(root, filePath);
-            if (fs.existsSync(candidate)) return vscode.Uri.file(candidate);
-        }
-
-        return undefined;
+    private _resolveSourceUri(filePath: unknown): vscode.Uri | undefined {
+        const workspaceRoots = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+        const resolved = resolveAllowedTechTreeSourcePath(filePath, this._dedupeFsPaths([
+            ...workspaceRoots,
+            ...this._searchRoots,
+        ]));
+        return resolved ? vscode.Uri.file(resolved) : undefined;
     }
 
     private async _saveExportedImage(dataUri: unknown, fileName: unknown) {
-        if (typeof dataUri !== 'string') return;
-        const match = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(dataUri);
-        if (!match) {
-            vscode.window.showErrorMessage(panelText('Failed to export technology tree image.', '导出科技树图片失败。'));
-            return;
-        }
-        const pngBase64 = match[1];
-        if (!pngBase64) {
+        const pngBytes = decodeTechTreePngDataUri(dataUri);
+        if (!pngBytes) {
             vscode.window.showErrorMessage(panelText('Failed to export technology tree image.', '导出科技树图片失败。'));
             return;
         }
@@ -588,7 +586,7 @@ export class TechTreePanel {
         if (!target) return;
 
         try {
-            await vscode.workspace.fs.writeFile(target, Buffer.from(pngBase64, 'base64'));
+            await vscode.workspace.fs.writeFile(target, pngBytes);
             vscode.window.showInformationMessage(panelText('Technology tree image exported.', '科技树图片已导出。'));
         } catch (e) {
             ErrorReporter.debug('TechTreePanel', 'Failed to save exported technology tree image', e);

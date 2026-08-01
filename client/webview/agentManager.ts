@@ -101,6 +101,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     let hasUserSelectedPrimaryTab = !!persistedUi.activeTab;
     let settingsRequestPending = false;
     let topicTitleEditing = false;
+    let runDockOpen: 'tasks' | 'changes' | null = null;
     let lastKnownTopicId: string | null = null;
     let lastOverviewSignature = '';
     let lastWorkspaceRenderSignature = '';
@@ -188,6 +189,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 timeline: '事件时间线',
                 noActivity: '暂无运行活动',
             },
+            dock: { tasks: '任务', changes: '改动文件', review: '审核全部改动', running: '运行中', completed: '已完成', created: '新增', modified: '修改', deleted: '删除' },
             settings: {
                 title: '设置',
                 subtitle: '模型、上下文、API 和工具',
@@ -252,6 +254,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 timeline: 'Event timeline',
                 noActivity: 'No run activity yet',
             },
+            dock: { tasks: 'Tasks', changes: 'changed files', review: 'Review all changes', running: 'Running', completed: 'Complete', created: 'Added', modified: 'Modified', deleted: 'Deleted' },
             settings: {
                 title: 'Settings',
                 subtitle: 'Models, context, API, and tools',
@@ -283,22 +286,17 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         addMany(run?.writtenFiles);
         for (const evt of Array.isArray(events) ? events : []) {
             const payload = evt?.payload || {};
-            add(payload.path);
-            add(payload.filePath);
-            add(payload.targetPath);
-            add(payload.relativePath);
-            addMany(payload.files);
-            addMany(payload.paths);
-            addMany(payload.filesWritten);
-            addMany(payload.writtenFiles);
-            add(payload.diff?.path);
-            add(payload.change?.path);
+            if (evt?.type === 'file_change') add(payload.filePath);
+            if (evt?.type === 'tool_call_end') addMany(payload.writtenFiles);
+            if (evt?.type === 'subagent_end') addMany(payload.filesWritten);
         }
-        return [...files];
+        return [...files].sort((left, right) => left.localeCompare(right));
     }
 
     function getDiffArtifacts(): ManagerSnapshotMessage['artifacts'] {
         return state.artifacts.filter((artifact: any) => {
+            if (artifact.kind === 'diff') return true;
+            if (typeof artifact.kind === 'string' && artifact.kind) return false;
             const haystack = `${artifact.kind || ''} ${artifact.title || ''} ${artifact.summary || ''}`.toLowerCase();
             return haystack.includes('diff') || haystack.includes('change') || haystack.includes('patch') || haystack.includes('变更') || haystack.includes('差异');
         });
@@ -321,7 +319,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         const byPath = new Map<string, WorkspaceFileRecord>();
         const addRecord = (record: WorkspaceFileRecord): void => {
             if (!record.file) return;
-            const key = record.file.replace(/\\/g, '/').toLowerCase();
+            const key = record.file.replace(/\\/g, '/');
             const existing = byPath.get(key);
             byPath.set(key, {
                 ...existing,
@@ -340,7 +338,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         for (const file of collectChangedFiles(run, events)) {
             addRecord({ file });
         }
-        return [...byPath.values()];
+        return [...byPath.values()].sort((left, right) => left.file.localeCompare(right.file));
     }
 
     function normalizeCacheStats(raw: any): NonNullable<ManagerEnhancementState['cacheStats']> {
@@ -404,6 +402,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         const previousCacheStats = options.preserveCache ? state.cacheStats : undefined;
         state.run = null;
         state.runEvents = [];
+        state.todos = [];
+        runDockOpen = null;
         state.selectedRunEventId = undefined;
         state.cacheStats = previousCacheStats;
         state.compactedMemoryContent = undefined;
@@ -586,6 +586,12 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     } else {
         topicsSummary.insertAdjacentElement('afterend', overview);
     }
+
+    const runDock = document.createElement('div');
+    runDock.className = 'manager-run-dock';
+    runDock.id = 'managerRunDock';
+    runDock.setAttribute('aria-live', 'polite');
+    document.querySelector<HTMLElement>('.input-wrapper')?.prepend(runDock);
 
     const drawerTitle = artifactDrawerEl.querySelector<HTMLElement>('.artifact-drawer-title');
     const drawerSubtitle = artifactDrawerEl.querySelector<HTMLElement>('.artifact-drawer-subtitle');
@@ -878,6 +884,41 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         renderInspector();
     });
 
+    runDock.addEventListener('click', event => {
+        const target = event.target as HTMLElement | null;
+        const fileButton = target?.closest<HTMLButtonElement>('[data-manager-dock-file]');
+        if (fileButton?.dataset.managerDockFile) {
+            event.preventDefault();
+            event.stopPropagation();
+            focusWorkspaceFile(fileButton.dataset.managerDockFile);
+            return;
+        }
+        const actionButton = target?.closest<HTMLButtonElement>('[data-manager-dock-action]');
+        const action = actionButton?.dataset.managerDockAction;
+        if (!action) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (action === 'review') {
+            focusWorkspaceFile();
+            return;
+        }
+        if (action === 'tasks' || action === 'changes') {
+            runDockOpen = runDockOpen === action ? null : action;
+            renderRunDock();
+        }
+    });
+
+    document.addEventListener('click', event => {
+        if (!runDockOpen || runDock.contains(event.target as Node)) return;
+        runDockOpen = null;
+        renderRunDock();
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape' || !runDockOpen) return;
+        runDockOpen = null;
+        renderRunDock();
+    });
+
     topicsPanel?.addEventListener('click', event => {
         const actionButton = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('[data-manager-action]');
         if (handleManagerAction(actionButton?.dataset.managerAction)) {
@@ -1065,7 +1106,96 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         return Math.max(0, Math.min(100, Math.round((used / limit) * 100)));
     }
 
+    function workspaceFileStatus(file: WorkspaceFileRecord): 'created' | 'modified' | 'deleted' | 'changed' {
+        if (file.status === 'created' || file.status === 'deleted' || file.status === 'modified') return file.status;
+        return 'changed';
+    }
+
+    function workspaceFileStatusLabel(file: WorkspaceFileRecord): string {
+        const status = workspaceFileStatus(file);
+        if (status === 'created') return ui.dock.created;
+        if (status === 'deleted') return ui.dock.deleted;
+        if (status === 'modified') return ui.dock.modified;
+        return ui.run.changed;
+    }
+
+    function renderRunDock(): void {
+        const files = collectWorkspaceFiles(state.run);
+        const todos = state.todos;
+        const isActive = state.isGenerating || isRunActive(String(state.run?.status || ''));
+        if (!isActive && todos.length === 0 && files.length === 0) {
+            runDock.hidden = true;
+            runDock.replaceChildren();
+            return;
+        }
+
+        runDock.hidden = false;
+        const done = todos.filter(todo => todo.status === 'done').length;
+        const additions = files.reduce((sum, file) => sum + Number(file.additions || 0), 0);
+        const deletions = files.reduce((sum, file) => sum + Number(file.deletions || 0), 0);
+        const taskLabel = todos.length > 0 ? `${done}/${todos.length} ${ui.dock.tasks}` : (isActive ? ui.dock.running : ui.dock.completed);
+        const taskRows = todos.map(todo => `
+            <div class="manager-dock-task manager-dock-task-${escapeHtml(todo.status)}">
+                <span>${taskStatusMark(todo.status)}</span><strong>${escapeHtml(todo.content)}</strong>
+            </div>
+        `).join('');
+        const fileRows = files.map(file => {
+            const status = workspaceFileStatus(file);
+            return `
+                <button type="button" class="manager-dock-file" data-manager-dock-file="${escapeHtml(file.file)}" title="${escapeHtml(file.file)}">
+                    <span class="manager-file-status manager-file-status-${status}">${escapeHtml(workspaceFileStatusLabel(file).slice(0, 1))}</span>
+                    <span class="manager-dock-file-main"><strong>${escapeHtml(fileBasename(file.file))}</strong><small>${escapeHtml(file.file)}</small></span>
+                    <span class="manager-dock-file-delta"><strong>+${file.additions ?? 0}</strong><em>-${file.deletions ?? 0}</em></span>
+                </button>
+            `;
+        }).join('');
+        const popover = runDockOpen === 'tasks' && todos.length > 0 ? `
+            <div class="manager-dock-popover" data-manager-dock-popover="tasks">
+                <header><strong>${ui.dock.tasks}</strong><span>${done}/${todos.length}</span></header>
+                <div class="manager-dock-list">${taskRows}</div>
+            </div>
+        ` : runDockOpen === 'changes' && files.length > 0 ? `
+            <div class="manager-dock-popover" data-manager-dock-popover="changes">
+                <header><strong>${ui.dock.changes}</strong><button type="button" data-manager-dock-action="review">${ui.dock.review}</button></header>
+                <div class="manager-dock-list">${fileRows}</div>
+            </div>
+        ` : '';
+
+        runDock.innerHTML = `
+            <div class="manager-dock-capsule ${isActive ? 'is-running' : 'is-complete'}">
+                <button type="button" class="manager-dock-segment manager-dock-tasks" data-manager-dock-action="tasks" aria-expanded="${runDockOpen === 'tasks'}">
+                    <span class="manager-dock-state" aria-hidden="true"></span><strong>${escapeHtml(taskLabel)}</strong>
+                </button>
+                ${files.length > 0 ? `
+                    <span class="manager-dock-divider" aria-hidden="true"></span>
+                    <button type="button" class="manager-dock-segment manager-dock-changes" data-manager-dock-action="changes" aria-expanded="${runDockOpen === 'changes'}">
+                        <strong>${files.length} ${ui.dock.changes}</strong>
+                        <span class="manager-command-delta"><strong>+${additions}</strong><em>-${deletions}</em></span>
+                    </button>
+                ` : ''}
+            </div>
+            ${popover}
+        `;
+    }
+
+    function focusWorkspaceFile(filePath?: string): void {
+        if (filePath) collapsedWorkspaceFiles.delete(filePath);
+        setManagerDrawerOpen(true);
+        setActiveTab('changes');
+        runDockOpen = null;
+        renderRunDock();
+        if (!filePath) return;
+        requestAnimationFrame(() => {
+            const row = Array.from(artifactListEl.querySelectorAll<HTMLElement>('[data-workspace-file]'))
+                .find(candidate => candidate.dataset.workspaceFile === filePath);
+            row?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            row?.classList.add('is-focused');
+            if (row) setTimeout(() => row.classList.remove('is-focused'), 1600);
+        });
+    }
+
     function renderOverview(): void {
+        renderRunDock();
         const runStatus = typeof state.run?.status === 'string' ? state.run.status : '';
         const isActive = state.isGenerating || isRunActive(runStatus);
         const statusText = runStatusLabel(runStatus, state.isGenerating);
@@ -1073,6 +1203,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         const currentTopic = state.topics.find(topic => topic.id === state.stats.currentTopicId);
         const topicTitle = currentTopic?.title || state.stats.currentTopicTitle || ui.run.noActiveTopic;
         const drawerOpen = document.body.classList.contains('artifact-drawer-open');
+        const workspaceFiles = collectWorkspaceFiles(state.run);
+        const additions = workspaceFiles.reduce((sum, file) => sum + Number(file.additions || 0), 0);
+        const deletions = workspaceFiles.reduce((sum, file) => sum + Number(file.deletions || 0), 0);
         const overviewSignature = JSON.stringify({
             drawerOpen,
             topicTitleEditing,
@@ -1081,6 +1214,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             statusText,
             statusClass,
             activeTab,
+            fileCount: workspaceFiles.length,
+            additions,
+            deletions,
         });
         if (overviewSignature === lastOverviewSignature) return;
         lastOverviewSignature = overviewSignature;
@@ -1108,6 +1244,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             <div class="manager-command-actions">
                 <button type="button" class="manager-command-metric manager-command-change ${activeTab === 'changes' && drawerOpen ? 'active' : ''}" data-manager-jump="changes">
                     <span>${ui.actions.review}</span>
+                    ${workspaceFiles.length > 0 ? `<span class="manager-command-delta"><strong>+${additions}</strong><em>-${deletions}</em></span>` : ''}
                 </button>
                 <button type="button" class="manager-command-settings manager-command-workbench" data-manager-action="workbench" title="${drawerOpen ? ui.actions.closeWorkbench : ui.actions.workbench}" aria-label="${drawerOpen ? ui.actions.closeWorkbench : ui.actions.workbench}">
                     ${svgIconNoMargin('layers')}
@@ -1170,10 +1307,11 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             const additions = workspaceFiles.reduce((sum, file) => sum + Number(file.additions || 0), 0);
             const deletions = workspaceFiles.reduce((sum, file) => sum + Number(file.deletions || 0), 0);
             const changedFilesHtml = workspaceFiles.length ? workspaceFiles.map(file => `
-                <article class="manager-file-change-row ${collapsedWorkspaceFiles.has(file.file) ? 'is-collapsed' : ''}">
+                <article class="manager-file-change-row ${collapsedWorkspaceFiles.has(file.file) ? 'is-collapsed' : ''}" data-workspace-file="${escapeHtml(file.file)}">
                     <header class="manager-file-change-header">
                         <button type="button" class="manager-file-change-toggle" data-workspace-file-toggle="${escapeHtml(file.file)}" aria-expanded="${collapsedWorkspaceFiles.has(file.file) ? 'false' : 'true'}" title="${escapeHtml(collapsedWorkspaceFiles.has(file.file) ? ui.workspace.expandFile : ui.workspace.collapseFile)}">
                             <span class="manager-file-chevron" aria-hidden="true"></span>
+                            <span class="manager-file-status manager-file-status-${workspaceFileStatus(file)}">${escapeHtml(workspaceFileStatusLabel(file).slice(0, 1))}</span>
                             <span class="manager-file-identity" title="${escapeHtml(file.file)}"><strong>${escapeHtml(fileBasename(file.file))}</strong><small>${escapeHtml(file.file)}</small></span>
                         </button>
                         <span class="manager-file-delta" aria-label="${escapeHtml(formatFileStats(file))}">
@@ -1545,6 +1683,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         state.workflowId = snapshot.workflowId || null;
         state.isGenerating = !!snapshot.isGenerating;
         state.liveStepCount = snapshot.liveStepCount || 0;
+        state.todos = snapshot.todos || [];
         state.messageCount = typeof snapshot.messageCount === 'number'
             ? snapshot.messageCount
             : snapshot.messages?.filter(message => !message.isHidden).length || 0;
@@ -1715,7 +1854,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 }
                 break;
             case 'todoUpdate':
+                if (msg.agentId) break;
                 state.todos = msg.todos || [];
+                renderOverview();
                 renderInspector();
                 break;
             case 'replaySteps':

@@ -30,9 +30,9 @@ interface TextDocumentStub {
     uri: { fsPath: string; scheme: string };
     getText(): string;
 }
-let openDocumentListener: ((document: TextDocumentStub) => void) | undefined;
+let _openDocumentListener: ((document: TextDocumentStub) => void) | undefined;
 let saveDocumentListener: ((document: TextDocumentStub) => void) | undefined;
-let closeDocumentListener: ((document: TextDocumentStub) => void) | undefined;
+let _closeDocumentListener: ((document: TextDocumentStub) => void) | undefined;
 
 class DisposableStub {
     constructor(private readonly callback: () => void) {}
@@ -69,16 +69,16 @@ const vscodeStub = {
         },
         onDidChangeConfiguration: () => ({ dispose: () => undefined }),
         onDidOpenTextDocument: (listener: (document: TextDocumentStub) => void) => {
-            openDocumentListener = listener;
-            return { dispose: () => { openDocumentListener = undefined; } };
+            _openDocumentListener = listener;
+            return { dispose: () => { _openDocumentListener = undefined; } };
         },
         onDidSaveTextDocument: (listener: (document: TextDocumentStub) => void) => {
             saveDocumentListener = listener;
             return { dispose: () => { saveDocumentListener = undefined; } };
         },
         onDidCloseTextDocument: (listener: (document: TextDocumentStub) => void) => {
-            closeDocumentListener = listener;
-            return { dispose: () => { closeDocumentListener = undefined; } };
+            _closeDocumentListener = listener;
+            return { dispose: () => { _closeDocumentListener = undefined; } };
         },
     },
     commands: {
@@ -158,9 +158,9 @@ describe('project knowledge SQLite V3', () => {
         vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: workspaceRoot } }];
         vscodeStub.workspace.textDocuments = [];
         watcherStubs.length = 0;
-        openDocumentListener = undefined;
+        _openDocumentListener = undefined;
         saveDocumentListener = undefined;
-        closeDocumentListener = undefined;
+        _closeDocumentListener = undefined;
         commandCalls = [];
         exportGate = undefined;
         validationStatus = {

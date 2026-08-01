@@ -281,6 +281,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const sideWorkspaceTitle = document.getElementById('sideWorkspaceTitle') as HTMLElement | null;
     const sideWorkspaceSubtitle = document.getElementById('sideWorkspaceSubtitle') as HTMLElement | null;
 
+    type TodoView = { id?: string; content: string; status: 'pending' | 'in_progress' | 'done' };
+    const subagentTodos = new Map<string, TodoView[]>();
+
     let isGenerating = false;
     let currentAssistantDiv: HTMLDivElement | null = null;
     let currentMode = 'build';
@@ -4212,6 +4215,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             const fullscreen = document.createElement('div');
             fullscreen.id = uniqueId;
             fullscreen.className = 'subagent-fullscreen-view';
+            fullscreen.dataset.agentId = agentId;
             fullscreen.innerHTML = `
                 <div class="subagent-header">
                     <button class="subagent-back-btn" data-target-id="${uniqueId}">‹ ${tr('Back', '返回')}</button>
@@ -4233,6 +4237,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             fullscreen.querySelector('.subagent-body')!.appendChild(innerMsg);
             
             div.appendChild(fullscreen);
+            const persistedTodos = latestTodosFromSteps(groupSteps);
+            if (persistedTodos.length > 0) {
+                subagentTodos.set(agentId, persistedTodos);
+                renderSubagentTodoPanel(fullscreen, persistedTodos);
+            }
         }
 
         // Batch 3: Enhance rendered content
@@ -4391,9 +4400,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const fullscreen = document.createElement('div');
                 fullscreen.id = uniqueId;
                 fullscreen.className = 'subagent-fullscreen-view';
+                fullscreen.dataset.agentId = agentId;
                 fullscreen.innerHTML = buildSubagentFullscreenHtml(agentId, uniqueId, chatI18n);
                 bindSubagentScroll(fullscreen);
                 currentAssistantDiv.appendChild(fullscreen);
+                renderSubagentTodoPanel(fullscreen, []);
 
                 const subagentBody = fullscreen.querySelector('.subagent-body') as HTMLElement;
                 subagentBody.innerHTML = `<div class="codex-live-host">${renderAssistantTurnCodex('', [], {
@@ -6211,7 +6222,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 break;
             }
 
-            case 'todoUpdate': renderTodos(msg.todos); break;
+            case 'todoUpdate':
+                if (typeof msg.agentId === 'string' && msg.agentId) {
+                    renderSubagentTodos(msg.agentId, msg.todos || []);
+                } else {
+                    renderTodos(msg.todos);
+                }
+                break;
 
             case 'autoWriteFile': showAutoWriteCard(msg.file, msg.isNewFile); break;
 
@@ -7030,14 +7047,68 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         );
     }
 
-    function renderTodos(todos: any[]) {
-        if (!todos || !todos.length) { todoPanel.classList.remove('has-items'); document.getElementById('todoList')!.innerHTML = ''; return; }
-        todoPanel.classList.add('has-items');
-        const icons: Record<string,string> = { pending: '○', in_progress: '●', done: '✓' };
-        document.getElementById('todoList')!.innerHTML = todos.map((t: any) => {
-            const cls = t.status === 'done' ? 'done' : t.status === 'in_progress' ? 'in_progress' : '';
-            return '<div class="todo-item ' + cls + '"><span>' + (icons[t.status] || '○') + '</span>' + escapeHtml(t.content) + '</div>';
+    function isTodoView(value: unknown): value is TodoView {
+        if (!value || typeof value !== 'object') return false;
+        const candidate = value as Partial<TodoView>;
+        return typeof candidate.content === 'string'
+            && candidate.content.trim().length > 0
+            && (candidate.status === 'pending' || candidate.status === 'in_progress' || candidate.status === 'done');
+    }
+
+    function normalizeTodoViews(value: unknown): TodoView[] {
+        return Array.isArray(value) ? value.filter(isTodoView).map(todo => ({ ...todo })) : [];
+    }
+
+    function latestTodosFromSteps(steps: readonly unknown[]): TodoView[] {
+        for (let index = steps.length - 1; index >= 0; index--) {
+            const step = steps[index];
+            if (!step || typeof step !== 'object') continue;
+            const record = step as { type?: unknown; toolName?: unknown; toolArgs?: { todos?: unknown } };
+            if (record.type !== 'tool_call' || record.toolName !== 'todo_write') continue;
+            const todos = normalizeTodoViews(record.toolArgs?.todos);
+            if (todos.length > 0) return todos;
+        }
+        return [];
+    }
+
+    function todoItemsHtml(todos: readonly TodoView[]): string {
+        const icons: Record<TodoView['status'], string> = { pending: '○', in_progress: '●', done: '✓' };
+        return todos.map(todo => {
+            const cls = todo.status === 'done' ? 'done' : todo.status === 'in_progress' ? 'in_progress' : '';
+            return `<div class="todo-item ${cls}"><span>${icons[todo.status]}</span>${escapeHtml(todo.content)}</div>`;
         }).join('');
+    }
+
+    function renderSubagentTodoPanel(fullscreen: HTMLElement, todos: readonly TodoView[]): void {
+        fullscreen.querySelector('.subagent-task-panel')?.remove();
+        if (todos.length === 0) return;
+        const done = todos.filter(todo => todo.status === 'done').length;
+        const panel = document.createElement('details');
+        panel.className = 'subagent-task-panel';
+        panel.open = todos.some(todo => todo.status === 'in_progress');
+        panel.innerHTML = `
+            <summary><span>${tr('Tasks', '任务')}</span><strong>${done}/${todos.length}</strong></summary>
+            <div class="subagent-task-list">${todoItemsHtml(todos)}</div>
+        `;
+        fullscreen.querySelector('.subagent-header')?.insertAdjacentElement('afterend', panel);
+    }
+
+    function renderSubagentTodos(agentId: string, rawTodos: unknown): void {
+        const todos = normalizeTodoViews(rawTodos);
+        subagentTodos.set(agentId, todos);
+        const matchingViews = Array.from(document.querySelectorAll<HTMLElement>('.subagent-fullscreen-view'))
+            .filter(fullscreen => fullscreen.dataset.agentId === agentId);
+        const currentView = matchingViews[matchingViews.length - 1];
+        if (currentView) renderSubagentTodoPanel(currentView, todos);
+    }
+
+    function renderTodos(rawTodos: unknown) {
+        const todos = normalizeTodoViews(rawTodos);
+        const todoList = document.getElementById('todoList');
+        if (!todoList) return;
+        if (todos.length === 0) { todoPanel.classList.remove('has-items'); todoList.innerHTML = ''; return; }
+        todoPanel.classList.add('has-items');
+        todoList.innerHTML = todoItemsHtml(todos);
     }
 
     function updateQuickModelSelector(providers: any[], current: any, ollamaModels: any[]) {

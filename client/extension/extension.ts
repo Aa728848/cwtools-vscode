@@ -1292,8 +1292,8 @@ export async function activate(context: ExtensionContext) {
 	toolExecutor.onAutoWritten = (file, isNewFile) =>
 		chatPanelProvider.handleAutoWritten(file, isNewFile);
 	// onTodoUpdate: push todo list updates to the WebView panel
-	toolExecutor.onTodoUpdate = (todos) =>
-		chatPanelProvider.sendTodoUpdate(todos);
+	toolExecutor.onTodoUpdate = (todos, scope) =>
+		chatPanelProvider.sendTodoUpdate(todos, scope);
 	// Sync fileWriteMode from config on startup
 	toolExecutor.fileWriteMode = workspace.getConfiguration('stellarisLanguageServices.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'auto');
 	// Re-sync fileWriteMode whenever config changes

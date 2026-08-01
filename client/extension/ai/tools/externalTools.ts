@@ -7,6 +7,7 @@ import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { TodoItem, TodoWriteResult } from '../types';
+import { ScopedTodoStore } from './scopedTodoStore';
 import { preflightCommand, type ConfiguredCommandPolicyRule } from '../runner/commandPreflight';
 import { hasInlineEvalPayload, PermissionPolicyStore } from '../runner/permissionPolicy';
 import { processRegistry } from '../runner/processRegistry';
@@ -130,7 +131,7 @@ export interface ExternalToolContext {
 // ─── Handler class ───────────────────────────────────────────────────────────
 
 export class ExternalToolHandler {
-    private currentTodos: TodoItem[] = [];
+    private readonly todoStore = new ScopedTodoStore();
     private ignoredCommandTempArtifacts = new Set<string>();
     private readonly webAccess: WebAccessService;
 
@@ -759,23 +760,28 @@ export class ExternalToolHandler {
 
     async todoWrite(args: { todos: TodoItem[] }, context?: import('../types').AgentToolContext): Promise<TodoWriteResult> {
         console.time('todoWrite_exec');
-        this.currentTodos = args.todos;
+        const agentId = context?.runnerOptions?.agentId;
+        const currentTodos = this.todoStore.set(args.todos, agentId);
         const onTodoUpdate = context?.onTodoUpdate;
         if (onTodoUpdate) {
-            onTodoUpdate(this.currentTodos);
+            onTodoUpdate(currentTodos, {
+                agentId,
+                threadId: context?.runnerOptions?.threadId,
+                runId: context?.runnerOptions?.runRecord?.runId ?? context?.runEventSink?.runId,
+            });
         }
         console.timeEnd('todoWrite_exec');
         return {
             success: true,
-            todoCount: this.currentTodos.length,
+            todoCount: currentTodos.length,
         };
     }
 
-    getTodos(): TodoItem[] { return this.currentTodos.map(todo => ({ ...todo })); }
-    restoreTodos(todos: readonly TodoItem[]): void {
-        this.currentTodos = todos.map(todo => ({ ...todo }));
+    getTodos(agentId?: string): TodoItem[] { return this.todoStore.get(agentId); }
+    restoreTodos(todos: readonly TodoItem[], agentId?: string): void {
+        this.todoStore.set(todos, agentId);
     }
-    clearTodos(): void { this.currentTodos = []; }
+    clearTodos(agentId?: string): void { this.todoStore.clear(agentId); }
 
     private canAccessProcess(record: ReturnType<typeof processRegistry.get>, context?: import('../types').AgentToolContext): boolean {
         if (!record) return false;

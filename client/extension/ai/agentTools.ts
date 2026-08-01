@@ -343,7 +343,7 @@ function compactAgentOutputForReport(output: unknown, maxLength = 1600): string 
  */
 export class AgentToolExecutor {
     /** Callback when todos are updated (for UI) */
-    public onTodoUpdate?: (todos: TodoItem[]) => void;
+    public onTodoUpdate?: import('./types').TodoUpdateCallback;
     /** Callback when a file write needs user confirmation (confirm mode). */
     public onPendingWrite?: (file: string, newContent: string, messageId: string) => Promise<boolean>;
     /** Callback when a file is automatically written (auto mode). */
@@ -380,7 +380,7 @@ export class AgentToolExecutor {
     private externalHandler: ExternalToolHandler;
     private memoryHandler: MemoryToolHandler;
     private readonly diagnosticAnalysisCounts = new Map<string, { count: number; lastSeen: number }>();
-    private readonly activeSkillPolicies = new Map<string, { skillName: string; allowedTools: Set<string> }>();
+    private readonly activeSkillPolicies = new Map<string, { skillNames: string[]; allowedTools: Set<string> }>();
     private static readonly ACTIVE_SKILL_POLICY_LIMIT = 64;
     /** Lazily constructed semantic evidence gate (plan §4 P0). */
     private evidenceGate?: EvidenceGate;
@@ -1289,7 +1289,7 @@ export class AgentToolExecutor {
         if (skillPolicy && toolName !== 'run_skill' && !skillPolicy.allowedTools.has(toolName)) {
             return {
                 success: false,
-                error: `Active skill '${skillPolicy.skillName}' does not allow tool '${toolName}'. Load another skill or use one of its declared allowed-tools.`,
+                error: `Active skills '${skillPolicy.skillNames.join("', '")}' do not allow tool '${toolName}'. Use one of the effective allowed-tools.`,
                 skillPolicyDenied: true,
                 allowedTools: [...skillPolicy.allowedTools].sort(),
             };
@@ -1919,7 +1919,7 @@ export class AgentToolExecutor {
                     break;
                 }
                 if (status === 'complete') {
-                    const incompleteTodos = context?.agentRunner?.toolExecutor.getTodos()
+                    const incompleteTodos = context?.agentRunner?.toolExecutor.getTodos(context?.runnerOptions?.agentId)
                         .filter(todo => todo.status !== 'done') ?? [];
                     const topicId = context?.runnerOptions?.topicId ?? 'default';
                     agentTaskManager.configure(topicId);
@@ -2087,10 +2087,17 @@ export class AgentToolExecutor {
             }
             const policyKey = this.getSkillPolicyKey(context);
             if (policyKey) {
+                const previous = this.activeSkillPolicies.get(policyKey);
+                const declared = new Set(declaredTools);
+                const effectiveAllowedTools = previous
+                    ? new Set([...previous.allowedTools].filter(tool => declared.has(tool)))
+                    : declared;
                 this.activeSkillPolicies.delete(policyKey);
                 this.activeSkillPolicies.set(policyKey, {
-                    skillName: loaded.skill.name,
-                    allowedTools: new Set(declaredTools),
+                    skillNames: previous?.skillNames.includes(loaded.skill.name)
+                        ? previous.skillNames
+                        : [...(previous?.skillNames ?? []), loaded.skill.name],
+                    allowedTools: effectiveAllowedTools,
                 });
                 while (this.activeSkillPolicies.size > AgentToolExecutor.ACTIVE_SKILL_POLICY_LIMIT) {
                     const oldest = this.activeSkillPolicies.keys().next().value as string | undefined;
@@ -2100,6 +2107,8 @@ export class AgentToolExecutor {
             }
         }
 
+        const policyKey = this.getSkillPolicyKey(context);
+        const effectivePolicy = policyKey ? this.activeSkillPolicies.get(policyKey) : undefined;
         const argumentSummary = args.arguments === undefined
             ? ''
             : `\n\n<skill-arguments>\n${JSON.stringify(args.arguments, null, 2)}\n</skill-arguments>`;
@@ -2112,8 +2121,14 @@ export class AgentToolExecutor {
             truncated: loaded.truncated,
             content: `<skill name="${loaded.skill.name}">\n${loaded.content}\n</skill>${argumentSummary}`,
             guidance: 'Follow this SKILL.md for the current task. If runAs says subagent, use dispatch_agents only when orchestration is already appropriate and available.',
-            policyEnforced: !!declaredTools?.length && !!this.getSkillPolicyKey(context),
+            policyEnforced: !!effectivePolicy,
+            activeSkills: effectivePolicy?.skillNames,
+            effectiveAllowedTools: effectivePolicy ? [...effectivePolicy.allowedTools].sort() : undefined,
         };
+    }
+
+    public clearSkillPolicyForRun(runId: string): void {
+        if (runId) this.activeSkillPolicies.delete(`run:${runId}`);
     }
 
     private getSkillPolicyKey(context?: import('./types').AgentToolContext): string | undefined {
@@ -3557,12 +3572,12 @@ export class AgentToolExecutor {
 
     // - Public accessors for external consumers -
 
-    getTodos(): TodoItem[] { return this.externalHandler.getTodos(); }
-    restoreTodos(todos: readonly TodoItem[]): void {
-        this.externalHandler.restoreTodos(todos);
-        this.onTodoUpdate?.(this.externalHandler.getTodos());
+    getTodos(agentId?: string): TodoItem[] { return this.externalHandler.getTodos(agentId); }
+    restoreTodos(todos: readonly TodoItem[], agentId?: string): void {
+        this.externalHandler.restoreTodos(todos, agentId);
+        this.onTodoUpdate?.(this.externalHandler.getTodos(agentId), agentId ? { agentId } : undefined);
     }
-    clearTodos(): void { this.externalHandler.clearTodos(); }
+    clearTodos(agentId?: string): void { this.externalHandler.clearTodos(agentId); }
     clearOrchestratorValidation(runId: string): void { this._orchestratorValidationByRun.delete(runId); }
     getOrchestratorValidation(runId: string): { success: boolean; summary: string; pendingOnly?: boolean } | undefined {
         return this._orchestratorValidationByRun.get(runId);

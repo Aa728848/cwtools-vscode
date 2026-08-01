@@ -439,7 +439,18 @@ function classifySegment(parsed: ParsedCommandSegment): SegmentClassification {
     }
 
     const git = classifyGitCommand(words);
-    if (git) return git;
+    if (git) {
+        // Preserve explicit destructive-Git denials, but never let Git's
+        // subcommand classification hide shell redirection or substitution.
+        if (git.decision === 'forbidden') return git;
+        if (parsed.complexSyntax) {
+            return prompt('interpreter', 2, aiText(
+                'Complex shell syntax around Git cannot be proven safe by the structured parser',
+                '结构化解析器无法证明 Git 命令周围的复杂 Shell 语法安全',
+            ), true);
+        }
+        return git;
+    }
     if (SYSTEM_DESTRUCTIVE_COMMANDS.has(baseCmd)
         || hasRmForce(words)
         || ((baseCmd === 'del' || baseCmd === 'erase') && lowerArgs.some(arg => /^\/[fsq]+$/i.test(arg)))

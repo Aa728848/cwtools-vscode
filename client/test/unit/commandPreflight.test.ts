@@ -145,6 +145,20 @@ describe('CommandPreflight Unit Tests', () => {
         expect(preflightCommand('echo $(pwd)').decision).to.equal('prompt');
     });
 
+    it('does not let read-only Git classification hide complex shell syntax', () => {
+        const { preflightCommand } = loadCommandPreflightModule();
+        for (const command of [
+            'git status > status.txt',
+            'git status $(Remove-Item target.txt)',
+            'git log "$(rm -f target.txt)"',
+        ]) {
+            const result = preflightCommand(command);
+            expect(result.decision, command).to.equal('prompt');
+            expect(result.opaqueExecution, command).to.equal(true);
+            expect(result.segments[0]!.classification, command).to.equal('interpreter');
+        }
+    });
+
     it('recursively checks nested shell command bodies', () => {
         const { preflightCommand } = loadCommandPreflightModule();
         expect(preflightCommand('bash -lc "ls | wc -l"').decision).to.equal('allow');

@@ -941,6 +941,51 @@ describe('Orchestrator runtime safety', () => {
         expect(result.summary).to.include('missing dependencies');
     });
 
+    it('executeGraph: never heals a misspelled dependency to the node itself', async () => {
+        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const graph = TaskGraphEngine.createGraph('self dependency healing');
+        TaskGraphEngine.addNode(graph, 'build_ui', 'build', 'build', { dependencies: ['build_u1'] });
+
+        const result = await executor.executeGraph(graph, new Blackboard(), async () => {
+            throw new Error('should not run');
+        }, {});
+
+        expect(result.success).to.equal(false);
+        expect(result.summary).to.include('missing dependencies');
+        expect(graph.nodes.get('build_ui')?.dependencies).to.deep.equal(['build_u1']);
+    });
+
+    it('executeGraph: rejects ambiguous dependency healing matches', async () => {
+        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const graph = TaskGraphEngine.createGraph('ambiguous dependency healing');
+        TaskGraphEngine.addNode(graph, 'build_ui', 'build', 'build');
+        TaskGraphEngine.addNode(graph, 'build_ux', 'build', 'build');
+        TaskGraphEngine.addNode(graph, 'consumer', 'build', 'build', { dependencies: ['build_ua'] });
+
+        const result = await executor.executeGraph(graph, new Blackboard(), async () => {
+            throw new Error('should not run');
+        }, {});
+
+        expect(result.success).to.equal(false);
+        expect(result.summary).to.include('missing dependencies');
+        expect(graph.nodes.get('consumer')?.dependencies).to.deep.equal(['build_ua']);
+    });
+
+    it('executeGraph: rechecks cycles introduced by dependency healing', async () => {
+        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const graph = TaskGraphEngine.createGraph('healed dependency cycle');
+        TaskGraphEngine.addNode(graph, 'compile', 'build', 'build', { dependencies: ['consumr'] });
+        TaskGraphEngine.addNode(graph, 'consumer', 'build', 'build', { dependencies: ['compile'] });
+
+        const result = await executor.executeGraph(graph, new Blackboard(), async () => {
+            throw new Error('should not run');
+        }, {});
+
+        expect(result.success).to.equal(false);
+        expect(result.summary).to.include('cyclic dependencies after dependency healing');
+        expect(graph.nodes.get('compile')?.dependencies).to.deep.equal(['consumr']);
+    });
+
     it('executeGraph: does not retry timeout-like sub-agent failures', async () => {
         const executor = new ParallelExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('timeout');

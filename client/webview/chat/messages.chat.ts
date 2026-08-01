@@ -19,4 +19,4 @@ export type ChatSurfaceHostMessage =
     | { type: 'runtimeInspectorSnapshot'; runtimeInspector: unknown }
     | { type: 'transcriptSnapshot'; transcript: unknown }
     | { type: 'artifactList'; artifacts: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }> }
-    | { type: 'todoUpdate'; todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'done' }> };
+    | { type: 'todoUpdate'; todos: Array<{ id?: string; content: string; status: 'pending' | 'in_progress' | 'done' }>; agentId?: string; threadId?: string; runId?: string };

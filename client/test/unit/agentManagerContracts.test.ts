@@ -70,6 +70,39 @@ describe('agent manager cross-surface contracts', () => {
         expect(css).to.not.include('workspace-toggle {\n    display: none !important;');
     });
 
+    it('keeps task progress and changed files visible above the manager composer', () => {
+        const manager = fs.readFileSync(path.join(root, 'client/webview/agentManager.ts'), 'utf8');
+        const css = fs.readFileSync(path.join(root, 'client/webview/agentManager.css'), 'utf8');
+
+        expect(manager).to.include("runDock.id = 'managerRunDock'");
+        expect(manager).to.include('data-manager-dock-action="tasks"');
+        expect(manager).to.include('data-manager-dock-action="changes"');
+        expect(manager).to.include('data-manager-dock-file=');
+        expect(manager).to.include('focusWorkspaceFile(');
+        expect(manager).to.include("if (evt?.type === 'file_change')");
+        expect(manager).to.include("if (evt?.type === 'tool_call_end')");
+        expect(manager).to.include("if (evt?.type === 'subagent_end')");
+        expect(css).to.include('.manager-run-dock');
+        expect(css).to.include('.manager-dock-popover');
+        expect(css).to.include('.manager-file-status-created');
+    });
+
+    it('routes child todos to the matching subagent view instead of the root task panel', () => {
+        const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
+        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const webview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
+
+        expect(hostTypes).to.include('export interface TodoUpdateScope');
+        expect(hostTypes).to.include("type: 'todoUpdate'; todos: TodoItem[]; agentId?: string");
+        expect(hostPanel).to.include("const scopeKey = scope?.agentId ? `agent:${scope.agentId}` : 'root'");
+        expect(hostPanel).to.include('if (currentScope?.agentId) return;');
+        expect(webview).to.include("fullscreen.dataset.agentId = agentId");
+        expect(webview).to.include('renderSubagentTodos(msg.agentId, msg.todos || [])');
+        expect(webview).to.include("fullscreen.querySelector('.subagent-task-panel')?.remove()");
+        expect(css).to.include('.subagent-task-panel');
+    });
+
     it('shares runtime profiles, inspector, and canonical transcript across surfaces', () => {
         const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
         const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');

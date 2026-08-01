@@ -145,6 +145,36 @@ body.plan-mode .plan-indicator { display: block; }
 .todo-item { font-size: 12px; padding: 2px 0; display: flex; align-items: flex-start; gap: 6px; }
 .todo-item.done { opacity: 0.4; text-decoration: line-through; }
 .todo-item.in_progress { color: var(--accent); }
+
+.subagent-task-panel {
+    margin: 0;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 92%, var(--accent));
+}
+.subagent-task-panel > summary {
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 16px;
+    color: var(--fg);
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+.subagent-task-panel > summary::-webkit-details-marker { display: none; }
+.subagent-task-panel > summary::before {
+    content: '›';
+    color: var(--muted);
+    font-size: 16px;
+    transform: rotate(0deg);
+}
+.subagent-task-panel[open] > summary::before { transform: rotate(90deg); }
+.subagent-task-panel > summary > span { flex: 1; font-size: 11px; font-weight: 650; }
+.subagent-task-panel > summary > strong { color: var(--muted); font-size: 10px; }
+.subagent-task-list { padding: 0 16px 10px 36px; }
 .artifact-scrim { position: fixed; inset: 42px 0 0 0; background: rgba(0,0,0,0.24); opacity: 0; pointer-events: none; transition: opacity 0.18s ease; z-index: 145; }
 body.artifact-drawer-open .artifact-scrim { opacity: 1; pointer-events: auto; }
 .artifact-drawer { position: fixed; top: 42px; right: 0; bottom: 0; width: min(380px, calc(100vw - 28px)); display: flex; flex-direction: column; background: var(--bg); background: color-mix(in srgb, var(--bg) 88%, #2b2b2b); border-left: 1px solid rgba(255,255,255,0.14); box-shadow: -24px 0 42px rgba(0,0,0,0.36); transform: translateX(104%); transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); z-index: 150; }

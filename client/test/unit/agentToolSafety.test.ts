@@ -148,6 +148,44 @@ describe('enforced central tool policy', () => {
         expect(denied.allowedTools).to.deep.equal(['read_file']);
     });
 
+    it('only narrows skill tool policies and clears them at run completion', async () => {
+        const skills = [
+            { name: 'broad-skill', allowedTools: 'read_file, get_diagnostics' },
+            { name: 'narrow-skill', allowedTools: 'read_file' },
+            { name: 'unrestricted-skill', allowedTools: undefined },
+        ];
+        for (const skill of skills) {
+            const skillDir = path.join(workspaceRoot, '.agents', 'skills', skill.name);
+            fs.mkdirSync(skillDir, { recursive: true });
+            fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
+                '---',
+                `name: ${skill.name}`,
+                `description: ${skill.name}`,
+                ...(skill.allowedTools ? [`allowed-tools: ${skill.allowedTools}`] : []),
+                '---',
+                'Follow the skill.',
+            ].join('\n'), 'utf8');
+        }
+
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        const context = {
+            runnerOptions: { mode: 'build', domain: 'general', topicId: 'skill-policy', runRecord: { runId: 'monotonic-skill-run' } },
+        } as any;
+        const broad = await executor.execute('run_skill', { name: 'broad-skill' }, context) as any;
+        expect(broad.effectiveAllowedTools).to.deep.equal(['get_diagnostics', 'read_file']);
+        const narrow = await executor.execute('run_skill', { name: 'narrow-skill' }, context) as any;
+        expect(narrow.effectiveAllowedTools).to.deep.equal(['read_file']);
+        const unrestricted = await executor.execute('run_skill', { name: 'unrestricted-skill' }, context) as any;
+        expect(unrestricted.policyEnforced).to.equal(true);
+        expect(unrestricted.effectiveAllowedTools).to.deep.equal(['read_file']);
+
+        const denied = await executor.execute('get_diagnostics', {}, context) as any;
+        expect(denied.skillPolicyDenied).to.equal(true);
+        executor.clearSkillPolicyForRun('monotonic-skill-run');
+        const afterCleanup = await executor.execute('get_diagnostics', {}, context) as any;
+        expect(afterCleanup.skillPolicyDenied).to.equal(undefined);
+    });
+
     it('enforces the General Coding domain even for unadvertised direct tool calls', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         const context = {

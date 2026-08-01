@@ -287,7 +287,7 @@ export interface OrchestratorOptions {
     /** Snapshot callback before file writing, used to pass upward to the recall system */
     onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
     /** Todo list update callback */
-    onTodoUpdate?: (todos: import('../types').TodoItem[]) => void;
+    onTodoUpdate?: import('../types').TodoUpdateCallback;
     /** Permission approval callback, the sub-Agent uses this callback to request permission from the user to perform sensitive operations */
     onPermissionRequest?: (id: string, tool: string, description: string, command?: string, context?: any) => Promise<boolean>;
 }

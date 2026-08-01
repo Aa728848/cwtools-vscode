@@ -1097,6 +1097,14 @@ export interface TodoWriteResult {
     todoCount: number;
 }
 
+export interface TodoUpdateScope {
+    agentId?: string;
+    threadId?: string;
+    runId?: string;
+}
+
+export type TodoUpdateCallback = (todos: TodoItem[], scope?: TodoUpdateScope) => void;
+
 export interface GetCompletionAtResult {
     completions: Array<{
         label: string;
@@ -1189,7 +1197,7 @@ export interface AgentToolContext {
         previousContent: string;
         content: string;
     }) => Promise<{ allowed: boolean; message?: string }>;
-    onTodoUpdate?: (todos: import('./types').TodoItem[]) => void;
+    onTodoUpdate?: TodoUpdateCallback;
     /** Host-recorded workspace revision observed by a successful authoritative read in this run. */
     authoritativeProjectRevision?: string;
     escalation?: boolean;
@@ -2350,7 +2358,7 @@ export type HostMessage =
     | { type: 'workflowChanged'; workflowId?: string | null; workflow?: { id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
     | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
-    | { type: 'todoUpdate'; todos: TodoItem[] }
+    | { type: 'todoUpdate'; todos: TodoItem[]; agentId?: string; threadId?: string; runId?: string }
     | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'apiModelsFetched'; providerId: string; models: Array<{ id: string }>; dynContexts?: Record<string, number>; reasoningCapabilities?: Record<string, ModelReasoningCapability>; error?: string; ctxNote?: string }
@@ -2422,6 +2430,7 @@ export type HostMessage =
         workflowId?: string | null;
         isGenerating: boolean;
         liveStepCount: number;
+        todos?: TodoItem[];
         artifacts: AgentArtifact[];
         activity?: import('./runner/activityProjection').ActivityProjection;
         runtimeInspector?: import('./runner/agentRuntime').AgentRuntimeInspector;

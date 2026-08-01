@@ -45,6 +45,7 @@ body.agent-manager-shell .mode-indicator {
 body.agent-manager-shell .todo-panel {
     grid-column: 2 / 3;
     grid-row: 4 / 5;
+    display: none !important;
 }
 
 body.agent-manager-shell .topics-panel {
@@ -2423,6 +2424,40 @@ body.agent-manager-shell .manager-file-identity {
     gap: 8px;
 }
 
+body.agent-manager-shell .manager-file-status {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    color: var(--manager-muted);
+    background: rgba(255, 255, 255, 0.06);
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 9px;
+    font-weight: 750;
+}
+
+body.agent-manager-shell .manager-file-status-created {
+    color: var(--manager-green);
+    background: color-mix(in srgb, var(--manager-green) 14%, transparent);
+}
+
+body.agent-manager-shell .manager-file-status-deleted {
+    color: var(--vscode-charts-red, #f14c4c);
+    background: color-mix(in srgb, var(--vscode-charts-red, #f14c4c) 14%, transparent);
+}
+
+body.agent-manager-shell .manager-file-status-modified {
+    color: var(--vscode-charts-yellow, #cca700);
+    background: color-mix(in srgb, var(--vscode-charts-yellow, #cca700) 14%, transparent);
+}
+
+body.agent-manager-shell .manager-file-change-row.is-focused .manager-file-change-header {
+    background: color-mix(in srgb, var(--manager-blue) 16%, var(--manager-panel));
+}
+
 body.agent-manager-shell .manager-file-identity strong {
     min-width: 0;
     overflow: hidden;
@@ -2692,6 +2727,201 @@ body.agent-manager-shell .manager-task-done {
     color: var(--manager-muted);
 }
 
+/* Compact task/change shelf above the composer. */
+body.agent-manager-shell .manager-run-dock {
+    position: relative;
+    z-index: 75;
+    width: var(--codex-chat-column);
+    max-width: var(--codex-chat-column);
+    min-height: 30px;
+    display: flex;
+    justify-content: center;
+    margin: 0 auto 7px;
+}
+
+body.agent-manager-shell .manager-run-dock[hidden] {
+    display: none;
+}
+
+body.agent-manager-shell .manager-dock-capsule {
+    min-width: 0;
+    max-width: min(100%, 660px);
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--manager-border);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--manager-card) 94%, var(--manager-bg));
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+}
+
+body.agent-manager-shell .manager-dock-segment {
+    min-width: 0;
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border: 0;
+    background: transparent;
+    color: var(--manager-fg);
+    padding: 4px 11px;
+    font: inherit;
+    font-size: 10.5px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+body.agent-manager-shell .manager-dock-segment:hover,
+body.agent-manager-shell .manager-dock-segment[aria-expanded="true"] {
+    background: var(--manager-card-hover);
+}
+
+body.agent-manager-shell .manager-dock-state {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 7px;
+    border-radius: 50%;
+    background: var(--manager-green);
+}
+
+body.agent-manager-shell .manager-dock-capsule.is-running .manager-dock-state {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--manager-green) 16%, transparent);
+    animation: manager-dock-pulse 1.6s ease-in-out infinite;
+}
+
+body.agent-manager-shell .manager-dock-capsule.is-complete .manager-dock-state {
+    background: var(--manager-muted);
+}
+
+body.agent-manager-shell .manager-dock-divider {
+    width: 1px;
+    height: 16px;
+    background: var(--manager-border-soft);
+}
+
+body.agent-manager-shell .manager-dock-popover {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 7px);
+    width: min(520px, calc(100vw - var(--manager-active-left-width) - var(--manager-active-right-width) - 32px));
+    max-height: min(420px, calc(100vh - 190px));
+    display: flex;
+    flex-direction: column;
+    transform: translateX(-50%);
+    border: 1px solid var(--manager-border);
+    border-radius: 10px;
+    background: var(--manager-card);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
+    overflow: hidden;
+}
+
+body.agent-manager-shell .manager-dock-popover > header {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 10px 6px 13px;
+    border-bottom: 1px solid var(--manager-border-soft);
+}
+
+body.agent-manager-shell .manager-dock-popover > header > span {
+    color: var(--manager-muted);
+    font-size: 10px;
+}
+
+body.agent-manager-shell .manager-dock-popover > header > button {
+    min-height: 26px;
+    border: 1px solid var(--manager-border-soft);
+    border-radius: 5px;
+    background: var(--manager-button);
+    color: var(--manager-fg);
+    padding: 3px 8px;
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+}
+
+body.agent-manager-shell .manager-dock-list {
+    min-height: 0;
+    overflow: auto;
+    padding: 7px;
+}
+
+body.agent-manager-shell .manager-dock-task,
+body.agent-manager-shell .manager-dock-file {
+    width: 100%;
+    min-height: 34px;
+    display: grid;
+    align-items: center;
+    gap: 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--manager-fg);
+    padding: 5px 7px;
+    text-align: left;
+}
+
+body.agent-manager-shell .manager-dock-task {
+    grid-template-columns: 18px minmax(0, 1fr);
+}
+
+body.agent-manager-shell .manager-dock-task > span {
+    color: var(--manager-blue);
+    text-align: center;
+}
+
+body.agent-manager-shell .manager-dock-task-done {
+    color: var(--manager-muted);
+}
+
+body.agent-manager-shell .manager-dock-file {
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    font: inherit;
+    cursor: pointer;
+}
+
+body.agent-manager-shell .manager-dock-file:hover {
+    background: var(--manager-card-hover);
+}
+
+body.agent-manager-shell .manager-dock-file-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+body.agent-manager-shell .manager-dock-file-main strong,
+body.agent-manager-shell .manager-dock-file-main small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.agent-manager-shell .manager-dock-file-main small {
+    color: var(--manager-muted);
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 9.5px;
+}
+
+body.agent-manager-shell .manager-dock-file-delta {
+    display: inline-flex;
+    gap: 6px;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 10px;
+}
+
+body.agent-manager-shell .manager-dock-file-delta strong { color: var(--manager-green); }
+body.agent-manager-shell .manager-dock-file-delta em { color: var(--vscode-charts-red, #f14c4c); font-style: normal; }
+
+@keyframes manager-dock-pulse {
+    0%, 100% { opacity: 0.72; }
+    50% { opacity: 1; }
+}
+
 body.agent-manager-shell .manager-side-item {
     width: 100%;
     min-height: 44px;
@@ -2900,6 +3130,14 @@ body.agent-manager-shell.manager-resizing * {
     body.agent-manager-shell .manager-agent-metrics {
         grid-column: 2;
     }
+
+    body.agent-manager-shell .manager-dock-popover {
+        width: calc(100vw - 20px);
+    }
+
+    body.agent-manager-shell .manager-dock-file-main small {
+        display: none;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2907,5 +3145,9 @@ body.agent-manager-shell.manager-resizing * {
     body.agent-manager-shell .artifact-drawer,
     body.agent-manager-shell .artifact-scrim {
         transition: none !important;
+    }
+
+    body.agent-manager-shell .manager-dock-capsule.is-running .manager-dock-state {
+        animation: none !important;
     }
 }

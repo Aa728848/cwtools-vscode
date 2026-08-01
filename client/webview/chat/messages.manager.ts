@@ -32,6 +32,7 @@ export interface ManagerSnapshotMessage {
     workflowId?: string | null;
     isGenerating: boolean;
     liveStepCount: number;
+    todos?: Array<{ id?: string; content: string; status: 'pending' | 'in_progress' | 'done' }>;
     artifacts: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }>;
     activity?: {
         version: 1;

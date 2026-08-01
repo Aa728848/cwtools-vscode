@@ -40,6 +40,8 @@ describe('ExternalToolHandler.isReadOnlyRunCommand (POSIX 跨平台)', () => {
             'git remote set-url origin https://example.com/x',
             'git config user.name agent',
             'git diff --output=out.patch',
+            'git status > status.txt',
+            'git status $(Remove-Item target.txt)',
         ]) {
             expect(isReadOnly(cmd), cmd).to.equal(false);
         }

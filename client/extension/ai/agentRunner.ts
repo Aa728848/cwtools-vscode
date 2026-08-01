@@ -233,7 +233,7 @@ export interface AgentRunnerOptions {
     /** Hook called before a file is written, allowing the caller to take a snapshot for rollback */
     onBeforeFileWrite?: (filePath: string, prevContent: string | null) => void;
     /** Callback when a sub-agent creates or modifies a todo list plan */
-    onTodoUpdate?: (todos: import('./types').TodoItem[]) => void;
+    onTodoUpdate?: import('./types').TodoUpdateCallback;
     /** 
 * Skip built-in validation loop (Phase 3). 
 * Orchestrator subagent uses this flag because Orchestrator has its own QualityGate mechanism, 
@@ -479,7 +479,8 @@ export class AgentRunner {
         iteration: number,
         messages: ChatMessage[],
         writtenFiles: string[],
-        topicId?: string
+        topicId?: string,
+        agentId?: string,
     ): Promise<void> {
         try {
             const fs = await import('fs');
@@ -500,7 +501,7 @@ export class AgentRunner {
                     .slice(-3)
                     .map(m => contentToString(m.content).substring(0, 500))
                     .join('\n---\n'),
-                todoSnapshot: JSON.stringify(this.toolExecutor.getTodos()),
+                todoSnapshot: JSON.stringify(this.toolExecutor.getTodos(agentId)),
                 topicId,
             };
 
@@ -1069,7 +1070,7 @@ export class AgentRunner {
         // 收集 Pinned Context 实时数据 (Todos & Diagnostics)
         let pinnedData: any = undefined;
         if (topicId) {
-            const todos = this.toolExecutor.getExternalToolHandler().getTodos();
+            const todos = this.toolExecutor.getExternalToolHandler().getTodos(options.agentId);
             const diagnostics: Array<{ file: string; message: string; line: number }> = [];
             try {
                 const vsDiags = vs.languages.getDiagnostics();
@@ -1449,7 +1450,7 @@ export class AgentRunner {
                 }
                 const isValid = orchestratorValidation?.success ?? (toolValidationOutcome !== 'repair');
                 updateRunStatus(isValid ? 'completed' : 'failed');
-                if (isValid) this.autoCompleteTodos();
+                if (isValid) this.autoCompleteTodos(options);
                 await clearResumeStateIfComplete();
                 return {
                     runId,
@@ -1479,7 +1480,7 @@ export class AgentRunner {
             // In addition, the validation loop will continue to generate steps after the reasoning ends, causing the external judgment card to be inconsistent with the internal state.
             if (options?.skipValidation) {
                 updateRunStatus('completed');
-                this.autoCompleteTodos();
+                this.autoCompleteTodos(options);
                 await clearResumeStateIfComplete();
                 return {
                     runId,
@@ -1527,7 +1528,7 @@ export class AgentRunner {
                 updateRunStatus('paused');
             } else {
                 updateRunStatus(validationResult.isValid ? 'completed' : 'failed');
-                if (validationResult.isValid) this.autoCompleteTodos();
+                if (validationResult.isValid) this.autoCompleteTodos(options);
             }
             await clearResumeStateIfComplete();
             return {
@@ -1566,6 +1567,8 @@ export class AgentRunner {
                 runMetrics,
             };
         } finally {
+            this.toolExecutor.clearSkillPolicyForRun(runId);
+            if (options?.agentId) this.toolExecutor.clearTodos(options.agentId);
             await this.tokenCalibration?.flush();
             this.retainedResumeRuns.delete(runId);
             unregisterActiveTurn();
@@ -1585,9 +1588,9 @@ export class AgentRunner {
      * Auto-mark remaining in-progress todos as done when the run completes successfully.
      * Prevents the task window from showing stale in-progress items after the AI finishes.
      */
-    private autoCompleteTodos(): void {
+    private autoCompleteTodos(options?: AgentRunnerOptions): void {
         const handler = this.toolExecutor.getExternalToolHandler();
-        const todos = handler.getTodos();
+        const todos = handler.getTodos(options?.agentId);
         if (todos.length === 0) return;
 
         let updated = false;
@@ -1598,7 +1601,11 @@ export class AgentRunner {
             }
         }
         if (updated) {
-            void handler.todoWrite({ todos });
+            void handler.todoWrite({ todos }, {
+                runnerOptions: options,
+                runEventSink: options?.runEventSink,
+                onTodoUpdate: options?.onTodoUpdate,
+            });
         }
     }
 
@@ -2195,7 +2202,7 @@ export class AgentRunner {
         let progressRevision = 0;
         let lastExtendedProgressRevision = 0;
         let lastExtendedActivityIteration = 0;
-        let completedTodoCount = this.toolExecutor.getTodos()
+        let completedTodoCount = this.toolExecutor.getTodos(options?.agentId)
             .filter(todo => todo.status === 'done').length;
         const blockingValidationIssues = new Set<string>();
         const diagnosticErrorsByTarget = new Map<string, number>();
@@ -2388,7 +2395,8 @@ export class AgentRunner {
                     iteration,
                     messages,
                     Array.from(confirmedWrittenFiles),
-                    options?.topicId
+                    options?.topicId,
+                    options?.agentId,
                 );
             }
 

@@ -33,6 +33,7 @@ import type {
     TokenUsage,
     AgentProfileSelection,
     ResolvedAgentProfile,
+    TodoUpdateScope,
 } from './types';
 import { contentToString } from './types';
 import { AgentRunner } from './agentRunner';
@@ -1084,7 +1085,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     // Permission callback for run_command tool (OpenCode strategy)
                     onPermissionRequest: (id: string, tool: string, description: string, command?: string, ctx?: any) =>
                         this.requestPermission(id, tool, description, command, ctx),
-                    onTodoUpdate: (todos) => this.sendTodoUpdate(todos),
+                    onTodoUpdate: (todos, scope) => this.sendTodoUpdate(todos, scope),
                     resumeFromState,
                     workflowId: this.currentWorkflowId ?? undefined,
                 },
@@ -2162,31 +2163,36 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
-    private _todoUpdateTimeout: NodeJS.Timeout | null = null;
-    private _pendingTodos: import('./types').TodoItem[] | null = null;
+    private readonly todoUpdateTimeouts = new Map<string, NodeJS.Timeout>();
+    private readonly pendingTodosByScope = new Map<string, { todos: import('./types').TodoItem[]; scope?: TodoUpdateScope }>();
 
     /** Push todo update to the WebView (called by toolExecutor.onTodoUpdate) with debouncing */
-    sendTodoUpdate(todos: import('./types').TodoItem[]): void {
+    sendTodoUpdate(todos: import('./types').TodoItem[], scope?: TodoUpdateScope): void {
         // Defensive try-catch: In a multi-Agent concurrent scenario, this callback is called synchronously by the sub-Agent's todoWrite.
         // Any uncaught exception will cause the child Agent's Promise to reject, thus blocking the coordinator.
         try {
-            this._pendingTodos = todos;
-            
-            if (this._todoUpdateTimeout) {
+            const scopeKey = scope?.agentId ? `agent:${scope.agentId}` : 'root';
+            this.pendingTodosByScope.set(scopeKey, { todos: todos.map(todo => ({ ...todo })), scope });
+
+            if (this.todoUpdateTimeouts.has(scopeKey)) {
                 return;
             }
 
             // Throttle updates to prevent UI lockups and I/O congestion during multi-agent concurrent execution
-            this._todoUpdateTimeout = setTimeout(() => {
-                this._todoUpdateTimeout = null;
-                const currentTodos = this._pendingTodos;
-                if (!currentTodos) return;
+            const timeout = setTimeout(() => {
+                this.todoUpdateTimeouts.delete(scopeKey);
+                const pending = this.pendingTodosByScope.get(scopeKey);
+                this.pendingTodosByScope.delete(scopeKey);
+                if (!pending) return;
+                const currentTodos = pending.todos;
+                const currentScope = pending.scope;
 
                 try {
-                    this.postMessage({ type: 'todoUpdate', todos: currentTodos });
+                    this.postMessage({ type: 'todoUpdate', todos: currentTodos, ...currentScope });
                 } catch { /* Prevent postMessage exception from affecting task.md writing */ }
 
-                // Natively save task.md in the topic folder
+                // Root tasks persist with the topic. Child tasks belong to their Agent view only.
+                if (currentScope?.agentId) return;
                 const topicId = this.topicManager.currentTopic?.id || 'default';
                 const topicDir = getPrivateTopicStorageDir(topicId, getProjectWorkspaceRoot());
                 if (topicDir && currentTodos.length > 0) {
@@ -2206,6 +2212,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     });
                 }
             }, 500);
+            this.todoUpdateTimeouts.set(scopeKey, timeout);
         } catch (e) {
             // Swallow the exception silently to ensure that the caller (sub-Agent todoWrite) is not affected
             ErrorReporter.debug(SOURCE.CHAT_PANEL, 'sendTodoUpdate: 回调异常已捕获', e);
@@ -3467,6 +3474,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             workflowId: this.currentWorkflowId,
             isGenerating: this._isGenerating,
             liveStepCount: this._liveSteps.length,
+            todos: this.agentRunner.toolExecutor.getTodos(),
             artifacts: this.artifactStore.list(),
             activity,
             runtimeInspector,

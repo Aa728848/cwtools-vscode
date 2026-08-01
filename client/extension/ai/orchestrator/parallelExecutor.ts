@@ -39,6 +39,62 @@ function isTimeoutLikeError(error?: string): boolean {
     return !!error && /timeout|timed out|idle timeout|absolute timeout|\u8d85\u65f6/i.test(error);
 }
 
+function normalizeDependencyId(id: string): string {
+    return id.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function dependencyEditDistance(left: string, right: string): number {
+    if (left === right) return 0;
+    if (!left) return right.length;
+    if (!right) return left.length;
+    const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+    for (let leftIndex = 1; leftIndex <= left.length; leftIndex++) {
+        let diagonal = previous[0]!;
+        previous[0] = leftIndex;
+        for (let rightIndex = 1; rightIndex <= right.length; rightIndex++) {
+            const above = previous[rightIndex]!;
+            previous[rightIndex] = Math.min(
+                above + 1,
+                previous[rightIndex - 1]! + 1,
+                diagonal + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+            );
+            diagonal = above;
+        }
+    }
+    return previous[right.length]!;
+}
+
+function findDependencyHealCandidate(
+    dependencyId: string,
+    nodeId: string,
+    nodeIds: readonly string[],
+): string | undefined {
+    const candidates = nodeIds
+        .filter(candidate => candidate !== nodeId)
+        .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+    const lowerDependency = dependencyId.toLowerCase();
+    const caseInsensitiveMatches = candidates.filter(candidate => candidate.toLowerCase() === lowerDependency);
+    if (caseInsensitiveMatches.length === 1) return caseInsensitiveMatches[0];
+    if (caseInsensitiveMatches.length > 1) return undefined;
+
+    const normalizedDependency = normalizeDependencyId(dependencyId);
+    if (!normalizedDependency) return undefined;
+    const normalizedMatches = candidates.filter(candidate => normalizeDependencyId(candidate) === normalizedDependency);
+    if (normalizedMatches.length === 1) return normalizedMatches[0];
+    if (normalizedMatches.length > 1) return undefined;
+
+    const threshold = normalizedDependency.length <= 4
+        ? 1
+        : normalizedDependency.length <= 10 ? 2 : Math.min(3, Math.floor(normalizedDependency.length / 4));
+    const ranked = candidates
+        .map(candidate => ({ candidate, distance: dependencyEditDistance(normalizedDependency, normalizeDependencyId(candidate)) }))
+        .filter(match => match.distance <= threshold)
+        .sort((left, right) => left.distance - right.distance
+            || (left.candidate < right.candidate ? -1 : left.candidate > right.candidate ? 1 : 0));
+    if (ranked.length === 0 || (ranked[1] && ranked[1].distance === ranked[0]!.distance)) return undefined;
+    return ranked[0]!.candidate;
+}
+
 export class ParallelExecutor {
     private readonly maxConcurrency: number;
     private globalTokenBudget: number;
@@ -100,34 +156,17 @@ export class ParallelExecutor {
         }
 
         const missingDependencies: Array<{ nodeId: string; dependencyId: string }> = [];
+        const proposedDependencies = new Map<string, string[]>();
+        const healedDependencies: Array<{ nodeId: string; dependencyId: string; matchedId: string }> = [];
+        const nodeIds = [...graph.nodes.keys()];
         for (const node of graph.nodes.values()) {
             const healedDeps: string[] = [];
             for (const depId of node.dependencies) {
                 if (!graph.nodes.has(depId)) {
-                    // 尝试在图里寻找相似度的真实节点 ID 进行防幻觉拼写自愈
-                    let matchedId: string | undefined = undefined;
-                    const depLower = depId.toLowerCase();
-                    for (const realId of graph.nodes.keys()) {
-                        const realLower = realId.toLowerCase();
-                        if (
-                            realLower.includes(depLower) || 
-                            depLower.includes(realLower) ||
-                            (realLower.startsWith('build') && depLower.startsWith('build')) ||
-                            (realLower.includes('loc') && depLower.includes('loc'))
-                        ) {
-                            matchedId = realId;
-                            break;
-                        }
-                    }
-
+                    const matchedId = findDependencyHealCandidate(depId, node.id, nodeIds);
                     if (matchedId) {
                         healedDeps.push(matchedId);
-                        const healMsg = aiText(
-                            `Dependency auto-heal: node ${node.id} depended on missing "${depId}", so it was linked to similar node "${matchedId}".`,
-                            `✨ 智能依赖自愈: 检测到节点 ${node.id} 依赖了不存在的 "${depId}"，已自动修正并关联至相似节点 "${matchedId}"`,
-                        );
-                        ErrorReporter.debug(SOURCE.ORCHESTRATOR, healMsg);
-                        emitStep({ type: 'thinking', content: healMsg, timestamp: Date.now() });
+                        healedDependencies.push({ nodeId: node.id, dependencyId: depId, matchedId });
                     } else {
                         missingDependencies.push({ nodeId: node.id, dependencyId: depId });
                     }
@@ -135,7 +174,7 @@ export class ParallelExecutor {
                     healedDeps.push(depId);
                 }
             }
-            node.dependencies = healedDeps;
+            proposedDependencies.set(node.id, healedDeps);
         }
 
         if (missingDependencies.length > 0) {
@@ -149,6 +188,34 @@ export class ParallelExecutor {
                 failedNodes: [...new Set(missingDependencies.map(d => d.nodeId))],
                 cancelledNodes: [],
             };
+        }
+
+        const originalDependencies = new Map<string, string[]>();
+        for (const node of graph.nodes.values()) {
+            originalDependencies.set(node.id, [...node.dependencies]);
+            node.dependencies = proposedDependencies.get(node.id) ?? [...node.dependencies];
+        }
+        const healedCycles = this.graphEngine.detectCycles(graph);
+        if (healedCycles) {
+            for (const node of graph.nodes.values()) {
+                node.dependencies = originalDependencies.get(node.id) ?? node.dependencies;
+            }
+            return {
+                success: false,
+                summary: `Task graph contains cyclic dependencies after dependency healing: ${healedCycles.map(c => c.join(' -> ')).join('; ')}`,
+                agentResults,
+                totalTokenUsage,
+                failedNodes: [...new Set(healedCycles.flat())],
+                cancelledNodes: [],
+            };
+        }
+        for (const healed of healedDependencies) {
+            const healMsg = aiText(
+                `Dependency auto-heal: node ${healed.nodeId} depended on missing "${healed.dependencyId}", so it was linked to uniquely similar node "${healed.matchedId}".`,
+                `依赖自动修复：节点 ${healed.nodeId} 依赖了不存在的 "${healed.dependencyId}"，已连接到唯一相似的节点 "${healed.matchedId}"。`,
+            );
+            ErrorReporter.debug(SOURCE.ORCHESTRATOR, healMsg);
+            emitStep({ type: 'thinking', content: healMsg, timestamp: Date.now() });
         }
 
         emitStep({

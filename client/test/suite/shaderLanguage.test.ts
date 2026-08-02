@@ -60,13 +60,13 @@ async function waitForServerReady(client: LanguageClient, timeoutMs = 120_000): 
     );
 }
 
-const shaderRulesConfigurationReady = (async () => {
+function assertShaderRulesConfiguration(): void {
     const rulesFolder = process.env.CWTOOLS_SHADER_TEST_RULES_FOLDER;
     assert.ok(rulesFolder, 'the Shader Extension Host test must provide a rules folder');
     const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
-    await config.update('rules_folder', rulesFolder, vscode.ConfigurationTarget.Global);
-    await config.update('rules_version', 'manual', vscode.ConfigurationTarget.Global);
-})();
+    assert.strictEqual(config.get('rules_folder'), rulesFolder, 'Shader rules must be configured before extension activation');
+    assert.strictEqual(config.get('rules_version'), 'manual', 'Shader tests must not start the remote rules updater');
+}
 
 suite('Paradox Shader LSP contract', function () {
     this.timeout(120_000);
@@ -76,7 +76,7 @@ suite('Paradox Shader LSP contract', function () {
     let client: LanguageClient;
 
     setup(async () => {
-        await shaderRulesConfigurationReady;
+        assertShaderRulesConfiguration();
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
         assert.ok(workspaceFolder, 'the Shader test workspace must be open');
         fixturePath = path.join(workspaceFolder.uri.fsPath, 'gfx', 'FX', 'shader_contract.fxh');

@@ -263,6 +263,15 @@ describe('webview smoke checks', () => {
         expect(script).to.include('let subagentScrollPending = false;');
     });
 
+    it('handles live Codex collapsibles before streaming DOM replacement can cancel clicks', () => {
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+
+        expect(script).to.include("chatArea.addEventListener('pointerdown'");
+        expect(script).to.include("control?.closest('.codex-live-host')");
+        expect(script).to.include('toggleCodexActivityControl(control)');
+        expect(script).to.include('suppressLiveCodexClickUntil');
+    });
+
     it('chat clear resets stale topic workspace panels', () => {
         const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
 

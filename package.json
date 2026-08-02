@@ -1,6 +1,6 @@
 {
   "name": "cwtools-vscode",
-  "version": "2.10.3",
+  "version": "2.10.4",
   "scripts": {
     "compile": "tsc -p ./.config/tsconfig.extension.json && rollup -c",
     "build:docs": "node tools/build-github-docs.js && node tools/build-release-readme.js",

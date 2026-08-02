@@ -183,6 +183,20 @@ describe('Codex activity view model', () => {
         expect(thinkingEvent?.status).to.equal('success');
     });
 
+    it('keeps a live activity group identity stable when it grows into mixed steps', () => {
+        const initial = firstGroup(buildLive([
+            { type: 'thinking_content', content: 'Checking schema', timestamp: 1000 },
+        ]));
+        const grown = firstGroup(buildLive([
+            { type: 'thinking_content', content: 'Checking schema', timestamp: 1000 },
+            { type: 'tool_call', toolName: 'query_cwt_schema', invocationId: '1', toolArgs: {}, timestamp: 1100 },
+        ]));
+
+        expect(initial.id.replace(/-\d+$/, '')).to.equal(grown.id.replace(/-\d+$/, ''));
+        expect(initial.kind).to.equal('thinking');
+        expect(grown.kind).to.equal('steps');
+    });
+
     it('suppresses legacy tool truncation warnings from transcript text', () => {
         const warning = '[WARNING: The result of tool query_cwt_schema was automatically truncated to 1000 characters to prevent context window overflow (Original size was 48000 chars).]';
         const model = build([

@@ -821,11 +821,11 @@ describe('AIService OpenAI Chat Completions compatibility', () => {
         expect(response.choices[0].message.content).to.equal('done');
     });
 
-    it('captures the usage trailer and finishes when a DeepSeek relay keeps the stream open', async () => {
+    it('finishes on a DeepSeek usage trailer without finish markers when the stream stays open', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;
         service.fetchWithRetry = async () => openChatCompletionsSseResponse([
-            `data:${JSON.stringify({ choices: [{ delta: { content: 'done' }, finish_reason: 'stop' }] })}\n\n`,
+            `data:${JSON.stringify({ choices: [{ delta: { content: 'done' }, finish_reason: null }] })}\n\n`,
             `data:${JSON.stringify({ choices: [], usage: { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105, prompt_cache_hit_tokens: 80 } })}\n\n`,
         ]);
 

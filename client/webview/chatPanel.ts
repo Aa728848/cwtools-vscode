@@ -5047,31 +5047,57 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         scrollBottom();
     }
 
-    chatArea.addEventListener('click', (e) => {
-        const groupToggle = (e.target as HTMLElement).closest('[data-codex-activity-group-toggle]') as HTMLElement | null;
+    function toggleCodexActivityControl(control: HTMLElement): boolean {
+        const groupToggle = control.closest('[data-codex-activity-group-toggle]') as HTMLElement | null;
         if (groupToggle) {
             const group = groupToggle.closest('.codex-activity-group') as HTMLElement | null;
-            if (!group) return;
+            if (!group) return false;
             const collapsed = group.classList.toggle('codex-activity-group-collapsed');
             groupToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-            return;
+            return true;
         }
 
-        const rowToggle = (e.target as HTMLElement).closest('[data-codex-activity-row-toggle]') as HTMLElement | null;
+        const rowToggle = control.closest('[data-codex-activity-row-toggle]') as HTMLElement | null;
         if (rowToggle) {
             const row = rowToggle.closest('.codex-activity-row') as HTMLElement | null;
-            if (!row) return;
+            if (!row) return false;
             const collapsed = row.classList.toggle('codex-activity-row-collapsed');
             rowToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-            return;
+            return true;
         }
 
-        const toggle = (e.target as HTMLElement).closest('[data-codex-turn-toggle]') as HTMLElement | null;
-        if (!toggle) return;
+        const toggle = control.closest('[data-codex-turn-toggle]') as HTMLElement | null;
+        if (!toggle) return false;
         const turn = toggle.closest('.codex-turn') as HTMLElement | null;
-        if (!turn) return;
+        if (!turn) return false;
         const collapsed = turn.classList.toggle('codex-turn-collapsed');
         toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        return true;
+    }
+
+    let suppressLiveCodexClickUntil = 0;
+    chatArea.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        const control = (e.target as HTMLElement).closest(
+            '[data-codex-activity-group-toggle], [data-codex-activity-row-toggle], [data-codex-turn-toggle]',
+        ) as HTMLElement | null;
+        if (!control?.closest('.codex-live-host')) return;
+        // Streaming replaces the live turn DOM on every animation frame, which can
+        // remove a pressed button before the browser dispatches its click event.
+        if (toggleCodexActivityControl(control)) {
+            suppressLiveCodexClickUntil = performance.now() + 750;
+        }
+    });
+
+    chatArea.addEventListener('click', (e) => {
+        const control = (e.target as HTMLElement).closest(
+            '[data-codex-activity-group-toggle], [data-codex-activity-row-toggle], [data-codex-turn-toggle]',
+        ) as HTMLElement | null;
+        if (!control) return;
+        if (control.closest('.codex-live-host') && e.detail > 0 && performance.now() <= suppressLiveCodexClickUntil) {
+            return;
+        }
+        toggleCodexActivityControl(control);
     });
 
     // ── Phase 5: Event delegation for inline permission buttons in tool timeline ──

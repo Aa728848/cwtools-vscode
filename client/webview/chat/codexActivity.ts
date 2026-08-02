@@ -472,7 +472,9 @@ function groupTurnItems(items: CodexTurnItem[], labels: CodexI18nText): CodexTur
             const startedAt = pending[0]!.timestamp;
             const endedAt = Math.max(...pending.map(event => event.timestamp + (event.durationMs || 0)));
             const group: CodexActivityGroup = {
-                id: `group-${pendingKind}-${startedAt}-${pending.length}`,
+                // Keep the identity stable while a live group grows or changes from a
+                // single-kind group into a mixed "steps" group.
+                id: `group-${startedAt}-${pending.length}`,
                 kind: pendingKind,
                 status: groupStatus(pending),
                 label: labelForGroup(pendingKind, pending.length, labels),

@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [2.10.4] - 2026-08-02
+
+### AI Agent 多轮收尾 / AI Agent Multi-turn Finalization
+- **[修复] 第二轮与编辑重发不再等待流连接自然关闭**：DeepSeek 官方 Provider 返回 `stream_options.include_usage` 的空 `choices` usage 尾帧时，即使缺少 `finish_reason` 和 `[DONE]`，也会将该协议尾帧识别为回合完成并主动释放流。
+  English: [Fix] Second turns and edit-resend runs no longer wait for the stream connection to close. An empty-`choices` usage trailer from the official DeepSeek provider now completes the turn even when both `finish_reason` and `[DONE]` are absent.
+- **[修复] 流式输出期间可正常展开工具步骤**：活动组在鼠标按下时立即切换，并在逐 token 重绘以及“思考”组增长为混合步骤组时保留展开状态。
+  English: [Fix] Tool steps remain expandable during streaming. Live controls now react before token-driven DOM replacement and preserve expansion when a thinking group grows into a mixed activity group.
+
+### 测试 / Tests
+- **[质量] 增加 DeepSeek usage 尾帧保持 HTTP 连接开启，以及实时工具组跨重绘展开的回归测试。**
+  English: [Quality] Added regressions for an open DeepSeek stream after its usage trailer and for live tool-group expansion across streaming redraws.
+
 ## [2.10.3] - 2026-08-02
 
 ### AI Agent 流式收尾 / AI Agent Stream Finalization

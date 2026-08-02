@@ -1297,7 +1297,17 @@ export class AIService {
                 if (typeof chunk.id === 'string' && chunk.id) responseIdBuf = chunk.id;
                 if (typeof chunk.created === 'number') createdBuf = chunk.created;
                 if (chunk.usage) { const u = chunk.usage as Record<string, any>; const promptTk = u.prompt_tokens ?? u.input_tokens ?? 0; const cached = extractUsageCachedTokens(u); const cacheCreation = extractUsageCacheCreationTokens(u, promptTk, cached); usageBuf = { prompt_tokens: promptTk, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? (promptTk + (u.completion_tokens ?? 0)), cached_tokens: cached, cache_creation_tokens: cacheCreation }; }
-                if (!choices || choices.length === 0) continue;
+                // With stream_options.include_usage, the protocol's final data
+                // chunk has an empty choices array and carries only usage. Some
+                // providers omit both finish_reason and [DONE], then keep the HTTP
+                // connection alive. The requested usage trailer is the final protocol
+                // frame for providers where we explicitly requested this shape.
+                if (!choices || choices.length === 0) {
+                    if (chunk.usage && STREAM_USAGE_PROVIDERS.has(providerId)) {
+                        terminalFrameSeen = true;
+                    }
+                    continue;
+                }
                 const delta = choices[0]!.delta as Record<string, unknown> | undefined;  
                 if (!delta) { finishReason = (choices[0]!.finish_reason as string) ?? finishReason; continue; }  
                 if (choices[0]!.finish_reason) finishReason = choices[0]!.finish_reason as string;  

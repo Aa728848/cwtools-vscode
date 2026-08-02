@@ -64,7 +64,29 @@ export const IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE = `Plan authoring guidance â
 
 export const EXECUTE_IMPLEMENTATION_PLAN_HANDOFF_CONTRACT = `${IMPLEMENTATION_PLAN_HANDOFF_CONTRACT}
 ${IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE}
-In a writable execution or coordinator mode, a separate approval stop is explicit only when you also successfully write this same complete document, including the cwtools-plan block, to Implementation_Plan.md in the exact current Agent Workspace Dir. Do not create that artifact for ordinary internal planning: continue through implementation and verification in the same turn.`;
+In a writable execution or coordinator mode, keep ordinary internal planning silent and continue through implementation and verification in the same turn. However, once you present a proposed implementation approach to the user as a reviewable plan, that presentation becomes an approval boundary: write this same complete document, including the cwtools-plan block, to Implementation_Plan.md in the exact current Agent Workspace Dir and STOP. Never display a user-facing plan and then continue into project writes or dispatch in the same turn.`;
+
+export function shouldPauseForInteractivePlan(
+    content: string,
+    context: { mode: AgentMode; approvedPlanExecution?: boolean },
+): boolean {
+    return !context.approvedPlanExecution
+        && EXECUTE_HANDOFF_MODES.has(context.mode)
+        && validateImplementationPlan(content).complete;
+}
+
+export function isCompleteImplementationPlanWrite(
+    toolName: string,
+    args: Record<string, unknown>,
+    targetPaths: readonly string[],
+): boolean {
+    if (toolName !== 'write_file' || typeof args.content !== 'string') return false;
+    const targets = targetPaths.length > 0
+        ? targetPaths
+        : typeof args.file === 'string' ? [args.file] : [];
+    return targets.some(target => PLAN_ARTIFACT_PATTERN.test(target))
+        && validateImplementationPlan(args.content).complete;
+}
 
 /** Runtime-only contract added after the cache-stable system prompt on approval continuations. */
 export function buildApprovedPlanExecutionReminder(): string {
@@ -270,7 +292,12 @@ export function hasImplementationPlanArtifact(
  */
 export function shouldRenderInteractivePlan(
     result: Pick<{ explanation: string; steps: AgentStep[] }, 'explanation' | 'steps'>,
-    context: { mode: AgentMode; planText?: string; hasCurrentPlanArtifact?: boolean },
+    context: {
+        mode: AgentMode;
+        planText?: string;
+        hasCurrentPlanArtifact?: boolean;
+        approvedPlanExecution?: boolean;
+    },
 ): boolean {
     const toolCalls = result.steps.filter(step => step.type === 'tool_call' && typeof step.toolName === 'string');
     const wrotePlanArtifact = context.hasCurrentPlanArtifact ?? hasImplementationPlanArtifact(result.steps);
@@ -278,8 +305,10 @@ export function shouldRenderInteractivePlan(
         && WRITE_TOOLS.has(step.toolName as any)
         && !PLAN_ARTIFACT_PATTERN.test(targetPath(step)));
     if (wroteProjectFile) return false;
-    if (context.mode !== 'plan' && (!EXECUTE_HANDOFF_MODES.has(context.mode) || !wrotePlanArtifact)) return false;
+    if (context.approvedPlanExecution) return false;
+    if (context.mode !== 'plan' && !EXECUTE_HANDOFF_MODES.has(context.mode)) return false;
 
     const planText = context.planText ?? (context.mode === 'plan' ? result.explanation : '');
-    return validateImplementationPlan(planText).complete;
+    return (context.mode === 'plan' || wrotePlanArtifact || shouldPauseForInteractivePlan(planText, context))
+        && validateImplementationPlan(planText).complete;
 }

@@ -106,7 +106,11 @@ import { createAgentRuntimeServices } from './runner/runtimeServices';
 import { runtimeFaultInjector } from './runner/faultInjection';
 import { threadStore } from './runner/threadStore';
 import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
-import { buildApprovedPlanExecutionReminder } from './executePlanHandoff';
+import {
+    buildApprovedPlanExecutionReminder,
+    isCompleteImplementationPlanWrite,
+    shouldPauseForInteractivePlan,
+} from './executePlanHandoff';
 import { appendCacheRequestUsage, isCacheCapableUsage, supportsOpenAiStylePrefixCache } from './cacheCapability';
 import {
     DEFAULT_GOAL_HARD_BUDGET_MULTIPLIER,
@@ -1999,6 +2003,7 @@ export class AgentRunner {
         let topLevelLengthRecoveries = 0;
         let prematureExecutionFinalRecoveries = 0;
         let executionActionObserved = false;
+        let interactivePlanApprovalPending = false;
         let ineffectiveCompactionCount = 0;
         const updateFinalPromptMetric = () => {
             if (!runMetrics) return;
@@ -3152,7 +3157,12 @@ export class AgentRunner {
             // If no tool calls (either format), we're done — the final answer is no emit thinking block
             if (!toolCalls || toolCalls.length === 0) {
                 const finalContent = this.cleanFinalContent(contentToString(assistantMessage.content));
-                const requiresUserInput = finalResponseRequiresUserInput(finalContent);
+                const requiresUserInput = finalResponseRequiresUserInput(finalContent)
+                    || interactivePlanApprovalPending
+                    || shouldPauseForInteractivePlan(finalContent, {
+                        mode,
+                        approvedPlanExecution: options?.approvedPlanExecution,
+                    });
                 if (!requiresUserInput
                     && prematureExecutionFinalRecoveries < 3
                     && shouldContinueAuthorizedExecution(
@@ -3438,6 +3448,13 @@ export class AgentRunner {
             }
 
             const toolResults: any[] = new Array(parsedCalls.length);
+            const submittedPlanIndex = options?.approvedPlanExecution
+                ? -1
+                : parsedCalls.findIndex(call => isCompleteImplementationPlanWrite(
+                    call.toolName,
+                    call.toolArgs,
+                    call.targetPaths,
+                ));
 
             for (const ci of parsedCalls) {
                 await runLedger.appendEvent(
@@ -3483,6 +3500,27 @@ export class AgentRunner {
                     }
                 }
                 const { toolName, toolArgs } = ci;
+
+                if (submittedPlanIndex >= 0
+                    && parsedCalls[submittedPlanIndex]?.invocationId !== ci.invocationId
+                    && isExecutionActionTool(toolName)) {
+                    const reason = 'An interactive Implementation Plan was submitted in this model step. '
+                        + 'Project writes, commands, and dispatch must wait for explicit user approval.';
+                    emitStep({
+                        type: 'validation',
+                        content: reason,
+                        timestamp: Date.now(),
+                        invocationId: ci.invocationId,
+                    });
+                    toolResults[i] = { success: false, error: reason, approvalBoundaryBlocked: true };
+                    await runLedger.appendEvent(
+                        runRecord.runId,
+                        'tool_call_end',
+                        { success: false, error: reason, approvalBoundaryBlocked: true },
+                        { invocationId: ci.invocationId },
+                    );
+                    continue;
+                }
 
                 if (ci.toolArgsParseError) {
                     let errMsg = `Tool argument JSON parse failed — ${ci.toolArgsParseError}. Please retry with valid JSON arguments.`;
@@ -3910,6 +3948,7 @@ export class AgentRunner {
                     ? parsedCalls[j]!.targetPaths
                     : [`tool:${parsedCalls[j]!.toolName}`];
                 const resultSucceeded = record?.success !== false && record?.error === undefined && record?.skipped !== true;
+                if (resultSucceeded && j === submittedPlanIndex) interactivePlanApprovalPending = true;
                 if (resultSucceeded && isExecutionActionTool(parsedCalls[j]!.toolName)) {
                     executionActionObserved = true;
                 }
@@ -4024,6 +4063,13 @@ export class AgentRunner {
                     content: `Tool stage advanced: ${previousStage ?? 'full'} -> ${toolStage ?? 'full'} (${availableTools.length} tools).`,
                     timestamp: Date.now(),
                 });
+            }
+
+            if (interactivePlanApprovalPending) {
+                return aiText(
+                    'The implementation plan is ready for your review. Execution will begin only after you explicitly approve it.',
+                    '实施方案已准备好，正在等待你的审阅。只有在你明确批准后才会开始执行。',
+                );
             }
 
             // Run emergency compaction only after every tool result has been

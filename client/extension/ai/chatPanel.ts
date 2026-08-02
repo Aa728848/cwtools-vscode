@@ -1161,6 +1161,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 mode: turnMode,
                 planText: interactivePlanText,
                 hasCurrentPlanArtifact,
+                approvedPlanExecution,
             });
             const wtPath = this.findGeneratedTopicFile(topicId, 'walkthrough.md');
             if (wtPath) {

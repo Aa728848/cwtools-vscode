@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [2.10.7] - 2026-08-02
+
+### AI Agent 方案确认边界 / AI Agent Plan Approval Boundary
+- **[修复] 执行模式展示方案后不再自动进入写入阶段**：静默的内部规划仍可在同一轮继续执行；但一旦 Agent 将拟执行方案作为可审阅内容展示，就会生成交互式方案卡并停止，只有用户明确批准后才进入写入或多 Agent 调度。
+  English: [Fix] Execute mode no longer proceeds automatically after presenting a reviewable implementation proposal. Silent internal planning may still continue in the same turn, but a user-facing plan now creates an interactive approval stop before writes or dispatch.
+- **[安全] 同一模型响应中提交完整 `Implementation_Plan.md` 时，后续项目写入、命令和 Agent 调度会被运行时拦截**，防止模型在方案卡尚未经过用户确认时抢先执行；已批准方案的续跑不会重复请求批准。
+  English: [Safety] When a complete `Implementation_Plan.md` is submitted, later project writes, commands, and Agent dispatches in the same model response are blocked by the runtime. Approved continuations do not reopen the approval boundary.
+
+### 测试 / Tests
+- **[质量] 增加执行模式无落盘方案、完整方案写入识别、批准后续跑和方案卡渲染边界的回归测试。**
+  English: [Quality] Added regressions for unpersisted Execute-mode proposals, complete plan-write detection, approved continuations, and interactive plan rendering boundaries.
+
 ## [2.10.6] - 2026-08-02
 
 ### AI Agent 快照与结算 / AI Agent Snapshot and Finalization

@@ -1,7 +1,9 @@
 import { expect } from 'chai';
 import {
     buildApprovedPlanExecutionReminder,
+    isCompleteImplementationPlanWrite,
     shouldRenderInteractivePlan,
+    shouldPauseForInteractivePlan,
     validateImplementationPlan,
 } from '../../extension/ai/executePlanHandoff';
 import {
@@ -155,12 +157,12 @@ describe('Execute-to-Plan handoff', () => {
         expect(validateImplementationPlan(cyclic).missing).to.include('acyclic operation dependencies');
     });
 
-    it('requires Execute-mode handoffs to create an explicit plan artifact', () => {
+    it('turns a complete Execute-mode proposal into an approval stop even before host persistence', () => {
         const plan = completePlan();
         expect(shouldRenderInteractivePlan({ explanation: plan, steps: [] }, {
             mode: 'utility',
             planText: plan,
-        })).to.equal(false);
+        })).to.equal(true);
         expect(shouldRenderInteractivePlan({
             explanation: plan,
             steps: [
@@ -171,6 +173,35 @@ describe('Execute-to-Plan handoff', () => {
             mode: 'utility',
             planText: plan,
         })).to.equal(true);
+    });
+
+    it('does not reopen the approval boundary during an approved execution continuation', () => {
+        const plan = completePlan();
+        expect(shouldPauseForInteractivePlan(plan, {
+            mode: 'utility',
+            approvedPlanExecution: true,
+        })).to.equal(false);
+        expect(shouldRenderInteractivePlan({ explanation: plan, steps: [] }, {
+            mode: 'utility',
+            planText: plan,
+            approvedPlanExecution: true,
+        })).to.equal(false);
+    });
+
+    it('recognizes only a complete exact Implementation_Plan write as a runtime approval boundary', () => {
+        const plan = completePlan();
+        expect(isCompleteImplementationPlanWrite('write_file', {
+            file: '.cwtools/topic/Implementation_Plan.md',
+            content: plan,
+        }, ['C:/storage/.cwtools/topic/Implementation_Plan.md'])).to.equal(true);
+        expect(isCompleteImplementationPlanWrite('write_file', {
+            file: '.cwtools/topic/Implementation_Plan.md',
+            content: '# Draft only',
+        }, ['C:/storage/.cwtools/topic/Implementation_Plan.md'])).to.equal(false);
+        expect(isCompleteImplementationPlanWrite('write_file', {
+            file: 'src/Implementation_Plan.md',
+            content: plan,
+        }, ['C:/workspace/src/not-the-plan.md'])).to.equal(false);
     });
 
     it('does not intercept an Execute result after a project write', () => {
@@ -188,7 +219,7 @@ describe('Execute-to-Plan handoff', () => {
         })).to.equal(false);
     });
 
-    it('rejects failed or generically named Execute-mode plan artifacts', () => {
+    it('falls back after a failed exact artifact but does not reinterpret another write as the approval artifact', () => {
         const plan = completePlan();
         expect(shouldRenderInteractivePlan({
             explanation: plan,
@@ -196,7 +227,7 @@ describe('Execute-to-Plan handoff', () => {
                 toolCall('write_file', '.cwtools/topic/Implementation_Plan.md'),
                 { ...successfulToolResult('write_file'), toolResult: { success: false, error: 'write failed' } },
             ],
-        }, { mode: 'utility', planText: plan })).to.equal(false);
+        }, { mode: 'utility', planText: plan })).to.equal(true);
         expect(shouldRenderInteractivePlan({
             explanation: plan,
             steps: [toolCall('write_file', '.cwtools/topic/plan.md'), successfulToolResult('write_file')],
@@ -207,6 +238,7 @@ describe('Execute-to-Plan handoff', () => {
         const mainPrompt = buildBuildSystemPrompt('', 'Synthetic', false);
         const childPrompt = buildBuildSystemPrompt('', 'Synthetic', true);
         expect(mainPrompt).to.include('cwtools-plan');
+        expect(mainPrompt).to.include('Never show a plan and then continue into writes or dispatch in the same turn');
         expect(childPrompt).to.not.include('cwtools-plan');
         expect(childPrompt).to.include('Slim Build Contract');
     });

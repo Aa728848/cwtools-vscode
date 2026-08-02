@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.10.8] - 2026-08-02
+
+### AI Agent 语义模式路由 / AI Agent Semantic Mode Routing
+- **[修复] 自动任务模式现在完全由模型按对话语义判断**：执行、计划、探索、审查以及显式多 Agent 委派不再被关键词分类器覆盖；确定性文本规则仅在路由调用失败或超时时作为安全回退。
+  English: [Fix] Automatic task modes are now selected entirely from model-level conversation semantics. Execute, Plan, Explore, Review, and explicit Multi-Agent delegation are no longer overridden by keyword classifiers; deterministic text rules remain only as the safe fallback when routing fails or times out.
+- **[修复] 用户明确要求开始、继续或按已定方案执行时会进入执行模式**；如果仍存在会改变结果、范围或行为的关键选择，则保持在计划权限边界，待用户敲定后由下一轮语义判断正常进入执行。
+  English: [Fix] Requests to start, continue, or carry out an agreed plan now enter Execute mode. Material unresolved choices remain behind the Plan authorization boundary, and the next semantic routing turn can enter Execute normally after the user decides.
+- **[安全] 能力领域继续完全由用户控制**：Paradox / CWTools 与通用编码领域不会被模型或请求语义自动切换；路由也不会改变权限配置或审批策略。
+  English: [Safety] Capability domains remain entirely user-owned. Model semantics cannot switch between Paradox/CWTools and General Coding, and routing never changes permission profiles or approval policy.
+
+### 对话界面 / Conversation UI
+- **[优化] 对话中显示语义路由进度与可展开判断摘要**：用户可以看到当前选择的任务模式、单/多 Agent、置信度和有界证据；路由失败时明确显示规则回退，不再呈现为无反馈等待。
+  English: [Improvement] The conversation now shows semantic-routing progress and an expandable bounded decision summary with task mode, Agent strategy, confidence, and evidence. Rule fallback is shown explicitly when routing is unavailable.
+
+### 测试 / Tests
+- **[质量] 增加语义执行授权、显式只读、用户决策阻断、手动领域保持、路由协议和 Webview 展示回归测试。**
+  English: [Quality] Added regressions for semantic execution authorization, explicit no-write requests, user-decision blocking, manual domain preservation, routing protocol validation, and Webview presentation.
+
 ## [2.10.7] - 2026-08-02
 
 ### AI Agent 方案确认边界 / AI Agent Plan Approval Boundary

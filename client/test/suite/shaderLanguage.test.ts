@@ -32,16 +32,35 @@ function applySemanticDelta(previous: number[], delta: SemanticTokensDeltaRespon
     return next;
 }
 
-async function waitForServerReady(client: LanguageClient, timeoutMs = 120_000): Promise<void> {
+function requestValidationStatus(client: LanguageClient, timeoutMs = 2_000): Promise<ValidationStatusResponse | null> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+            () => reject(new Error(`validation status request timed out after ${timeoutMs}ms`)),
+            timeoutMs,
+        );
+        client.sendRequest<ValidationStatusResponse | null>('workspace/executeCommand', {
+            command: 'cwtools.ai.getValidationStatus',
+            arguments: [],
+        }).then(
+            status => {
+                clearTimeout(timer);
+                resolve(status);
+            },
+            error => {
+                clearTimeout(timer);
+                reject(error);
+            },
+        );
+    });
+}
+
+async function waitForServerReady(client: LanguageClient, timeoutMs = 90_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     let lastStatus: ValidationStatusResponse | null | undefined;
     let lastError: unknown;
     while (Date.now() < deadline) {
         try {
-            lastStatus = await client.sendRequest<ValidationStatusResponse | null>('workspace/executeCommand', {
-                command: 'cwtools.ai.getValidationStatus',
-                arguments: [],
-            });
+            lastStatus = await requestValidationStatus(client);
         } catch (error) {
             lastError = error;
             await new Promise(resolve => setTimeout(resolve, 250));

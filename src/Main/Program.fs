@@ -8367,6 +8367,68 @@ type Server(client: ILanguageClient) =
             |> catchError { documentChanges = None; changes = Map.empty }
 
         member this.ExecuteCommand(p: ExecuteCommandParams) : Async<ExecuteCommandResponse option> =
+            let validationStatusResult () =
+                let currentEpoch = diagnosticEpoch.Value
+                let currentModelEpoch = modelEpochSnapshot ()
+                let totalFiles = fileDiagnosticStates.Count
+                let pendingFiles =
+                    fileDiagnosticStates.Values
+                    |> Seq.filter (fun state ->
+                        state.freshness <> Fresh
+                        || not (sameModelEpoch state.modelEpoch currentModelEpoch))
+                    |> Seq.length
+                let allPendingKinds =
+                    Seq.append
+                        (fileDiagnosticStates.Values |> Seq.collect (fun state -> state.pendingGlobalKinds))
+                        (pendingRefreshDomainList ())
+                    |> Seq.distinct
+                    |> Seq.toArray
+                let pendingRefreshDomains = pendingRefreshDomainList ()
+                let freshness =
+                    if pendingFiles = 0 then "fresh"
+                    elif pendingFiles < totalFiles then "pending"
+                    else "stale"
+                let runtime = validationRuntimeSnapshot ()
+                let loading = loadingRuntimeSnapshot ()
+                let modelReadyForKnowledgeExport =
+                    not runtime.inProgress
+                    && not loading.inProgress
+                    && pendingRefreshDomains.IsEmpty
+                JsonValue.Record
+                    [| "ok",                 JsonValue.Boolean true
+                       "epoch",              JsonValue.Number(decimal currentEpoch)
+                       "modelEpoch",
+                           JsonValue.Record
+                               [| "game", JsonValue.Number(decimal currentModelEpoch.game)
+                                  "rules", JsonValue.Number(decimal currentModelEpoch.rules)
+                                  "types", JsonValue.Number(decimal currentModelEpoch.types)
+                                  "localisation", JsonValue.Number(decimal currentModelEpoch.localisation) |]
+                       "freshness",          JsonValue.String freshness
+                       "totalFiles",         JsonValue.Number(decimal totalFiles)
+                       "pendingFiles",       JsonValue.Number(decimal pendingFiles)
+                       "pendingGlobalKinds", JsonValue.Array(allPendingKinds |> Array.map JsonValue.String)
+                       "pendingRefreshDomains", JsonValue.Array(pendingRefreshDomains |> List.map JsonValue.String |> Array.ofList)
+                       "modelReadyForKnowledgeExport", JsonValue.Boolean modelReadyForKnowledgeExport
+                       "inProgress",         JsonValue.Boolean runtime.inProgress
+                       "inProgressFile",     JsonValue.String runtime.inProgressFile
+                       "queueDepth",         JsonValue.Number(decimal runtime.queueDepth)
+                       "debounceQueueDepth", JsonValue.Number(decimal runtime.debounceQueueDepth)
+                       "needsTypeRefresh",   JsonValue.Boolean needsTypeRefresh
+                       "delayedLocalisationUpdate", JsonValue.Boolean delayedLocUpdate
+                       "refreshSkipCount",   JsonValue.Number(decimal refreshSkipCount)
+                       "nextAnalyzeDelayMs", JsonValue.Number(decimal (int delayTime.TotalMilliseconds))
+                       "lastTypeRefreshRequestedAtUnixMs", JsonValue.Number(decimal (dateTimeToUnixMs lastTypeRefreshRequestAt))
+                       "lastTypeRefreshCompletedAtUnixMs", JsonValue.Number(decimal (dateTimeToUnixMs lastTypeRefreshCompletedAt))
+                       "lastGlobalRefreshAtUnixMs", JsonValue.Number(decimal (dateTimeToUnixMs lastGlobalRefreshAt))
+                       "openDocuments",      JsonValue.Number(decimal (docs.OpenFiles() |> List.length))
+                       "refreshDomains",     refreshDomainSnapshotJson ()
+                       "runtime",            getRuntimeSnapshotJson ()
+                       "loading",            getLoadingSnapshotJson ()
+                       "completion",         getCompletionSnapshotJson ()
+                       "diagnosticSummary",  getDiagnosticSummaryJson ()
+                       "memory",             getMemorySnapshotJson ()
+                       "caches",             getCacheSnapshotJson () |]
+
             let queryProjectKnowledgeDbCommand args =
                 let optionsRecord =
                     args
@@ -8419,7 +8481,11 @@ type Server(client: ILanguageClient) =
                                 [| "ok", JsonValue.Boolean false
                                    "status", JsonValue.String "error"
                                    "error", JsonValue.String error.Message |]
-            async {
+            if p.command = "cwtools.ai.getValidationStatus" then
+                // Readiness must remain observable while the initial project load owns
+                // the game-state write lock or has failed before gameObj is assigned.
+                async.Return(Some(validationStatusResult ()))
+            else async {
                 return
                     match gameObj with
                     | Some game ->
@@ -11137,68 +11203,7 @@ type Server(client: ILanguageClient) =
                         // - cwtools.ai.getValidationStatus -
                         // Return global verification status summary: current epoch, number of pending files, total number of files
                         | { command = "cwtools.ai.getValidationStatus" } ->
-                            let currentEpoch = diagnosticEpoch.Value
-                            let currentModelEpoch = modelEpochSnapshot ()
-                            let totalFiles = fileDiagnosticStates.Count
-                            let pendingFiles =
-                                fileDiagnosticStates.Values
-                                |> Seq.filter (fun s ->
-                                    s.freshness <> Fresh
-                                    || not (sameModelEpoch s.modelEpoch currentModelEpoch))
-                                |> Seq.length
-                            let allPendingKinds =
-                                Seq.append
-                                    (fileDiagnosticStates.Values |> Seq.collect (fun s -> s.pendingGlobalKinds))
-                                    (pendingRefreshDomainList ())
-                                |> Seq.distinct
-                                |> Seq.toArray
-                            let pendingRefreshDomains = pendingRefreshDomainList ()
-                            let freshness =
-                                if pendingFiles = 0 then "fresh"
-                                elif pendingFiles < totalFiles then "pending"
-                                else "stale"
-                            let runtime = validationRuntimeSnapshot ()
-                            let loading = loadingRuntimeSnapshot ()
-                            let modelReadyForKnowledgeExport =
-                                not runtime.inProgress
-                                && not loading.inProgress
-                                && pendingRefreshDomains.IsEmpty
-                            let result =
-                                JsonValue.Record
-                                    [| "ok",                 JsonValue.Boolean true
-                                       "epoch",             JsonValue.Number(decimal currentEpoch)
-                                       "modelEpoch",
-                                           JsonValue.Record
-                                               [| "game", JsonValue.Number(decimal currentModelEpoch.game)
-                                                  "rules", JsonValue.Number(decimal currentModelEpoch.rules)
-                                                  "types", JsonValue.Number(decimal currentModelEpoch.types)
-                                                  "localisation", JsonValue.Number(decimal currentModelEpoch.localisation) |]
-                                       "freshness",         JsonValue.String freshness
-                                       "totalFiles",        JsonValue.Number(decimal totalFiles)
-                                       "pendingFiles",      JsonValue.Number(decimal pendingFiles)
-                                       "pendingGlobalKinds",JsonValue.Array(allPendingKinds |> Array.map JsonValue.String)
-                                       "pendingRefreshDomains",JsonValue.Array(pendingRefreshDomains |> List.map JsonValue.String |> Array.ofList)
-                                       "modelReadyForKnowledgeExport",JsonValue.Boolean modelReadyForKnowledgeExport
-                                       "inProgress",        JsonValue.Boolean runtime.inProgress
-                                       "inProgressFile",    JsonValue.String runtime.inProgressFile
-                                       "queueDepth",        JsonValue.Number(decimal runtime.queueDepth)
-                                       "debounceQueueDepth",JsonValue.Number(decimal runtime.debounceQueueDepth)
-                                       "needsTypeRefresh",  JsonValue.Boolean needsTypeRefresh
-                                       "delayedLocalisationUpdate", JsonValue.Boolean delayedLocUpdate
-                                       "refreshSkipCount",  JsonValue.Number(decimal refreshSkipCount)
-                                       "nextAnalyzeDelayMs",JsonValue.Number(decimal (int delayTime.TotalMilliseconds))
-                                       "lastTypeRefreshRequestedAtUnixMs", JsonValue.Number(decimal (dateTimeToUnixMs lastTypeRefreshRequestAt))
-                                       "lastTypeRefreshCompletedAtUnixMs", JsonValue.Number(decimal (dateTimeToUnixMs lastTypeRefreshCompletedAt))
-                                       "lastGlobalRefreshAtUnixMs", JsonValue.Number(decimal (dateTimeToUnixMs lastGlobalRefreshAt))
-                                       "openDocuments",     JsonValue.Number(decimal (docs.OpenFiles() |> List.length))
-                                       "refreshDomains",    refreshDomainSnapshotJson ()
-                                       "runtime",           getRuntimeSnapshotJson ()
-                                       "loading",           getLoadingSnapshotJson ()
-                                       "completion",        getCompletionSnapshotJson ()
-                                       "diagnosticSummary", getDiagnosticSummaryJson ()
-                                       "memory",            getMemorySnapshotJson ()
-                                       "caches",            getCacheSnapshotJson () |]
-                            Some result
+                            Some(validationStatusResult ())
 
                         | { command = "cwtools.ai.revalidateFiles"
                             arguments = revalArgs } ->

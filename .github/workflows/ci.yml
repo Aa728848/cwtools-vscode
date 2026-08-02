@@ -57,6 +57,15 @@ jobs:
           --output release/bin/server/linux-x64
       - name: Run Shader Extension Host contract
         run: xvfb-run -a npm run test:shader-lsp
+        env:
+          GSETTINGS_BACKEND: memory
+      - name: Dump Shader Extension Host logs
+        if: failure()
+        shell: bash
+        run: >-
+          find .vscode-test/shader-user-data/logs -type f
+          \( -name '*Paradox Language Server.log' -o -name '*MemDiag.log' \)
+          -print -exec tail -n 500 '{}' \;
 
   dotnet:
     name: .NET server build

@@ -721,6 +721,10 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                             // Folding scans only the current DocumentStore text. It
                             // must remain available while the game model has a writer.
                             processQueue.Add(ProcessLockFreeRequest(id, task, cancel))
+                        | ExecuteCommand p when p.command = "cwtools.ai.getValidationStatus" ->
+                            // Readiness snapshots use independently synchronized state
+                            // and must remain observable while project loading has the writer.
+                            processQueue.Add(ProcessLockFreeRequest(id, task, cancel))
                         | _ ->
                             processQueue.Add(ProcessRequest(id, task, cancel, isReadOnly, lockFallback))
                 | Parser.ResponseMessage(id, result) -> responseAgent.Post(Response(id, result))

@@ -48,6 +48,12 @@ export interface ModelAgentProfileDecision {
     intent: Exclude<AgentIntent, 'auto'>;
     strategy: Exclude<AgentExecutionStrategy, 'auto'>;
     requiresUserDecision: boolean;
+    /** Semantic confirmation that the user explicitly asked to start or continue execution. */
+    explicitExecutionRequest?: boolean;
+    /** Semantic confirmation that the user explicitly prohibited writes or execution. */
+    explicitNoWriteRequest?: boolean;
+    /** Semantic confirmation that the user explicitly requested multiple Agents. */
+    explicitDelegationRequest?: boolean;
     reason: string;
     confidence?: number;
     evidence?: string[];
@@ -168,6 +174,15 @@ export function parseModelAgentProfileDecision(raw: string): ModelAgentProfileDe
         if (candidate.requiresUserDecision !== undefined && typeof candidate.requiresUserDecision !== 'boolean') {
             return undefined;
         }
+        if (candidate.explicitExecutionRequest !== undefined && typeof candidate.explicitExecutionRequest !== 'boolean') {
+            return undefined;
+        }
+        if (candidate.explicitNoWriteRequest !== undefined && typeof candidate.explicitNoWriteRequest !== 'boolean') {
+            return undefined;
+        }
+        if (candidate.explicitDelegationRequest !== undefined && typeof candidate.explicitDelegationRequest !== 'boolean') {
+            return undefined;
+        }
         const confidence = typeof candidate.confidence === 'number'
             ? Math.max(0, Math.min(1, candidate.confidence))
             : undefined;
@@ -178,6 +193,9 @@ export function parseModelAgentProfileDecision(raw: string): ModelAgentProfileDe
             intent: candidate.intent as ModelAgentProfileDecision['intent'],
             strategy: candidate.strategy,
             requiresUserDecision: candidate.requiresUserDecision === true,
+            explicitExecutionRequest: candidate.explicitExecutionRequest === true,
+            explicitNoWriteRequest: candidate.explicitNoWriteRequest === true,
+            explicitDelegationRequest: candidate.explicitDelegationRequest === true,
             reason: typeof candidate.reason === 'string' ? candidate.reason.trim().slice(0, 240) : '',
             ...(confidence !== undefined ? { confidence } : {}),
             ...(evidence !== undefined ? { evidence } : {}),
@@ -188,30 +206,26 @@ export function parseModelAgentProfileDecision(raw: string): ModelAgentProfileDe
 }
 
 export function resolveAgentProfileFromModelDecision(
-    text: string,
+    _text: string,
     profile: AgentProfileSelection,
     decision: ModelAgentProfileDecision,
-    hints: AgentProfileResolveHints = {},
+    _hints: AgentProfileResolveHints = {},
 ): ResolvedAgentProfile {
     const selection = normalizeAgentProfile(profile);
-    const fallback = resolveAgentProfile(text, selection, hints);
     const routeConfidence = decision.confidence ?? 0.65;
     // Capability domain is user-owned. Semantic routing may change task intent
     // and execution topology, but never Paradox/General capabilities.
     const domain: ResolvedAgentProfile['domain'] = selection.domain === 'general' ? 'general' : 'paradox';
-    const explicitNoWrite = NO_WRITE_INTENT_RE.test(text) && !DIRECT_WRITE_OVERRIDE_RE.test(text);
-    const directWriteRequested = DIRECT_WRITE_OVERRIDE_RE.test(text);
-    const terseModificationAnswer = text.trim().length <= 80
-        && (hints.previousUserRequests?.length ?? 0) > 0
-        && fallback.intent === 'execute'
-        && !PLAN_INTENT_RE.test(text);
+    // Once semantic routing succeeds, no keyword classifier may override it.
+    // Regex admission remains only in resolveAgentProfile(), the unavailable-
+    // router fallback path.
     const routedIntent = decision.requiresUserDecision
         ? 'plan'
-        : explicitNoWrite
-            ? fallback.intent
-            : directWriteRequested || terseModificationAnswer
-            ? 'execute'
-            : decision.intent;
+        : decision.explicitNoWriteRequest === true
+            ? (decision.intent === 'execute' ? 'explore' : decision.intent)
+            : decision.explicitExecutionRequest === true
+                ? 'execute'
+                : decision.intent;
     // A material unresolved choice is a hard read/plan boundary even when the
     // request also contains mutation verbs. Only a later user answer may admit
     // execution.
@@ -224,7 +238,7 @@ export function resolveAgentProfileFromModelDecision(
     // recommend it, but only an explicit user request commits at admission;
     // broad tasks can still dispatch after repository-backed decomposition.
     const selectedStrategy = selection.strategy === 'auto'
-        ? (MULTI_AGENT_RE.test(text) ? 'multi' : 'single')
+        ? (decision.explicitDelegationRequest === true ? 'multi' : 'single')
         : selection.strategy;
     const strategy = intent === 'execute' ? selectedStrategy : 'single';
     const base = {

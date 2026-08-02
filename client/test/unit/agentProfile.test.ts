@@ -45,7 +45,11 @@ describe('agent profile', () => {
     it('parses strict model routing decisions from plain or fenced JSON', () => {
         expect(parseModelAgentProfileDecision(
             '```json\n{"domain":"paradox","intent":"execute","strategy":"multi","reason":" broad task "}\n```',
-        )).to.deep.equal({ intent: 'execute', strategy: 'multi', requiresUserDecision: false, reason: 'broad task' });
+        )).to.deep.equal({
+            intent: 'execute', strategy: 'multi', requiresUserDecision: false,
+            explicitExecutionRequest: false, explicitNoWriteRequest: false, explicitDelegationRequest: false,
+            reason: 'broad task',
+        });
         expect(parseModelAgentProfileDecision(
             `{"domain":"general","intent":"explore","strategy":"single","reason":"${'x'.repeat(300)}"}`,
         )?.reason).to.have.length(240);
@@ -54,9 +58,19 @@ describe('agent profile', () => {
         )).to.equal(undefined);
         expect(parseModelAgentProfileDecision(
             '{"domain":"unknown","intent":"execute","strategy":"single"}',
-        )).to.deep.equal({ intent: 'execute', strategy: 'single', requiresUserDecision: false, reason: '' });
+        )).to.deep.equal({
+            intent: 'execute', strategy: 'single', requiresUserDecision: false,
+            explicitExecutionRequest: false, explicitNoWriteRequest: false, explicitDelegationRequest: false,
+            reason: '',
+        });
         expect(parseModelAgentProfileDecision(
             '{"intent":"execute","strategy":"single","requiresUserDecision":"yes"}',
+        )).to.equal(undefined);
+        expect(parseModelAgentProfileDecision(
+            '{"intent":"execute","strategy":"single","explicitExecutionRequest":"yes"}',
+        )).to.equal(undefined);
+        expect(parseModelAgentProfileDecision(
+            '{"intent":"execute","strategy":"single","explicitDelegationRequest":"yes"}',
         )).to.equal(undefined);
     });
 
@@ -65,7 +79,7 @@ describe('agent profile', () => {
             intent: 'execute', strategy: 'multi', requiresUserDecision: false, reason: 'independent workstreams',
         })).to.include({ domain: 'paradox', intent: 'execute', strategy: 'single', mode: 'build' });
         expect(resolveAgentProfileFromModelDecision('use multiple agents for this mod change', DEFAULT_AGENT_PROFILE, {
-            intent: 'execute', strategy: 'multi', requiresUserDecision: false, reason: 'independent workstreams',
+            intent: 'execute', strategy: 'multi', explicitDelegationRequest: true, requiresUserDecision: false, reason: 'explicit delegation',
         })).to.include({ domain: 'paradox', intent: 'execute', strategy: 'multi', mode: 'script' });
     });
 
@@ -131,7 +145,7 @@ describe('agent profile', () => {
         expect(resolved).to.include({ domain: 'paradox', intent: 'execute', strategy: 'single', mode: 'build' });
 
         const routed = resolveAgentProfileFromModelDecision('只改一处', DEFAULT_AGENT_PROFILE, {
-            intent: 'explore', strategy: 'single', requiresUserDecision: false, reason: 'short follow-up',
+            intent: 'execute', strategy: 'single', explicitExecutionRequest: true, requiresUserDecision: false, reason: 'short answer confirms execution scope',
         }, {
             previousDomain: 'paradox',
             previousUserRequests: ['把选中的 GFX_colony_type_capital 改成 GFX_colony_type_bureaucratic'],
@@ -139,9 +153,9 @@ describe('agent profile', () => {
         expect(routed).to.include({ intent: 'execute', strategy: 'single', mode: 'build' });
     });
 
-    it('keeps explicit cancellation read-only even if the model requests execution', () => {
+    it('keeps semantic cancellation read-only without keyword overrides', () => {
         const routed = resolveAgentProfileFromModelDecision('算了，先不改', DEFAULT_AGENT_PROFILE, {
-            intent: 'execute', strategy: 'multi', requiresUserDecision: false, reason: 'incorrect mutation classification',
+            intent: 'explore', strategy: 'single', explicitNoWriteRequest: true, requiresUserDecision: false, reason: 'the user cancelled changes',
         }, {
             previousDomain: 'paradox',
             previousUserRequests: ['修改这个事件'],
@@ -228,7 +242,7 @@ describe('agent profile', () => {
 
     it('keeps semantic read-only intent even when the wording also contains a write keyword', () => {
         const routed = resolveAgentProfileFromModelDecision('分析为什么这个修复方案会失败', DEFAULT_AGENT_PROFILE, {
-            intent: 'explore', strategy: 'single', requiresUserDecision: false, reason: 'the user requested analysis',
+            intent: 'explore', strategy: 'single', explicitNoWriteRequest: true, requiresUserDecision: false, reason: 'the user requested analysis',
         });
         expect(routed).to.include({ intent: 'explore', strategy: 'single', mode: 'explore' });
         expect(routed.admission.authorization).to.equal('read_only');
@@ -236,12 +250,21 @@ describe('agent profile', () => {
 
     it('blocks execution while a material choice still belongs to the user', () => {
         const routed = resolveAgentProfileFromModelDecision('实现导入功能，格式你看着选', DEFAULT_AGENT_PROFILE, {
-            intent: 'execute', strategy: 'multi', requiresUserDecision: true, reason: 'the file format changes public behavior',
+            intent: 'execute', strategy: 'multi', explicitExecutionRequest: true, explicitDelegationRequest: true, requiresUserDecision: true, reason: 'the file format changes public behavior',
         });
         expect(routed).to.include({
             intent: 'plan', strategy: 'single', mode: 'plan', requiresUserDecision: true, routingSource: 'model',
         });
         expect(routed.admission.authorization).to.equal('plan_write_only');
+    });
+
+    it('enters Execute when semantic routing confirms the user asked to proceed', () => {
+        const routed = resolveAgentProfileFromModelDecision('方案没问题，就这么做', DEFAULT_AGENT_PROFILE, {
+            intent: 'plan', strategy: 'single', explicitExecutionRequest: true, requiresUserDecision: false,
+            reason: 'the user approved the plan and asked to carry it out',
+        });
+        expect(routed).to.include({ intent: 'execute', strategy: 'single', mode: 'build', requiresUserDecision: false });
+        expect(routed.admission.authorization).to.equal('workspace_write');
     });
 
     it('uses semantic routing whenever task intent is automatic', () => {

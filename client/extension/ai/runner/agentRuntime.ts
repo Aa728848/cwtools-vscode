@@ -24,6 +24,7 @@ import {
 } from './state/runtimeModels';
 import type { DomainStateStore } from './state/domainStateStore';
 import { createStepRequest, type StepRequest } from './stepRequest';
+import { TranscriptStreamBuffer } from './transcriptStreamBuffer';
 import { sideQuestionService, type SideQuestion } from './sideQuestionService';
 import { TOOL_REGISTRY } from '../tools/registry';
 import { conversationUndoCoordinator, type UndoResult } from './undoCoordinator';
@@ -128,8 +129,7 @@ export interface AgentRuntimeInspector {
 interface TranscriptRuntimeState {
     tail: Promise<void>;
     stepOrdinal: number;
-    streamTextByTurn: Map<string, string>;
-    initializedStreams: Set<string>;
+    streams: TranscriptStreamBuffer;
 }
 
 interface ModelBindingState {
@@ -456,7 +456,7 @@ export class AgentRuntime {
         const currentGoal = await goalStore.getGoal(topicId, threadId);
         if (currentGoal) goalRuntime.goal = currentGoal;
         await this.flushTranscript(topicId, threadId);
-        const streamed = this.getTranscriptRuntimeState(topicId, threadId).initializedStreams.has(turnId);
+        const streamed = this.getTranscriptRuntimeState(topicId, threadId).streams.hasStream(turnId);
         const finalStepId = streamed ? `${turnId}:assistant-stream` : result.runId ?? `${turnId}:result`;
         await this.appendTranscriptOperations(topicId, threadId, [
             {
@@ -1263,8 +1263,7 @@ export class AgentRuntime {
             ?? scope.set<TranscriptRuntimeState>('transcriptRuntime', {
                 tail: Promise.resolve(),
                 stepOrdinal: 0,
-                streamTextByTurn: new Map(),
-                initializedStreams: new Set(),
+                streams: new TranscriptStreamBuffer(),
             });
     }
 
@@ -1306,13 +1305,43 @@ export class AgentRuntime {
     }
 
     private flushTranscript(topicId: string, threadId: string): Promise<void> {
-        return this.getTranscriptRuntimeState(topicId, threadId).tail;
+        const state = this.getTranscriptRuntimeState(topicId, threadId);
+        for (const turnId of state.streams.pendingTurnIds()) {
+            this.flushPendingTranscriptStream(topicId, threadId, turnId);
+        }
+        return state.tail;
     }
 
     private clearTranscriptTurnState(topicId: string, threadId: string, turnId: string): void {
         const state = this.getTranscriptRuntimeState(topicId, threadId);
-        state.streamTextByTurn.delete(turnId);
-        state.initializedStreams.delete(turnId);
+        state.streams.clear(turnId);
+    }
+
+    private flushPendingTranscriptStream(topicId: string, threadId: string, turnId: string): Promise<void> {
+        const batch = this.getTranscriptRuntimeState(topicId, threadId).streams.take(turnId);
+        if (!batch) return this.getTranscriptRuntimeState(topicId, threadId).tail;
+        return this.appendTranscriptOperations(topicId, threadId, [
+            ...(batch.initialize ? [{
+                op: 'step.upsert' as const,
+                turnId,
+                step: { stepId: `${turnId}:assistant-stream`, ordinal: batch.ordinal, state: 'running' as const },
+            }, {
+                op: 'frame.upsert' as const,
+                turnId,
+                stepId: `${turnId}:assistant-stream`,
+                frame: { frameId: `${turnId}:assistant`, kind: 'text' as const, text: '', status: 'running' },
+            }] : []),
+            {
+                op: 'append',
+                target: {
+                    turnId,
+                    stepId: `${turnId}:assistant-stream`,
+                    frameId: `${turnId}:assistant`,
+                },
+                offset: batch.offset,
+                text: batch.text,
+            },
+        ]);
     }
 
     private recordTranscriptStep(
@@ -1324,33 +1353,13 @@ export class AgentRuntime {
         const runtime = this.getTranscriptRuntimeState(topicId, threadId);
         const ordinal = runtime.stepOrdinal++;
         if (step.type === 'text_delta') {
-            const previous = runtime.streamTextByTurn.get(turnId) ?? '';
-            runtime.streamTextByTurn.set(turnId, previous + step.content);
-            const exists = runtime.initializedStreams.has(turnId);
-            runtime.initializedStreams.add(turnId);
-            return this.appendTranscriptOperations(topicId, threadId, [
-                ...(!exists ? [{
-                    op: 'step.upsert' as const,
-                    turnId,
-                    step: { stepId: `${turnId}:assistant-stream`, ordinal, state: 'running' as const },
-                }, {
-                    op: 'frame.upsert' as const,
-                    turnId,
-                    stepId: `${turnId}:assistant-stream`,
-                    frame: { frameId: `${turnId}:assistant`, kind: 'text' as const, text: '', status: 'running' },
-                }] : []),
-                {
-                    op: 'append',
-                    target: {
-                        turnId,
-                        stepId: `${turnId}:assistant-stream`,
-                        frameId: `${turnId}:assistant`,
-                    },
-                    offset: previous.length,
-                    text: step.content,
-                },
-            ]);
+            return runtime.streams.append(turnId, step.content, ordinal)
+                ? this.flushPendingTranscriptStream(topicId, threadId, turnId)
+                : runtime.tail;
         }
+
+        // Preserve transcript ordering when a tool/thinking step follows streamed text.
+        this.flushPendingTranscriptStream(topicId, threadId, turnId);
 
         if (step.type === 'todo_update') {
             return this.appendTranscriptOperations(topicId, threadId, [{

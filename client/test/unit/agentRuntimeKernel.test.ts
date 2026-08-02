@@ -27,6 +27,7 @@ import { ModelRequestService } from '../../extension/ai/runner/modelRequestServi
 import { ToolExecutionPipeline } from '../../extension/ai/runner/toolExecutionPipeline';
 import { migrateLegacyRuntimeState } from '../../extension/ai/runner/state/migrations';
 import { projectActivities } from '../../extension/ai/runner/activityProjection';
+import { TranscriptStreamBuffer } from '../../extension/ai/runner/transcriptStreamBuffer';
 
 describe('agent runtime kernel', () => {
     it('orders requests deterministically and rejects duplicate ids', async () => {
@@ -83,6 +84,42 @@ describe('agent runtime kernel', () => {
         slot.register({ id: 'first', order: 0, run: value => { seen.push(`first:${value}`); } });
         await slot.run('x');
         expect(seen).to.deep.equal(['first:x', 'a:x', 'z:x']);
+    });
+});
+
+describe('transcript stream buffering', () => {
+    it('coalesces small deltas into bounded journal batches with contiguous offsets', () => {
+        const buffer = new TranscriptStreamBuffer(8);
+        expect(buffer.append('turn', 'ab', 3)).to.equal(false);
+        expect(buffer.append('turn', 'cd', 4)).to.equal(false);
+        expect(buffer.append('turn', 'efgh', 5)).to.equal(true);
+        expect(buffer.take('turn')).to.deep.equal({
+            text: 'abcdefgh',
+            offset: 0,
+            ordinal: 3,
+            initialize: true,
+        });
+
+        expect(buffer.append('turn', 'ij', 6)).to.equal(false);
+        expect(buffer.take('turn')).to.deep.equal({
+            text: 'ij',
+            offset: 8,
+            ordinal: 6,
+            initialize: false,
+        });
+        expect(buffer.hasStream('turn')).to.equal(true);
+    });
+
+    it('keeps turns isolated and drops all buffered state when a turn is cleared', () => {
+        const buffer = new TranscriptStreamBuffer(4);
+        buffer.append('first', 'abc', 1);
+        buffer.append('second', 'xy', 2);
+        expect(buffer.pendingTurnIds()).to.deep.equal(['first', 'second']);
+
+        buffer.clear('first');
+        expect(buffer.take('first')).to.equal(undefined);
+        expect(buffer.hasStream('first')).to.equal(false);
+        expect(buffer.take('second')).to.deep.include({ text: 'xy', offset: 0, initialize: true });
     });
 });
 

@@ -58,6 +58,7 @@ const OPTIONAL_CHAT_REQUEST_FIELDS = [
 const DEFAULT_CHAT_COMPLETION_TIMEOUT_MS = 20 * 60 * 1000;
 const MIN_CHAT_COMPLETION_TIMEOUT_MS = 60 * 1000;
 const MAX_CHAT_COMPLETION_TIMEOUT_MS = 60 * 60 * 1000;
+const CHAT_COMPLETION_USAGE_TRAILER_GRACE_MS = 1500;
 const DEFAULT_CUSTOM_API_FORMAT: CustomApiFormat = 'openai-chat-completions';
 
 function isResponsesFunctionCallItemId(value: unknown): value is string {
@@ -1093,7 +1094,8 @@ export class AIService {
     private async readWithTimeout<T>(
         reader: ReadableStreamDefaultReader<T>,
         controller: AbortController,
-        timeoutMs: number
+        timeoutMs: number,
+        abortOnTimeout = true,
     ): Promise<ReadableStreamReadResult<T>> {
         let timeoutId: NodeJS.Timeout | undefined;
         let abortListener: (() => void) | undefined;
@@ -1101,7 +1103,7 @@ export class AIService {
             timeoutId = setTimeout(() => {
                 const err = new Error(`Stream idle timeout: no data received for ${timeoutMs}ms`);
                 err.name = 'TimeoutError';
-                controller.abort(err);
+                if (abortOnTimeout) controller.abort(err);
                 reject(err);
             }, timeoutMs);
         });
@@ -1243,21 +1245,45 @@ export class AIService {
         let modelBuf = '';
         let responseIdBuf = '';
         let createdBuf = Math.floor(Date.now() / 1000);
+        let streamClosed = false;
+        let terminalFrameSeen = false;
         // tool_calls reassembly: index → { id, type, function.name, function.arguments(buf) }
         const toolCallMap: Record<number, { id: string; type: string; function: { name: string; arguments: string } }> = {};
         const toolCallIdToIndex = new Map<string, number>();
         let lastToolCallIndex = 0;
 
-        while (true) {
-            const { done, value } = await this.readWithTimeout(reader, controller, 600000); // 600s idle timeout (to prevent large models from being disconnected and suspended)
-            if (done) break;
+        while (!terminalFrameSeen) {
+            let readResult: ReadableStreamReadResult<Uint8Array>;
+            try {
+                const waitingForUsageTrailer = finishReason !== null
+                    && STREAM_USAGE_PROVIDERS.has(providerId)
+                    && usageBuf === undefined;
+                readResult = await this.readWithTimeout(
+                    reader,
+                    controller,
+                    waitingForUsageTrailer ? CHAT_COMPLETION_USAGE_TRAILER_GRACE_MS : 600000,
+                    !waitingForUsageTrailer,
+                );
+            } catch (error) {
+                if (finishReason !== null && error instanceof Error && error.name === 'TimeoutError') break;
+                throw error;
+            }
+            const { done, value } = readResult;
+            if (done) {
+                streamClosed = true;
+                break;
+            }
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
             buffer = lines.pop() ?? '';
 
             for (const line of lines) {
                 const trimmed = line.trim();
-                if (!trimmed || trimmed === 'data: [DONE]') continue;
+                if (!trimmed) continue;
+                if (trimmed === 'data: [DONE]') {
+                    terminalFrameSeen = true;
+                    continue;
+                }
                 if (!trimmed.startsWith('data:')) continue;
                 let chunk: Record<string, unknown>;
                 try { chunk = JSON.parse(trimmed.slice(5).trimStart()); } catch { continue; }
@@ -1323,6 +1349,17 @@ export class AIService {
                     }
                 }
             }
+
+            if (finishReason !== null
+                && (!STREAM_USAGE_PROVIDERS.has(providerId) || usageBuf !== undefined)) {
+                terminalFrameSeen = true;
+            }
+        }
+
+        if (!streamClosed) {
+            void reader.cancel().catch(error => {
+                ErrorReporter.debug(SOURCE.AI_SERVICE, 'Failed to cancel a completed Chat Completions stream.', error);
+            });
         }
 
         // Build a synthetic ChatCompletionResponse

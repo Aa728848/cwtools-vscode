@@ -801,6 +801,47 @@ describe('AIService OpenAI Chat Completions compatibility', () => {
         expect(response.choices[0].message.content).to.equal('ok');
     });
 
+    it('finishes on the DONE frame even when a relay keeps the HTTP stream open', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        service.fetchWithRetry = async () => openChatCompletionsSseResponse([
+            `data:${JSON.stringify({ choices: [{ delta: { content: 'done' }, finish_reason: null }] })}\n\n`,
+            'data: [DONE]\n\n',
+        ]);
+
+        const response = await service.callOpenAICompatibleStreaming(
+            'https://relay.example/v1',
+            'test-key',
+            { model: 'relay-model', messages: [{ role: 'user', content: 'Hi' }] },
+            'custom',
+            undefined,
+            new AbortController(),
+        );
+
+        expect(response.choices[0].message.content).to.equal('done');
+    });
+
+    it('captures the usage trailer and finishes when a DeepSeek relay keeps the stream open', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        service.fetchWithRetry = async () => openChatCompletionsSseResponse([
+            `data:${JSON.stringify({ choices: [{ delta: { content: 'done' }, finish_reason: 'stop' }] })}\n\n`,
+            `data:${JSON.stringify({ choices: [], usage: { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105, prompt_cache_hit_tokens: 80 } })}\n\n`,
+        ]);
+
+        const response = await service.callOpenAICompatibleStreaming(
+            'https://api.deepseek.com/v1',
+            'test-key',
+            { model: 'deepseek-v4-flash', messages: [{ role: 'user', content: 'Hi' }] },
+            'deepseek',
+            undefined,
+            new AbortController(),
+        );
+
+        expect(response.choices[0].message.content).to.equal('done');
+        expect(response.usage!.cached_tokens).to.equal(80);
+    });
+
     it('retries once without an explicitly rejected optional field', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;
@@ -1307,6 +1348,20 @@ function chatCompletionsSseResponse(events: Record<string, unknown>[]): Response
             start(controller) {
                 for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
                 controller.close();
+            },
+        }),
+    } as Response;
+}
+
+function openChatCompletionsSseResponse(chunks: string[]): Response {
+    const encoder = new TextEncoder();
+    return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'text/event-stream' }),
+        body: new ReadableStream({
+            start(controller) {
+                for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
             },
         }),
     } as Response;

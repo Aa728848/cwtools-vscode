@@ -1,3 +1,4 @@
+#r "../../submodules/cwtools/artifacts/bin/CWTools/debug/CWTools.dll"
 #r "../../artifacts/bin/Main/debug/CWTools Server.dll"
 
 open System
@@ -10,6 +11,7 @@ let cache = Path.Combine(root, "cache")
 let manual = Path.Combine(root, "manual")
 let bundled = Path.Combine(root, "bundled")
 let bundledZip = Path.Combine(root, "bundled.zip")
+let gameCacheDirectory = Path.Combine(root, "game-cache")
 
 let writeRule folder name =
     Directory.CreateDirectory(folder) |> ignore
@@ -43,6 +45,12 @@ try
     Directory.Delete(bundled, true)
     Directory.Delete(cache, true)
     assertSelection "bundled" (Some cache) false None (Some bundledZip) true
+
+    Directory.CreateDirectory(gameCacheDirectory) |> ignore
+    let missingResources, missingFiles = getCachedFiles STL (Some gameCacheDirectory) false
+
+    if not missingResources.IsEmpty || not missingFiles.IsEmpty then
+        failwith "A missing vanilla cache should fall back to empty cached resources and files."
 finally
     if Directory.Exists(root) then
         Directory.Delete(root, true)

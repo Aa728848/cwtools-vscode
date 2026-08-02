@@ -194,6 +194,13 @@ let private gameCacheFile (cp: string) (fileName: string) =
     let dir = if parent <> null then parent.FullName else cp + "/.."
     System.IO.Path.Combine(dir, fileName)
 
+let private loadCacheIfPresent cacheFile =
+    if System.IO.File.Exists cacheFile then
+        deserialize cacheFile
+    else
+        logInfo $"Cache file not found at %s{cacheFile}; continuing without vanilla cache"
+        ([], [])
+
 let getCachedFiles (game: GameLanguage) cachePath isVanillaFolder =
     let timer = System.Diagnostics.Stopwatch()
     timer.Start()
@@ -203,15 +210,15 @@ let getCachedFiles (game: GameLanguage) cachePath isVanillaFolder =
         | _, _, true ->
             logInfo "Vanilla folder, so not loading cache"
             ([], [])
-        | STL, Some cp, _ -> deserialize (gameCacheFile cp "stl.cwb")
-        | EU4, Some cp, _ -> deserialize (gameCacheFile cp "eu4.cwb")
-        | EU5, Some cp, _ -> deserialize (gameCacheFile cp "eu5.cwb")
-        | HOI4, Some cp, _ -> deserialize (gameCacheFile cp "hoi4.cwb")
-        | CK2, Some cp, _ -> deserialize (gameCacheFile cp "ck2.cwb")
-        | IR, Some cp, _ -> deserialize (gameCacheFile cp "ir.cwb")
-        | VIC2, Some cp, _ -> deserialize (gameCacheFile cp "vic2.cwb")
-        | VIC3, Some cp, _ -> deserialize (gameCacheFile cp "vic3.cwb")
-        | CK3, Some cp, _ -> deserialize (gameCacheFile cp "ck3.cwb")
+        | STL, Some cp, _ -> loadCacheIfPresent (gameCacheFile cp "stl.cwb")
+        | EU4, Some cp, _ -> loadCacheIfPresent (gameCacheFile cp "eu4.cwb")
+        | EU5, Some cp, _ -> loadCacheIfPresent (gameCacheFile cp "eu5.cwb")
+        | HOI4, Some cp, _ -> loadCacheIfPresent (gameCacheFile cp "hoi4.cwb")
+        | CK2, Some cp, _ -> loadCacheIfPresent (gameCacheFile cp "ck2.cwb")
+        | IR, Some cp, _ -> loadCacheIfPresent (gameCacheFile cp "ir.cwb")
+        | VIC2, Some cp, _ -> loadCacheIfPresent (gameCacheFile cp "vic2.cwb")
+        | VIC3, Some cp, _ -> loadCacheIfPresent (gameCacheFile cp "vic3.cwb")
+        | CK3, Some cp, _ -> loadCacheIfPresent (gameCacheFile cp "ck3.cwb")
         | _ -> ([], [])
 
     logInfo $"Parse cache time: %i{timer.ElapsedMilliseconds}ms, cached resources: %d{List.length cached}, cached files: %d{List.length cachedFiles}"

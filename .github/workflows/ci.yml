@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typescript:
+    name: TypeScript and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run check:mcp-schema
+
+  vscode-integration:
+    name: Shader Extension Host contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: npm ci
+      - name: Publish Linux language server
+        run: >-
+          dotnet publish src/Main/Main.fsproj
+          --configuration Release
+          --runtime linux-x64
+          --self-contained true
+          -p:PublishReadyToRun=false
+          -p:UseLocalCwtools=false
+          --output release/bin/server/linux-x64
+      - name: Run Shader Extension Host contract
+        run: xvfb-run -a npm run test:shader-lsp
+
+  dotnet:
+    name: .NET server build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet build src/LSP/LSP.fsproj --configuration Release
+      - run: dotnet build src/Main/Main.fsproj --configuration Release
+
+  mcp:
+    name: MCP contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: submodules/cwtools-mcp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: submodules/cwtools-mcp/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:contracts

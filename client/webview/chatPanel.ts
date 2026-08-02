@@ -43,6 +43,7 @@ import {
     renderTopics as renderTopicsView,
 } from './chat/topicViews';
 import { getChatI18n } from './chat/i18n';
+import { parseHostMessage } from './chat/hostProtocol';
 import { applyModeUi } from './chat/modes';
 import {
     buildSlashCommands,
@@ -5780,7 +5781,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     // ── Message handler ────────────────────────────────────────────────────────
     window.addEventListener('message', event => {
-        const msg = event.data;
+        const validatedMessage = parseHostMessage(event.data);
+        if (!validatedMessage) return;
+        const msg: any = validatedMessage;
         switch (msg.type) {
 
             case 'addUserMessage':

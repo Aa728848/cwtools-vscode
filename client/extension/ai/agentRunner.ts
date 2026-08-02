@@ -49,6 +49,7 @@ import { budgetToolResult as _budgetToolResult, getToolResultBudget } from './co
 import type { CompactMessagesOptions } from './contextBudget';
 import { AGENT, SOURCE, aiText } from './messages';
 import { ErrorReporter } from './errorReporter';
+import { createBestEffortReporter } from './runner/bestEffortDiagnostics';
 import { MemoryParser } from './memoryParser';
 import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates, canonicalPathKey } from './workspacePaths';
 import {
@@ -142,6 +143,9 @@ const MAX_VALIDATION_RETRIES = 2;
 const VALIDATION_DIAGNOSTIC_FRESHNESS_RECHECK_DELAYS_MS = [500, 1500, 3000];
 const MAX_OUTPUT_REPETITION_RECOVERIES = 1;
 const MAX_TOP_LEVEL_LENGTH_RECOVERIES = 1;
+const reportBestEffortFailure = createBestEffortReporter((message, error) => {
+    ErrorReporter.debug(SOURCE.AGENT_RUNNER, message, error);
+});
 // Compact when conversation exceeds this fraction of provider context
 // Default context limit if unknown
 // How many recent messages to keep un-compressed during compaction
@@ -511,8 +515,12 @@ export class AgentRunner {
                 JSON.stringify(checkpoint, null, 2),
                 'utf-8'
             );
-        } catch {
-            // Non-critical — silently ignore checkpoint failures
+        } catch (error) {
+            reportBestEffortFailure('checkpoint.save', {
+                topicId: topicId || 'default',
+                agentId,
+                iteration,
+            }, error);
         }
     }
 
@@ -590,8 +598,8 @@ export class AgentRunner {
                     fs.unlinkSync(resumePath);
                 }
             }
-        } catch {
-            // Ignore deletion errors
+        } catch (error) {
+            reportBestEffortFailure('resume.clear', { topicId }, error);
         }
     }
 
@@ -813,8 +821,12 @@ export class AgentRunner {
             steps.push(step);
             options?.onStep?.(step);
             runRecordPromise.then(r => {
-                runLedger.appendEvent(r.runId, 'step_appended', { step }).catch(() => {});
-            }).catch(() => {});
+                runLedger.appendEvent(r.runId, 'step_appended', { step }).catch(error => {
+                    reportBestEffortFailure('ledger.append_step', { runId: r.runId, stepType: step.type }, error);
+                });
+            }).catch(error => {
+                reportBestEffortFailure('run_record.resolve', { topicId, threadId }, error);
+            });
         };
         const updateRunStatus = (status: import('./types').AgentRunStatus) => {
             runRecordPromise.then(async r => {
@@ -844,7 +856,9 @@ export class AgentRunner {
                         topicId,
                         threadId,
                         status === 'completed' ? 'completed' : status === 'paused' ? 'interrupted' : 'failed',
-                    ).catch(() => {});
+                    ).catch(error => {
+                        reportBestEffortFailure('thread.mark_status', { topicId, threadId, status }, error);
+                    });
                     await runLedger.appendEvent(r.runId, 'metrics_updated', {
                         metrics: {
                             totalTokens: tokenAccumulator.total,
@@ -861,7 +875,9 @@ export class AgentRunner {
                         }
                     });
                 }
-            }).catch(() => {});
+            }).catch(error => {
+                reportBestEffortFailure('run_status.persist', { topicId, threadId, status }, error);
+            });
         };
             // Empty
         // Empty
@@ -1545,7 +1561,9 @@ export class AgentRunner {
             const errorMsg = e instanceof Error ? e.message : String(e);
 
             if (errorMsg.includes('aborted') || errorMsg.includes('cancel')) {
-                threadStore.markStatus(topicId, threadId, 'interrupted').catch(() => {});
+                threadStore.markStatus(topicId, threadId, 'interrupted').catch(error => {
+                    reportBestEffortFailure('thread.mark_interrupted', { topicId, threadId }, error);
+                });
                 emitStep({ type: 'error', content: AGENT.CANCELLED, timestamp: Date.now() });
             } else {
                 emitStep({ type: 'error', content: `${AGENT.ERROR_PREFIX}: ${errorMsg}`, timestamp: Date.now() });
@@ -1745,7 +1763,9 @@ export class AgentRunner {
                     truncated: false
                 },
                 { invocationId, status: 'done' }
-            ).catch(() => {});
+            ).catch(error => {
+                reportBestEffortFailure('ledger.append_tool_output', { runId, toolName, truncated: false }, error);
+            });
             return result;
         }
 
@@ -1777,7 +1797,9 @@ export class AgentRunner {
                     resultSize: strContent.length
                 },
                 { invocationId, status: 'done' }
-            ).catch(() => {});
+            ).catch(error => {
+                reportBestEffortFailure('ledger.append_artifact', { runId, toolName }, error);
+            });
             await runLedger.appendEvent(
                 runId,
                 'tool_output_delta',
@@ -1789,7 +1811,9 @@ export class AgentRunner {
                     resultRef: relativeDiskPath
                 },
                 { invocationId, status: 'done' }
-            ).catch(() => {});
+            ).catch(error => {
+                reportBestEffortFailure('ledger.append_tool_output', { runId, toolName, truncated: true }, error);
+            });
             return {
                 ok: true,
                 truncated: true,
@@ -1799,7 +1823,8 @@ export class AgentRunner {
                 resultRef: relativeDiskPath,
                 resultSha256,
             };
-        } catch {
+        } catch (archiveError) {
+            reportBestEffortFailure('tool_result.archive', { runId, toolName }, archiveError);
             await runLedger.appendEvent(
                 runId,
                 'tool_output_delta',
@@ -1810,7 +1835,9 @@ export class AgentRunner {
                     truncated: true
                 },
                 { invocationId, status: 'failed' }
-            ).catch(() => {});
+            ).catch(error => {
+                reportBestEffortFailure('ledger.append_tool_output', { runId, toolName, truncated: true }, error);
+            });
             return {
                 ok: true,
                 truncated: true,
@@ -2556,7 +2583,9 @@ export class AgentRunner {
                     'model_call_delta',
                     { iteration, kind, preview: text.substring(0, 240), size: text.length },
                     { invocationId: modelCallId, status: 'running' }
-                ).catch(() => {});
+                ).catch(error => {
+                    reportBestEffortFailure('ledger.append_model_delta', { runId: runRecord.runId, kind }, error);
+                });
             };
             const requestArtifact = await archiveModelRequest(
                 modelCallId,
@@ -2964,7 +2993,9 @@ export class AgentRunner {
                         outputTokens: completionTokens,
                         hitRate,
                         savedCostCny
-                    }, { agentId: options?.sandbox?.agentId }).catch(() => {});
+                    }, { agentId: options?.sandbox?.agentId }).catch(error => {
+                        reportBestEffortFailure('ledger.append_cache_stats', { runId: runRecord.runId }, error);
+                    });
                 }
             }
 
@@ -3418,7 +3449,9 @@ export class AgentRunner {
                             reason: 'SANDBOX_VIOLATION',
                             detail: safetyCheck.reason,
                             toolArgs: ci.toolArgs,
-                        }).catch(() => {});
+                        }).catch(error => {
+                            reportBestEffortFailure('ledger.append_subagent_refusal', { runId: runRecord.runId, tool: ci.toolName }, error);
+                        });
                         toolResults[i] = { success: false, error: safetyCheck.reason };
                         continue;
                     }
@@ -4232,7 +4265,9 @@ export class AgentRunner {
                 'validation_end',
                 { targetFile, retryCount, ...payload },
                 { status }
-            ).catch(() => {});
+            ).catch(error => {
+                reportBestEffortFailure('ledger.append_validation_end', { runId: validationRunRecord.runId, targetFile, status }, error);
+            });
         };
 
         const agentToolContext: import('./types').AgentToolContext = {

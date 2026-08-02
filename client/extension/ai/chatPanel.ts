@@ -42,6 +42,7 @@ import { UsageTracker } from './usageTracker';
 import { supportsOpenAiStylePrefixCache } from './cacheCapability';
 import { buildProviderCallTokenUsage } from './providerCallUsage';
 import { routeWebviewMessage } from './chat/bridge';
+import { parseWebviewMessage } from './chat/webviewProtocol';
 import { getChatPanelHtml } from './chatHtml';
 import { getAgentManagerHtml } from './agentManagerHtml';
 import { ChatTopicManager } from './chatTopics';
@@ -3769,8 +3770,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             : this.getHtmlContent(webview);
 
         webview.onDidReceiveMessage(
-            async (msg: WebViewMessage) => {
-                if (!msg?.type) return;
+            async (input: unknown) => {
+                const msg = parseWebviewMessage(input);
+                if (!msg) {
+                    ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Rejected malformed Webview message.');
+                    return;
+                }
                 try {
                     await this.handleWebViewMessage(msg, surface);
                 } catch (e) {

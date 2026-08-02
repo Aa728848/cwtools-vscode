@@ -10,10 +10,16 @@ import { getGameKnowledge } from './gameKnowledge';
 import { getProjectProfilePath, queryProjectProfile, readProjectProfile } from './projectProfile';
 import { ErrorReporter } from './errorReporter';
 import { getProjectKnowledgeManifestPath, readProjectKnowledgeManifest } from './projectKnowledge';
+import {
+    isAuthorizedBridgeRequest,
+    isMcpBridgeMethod,
+    McpBridgeRequestTooLargeError,
+    parseBridgeJsonRpcPayload,
+    readMcpBridgeRequestBody,
+} from './mcpBridgeProtocol';
 
 const BRIDGE_PROTOCOL_VERSION = 1;
 const MANIFEST_FILE_NAME = 'bridge-manifest.json';
-const MAX_REQUEST_BYTES = 1024 * 1024;
 
 const MCP_BRIDGE_TOOL_NAMES = [
     'query_types',
@@ -52,13 +58,6 @@ const RESOURCE_URIS = [
     'cwtools://project/profile',
     'cwtools://project/knowledge-manifest',
 ] as const;
-
-interface BridgeJsonRpcRequest {
-    jsonrpc?: string;
-    id?: string | number | null;
-    method?: string;
-    params?: unknown;
-}
 
 interface BridgeManifest {
     schemaVersion: 1;
@@ -187,7 +186,7 @@ export class McpBridgeServer implements Disposable {
             return;
         }
 
-        if (!this.isAuthorized(request)) {
+        if (!isAuthorizedBridgeRequest(request.headers, this.token)) {
             this.sendJson(response, 401, {
                 jsonrpc: '2.0',
                 id: null,
@@ -196,14 +195,34 @@ export class McpBridgeServer implements Disposable {
             return;
         }
 
-        const requestBody = await readRequestBody(request);
-        const rpc = JSON.parse(requestBody) as BridgeJsonRpcRequest;
-        const id = rpc.id ?? null;
-        if (!rpc.method) {
+        let requestBody: string;
+        try {
+            requestBody = await readMcpBridgeRequestBody(request);
+        } catch (error) {
+            if (!(error instanceof McpBridgeRequestTooLargeError)) throw error;
+            this.sendJson(response, 413, {
+                jsonrpc: '2.0',
+                id: null,
+                error: { code: -32600, message: error.message },
+            });
+            return;
+        }
+        const parsed = parseBridgeJsonRpcPayload(requestBody);
+        if (!parsed.ok) {
             this.sendJson(response, 400, {
                 jsonrpc: '2.0',
+                id: parsed.id,
+                error: { code: parsed.code, message: parsed.message },
+            });
+            return;
+        }
+        const rpc = parsed.request;
+        const id = rpc.id ?? null;
+        if (!isMcpBridgeMethod(rpc.method)) {
+            this.sendJson(response, 200, {
+                jsonrpc: '2.0',
                 id,
-                error: { code: -32600, message: 'Missing JSON-RPC method.' },
+                error: { code: -32601, message: `Unknown CWTools MCP bridge method: ${rpc.method}` },
             });
             return;
         }
@@ -376,13 +395,6 @@ export class McpBridgeServer implements Disposable {
         return 'stellaris';
     }
 
-    private isAuthorized(request: http.IncomingMessage): boolean {
-        const auth = request.headers.authorization;
-        if (typeof auth === 'string' && auth === `Bearer ${this.token}`) return true;
-        const header = request.headers['x-cwtools-mcp-token'];
-        return typeof header === 'string' && header === this.token;
-    }
-
     private currentManifest(): BridgeManifest {
         const port = this.port;
         if (!port) {
@@ -524,23 +536,4 @@ function isFailureResult(value: unknown): boolean {
     if (!value || typeof value !== 'object') return false;
     const record = value as Record<string, unknown>;
     return record.success === false || typeof record.error === 'string';
-}
-
-async function readRequestBody(request: http.IncomingMessage): Promise<string> {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    return new Promise<string>((resolve, reject) => {
-        request.on('data', chunk => {
-            const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-            size += buffer.length;
-            if (size > MAX_REQUEST_BYTES) {
-                reject(new Error('CWTools MCP bridge request is too large.'));
-                request.destroy();
-                return;
-            }
-            chunks.push(buffer);
-        });
-        request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-        request.on('error', reject);
-    });
 }

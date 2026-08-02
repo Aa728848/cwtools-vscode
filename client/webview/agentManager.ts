@@ -8,6 +8,7 @@ import { svgIcon, svgIconNoMargin } from './svgIcons';
 import type { ManagerSnapshotMessage, OrchestratorProgressMessage } from './chat/messages.manager';
 import type { ManagerAgentProfileView } from './chat/messages.manager';
 import type { TopicListItem, TopicStats } from './chat/messages.shared';
+import { parseHostMessage } from './chat/hostProtocol';
 
 type ManagerTab = 'changes' | 'activity' | 'settings';
 
@@ -1747,7 +1748,10 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         }
     }
 
-    function applyHostMessage(msg: any): void {
+    function applyHostMessage(input: unknown): void {
+        const validatedMessage = parseHostMessage(input);
+        if (!validatedMessage) return;
+        const msg: any = validatedMessage;
         switch (msg?.type) {
             case 'managerSnapshot':
                 updateFromSnapshot(msg as ManagerSnapshotMessage);

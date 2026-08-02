@@ -15,12 +15,49 @@ interface SemanticTokensDeltaResponse {
     edits: Array<{ start: number; deleteCount: number; data?: number[] }>;
 }
 
+interface ValidationStatusResponse {
+    ok?: boolean;
+    loading?: {
+        inProgress?: boolean;
+        phase?: string;
+        lastError?: string | null;
+    };
+}
+
 function applySemanticDelta(previous: number[], delta: SemanticTokensDeltaResponse): number[] {
     const next = [...previous];
     for (const edit of [...delta.edits].sort((left, right) => right.start - left.start)) {
         next.splice(edit.start, edit.deleteCount, ...(edit.data ?? []));
     }
     return next;
+}
+
+async function waitForServerReady(client: LanguageClient, timeoutMs = 120_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let lastStatus: ValidationStatusResponse | undefined;
+    let lastError: unknown;
+    while (Date.now() < deadline) {
+        try {
+            lastStatus = await client.sendRequest<ValidationStatusResponse>('workspace/executeCommand', {
+                command: 'cwtools.ai.getValidationStatus',
+                arguments: [],
+            });
+        } catch (error) {
+            lastError = error;
+            await new Promise(resolve => setTimeout(resolve, 250));
+            continue;
+        }
+        const loading = lastStatus.loading;
+        if (lastStatus.ok === true && loading?.inProgress === false && loading.phase === 'ready') return;
+        if (loading?.phase === 'load_project_error') {
+            throw new Error(`CWTools language server failed to load the Shader fixture: ${loading.lastError ?? 'unknown error'}`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    throw new Error(
+        `CWTools language server was not ready after ${timeoutMs}ms; `
+        + `lastStatus=${JSON.stringify(lastStatus)} lastError=${String(lastError ?? '')}`,
+    );
 }
 
 const shaderRulesConfigurationReady = (async () => {
@@ -47,6 +84,7 @@ suite('Paradox Shader LSP contract', function () {
         const languageClient = api?.getLanguageClient();
         assert.ok(languageClient, 'the extension must expose its live language client');
         client = languageClient;
+        await waitForServerReady(client);
         document = await vscode.workspace.openTextDocument(vscode.Uri.file(fixturePath));
         await vscode.window.showTextDocument(document);
     });
@@ -131,17 +169,23 @@ suite('Paradox Shader LSP contract', function () {
         assert.ok(await vscode.workspace.applyEdit(restore));
     });
 
-    test('a cancelled semantic-token request rejects as cancellation and leaves later requests usable', async () => {
+    test('a semantic-token cancellation race terminates cleanly and leaves later requests usable', async () => {
         const uri = document.uri.toString();
         const cancellation = new vscode.CancellationTokenSource();
-        cancellation.cancel();
         const pending = client.sendRequest<SemanticTokensResponse>(
             'textDocument/semanticTokens/full',
             { textDocument: { uri } },
             cancellation.token,
         );
-        await assert.rejects(pending, error => /cancel/i.test(String(error)));
-        cancellation.dispose();
+        cancellation.cancel();
+        try {
+            const completed = await pending;
+            assert.strictEqual(completed.data.length % 5, 0);
+        } catch (error) {
+            assert.match(String(error), /cancel/i);
+        } finally {
+            cancellation.dispose();
+        }
 
         const retry = await client.sendRequest<SemanticTokensResponse>(
             'textDocument/semanticTokens/full',

@@ -5,6 +5,7 @@ import type { RuntimeInteraction, RuntimePrompt } from '../promptInteraction';
 import type { PermissionTraceEntry } from '../permissionTrace';
 import {
     applyTranscriptBatch,
+    boundTranscriptSnapshot,
     type AgentTranscriptSnapshot,
     type TranscriptOpBatch,
 } from '../../../../shared/agentTranscript';
@@ -122,6 +123,10 @@ export function createRuntimeDomainStateStore(topicId: string, agentId: string):
         validateState: (value): value is TranscriptDomainState =>
             isRecord(value) && typeof value.revision === 'number'
             && isRecord(value.transcript) && value.transcript.version === 1,
+        normalizeState: value => ({
+            ...value,
+            transcript: boundTranscriptSnapshot(value.transcript),
+        }),
     });
     store.registerModel<PermissionDomainState>({
         domain: 'permission',
@@ -254,7 +259,7 @@ export function createRuntimeDomainStateStore(topicId: string, agentId: string):
             isRecord(value) && isRecord(value.transcript) && value.transcript.version === 1,
         apply: (state, payload) => ({
             revision: state.revision + 1,
-            transcript: payload.transcript,
+            transcript: boundTranscriptSnapshot(payload.transcript),
         }),
     });
     store.registry.register<TranscriptDomainState, { batch: TranscriptOpBatch }>({

@@ -29,6 +29,9 @@ export class DomainStateStore {
     private snapshotValue?: DomainSnapshot;
     private operationSequence = 0;
     private applyQueue: Promise<void> = Promise.resolve();
+    private checkpointValue?: Promise<DomainSnapshot>;
+    private queueRevision = 0;
+    private checkpointRevision = -1;
     private readonly journalValue: DomainJournal;
 
     constructor(
@@ -62,6 +65,8 @@ export class DomainStateStore {
         for (const model of this.models.values()) {
             if (!model.validateState(base.models[model.domain])) {
                 base.models[model.domain] = model.initialState();
+            } else if (model.normalizeState) {
+                base.models[model.domain] = model.normalizeState(base.models[model.domain]);
             }
         }
         const read = this.journalValue.read(base.sequence);
@@ -76,6 +81,7 @@ export class DomainStateStore {
     }
 
     apply(operation: DomainOp): Promise<PersistedDomainOp> {
+        this.queueRevision++;
         const current = this.applyQueue.then(() => this.applyInternal(operation));
         this.applyQueue = current.then(() => undefined, () => undefined);
         return current;
@@ -101,8 +107,16 @@ export class DomainStateStore {
     }
 
     checkpoint(): Promise<DomainSnapshot> {
+        if (this.checkpointValue && this.checkpointRevision === this.queueRevision) return this.checkpointValue;
+        const requestedRevision = this.queueRevision;
         const current = this.applyQueue.then(() => this.checkpointInternal());
+        this.checkpointValue = current;
+        this.checkpointRevision = requestedRevision;
         this.applyQueue = current.then(() => undefined, () => undefined);
+        void current.then(
+            () => { if (this.checkpointValue === current) this.checkpointValue = undefined; },
+            () => { if (this.checkpointValue === current) this.checkpointValue = undefined; },
+        );
         return current;
     }
 

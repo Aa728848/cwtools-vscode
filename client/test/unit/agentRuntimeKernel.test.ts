@@ -121,6 +121,27 @@ describe('transcript stream buffering', () => {
         expect(buffer.hasStream('first')).to.equal(false);
         expect(buffer.take('second')).to.deep.include({ text: 'xy', offset: 0, initialize: true });
     });
+
+    it('reduces provider-sized reasoning deltas to a bounded number of journal batches', () => {
+        const buffer = new TranscriptStreamBuffer();
+        let batches = 0;
+        let persisted = '';
+        for (let index = 0; index < 45_000; index++) {
+            if (!buffer.append('reasoning-turn', 'x', index)) continue;
+            const batch = buffer.take('reasoning-turn');
+            expect(batch?.offset).to.equal(persisted.length);
+            persisted += batch?.text ?? '';
+            batches++;
+        }
+        const tail = buffer.take('reasoning-turn');
+        persisted += tail?.text ?? '';
+        if (tail) batches++;
+
+        expect(persisted).to.have.length(45_000);
+        expect(batches).to.be.lessThan(24);
+        expect(buffer.text('reasoning-turn')).to.equal(persisted);
+        expect(buffer.ordinal('reasoning-turn')).to.equal(0);
+    });
 });
 
 describe('domain replay', () => {

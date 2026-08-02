@@ -5,6 +5,8 @@ export interface DomainModel<TState> {
     readonly version: number;
     readonly initialState: () => TState;
     readonly validateState: (value: unknown) => value is TState;
+    /** Applies deterministic storage bounds after validation and before replay. */
+    readonly normalizeState?: (value: TState) => TState;
 }
 
 export interface DomainSnapshot {

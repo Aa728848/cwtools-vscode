@@ -4,9 +4,11 @@ import * as os from 'os';
 import * as path from 'path';
 import {
     AgentTranscriptStore,
+    boundTranscriptSnapshot,
     createEmptyTranscript,
     filterTranscriptOperations,
     paginateTranscriptTurns,
+    TRANSCRIPT_SNAPSHOT_LIMITS,
 } from '../../shared/agentTranscript';
 import { PromptQueueService, InteractionService } from '../../extension/ai/runner/promptInteraction';
 import { RuntimeScope } from '../../extension/ai/runner/runtimeScope';
@@ -118,6 +120,55 @@ describe('agent platform kernel', () => {
         store.next([{ op: 'turns.remove', turnIds: ['t1'] }]);
         expect(store.snapshot().turns).to.deep.equal([]);
         expect(store.snapshot().entities).to.deep.equal([]);
+    });
+
+    it('bounds completed transcript history while preserving active append offsets', () => {
+        const snapshot = createEmptyTranscript('agent');
+        snapshot.turns = Array.from({ length: TRANSCRIPT_SNAPSHOT_LIMITS.turns + 5 }, (_, index) => ({
+            turnId: `old-${index}`,
+            ordinal: index,
+            state: 'completed' as const,
+            prompt: 'p'.repeat(1_000),
+            steps: index === TRANSCRIPT_SNAPSHOT_LIMITS.turns + 4 ? Array.from({ length: 300 }, (_, stepIndex) => ({
+                stepId: `step-${stepIndex}`,
+                ordinal: stepIndex,
+                state: 'completed' as const,
+                frames: [{
+                    frameId: `frame-${stepIndex}`,
+                    kind: 'tool' as const,
+                    text: 't'.repeat(20_000),
+                    payload: { output: 'x'.repeat(40_000) },
+                }],
+            })) : [],
+        }));
+        const bounded = boundTranscriptSnapshot(snapshot);
+        expect(bounded.turns).to.have.length(TRANSCRIPT_SNAPSHOT_LIMITS.turns);
+        expect(bounded.turns.reduce((total, turn) => total + turn.steps.length, 0))
+            .to.be.at.most(TRANSCRIPT_SNAPSHOT_LIMITS.stepsTotal);
+        expect(bounded.hasMoreOlder).to.equal(true);
+        expect(JSON.stringify(bounded).length).to.be.lessThan(3_500_000);
+
+        const active = createEmptyTranscript('active-agent');
+        active.turns = [{
+            turnId: 'active',
+            ordinal: 1,
+            state: 'running',
+            steps: Array.from({ length: TRANSCRIPT_SNAPSHOT_LIMITS.stepsPerTurn + 1 }, (_, index) => ({
+                stepId: `s-${index}`,
+                ordinal: index,
+                state: 'running' as const,
+                frames: [{ frameId: `f-${index}`, kind: 'text' as const, text: index === 0 ? 'abc' : '' }],
+            })),
+        }];
+        const store = new AgentTranscriptStore('active-agent', active);
+        const appended = store.next([{
+            op: 'append',
+            target: { turnId: 'active', stepId: 's-0', frameId: 'f-0' },
+            offset: 3,
+            text: 'def',
+        }]);
+        expect(appended.gap).to.equal(undefined);
+        expect(store.snapshot().turns[0]?.steps[0]?.frames[0]?.text).to.equal('abcdef');
     });
 
     it('tracks prompt launch/completion and creates only cold interactions', async () => {

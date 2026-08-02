@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [2.10.6] - 2026-08-02
+
+### AI Agent 快照与结算 / AI Agent Snapshot and Finalization
+- **[修复] DeepSeek 多轮长回复不再因思考流快照膨胀而停留在运行中**：`reasoning_content` 现在按有界批次持久化，不再为每个细粒度增量创建独立步骤；同等 4.5 万增量规模约缩减为二十余次转录写入。
+  English: [Fix] DeepSeek multi-turn answers no longer remain running while fine-grained reasoning deltas inflate the snapshot. `reasoning_content` is now persisted in bounded batches instead of one durable step per provider delta.
+- **[性能] 转录快照增加硬边界与自动收敛**：限制保留轮次、步骤、帧、文本及结构化载荷；旧的大型快照在恢复或下一次转录更新时自动压缩，避免序列化时间和磁盘占用随对话无限增长。
+  English: [Performance] Durable transcripts now enforce hard limits for turns, steps, frames, text, and structured payloads. Existing oversized snapshots converge automatically during restore or the next transcript update.
+- **[修复] 快照落盘不再阻塞前台回复结算**：域操作先写入可恢复日志，快照作为回放加速器在后台生成；重复快照请求会合并，慢磁盘或大历史不会继续占用停止按钮和“运行中”状态。
+  English: [Fix] Snapshot materialization no longer blocks user-visible completion. Recoverable journal operations remain durable, snapshots are generated in the background, and duplicate checkpoint requests are coalesced.
+
+### 测试 / Tests
+- **[质量] 增加 4.5 万思考增量批处理、快照总量边界和活动流 append offset 保持的回归测试。**
+  English: [Quality] Added regressions for batching 45,000 reasoning deltas, total snapshot bounds, and preserving append offsets for an active stream.
+
 ## [2.10.5] - 2026-08-02
 
 ### AI Agent 工具调用可见性 / AI Agent Tool-call Visibility

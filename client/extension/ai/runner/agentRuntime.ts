@@ -130,6 +130,7 @@ interface TranscriptRuntimeState {
     tail: Promise<void>;
     stepOrdinal: number;
     streams: TranscriptStreamBuffer;
+    thinkingStreams: TranscriptStreamBuffer;
 }
 
 interface ModelBindingState {
@@ -424,7 +425,6 @@ export class AgentRuntime {
                 domain: 'context',
                 payload: { turnId, status: 'interrupted' },
             });
-            await domainStore.checkpoint();
             throw error;
         } finally {
             await runAgentHooks('stop', { topicId, threadId, turnId });
@@ -456,9 +456,30 @@ export class AgentRuntime {
         const currentGoal = await goalStore.getGoal(topicId, threadId);
         if (currentGoal) goalRuntime.goal = currentGoal;
         await this.flushTranscript(topicId, threadId);
-        const streamed = this.getTranscriptRuntimeState(topicId, threadId).streams.hasStream(turnId);
+        const transcriptRuntime = this.getTranscriptRuntimeState(topicId, threadId);
+        const streamed = transcriptRuntime.streams.hasStream(turnId);
+        const streamedThinking = transcriptRuntime.thinkingStreams.hasStream(turnId);
         const finalStepId = streamed ? `${turnId}:assistant-stream` : result.runId ?? `${turnId}:result`;
         await this.appendTranscriptOperations(topicId, threadId, [
+            ...(streamedThinking ? [{
+                op: 'step.upsert' as const,
+                turnId,
+                step: {
+                    stepId: `${turnId}:thinking-stream`,
+                    ordinal: transcriptRuntime.thinkingStreams.ordinal(turnId) ?? 0,
+                    state: 'completed' as const,
+                },
+            }, {
+                op: 'frame.upsert' as const,
+                turnId,
+                stepId: `${turnId}:thinking-stream`,
+                frame: {
+                    frameId: `${turnId}:thinking`,
+                    kind: 'thinking' as const,
+                    text: transcriptRuntime.thinkingStreams.text(turnId),
+                    status: 'completed',
+                },
+            }] : []),
             {
                 op: 'step.upsert',
                 turnId,
@@ -542,7 +563,6 @@ export class AgentRuntime {
                 payload: { interactions: this.interactions.list({ threadId }) },
             }),
         ]);
-        await domainStore.checkpoint();
         const rollout = result.runId ? await readRunRollout(result.runId, topicId) : undefined;
         if (result.runId) {
             for (const notification of backgroundNotifications) {
@@ -597,7 +617,6 @@ export class AgentRuntime {
                     domain: 'context',
                     payload: { loaded: disclosedTools },
                 });
-                await domainStore.checkpoint();
             }
             const finalSchedulingState = run?.schedulingState ?? effectiveOptions.schedulingState;
             activation.activate(profile, finalSchedulingState, disclosedTools);
@@ -607,7 +626,6 @@ export class AgentRuntime {
                 domain: 'scheduling',
                 payload: { state: finalSchedulingState },
             });
-            await domainStore.checkpoint();
             const admission = events.find(event => event.type === 'admission_decided')?.payload;
             const finalPhase = [...events].reverse()
                 .find(event => event.type === 'phase_changed')?.payload?.to
@@ -1264,6 +1282,7 @@ export class AgentRuntime {
                 tail: Promise.resolve(),
                 stepOrdinal: 0,
                 streams: new TranscriptStreamBuffer(),
+                thinkingStreams: new TranscriptStreamBuffer(),
             });
     }
 
@@ -1307,7 +1326,10 @@ export class AgentRuntime {
     private flushTranscript(topicId: string, threadId: string): Promise<void> {
         const state = this.getTranscriptRuntimeState(topicId, threadId);
         for (const turnId of state.streams.pendingTurnIds()) {
-            void this.flushPendingTranscriptStream(topicId, threadId, turnId);
+            void this.flushPendingTranscriptStream(topicId, threadId, turnId, 'text');
+        }
+        for (const turnId of state.thinkingStreams.pendingTurnIds()) {
+            void this.flushPendingTranscriptStream(topicId, threadId, turnId, 'thinking');
         }
         return state.tail;
     }
@@ -1315,29 +1337,34 @@ export class AgentRuntime {
     private clearTranscriptTurnState(topicId: string, threadId: string, turnId: string): void {
         const state = this.getTranscriptRuntimeState(topicId, threadId);
         state.streams.clear(turnId);
+        state.thinkingStreams.clear(turnId);
     }
 
-    private flushPendingTranscriptStream(topicId: string, threadId: string, turnId: string): Promise<void> {
-        const batch = this.getTranscriptRuntimeState(topicId, threadId).streams.take(turnId);
-        if (!batch) return this.getTranscriptRuntimeState(topicId, threadId).tail;
+    private flushPendingTranscriptStream(
+        topicId: string,
+        threadId: string,
+        turnId: string,
+        kind: 'text' | 'thinking',
+    ): Promise<void> {
+        const runtime = this.getTranscriptRuntimeState(topicId, threadId);
+        const batch = (kind === 'text' ? runtime.streams : runtime.thinkingStreams).take(turnId);
+        if (!batch) return runtime.tail;
+        const stepId = kind === 'text' ? `${turnId}:assistant-stream` : `${turnId}:thinking-stream`;
+        const frameId = kind === 'text' ? `${turnId}:assistant` : `${turnId}:thinking`;
         return this.appendTranscriptOperations(topicId, threadId, [
             ...(batch.initialize ? [{
                 op: 'step.upsert' as const,
                 turnId,
-                step: { stepId: `${turnId}:assistant-stream`, ordinal: batch.ordinal, state: 'running' as const },
+                step: { stepId, ordinal: batch.ordinal, state: 'running' as const },
             }, {
                 op: 'frame.upsert' as const,
                 turnId,
-                stepId: `${turnId}:assistant-stream`,
-                frame: { frameId: `${turnId}:assistant`, kind: 'text' as const, text: '', status: 'running' },
+                stepId,
+                frame: { frameId, kind, text: '', status: 'running' },
             }] : []),
             {
                 op: 'append',
-                target: {
-                    turnId,
-                    stepId: `${turnId}:assistant-stream`,
-                    frameId: `${turnId}:assistant`,
-                },
+                target: { turnId, stepId, frameId },
                 offset: batch.offset,
                 text: batch.text,
             },
@@ -1353,13 +1380,21 @@ export class AgentRuntime {
         const runtime = this.getTranscriptRuntimeState(topicId, threadId);
         const ordinal = runtime.stepOrdinal++;
         if (step.type === 'text_delta') {
+            void this.flushPendingTranscriptStream(topicId, threadId, turnId, 'thinking');
             return runtime.streams.append(turnId, step.content, ordinal)
-                ? this.flushPendingTranscriptStream(topicId, threadId, turnId)
+                ? this.flushPendingTranscriptStream(topicId, threadId, turnId, 'text')
+                : runtime.tail;
+        }
+        if (step.type === 'thinking_content') {
+            void this.flushPendingTranscriptStream(topicId, threadId, turnId, 'text');
+            return runtime.thinkingStreams.append(turnId, step.content, ordinal)
+                ? this.flushPendingTranscriptStream(topicId, threadId, turnId, 'thinking')
                 : runtime.tail;
         }
 
         // Preserve transcript ordering when a tool/thinking step follows streamed text.
-        void this.flushPendingTranscriptStream(topicId, threadId, turnId);
+        void this.flushPendingTranscriptStream(topicId, threadId, turnId, 'text');
+        void this.flushPendingTranscriptStream(topicId, threadId, turnId, 'thinking');
 
         if (step.type === 'todo_update') {
             return this.appendTranscriptOperations(topicId, threadId, [{
@@ -1409,13 +1444,13 @@ export class AgentRuntime {
         }
 
         const stepId = step.invocationId ?? `${turnId}:step:${step.stepIndex ?? ordinal}`;
-        const kind = step.type === 'thinking' || step.type === 'thinking_content'
+        const kind = step.type === 'thinking'
             ? 'thinking'
             : step.type === 'tool_call' || step.type === 'tool_result'
                 ? 'tool'
                 : 'notice';
         const failed = step.type === 'error';
-        const running = step.type === 'tool_call' || step.type === 'thinking' || step.type === 'thinking_content';
+        const running = step.type === 'tool_call' || step.type === 'thinking';
         const frameSuffix = step.type === 'tool_call'
             ? 'call'
             : step.type === 'tool_result' ? 'result' : 'frame';
@@ -1459,7 +1494,11 @@ export class AgentRuntime {
                 payload: { interactions: this.interactions.list({ threadId }) },
             }),
         ]);
-        await store.checkpoint();
+        // Journal appends above are already durable. A snapshot is a replay
+        // accelerator, so it must not keep the user-visible turn in "running".
+        void store.checkpoint().catch(error => {
+            ErrorReporter.warn('AgentRuntime', 'Failed to checkpoint runtime projections.', error);
+        });
     }
 
     private getLoopKernel(topicId: string, threadId: string): AgentLoopKernel {

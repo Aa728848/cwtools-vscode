@@ -18,6 +18,8 @@ interface PendingTranscriptStream {
 export class TranscriptStreamBuffer {
     private readonly pending = new Map<string, PendingTranscriptStream>();
     private readonly queuedLengths = new Map<string, number>();
+    private readonly completeText = new Map<string, string>();
+    private readonly firstOrdinals = new Map<string, number>();
     private readonly seen = new Set<string>();
 
     constructor(private readonly flushChars = 2_048) {
@@ -28,6 +30,8 @@ export class TranscriptStreamBuffer {
 
     append(turnId: string, text: string, ordinal: number): boolean {
         this.seen.add(turnId);
+        if (!this.firstOrdinals.has(turnId)) this.firstOrdinals.set(turnId, ordinal);
+        this.completeText.set(turnId, (this.completeText.get(turnId) ?? '') + text);
         const current = this.pending.get(turnId);
         this.pending.set(turnId, {
             text: (current?.text ?? '') + text,
@@ -54,9 +58,19 @@ export class TranscriptStreamBuffer {
         return this.seen.has(turnId);
     }
 
+    text(turnId: string): string {
+        return this.completeText.get(turnId) ?? '';
+    }
+
+    ordinal(turnId: string): number | undefined {
+        return this.firstOrdinals.get(turnId);
+    }
+
     clear(turnId: string): void {
         this.pending.delete(turnId);
         this.queuedLengths.delete(turnId);
+        this.completeText.delete(turnId);
+        this.firstOrdinals.delete(turnId);
         this.seen.delete(turnId);
     }
 }

@@ -1307,7 +1307,7 @@ export class AgentRuntime {
     private flushTranscript(topicId: string, threadId: string): Promise<void> {
         const state = this.getTranscriptRuntimeState(topicId, threadId);
         for (const turnId of state.streams.pendingTurnIds()) {
-            this.flushPendingTranscriptStream(topicId, threadId, turnId);
+            void this.flushPendingTranscriptStream(topicId, threadId, turnId);
         }
         return state.tail;
     }
@@ -1359,7 +1359,7 @@ export class AgentRuntime {
         }
 
         // Preserve transcript ordering when a tool/thinking step follows streamed text.
-        this.flushPendingTranscriptStream(topicId, threadId, turnId);
+        void this.flushPendingTranscriptStream(topicId, threadId, turnId);
 
         if (step.type === 'todo_update') {
             return this.appendTranscriptOperations(topicId, threadId, [{

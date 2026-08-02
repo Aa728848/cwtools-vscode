@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [2.10.2] - 2026-08-02
+
+### AI Agent 运行收尾 / AI Agent Turn Finalization
+- **[修复] 多轮长回答完成后不再停留在运行状态**：流式回答的 transcript 增量改为有界批量持久化，并在工具步骤切换和回合结束时强制冲刷；避免大量细碎磁盘写入阻塞 `generationComplete`，尤其改善用户确认修改后的第二轮执行。
+  English: [Fix] Multi-turn runs no longer remain active after a long answer finishes. Streamed transcript deltas are persisted in bounded batches and flushed at tool boundaries and turn completion, preventing thousands of tiny journal writes from delaying `generationComplete`, especially on the second turn after the user approves an edit.
+
+### 测试 / Tests
+- **[质量] 增加流式 transcript 批处理、连续 offset 与多回合隔离回归测试。**
+  English: [Quality] Added regression coverage for streamed transcript batching, contiguous offsets, and per-turn isolation.
+
 ## [2.10.1] - 2026-08-01
 
 ### Agent 界面与任务可见性 / Agent UI & Task Visibility

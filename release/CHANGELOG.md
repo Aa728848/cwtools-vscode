@@ -1,7 +1,5 @@
 # Changelog
 
-## [Unreleased]
-
 ## [2.10.7] - 2026-08-02
 
 ### AI Agent 方案确认边界 / AI Agent Plan Approval Boundary

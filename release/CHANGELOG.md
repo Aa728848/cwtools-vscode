@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [2.10.5] - 2026-08-02
+
+### AI Agent 工具调用可见性 / AI Agent Tool-call Visibility
+- **[修复] DeepSeek 输出正文后继续准备工具时不再呈现为假卡死**：OpenAI-compatible 流一旦提供稳定的工具调用 ID 与工具名，界面会立即显示运行中的工具步骤；完整参数与正式执行到达后在同一行原地更新，不重复生成工具栏。
+  English: [Fix] DeepSeek no longer appears stuck while preparing tools after visible text has finished. OpenAI-compatible streams now show a running tool step as soon as a stable call ID and tool name are available, then upgrade that row in place when complete arguments and execution arrive.
+
+### Stellaris 规则 / Stellaris Rules
+- **[修复] 统一 `ordered_*` 效果中 `order_by = value[variable]` 的 cardinality 元数据缩进。**
+  English: [Fix] Normalized cardinality metadata indentation for `order_by = value[variable]` across `ordered_*` effects.
+
+### 测试 / Tests
+- **[质量] 增加流式工具调用身份传递和预览行原地升级回归测试。**
+  English: [Quality] Added regressions for streamed tool-call identity propagation and in-place preview-row upgrades.
+
 ## [2.10.4] - 2026-08-02
 
 ### AI Agent 多轮收尾 / AI Agent Multi-turn Finalization

@@ -2029,6 +2029,8 @@ export interface AgentStep {
     invocationId?: string;
     /** UI-only lifecycle marker for persisted interactive cards restored from history. */
     uiState?: 'pending' | 'approved';
+    /** A tool row emitted while the provider is still streaming its call arguments. */
+    streamingPreview?: boolean;
 }
 
 export type AgentArtifactKind =

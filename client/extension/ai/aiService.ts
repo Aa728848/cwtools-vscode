@@ -59,6 +59,11 @@ const DEFAULT_CHAT_COMPLETION_TIMEOUT_MS = 20 * 60 * 1000;
 const MIN_CHAT_COMPLETION_TIMEOUT_MS = 60 * 1000;
 const MAX_CHAT_COMPLETION_TIMEOUT_MS = 60 * 60 * 1000;
 const CHAT_COMPLETION_USAGE_TRAILER_GRACE_MS = 1500;
+
+interface ToolCallDeltaMetadata {
+    id?: string;
+    index?: number;
+}
 const DEFAULT_CUSTOM_API_FORMAT: CustomApiFormat = 'openai-chat-completions';
 
 function isResponsesFunctionCallItemId(value: unknown): value is string {
@@ -459,7 +464,7 @@ export class AIService {
             /** Real-time callback for incremental text content tokens (streaming typewriter effect) */
             onTextDelta?: (text: string) => void;
             /** Real-time callback for incremental tool call fragments */
-            onToolCallDelta?: (toolName: string, argsBuf: string) => void;
+            onToolCallDelta?: (toolName: string, argsBuf: string, metadata?: ToolCallDeltaMetadata) => void;
             /** Stable seed used only by the OpenAI Responses fast path for prompt-cache routing. */
             promptCacheKey?: string;
             /** External AbortSignal for caller-controlled cancellation */
@@ -1179,7 +1184,7 @@ export class AIService {
         onThinking: ((text: string) => void) | undefined,
         controller: AbortController,
         onTextDelta?: (text: string) => void,
-        onToolCallDelta?: (toolName: string, argsBuf: string) => void
+        onToolCallDelta?: (toolName: string, argsBuf: string, metadata?: ToolCallDeltaMetadata) => void
     ): Promise<ChatCompletionResponse> {
         const url = normalizeOpenAIActionUrl(endpoint, 'chat/completions');
         const headers: Record<string, string> = {
@@ -1226,8 +1231,8 @@ export class AIService {
             const message = data.choices?.[0]?.message;
             if (typeof message?.content === 'string' && message.content) onTextDelta?.(message.content);
             if (message?.reasoning_content) onThinking?.(message.reasoning_content);
-            for (const call of message?.tool_calls ?? []) {
-                onToolCallDelta?.(call.function.name, call.function.arguments);
+            for (const [index, call] of (message?.tool_calls ?? []).entries()) {
+                onToolCallDelta?.(call.function.name, call.function.arguments, { id: call.id, index });
             }
             return data;
         }
@@ -1352,7 +1357,10 @@ export class AIService {
                             if (fn.arguments) {
                                 toolCallMap[idx].function.arguments += fn.arguments;
                                 if (onToolCallDelta) {
-                                    onToolCallDelta(toolCallMap[idx].function.name, toolCallMap[idx].function.arguments);
+                                    onToolCallDelta(toolCallMap[idx].function.name, toolCallMap[idx].function.arguments, {
+                                        id: toolCallMap[idx].id || undefined,
+                                        index: idx,
+                                    });
                                 }
                             }
                         }

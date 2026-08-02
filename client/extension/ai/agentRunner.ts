@@ -2367,6 +2367,11 @@ export class AgentRunner {
             let toolCalls: ToolCall[] | undefined = undefined;
             let needsHashValidation = false;
             let softLoopGuidancePending = false;
+            const modelCallId = `model_${runRecord.runId}_${iteration}`;
+            const streamedToolPreviewIds = new Set<string>();
+            const previewInvocationByModelToolCallId = new Map<string, string>();
+            const previewInvocationByToolIndex = new Map<number, string>();
+            let streamedToolPreviewSequence = 0;
 
             const restoredRetry = iteration === 1
                 ? restoredStepRequests.find((request): request is RetryStepRequest => isRetryStepRequest(request))
@@ -2549,7 +2554,6 @@ export class AgentRunner {
             }
 
             let response;
-            const modelCallId = `model_${runRecord.runId}_${iteration}`;
             let lastModelDeltaEventAt = 0;
             let streamedThinkingChars = 0;
             let slimThinkingBudgetExceeded = false;
@@ -2705,7 +2709,27 @@ export class AgentRunner {
                             timestamp: Date.now(),
                         });
                     } : undefined,
-                    onToolCallDelta: (toolName, argsBuf) => {
+                    onToolCallDelta: (toolName, argsBuf, metadata) => {
+                        const previewKey = metadata?.id
+                            ? `id:${metadata.id}`
+                            : metadata?.index !== undefined
+                                ? `index:${metadata.index}`
+                                : '';
+                        if (toolName && previewKey && !streamedToolPreviewIds.has(previewKey)) {
+                            streamedToolPreviewIds.add(previewKey);
+                            const invocationId = `preview_${modelCallId}_${++streamedToolPreviewSequence}`;
+                            if (metadata?.id) previewInvocationByModelToolCallId.set(metadata.id, invocationId);
+                            if (metadata?.index !== undefined) previewInvocationByToolIndex.set(metadata.index, invocationId);
+                            emitStep({
+                                type: 'tool_call',
+                                content: aiText(`Preparing tool call: ${toolName}`, `正在准备工具调用：${toolName}`),
+                                toolName,
+                                toolArgs: {},
+                                invocationId,
+                                streamingPreview: true,
+                                timestamp: Date.now(),
+                            });
+                        }
                         tryAnnouncePath(toolName, argsBuf);
                     }
                 });
@@ -3301,7 +3325,7 @@ export class AgentRunner {
                 effect: import('./types').ToolEffect;
                 targetPaths: string[];
             }> = [];
-            for (const toolCall of toolCalls) {
+            for (const [toolCallPosition, toolCall] of toolCalls.entries()) {
                 options?.abortSignal?.throwIfAborted();
                 // runRecord is resolved at reasoningLoop entry
                 const invocation = buildToolInvocation({
@@ -3311,7 +3335,9 @@ export class AgentRunner {
                     workspaceRoot: this.toolExecutor.workspaceRoot,
                     topicId: options?.topicId
                 });
-                const invocationId = invocation.invocationId;
+                const invocationId = (toolCall.id && previewInvocationByModelToolCallId.get(toolCall.id))
+                    ?? previewInvocationByToolIndex.get(toolCallPosition)
+                    ?? invocation.invocationId;
                 let toolName = toolCall.function.name as AgentToolName;
                 const knownNames = availableTools.map(t => t.function.name);
                 if (!knownNames.includes(toolName)) {

@@ -717,8 +717,17 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
         }
         if (type === 'tool_call') {
             const event = createToolEvent(step, labels, index);
-            rawItems.push({ type: 'activity', event });
-            rememberPending(event);
+            const invocationId = invocationIdOf(step);
+            const existing = invocationId ? pendingByInvocation.get(invocationId) : undefined;
+            const existingStep = asRecord(existing?.sourceStep);
+            if (existing && existingStep.streamingPreview === true && step.streamingPreview !== true) {
+                takePending(step);
+                Object.assign(existing, event);
+                rememberPending(existing);
+            } else {
+                rawItems.push({ type: 'activity', event });
+                rememberPending(event);
+            }
             return;
         }
         if (type === 'tool_result') {

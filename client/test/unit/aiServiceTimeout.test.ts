@@ -905,6 +905,7 @@ describe('AIService OpenAI Chat Completions compatibility', () => {
             { choices: [{ delta: { tool_calls: [{ function: { arguments: '"a.txt"}' } }] }, finish_reason: 'tool_calls' }] },
         ]);
 
+        const metadata: Array<{ id?: string; index?: number }> = [];
         const response = await service.callOpenAICompatibleStreaming(
             'https://relay.example/v1',
             'test-key',
@@ -912,10 +913,16 @@ describe('AIService OpenAI Chat Completions compatibility', () => {
             'custom',
             undefined,
             new AbortController(),
+            undefined,
+            (_name: string, _args: string, value?: { id?: string; index?: number }) => {
+                if (value) metadata.push(value);
+            },
         );
 
         expect(response.choices[0].message.tool_calls).to.have.length(1);
         expect(response.choices[0].message.tool_calls![0]!.function.arguments).to.equal('{"path":"a.txt"}');
+        expect(metadata[0]).to.deep.equal({ id: 'call_1', index: 0 });
+        expect(metadata.at(-1)).to.deep.equal({ id: 'call_1', index: 0 });
     });
 });
 

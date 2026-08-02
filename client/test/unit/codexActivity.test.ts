@@ -306,6 +306,37 @@ describe('Codex activity view model', () => {
         expect(group.events.some(event => event.label === 'Waiting for permission')).to.equal(false);
     });
 
+    it('upgrades a streamed tool preview instead of rendering a duplicate tool row', () => {
+        const group = firstGroup(buildLive([
+            {
+                type: 'tool_call',
+                toolName: 'query_cwt_schema',
+                invocationId: 'preview-1',
+                toolArgs: {},
+                streamingPreview: true,
+                timestamp: 1000,
+            },
+            {
+                type: 'tool_call',
+                toolName: 'query_cwt_schema',
+                invocationId: 'preview-1',
+                toolArgs: { name: 'distance' },
+                timestamp: 1100,
+            },
+            {
+                type: 'tool_result',
+                toolName: 'query_cwt_schema',
+                invocationId: 'preview-1',
+                toolResult: { success: true },
+                timestamp: 1200,
+            },
+        ]));
+
+        expect(group.events).to.have.lengthOf(1);
+        expect(group.events[0]?.status).to.equal('success');
+        expect(group.events[0]?.detailModel?.args).to.deep.equal({ name: 'distance' });
+    });
+
     it('renders tool activity and command output as collapsed details', () => {
         const i18n = getChatI18n('en');
         const model = build([

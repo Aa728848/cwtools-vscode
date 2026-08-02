@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [2.10.3] - 2026-08-02
+
+### AI Agent 流式收尾 / AI Agent Stream Finalization
+- **[修复] 兼容接口输出结论后会立即正确结束任务**：OpenAI Chat Completions 兼容流现在将 `[DONE]` 和 `finish_reason` 视为终止信号，不再依赖中转服务器关闭 HTTP 连接；DeepSeek 等 Provider 会在终止后短暂接收 usage 尾帧，随后主动释放流。
+  English: [Fix] OpenAI-compatible streams now finish on `[DONE]` or `finish_reason` instead of waiting for relay servers to close the HTTP connection. DeepSeek-compatible streams briefly accept the trailing usage frame before releasing the stream.
+- **[修复] 缓存命中统计不再漏掉终止后的 usage 数据**：保留并解析 DeepSeek `prompt_cache_hit_tokens` 尾帧，避免已命中的前缀缓存被误记为零命中。
+  English: [Fix] Cache-hit metrics now retain trailing DeepSeek usage data, including `prompt_cache_hit_tokens`, instead of under-reporting successful prefix-cache hits as zero.
+
+### 测试 / Tests
+- **[质量] 增加中转连接保持开启、`[DONE]` 收尾及 DeepSeek usage 尾帧的流式回归测试。**
+  English: [Quality] Added streaming regressions for relays that keep connections open, `[DONE]` termination, and DeepSeek usage trailers.
+
 ## [2.10.2] - 2026-08-02
 
 ### AI Agent 运行收尾 / AI Agent Turn Finalization

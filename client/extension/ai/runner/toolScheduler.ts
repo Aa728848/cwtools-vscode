@@ -35,9 +35,11 @@ export function getAgentToolTargetFiles(
                 const isWinAbs = /^[a-zA-Z]:[\\/]/.test(trimmed) || trimmed.startsWith('\\\\');
                 const isPosixAbs = trimmed.startsWith('/');
                 if (isWinAbs) {
-                    paths.push(process.platform === 'win32' ? path.resolve(trimmed) : trimmed.replace(/\//g, '\\'));
+                    paths.push(path.win32.resolve(trimmed));
                 } else if (isPosixAbs) {
                     paths.push(path.resolve(trimmed));
+                } else if (/^[a-zA-Z]:[\\/]/.test(workspaceRoot) || workspaceRoot.startsWith('\\\\')) {
+                    paths.push(path.win32.resolve(workspaceRoot, trimmed));
                 } else {
                     paths.push(path.resolve(workspaceRoot, trimmed));
                 }

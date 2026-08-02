@@ -1763,7 +1763,7 @@ describe('agent tool topic artifacts', () => {
         expect(result.stdout).to.include('topic escaped ok');
     });
 
-    it('normalizes one-sided escaped quoted topic scratch paths for PowerShell commands', async () => {
+    if (process.platform === 'win32') it('normalizes one-sided escaped quoted topic scratch paths for PowerShell commands', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         const topicScratch = path.join(workspaceRoot, '.cwtools', 'topic_1779112553395', 'scratch');
         fs.mkdirSync(topicScratch, { recursive: true });
@@ -1788,7 +1788,7 @@ describe('agent tool topic artifacts', () => {
         expect(result.stdout).to.include('powershell path ok');
     });
 
-    it('uses PowerShell for normal Windows commands instead of cmd quoting', async () => {
+    if (process.platform === 'win32') it('uses PowerShell for normal Windows commands instead of cmd quoting', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         const topicScratch = path.join(workspaceRoot, '.cwtools', 'topic_1779112553395', 'scratch');
         fs.mkdirSync(topicScratch, { recursive: true });
@@ -2186,8 +2186,8 @@ describe('agent tool progress and aborts', () => {
         expect(sendRequest.firstCall.args[1].command).to.equal('cwtools.ai.revalidateFiles');
         const requestedTargets = sendRequest.firstCall.args[1].arguments[0] as string[];
         expect(requestedTargets).to.have.length(2);
-        expect(requestedTargets.map(u => (u as string).replace(/^file:\/\//, '').replace(/\//g, '\\'))).to.deep.include(shaderFile);
-        expect(requestedTargets.map(u => (u as string).replace(/^file:\/\//, '').replace(/\//g, '\\'))).to.deep.include(fxhFile);
+        expect(requestedTargets).to.deep.include(vscodeStub.Uri.file(shaderFile).toString());
+        expect(requestedTargets).to.deep.include(vscodeStub.Uri.file(fxhFile).toString());
         expect(result.revalidation.ok).to.equal(true);
     });
 

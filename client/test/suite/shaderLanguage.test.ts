@@ -34,11 +34,11 @@ function applySemanticDelta(previous: number[], delta: SemanticTokensDeltaRespon
 
 async function waitForServerReady(client: LanguageClient, timeoutMs = 120_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
-    let lastStatus: ValidationStatusResponse | undefined;
+    let lastStatus: ValidationStatusResponse | null | undefined;
     let lastError: unknown;
     while (Date.now() < deadline) {
         try {
-            lastStatus = await client.sendRequest<ValidationStatusResponse>('workspace/executeCommand', {
+            lastStatus = await client.sendRequest<ValidationStatusResponse | null>('workspace/executeCommand', {
                 command: 'cwtools.ai.getValidationStatus',
                 arguments: [],
             });
@@ -47,8 +47,8 @@ async function waitForServerReady(client: LanguageClient, timeoutMs = 120_000): 
             await new Promise(resolve => setTimeout(resolve, 250));
             continue;
         }
-        const loading = lastStatus.loading;
-        if (lastStatus.ok === true && loading?.inProgress === false && loading.phase === 'ready') return;
+        const loading = lastStatus?.loading;
+        if (lastStatus?.ok === true && loading?.inProgress === false && loading.phase === 'ready') return;
         if (loading?.phase === 'load_project_error') {
             throw new Error(`CWTools language server failed to load the Shader fixture: ${loading.lastError ?? 'unknown error'}`);
         }

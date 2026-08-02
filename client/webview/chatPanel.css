@@ -292,9 +292,20 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .codex-chat-shell .codex-floating-layer { width: var(--codex-chat-column); max-width: var(--codex-chat-column); }
 .codex-user-message { align-items: flex-end; }
 .codex-chat-shell .codex-user-bubble { max-width: 72%; margin-left: auto; border-radius: var(--codex-radius); background: rgba(255,255,255,0.055); }
-.agent-routing-status { display: inline-flex; align-items: center; min-height: 18px; margin-right: 2px; color: var(--codex-muted); font-size: 10.5px; line-height: 1.35; opacity: 0.78; }
+.agent-routing-live { display: flex; align-items: center; gap: 7px; min-height: 24px; color: var(--codex-muted); font-size: 11.5px; animation: fadeIn 0.16s ease; }
+.agent-routing-spinner { width: 11px; height: 11px; flex: 0 0 auto; border: 1.5px solid color-mix(in srgb, var(--codex-muted) 38%, transparent); border-top-color: var(--vscode-progressBar-background, #4da36a); border-radius: 50%; animation: spin 0.8s linear infinite; }
+.agent-routing-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--vscode-progressBar-background, #4da36a); }
+.agent-routing-status { display: block; min-height: 18px; margin-right: 2px; color: var(--codex-muted); font-size: 10.5px; line-height: 1.4; opacity: 0.88; }
+.agent-routing-summary { cursor: pointer; user-select: none; list-style-position: outside; }
+.agent-routing-summary:hover { color: var(--fg); }
+.agent-routing-explanation { max-width: min(620px, 78vw); margin-top: 5px; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--codex-muted) 22%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--bg) 92%, var(--vscode-editorWidget-background)); color: var(--codex-muted); }
+.agent-routing-reason, .agent-routing-decision-boundary { margin-bottom: 4px; }
+.agent-routing-decision-boundary { color: var(--vscode-charts-yellow, #d7ba7d); }
+.agent-routing-evidence { margin: 4px 0; padding-left: 18px; }
+.agent-routing-confidence { opacity: 0.75; }
 .agent-routing-plan { color: var(--vscode-charts-blue, #75a7e8); }
 .agent-routing-execute { color: var(--vscode-charts-green, #73c991); }
+@media (prefers-reduced-motion: reduce) { .agent-routing-spinner { animation: none; } }
 .codex-message { gap: 8px; }
 .codex-message.message.assistant { align-items: stretch; }
 .codex-turn { display: flex; flex-direction: column; gap: 10px; color: var(--fg); }

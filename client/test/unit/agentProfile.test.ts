@@ -7,6 +7,7 @@ import {
     profileForLegacyMode,
     resolveAgentProfile,
     resolveAgentProfileFromModelDecision,
+    shouldUseSemanticAgentRouting,
 } from '../../extension/ai/agentProfile';
 
 describe('agent profile', () => {
@@ -44,7 +45,7 @@ describe('agent profile', () => {
     it('parses strict model routing decisions from plain or fenced JSON', () => {
         expect(parseModelAgentProfileDecision(
             '```json\n{"domain":"paradox","intent":"execute","strategy":"multi","reason":" broad task "}\n```',
-        )).to.deep.equal({ domain: 'paradox', intent: 'execute', strategy: 'multi', reason: 'broad task' });
+        )).to.deep.equal({ intent: 'execute', strategy: 'multi', requiresUserDecision: false, reason: 'broad task' });
         expect(parseModelAgentProfileDecision(
             `{"domain":"general","intent":"explore","strategy":"single","reason":"${'x'.repeat(300)}"}`,
         )?.reason).to.have.length(240);
@@ -53,25 +54,28 @@ describe('agent profile', () => {
         )).to.equal(undefined);
         expect(parseModelAgentProfileDecision(
             '{"domain":"unknown","intent":"execute","strategy":"single"}',
+        )).to.deep.equal({ intent: 'execute', strategy: 'single', requiresUserDecision: false, reason: '' });
+        expect(parseModelAgentProfileDecision(
+            '{"intent":"execute","strategy":"single","requiresUserDecision":"yes"}',
         )).to.equal(undefined);
     });
 
-    it('uses model intent without letting routing override the selected domain', () => {
+    it('uses model intent while the selected domain remains user-owned', () => {
         expect(resolveAgentProfileFromModelDecision('large change', DEFAULT_AGENT_PROFILE, {
-            domain: 'general', intent: 'execute', strategy: 'multi', reason: 'independent workstreams',
+            intent: 'execute', strategy: 'multi', requiresUserDecision: false, reason: 'independent workstreams',
         })).to.include({ domain: 'paradox', intent: 'execute', strategy: 'single', mode: 'build' });
         expect(resolveAgentProfileFromModelDecision('use multiple agents for this mod change', DEFAULT_AGENT_PROFILE, {
-            domain: 'paradox', intent: 'execute', strategy: 'multi', reason: 'independent workstreams',
+            intent: 'execute', strategy: 'multi', requiresUserDecision: false, reason: 'independent workstreams',
         })).to.include({ domain: 'paradox', intent: 'execute', strategy: 'multi', mode: 'script' });
     });
 
     it('allows the model to plan a complex requested mutation before execution', () => {
         const routed = resolveAgentProfileFromModelDecision('重构整个运行器并调整恢复协议', DEFAULT_AGENT_PROFILE, {
-            domain: 'general', intent: 'plan', strategy: 'multi', reason: 'coupled architecture change',
+            intent: 'plan', strategy: 'multi', requiresUserDecision: false, reason: 'coupled architecture change',
         });
-        expect(routed).to.include({ domain: 'paradox', intent: 'plan', strategy: 'single', mode: 'build' });
+        expect(routed).to.include({ domain: 'paradox', intent: 'plan', strategy: 'single', mode: 'plan' });
         expect(routed.admission).to.include({
-            authorization: 'workspace_write',
+            authorization: 'plan_write_only',
             initialPhase: 'plan',
         });
     });
@@ -80,12 +84,12 @@ describe('agent profile', () => {
         expect(resolveAgentProfileFromModelDecision('review only', {
             domain: 'general', intent: 'auto', strategy: 'auto',
         }, {
-            domain: 'paradox', intent: 'review', strategy: 'multi', reason: '',
+            intent: 'review', strategy: 'multi', requiresUserDecision: false, reason: '',
         })).to.include({ domain: 'general', intent: 'review', strategy: 'single', mode: 'review' });
         expect(resolveAgentProfileFromModelDecision('legacy plan', {
             domain: 'paradox', intent: 'plan', strategy: 'multi',
         }, {
-            domain: 'paradox', intent: 'execute', strategy: 'multi', reason: '',
+            intent: 'execute', strategy: 'multi', requiresUserDecision: false, reason: '',
         })).to.include({ domain: 'paradox', intent: 'plan', strategy: 'single', mode: 'plan' });
         expect(resolveAgentProfile('Use multiple agents to review this repository without changes'))
             .to.include({ intent: 'review', strategy: 'single', mode: 'review' });
@@ -127,7 +131,7 @@ describe('agent profile', () => {
         expect(resolved).to.include({ domain: 'paradox', intent: 'execute', strategy: 'single', mode: 'build' });
 
         const routed = resolveAgentProfileFromModelDecision('只改一处', DEFAULT_AGENT_PROFILE, {
-            domain: 'paradox', intent: 'explore', strategy: 'single', reason: 'short follow-up',
+            intent: 'explore', strategy: 'single', requiresUserDecision: false, reason: 'short follow-up',
         }, {
             previousDomain: 'paradox',
             previousUserRequests: ['把选中的 GFX_colony_type_capital 改成 GFX_colony_type_bureaucratic'],
@@ -137,7 +141,7 @@ describe('agent profile', () => {
 
     it('keeps explicit cancellation read-only even if the model requests execution', () => {
         const routed = resolveAgentProfileFromModelDecision('算了，先不改', DEFAULT_AGENT_PROFILE, {
-            domain: 'paradox', intent: 'execute', strategy: 'multi', reason: 'incorrect mutation classification',
+            intent: 'execute', strategy: 'multi', requiresUserDecision: false, reason: 'incorrect mutation classification',
         }, {
             previousDomain: 'paradox',
             previousUserRequests: ['修改这个事件'],
@@ -196,31 +200,54 @@ describe('agent profile', () => {
         expect(resolved.mode).to.equal('build');
     });
 
-    it('ignores model domain changes when Paradox is selected', () => {
+    it('keeps Paradox selected during semantic routing', () => {
         const routed = resolveAgentProfileFromModelDecision('continue investigating this', DEFAULT_AGENT_PROFILE, {
-            domain: 'general',
             intent: 'explore',
             strategy: 'single',
+            requiresUserDecision: false,
             reason: 'ambiguous follow-up',
             confidence: 0.55,
         }, {
             previousDomain: 'paradox',
         });
         expect(routed).to.include({ domain: 'paradox', intent: 'explore', mode: 'explore' });
-        expect(routed.reason).to.not.contain('routing hysteresis');
     });
 
     it('keeps a manually selected General domain despite the model decision', () => {
         const routed = resolveAgentProfileFromModelDecision('Fix the TypeScript webview state', profileForUserDomain('general'), {
-            domain: 'paradox',
             intent: 'execute',
             strategy: 'single',
+            requiresUserDecision: false,
             reason: 'incorrect domain classification',
             confidence: 0.55,
         }, {
             previousDomain: 'paradox',
         });
         expect(routed).to.include({ domain: 'general', intent: 'execute', mode: 'utility' });
+    });
+
+    it('keeps semantic read-only intent even when the wording also contains a write keyword', () => {
+        const routed = resolveAgentProfileFromModelDecision('分析为什么这个修复方案会失败', DEFAULT_AGENT_PROFILE, {
+            intent: 'explore', strategy: 'single', requiresUserDecision: false, reason: 'the user requested analysis',
+        });
+        expect(routed).to.include({ intent: 'explore', strategy: 'single', mode: 'explore' });
+        expect(routed.admission.authorization).to.equal('read_only');
+    });
+
+    it('blocks execution while a material choice still belongs to the user', () => {
+        const routed = resolveAgentProfileFromModelDecision('实现导入功能，格式你看着选', DEFAULT_AGENT_PROFILE, {
+            intent: 'execute', strategy: 'multi', requiresUserDecision: true, reason: 'the file format changes public behavior',
+        });
+        expect(routed).to.include({
+            intent: 'plan', strategy: 'single', mode: 'plan', requiresUserDecision: true, routingSource: 'model',
+        });
+        expect(routed.admission.authorization).to.equal('plan_write_only');
+    });
+
+    it('uses semantic routing whenever task intent is automatic', () => {
+        expect(shouldUseSemanticAgentRouting(DEFAULT_AGENT_PROFILE)).to.equal(true);
+        expect(shouldUseSemanticAgentRouting(profileForUserDomain('general'))).to.equal(true);
+        expect(shouldUseSemanticAgentRouting(profileForLegacyMode('plan'))).to.equal(false);
     });
 
     it('keeps implementation-only legacy roles out of the user-facing profile', () => {

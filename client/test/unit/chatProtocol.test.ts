@@ -59,6 +59,8 @@ describe('AI chat protocol boundaries', () => {
         expect(hostMessageTypesMatch).to.equal(true);
         expect(parseHostMessage({ type: 'clearChat' })).to.deep.equal({ type: 'clearChat' });
         expect(parseHostMessage({ type: 'agentStep', step: { type: 'thinking', content: 'x' } })).to.not.equal(null);
+        expect(parseHostMessage({ type: 'agentRoutingStatus', phase: 'classifying' })).to.not.equal(null);
+        expect(parseHostMessage({ type: 'agentRoutingStatus', phase: 'unknown' })).to.equal(null);
         expect(parseHostMessage({
             type: 'permissionRequest',
             permissionId: 'p1',

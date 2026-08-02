@@ -110,8 +110,12 @@ describe('webview smoke checks', () => {
         expect(types).to.include('resolvedAgentProfile?: ResolvedAgentProfile');
         expect(script).to.include('parseResolvedAgentProfileView(resolvedAgentProfile)');
         expect(script).to.include("tr('Multi-Agent', '多 Agent')");
+        expect(script).to.include("case 'agentRoutingStatus'");
+        expect(script).to.include("tr('Decision summary', '判断摘要')");
+        expect(script).to.include("tr('Awaiting your decision', '等待用户敲定')");
         expect(script).to.include('m.resolvedAgentProfile');
         expect(css).to.include('.agent-routing-status');
+        expect(css).to.include('.agent-routing-live');
         expect(host).to.include("public getApprovedPlanExecutionMode(): 'orchestrator' | 'script'");
         expect(host).to.include('mode: approvalMode');
         expect(bridge).to.include('const executionMode = provider.getApprovedPlanExecutionMode();');

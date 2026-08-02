@@ -92,6 +92,7 @@ export type WebviewToHostMessage =
 
 export interface StreamTextMessage { type: 'streamText'; text: string; isComplete: boolean }
 export interface AddUserMessage { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[]; contexts?: unknown[]; resolvedAgentProfile?: unknown }
+export interface AgentRoutingStatusMessage { type: 'agentRoutingStatus'; phase: 'classifying' | 'resolved' | 'fallback'; profile?: unknown }
 export interface QueuedUserInputMessage { type: 'queuedUserInput'; text: string; messageIndex: number; images?: string[]; contexts?: unknown[] }
 export interface AgentStepMessage { type: 'agentStep'; step: unknown }
 export interface ContextCompactionStatusMessage { type: 'contextCompactionStatus'; step: unknown }
@@ -119,6 +120,7 @@ export interface SkillsUpdateMessage { type: 'skillsUpdate'; skills: unknown[] }
 export type HostToWebviewMessage =
     | StreamTextMessage
     | AddUserMessage
+    | AgentRoutingStatusMessage
     | QueuedUserInputMessage
     | AgentStepMessage
     | ContextCompactionStatusMessage

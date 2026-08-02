@@ -92,6 +92,10 @@ export interface ResolvedAgentProfile {
     strategy: Exclude<AgentExecutionStrategy, 'auto'>;
     mode: AgentMode;
     reason: string;
+    /** Whether the semantic router found a material choice that must remain with the user. */
+    requiresUserDecision?: boolean;
+    /** User-visible provenance for the bounded routing summary. */
+    routingSource?: 'model' | 'deterministic' | 'manual';
     /** Admission decision retained separately from the legacy mode adapter. */
     admission: AdmissionDecision;
     /** Initial persisted runtime scheduler state. */
@@ -2332,6 +2336,7 @@ export type WebViewMessage =
 
 export type HostMessage =
     | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[]; resolvedAgentProfile?: ResolvedAgentProfile }
+    | { type: 'agentRoutingStatus'; phase: 'classifying' | 'resolved' | 'fallback'; profile?: ResolvedAgentProfile }
     | { type: 'queuedUserInput'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[] }
     | { type: 'startBackgroundGeneration' }
     | { type: 'agentStep'; step: AgentStep }

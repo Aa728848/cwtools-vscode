@@ -25,6 +25,7 @@ const noFields = fields();
 
 const validators = {
     addUserMessage: fields({ text: isString, messageIndex: isInteger }, { images: optional(isStringArray), contexts: optional(isArray), resolvedAgentProfile: optional(isObject) }),
+    agentRoutingStatus: fields({ phase: isOneOf(['classifying', 'resolved', 'fallback'] as const) }, { profile: optional(isObject) }),
     queuedUserInput: fields({ text: isString, messageIndex: isInteger }, { images: optional(isStringArray), contexts: optional(isArray) }),
     startBackgroundGeneration: noFields,
     agentStep: fields({ step: isObject }),

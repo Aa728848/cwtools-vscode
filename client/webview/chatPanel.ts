@@ -101,6 +101,10 @@ interface ResolvedAgentProfileView {
     intent: 'execute' | 'plan' | 'explore' | 'review';
     strategy: 'single' | 'multi';
     reason?: string;
+    requiresUserDecision: boolean;
+    routingSource?: 'model' | 'deterministic' | 'manual';
+    confidence?: number;
+    evidence: string[];
 }
 
 function parseResolvedAgentProfileView(value: unknown): ResolvedAgentProfileView | undefined {
@@ -110,10 +114,27 @@ function parseResolvedAgentProfileView(value: unknown): ResolvedAgentProfileView
     const strategy = candidate.strategy;
     if (intent !== 'execute' && intent !== 'plan' && intent !== 'explore' && intent !== 'review') return undefined;
     if (strategy !== 'single' && strategy !== 'multi') return undefined;
+    const admission = candidate.admission && typeof candidate.admission === 'object'
+        ? candidate.admission as Record<string, unknown>
+        : undefined;
+    const routingSource = candidate.routingSource;
     return {
         intent,
         strategy,
         reason: typeof candidate.reason === 'string' ? candidate.reason.slice(0, 240) : undefined,
+        requiresUserDecision: candidate.requiresUserDecision === true,
+        routingSource: routingSource === 'model' || routingSource === 'deterministic' || routingSource === 'manual'
+            ? routingSource
+            : undefined,
+        confidence: typeof admission?.confidence === 'number' && Number.isFinite(admission.confidence)
+            ? Math.max(0, Math.min(1, admission.confidence))
+            : undefined,
+        evidence: Array.isArray(admission?.evidence)
+            ? admission.evidence
+                .filter((item): item is string => typeof item === 'string')
+                .map(item => item.slice(0, 240))
+                .slice(0, 4)
+            : [],
     };
 }
 
@@ -5264,7 +5285,57 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         bubble.appendChild(card);
     }
 
+    let liveAgentRoutingStatus: HTMLDivElement | null = null;
+
+    function agentIntentLabel(intent: ResolvedAgentProfileView['intent']): string {
+        return {
+            execute: tr('Execute', '执行'),
+            plan: tr('Plan', '计划'),
+            explore: tr('Explore', '探索'),
+            review: tr('Review', '审查'),
+        }[intent];
+    }
+
+    function clearAgentRoutingStatus(): void {
+        liveAgentRoutingStatus?.remove();
+        liveAgentRoutingStatus = null;
+    }
+
+    function updateAgentRoutingStatus(
+        phase: 'classifying' | 'resolved' | 'fallback',
+        profile?: unknown,
+    ): void {
+        if (!liveAgentRoutingStatus) {
+            emptyState.style.display = 'none';
+            liveAgentRoutingStatus = document.createElement('div');
+            liveAgentRoutingStatus.className = 'agent-routing-live';
+            liveAgentRoutingStatus.setAttribute('role', 'status');
+            liveAgentRoutingStatus.setAttribute('aria-live', 'polite');
+            chatArea.appendChild(liveAgentRoutingStatus);
+        }
+        liveAgentRoutingStatus.replaceChildren();
+        const indicator = document.createElement('span');
+        indicator.className = phase === 'classifying' ? 'agent-routing-spinner' : 'agent-routing-dot';
+        indicator.setAttribute('aria-hidden', 'true');
+        const label = document.createElement('span');
+        const resolved = parseResolvedAgentProfileView(profile);
+        if (phase === 'classifying') {
+            label.textContent = tr('Judging the task mode from its meaning…', '正在根据需求语义判断任务模式…');
+        } else if (phase === 'fallback') {
+            label.textContent = tr('Semantic routing was unavailable; using the safe rule fallback…', '语义路由暂不可用，正在使用安全规则回退…');
+        } else if (resolved) {
+            label.textContent = resolved.requiresUserDecision
+                ? tr('A user decision is required; execution remains blocked.', '需要用户敲定关键选择，本轮不会进入执行。')
+                : tr(`Selected ${agentIntentLabel(resolved.intent)} mode.`, `已选择${agentIntentLabel(resolved.intent)}模式。`);
+        } else {
+            label.textContent = tr('Task mode selected.', '任务模式判断完成。');
+        }
+        liveAgentRoutingStatus.append(indicator, label);
+        scrollBottom();
+    }
+
     function addUserMessage(text: string, msgIdx: number, images?: string[], contexts?: ActiveContext[], resolvedAgentProfile?: unknown) {
+        clearAgentRoutingStatus();
         emptyState.style.display = 'none';
         const div = document.createElement('div');
         div.className = 'message user codex-user-message';
@@ -5331,20 +5402,58 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
         const resolved = parseResolvedAgentProfileView(resolvedAgentProfile);
         if (resolved) {
-            const routing = document.createElement('div');
+            const routing = document.createElement('details');
             routing.className = `agent-routing-status agent-routing-${resolved.intent}`;
-            const intentLabels = {
-                execute: tr('Execute', '执行'),
-                plan: tr('Plan', '计划'),
-                explore: tr('Explore', '探索'),
-                review: tr('Review', '审查'),
-            };
+            const summary = document.createElement('summary');
+            summary.className = 'agent-routing-summary';
             const strategyLabel = resolved.strategy === 'multi'
                 ? tr('Multi-Agent', '多 Agent')
                 : tr('Single Agent', '单 Agent');
-            routing.textContent = `${tr('Auto', '自动')} · ${intentLabels[resolved.intent]} · ${strategyLabel}`;
-            routing.setAttribute('aria-label', `${tr('Automatic task routing', '自动任务路由')}：${intentLabels[resolved.intent]}，${strategyLabel}`);
-            if (resolved.reason) routing.title = resolved.reason;
+            const sourceLabel = resolved.routingSource === 'model'
+                ? tr('Semantic routing', '语义路由')
+                : resolved.routingSource === 'manual'
+                    ? tr('Manual mode', '手动模式')
+                    : tr('Rule fallback', '规则回退');
+            summary.textContent = resolved.requiresUserDecision
+                ? `${sourceLabel} · ${tr('Awaiting your decision', '等待用户敲定')} · ${agentIntentLabel(resolved.intent)}`
+                : `${sourceLabel} · ${agentIntentLabel(resolved.intent)} · ${strategyLabel}`;
+            routing.setAttribute('aria-label', `${tr('Task routing decision', '任务路由判断')}：${summary.textContent}`);
+            routing.appendChild(summary);
+
+            const explanation = document.createElement('div');
+            explanation.className = 'agent-routing-explanation';
+            if (resolved.requiresUserDecision) {
+                const boundary = document.createElement('div');
+                boundary.className = 'agent-routing-decision-boundary';
+                boundary.textContent = tr(
+                    'A material choice must be made by you. The Agent is kept out of Execute mode until you answer.',
+                    '存在必须由你决定的关键选择；在你答复前，Agent 不会进入执行模式。',
+                );
+                explanation.appendChild(boundary);
+            }
+            if (resolved.reason) {
+                const reason = document.createElement('div');
+                reason.className = 'agent-routing-reason';
+                reason.textContent = `${tr('Decision summary', '判断摘要')}：${resolved.reason}`;
+                explanation.appendChild(reason);
+            }
+            if (resolved.evidence.length > 0) {
+                const evidence = document.createElement('ul');
+                evidence.className = 'agent-routing-evidence';
+                for (const item of resolved.evidence) {
+                    const entry = document.createElement('li');
+                    entry.textContent = item;
+                    evidence.appendChild(entry);
+                }
+                explanation.appendChild(evidence);
+            }
+            if (resolved.confidence !== undefined) {
+                const confidence = document.createElement('div');
+                confidence.className = 'agent-routing-confidence';
+                confidence.textContent = `${tr('Confidence', '置信度')} ${Math.round(resolved.confidence * 100)}%`;
+                explanation.appendChild(confidence);
+            }
+            if (explanation.childElementCount > 0) routing.appendChild(explanation);
             div.appendChild(routing);
         }
 
@@ -6179,6 +6288,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 });
                 break;
             }
+
+            case 'agentRoutingStatus':
+                updateAgentRoutingStatus(msg.phase, msg.profile);
+                break;
 
             case 'modeChanged':
                 switchMode(msg.mode, /* fromUI */ false);

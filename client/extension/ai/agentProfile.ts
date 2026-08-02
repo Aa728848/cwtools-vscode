@@ -45,9 +45,9 @@ export interface AgentProfileResolveHints {
 }
 
 export interface ModelAgentProfileDecision {
-    domain: AgentRuntimeDomain;
     intent: Exclude<AgentIntent, 'auto'>;
     strategy: Exclude<AgentExecutionStrategy, 'auto'>;
+    requiresUserDecision: boolean;
     reason: string;
     confidence?: number;
     evidence?: string[];
@@ -161,9 +161,11 @@ export function parseModelAgentProfileDecision(raw: string): ModelAgentProfileDe
         const parsed: unknown = JSON.parse(objectText);
         if (!parsed || typeof parsed !== 'object') return undefined;
         const candidate = parsed as Partial<ModelAgentProfileDecision>;
-        if (!isAgentRuntimeDomain(candidate.domain)
-            || !['execute', 'plan', 'explore', 'review'].includes(candidate.intent ?? '')
+        if (!['execute', 'plan', 'explore', 'review'].includes(candidate.intent ?? '')
             || (candidate.strategy !== 'single' && candidate.strategy !== 'multi')) {
+            return undefined;
+        }
+        if (candidate.requiresUserDecision !== undefined && typeof candidate.requiresUserDecision !== 'boolean') {
             return undefined;
         }
         const confidence = typeof candidate.confidence === 'number'
@@ -173,9 +175,9 @@ export function parseModelAgentProfileDecision(raw: string): ModelAgentProfileDe
             ? candidate.evidence.filter((item): item is string => typeof item === 'string').map(item => item.slice(0, 240)).slice(0, 8)
             : undefined;
         return {
-            domain: candidate.domain,
             intent: candidate.intent as ModelAgentProfileDecision['intent'],
             strategy: candidate.strategy,
+            requiresUserDecision: candidate.requiresUserDecision === true,
             reason: typeof candidate.reason === 'string' ? candidate.reason.trim().slice(0, 240) : '',
             ...(confidence !== undefined ? { confidence } : {}),
             ...(evidence !== undefined ? { evidence } : {}),
@@ -194,34 +196,28 @@ export function resolveAgentProfileFromModelDecision(
     const selection = normalizeAgentProfile(profile);
     const fallback = resolveAgentProfile(text, selection, hints);
     const routeConfidence = decision.confidence ?? 0.65;
-    const keepPreviousDomain = selection.domain === 'auto'
-        && !!hints.previousDomain
-        && decision.domain !== hints.previousDomain
-        && routeConfidence < 0.8
-        && fallback.domain === hints.previousDomain;
-    // Apply hysteresis only when the deterministic route has no strong
-    // evidence for switching domains. Explicit file/language semantics in the
-    // fallback still switch immediately.
-    const domain = selection.domain === 'auto'
-        ? (keepPreviousDomain ? hints.previousDomain! : decision.domain)
-        : selection.domain;
+    // Capability domain is user-owned. Semantic routing may change task intent
+    // and execution topology, but never Paradox/General capabilities.
+    const domain: ResolvedAgentProfile['domain'] = selection.domain === 'general' ? 'general' : 'paradox';
     const explicitNoWrite = NO_WRITE_INTENT_RE.test(text) && !DIRECT_WRITE_OVERRIDE_RE.test(text);
     const directWriteRequested = DIRECT_WRITE_OVERRIDE_RE.test(text);
     const terseModificationAnswer = text.trim().length <= 80
         && (hints.previousUserRequests?.length ?? 0) > 0
         && fallback.intent === 'execute'
         && !PLAN_INTENT_RE.test(text);
-    const routedIntent = explicitNoWrite
-        ? fallback.intent
-        : directWriteRequested || terseModificationAnswer
+    const routedIntent = decision.requiresUserDecision
+        ? 'plan'
+        : explicitNoWrite
+            ? fallback.intent
+            : directWriteRequested || terseModificationAnswer
             ? 'execute'
-            : fallback.intent === 'execute' && (decision.intent === 'explore' || decision.intent === 'review')
-                ? 'execute'
             : decision.intent;
-    const intent = selection.intent === 'auto' ? routedIntent : selection.intent;
-    const mutationAuthorizedPlan = intent === 'plan'
-        && fallback.intent === 'execute'
-        && !explicitNoWrite;
+    // A material unresolved choice is a hard read/plan boundary even when the
+    // request also contains mutation verbs. Only a later user answer may admit
+    // execution.
+    const intent = decision.requiresUserDecision
+        ? 'plan'
+        : selection.intent === 'auto' ? routedIntent : selection.intent;
     // Existing multi-Agent modes are execution coordinators. Keep read-only and
     // plan turns on their dedicated safety modes even if a router returns multi.
     // Multi-Agent is a runtime optimization. Automatic model routing may
@@ -236,17 +232,15 @@ export function resolveAgentProfileFromModelDecision(
         domain,
         intent,
         strategy,
-        mode: mutationAuthorizedPlan
-            ? resolveMode(domain, 'execute', 'single')
-            : resolveMode(domain, intent, strategy),
-        reason: `model routing${decision.reason ? `: ${decision.reason}` : ''}; fallback=${fallback.mode}`
-            + (keepPreviousDomain ? '; domain switch deferred by routing hysteresis' : ''),
+        mode: resolveMode(domain, intent, strategy),
+        reason: decision.reason || 'Semantic routing completed.',
+        requiresUserDecision: decision.requiresUserDecision,
+        routingSource: 'model' as const,
     };
     const admission = admissionFromResolvedProfile(
         base,
         routeConfidence,
         decision.evidence ?? [decision.reason || 'model-assisted routing'],
-        mutationAuthorizedPlan ? 'workspace_write' : undefined,
     );
     return { ...base, admission, schedulingState: schedulingForSelection(admission, selection) };
 }
@@ -313,6 +307,8 @@ export function resolveAgentProfile(
         strategy,
         mode,
         reason: `domain: ${domainReason}; intent: ${intentReason}; strategy: ${strategyReason}${BROAD_TASK_RE.test(request) ? '; runtime dispatch evaluation requested' : ''}`,
+        requiresUserDecision: false,
+        routingSource: selection.intent === 'auto' ? 'deterministic' as const : 'manual' as const,
     };
     const confidence = selection.domain !== 'auto'
         ? 1
@@ -331,4 +327,9 @@ export function resolveAgentProfile(
     ];
     const admission = admissionFromResolvedProfile(base, confidence, evidence);
     return { ...base, admission, schedulingState: schedulingForSelection(admission, selection) };
+}
+
+/** Automatic task intent is semantic; deterministic admission is only its bounded fallback. */
+export function shouldUseSemanticAgentRouting(profile: AgentProfileSelection): boolean {
+    return normalizeAgentProfile(profile).intent === 'auto';
 }

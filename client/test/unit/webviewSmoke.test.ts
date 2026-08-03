@@ -242,6 +242,8 @@ describe('webview smoke checks', () => {
         expect(mermaidRenderer).to.include('htmlLabels: false');
         expect(mermaidRenderer).to.include('wrappingWidth: MERMAID_FLOWCHART_WRAP_WIDTH');
         expect(mermaidRenderer).to.include('--mermaid-natural-width');
+        expect(mermaidRenderer).to.include('--mermaid-preview-width');
+        expect(css).to.include('max-height: min(70vh, 800px)');
         expect(mermaidRenderer).to.include('nodeTextColor');
         expect(mermaidRenderer).to.include('edgeLabelBackground');
         expect(script).to.include('startMessageSelectionActions({');

@@ -730,9 +730,12 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .md-mermaid-output:empty { display: none; }
 .md-mermaid-output svg {
     display: inline-block;
-    width: min(100%, var(--mermaid-natural-width, 100%));
+    /* Keep tall path diagrams fully visible in the inline preview. Fullscreen
+       uses a separate selector and remains available for detailed scrolling. */
+    width: min(100%, var(--mermaid-preview-width, var(--mermaid-natural-width, 100%)));
     min-width: 0;
     max-width: 100%;
+    max-height: min(70vh, 800px);
     height: auto;
     vertical-align: top;
     color: var(--mermaid-text);

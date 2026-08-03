@@ -1,6 +1,7 @@
 const MAX_MERMAID_SOURCE_LENGTH = 20_000;
 const MERMAID_FLOWCHART_WRAP_WIDTH = 180;
 const MIN_MERMAID_NATURAL_WIDTH = 180;
+const MAX_MERMAID_PREVIEW_HEIGHT = 800;
 let diagramCounter = 0;
 let renderQueue = Promise.resolve();
 
@@ -97,12 +98,35 @@ function initializeMermaid(): void {
     });
 }
 
+export function calculateMermaidPreviewWidth(
+    viewBoxWidth: number,
+    viewBoxHeight: number,
+    maxPreviewHeight = MAX_MERMAID_PREVIEW_HEIGHT,
+): number | undefined {
+    if (!Number.isFinite(viewBoxWidth) || viewBoxWidth <= 0
+        || !Number.isFinite(viewBoxHeight) || viewBoxHeight <= 0
+        || !Number.isFinite(maxPreviewHeight) || maxPreviewHeight <= 0) return undefined;
+    const naturalWidth = Math.max(MIN_MERMAID_NATURAL_WIDTH, Math.ceil(viewBoxWidth));
+    const heightLimitedWidth = viewBoxWidth * maxPreviewHeight / viewBoxHeight;
+    return Math.max(1, Math.ceil(Math.min(naturalWidth, heightLimitedWidth)));
+}
+
 function preserveNaturalDiagramSize(output: HTMLElement): void {
     const svg = output.querySelector<SVGSVGElement>('svg');
     const viewBox = svg?.viewBox.baseVal;
-    if (!svg || !viewBox || !Number.isFinite(viewBox.width) || viewBox.width <= 0) return;
+    if (!svg || !viewBox) return;
+    const viewportHeight = Number.isFinite(window.innerHeight) && window.innerHeight > 0
+        ? window.innerHeight * 0.7
+        : MAX_MERMAID_PREVIEW_HEIGHT;
+    const previewWidth = calculateMermaidPreviewWidth(
+        viewBox.width,
+        viewBox.height,
+        Math.min(MAX_MERMAID_PREVIEW_HEIGHT, viewportHeight),
+    );
+    if (previewWidth === undefined) return;
     const naturalWidth = Math.max(MIN_MERMAID_NATURAL_WIDTH, Math.ceil(viewBox.width));
     svg.style.setProperty('--mermaid-natural-width', `${naturalWidth}px`);
+    svg.style.setProperty('--mermaid-preview-width', `${previewWidth}px`);
 }
 
 function sanitizeSvg(svgText: string): string {
@@ -265,5 +289,18 @@ export function startMermaidRendering(root: HTMLElement): () => void {
         }
     });
     observer.observe(root, { childList: true, subtree: true });
-    return () => observer.disconnect();
+    let resizeFrame: number | undefined;
+    const resize = (): void => {
+        if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
+        resizeFrame = requestAnimationFrame(() => {
+            resizeFrame = undefined;
+            root.querySelectorAll<HTMLElement>('.md-mermaid-output').forEach(preserveNaturalDiagramSize);
+        });
+    };
+    window.addEventListener('resize', resize);
+    return () => {
+        observer.disconnect();
+        window.removeEventListener('resize', resize);
+        if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
+    };
 }

@@ -673,4 +673,12 @@ describe('webview smoke checks', () => {
         expect(css).to.include('.details-relation-link');
         expect(css).to.include('prefers-reduced-motion');
     });
+
+    it('streaming thinking body re-render preserves user scroll position', () => {
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        expect(script).to.include('function rerenderScrollableBody(body: HTMLElement, html: string): void {');
+        expect(script).to.include('body.scrollTop = stickToBottom ? body.scrollHeight : Math.min(prevScrollTop, body.scrollHeight);');
+        expect(script).to.include('rerenderScrollableBody(state.liveThinkBody, renderMarkdown(clipLiveMarkdownContent(state.liveThinkContent)));');
+        expect(script).to.include('rerenderScrollableBody(state.liveTextProcessBody, renderMarkdown(clipLiveMarkdownContent(state.liveTextContent)));');
+    });
 });

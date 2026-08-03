@@ -3661,6 +3661,16 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         });
     }
 
+    // Re-render a streaming scrollable body (e.g. .thinking-body) without losing
+    // the user's scroll position: follow the stream while pinned to the bottom,
+    // otherwise restore the previous offset (innerHTML replacement resets it).
+    function rerenderScrollableBody(body: HTMLElement, html: string): void {
+        const stickToBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 24;
+        const prevScrollTop = body.scrollTop;
+        body.innerHTML = html;
+        body.scrollTop = stickToBottom ? body.scrollHeight : Math.min(prevScrollTop, body.scrollHeight);
+    }
+
     function scrollBottom(force = false) {
         const activeSubagent = document.querySelector('.subagent-fullscreen-view.active') as HTMLElement | null;
         if (activeSubagent) {
@@ -4716,7 +4726,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         requestAnimationFrame(() => {
             state.pendingThinkingRender = false;
             if (state.liveThinkBody) {
-                state.liveThinkBody.innerHTML = renderMarkdown(clipLiveMarkdownContent(state.liveThinkContent));
+                rerenderScrollableBody(state.liveThinkBody, renderMarkdown(clipLiveMarkdownContent(state.liveThinkContent)));
             }
             if (state.liveThinkSum) {
                 state.liveThinkSum.innerHTML = buildThinkingSummaryHtml(state.liveThinkContent, chatI18n);
@@ -4754,7 +4764,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         requestAnimationFrame(() => {
             state.pendingTextRender = false;
             if (state.liveTextProcessBody) {
-                state.liveTextProcessBody.innerHTML = renderMarkdown(clipLiveMarkdownContent(state.liveTextContent));
+                rerenderScrollableBody(state.liveTextProcessBody, renderMarkdown(clipLiveMarkdownContent(state.liveTextContent)));
             }
             scrollBottom();
         });

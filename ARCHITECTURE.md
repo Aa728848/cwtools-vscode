@@ -148,7 +148,7 @@ The repository depends on two submodules with different responsibilities:
 | Submodule | Role |
 | --- | --- |
 | `submodules/cwtools/` | Upstream CWTools F# library. The language server depends on it for parsing, validation, game model semantics, shader analysis, and scripted-type refresh behavior. |
-| `submodules/cwtools-stellaris-config/` | Stellaris CWT rule/config data. Rules sync tooling compares it with game `script_documentation` logs and vanilla `common/`; `rules:stellaris:shader-abi` generates fail-closed, human-reviewed Shader ABI upgrade packs; packaging zips its `config/` directory into the fallback rules bundle. |
+| `submodules/cwtools-stellaris-config/` | Stellaris CWT rule/config data. Rules sync tooling compares it with game `script_documentation` logs and vanilla `common/`; `rules:stellaris:report` auto-merges the Shader ABI catalog/audit/renderer-contract files from the CWTools inventory scan (new declarations register with `automatic_inventory` evidence); packaging zips its `config/` directory into the fallback rules bundle. |
 
 The first submodule is executable/library semantics; the second is rules data.
 Keep that distinction visible in commits and PR descriptions.
@@ -651,7 +651,7 @@ EvidenceGate 对项目可扩展 TypeDef 引用执行分阶段判定。`pre_write
 | 子模块 | 作用 |
 | --- | --- |
 | `submodules/cwtools/` | 上游 CWTools F# 库。语言服务器依赖它完成解析、校验、游戏模型语义、Shader 分析和 scripted type 刷新行为。 |
-| `submodules/cwtools-stellaris-config/` | Stellaris CWT 规则/配置数据。规则同步工具会把它与游戏 `script_documentation` 日志和原版 `common/` 对比；`rules:stellaris:shader-abi` 生成保守且必须人工审核的 Shader ABI 升级包；打包时会将其中的 `config/` 目录压缩为 fallback 规则包。 |
+| `submodules/cwtools-stellaris-config/` | Stellaris CWT 规则/配置数据。规则同步工具会把它与游戏 `script_documentation` 日志和原版 `common/` 对比；`rules:stellaris:report` 基于 CWTools 清单扫描自动合并 Shader ABI 的 catalog/audit/渲染器契约文件（新声明以 `automatic_inventory` 证据收录）；打包时会将其中的 `config/` 目录压缩为 fallback 规则包。 |
 
 前者是可执行/库语义，后者是规则数据。提交和 PR 说明中应保持这个边界清晰。
 
@@ -1155,8 +1155,7 @@ Shader 支持覆盖 `.shader` 和 `.fxh`，涉及：
 
 - `npm run rules:stellaris` — 交互式入口
 - `npm run rules:stellaris:scan` / `check` / `update` — 扫描、校验（支持 `--ci`）、更新
-- `npm run rules:stellaris:report` — 只读对比游戏 `script_documentation` 日志、原版 `common/` 与 CWT 配置基线，生成自包含 HTML 报告（`tools/rules-sync/report.ts`，默认自动打开浏览器，`--no-open` 关闭）
-- `npm run rules:stellaris:shader-abi` — 复用 CWTools Shader parser 扫描新版本 `gfx/FX` 与 EXE，生成禁止自动晋升的 ABI 审核草案；只有同时提供已审核 catalog/audit 时 `--apply` 才能写入
+- `npm run rules:stellaris:report` — 对比游戏 `script_documentation` 日志、原版 `common/` 与 CWT 配置基线，生成自包含 HTML 报告（`tools/rules-sync/report.ts`，默认自动打开浏览器，`--no-open` 关闭）；检测到游戏安装时会先扫描 `gfx/FX` 与 EXE 并自动合并 Shader ABI 配置（`config/shader/`），传入 `--no-shader-abi` 恢复只读
 
 .NET 常用命令：
 

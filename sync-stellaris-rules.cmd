@@ -8,12 +8,10 @@ echo Select Stellaris rules sync mode:
 echo   1. scan   - generate rules.generated.json and CWT candidates
 echo   2. check  - generate and compare with current config
 echo   3. update - generate append-only candidates for review
-echo   4. report - visual HTML comparison report (opens in browser)
-echo   5. shader ABI - scan a game update and generate a fail-closed review pack
+echo   4. report - visual HTML comparison report (opens in browser, auto-merges Shader ABI)
 echo   Q. quit
-choice /C 12345Q /N /M "Choose 1, 2, 3, 4, 5, or Q: "
-if "%ERRORLEVEL%"=="6" exit /b 0
-if "%ERRORLEVEL%"=="5" set "MODE=shader-abi"
+choice /C 1234Q /N /M "Choose 1, 2, 3, 4, or Q: "
+if "%ERRORLEVEL%"=="5" exit /b 0
 if "%ERRORLEVEL%"=="4" set "MODE=report"
 if "%ERRORLEVEL%"=="3" set "MODE=update"
 if "%ERRORLEVEL%"=="2" set "MODE=check"

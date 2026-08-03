@@ -105,12 +105,11 @@ npm run rules:stellaris:scan
 npm run rules:stellaris:check
 npm run rules:stellaris:update
 npm run rules:stellaris:report
-npm run rules:stellaris:shader-abi
 ```
 
-`rules:stellaris:report` runs a read-only comparison between the latest game `script_documentation` log, vanilla `common/`, and the CWT config baseline, generating a self-contained HTML report (`tools/rules-sync/report.ts`, automatically opens in the browser by default, disable with `--no-open`). For details, see [tools/rules-sync/README.md](./tools/rules-sync/README.md).
+`rules:stellaris:report` compares the latest game `script_documentation` log, vanilla `common/`, and the CWT config baseline, generating a self-contained HTML report (`tools/rules-sync/report.ts`, automatically opens in the browser by default, disable with `--no-open`). For details, see [tools/rules-sync/README.md](./tools/rules-sync/README.md).
 
-`rules:stellaris:shader-abi` parses the updated `gfx/FX` corpus through CWTools, fingerprints `stellaris.exe`, and writes a fail-closed ABI upgrade review pack. It never promotes candidates automatically; applying canonical catalog/audit files requires both separately reviewed artifacts.
+When a Stellaris install is available, `rules:stellaris:report` also parses the `gfx/FX` corpus through CWTools, fingerprints `stellaris.exe`, and auto-merges the Shader ABI files (`config/shader/abi-catalog.json`, `abi-audit.json`, `renderer-contracts.json`) before rendering the report. Reviewed catalog entries carry forward while their declarations still exist; every other scanned Effect declaration is registered with `automatic_inventory` evidence, and entries or renderer contracts whose declarations vanished are removed. Pass `--no-shader-abi` for a fully read-only report.
 
 #### Run and Debug
 
@@ -467,17 +466,19 @@ npm run rules:stellaris:scan
 npm run rules:stellaris:check
 npm run rules:stellaris:update
 npm run rules:stellaris:report
-npm run rules:stellaris:shader-abi
 ```
 
 `rules:stellaris:report` 会把最新游戏 `script_documentation` 日志、原版 `common/`
-与 CWT 配置基线做只读对比，并生成自包含 HTML 报告
+与 CWT 配置基线做对比，并生成自包含 HTML 报告
 （`tools/rules-sync/report.ts`，默认自动在浏览器打开，可用 `--no-open` 关闭）。
 详见 [tools/rules-sync/README.md](./tools/rules-sync/README.md)。
 
-`rules:stellaris:shader-abi` 会通过 CWTools 解析更新后的 `gfx/FX`、记录 `stellaris.exe`
-指纹并生成保守的 ABI 升级审核包。它不会自动晋升候选项；写入正式 catalog/audit 前，
-必须分别提供已审核的两份产物。
+检测到 Stellaris 安装目录时，`rules:stellaris:report` 还会通过 CWTools 解析
+`gfx/FX`、记录 `stellaris.exe` 指纹，并在生成报告前自动合并 Shader ABI 文件
+（`config/shader/abi-catalog.json`、`abi-audit.json`、`renderer-contracts.json`）：
+已审核条目在声明仍存在时自动结转，其余扫描到的 Effect 声明以
+`automatic_inventory` 证据自动收录，声明已消失的条目与渲染器契约会被移除。
+传入 `--no-shader-abi` 可恢复为完全只读的报告。
 
 
 #### 运行和调试

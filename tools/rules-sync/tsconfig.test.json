@@ -13,6 +13,8 @@
     "scope-contracts-cli.ts",
     "scope-contracts.test.ts",
     "shader-abi-sync.ts",
-    "shader-abi-sync.test.ts"
+    "shader-abi-sync.test.ts",
+    "report.ts",
+    "report.test.ts"
   ]
 }

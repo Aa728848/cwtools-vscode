@@ -6,9 +6,9 @@ import { scanScopeContracts, type ScopeContractReport } from './scope-contracts'
 // versus the rules config baseline (config/logs/* + CWT files).
 // Read-only: never writes into the config; emits a self-contained HTML report.
 
-type RuleKind = 'effect' | 'trigger' | 'modifier' | 'scope' | 'localisation_command';
+export type RuleKind = 'effect' | 'trigger' | 'modifier' | 'scope' | 'localisation_command';
 
-interface DocRule {
+export interface DocRule {
     name: string;
     kind: RuleKind;
     scopes: string[];
@@ -19,13 +19,13 @@ interface DocRule {
     sourceLine: number;
 }
 
-interface DiffChange {
+export interface DiffChange {
     field: string;
     before: string;
     after: string;
 }
 
-interface DiffEntry {
+export interface DiffEntry {
     name: string;
     description: string;
     scopes: string[];
@@ -37,7 +37,7 @@ interface DiffEntry {
     changes?: DiffChange[];
 }
 
-interface KindDiff {
+export interface KindDiff {
     kind: RuleKind;
     added: DiffEntry[];
     removed: DiffEntry[];
@@ -73,6 +73,22 @@ interface FolderFieldReport {
     staleSubtypes?: Array<{ name: string; renameTo?: string }>;
 }
 
+interface ShaderAbiMergeInfo {
+    fromVersion: string;
+    toVersion: string;
+    executableChanged: boolean;
+    declarations: number;
+    uniqueNames: number;
+    carried: string[];
+    added: string[];
+    dropped: Array<{ name: string; shader_file?: string; reason: string }>;
+    contractsKept: number;
+    contractsSkipped: boolean;
+    contractsDropped: Array<{ renderer_subtype?: string; shader_file?: string; reason: string }>;
+    asciiHits: number;
+    utf16Hits: number;
+}
+
 interface ReportData {
     generatedAt: string;
     gameVersion: string;
@@ -84,6 +100,7 @@ interface ReportData {
     diffs: KindDiff[];
     folders: FolderFieldReport[];
     scopeContracts: ScopeContractReport;
+    shaderAbi: ShaderAbiMergeInfo | null;
 }
 
 const IDENT = '[A-Za-z_][A-Za-z0-9_\\.\\-]*';
@@ -672,7 +689,23 @@ function sameSet(left: string[], right: string[]): boolean {
     return right.every(v => set.has(v.toLowerCase()));
 }
 
-function diffKind(kind: RuleKind, game: Map<string, DocRule>, baseline: Map<string, DocRule>, cwtNames: Map<RuleKind, Set<string>>): KindDiff {
+/** Trim a changed description pair to a compact window that still contains
+ * the first difference. A plain fixed-length prefix slice makes long
+ * descriptions whose change sits past the cut render as identical text. */
+export function descriptionChangeWindow(before: string, after: string, max = 160): { before: string; after: string } {
+    if (before.length <= max && after.length <= max) return { before, after };
+    let firstDiff = 0;
+    const shared = Math.min(before.length, after.length);
+    while (firstDiff < shared && before[firstDiff] === after[firstDiff]) firstDiff++;
+    const windowAround = (value: string): string => {
+        const start = Math.max(0, Math.min(firstDiff - 40, value.length - max));
+        const sliced = value.slice(start, start + max);
+        return (start > 0 ? '…' : '') + sliced + (start + max < value.length ? '…' : '');
+    };
+    return { before: windowAround(before), after: windowAround(after) };
+}
+
+export function diffKind(kind: RuleKind, game: Map<string, DocRule>, baseline: Map<string, DocRule>, cwtNames: Map<RuleKind, Set<string>>): KindDiff {
     const added: DiffEntry[] = [];
     const removed: DiffEntry[] = [];
     const changed: DiffEntry[] = [];
@@ -695,8 +728,10 @@ function diffKind(kind: RuleKind, game: Map<string, DocRule>, baseline: Map<stri
         if ((old.category ?? '') !== (rule.category ?? '')) {
             changes.push({ field: 'category', before: old.category ?? '(无)', after: rule.category ?? '(无)' });
         }
-        if (old.description.trim() !== rule.description.trim()) {
-            changes.push({ field: 'description', before: old.description.trim().slice(0, 160), after: rule.description.trim().slice(0, 160) });
+        const beforeDescription = old.description.trim();
+        const afterDescription = rule.description.trim();
+        if (beforeDescription !== afterDescription) {
+            changes.push({ field: 'description', ...descriptionChangeWindow(beforeDescription, afterDescription) });
         }
         if (changes.length) changed.push({ ...toDiffEntry(rule), changes });
     }
@@ -908,6 +943,44 @@ function detectGameVersion(vanillaCommonDir: string): string {
     }
 }
 
+function readShaderAbiMergeReport(file: string): ShaderAbiMergeInfo | null {
+    try {
+        if (!file || !fs.existsSync(file)) return null;
+        const raw: unknown = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+        const report = raw as Record<string, unknown>;
+        const child = (value: unknown): Record<string, unknown> =>
+            value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+        const identity = child(report.game_identity);
+        const declarations = child(report.declarations);
+        const catalog = child(report.catalog);
+        const contracts = child(report.renderer_contracts);
+        const scan = child(report.executable_string_scan);
+        const stringList = (value: unknown): string[] =>
+            Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+        const droppedList = <T extends Record<string, unknown>>(value: unknown): T[] =>
+            Array.isArray(value) ? value.filter((item): item is T => !!item && typeof item === 'object' && !Array.isArray(item)) : [];
+        const numberValue = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) ? value : 0;
+        return {
+            fromVersion: typeof report.from_version === 'string' ? report.from_version : 'unknown',
+            toVersion: typeof report.to_version === 'string' ? report.to_version : '',
+            executableChanged: identity.executable_changed === true,
+            declarations: numberValue(declarations.effect_declarations),
+            uniqueNames: numberValue(declarations.unique_effect_names),
+            carried: stringList(catalog.carried),
+            added: stringList(catalog.added),
+            dropped: droppedList(catalog.dropped),
+            contractsKept: numberValue(contracts.kept),
+            contractsSkipped: contracts.skipped === true,
+            contractsDropped: droppedList(contracts.dropped),
+            asciiHits: numberValue(scan.ascii_hits),
+            utf16Hits: numberValue(scan.utf16le_hits),
+        };
+    } catch {
+        return null;
+    }
+}
+
 function newestMtime(dir: string): string {
     let newest = 0;
     for (const file of walkFiles(dir, f => /\.(log|txt)$/i.test(f))) {
@@ -1017,6 +1090,9 @@ for (const diff of DATA.diffs) {
 }
 tabs.push({ id: 'fields', label: 'Common 字段级参数', count: DATA.folders.reduce((n, f) => n + f.newFields.length + (f.missingSubtypes || []).length + (f.staleSubtypes || []).length + (f.covered ? 0 : 1), 0), render: renderFolders });
 tabs.push({ id: 'scope-contracts', label: 'Scope 契约', count: DATA.scopeContracts.findings.length, render: renderScopeContracts });
+if (DATA.shaderAbi) {
+  tabs.push({ id: 'shader-abi', label: 'Shader ABI', count: DATA.shaderAbi.added.length + DATA.shaderAbi.dropped.length + DATA.shaderAbi.contractsDropped.length, render: renderShaderAbi });
+}
 
 function cards() {
   const host = document.getElementById('cards');
@@ -1038,6 +1114,13 @@ function cards() {
   if (scopeSummary.missing) items.push({ tab: 'scope-contracts', cls: 'add', num: scopeSummary.missing, lbl: 'Scope 元数据缺失' });
   if (scopeSummary.mismatch) items.push({ tab: 'scope-contracts', cls: 'chg', num: scopeSummary.mismatch, lbl: 'Scope 契约冲突' });
   if (scopeSummary.unresolved) items.push({ tab: 'scope-contracts', cls: 'del', num: scopeSummary.unresolved, lbl: 'Scope 注释待复核' });
+  const abi = DATA.shaderAbi;
+  if (abi) {
+    if (abi.executableChanged) items.push({ tab: 'shader-abi', cls: 'chg', num: 'EXE', lbl: '引擎可执行文件已变化' });
+    if (abi.added.length) items.push({ tab: 'shader-abi', cls: 'add', num: abi.added.length, lbl: 'Shader ABI 自动收录' });
+    if (abi.dropped.length) items.push({ tab: 'shader-abi', cls: 'del', num: abi.dropped.length, lbl: 'Shader ABI 条目移除' });
+    if (abi.contractsDropped.length) items.push({ tab: 'shader-abi', cls: 'del', num: abi.contractsDropped.length, lbl: '渲染器契约移除' });
+  }
   host.innerHTML = items.map(i => '<div class="card" data-tab="' + i.tab + '"><div class="num ' + i.cls + '">' + i.num + '</div><div class="lbl">' + esc(i.lbl) + '</div></div>').join('')
     || '<div class="card"><div class="num add">0</div><div class="lbl">无差异，规则与游戏文档一致</div></div>';
   host.querySelectorAll('.card[data-tab]').forEach(el => el.addEventListener('click', () => activate(el.dataset.tab)));
@@ -1237,6 +1320,38 @@ function renderScopeContracts() {
   paint();
 }
 
+function renderShaderAbi() {
+  const main = document.getElementById('main');
+  const abi = DATA.shaderAbi;
+  const wrap = document.createElement('div');
+  const ABI_CAP = 400;
+  const idParts = id => String(id).split('|');
+  const idTable = (ids, badge) => {
+    const shown = ids.slice(0, ABI_CAP);
+    return '<table><thead><tr><th style="width:34%">Effect</th><th>Shader 文件</th></tr></thead><tbody>'
+      + shown.map(id => {
+        const parts = idParts(id);
+        return '<tr><td class="name">' + esc(parts[0]) + (badge ? '<span class="badge ' + badge[0] + '">' + badge[1] + '</span>' : '') + '</td><td class="src">' + esc(parts[1] || '') + '</td></tr>';
+      }).join('') + '</tbody></table>'
+      + (ids.length > ABI_CAP ? '<div class="desc" style="padding:6px 0">… 仅显示前 ' + ABI_CAP + ' 条，共 ' + ids.length + ' 条（完整列表见 shader-abi-merge-report.json）</div>' : '');
+  };
+  const dropTable = rows => '<table><thead><tr><th style="width:26%">名称</th><th style="width:26%">Shader 文件</th><th>原因</th></tr></thead><tbody>'
+    + rows.map(row => '<tr><td class="name">' + esc(row.name || row.renderer_subtype || '?') + '<span class="badge del">移除</span></td><td class="src">' + esc(row.shader_file || '') + '</td><td class="desc">' + esc(row.reason || '') + '</td></tr>').join('')
+    + '</tbody></table>';
+  wrap.innerHTML = '<div class="desc" style="margin-bottom:12px">'
+    + 'Shader ABI 已随报告<b>自动合并</b>（无人工审核）写入 <span class="tag">config/shader/</span>：版本 ' + esc(abi.fromVersion) + ' → ' + esc(abi.toVersion)
+    + ' · Effect 声明 ' + abi.declarations + '（唯一名称 ' + abi.uniqueNames + '）'
+    + ' · 引擎 EXE ' + (abi.executableChanged ? '<span class="badge chg">已变化</span>' : '<span class="badge cwt">未变化</span>')
+    + ' · 字符串扫描 ASCII ' + abi.asciiHits + ' / UTF-16 ' + abi.utf16Hits + '（仅候选信号）'
+    + '</div>'
+    + (abi.dropped.length ? '<details class="folder uncovered" open><summary>移除的 ABI 条目 ' + abi.dropped.length + '<span class="sub">声明已不存在，不再结转</span></summary><div class="body">' + dropTable(abi.dropped) + '</div></details>' : '')
+    + (abi.contractsDropped.length ? '<details class="folder uncovered" open><summary>移除的渲染器契约 ' + abi.contractsDropped.length + '<span class="sub">Effect 在新语料中已不存在</span></summary><div class="body">' + dropTable(abi.contractsDropped) + '</div></details>' : '')
+    + '<details class="folder"' + (abi.added.length && abi.added.length <= 40 ? ' open' : '') + '><summary>自动收录的 ABI 条目 ' + abi.added.length + '<span class="sub">evidence = automatic_inventory，rename_policy = forbidden</span></summary><div class="body">' + idTable(abi.added, ['add', '新增']) + '</div></details>'
+    + '<details class="folder"><summary>结转的已审核条目 ' + abi.carried.length + '<span class="sub">保留原 evidence，版本已升级</span></summary><div class="body">' + (abi.carried.length ? idTable(abi.carried, null) : '<span class="desc">无</span>') + '</div></details>'
+    + '<div class="desc" style="margin-top:8px">渲染器契约：保留 ' + abi.contractsKept + ' 条' + (abi.contractsSkipped ? '（未找到现有契约文件，已跳过）' : '') + '，移除 ' + abi.contractsDropped.length + ' 条。</div>';
+  main.appendChild(wrap);
+}
+
 meta();
 cards();
 nav();
@@ -1258,6 +1373,7 @@ function parseArgs(argv: string[]) {
         docs: getArg('--docs'),
         config: getArg('--config'),
         vanillaCommon: getArg('--vanilla-common'),
+        shaderAbi: getArg('--shader-abi'),
         outDir: getArg('--output', path.resolve('rules-report')),
     };
 }
@@ -1265,7 +1381,7 @@ function parseArgs(argv: string[]) {
 function main() {
     const args = parseArgs(process.argv.slice(2));
     if (!args.docs || !args.config) {
-        console.error('Usage: npx ts-node tools/rules-sync/report.ts --docs <scriptDocsDir> --config <configDir> [--vanilla-common <dir>] [--output <outDir>]');
+        console.error('Usage: npx ts-node tools/rules-sync/report.ts --docs <scriptDocsDir> --config <configDir> [--vanilla-common <dir>] [--shader-abi <mergeReport.json>] [--output <outDir>]');
         process.exit(1);
     }
     const baselineDir = path.join(args.config, 'logs');
@@ -1320,6 +1436,7 @@ function main() {
         scopeContracts: args.vanillaCommon && fs.existsSync(args.vanillaCommon)
             ? scanScopeContracts(args.vanillaCommon, args.config)
             : { gameVersion: '', contracts: [], findings: [], summary: { extracted: 0, highConfidence: 0, missing: 0, mismatch: 0, unresolved: 0 } },
+        shaderAbi: args.shaderAbi ? readShaderAbiMergeReport(args.shaderAbi) : null,
     };
 
     fs.mkdirSync(args.outDir, { recursive: true });
@@ -1333,7 +1450,11 @@ function main() {
     }
     console.log(`[report] folders with findings: ${folders.length}`);
     console.log(`[report] scope contracts: extracted=${data.scopeContracts.summary.extracted} high=${data.scopeContracts.summary.highConfidence} missing=${data.scopeContracts.summary.missing} mismatch=${data.scopeContracts.summary.mismatch} unresolved=${data.scopeContracts.summary.unresolved}`);
+    if (data.shaderAbi) {
+        const abi = data.shaderAbi;
+        console.log(`[report] shader-abi: ${abi.fromVersion} -> ${abi.toVersion}, catalog carried=${abi.carried.length} added=${abi.added.length} dropped=${abi.dropped.length}, contracts kept=${abi.contractsKept} dropped=${abi.contractsDropped.length}`);
+    }
     console.log(`Report: ${htmlPath}`);
 }
 
-main();
+if (require.main === module) main();

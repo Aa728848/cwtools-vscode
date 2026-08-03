@@ -9,18 +9,18 @@ let tsNodeBin = '';
 
 function usage() {
     console.log(`Usage:
-  node tools/rules-sync/stellaris-rules-sync.js [scan|check|update|report|contracts|shader-abi] [options]
+  node tools/rules-sync/stellaris-rules-sync.js [scan|check|update|report|contracts] [options]
 
 Modes:
   scan    Generate rules.generated.json and generated CWT candidates.
   check   Generate, compare with the config, and write a check report. Default mode.
   update  Generate append-only CWT candidates under the output directory for review.
   report  Compare fresh game docs + vanilla common against the config baseline and
-          write a self-contained visual HTML report (opens in browser).
+          write a self-contained visual HTML report (opens in browser). When a
+          Stellaris install is found, the Shader ABI inventory is scanned and
+          auto-merged into config/shader before the report is generated.
   contracts  Extract Scope/ROOT/FROM contracts from vanilla comments and emit
              reviewable CWT candidates. Read-only unless --apply is passed.
-  shader-abi Parse gfx/FX with CWTools, fingerprint stellaris.exe, and emit a
-             fail-closed ABI upgrade review pack. Never auto-promotes entries.
 
 Options:
   --docs <path>              Stellaris script_documentation directory.
@@ -30,15 +30,14 @@ Options:
   --previous <path>          Previous rules.generated.json for definition diffs.
   --include-vanilla-common   Inventory vanilla Stellaris common/ definitions. Enabled by default.
   --vanilla-common <path>    Vanilla Stellaris common directory.
-  --game-path <path>         Stellaris install root for shader-abi mode.
+  --game-path <path>         Stellaris install root for the report mode Shader ABI scan.
+  --no-shader-abi            Skip the Shader ABI scan and auto-merge in report mode.
   --no-vanilla-common        Do not inventory vanilla Stellaris common/ definitions.
   --no-config-common         Do not inventory config/common CWT definitions.
   --no-cwt                   Do not emit generated CWT candidate files during scan.
   --no-open                  Do not open the HTML report in the browser (report mode).
   --apply-conflicts          Replace conflicting CWT contracts with reviewed vanilla evidence.
-  --reviewed-catalog <path>  Human-reviewed ABI catalog used by shader-abi mode.
-  --reviewed-audit <path>    Completed ABI audit used by shader-abi mode.
-  --apply                    Apply contracts, or apply both reviewed Shader ABI files.
+  --apply                    Apply contracts.
   --ci                       Preserve check exit code 2 when drift is found.
 `);
 }
@@ -48,8 +47,8 @@ function parseArgs(argv) {
     let mode = 'check';
     if (args[0] && !args[0].startsWith('-')) mode = args.shift();
     if (mode === 'help' || mode === '--help' || mode === '-h') return { help: true };
-    if (!['scan', 'check', 'update', 'report', 'contracts', 'shader-abi'].includes(mode)) {
-        throw new Error(`Unknown mode "${mode}". Expected scan, check, update, report, contracts, or shader-abi.`);
+    if (!['scan', 'check', 'update', 'report', 'contracts'].includes(mode)) {
+        throw new Error(`Unknown mode "${mode}". Expected scan, check, update, report, or contracts.`);
     }
 
     const opts = {
@@ -62,13 +61,12 @@ function parseArgs(argv) {
         includeVanillaCommon: true,
         vanillaCommon: '',
         gamePath: '',
+        shaderAbi: true,
         includeConfigCommon: true,
         emitCwt: true,
         openReport: true,
         apply: false,
         applyConflicts: false,
-        reviewedCatalog: '',
-        reviewedAudit: '',
         ci: false,
     };
 
@@ -100,6 +98,9 @@ function parseArgs(argv) {
             case '--game-path':
                 opts.gamePath = path.resolve(args[++i] || '');
                 break;
+            case '--no-shader-abi':
+                opts.shaderAbi = false;
+                break;
             case '--no-vanilla-common':
                 opts.includeVanillaCommon = false;
                 break;
@@ -117,12 +118,6 @@ function parseArgs(argv) {
                 break;
             case '--apply-conflicts':
                 opts.applyConflicts = true;
-                break;
-            case '--reviewed-catalog':
-                opts.reviewedCatalog = path.resolve(args[++i] || '');
-                break;
-            case '--reviewed-audit':
-                opts.reviewedAudit = path.resolve(args[++i] || '');
                 break;
             case '--ci':
                 opts.ci = true;
@@ -256,6 +251,31 @@ function buildCommonArgs(opts) {
     return commonArgs;
 }
 
+function runShaderAbiAutoMerge(opts) {
+    const gamePath = opts.gamePath || defaultGamePath();
+    if (!gamePath || !fs.existsSync(gamePath)) {
+        console.log('[rules-sync] shader-abi skipped: Stellaris game directory not found (set --game-path, or pass --no-shader-abi to silence).');
+        return '';
+    }
+    const shaderOut = path.join(opts.out, 'shader-abi');
+    const inventoryPath = path.join(shaderOut, 'shader-abi-inventory.json');
+    const cliProject = path.join(repoRoot, 'submodules', 'cwtools', 'CWToolsCLI', 'CWToolsCLI.fsproj');
+    const inventoryArgs = [
+        'run', '--project', cliProject, '--no-restore', '--',
+        '--game', 'STL', '--directory', gamePath,
+        'shader-abi-inventory',
+    ];
+    if (opts.version && opts.version !== 'local') inventoryArgs.push('--gameversion', opts.version);
+    inventoryArgs.push(inventoryPath);
+    fs.mkdirSync(shaderOut, { recursive: true });
+    console.log('[rules-sync] shader-abi: scanning gfx/FX and auto-merging into config/shader');
+    console.log(`[rules-sync] gamePath=${gamePath}`);
+    run('dotnet', inventoryArgs, false, opts.ci);
+    const syncScript = path.join(repoRoot, 'tools', 'rules-sync', 'shader-abi-sync.ts');
+    runTsNode(syncScript, ['--inventory', inventoryPath, '--config', opts.config, '--output', shaderOut], false, opts.ci);
+    return path.join(shaderOut, 'shader-abi-merge-report.json');
+}
+
 function main() {
     const opts = parseArgs(process.argv.slice(2));
     if (opts.help) {
@@ -265,35 +285,6 @@ function main() {
 
     assertDir('Config', opts.config);
     fs.mkdirSync(opts.out, { recursive: true });
-
-    if (opts.mode === 'shader-abi') {
-        const gamePath = opts.gamePath || defaultGamePath();
-        assertDir('Stellaris game', gamePath);
-        const shaderOut = path.join(opts.out, 'shader-abi');
-        const inventoryPath = path.join(shaderOut, 'shader-abi-inventory.json');
-        const cliProject = path.join(repoRoot, 'submodules', 'cwtools', 'CWToolsCLI', 'CWToolsCLI.fsproj');
-        const inventoryArgs = [
-            'run', '--project', cliProject, '--no-restore', '--',
-            '--game', 'STL', '--directory', gamePath,
-            'shader-abi-inventory',
-        ];
-        if (opts.version && opts.version !== 'local') inventoryArgs.push('--gameversion', opts.version);
-        inventoryArgs.push(inventoryPath);
-        fs.mkdirSync(shaderOut, { recursive: true });
-        console.log('[rules-sync] mode=shader-abi');
-        console.log(`[rules-sync] gamePath=${gamePath}`);
-        console.log(`[rules-sync] config=${opts.config}`);
-        console.log(`[rules-sync] out=${shaderOut}`);
-        run('dotnet', inventoryArgs, false, opts.ci);
-
-        const syncScript = path.join(repoRoot, 'tools', 'rules-sync', 'shader-abi-sync.ts');
-        const syncArgs = ['--inventory', inventoryPath, '--config', opts.config, '--output', shaderOut];
-        if (opts.reviewedCatalog) syncArgs.push('--reviewed-catalog', opts.reviewedCatalog);
-        if (opts.reviewedAudit) syncArgs.push('--reviewed-audit', opts.reviewedAudit);
-        if (opts.apply) syncArgs.push('--apply');
-        runTsNode(syncScript, syncArgs, false, opts.ci);
-        return;
-    }
 
     if (opts.mode === 'contracts') {
         const vanillaCommon = opts.vanillaCommon || defaultVanillaCommonDir();
@@ -326,6 +317,10 @@ function main() {
         console.log(`[rules-sync] docs=${opts.docs}`);
         console.log(`[rules-sync] config=${opts.config}`);
         console.log(`[rules-sync] out=${reportOut}`);
+        if (opts.shaderAbi) {
+            const mergeReport = runShaderAbiAutoMerge(opts);
+            if (mergeReport && fs.existsSync(mergeReport)) reportArgs.push('--shader-abi', mergeReport);
+        }
         runTsNode(reportScript, reportArgs, false, opts.ci);
         const htmlPath = path.join(reportOut, 'rules-sync-report.html');
         if (opts.openReport && fs.existsSync(htmlPath)) openInBrowser(htmlPath);

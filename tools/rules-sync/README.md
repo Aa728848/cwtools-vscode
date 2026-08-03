@@ -19,7 +19,6 @@ npm run rules:stellaris:check
 npm run rules:stellaris:update
 npm run rules:stellaris:report
 npm run rules:stellaris:contracts
-npm run rules:stellaris:shader-abi
 ```
 
 Default inputs:
@@ -39,29 +38,50 @@ Modes:
   HTML report to `report\rules-sync-report.html` (added/removed/changed triggers,
   effects, modifiers, scopes, localisation commands, plus folder coverage and
   definition-field-level findings). The report opens in the browser automatically;
-  pass `--no-open` to skip. Read-only: it never modifies the config.
+  pass `--no-open` to skip. When a Stellaris install is found, `report` also scans
+  the Shader ABI inventory and auto-merges it into `config\shader` first (see
+  below); pass `--no-shader-abi` for a fully read-only report.
 - `contracts` extracts adjacent `Scope` / `This` / `Root` / `FromFrom...` comments
   from vanilla `on_actions` and `game_rules`, compares them with CWT
   `replace_scope`, and writes JSON plus reviewable CWT candidates under
   `scope-contracts`. It is read-only by default; pass `--apply` to add only missing,
   high-confidence annotations. Existing conflicting annotations are never replaced
   unless the separately reviewed `--apply-conflicts` option is supplied.
-- `shader-abi` uses the authoritative CWTools Shader parser to inventory `gfx/FX`,
-  fingerprint `stellaris.exe`, scan Effect-name strings as candidates, and emit
-  `shader-abi-inventory.json`, `shader-abi-upgrade-report.json`, plus catalog/audit
-  drafts under `.rules-sync/stellaris/shader-abi`. It never auto-promotes an entry.
 
-## Shader ABI game-version upgrades / Shader ABI 游戏版本升级
+## Shader ABI auto merge / Shader ABI 自动合并
 
-Generate a fail-closed review pack after Stellaris updates:
+`report` mode includes the Shader ABI upgrade automatically:
 
-游戏更新后生成保守的人工审核包：
+`report` 模式已内置 Shader ABI 升级流程：
 
-```powershell
-npm run rules:stellaris:shader-abi -- `
-  --game-path "C:\Program Files (x86)\Steam\steamapps\common\Stellaris" `
-  --version 4.4.7
-```
+1. CWToolsCLI parses the game `gfx/FX` corpus with the authoritative CWTools Shader
+   parser and fingerprints `stellaris.exe` into
+   `.rules-sync/stellaris/shader-abi/shader-abi-inventory.json`.
+2. `shader-abi-sync.ts` merges that inventory directly into
+   `config/shader/abi-catalog.json`, `config/shader/abi-audit.json`, and
+   `config/shader/renderer-contracts.json`:
+   - reviewed catalog entries carry forward (keeping their evidence) while their
+     Effect declaration still exists;
+   - every other scanned Effect declaration is registered with
+     `automatic_inventory` evidence and `rename_policy = forbidden`;
+   - entries and renderer contracts whose declarations vanished are removed.
+3. The HTML report gains a Shader ABI section with the version transition, EXE
+   identity change, carried/added/dropped entries, and contract changes. A
+   machine-readable copy lives at
+   `.rules-sync/stellaris/shader-abi/shader-abi-merge-report.json`, and the
+   pre-merge files are backed up under `.rules-sync/stellaris/shader-abi/previous/`.
+
+1. CWToolsCLI 使用 CWTools 权威 Shader 解析器扫描游戏 `gfx/FX` 并记录
+   `stellaris.exe` 指纹，输出 `.rules-sync/stellaris/shader-abi/shader-abi-inventory.json`。
+2. `shader-abi-sync.ts` 将该清单直接自动合并进 `config/shader/abi-catalog.json`、
+   `config/shader/abi-audit.json` 与 `config/shader/renderer-contracts.json`：
+   已审核条目在声明仍存在时结转并保留原证据；其余扫描到的 Effect 声明一律以
+   `automatic_inventory` 证据、`rename_policy = forbidden` 自动收录；声明已消失的
+   条目与渲染器契约会被移除。
+3. HTML 报告新增 Shader ABI 区块，展示版本变迁、EXE 指纹变化、结转/新增/移除条目
+   与契约变化。机器可读副本见
+   `.rules-sync/stellaris/shader-abi/shader-abi-merge-report.json`，合并前的文件
+   备份在 `.rules-sync/stellaris/shader-abi/previous/`。
 
 The scanner is hosted by `CWToolsCLI` and calls `PdxShaderRuntime`; it does not
 maintain a second TypeScript Shader parser. If the CLI has not been restored on a
@@ -70,30 +90,6 @@ fresh checkout, run an explicit `dotnet restore` for
 
 扫描器由 `CWToolsCLI` 承载并调用 `PdxShaderRuntime`，不会在 TypeScript 中维护第二套
 Shader 解析器。全新检出若尚未还原 CLI，请先显式执行对应项目的 `dotnet restore`。
-
-Across a changed game version, Shader corpus, declaration inventory, or EXE hash,
-the generated catalog draft starts empty. Old entries appear as requiring review;
-string matches and missing textual callers never carry them forward. Review all four
-audit stages, then apply only explicitly reviewed files:
-
-只要游戏版本、Shader 语料、声明清单或 EXE 哈希发生变化，catalog 草案就从空清单开始；
-旧条目进入待复核列表，字符串命中或无文本调用不会自动继承。完成四阶段审核后，才可应用
-两份明确审核过的文件：
-
-```powershell
-npm run rules:stellaris:shader-abi -- `
-  --game-path "C:\Program Files (x86)\Steam\steamapps\common\Stellaris" `
-  --version 4.4.7 `
-  --reviewed-catalog ".rules-sync\stellaris\shader-abi\abi-catalog.reviewed.json" `
-  --reviewed-audit ".rules-sync\stellaris\shader-abi\abi-audit.reviewed.json" `
-  --apply
-```
-
-`--apply` fails unless both artifacts match the fresh version, corpus hashes, EXE
-identity, catalog identities, and completed evidence stages.
-
-只有当两份产物与最新版本、语料哈希、EXE 身份、catalog 身份及全部已完成证据阶段完全一致时，
-`--apply` 才会写入配置。
 
 Only effects and triggers are converted into generated CWT candidates. Modifiers and scopes stay in `rules.generated.json` because they are loaded from the game logs directly.
 

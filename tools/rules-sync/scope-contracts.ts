@@ -78,6 +78,10 @@ const SCOPE_SYNONYMS = new Map<string, string>([
     ['archaeological site', 'archaeological_site'],
     ['ambient object', 'ambient_object'],
     ['cosmic storm', 'cosmic_storm'],
+    // Vanilla comments still say "pop" where the 4.x rules use pop_group, and
+    // a star is scoped as a planet by the engine.
+    ['pop', 'pop_group'],
+    ['star', 'planet'],
 ]);
 
 // Vanilla comments frequently name a participant's role rather than its
@@ -116,7 +120,7 @@ const ROLE_SCOPE_SYNONYMS = new Map<string, string>([
     ['actor', 'country'],
     ['recipient', 'country'],
     ['bombarder', 'country'],
-    ['opponent', 'army'],
+    ['opponent', 'country'],
     ['station', 'ship'],
     ['heir', 'leader'],
     ['storm', 'cosmic_storm'],
@@ -131,6 +135,13 @@ const POLYMORPHIC_SCOPE_COMBINATIONS = new Map<string, string>([
     ['fleet|planet', 'planet_fleet'],
 ]);
 const POLYMORPHIC_SCOPE_NAMES = new Set(POLYMORPHIC_SCOPE_COMBINATIONS.values());
+
+// A few vanilla comments contradict the actual engine scopes. Keep the
+// verified corrections here so the comparison neither reports a false
+// mismatch nor overwrites correct CWT data when applying.
+const VANILLA_COMMENT_ERRATA = new Map<string, { scope: { this?: string; root?: string; from?: Record<number, string> }; note: string }>([
+    ['on_actions:on_ship_built', { scope: { from: { 0: 'starbase' } }, note: 'vanilla comment says "From = Planet"; ships are built at a starbase' }],
+]);
 
 export function scanScopeContracts(vanillaCommonDir: string, configDir: string): ScopeContractReport {
     const aliases = loadScopeAliases(path.join(configDir, 'scopes.cwt'));
@@ -522,6 +533,16 @@ function contractFromComments(
     // field instead of leaving an incorrect pre-existing THIS/ROOT unchecked.
     if (scope.this && !scope.root) scope.root = scope.this;
     else if (scope.root && !scope.this) scope.this = scope.root;
+
+    const errata = VANILLA_COMMENT_ERRATA.get(contractKey(folder, name));
+    if (errata) {
+        if (errata.scope.this) scope.this = errata.scope.this;
+        if (errata.scope.root) scope.root = errata.scope.root;
+        for (const [index, value] of Object.entries(errata.scope.from ?? {})) {
+            scope.from[Number(index)] = value;
+        }
+        evidence.push(`# errata: ${errata.note}`);
+    }
 
     const hasResolvedScope = !!scope.this || !!scope.root || scope.from.length > 0;
     if (!hasResolvedScope && !unresolved.length) return undefined;

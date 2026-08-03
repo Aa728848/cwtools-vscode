@@ -1,8 +1,12 @@
 import { expect } from 'chai';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
     addMissingCwtScopeContracts,
     compareScopeContracts,
     extractScopeContractsFromText,
+    loadScopeAliases,
     parseCwtScopeContracts,
 } from './scope-contracts';
 
@@ -261,5 +265,74 @@ subtype[can_build] = { }
 
         expect(result.added).to.deep.equal(['can_build']);
         expect(result.content).to.contain('## replace_scope = { this = country root = country }');
+    });
+
+    it('maps vanilla pop and star comments to pop_group and planet', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-contracts-'));
+        const scopesFile = path.join(dir, 'scopes.cwt');
+        fs.writeFileSync(scopesFile, `
+Pop = {
+    aliases = { pop }
+}
+"Pop Group" = {
+    aliases = { pop_group }
+}
+Star = {
+    aliases = { star }
+}
+Planet = {
+    aliases = { planet }
+}
+`);
+        const loaded = loadScopeAliases(scopesFile);
+        expect(loaded.get('pop')).to.equal('pop_group');
+        expect(loaded.get('star')).to.equal('planet');
+
+        const [popRule] = extractScopeContractsFromText(`
+#this/root = pop
+can_fill_drone_job = { }
+`, 'game_rules/00_rules.txt', 'game_rules', loaded);
+        expect(popRule!.scope).to.deep.equal({ this: 'pop_group', root: 'pop_group', from: [] });
+
+        const [starRule] = extractScopeContractsFromText(`
+# root/this = star
+can_initiate_storm_on_planet = { }
+`, 'game_rules/00_rules.txt', 'game_rules', loaded);
+        expect(starRule!.scope).to.deep.equal({ this: 'planet', root: 'planet', from: [] });
+    });
+
+    it('resolves the opponent role to the country scope', () => {
+        const [contract] = extractScopeContractsFromText(`
+#An army has been killed in ground combat
+# This = owner
+# From = army
+# FromFrom = opponent
+# FromFromFrom = colony
+on_army_killed_in_combat = { }
+`, 'on_actions/00_on_actions.txt', 'on_actions', new Map([...aliases, ['army', 'army']]));
+
+        expect(contract!.scope).to.deep.equal({ this: 'country', root: 'country', from: ['army', 'country', 'colony'] });
+        expect(contract!.confidence).to.equal('high');
+    });
+
+    it('applies the on_ship_built comment errata instead of reporting a mismatch', () => {
+        const [contract] = extractScopeContractsFromText(`
+# Scope: Ship Event
+#A ship has been built
+# Root = Ship
+# From = Planet
+on_ship_built = { }
+`, 'on_actions/00_on_actions.txt', 'on_actions', aliases);
+
+        expect(contract!.scope).to.deep.equal({ this: 'ship', root: 'ship', from: ['starbase'] });
+        expect(contract!.evidence.some(line => line.includes('errata'))).to.equal(true);
+
+        const parsed = parseCwtScopeContracts(`
+## type_key_filter = on_ship_built
+## replace_scope = { this = ship root = ship from = starbase }
+subtype[on_ship_built] = { }
+`, 'common/on_actions.cwt', 'on_actions');
+        const findings = compareScopeContracts([contract!], new Map([['on_actions:on_ship_built', parsed[0]!]]));
+        expect(findings).to.deep.equal([]);
     });
 });

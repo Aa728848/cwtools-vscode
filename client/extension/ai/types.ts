@@ -2286,7 +2286,8 @@ export type WebViewMessage =
     | { type: 'detectOllamaModels'; endpoint: string }
     | { type: 'fetchApiModels'; providerId: string; endpoint: string; apiKey: string; customApiFormat?: CustomApiFormat }
     | { type: 'deleteApiKey'; providerId: string }
-    | { type: 'testConnection'; settings: PanelSettings } | { type: 'deleteDynamicModel'; providerId: string; modelId: string }
+    | { type: 'testConnection'; settings: ConnectionTestSettings }
+    | { type: 'deleteDynamicModel'; providerId: string; modelId: string }
     | { type: 'codexLogin' }
     | { type: 'codexRefreshAccount' }
     | { type: 'codexLogout' }
@@ -2532,6 +2533,10 @@ export interface PanelSettings {
         agentModels?: Record<string, { provider: string; model: string }>;
     };
 }
+
+/** Unsaved provider fields needed to test a connection from the settings UI. */
+export type ConnectionTestSettings = Pick<PanelSettings,
+    'provider' | 'model' | 'apiKey' | 'endpoint' | 'customApiFormat'>;
 
 // ─── Shared Utilities ────────────────────────────────────────────────────────
 

@@ -8215,25 +8215,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 model: getSelectedModel(),
                 apiKey: (document.getElementById('settingsApiKey') as HTMLInputElement).value,
                 endpoint: (document.getElementById('settingsEndpoint') as HTMLInputElement).value.trim(),
-                customApiFormat: getCustomApiFormat(),
-                maxContextTokens: 0, agentFileWriteMode: 'auto',
-                reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
-                inlineCompletion: {
-                    enabled: false,
-                    provider: '',
-                    model: '',
-                    endpoint: '',
-                    debounceMs: 200,
-                    maxTokens: 128,
-                    contextBeforeLines: 20,
-                    contextAfterLines: 10,
-                    includeMcpContext: false,
-                    mcpCacheTtlMs: 30000,
-                    requestTimeoutMs: 1500,
-                    lspFastPath: true,
-                    overlapStripping: true
-                },
-                mcp: { servers: [] }
+                customApiFormat: getCustomApiFormat()
             }
         });
     }

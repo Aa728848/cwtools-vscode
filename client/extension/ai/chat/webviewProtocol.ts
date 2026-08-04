@@ -1,4 +1,4 @@
-import type { ContextItem, PanelSettings, WebViewMessage } from '../types';
+import type { ConnectionTestSettings, ContextItem, PanelSettings, WebViewMessage } from '../types';
 import { isAgentMode, isAgentProfileSelection } from '../agentProfile';
 import {
     fields,
@@ -69,6 +69,15 @@ function isPanelSettings(value: unknown): value is PanelSettings {
         && isRecord(value.translationPreview);
 }
 
+function isConnectionTestSettings(value: unknown): value is ConnectionTestSettings {
+    return isRecord(value)
+        && typeof value.provider === 'string'
+        && typeof value.model === 'string'
+        && typeof value.apiKey === 'string'
+        && typeof value.endpoint === 'string'
+        && (value.customApiFormat === undefined || isCustomApiFormat(value.customApiFormat));
+}
+
 const isAnnotations = isArrayOf(value => isRecord(value)
     && typeof value.section === 'string'
     && typeof value.note === 'string');
@@ -106,7 +115,7 @@ const validators: Record<WebViewMessage['type'], MessageValidator> = {
     detectOllamaModels: fields({ endpoint: isString }),
     fetchApiModels: fields({ providerId: isString, endpoint: isString, apiKey: isString }, { customApiFormat: optional(isCustomApiFormat) }),
     deleteApiKey: fields({ providerId: isString }),
-    testConnection: fields({ settings: isPanelSettings }),
+    testConnection: fields({ settings: isConnectionTestSettings }),
     deleteDynamicModel: fields({ providerId: isString, modelId: isString }),
     codexLogin: noFields,
     codexRefreshAccount: noFields,

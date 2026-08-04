@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as cp from 'child_process';
 import { promisify } from 'util';
-import type { PanelSettings, HostMessage, CustomApiFormat, ModelReasoningCapability, ReasoningEffort } from './types';
+import type { ConnectionTestSettings, PanelSettings, HostMessage, CustomApiFormat, ModelReasoningCapability, ReasoningEffort } from './types';
 import type { AIService } from './aiService';
 import { aiText } from './messages';
 import { getProjectWorkspaceRoot } from './workspacePaths';
@@ -856,7 +856,7 @@ export class ChatSettingsManager {
         }
     }
 
-    async testConnection(settings?: PanelSettings): Promise<void> {
+    async testConnection(settings?: ConnectionTestSettings): Promise<void> {
         const { getEffectiveEndpoint, getProvider } = await import('./providers');
         const saved = this.aiService.getConfig();
         const providerId = settings?.provider ?? saved.provider;

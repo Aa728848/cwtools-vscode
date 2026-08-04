@@ -55,6 +55,26 @@ describe('AI chat protocol boundaries', () => {
         expect(parseWebviewMessage({ type: 'saveSettings', settings: { ...settings, maxContextTokens: 'large' } })).to.equal(null);
     });
 
+    it('accepts the provider fields used by connection tests', () => {
+        const settings = {
+            provider: 'deepseek',
+            model: 'deepseek-chat',
+            apiKey: '',
+            endpoint: 'https://api.deepseek.com/v1',
+            customApiFormat: 'openai-chat-completions',
+        };
+
+        expect(parseWebviewMessage({ type: 'testConnection', settings })).to.not.equal(null);
+        expect(parseWebviewMessage({
+            type: 'testConnection',
+            settings: { ...settings, endpoint: 42 },
+        })).to.equal(null);
+        expect(parseWebviewMessage({
+            type: 'testConnection',
+            settings: { ...settings, customApiFormat: 'unknown' },
+        })).to.equal(null);
+    });
+
     it('accepts well-formed Host messages and rejects malformed payloads', () => {
         expect(hostMessageTypesMatch).to.equal(true);
         expect(parseHostMessage({ type: 'clearChat' })).to.deep.equal({ type: 'clearChat' });

@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.10.9] - 2026-08-04
+
+### 实体与粒子预览 / Entity and Particle Preview
+- **[新增] Entity 状态现在会播放 `.asset` 中的 `event` 与 `start_event` 粒子事件**：粒子与动画共用状态时间轴，支持同一状态内动画与粒子同时播放、循环控制、时间跳转以及定位器/骨骼挂载。
+  English: [New] Entity states now play particle `event` and `start_event` blocks from `.asset` files. Particles share the animation state timeline, including combined animation/particle playback, looping, seeking, and locator or bone attachment.
+- **[兼容] 按 CWT 规则解析真实粒子引用链**：Entity 事件中的粒子名会先解析 `gfx` 下 `objectTypes.pdxparticle`，再沿 `type` 查找 `.asset` 中的 `particle`，同时应用别名 `scale`；模组资源优先，缺失内容自动回退原版 Stellaris 数据目录。
+  English: [Compatibility] Particle references now follow the CWT-defined chain from Entity events through `objectTypes.pdxparticle` in `.gfx` files to `particle` definitions in `.asset` files, including alias scale, mod override priority, and vanilla Stellaris fallback.
+- **[修复] 挂载粒子现在使用定位器或动画骨骼的完整方向矩阵**：尾喷粒子沿挂点本地后向轴发射，位置、拖尾、非公告牌朝向和缩放均随节点变换更新；缺少节点时会明确区分“效果未解析”和“效果已载入但挂点不存在”。
+  English: [Fix] Attached particles now use the complete locator or animated-bone orientation matrix. Exhaust emits along the attachment's local backward axis, while positions, trails, non-billboard orientation, and scale follow node transforms; diagnostics distinguish unresolved effects from loaded effects with missing attachment nodes.
+
+### 编辑器与工具 / Editor and Tooling
+- **[改进] AI 连接测试设置使用独立校验路径**，避免连接测试被常规聊天设置的校验状态错误阻断。
+  English: [Improvement] AI connection-test settings now use an independent validation path so regular chat-setting validation cannot incorrectly block connection tests.
+- **[优化] Mermaid 高图预览限制在可视窗口高度内**，改善大型图表的浏览与滚动体验。
+  English: [Optimization] Tall Mermaid previews are constrained to the viewport height for easier navigation and scrolling.
+- **[维护] 增加 Stellaris Shader ABI 同步与自动化测试工具，拆分 Chat Webview 模块，并清理废弃服务与配置文件。**
+  English: [Maintenance] Added Stellaris Shader ABI synchronization and automated test tooling, modularized the Chat Webview, and removed deprecated services and configuration files.
+
+### 质量 / Quality
+- **[测试] 增加 Entity 粒子事件、`pdxparticle` 别名链、原版/模组资源解析、挂点方向以及动画与粒子组合播放的回归覆盖。**
+  English: [Tests] Added regressions for Entity particle events, `pdxparticle` alias chains, vanilla/mod resource resolution, attachment orientation, and combined animation/particle playback.
+
 ## [2.10.8] - 2026-08-02
 
 ### AI Agent 语义模式路由 / AI Agent Semantic Mode Routing

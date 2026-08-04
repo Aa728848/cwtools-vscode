@@ -138,6 +138,11 @@ export class ParticleRenderer {
     private batches: Batch[] = [];
     private readonly loader = new THREE.TextureLoader();
     private readonly cameraPosition = new THREE.Vector3();
+    private readonly transformedPosition = new THREE.Vector3();
+    private readonly transformedTail = new THREE.Vector3();
+    private readonly transformedRight = new THREE.Vector3();
+    private readonly transformedUp = new THREE.Vector3();
+    private readonly transformedScale = new THREE.Vector3(1, 1, 1);
 
     constructor(scene: THREE.Scene) {
         this.scene = scene;
@@ -150,7 +155,7 @@ export class ParticleRenderer {
         }
     }
 
-    update(camera: THREE.Camera): void {
+    update(camera: THREE.Camera, localToWorld?: THREE.Matrix4): void {
         const elements = camera.matrixWorld.elements;
         const right = new THREE.Vector3(elements[0] ?? 1, elements[1] ?? 0, elements[2] ?? 0);
         const up = new THREE.Vector3(elements[4] ?? 0, elements[5] ?? 1, elements[6] ?? 0);
@@ -159,7 +164,7 @@ export class ParticleRenderer {
         for (const batch of this.batches) {
             const buffer = batch.system.buffer;
             batch.geometry.instanceCount = buffer.count;
-            this.copyInstanceData(batch);
+            this.copyInstanceData(batch, localToWorld);
             batch.posAttr.needsUpdate = true;
             batch.tailAttr.needsUpdate = true;
             batch.sizeAttr.needsUpdate = true;
@@ -174,7 +179,7 @@ export class ParticleRenderer {
         }
     }
 
-    private copyInstanceData(batch: Batch): void {
+    private copyInstanceData(batch: Batch, localToWorld?: THREE.Matrix4): void {
         const buffer = batch.system.buffer;
         const count = buffer.count;
         const posArray = batch.posAttr.array as Float32Array;
@@ -186,7 +191,7 @@ export class ParticleRenderer {
         const rightArray = batch.rightAttr.array as Float32Array;
         const upArray = batch.upAttr.array as Float32Array;
 
-        if (!batch.sortByCameraDepth || count <= 1) {
+        if (!localToWorld && (!batch.sortByCameraDepth || count <= 1)) {
             posArray.set(buffer.positions.subarray(0, count * 3));
             tailArray.set(buffer.trailTails.subarray(0, count * 3));
             sizeArray.set(buffer.sizes.subarray(0, count));
@@ -199,16 +204,32 @@ export class ParticleRenderer {
         }
 
         batch.sortOrder.length = count;
-        batch.sortDepths.length = count;
-        for (let i = 0; i < count; i++) {
-            const offset = i * 3;
-            const dx = (buffer.positions[offset] ?? 0) - this.cameraPosition.x;
-            const dy = (buffer.positions[offset + 1] ?? 0) - this.cameraPosition.y;
-            const dz = (buffer.positions[offset + 2] ?? 0) - this.cameraPosition.z;
-            batch.sortOrder[i] = i;
-            batch.sortDepths[i] = dx * dx + dy * dy + dz * dz;
+        if (batch.sortByCameraDepth && count > 1) {
+            batch.sortDepths.length = count;
+            for (let i = 0; i < count; i++) {
+                const offset = i * 3;
+                this.transformedPosition.set(
+                    buffer.positions[offset] ?? 0,
+                    buffer.positions[offset + 1] ?? 0,
+                    buffer.positions[offset + 2] ?? 0,
+                );
+                if (localToWorld) this.transformedPosition.applyMatrix4(localToWorld);
+                const dx = this.transformedPosition.x - this.cameraPosition.x;
+                const dy = this.transformedPosition.y - this.cameraPosition.y;
+                const dz = this.transformedPosition.z - this.cameraPosition.z;
+                batch.sortOrder[i] = i;
+                batch.sortDepths[i] = dx * dx + dy * dy + dz * dz;
+            }
+            batch.sortOrder.sort((a, b) => (batch.sortDepths[b] ?? 0) - (batch.sortDepths[a] ?? 0));
+        } else {
+            for (let i = 0; i < count; i++) batch.sortOrder[i] = i;
         }
-        batch.sortOrder.sort((a, b) => (batch.sortDepths[b] ?? 0) - (batch.sortDepths[a] ?? 0));
+
+        let sizeScale = 1;
+        if (localToWorld) {
+            this.transformedScale.setFromMatrixScale(localToWorld);
+            sizeScale = Math.cbrt(Math.abs(this.transformedScale.x * this.transformedScale.y * this.transformedScale.z)) || 1;
+        }
 
         for (let dst = 0; dst < count; dst++) {
             const src = batch.sortOrder[dst] ?? dst;
@@ -216,20 +237,46 @@ export class ParticleRenderer {
             const src3 = src * 3;
             const dst4 = dst * 4;
             const src4 = src * 4;
-            posArray[dst3] = buffer.positions[src3] ?? 0;
-            posArray[dst3 + 1] = buffer.positions[src3 + 1] ?? 0;
-            posArray[dst3 + 2] = buffer.positions[src3 + 2] ?? 0;
-            tailArray[dst3] = buffer.trailTails[src3] ?? posArray[dst3] ?? 0;
-            tailArray[dst3 + 1] = buffer.trailTails[src3 + 1] ?? posArray[dst3 + 1] ?? 0;
-            tailArray[dst3 + 2] = buffer.trailTails[src3 + 2] ?? posArray[dst3 + 2] ?? 0;
-            sizeArray[dst] = buffer.sizes[src] ?? 1;
+            this.transformedPosition.set(
+                buffer.positions[src3] ?? 0,
+                buffer.positions[src3 + 1] ?? 0,
+                buffer.positions[src3 + 2] ?? 0,
+            );
+            this.transformedTail.set(
+                buffer.trailTails[src3] ?? this.transformedPosition.x,
+                buffer.trailTails[src3 + 1] ?? this.transformedPosition.y,
+                buffer.trailTails[src3 + 2] ?? this.transformedPosition.z,
+            );
+            this.transformedRight.set(
+                buffer.rights[src3] ?? 1,
+                buffer.rights[src3 + 1] ?? 0,
+                buffer.rights[src3 + 2] ?? 0,
+            );
+            this.transformedUp.set(
+                buffer.ups[src3] ?? 0,
+                buffer.ups[src3 + 1] ?? 1,
+                buffer.ups[src3 + 2] ?? 0,
+            );
+            if (localToWorld) {
+                this.transformedPosition.applyMatrix4(localToWorld);
+                this.transformedTail.applyMatrix4(localToWorld);
+                this.transformedRight.transformDirection(localToWorld);
+                this.transformedUp.transformDirection(localToWorld);
+            }
+            posArray[dst3] = this.transformedPosition.x;
+            posArray[dst3 + 1] = this.transformedPosition.y;
+            posArray[dst3 + 2] = this.transformedPosition.z;
+            tailArray[dst3] = this.transformedTail.x;
+            tailArray[dst3 + 1] = this.transformedTail.y;
+            tailArray[dst3 + 2] = this.transformedTail.z;
+            sizeArray[dst] = (buffer.sizes[src] ?? 1) * sizeScale;
             rotArray[dst] = buffer.rotations[src] ?? 0;
-            rightArray[dst3] = buffer.rights[src3] ?? 1;
-            rightArray[dst3 + 1] = buffer.rights[src3 + 1] ?? 0;
-            rightArray[dst3 + 2] = buffer.rights[src3 + 2] ?? 0;
-            upArray[dst3] = buffer.ups[src3] ?? 0;
-            upArray[dst3 + 1] = buffer.ups[src3 + 1] ?? 1;
-            upArray[dst3 + 2] = buffer.ups[src3 + 2] ?? 0;
+            rightArray[dst3] = this.transformedRight.x;
+            rightArray[dst3 + 1] = this.transformedRight.y;
+            rightArray[dst3 + 2] = this.transformedRight.z;
+            upArray[dst3] = this.transformedUp.x;
+            upArray[dst3 + 1] = this.transformedUp.y;
+            upArray[dst3 + 2] = this.transformedUp.z;
             colorArray[dst4] = buffer.colors[src4] ?? 1;
             colorArray[dst4 + 1] = buffer.colors[src4 + 1] ?? 1;
             colorArray[dst4 + 2] = buffer.colors[src4 + 2] ?? 1;

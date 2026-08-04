@@ -40,7 +40,20 @@ export interface StateDefinition {
     name: string;
     locators: LocatorOverride[];
     meshSettings: MeshSettingOverride[];
+    particleEvents: StateParticleEvent[];
     animation?: string;
+    stateTime?: number;
+    looping?: boolean;
+}
+
+export interface StateParticleEvent {
+    kind: 'event' | 'start_event';
+    time: number;
+    node?: string;
+    particle: string;
+    keepParticle?: boolean;
+    triggerOnce?: boolean;
+    line: number;
 }
 
 export interface EntityDefinition {
@@ -198,8 +211,42 @@ function parseMeshSettingBlock(ctx: ParseCtx): MeshSettingOverride {
     return ms;
 }
 
+function parseYesNo(ctx: ParseCtx): boolean {
+    return (advance(ctx)?.value.replace(/"/g, '').toLowerCase() ?? '') === 'yes';
+}
+
+function parseStateEventBlock(ctx: ParseCtx, kind: StateParticleEvent['kind']): StateParticleEvent | undefined {
+    const event: StateParticleEvent = {
+        kind,
+        time: 0,
+        particle: '',
+        line: peek(ctx)?.line ?? 0,
+    };
+    expect(ctx, '{');
+    while (peek(ctx) && peek(ctx)!.value !== '}') {
+        const key = advance(ctx)!.value;
+        if (key === '=') continue;
+        if (peek(ctx)?.value !== '=') continue;
+        advance(ctx);
+        switch (key) {
+            case 'time': event.time = parseNumber(ctx); break;
+            case 'node': event.node = advance(ctx)!.value.replace(/"/g, ''); break;
+            case 'particle': event.particle = advance(ctx)!.value.replace(/"/g, ''); break;
+            case 'keep_particle': event.keepParticle = parseYesNo(ctx); break;
+            case 'trigger_once': event.triggerOnce = parseYesNo(ctx); break;
+            default: {
+                const next = peek(ctx);
+                if (next?.value === '{') { advance(ctx); skipBlock(ctx); }
+                else advance(ctx);
+            }
+        }
+    }
+    expect(ctx, '}');
+    return event.particle ? event : undefined;
+}
+
 function parseStateBlock(ctx: ParseCtx): StateDefinition {
-    const state: StateDefinition = { name: '', locators: [], meshSettings: [] };
+    const state: StateDefinition = { name: '', locators: [], meshSettings: [], particleEvents: [] };
     expect(ctx, '{');
     while (peek(ctx) && peek(ctx)!.value !== '}') {
         const key = advance(ctx)!.value;
@@ -210,8 +257,20 @@ function parseStateBlock(ctx: ParseCtx): StateDefinition {
         switch (key) {
             case 'name': state.name = advance(ctx)!.value.replace(/"/g, ''); break;
             case 'animation': state.animation = advance(ctx)!.value.replace(/"/g, ''); break;
+            case 'state_time': state.stateTime = parseNumber(ctx); break;
+            case 'looping': state.looping = parseYesNo(ctx); break;
             case 'locator': state.locators.push(parseLocatorBlock(ctx, state.name)); break;
             case 'meshsettings': state.meshSettings.push(parseMeshSettingBlock(ctx)); break;
+            case 'event': {
+                const event = parseStateEventBlock(ctx, 'event');
+                if (event) state.particleEvents.push(event);
+                break;
+            }
+            case 'start_event': {
+                const event = parseStateEventBlock(ctx, 'start_event');
+                if (event) state.particleEvents.push(event);
+                break;
+            }
             default: {
                 const next = peek(ctx);
                 if (next?.value === '{') { advance(ctx); skipBlock(ctx); }

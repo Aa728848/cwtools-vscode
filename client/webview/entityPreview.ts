@@ -25,6 +25,10 @@ import { decompressBC1, decompressBC3, rgb565 } from './bcDecode';
 import { SkyboxEnvironment } from './skyboxEnvironment';
 import { EnvironmentUi, DEFAULT_ENV_STATE, type EnvironmentUiState } from './environmentUi';
 import type { EnvironmentsMessage } from './environmentTypes';
+import { ParticleEffectSimulation } from './particleSimulation';
+import { ParticleRenderer } from './particleRenderer';
+import { composeParticleAttachmentMatrix } from './particleAttachmentTransform';
+import type { ParticleEffect, ParticleTexturePayload } from './particleTypes';
 
 // ── VS Code API ──────────────────────────────────────────────────────────────
 
@@ -116,9 +120,26 @@ interface EntityData {
         scale?: number;
     }>;
     attaches?: Array<{ locatorName: string; entityName: string }>;
-    states?: Array<{ name: string; animation?: string }>;
+    states?: EntityStateData[];
     defaultState?: string;
     attachData?: AttachData[];
+}
+
+interface StateParticleEventData {
+    kind: 'event' | 'start_event';
+    time: number;
+    node?: string;
+    particle: string;
+    keepParticle?: boolean;
+    triggerOnce?: boolean;
+}
+
+interface EntityStateData {
+    name: string;
+    animation?: string;
+    stateTime?: number;
+    looping?: boolean;
+    particleEvents?: StateParticleEventData[];
 }
 
 interface RenderMessage {
@@ -126,6 +147,9 @@ interface RenderMessage {
     entity: EntityData;
     meshBase64?: string;  // base64-encoded .mesh binary
     animations?: Array<{ stateName: string; animName: string; animBase64: string }>;
+    particleEffects?: Record<string, ParticleEffect>;
+    particleTextures?: Record<string, ParticleTexturePayload>;
+    unresolvedParticles?: string[];
     fileName: string;
 }
 
@@ -228,6 +252,19 @@ const animationClips = new Map<string, THREE.AnimationClip>(); // stateName → 
 let currentAction: THREE.AnimationAction | null = null;
 let isAnimPlaying = true;
 let animLooping = true;
+interface ActiveParticleInstance {
+    simulation: ParticleEffectSimulation;
+    renderer: ParticleRenderer;
+    anchor: THREE.Object3D;
+}
+const activeParticleInstances: ActiveParticleInstance[] = [];
+let particleEffects: Record<string, ParticleEffect> = {};
+let particleTextures: Record<string, ParticleTexturePayload> = {};
+let activeEntityState: EntityStateData | undefined;
+let stateParticleElapsed = 0;
+const firedStateParticleEvents = new Set<number>();
+const MAX_ACTIVE_PARTICLE_INSTANCES = 64;
+const particleAttachmentMatrix = new THREE.Matrix4();
 // Snapshot of selected locator's original position/rotation at selection time
 let selectedLocatorSnapshot: { px: number; py: number; pz: number; rx: number; ry: number; rz: number } | null = null;
 interface SmartDuplicateState {
@@ -517,6 +554,115 @@ function autoSaveLocator() {
     });
 }
 
+function clearParticleInstances(): void {
+    for (const instance of activeParticleInstances) instance.renderer.dispose();
+    activeParticleInstances.length = 0;
+}
+
+function disposeStateParticles(): void {
+    clearParticleInstances();
+    activeEntityState = undefined;
+    stateParticleElapsed = 0;
+    firedStateParticleEvents.clear();
+}
+
+function seekStateParticles(time: number): void {
+    if (!activeEntityState) return;
+    clearParticleInstances();
+    firedStateParticleEvents.clear();
+    stateParticleElapsed = 0;
+    fireDueStateParticleEvents();
+    const target = Math.max(0, Math.min(time, 60));
+    while (stateParticleElapsed < target) {
+        const step = Math.min(1 / 30, target - stateParticleElapsed);
+        stateParticleElapsed += step;
+        fireDueStateParticleEvents();
+        for (const instance of activeParticleInstances) instance.simulation.update(step);
+    }
+}
+
+function findParticleAnchor(nodeName: string | undefined): THREE.Object3D | undefined {
+    if (!currentModel) return undefined;
+    if (!nodeName) return currentModel;
+    let exactLocator: THREE.Object3D | undefined;
+    let exactNode: THREE.Object3D | undefined;
+    let prefixedBone: THREE.Object3D | undefined;
+    currentModel.traverse(obj => {
+        if (obj.name === nodeName) {
+            if (obj.userData?.isLocator && !exactLocator) exactLocator = obj;
+            if (!exactNode) exactNode = obj;
+        } else if (obj instanceof THREE.Bone && obj.name.endsWith(`__${nodeName}`) && !prefixedBone) {
+            prefixedBone = obj;
+        }
+    });
+    return exactLocator ?? exactNode ?? prefixedBone ?? (nodeName === 'root' ? currentModel : undefined);
+}
+
+function triggerStateParticleEvent(event: StateParticleEventData): void {
+    const effect = particleEffects[event.particle];
+    const anchor = findParticleAnchor(event.node);
+    if (!effect || !anchor) {
+        vscode.postMessage({
+            command: 'log',
+            level: 'warn',
+            text: !effect
+                ? (isChinese
+                    ? `无法解析粒子效果“${event.particle}”。`
+                    : `Particle effect "${event.particle}" could not be resolved.`)
+                : (isChinese
+                    ? `粒子效果“${event.particle}”已载入，但当前实体中不存在挂载节点“${event.node}”。`
+                    : `Particle effect "${event.particle}" was loaded, but attach node "${event.node}" does not exist in the current entity.`),
+        });
+        return;
+    }
+    if (activeParticleInstances.length >= MAX_ACTIVE_PARTICLE_INSTANCES) {
+        activeParticleInstances.shift()?.renderer.dispose();
+    }
+    const simulation = new ParticleEffectSimulation(effect);
+    const particleRenderer = new ParticleRenderer(scene);
+    particleRenderer.setSystems(simulation.systems, particleTextures);
+    activeParticleInstances.push({ simulation, renderer: particleRenderer, anchor });
+}
+
+function fireDueStateParticleEvents(): void {
+    for (const [index, event] of (activeEntityState?.particleEvents ?? []).entries()) {
+        if (firedStateParticleEvents.has(index)) continue;
+        const eventTime = event.kind === 'start_event' ? 0 : Math.max(0, event.time || 0);
+        if (eventTime > stateParticleElapsed + 1e-6) continue;
+        firedStateParticleEvents.add(index);
+        triggerStateParticleEvent(event);
+    }
+}
+
+function activateEntityState(stateName: string, animationName?: string): void {
+    disposeStateParticles();
+    const states = currentEntity?.states ?? [];
+    activeEntityState = states.find(state => state.name === stateName && (!animationName || state.animation === animationName))
+        ?? states.find(state => state.name === stateName);
+    if (activeEntityState?.looping !== undefined) {
+        animLooping = activeEntityState.looping;
+        currentAction?.setLoop(animLooping ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+        if (currentAction) currentAction.clampWhenFinished = !animLooping;
+        const loopButton = document.getElementById('btn-anim-loop');
+        if (loopButton) loopButton.textContent = animLooping ? '🔁' : '➡️';
+    }
+    fireDueStateParticleEvents();
+}
+
+function updateStateParticles(delta: number): void {
+    if (isAnimPlaying) {
+        stateParticleElapsed += delta * (mixer?.timeScale ?? 1);
+        fireDueStateParticleEvents();
+        for (const instance of activeParticleInstances) instance.simulation.update(delta * (mixer?.timeScale ?? 1));
+    }
+    currentModel?.updateMatrixWorld(true);
+    for (const instance of activeParticleInstances) {
+        instance.anchor.updateWorldMatrix(true, false);
+        composeParticleAttachmentMatrix(instance.anchor.matrixWorld, particleAttachmentMatrix);
+        instance.renderer.update(camera, particleAttachmentMatrix);
+    }
+}
+
 // Locator label DOM elements
 const locatorLabelEls: Map<string, HTMLDivElement> = new Map();
 let isWebviewVisible = true;
@@ -556,6 +702,10 @@ function animate() {
         const boneUniformScale = Math.cbrt(_baLocalScale.x * _baLocalScale.y * _baLocalScale.z);
         ba.group.scale.setScalar(boneUniformScale * ba.entityScale);
     }
+
+    // Particle events share the entity state clock and use locator/bone transforms
+    // after animation mixers and bone-mounted children have been updated.
+    updateStateParticles(delta);
 
     if (!envController?.renderFrame()) {
         renderer.render(scene, camera);
@@ -2231,6 +2381,7 @@ let totalVertices = 0;
 async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined) {
     // Deselect and clear labels
     deselectLocator();
+    disposeStateParticles();
     lastHiddenLocators = [];
     clearLocatorLabels();
 
@@ -3233,10 +3384,9 @@ function buildStateAnimMap(entity: EntityData): Map<string, string[]> {
     const map = new Map<string, string[]>();
     if (!entity.states) return map;
     for (const s of entity.states) {
-        if (!s.animation) continue;
         let arr = map.get(s.name);
         if (!arr) { arr = []; map.set(s.name, arr); }
-        if (!arr.includes(s.animation)) arr.push(s.animation);
+        if (s.animation && !arr.includes(s.animation)) arr.push(s.animation);
     }
     return map;
 }
@@ -3254,6 +3404,7 @@ function updateStateSelector(entity: EntityData) {
             opt.textContent = stateName;
             sel.appendChild(opt);
         }
+        if (entity.defaultState && currentStateAnimMap.has(entity.defaultState)) sel.value = entity.defaultState;
         sel.style.display = 'inline-block';
         // Initialize secondary animation selector for the default/first state
         updateAnimVariantSelector(sel.value);
@@ -3290,6 +3441,8 @@ function updateAnimVariantSelector(stateName: string) {
             const animName = animSel!.value;
             const clip = animationClips.get(animName);
             if (clip) switchAnimation(clip);
+            const stateName = (document.getElementById('sel-state') as HTMLSelectElement | null)?.value;
+            if (stateName) activateEntityState(stateName, animName);
         });
     }
     animSel.innerHTML = '';
@@ -3317,7 +3470,11 @@ document.getElementById('sel-state')?.addEventListener('change', (e) => {
     const clip = animName ? animationClips.get(animName) : undefined;
     if (clip) {
         switchAnimation(clip);
+    } else if (currentAction) {
+        currentAction.stop();
+        currentAction = null;
     }
+    activateEntityState(stateName, animName);
 
     // Propagate state change to all getStateFromParent child mixers
     for (const entry of childMixers) {
@@ -3351,6 +3508,7 @@ document.getElementById('anim-scrub')?.addEventListener('input', (e) => {
     const time = (val / 1000) * duration;
     currentAction.time = time;
     mixer.update(0); // Force update to this frame
+    seekStateParticles(time);
     updateTimelineUI();
 });
 
@@ -3776,6 +3934,9 @@ function disposeAll() {
 
     envController?.dispose();
     envController = null;
+    disposeStateParticles();
+    particleEffects = {};
+    particleTextures = {};
     // Remove event listeners
     window.removeEventListener('resize', handleResize);
     window.removeEventListener('keydown', handleWindowKeydown);
@@ -4220,6 +4381,15 @@ async function handleWindowMessage(event: MessageEvent) {
         }
         case 'render': {
             const data = msg as RenderMessage;
+            particleEffects = data.particleEffects ?? {};
+            particleTextures = data.particleTextures ?? {};
+            if (data.unresolvedParticles?.length) {
+                vscode.postMessage({
+                    command: 'log',
+                    level: 'warn',
+                    text: `Unresolved particle effects: ${data.unresolvedParticles.join(', ')}`,
+                });
+            }
             entityNameEl.textContent = data.entity.name || data.fileName;
             emptyState.style.display = 'none';
             document.title = `Entity: ${data.entity.name || data.fileName}`;
@@ -4250,6 +4420,18 @@ async function handleWindowMessage(event: MessageEvent) {
             // Initialize animations after model is loaded
             if (animBuffers.size > 0) {
                 initAnimations(animBuffers, data.entity.meshScale ?? 1.0);
+            }
+            const stateSelect = document.getElementById('sel-state') as HTMLSelectElement | null;
+            const stateName = stateSelect?.value;
+            if (stateName) {
+                const animationName = currentStateAnimMap.get(stateName)?.[0];
+                const clip = animationName ? animationClips.get(animationName) : undefined;
+                if (clip) switchAnimation(clip);
+                else if (currentAction) {
+                    currentAction.stop();
+                    currentAction = null;
+                }
+                activateEntityState(stateName, animationName);
             }
             break;
         }

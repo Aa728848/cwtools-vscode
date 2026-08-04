@@ -9,6 +9,7 @@ import { buildEntityGraph, type EntityDefinition, type EntityGraph } from './ent
 import { matchesExt } from './fileExtensions';
 import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { isPathInsideOrEqual } from './pathScope';
+import { resolveNamedParticleResources } from './particleResourceResolver';
 import { loadEnvironmentPresets } from './worldgfxPresets';
 
 function panelText(en: string, zh: string): string {
@@ -1069,6 +1070,16 @@ export class EntityPanel {
             }
         }
 
+        const particleNames = new Set<string>();
+        for (const state of entity.states) {
+            for (const event of state.particleEvents) particleNames.add(event.particle);
+        }
+        const particleResources = await resolveNamedParticleResources(
+            particleNames,
+            searchRoots,
+            document.uri.fsPath,
+        );
+
         await this._panel.webview.postMessage({
             command: 'render',
             entity: {
@@ -1085,12 +1096,21 @@ export class EntityPanel {
                     scale: l.scale,
                 })),
                 attaches: entity.attaches,
-                states: entity.states.map(s => ({ name: s.name, animation: s.animation })),
+                states: entity.states.map(s => ({
+                    name: s.name,
+                    animation: s.animation,
+                    stateTime: s.stateTime,
+                    looping: s.looping,
+                    particleEvents: s.particleEvents,
+                })),
                 defaultState: entity.defaultState,
                 attachData,
             },
             meshBase64,
             animations: animations.length > 0 ? animations : undefined,
+            particleEffects: particleResources.effects,
+            particleTextures: particleResources.textures,
+            unresolvedParticles: particleResources.unresolved,
             fileName: path.basename(document.fileName),
         });
     }

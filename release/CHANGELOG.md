@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.10.10] - 2026-08-04
+
+### AI 对话与推理兼容性 / AI Chat and Reasoning Compatibility
+- **[新增] OpenAI 兼容渠道支持自动探测和手动配置推理字段名**：可识别 `reasoning_content`、`reasoning`、`reasoning_text` 与 `thinking`，并在流式展示及多轮工具调用中按原字段回传思考内容，兼容使用非标准字段的网关与中转服务。
+  English: [New] OpenAI-compatible channels can now auto-detect or explicitly configure the reasoning field name. `reasoning_content`, `reasoning`, `reasoning_text`, and `thinking` are preserved across streaming output and multi-turn tool calls for gateways and relays that use non-standard fields.
+- **[改进] 推理参数路由统一为按 Provider、协议和模型匹配的规则表**：OpenAI、OpenRouter、Anthropic、Gemini、Qwen、SiliconFlow、GLM、DeepSeek、Together、DeepInfra、Ollama 及自定义渠道继续使用各自正确的思考参数，并更易扩展新模型。
+  English: [Improvement] Reasoning parameters now use a centralized rule table keyed by provider, wire format, and model. OpenAI, OpenRouter, Anthropic, Gemini, Qwen, SiliconFlow, GLM, DeepSeek, Together, DeepInfra, Ollama, and custom channels retain their provider-specific request shapes while making new model support easier to extend.
+- **[兼容] 移除 DeepSeek Beta 前缀续写的专用分支**，统一通过标准对话与 Agent 循环处理后续轮次，避免专有续写协议干扰工具调用或结构化消息状态。
+  English: [Compatibility] Removed the dedicated DeepSeek Beta prefix-continuation path so subsequent turns consistently use the standard conversation and Agent loop without risking tool-call or structured-message state.
+
+### 模型与规则数据 / Models and Rules Data
+- **[新增] 更新内置模型与价格数据**：加入 GPT-5.6 系列、`qwen3.8-max` 与 `gemini-3.6-flash` 的模型或价格信息。
+  English: [New] Updated built-in model and pricing data for the GPT-5.6 family, `qwen3.8-max`, and `gemini-3.6-flash`.
+- **[更新] 刷新 Stellaris 规则配置与随包规则集**：修复触发船只角色的名称引用并移除冗余船只角色枚举。
+  English: [Update] Refreshed the Stellaris rule configuration and bundled rules, fixing triggered ship-role name references and removing a redundant ship-role enumeration.
+- **[更新] 升级 CWTools 规则信息服务并清理旧版 MCP 集成文件**，保持核心库、只读 MCP 服务与扩展所用子模块版本一致。
+  English: [Update] Upgraded the CWTools rule-information service and removed legacy MCP integration files, keeping the core library, read-only MCP server, and extension submodules aligned.
+
+### 质量 / Quality
+- **[测试] 增加推理字段探测、Provider 能力、思考参数及新模型价格的回归覆盖。**
+  English: [Tests] Added regression coverage for reasoning-field detection, provider capabilities, thinking parameters, and new model pricing.
+
 ## [2.10.9] - 2026-08-04
 
 ### 实体与粒子预览 / Entity and Particle Preview

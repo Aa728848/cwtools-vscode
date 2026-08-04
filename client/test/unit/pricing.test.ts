@@ -25,7 +25,13 @@ describe('getModelPricing', () => {
         expect(getModelPricing('glm-4.6')).to.deep.equal([4.10, 15.02]);
         expect(getModelPricing('MiniMax-M3')).to.deep.equal([2.10, 8.40]);
         expect(getModelPricing('qwen3.7-max-2026-06-08')).to.deep.equal([12.00, 36.00]);
+        expect(getModelPricing('qwen3.8-max')).to.deep.equal([12.00, 36.00]);
+        expect(getModelPricing('gpt-5.6')).to.deep.equal([34.10, 204.59]);
+        expect(getModelPricing('gpt-5.6-sol')).to.deep.equal([34.10, 204.59]);
+        expect(getModelPricing('gpt-5.6-terra')).to.deep.equal([13.64, 81.84]);
+        expect(getModelPricing('gpt-5.6-luna')).to.deep.equal([1.36, 8.18]);
         expect(getModelPricing('gemini-3.5-flash')).to.deep.equal([10.23, 61.38]);
+        expect(getModelPricing('gemini-3.6-flash')).to.deep.equal([10.23, 51.15]);
         expect(getModelPricing('mimo-v2.5-pro')).to.deep.equal([3.00, 6.00]);
         expect(getModelPricing('kimi-k2.7-code')).to.deep.equal([6.50, 27.00]);
         expect(getModelPricing('kimi-k3')).to.deep.equal([20.00, 100.00]);
@@ -96,6 +102,11 @@ describe('getCacheDiscountFactor', () => {
 
     it('returns 0.2 for Qwen models', () => {
         expect(getCacheDiscountFactor('qwen-max')).to.equal(0.2);
+    });
+
+    it('uses the documented 12.5% implicit-cache rate for Qwen 3.8-Max', () => {
+        expect(getCacheDiscountFactor('qwen3.8-max')).to.equal(0.125);
+        expect(getCacheDiscountFactor('qwen3.7-max')).to.equal(0.2);
     });
 
     it('returns correct factors for other providers', () => {

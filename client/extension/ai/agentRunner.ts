@@ -40,6 +40,7 @@ import { AIService } from './aiService';
 import { AgentToolExecutor, TOOL_DEFINITIONS } from './agentTools';
 import { PromptBuilder, hashToolDefinitionsForFingerprint, orderMessagesForStablePrefix } from './promptBuilder';
 import { getEffectiveEndpoint, getProvider, getProviderApiFormat, isModelVisionCapable } from './providers';
+import { DEFAULT_REASONING_KEY, detectReasoningKey, reasoningValue } from './providers/reasoningKey';
 import { getModelPricing, getCacheDiscountFactor } from './pricing';
 import { buildProviderCallTokenUsage } from './providerCallUsage';
 import { parseDsmlToolCalls as _parseDsmlToolCalls, stripDsmlMarkup as _stripDsmlMarkup, stripThinkBlocks as _stripThinkBlocks, cleanFinalContent as _cleanFinalContent } from './toolCallParser';
@@ -3061,9 +3062,13 @@ export class AgentRunner {
             }
 
             // ── Extract thinking/reasoning content ──────────────────────
-            // 1. reasoning_content field (DeepSeek-R1 / some OpenAI-compat providers)
+            // 1. reasoning field (DeepSeek-R1 / some OpenAI-compat providers);
+            //    the exact field name is provider-specific, detected on the fly.
             const rawMsg = (choice as unknown as Record<string, unknown>);
-            const reasoningField = (rawMsg.message as Record<string, unknown>)?.reasoning_content as string | undefined;
+            const rawMessage = rawMsg.message as Record<string, unknown> | undefined;
+            const explicitReasoningKey = this.aiService.getConfig().reasoningKey;
+            const reasoningField = rawMessage ? reasoningValue(rawMessage, explicitReasoningKey) : undefined;
+            const reasoningKey = rawMessage ? (explicitReasoningKey || detectReasoningKey(rawMessage)) : undefined;
             // 2. <think>...</think> blocks in text (Qwen3 /think, local models)
             const thinkBlockRe = /<think>([\s\S]*?)<\/think>/gi;
             let thinkContent = reasoningField || '';
@@ -3095,13 +3100,18 @@ export class AgentRunner {
             }
 
             // Add assistant response (cleaned) to conversation history.
-            // Preserve reasoning_content for DeepSeek-R1 API compatibility:
-            // DeepSeek requires reasoning_content on ALL assistant messages when
-            // in thinking mode, even if null. Without it, after several iterations
-            // the API returns 400: "reasoning_content must be passed back".
-            // The reasoningField was already extracted at line 640 from the raw response.
+            // Preserve the reasoning field for DeepSeek-R1 API compatibility:
+            // DeepSeek requires it on ALL assistant messages when in thinking
+            // mode, even if null. Without it, after several iterations the API
+            // returns 400: "reasoning_content must be passed back".
+            // The reasoningField was already extracted from the raw response.
             if (reasoningField !== undefined && assistantMessage.reasoning_content === undefined) {
                 assistantMessage.reasoning_content = reasoningField || null;
+            }
+            // Remember a non-default reasoning field name so later turns replay
+            // the thinking content under the field this provider actually uses.
+            if (reasoningKey && reasoningKey !== DEFAULT_REASONING_KEY && assistantMessage.reasoning_key === undefined) {
+                assistantMessage.reasoning_key = reasoningKey;
             }
 
             // ── DeepSeek API guard: ensure assistant messages always have content or tool_calls ──

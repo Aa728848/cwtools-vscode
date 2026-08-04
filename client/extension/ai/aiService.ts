@@ -33,7 +33,7 @@ import {
     getModelReasoningCapability,
     normalizeReasoningEffort,
 } from './providers';
-import { resolveProviderCapabilities } from './providers/capabilities';
+import { DEFAULT_REASONING_KEY, detectReasoningKey, KNOWN_REASONING_KEYS, reasoningValue } from './providers/reasoningKey';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
 import { ChatGptOAuthService } from './codex/oauthService';
@@ -99,10 +99,15 @@ function removeUnsupportedOptionalChatFields(
         if (Object.keys(google).length === 0) delete payload.google;
         if (!removed.includes('thinking_config')) removed.push('thinking_config');
     }
-    if (/\breasoning_content\b/i.test(errorText) && Array.isArray(payload.messages)) {
+    if (Array.isArray(payload.messages)
+        && KNOWN_REASONING_KEYS.some(key => new RegExp(`\\b${key}\\b`, 'i').test(errorText))) {
         let changed = false;
         for (const message of payload.messages as Array<Record<string, unknown>>) {
-            if (message.reasoning_content === undefined) continue;
+            const key = typeof message.reasoning_key === 'string' && message.reasoning_key
+                ? message.reasoning_key
+                : DEFAULT_REASONING_KEY;
+            if (message[key] === undefined && message.reasoning_content === undefined) continue;
+            delete message[key];
             delete message.reasoning_content;
             changed = true;
         }
@@ -170,23 +175,6 @@ export function normalizeCustomApiFormat(value: unknown): CustomApiFormat {
         default:
             return DEFAULT_CUSTOM_API_FORMAT;
     }
-}
-
-function mergeCompletionUsage(
-    first: ChatCompletionResponse['usage'],
-    second: ChatCompletionResponse['usage'],
-): ChatCompletionResponse['usage'] {
-    if (!first) return second;
-    if (!second) return first;
-    const firstCached = first.cached_tokens ?? first.prompt_tokens_details?.cached_tokens ?? first.prompt_cache_hit_tokens ?? 0;
-    const secondCached = second.cached_tokens ?? second.prompt_tokens_details?.cached_tokens ?? second.prompt_cache_hit_tokens ?? 0;
-    return {
-        prompt_tokens: first.prompt_tokens + second.prompt_tokens,
-        completion_tokens: first.completion_tokens + second.completion_tokens,
-        total_tokens: first.total_tokens + second.total_tokens,
-        cached_tokens: firstCached + secondCached,
-        cache_creation_tokens: (first.cache_creation_tokens ?? 0) + (second.cache_creation_tokens ?? 0),
-    };
 }
 
 function normalizeConfiguredReasoningEffort(value: unknown): ReasoningEffort {
@@ -639,60 +627,12 @@ export class AIService {
                     return await this.callClaude(requestEndpoint, apiKey, requestBody, controller, options?.onThinking, options?.onTextDelta, options?.onToolCallDelta, providerId);
                 }
                 if (provider.supportsStreaming) {
-                    return await this.callOpenAICompatibleStreaming(requestEndpoint, apiKey, { ...requestBody, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta, options?.onToolCallDelta);
+                    return await this.callOpenAICompatibleStreaming(requestEndpoint, apiKey, { ...requestBody, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta, options?.onToolCallDelta, config.reasoningKey);
                 }
                 return await this.callOpenAICompatible(requestEndpoint, apiKey, requestBody, providerId, controller);
             };
 
-            let response = await execute(endpoint, request);
-            const capabilities = resolveProviderCapabilities(providerId, endpoint, effectiveApiFormat);
-            const continuationEndpoint = capabilities.prefixContinuationEndpoint;
-            // DeepSeek's prefix continuation is provider-native and only safe for a
-            // pure text/reasoning truncation. Tool and structured turns continue via
-            // the normal runner loop so their protocol state cannot be corrupted.
-            for (let continuationAttempt = 0;
-                continuationAttempt < 2
-                && capabilities.prefixContinuation === 'supported'
-                && continuationEndpoint
-                && response.choices?.[0]?.finish_reason === 'length';
-                continuationAttempt++) {
-                const message = response.choices[0]!.message;
-                if ((message.tool_calls?.length ?? 0) > 0) break;
-                const content = typeof message.content === 'string' ? message.content : '';
-                const reasoning = message.reasoning_content ?? '';
-                if (!content && !reasoning) break;
-
-                const prefixMessage: ChatMessage = {
-                    role: 'assistant',
-                    content,
-                    ...(reasoning ? { reasoning_content: reasoning } : {}),
-                    provider_prefix: true,
-                };
-                const continuationRequest: ChatCompletionRequest = {
-                    ...request,
-                    messages: [...request.messages, prefixMessage],
-                    tools: undefined,
-                    tool_choice: undefined,
-                };
-                const continued = await execute(continuationEndpoint, continuationRequest);
-                const continuedMessage = continued.choices?.[0]?.message;
-                if (!continuedMessage || (continuedMessage.tool_calls?.length ?? 0) > 0) break;
-                const continuedContent = typeof continuedMessage.content === 'string' ? continuedMessage.content : '';
-                const continuedReasoning = continuedMessage.reasoning_content ?? '';
-                response = {
-                    ...continued,
-                    choices: continued.choices.map((choice, index) => index === 0 ? {
-                        ...choice,
-                        message: {
-                            ...choice.message,
-                            content: content + continuedContent,
-                            reasoning_content: reasoning + continuedReasoning || undefined,
-                        },
-                    } : choice),
-                    usage: mergeCompletionUsage(response.usage, continued.usage),
-                };
-            }
-            return response;
+            return await execute(endpoint, request);
         } catch (err) {
             if (timedOutError) throw timedOutError;
             throw err;
@@ -927,8 +867,7 @@ export class AIService {
                 } : {}),
                 ...(message.tool_call_id !== undefined ? { tool_call_id: message.tool_call_id } : {}),
                 ...(message.name !== undefined ? { name: message.name } : {}),
-                ...(message.reasoning_content !== undefined ? { reasoning_content: message.reasoning_content } : {}),
-                ...(providerId === 'deepseek' && message.provider_prefix === true ? { prefix: true } : {}),
+                ...(message.reasoning_content !== undefined ? { [message.reasoning_key ?? DEFAULT_REASONING_KEY]: message.reasoning_content } : {}),
             })),
         };
 
@@ -1136,7 +1075,7 @@ export class AIService {
         apiKey: string,
         request: ChatCompletionRequest,
         providerId: string,
-        controller: AbortController
+        controller: AbortController,
     ): Promise<ChatCompletionResponse> {
         const url = normalizeOpenAIActionUrl(endpoint, 'chat/completions');
 
@@ -1184,7 +1123,8 @@ export class AIService {
         onThinking: ((text: string) => void) | undefined,
         controller: AbortController,
         onTextDelta?: (text: string) => void,
-        onToolCallDelta?: (toolName: string, argsBuf: string, metadata?: ToolCallDeltaMetadata) => void
+        onToolCallDelta?: (toolName: string, argsBuf: string, metadata?: ToolCallDeltaMetadata) => void,
+        reasoningKey?: string
     ): Promise<ChatCompletionResponse> {
         const url = normalizeOpenAIActionUrl(endpoint, 'chat/completions');
         const headers: Record<string, string> = {
@@ -1230,7 +1170,10 @@ export class AIService {
             }
             const message = data.choices?.[0]?.message;
             if (typeof message?.content === 'string' && message.content) onTextDelta?.(message.content);
-            if (message?.reasoning_content) onThinking?.(message.reasoning_content);
+            if (message) {
+                const thinking = reasoningValue(message as unknown as Record<string, unknown>, reasoningKey);
+                if (thinking) onThinking?.(thinking);
+            }
             for (const [index, call] of (message?.tool_calls ?? []).entries()) {
                 onToolCallDelta?.(call.function.name, call.function.arguments, { id: call.id, index });
             }
@@ -1245,6 +1188,7 @@ export class AIService {
         // Aggregation state
         let contentBuf = '';
         let reasoningBuf = '';
+        let detectedReasoningKey: string | null = null;
         let finishReason: string | null = null;
         let usageBuf: { prompt_tokens: number; completion_tokens: number; total_tokens: number; cached_tokens?: number; cache_creation_tokens?: number } | undefined;
         let modelBuf = '';
@@ -1322,9 +1266,11 @@ export class AIService {
                     contentBuf += delta.content;
                     if (delta.content && onTextDelta) onTextDelta(delta.content);
                 }
-                // Accumulate thinking/reasoning content and emit incrementally
-                const reasoning = delta.reasoning_content ?? delta.reasoning;
-                if (typeof reasoning === 'string' && reasoning) {
+                // Accumulate thinking/reasoning content and emit incrementally.
+                // The field name is provider-specific; detect it from the delta.
+                const reasoning = reasoningValue(delta, reasoningKey);
+                if (reasoning) {
+                    if (!detectedReasoningKey) detectedReasoningKey = reasoningKey || (detectReasoningKey(delta) ?? null);
                     reasoningBuf += reasoning;
                     onThinking?.(reasoning);
                 }
@@ -1401,7 +1347,9 @@ export class AIService {
                     role: 'assistant',
                     content: contentBuf || null,
                     tool_calls: toolCalls,
-                    // DeepSeek-R1 requires reasoning_content on ALL assistant messages
+                    ...(detectedReasoningKey && detectedReasoningKey !== DEFAULT_REASONING_KEY
+                        ? { reasoning_key: detectedReasoningKey } : {}),
+                    // DeepSeek-R1 requires the reasoning field on ALL assistant messages
                     // when thinking mode is active — set to null when absent, not omitted
                     reasoning_content: reasoningBuf || null,
                 } as ChatMessage & { tool_calls?: typeof toolCalls },

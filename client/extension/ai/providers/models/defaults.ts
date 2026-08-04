@@ -160,6 +160,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         models: [
             'qwen3.7-max-2026-06-08',
             'qwen3.7-max',
+            'qwen3.8-max',
             'qwen3.7-plus',
             'qwen3.6-plus',
             'qwen3.6-flash',
@@ -212,6 +213,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         defaultModel: 'gemini-3.5-flash',
         models: [
             'gemini-3.5-flash',
+            'gemini-3.6-flash',
             'gemini-3.1-pro-preview',
             'gemini-3.1-flash-lite',
             'gemini-3-flash-preview',

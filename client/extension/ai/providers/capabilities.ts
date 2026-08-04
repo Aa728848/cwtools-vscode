@@ -3,20 +3,13 @@ import type { CustomApiFormat } from '../types';
 export type CapabilitySupport = 'supported' | 'unsupported' | 'unknown';
 
 export interface ProviderCapabilities {
-    prefixContinuation: CapabilitySupport;
     reasoningReplay: CapabilitySupport;
     promptCaching: CapabilitySupport;
     nativeConversationState: CapabilitySupport;
     structuredOutput: CapabilitySupport;
 }
 
-export interface ResolvedProviderCapabilities extends ProviderCapabilities {
-    /** Provider-owned endpoint used only for the supported continuation protocol. */
-    prefixContinuationEndpoint?: string;
-}
-
 const UNKNOWN_CAPABILITIES: ProviderCapabilities = {
-    prefixContinuation: 'unknown',
     reasoningReplay: 'unknown',
     promptCaching: 'unknown',
     nativeConversationState: 'unknown',
@@ -41,28 +34,20 @@ export function resolveProviderCapabilities(
     providerId: string,
     endpoint: string,
     apiFormat: CustomApiFormat,
-): ResolvedProviderCapabilities {
+): ProviderCapabilities {
     const normalizedProvider = providerId.toLowerCase();
     if (normalizedProvider === 'deepseek'
         && apiFormat === 'openai-chat-completions'
         && isOfficialDeepSeekEndpoint(endpoint)) {
         return {
-            prefixContinuation: 'supported',
             reasoningReplay: 'supported',
             promptCaching: 'supported',
             nativeConversationState: 'unsupported',
             structuredOutput: 'unknown',
-            prefixContinuationEndpoint: 'https://api.deepseek.com/beta',
         };
     }
 
-    if (normalizedProvider === 'custom' || !isOfficialDeepSeekEndpoint(endpoint)) {
-        return { ...UNKNOWN_CAPABILITIES };
-    }
-
-    return {
-        ...UNKNOWN_CAPABILITIES,
-        prefixContinuation: 'unsupported',
-    };
+    // Custom channels and non-official transports cannot be assumed to
+    // implement any provider-native capability.
+    return { ...UNKNOWN_CAPABILITIES };
 }
-

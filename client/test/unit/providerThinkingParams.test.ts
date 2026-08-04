@@ -89,6 +89,11 @@ describe('provider thinking params', () => {
             .to.deep.equal({ extraBody: { enable_thinking: true, thinking_budget: 2048 } });
         expect(getThinkingParams('qwen3.7-plus', 'qwen', 'openai-chat-completions', 'max'))
             .to.deep.equal({ extraBody: { enable_thinking: true, thinking_budget: 262144 } });
+        // Qwen 3.8-Max reuses the family thinking protocol with the default 81920 cap.
+        expect(getThinkingParams('qwen3.8-max', 'qwen', 'openai-chat-completions', 'low'))
+            .to.deep.equal({ extraBody: { enable_thinking: true, thinking_budget: 2048 } });
+        expect(getThinkingParams('qwen3.8-max', 'qwen', 'openai-chat-completions', 'max'))
+            .to.deep.equal({ extraBody: { enable_thinking: true, thinking_budget: 81920 } });
     });
 
     it('uses Gemini 3 levels and Gemini 2.5 budgets', () => {

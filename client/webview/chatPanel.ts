@@ -7486,6 +7486,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         (document.getElementById('settingsEndpoint') as HTMLInputElement).value = current.endpoint || '';
         const customFormatSel = document.getElementById('customApiFormat') as HTMLSelectElement | null;
         if (customFormatSel) customFormatSel.value = current.customApiFormat || 'openai-chat-completions';
+        const reasoningKeyInput = document.getElementById('settingsReasoningKey') as HTMLInputElement | null;
+        if (reasoningKeyInput) reasoningKeyInput.value = current.reasoningKey || '';
         // Auto-fill context size: prefer per-model lookup, then user-saved value
         const initCtx = autoFillContextForModel(current.model, current.provider) || current.maxContextTokens || 0;
         (document.getElementById('settingsCtx') as HTMLInputElement).value = initCtx;
@@ -8146,6 +8148,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     reviewer: ((document.getElementById('approvalsAutoReview') as HTMLInputElement | null)?.checked ? 'auto_review' : 'user'),
                 },
                 reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
+                reasoningKey: ((document.getElementById('settingsReasoningKey') as HTMLInputElement | null)?.value || '').trim(),
                 webAccess: {
                     mode: ((document.getElementById('webAccessMode') as HTMLSelectElement | null)?.value || 'indexed'),
                     provider: ((document.getElementById('webSearchProvider') as HTMLSelectElement | null)?.value || 'auto'),

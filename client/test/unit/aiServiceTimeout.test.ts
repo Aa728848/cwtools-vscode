@@ -116,59 +116,6 @@ describe('AIService provider protocol routing', () => {
         expect(chatCompletionsCalls).to.equal(1);
     });
 
-    it('continues official DeepSeek length truncation with one bounded prefix turn', async () => {
-        const { AIService } = loadAIService();
-        const service = new AIService({ secrets: {} } as any) as any;
-        const calls: Array<{ endpoint: string; request: any }> = [];
-        service.callOpenAICompatibleStreaming = async (endpoint: string, _apiKey: string, request: any) => {
-            calls.push({ endpoint, request });
-            if (calls.length === 1) {
-                return {
-                    ...completionResponse(request.model),
-                    choices: [{ index: 0, finish_reason: 'length', message: { role: 'assistant', content: 'part ', reasoning_content: 'think ' } }],
-                    usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
-                };
-            }
-            return {
-                ...completionResponse(request.model),
-                choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'done', reasoning_content: 'more' } }],
-                usage: { prompt_tokens: 14, completion_tokens: 3, total_tokens: 17 },
-            };
-        };
-
-        const response = await service.chatCompletion([{ role: 'user', content: 'Hello' }], {
-            providerId: 'deepseek', model: 'deepseek-reasoner', apiKey: 'test-key',
-        });
-
-        expect(calls).to.have.lengthOf(2);
-        expect(calls[1]!.endpoint).to.equal('https://api.deepseek.com/beta');
-        expect(calls[1]!.request.tools).to.equal(undefined);
-        expect(calls[1]!.request.messages.at(-1)).to.include({
-            role: 'assistant', content: 'part ', reasoning_content: 'think ', provider_prefix: true,
-        });
-        expect(response.choices[0].message.content).to.equal('part done');
-        expect(response.choices[0].message.reasoning_content).to.equal('think more');
-        expect(response.usage).to.include({ prompt_tokens: 24, completion_tokens: 7, total_tokens: 31 });
-    });
-
-    it('does not enable provider-native continuation through a custom DeepSeek relay', async () => {
-        const { AIService } = loadAIService();
-        const service = new AIService({ secrets: {} } as any) as any;
-        let calls = 0;
-        service.callOpenAICompatibleStreaming = async (_endpoint: string, _apiKey: string, request: any) => {
-            calls++;
-            return {
-                ...completionResponse(request.model),
-                choices: [{ index: 0, finish_reason: 'length', message: { role: 'assistant', content: 'partial' } }],
-            };
-        };
-
-        await service.chatCompletion([{ role: 'user', content: 'Hello' }], {
-            providerId: 'deepseek', model: 'deepseek-reasoner', apiKey: 'test-key', endpoint: 'https://relay.example/v1',
-        });
-        expect(calls).to.equal(1);
-    });
-
     it('applies provider-specific thinking levels before Chat Completions routing', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;
@@ -1343,6 +1290,61 @@ function anthropicSseChunksResponse(chunks: string[]): Response {
         }),
     } as Response;
 }
+
+describe('AIService streaming reasoning detection', () => {
+    it('detects a non-default reasoning field and replays it on the synthetic message', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        const thinking: string[] = [];
+        service.fetchWithRetry = async (_url: string) => chatCompletionsSseResponse([
+            { choices: [{ index: 0, delta: { role: 'assistant', reasoning: 'think ' } }] },
+            { choices: [{ index: 0, delta: { content: 'answer' } }] },
+            {
+                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+            },
+        ]);
+
+        const response = await service.callOpenAICompatibleStreaming(
+            'https://api.deepseek.com/v1',
+            'test-key',
+            { model: 'deepseek-v4-flash', messages: [{ role: 'user', content: 'Hello' }] },
+            'deepseek',
+            (text: string) => thinking.push(text),
+            new AbortController(),
+        );
+
+        expect(thinking).to.deep.equal(['think ']);
+        expect(response.choices[0].message.content).to.equal('answer');
+        expect(response.choices[0].message.reasoning_content).to.equal('think ');
+        expect(response.choices[0].message.reasoning_key).to.equal('reasoning');
+    });
+
+    it('defaults to reasoning_content when the delta uses the standard key', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        service.fetchWithRetry = async (_url: string) => chatCompletionsSseResponse([
+            { choices: [{ index: 0, delta: { role: 'assistant', reasoning_content: 'think ' } }] },
+            { choices: [{ index: 0, delta: { content: 'answer' } }] },
+            {
+                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+            },
+        ]);
+
+        const response = await service.callOpenAICompatibleStreaming(
+            'https://api.deepseek.com/v1',
+            'test-key',
+            { model: 'deepseek-v4-flash', messages: [{ role: 'user', content: 'Hello' }] },
+            'deepseek',
+            undefined,
+            new AbortController(),
+        );
+
+        expect(response.choices[0].message.reasoning_content).to.equal('think ');
+        expect(response.choices[0].message.reasoning_key).to.equal(undefined);
+    });
+});
 
 function chatCompletionsSseResponse(events: Record<string, unknown>[]): Response {
     const encoder = new TextEncoder();

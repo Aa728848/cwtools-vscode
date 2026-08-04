@@ -84,10 +84,12 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
     // Anthropic Claude
     if (lower.includes('claude')) return 0.1;
     // OpenAI GPT series
+    if (lower.startsWith('gpt-5.6')) return 0.1; // Sol/Terra/Luna all cache at 10% (BenchLM 2026-08)
     if (lower.includes('gpt-') || lower.includes('gpt5')) return 0.5;
     // Google Gemini
     if (lower.includes('gemini')) return 0.1;
     // Alibaba Qwen (implicit cache default)
+    if (lower.startsWith('qwen3.8')) return 0.125; // 3.8-Max: 1.5/12 implicit-cache rate
     if (lower.includes('qwen')) return 0.2;
     // Zhipu GLM
     if (lower.includes('glm')) return 0.19;

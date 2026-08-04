@@ -282,6 +282,12 @@ export interface AIUserConfig {
     agentFileWriteMode: 'confirm' | 'auto';
     /** Reasoning effort / thinking mode selected for the active model. */
     reasoningEffort: ReasoningEffort;
+    /**
+     * Optional reasoning field name override for OpenAI-compatible providers
+     * whose gateways return thinking content under a non-standard key.
+     * Empty means auto-detect (default: `reasoning_content`).
+     */
+    reasoningKey?: string;
     inlineCompletion: {
         enabled: boolean;
         debounceMs: number;
@@ -329,8 +335,11 @@ export interface ChatMessage {
      * using DeepSeek's thinking mode, otherwise API returns 400.
      */
     reasoning_content?: string | null;
-    /** Internal marker serialized as DeepSeek's `prefix` field only on its official beta endpoint. */
-    provider_prefix?: boolean;
+    /**
+     * Actual reasoning field name used by this provider/relay when it differs
+     * from `reasoning_content`; serialized in place of `reasoning_content`.
+     */
+    reasoning_key?: string;
     /** Raw Responses output items, replayed unchanged to preserve reasoning and item phases. */
     responses_output_items?: Array<Record<string, unknown>>;
     /** Signed Anthropic thinking blocks required when continuing a tool-use turn. */
@@ -2491,6 +2500,8 @@ export interface PanelSettings {
     sandboxBackend?: { available: boolean; backend?: string; message: string };
     /** Reasoning effort / thinking mode for the selected provider/model. */
     reasoningEffort: ReasoningEffort;
+    /** Reasoning field override for OpenAI-compatible gateways (empty = auto-detect). */
+    reasoningKey?: string;
     webAccess?: {
         mode: 'disabled' | 'indexed' | 'live';
         provider: 'auto' | 'openai' | 'brave' | 'exa' | 'tavily' | 'serper' | 'serpapi' | 'searxng' | 'duckduckgo';

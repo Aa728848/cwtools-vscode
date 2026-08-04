@@ -345,6 +345,7 @@ export class ChatSettingsManager {
                     ? aiText('No enforced Windows command backend is ready. Install bubblewrap in WSL2, use a Dev Container, configure a verified native helper, or explicitly approve a terminal run.', 'Windows 强制命令后端尚未就绪。请在 WSL2 中安装 bubblewrap、使用开发容器、配置已验证的原生 helper，或明确批准终端运行。')
                     : aiText('No supported OS command sandbox backend is available. Captured commands fail closed.', '没有可用的操作系统命令沙箱后端。捕获命令将安全拒绝。') },
             reasoningEffort: config.reasoningEffort,
+            reasoningKey: config.reasoningKey ?? '',
             webAccess: {
                 mode: webConfig.get<'disabled' | 'indexed' | 'live'>('mode', 'indexed'),
                 provider: webConfig.get<NonNullable<PanelSettings['webAccess']>['provider']>('provider', 'auto'),
@@ -514,6 +515,7 @@ export class ChatSettingsManager {
         await cfg.update('provider', settings.provider, vs.ConfigurationTarget.Global);
         await cfg.update('model', settings.model, vs.ConfigurationTarget.Global);
         await cfg.update('customApiFormat', normalizeCustomApiFormatSetting(settings.customApiFormat), vs.ConfigurationTarget.Global);
+        await cfg.update('reasoningKey', settings.reasoningKey?.trim() || undefined, vs.ConfigurationTarget.Global);
         if (settings.apiKey !== undefined) {
             const trimmedKey = settings.apiKey.trim();
             if (trimmedKey.length > 0 && !trimmedKey.startsWith('•')) {

@@ -2,16 +2,21 @@ import { expect } from 'chai';
 import { resolveProviderCapabilities } from '../../extension/ai/providers/capabilities';
 
 describe('provider capabilities', () => {
-    it('enables prefix continuation only for the official DeepSeek transport', () => {
+    it('recognizes provider-native capabilities only on the official DeepSeek transport', () => {
         const official = resolveProviderCapabilities('deepseek', 'https://api.deepseek.com', 'openai-chat-completions');
-        expect(official.prefixContinuation).to.equal('supported');
-        expect(official.prefixContinuationEndpoint).to.equal('https://api.deepseek.com/beta');
+        expect(official.reasoningReplay).to.equal('supported');
+        expect(official.promptCaching).to.equal('supported');
 
-        expect(resolveProviderCapabilities('deepseek', 'https://relay.example/v1', 'openai-chat-completions').prefixContinuation)
-            .to.equal('unknown');
-        expect(resolveProviderCapabilities('custom', 'https://api.deepseek.com', 'openai-chat-completions').prefixContinuation)
-            .to.equal('unknown');
-        expect(resolveProviderCapabilities('deepseek', 'https://api.deepseek.com', 'anthropic-messages').prefixContinuation)
-            .to.equal('unsupported');
+        const relay = resolveProviderCapabilities('deepseek', 'https://relay.example/v1', 'openai-chat-completions');
+        expect(relay.reasoningReplay).to.equal('unknown');
+        expect(relay.promptCaching).to.equal('unknown');
+
+        expect(resolveProviderCapabilities('custom', 'https://api.deepseek.com', 'openai-chat-completions'))
+            .to.deep.equal({
+                reasoningReplay: 'unknown',
+                promptCaching: 'unknown',
+                nativeConversationState: 'unknown',
+                structuredOutput: 'unknown',
+            });
     });
 });

@@ -271,6 +271,11 @@ ${stylesheetLinks}
                     </select>
                     <div class="settings-hint" id="customApiFormatHint"></div>
                 </div>
+                <div class="settings-group" id="reasoningKeyGroup">
+                    <label class="settings-label">Reasoning field name</label>
+                    <input class="settings-input" id="settingsReasoningKey" type="text" placeholder="${t('Auto-detect (default)', '自动探测（默认）')}" autocomplete="off" />
+                    <div class="settings-hint" id="reasoningKeyHint">${t('Empty = auto-detect. Set only when the gateway returns thinking content under a non-standard field name.', '留空自动探测；仅当网关用非标准字段名返回思考内容时填写。')}</div>
+                </div>
                 <div class="settings-group">
                     <label class="settings-label">Model</label>
                     <div class="model-row" style="position:relative">

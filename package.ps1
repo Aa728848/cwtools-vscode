@@ -32,7 +32,8 @@ param (
     [switch]$Install,
     [switch]$SkipServer,
     [switch]$SkipClient,
-    [switch]$IncludeMcp
+    [switch]$IncludeMcp,
+    [switch]$Publish
 )
 
 $StartTime = Get-Date
@@ -284,6 +285,36 @@ if ($Install) {
         }
     } else {
         Write-Error "No VSIX bundle found to install!"
+    }
+# 7. GitHub Release Publishing
+if ($Publish) {
+    if ($VsixFile) {
+        Write-Host "[*] Executing GitHub Release publishing via gh CLI..." -ForegroundColor Yellow
+        $PkgJson = Get-Content -Path (Join-Path $PSScriptRoot "release/package.json") -Raw | ConvertFrom-Json
+        $CurrentVer = $PkgJson.version
+        $TagName = "v$CurrentVer"
+        Write-Host ">>> Target release tag: $TagName" -ForegroundColor Cyan
+        
+        $GitStatus = & git status --short
+        if ($GitStatus) {
+            Write-Host ">>> Committing version bump & changelog..." -ForegroundColor Cyan
+            git commit -am "Bump version to $CurrentVer and add changelog"
+        }
+        
+        Write-Host ">>> Tagging and pushing $TagName to GitHub..." -ForegroundColor Cyan
+        git tag $TagName 2>$null
+        git push origin main
+        git push origin $TagName
+        
+        Write-Host ">>> Creating GitHub Release on Aa728848/cwtools-vscode..." -ForegroundColor Cyan
+        gh release create $TagName $VsixFile.FullName --repo Aa728848/cwtools-vscode --title $TagName --generate-notes
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[OK] GitHub Release $TagName published successfully!" -ForegroundColor Green
+        } else {
+            Write-Warning "GitHub Release publishing returned non-zero exit code."
+        }
+    } else {
+        Write-Error "No VSIX bundle found to publish!"
     }
 }
 

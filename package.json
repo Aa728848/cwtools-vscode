@@ -9,6 +9,7 @@
     "pack": "powershell -ExecutionPolicy Bypass -File ./package.ps1",
     "pack:install": "powershell -ExecutionPolicy Bypass -File ./package.ps1 -Install",
     "pack:quick": "powershell -ExecutionPolicy Bypass -File ./package.ps1 -SkipServer -Install",
+    "pack:release": "powershell -ExecutionPolicy Bypass -File ./package.ps1 -Publish",
     "rules:stellaris": "node tools/rules-sync/stellaris-rules-sync.js",
     "rules:stellaris:scan": "node tools/rules-sync/stellaris-rules-sync.js scan",
     "rules:stellaris:check": "node tools/rules-sync/stellaris-rules-sync.js check",

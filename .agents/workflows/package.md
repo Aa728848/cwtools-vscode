@@ -25,6 +25,10 @@ description: 打包 CWTools VSCode 插件为 .vsix 格式（含 Win/Linux/macOS 
   ```bash
   npm run pack
   ```
+* **打包并自动发布至 GitHub Release**（打包通用包，并通过 GitHub CLI 自动 Tag、推送并创建 Release 上传 VSIX）：
+  ```bash
+  npm run pack:release
+  ```
 
 如果您需要对流程进行更细粒度的控制，或者查验手动编译细节，请依次参阅下述各步：
 
@@ -108,6 +112,24 @@ if ($vsix) {
 } else {
     Write-Host "未找到可安装的 VSIX 包！"
 }
+```
+
+---
+
+## 7. 发布至 GitHub Release
+
+使用 GitHub CLI (`gh`) 自动提交 Commit、打 Tag 并发布至 GitHub Release 页面。
+
+// turbo
+```powershell
+$vsix = Get-ChildItem -Path release -Filter *.vsix | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$ver = (Get-Content release/package.json -Raw | ConvertFrom-Json).version
+$tag = "v$ver"
+git commit -am "Bump version to $ver and add changelog"
+git tag $tag
+git push origin main
+git push origin $tag
+gh release create $tag $vsix.FullName --repo Aa728848/cwtools-vscode --title $tag --generate-notes
 ```
 
 ---

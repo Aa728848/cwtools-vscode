@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.10.11] - 2026-08-06
+
+### 规则加载与离线可用性 / Rules Loading and Offline Availability
+- **[优化] 优先载入本地规则再进行后台远程更新**：在后台异步检测和拉取远程规则更新之前，优先载入本地已有的规则缓存，提升初始加载性能与离线可用性。
+  English: [Optimization] Load local rules before initiating background remote updates, improving startup performance and offline usability.
+
 ## [2.10.10] - 2026-08-04
 
 ### AI 对话与推理兼容性 / AI Chat and Reasoning Compatibility

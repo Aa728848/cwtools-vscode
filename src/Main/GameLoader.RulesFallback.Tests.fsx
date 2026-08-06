@@ -35,11 +35,27 @@ try
     assertSelection "bundled" (Some cache) false None (Some bundled) true
 
     writeRule cache "cached.cwt"
-    assertSelection "bundled" (Some cache) false None (Some bundled) true
-    assertSelection "remote" (Some cache) false None (Some bundled) false
+    let startupPreference = shouldPreferBundledRulesAtStartup false
+    if not startupPreference then
+        failwith "Automatic startup should prefer bundled rules while the remote check runs."
+    assertSelection "bundled" (Some cache) false None (Some bundled) startupPreference
+
+    let successfulUpdatePreference = shouldPreferBundledRulesAfterRemoteUpdate false true
+    if successfulUpdatePreference then
+        failwith "A successful remote update should select the remote cache."
+    assertSelection "remote" (Some cache) false None (Some bundled) successfulUpdatePreference
+
+    let failedUpdatePreference = shouldPreferBundledRulesAfterRemoteUpdate false false
+    if not failedUpdatePreference then
+        failwith "A failed remote update should retain the bundled fallback preference."
+    assertSelection "bundled" (Some cache) false None (Some bundled) failedUpdatePreference
 
     writeRule manual "manual.cwt"
-    assertSelection "manual" (Some cache) true (Some manual) (Some bundled) true
+    let manualStartupPreference = shouldPreferBundledRulesAtStartup true
+    let manualFinalPreference = shouldPreferBundledRulesAfterRemoteUpdate true false
+    if manualStartupPreference || manualFinalPreference then
+        failwith "Manual mode must never prefer bundled rules."
+    assertSelection "manual" (Some cache) true (Some manual) (Some bundled) manualStartupPreference
 
     ZipFile.CreateFromDirectory(bundled, bundledZip)
     Directory.Delete(bundled, true)

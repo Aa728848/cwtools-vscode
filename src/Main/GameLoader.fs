@@ -154,6 +154,19 @@ let getConfigSource cachePath useManualRules manualRulesFolder bundledRulesFolde
     resolveConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder preferBundledRules
     |> snd
 
+/// Automatic mode starts from a packaged fallback when one is available so
+/// project loading never waits for the remote rules check. Manual mode remains
+/// isolated from both bundled and remote rules.
+let shouldPreferBundledRulesAtStartup useManualRules =
+    not useManualRules
+
+/// Once the remote check completes, preserve the existing final-source policy:
+/// a successful check selects the remote cache, while a failed check selects
+/// the bundled fallback (and resolveConfigFiles falls back to the cache if the
+/// bundle is unavailable).
+let shouldPreferBundledRulesAfterRemoteUpdate useManualRules remoteUpdateSucceeded =
+    not useManualRules && not remoteUpdateSucceeded
+
 let getFolderList (filename: string, filetext: string) =
     if Path.GetFileName filename = "folders.cwt" then
         Some(filetext.Split([| "\r\n"; "\r"; "\n" |], StringSplitOptions.RemoveEmptyEntries ||| StringSplitOptions.TrimEntries))

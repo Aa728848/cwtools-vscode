@@ -5000,112 +5000,31 @@ type Server(client: ILanguageClient) =
                 }
             loop Map.empty 0)
 
+    let mutable rulesUpdateGeneration = 0L
+    let rulesUpdateTimeoutMs = 15_000
+    let rulesUpdateGate = new System.Threading.SemaphoreSlim(1, 1)
+
+    /// Select an immediately available local source. The remote check is
+    /// intentionally started only after processWorkspace has built a usable
+    /// game model, so slow GitHub access cannot block completion or indexing.
     let setupRulesCaches () =
         semanticCatalogCache <- None
-        let sw = Stopwatch.StartNew()
-        preferBundledRules <- false
-        let finishRules status error =
-            sw.Stop()
-            let source = getConfigSource cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
-            updateLoadingRuntime (fun state ->
-                { state with
-                    inProgress = false
-                    phase = "rules"
-                    lastCompletedAtUnixMs = nowUnixMs ()
-                    lastElapsedMs = int64 (sw.Elapsed.TotalMilliseconds)
-                    lastRulesStatus = status
-                    lastRulesSource = source
-                    lastError = error })
+        let generation = System.Threading.Interlocked.Increment(&rulesUpdateGeneration)
+        preferBundledRules <- shouldPreferBundledRulesAtStartup useManualRules
+        let source = getConfigSource cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
+        let status =
+            match useManualRules, source with
+            | true, "manual" -> "manual"
+            | true, _ -> "missing"
+            | false, "bundled" -> "startup_bundled"
+            | false, "remote" -> "startup_cached"
+            | _ -> "missing"
         updateLoadingRuntime (fun state ->
             { state with
-                inProgress = true
-                phase = "rules"
-                lastStartedAtUnixMs = nowUnixMs ()
-                lastGame = activeGame.ToString()
-                lastRulesStatus = "checking"
-                lastRulesSource = "checking"
+                lastRulesStatus = status
+                lastRulesSource = source
                 lastError = None })
-        match cachePath, remoteRepoPath, useManualRules with
-        | Some cp, Some rp, false ->
-            let stable = rulesChannel <> "latest"
-            let mutable rulesStatus = "updating"
-            let mutable rulesError: string option = None
-
-            client.CustomNotification(
-                "loadingBar",
-                JsonValue.Record
-                    [| "value", JsonValue.String(LangResources.loadingBar_UpdatingRules)
-                       "enable", JsonValue.Boolean(true) |]
-            )
-
-            let rulesResult =
-                try Some (initOrUpdateRules rp cp stable true)
-                with e ->
-                    rulesStatus <- "error"
-                    rulesError <- Some e.Message
-                    logError $"Failed to update CWTools rules: {e.Message}"
-                    None
-
-            let activateFallback () =
-                preferBundledRules <- true
-                let fallbackSource =
-                    getConfigSource cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
-
-                match fallbackSource with
-                | "bundled" ->
-                    rulesStatus <- "fallback"
-                    let warningMsg =
-                        uiText
-                            (sprintf "Failed to update CWTools rules for %A from the remote repository. Loaded the bundled fallback rules instead." activeGame)
-                            (sprintf "无法从远程仓库更新 %A 的 CWTools 规则，已改用内置备用规则。" activeGame)
-                    logWarning warningMsg
-                    client.ShowMessage(
-                        { ``type`` = MessageType.Warning
-                          message = warningMsg }
-                    )
-                | "remote" ->
-                    rulesStatus <- "fallback"
-                    let warningMsg =
-                        uiText
-                            (sprintf "Failed to update CWTools rules for %A from the remote repository. The bundled fallback was unavailable, so the existing cached rules were kept." activeGame)
-                            (sprintf "无法从远程仓库更新 %A 的 CWTools 规则；内置备用规则不可用，因此继续使用现有缓存规则。" activeGame)
-                    logWarning warningMsg
-                    client.ShowMessage(
-                        { ``type`` = MessageType.Warning
-                          message = warningMsg }
-                    )
-                | _ ->
-                    rulesStatus <- "missing"
-                    let errorMsg =
-                        uiText
-                            (sprintf "Failed to update or load CWTools rules for %A. No bundled fallback or usable remote cache was found. Reinstall the VSIX or run the package script again, then run 'CWTools: Run Installation Health Check'." activeGame)
-                            (sprintf "无法更新或加载 %A 的 CWTools 规则，未找到内置备用规则或可用的远程缓存。请重新安装 VSIX 或重新运行打包脚本，然后运行“CWTools: 运行安装健康检查”。" activeGame)
-                    rulesError <- Some errorMsg
-                    logError errorMsg
-                    client.ShowMessage(
-                        { ``type`` = MessageType.Error
-                          message = errorMsg }
-                    )
-
-            match rulesResult with
-            | Some (true, Some date) ->
-                rulesStatus <- "updated"
-                let text = String.Format(LangResources.rulesUpdated, activeGame, date)
-                logInfo text
-            | Some (false, Some _) ->
-                rulesStatus <- "up_to_date"
-                logInfo "CWTools rules are already up-to-date."
-            | Some (false, None) -> activateFallback ()
-            | Some _ -> rulesStatus <- "unknown"
-            | None -> activateFallback ()
-
-            finishRules rulesStatus rulesError
-
-            client.CustomNotification(
-                "loadingBar",
-                JsonValue.Record [| "value", JsonValue.String(""); "enable", JsonValue.Boolean(false) |]
-            )
-        | _ -> finishRules "skipped" None
+        generation, cachePath, remoteRepoPath, useManualRules, rulesChannel, activeGame
 
     /// Bump this when the serialized vanilla cache format or serializer inputs
     /// become incompatible with caches produced by older extension builds.
@@ -5575,6 +5494,165 @@ type Server(client: ILanguageClient) =
             )
         | _ -> ()
 
+    let rulesUpdateIsCurrent generation startupCachePath startupRemoteRepoPath startupRulesChannel startupGame =
+        System.Threading.Volatile.Read(&rulesUpdateGeneration) = generation
+        && cachePath = Some startupCachePath
+        && remoteRepoPath = Some startupRemoteRepoPath
+        && not useManualRules
+        && rulesChannel = startupRulesChannel
+        && activeGame = startupGame
+
+    let finishBackgroundRulesUpdate
+        generation
+        startupCachePath
+        startupRemoteRepoPath
+        startupRulesChannel
+        startupGame
+        elapsedMs
+        rulesResult
+        updateError =
+        if rulesUpdateIsCurrent generation startupCachePath startupRemoteRepoPath startupRulesChannel startupGame then
+            enterGameStateWriteLock ()
+            try
+                if rulesUpdateIsCurrent generation startupCachePath startupRemoteRepoPath startupRulesChannel startupGame then
+                    let previousSource =
+                        getConfigSource cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
+                    let remoteUpdateSucceeded =
+                        match rulesResult with
+                        | Some (_, Some _) -> true
+                        | _ -> false
+                    let remoteRulesChanged =
+                        match rulesResult with
+                        | Some (changed, Some _) -> changed
+                        | _ -> false
+
+                    preferBundledRules <-
+                        shouldPreferBundledRulesAfterRemoteUpdate useManualRules remoteUpdateSucceeded
+                    let finalSource =
+                        getConfigSource cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
+
+                    let mutable rulesStatus = "unknown"
+                    let mutable rulesError = updateError
+                    let mutable userMessage: (MessageType * string) option = None
+
+                    match rulesResult, finalSource with
+                    | Some (true, Some date), "remote" ->
+                        rulesStatus <- "updated"
+                        logInfo (String.Format(LangResources.rulesUpdated, activeGame, date))
+                    | Some (false, Some _), "remote" ->
+                        rulesStatus <- "up_to_date"
+                        logInfo "CWTools rules are already up-to-date."
+                    | _, "bundled" ->
+                        rulesStatus <- "fallback"
+                        let warningMsg =
+                            uiText
+                                (sprintf "Failed to update CWTools rules for %A from the remote repository. Loaded the bundled fallback rules instead." activeGame)
+                                (sprintf "无法从远程仓库更新 %A 的 CWTools 规则，已改用内置备用规则。" activeGame)
+                        logWarning warningMsg
+                        userMessage <- Some (MessageType.Warning, warningMsg)
+                    | _, "remote" ->
+                        rulesStatus <- "fallback"
+                        let warningMsg =
+                            uiText
+                                (sprintf "Failed to update CWTools rules for %A from the remote repository. The bundled fallback was unavailable, so the existing cached rules were kept." activeGame)
+                                (sprintf "无法从远程仓库更新 %A 的 CWTools 规则；内置备用规则不可用，因此继续使用现有缓存规则。" activeGame)
+                        logWarning warningMsg
+                        userMessage <- Some (MessageType.Warning, warningMsg)
+                    | _ ->
+                        rulesStatus <- "missing"
+                        let errorMsg =
+                            uiText
+                                (sprintf "Failed to update or load CWTools rules for %A. No bundled fallback or usable remote cache was found. Reinstall the VSIX or run the package script again, then run 'CWTools: Run Installation Health Check'." activeGame)
+                                (sprintf "无法更新或加载 %A 的 CWTools 规则，未找到内置备用规则或可用的远程缓存。请重新安装 VSIX 或重新运行打包脚本，然后运行“CWTools: 运行安装健康检查”。" activeGame)
+                        rulesError <- Some errorMsg
+                        logError errorMsg
+                        userMessage <- Some (MessageType.Error, errorMsg)
+
+                    updateLoadingRuntime (fun state ->
+                        { state with
+                            lastCompletedAtUnixMs = nowUnixMs ()
+                            lastElapsedMs = elapsedMs
+                            lastRulesStatus = rulesStatus
+                            lastRulesSource = finalSource
+                            lastError = rulesError })
+
+                    match userMessage with
+                    | Some (messageType, message) ->
+                        client.ShowMessage({ ``type`` = messageType; message = message })
+                    | None -> ()
+
+                    if finalSource <> previousSource || remoteRulesChanged then
+                        semanticCatalogCache <- None
+                        bumpGameModelEpoch ()
+                        bumpRulesModelEpoch ()
+                        bumpTypesModelEpoch ()
+                        bumpLocalisationModelEpoch ()
+                        processWorkspace rootUri
+            finally
+                exitGameStateWriteLock ()
+
+    let startRulesUpdateInBackground
+        (generation, startupCachePath, startupRemoteRepoPath, startupUseManualRules, startupRulesChannel, startupGame) =
+        match startupCachePath, startupRemoteRepoPath, startupUseManualRules with
+        | Some cp, Some rp, false ->
+            let stable = startupRulesChannel <> "latest"
+            updateLoadingRuntime (fun state ->
+                { state with
+                    lastRulesStatus = "updating_background"
+                    lastRulesSource =
+                        getConfigSource cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
+                    lastError = None })
+
+            let updateTask =
+                Task.Run(fun () ->
+                    let sw = Stopwatch.StartNew()
+                    rulesUpdateGate.Wait()
+                    try
+                        try
+                            // A failed background attempt already leaves the local model usable;
+                            // do not repeat the same potentially slow network operation here.
+                            let result = Some (initOrUpdateRules rp cp stable false)
+                            sw.Stop()
+                            result, None, int64 sw.ElapsedMilliseconds
+                        with e ->
+                            sw.Stop()
+                            logError $"Failed to update CWTools rules in the background: {e.Message}"
+                            None, Some e.Message, int64 sw.ElapsedMilliseconds
+                    finally
+                        rulesUpdateGate.Release() |> ignore)
+
+            let supervisor =
+                task {
+                    let timeoutTask = Task.Delay(rulesUpdateTimeoutMs)
+                    let! firstCompleted = Task.WhenAny(updateTask :> Task, timeoutTask)
+                    if Object.ReferenceEquals(firstCompleted, timeoutTask)
+                       && rulesUpdateIsCurrent generation cp rp startupRulesChannel startupGame then
+                        let timeoutMessage =
+                            $"Background CWTools rules update exceeded {rulesUpdateTimeoutMs}ms; continuing with the local rules source."
+                        logWarning timeoutMessage
+                        updateLoadingRuntime (fun state ->
+                            { state with
+                                lastRulesStatus = "background_timeout"
+                                lastError = Some timeoutMessage })
+
+                    let! rulesResult, updateError, elapsedMs = updateTask
+                    finishBackgroundRulesUpdate
+                        generation
+                        cp
+                        rp
+                        startupRulesChannel
+                        startupGame
+                        elapsedMs
+                        rulesResult
+                        updateError
+                }
+
+            supervisor.ContinueWith(fun (completed: Task) ->
+                if completed.IsFaulted then
+                    logError $"Background CWTools rules update supervisor failed: {completed.Exception.GetBaseException().Message}")
+            |> ignore
+        | _ -> ()
+
     let createRange startLine startCol endLine endCol =
         { start =
             { line = startLine
@@ -6007,20 +6085,24 @@ type Server(client: ILanguageClient) =
                             enterGameStateWriteLock ()
                             initWriteWaitSw.Stop()
                             let initWriteHoldSw = Stopwatch.StartNew()
-                            try
-                                setupRulesCaches ()
-                                checkOrSetGameCache false
-                                bumpGameModelEpoch ()
-                                bumpRulesModelEpoch ()
-                                bumpTypesModelEpoch ()
-                                bumpLocalisationModelEpoch ()
-                                processWorkspace rootUri
-                            finally
-                                exitGameStateWriteLock ()
-                                initWriteHoldSw.Stop()
-                                if initWriteHoldSw.ElapsedMilliseconds > writeLockHoldBudgetMs then
-                                    monitorLog Performance
-                                        $"WriteLock hold budget exceeded phase=gameInit wait={initWriteWaitSw.ElapsedMilliseconds}ms hold={initWriteHoldSw.ElapsedMilliseconds}ms")
+                            let rulesUpdate =
+                                try
+                                    let snapshot = setupRulesCaches ()
+                                    checkOrSetGameCache false
+                                    bumpGameModelEpoch ()
+                                    bumpRulesModelEpoch ()
+                                    bumpTypesModelEpoch ()
+                                    bumpLocalisationModelEpoch ()
+                                    processWorkspace rootUri
+                                    snapshot
+                                finally
+                                    exitGameStateWriteLock ()
+                                    initWriteHoldSw.Stop()
+                                    if initWriteHoldSw.ElapsedMilliseconds > writeLockHoldBudgetMs then
+                                        monitorLog Performance
+                                            $"WriteLock hold budget exceeded phase=gameInit wait={initWriteWaitSw.ElapsedMilliseconds}ms hold={initWriteHoldSw.ElapsedMilliseconds}ms"
+
+                            startRulesUpdateInBackground rulesUpdate)
 
                     task.Start()
             }

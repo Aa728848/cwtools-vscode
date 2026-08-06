@@ -550,6 +550,10 @@ export interface QueryLocalisationIndexResult {
     referenceAudit?: {
         keysConsidered: number;
         keysResolved: number;
+        referencedKeys: number;
+        unreferencedKeys: number;
+        unknownKeys: number;
+        unreferencedSamples: Array<{ key: string; language: string; file: string; line: number }>;
         truncated: boolean;
         unsupportedConstructs: string[];
     };
@@ -572,6 +576,8 @@ export interface QueryLocalisationIndexResult {
             line: number;
             message: string;
         }>;
+        unreferencedDefinitions: Array<{ key: string; language: string; file: string; line: number }>;
+        encodingAndHeaderIssues: Array<{ key: string; language: string; file: string; line: number; issue: string }>;
         truncated: boolean;
         staleReasons: string[];
         unsupportedConstructs?: string[];

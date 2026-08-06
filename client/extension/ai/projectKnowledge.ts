@@ -17,11 +17,11 @@ import type {
 export const PROJECT_KNOWLEDGE_SCHEMA_VERSION = 7;
 export const PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS = Object.freeze({
     inlineGraph: 2,
-    stateFlow: 2,
+    stateFlow: 3,
     overrideResolution: 2,
-    interfaceGraph: 1,
-    localisationAudit: 2,
-    pdxFlow: 2,
+    interfaceGraph: 2,
+    localisationAudit: 3,
+    pdxFlow: 3,
 });
 export const PROJECT_KNOWLEDGE_RELATIVE_DIR = path.join('.cwtools', 'project', 'knowledge');
 

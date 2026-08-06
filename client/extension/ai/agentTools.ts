@@ -520,12 +520,13 @@ export class AgentToolExecutor {
                     entries: vanillaEntries,
                 },
                 coverage: {
-                    filesConsidered: new Set(indexed.entries.map(entry => entry.file)).size,
-                    filesIndexed: new Set(indexed.entries.map(entry => entry.file)).size,
-                    symbolsConsidered: indexed.indexedSymbolNames ?? indexed.totalCount,
-                    symbolsIndexed: indexed.entries.length,
-                    truncated: indexed.entries.length >= 100,
-                    staleReasons: indexed.status === 'ready' ? [] : [`index_${indexed.status}`],
+                    filesConsidered: indexed.coverage?.filesConsidered ?? new Set(indexed.entries.map(entry => entry.file)).size,
+                    filesIndexed: indexed.coverage?.filesIndexed ?? new Set(indexed.entries.map(entry => entry.file)).size,
+                    symbolsConsidered: indexed.coverage?.symbolsConsidered ?? indexed.indexedSymbolNames ?? indexed.totalCount,
+                    symbolsIndexed: indexed.coverage?.symbolsIndexed ?? indexed.entries.length,
+                    truncated: indexed.coverage?.truncated ?? indexed.entries.length >= 100,
+                    staleReasons: indexed.coverage?.staleReasons ?? (indexed.status === 'ready' ? [] : [`index_${indexed.status}`]),
+                    unsupportedConstructs: indexed.coverage?.unsupportedConstructs ?? [],
                 },
             };
         } catch (error) {
@@ -997,9 +998,26 @@ export class AgentToolExecutor {
                 evidenceCalls: this.impactEvidenceCalls.get(this.getImpactEvidenceKey(context)),
             });
         } catch (error) {
-            // Evidence collection is advisory when its infrastructure fails;
-            // never turn an LSP/index outage into a workspace write outage.
+            // Ordinary local repairs remain available during an LSP/index
+            // outage, but high-impact semantic edits fail closed because their
+            // indirect callers/winners/assets cannot be reconstructed safely.
             ErrorReporter.warn('AgentTools', `Evidence gate evaluation failed for ${toolName} on ${resolvedTargetFile}`, error);
+            if (mode === 'enforce' && this.isHighRiskPdxWrite(toolName, resolvedTargetFile)) {
+                const message = `High-risk ${toolName} was blocked because semantic impact evidence is unavailable: ${error instanceof Error ? error.message : String(error)}`;
+                return {
+                    summary: {
+                        verdict: 'block', mode, phase: 'pre_write', degraded: true,
+                        evidenceUnavailable: true, warning: message,
+                    },
+                    errorResult: {
+                        success: false,
+                        error: message,
+                        evidenceGateBlocked: true,
+                        evidenceUnavailable: true,
+                        suggestedQueries: ['Wait for the CWTools LSP/project index to become ready, then rerun the exact impact query.'],
+                    },
+                };
+            }
             return {
                 summary: {
                     verdict: 'allow',
@@ -1266,6 +1284,17 @@ export class AgentToolExecutor {
             validations,
             errorCount,
         };
+    }
+
+    private isHighRiskPdxWrite(toolName: string, targetFile: string): boolean {
+        if (toolName === 'rename_symbol') return true;
+        const relative = path.relative(this.workspaceRoot, targetFile).replace(/\\/g, '/').toLowerCase();
+        return relative.startsWith('common/inline_scripts/')
+            || relative.startsWith('common/on_actions/')
+            || relative.startsWith('common/button_effects/')
+            || relative.startsWith('events/')
+            || relative.startsWith('interface/')
+            || relative.startsWith('gfx/');
     }
 
     /** Re-run evidence against integrated on-disk files after all child writes merge. */
@@ -1739,7 +1768,9 @@ export class AgentToolExecutor {
                 const resultRecord = result && typeof result === 'object' && !Array.isArray(result)
                     ? result as Record<string, unknown>
                     : undefined;
-                const writeSucceeded = resultRecord?.success !== false && !gateOutcome?.errorResult;
+                const writeSucceeded = resultRecord?.success !== false
+                    && resultRecord?.applied !== false
+                    && !gateOutcome?.errorResult;
                 if (context && WRITE_TOOLS.has(toolName) && writeSucceeded) {
                     // A prior read no longer proves the post-mutation workspace
                     // revision. Require another authoritative read before a stale

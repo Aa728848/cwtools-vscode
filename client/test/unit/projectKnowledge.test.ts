@@ -716,7 +716,7 @@ describe('project knowledge current SQLite schema', () => {
             ok: true,
             status: 'ready',
             schemaVersion: 7,
-            capabilityVersions: { inlineGraph: 2, stateFlow: 2, overrideResolution: 2, interfaceGraph: 1, localisationAudit: 2, pdxFlow: 2 },
+            capabilityVersions: { inlineGraph: 2, stateFlow: 3, overrideResolution: 2, interfaceGraph: 2, localisationAudit: 3, pdxFlow: 3 },
             game: 'stellaris',
             generatedAtUnixMs: Date.now(),
             projectRoots: [workspaceRoot],

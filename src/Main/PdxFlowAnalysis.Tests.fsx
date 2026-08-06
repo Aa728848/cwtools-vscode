@@ -92,6 +92,7 @@ assertTrue "special project success event edge"
 let stateContent = """country_event = {
     id = state.1
     trigger = { has_country_flag = branch_flag }
+    trigger = { event_target:missing_target = { exists = yes } }
     if = { limit = { always = yes } set_country_flag = branch_flag }
     save_event_target_as = delayed_target
     country_event = { id = state.2 days = 10 }
@@ -102,6 +103,8 @@ let stateEntity = parseEntity stateContent "events/state.txt"
 let issues = stateIssues "state.1" "events/state.txt" stateEntity.rawEntity
 assertTrue "state read before unconditional initialization is reported"
     (issues |> List.exists (fun item -> item.kind = "use_before_initialization" || item.kind = "branch_incomplete_initialization"))
+assertTrue "direct event_target reads preserve the target name"
+    (issues |> List.exists (fun item -> item.subject = "missing_target" && item.kind = "use_before_initialization"))
 assertTrue "delayed local event target risk is reported"
     (issues |> List.exists (fun item -> item.kind = "delayed_local_event_target_risk"))
 assertTrue "last_created implicit state dependency is reported"
@@ -118,6 +121,8 @@ let facts =
 let json = flowAnalysisJson facts
 assertTrue "json ok flag"
     (json.Item("ok").AsBoolean())
+assertTrue "json advertises the interprocedural flow contract"
+    (json.Item("version").AsInteger() = 3)
 assertTrue "json cost caveat present"
     (json.Item("costModel").Item("caveat").AsString().Contains "Relative static weights")
 assertTrue "json exposes costs and relations"

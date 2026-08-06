@@ -321,14 +321,22 @@ type private StateAccess =
 type private EventCall =
     { sourceId: string
       targetId: string
+      targetKind: string
       operator: string
       file: string
       line: int
-      delayed: bool }
+      delayed: bool
+      delay: string option
+      phase: string
+      conditionPath: string option
+      scopeMap: string option
+      sourceScope: string option
+      targetScope: string option }
 
 let private stateOperation (key: string) =
     let lower = key.ToLowerInvariant()
-    if lower.StartsWith("save_") && lower.Contains("event_target") then Some "save"
+    if lower.StartsWith("event_target:") || lower.StartsWith("global_event_target:") then Some "read"
+    elif lower.StartsWith("save_") && lower.Contains("event_target") then Some "save"
     elif lower.StartsWith("set_") && (lower.Contains("variable") || lower.EndsWith("_flag")) then Some "set"
     elif lower.StartsWith("change_") && lower.Contains("variable") then Some "write"
     elif (lower.StartsWith("remove_") || lower.StartsWith("clear_")) && (lower.Contains("variable") || lower.Contains("flag") || lower.Contains("event_target")) then Some "clear"
@@ -355,6 +363,11 @@ let private subjectFromNode (node: Node) =
     |> Option.map (fun value -> string value.Value |> fun raw -> raw.Trim().Trim('"'))
     |> Option.defaultValue "<dynamic>"
 
+let private stateSubjectFromKeyOrNode (key: string) (node: Node) =
+    let separator = key.IndexOf(':')
+    if separator >= 0 && separator + 1 < key.Length then key.Substring(separator + 1)
+    else subjectFromNode node
+
 let private collectStateAccesses (root: Node) =
     let accesses = ResizeArray<StateAccess>()
     let rec visit (node: Node) conditional phase =
@@ -365,7 +378,7 @@ let private collectStateAccesses (root: Node) =
         | Some operation ->
             accesses.Add
                 { operation = operation
-                  subject = subjectFromNode node
+                  subject = stateSubjectFromKeyOrNode node.Key node
                   scope = stateScope key
                   line = int node.Position.StartLine
                   conditional = nextConditional
@@ -382,37 +395,108 @@ let private collectStateAccesses (root: Node) =
                       conditional = nextConditional
                       phase = nextPhase }
             | None -> ()
+            let rawValue = string value.Value
+            for found in Regex.Matches(rawValue, @"(?:global_)?event_target:([A-Za-z_][A-Za-z0-9_.-]*)", RegexOptions.IgnoreCase) do
+                accesses.Add
+                    { operation = "read"
+                      subject = found.Groups.[1].Value
+                      scope = if found.Value.StartsWith("global_", StringComparison.OrdinalIgnoreCase) then "global" else "local_event"
+                      line = int value.Position.StartLine
+                      conditional = nextConditional
+                      phase = nextPhase }
         for child in node.Nodes do visit child nextConditional nextPhase
     visit root false ""
     accesses |> Seq.distinctBy (fun item -> item.operation, item.subject, item.line) |> Seq.sortBy _.line |> Seq.toList
 
+let private eventScopeFromKey (key: string) =
+    let lower = key.ToLowerInvariant()
+    if lower.EndsWith("_event", StringComparison.Ordinal) then Some(lower.Substring(0, lower.Length - 6))
+    else None
+
+let private conditionPathText path =
+    match path |> List.rev with
+    | [] -> None
+    | ordered ->
+        let relation =
+            if ordered |> List.exists (fun value -> value = "not" || value = "nor" || value = "else") then "blocks"
+            elif ordered |> List.exists (fun value -> value = "or" || value = "random_list" || value = "switch" || value = "else_if") then "alternative"
+            else "requires"
+        Some(relation + ":" + String.concat ">" ordered)
+
 let private collectEventCalls definitionId file (root: Node) =
     let calls = ResizeArray<EventCall>()
-    let rec visit (node: Node) =
+    let sourceScope = eventScopeFromKey root.Key
+    let rec visit (node: Node) phase conditionPath =
         let key = node.Key.ToLowerInvariant()
-        if eventCallOperators.Contains key && key <> "fire_on_action" then
+        let nextPhase = if phaseOf node <> "" then phaseOf node else phase
+        let nextPath =
+            if key = "if" || key = "else_if" || key = "else" || key = "and" || key = "or"
+               || key = "nor" || key = "not" || key = "random_list" || key = "switch" || key = "while" then
+                key :: conditionPath
+            else conditionPath
+        for value in node.Values do
+            let valueKey = value.Key.ToLowerInvariant()
+            if eventCallOperators.Contains valueKey then
+                let target = (string value.Value).Trim().Trim('"')
+                if not (String.IsNullOrWhiteSpace target) then
+                    calls.Add
+                        { sourceId = definitionId
+                          targetId = target
+                          targetKind = if valueKey = "fire_on_action" then "on_action" else "event"
+                          operator = valueKey
+                          file = file
+                          line = int value.Position.StartLine
+                          delayed = false
+                          delay = None
+                          phase = if String.IsNullOrWhiteSpace nextPhase then "effect" else nextPhase
+                          conditionPath = conditionPathText nextPath
+                          scopeMap = None
+                          sourceScope = sourceScope
+                          targetScope = if valueKey = "fire_on_action" then None else eventScopeFromKey valueKey }
+        if eventCallOperators.Contains key then
             let id =
                 node.Values
-                |> Seq.tryFind (fun value -> value.Key.Equals("id", StringComparison.OrdinalIgnoreCase))
+                |> Seq.tryFind (fun value ->
+                    value.Key.Equals("id", StringComparison.OrdinalIgnoreCase)
+                    || (key = "fire_on_action" && (value.Key.Equals("on_action", StringComparison.OrdinalIgnoreCase) || value.Key.Equals("name", StringComparison.OrdinalIgnoreCase))))
                 |> Option.orElseWith (fun () -> node.Values |> Seq.tryHead)
                 |> Option.map (fun value -> string value.Value |> fun raw -> raw.Trim().Trim('"'))
-            let delayed =
+            let delayParts =
                 node.Values
-                |> Seq.exists (fun value ->
+                |> Seq.choose (fun value ->
                     let valueKey = value.Key.ToLowerInvariant()
-                    valueKey = "days" || valueKey = "months" || valueKey = "years")
+                    if valueKey = "days" || valueKey = "months" || valueKey = "years" || valueKey = "random" then
+                        Some(valueKey + "=" + (string value.Value).Trim().Trim('"'))
+                    else None)
+                |> Seq.toList
+            let scopeMap =
+                node.Nodes
+                |> Seq.tryFind (fun child -> child.Key.Equals("scopes", StringComparison.OrdinalIgnoreCase))
+                |> Option.map (fun scopes ->
+                    scopes.Leaves
+                    |> Seq.map (fun leaf -> leaf.Key + "->" + string leaf.Value)
+                    |> Seq.sort
+                    |> String.concat ",")
+                |> Option.filter (String.IsNullOrWhiteSpace >> not)
             id
             |> Option.filter (String.IsNullOrWhiteSpace >> not)
             |> Option.iter (fun target ->
                 calls.Add
                     { sourceId = definitionId
                       targetId = target
+                      targetKind = if key = "fire_on_action" then "on_action" else "event"
                       operator = key
                       file = file
                       line = int node.Position.StartLine
-                      delayed = delayed })
-        for child in node.Nodes do visit child
-    visit root
+                      delayed = not delayParts.IsEmpty
+                      delay = if delayParts.IsEmpty then None else Some(String.concat "," delayParts)
+                      phase = if String.IsNullOrWhiteSpace nextPhase then "effect" else nextPhase
+                      conditionPath = conditionPathText nextPath
+                      scopeMap = scopeMap
+                      sourceScope = sourceScope
+                      targetScope = if key = "fire_on_action" then None else eventScopeFromKey key })
+        for child in node.Nodes do visit child nextPhase nextPath
+    visit root "" []
     calls |> Seq.toList
 
 let stateIssues definitionId file (root: Node) =
@@ -516,6 +600,7 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
     let relations = ResizeArray<GameplayRelationFact>()
     let issues = ResizeArray<FlowIssueFact>()
     let eventCalls = ResizeArray<EventCall>()
+    let stateAccessesByDefinition = Dictionary<string, StateAccess list>(StringComparer.OrdinalIgnoreCase)
     let eventDefinitions = Dictionary<string, string * string * int * bool>(StringComparer.OrdinalIgnoreCase)
     let visitedFiles = HashSet<string>(StringComparer.OrdinalIgnoreCase)
     let mutable definitionsConsidered = 0
@@ -549,15 +634,40 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
                 int node.Position.StartLine = int range.StartLine
                 && int node.Position.EndLine = int range.EndLine)
         | _ -> None
-    let definitions =
+    let allDefinitions =
         game.Types()
         |> Map.toSeq
         |> Seq.collect (fun (definitionType, values) -> values |> Seq.map (fun value -> definitionType, value))
+        |> Seq.toList
+    let seedDefinitions =
+        allDefinitions
+        |> Seq.ofList
         |> Seq.filter (fun (definitionType, definition) ->
             query.entityType |> Option.forall (fun expected -> definitionType.Equals(expected, StringComparison.OrdinalIgnoreCase))
             && query.definitionId |> Option.forall (fun expected -> definition.id.Equals(expected, StringComparison.OrdinalIgnoreCase))
             && query.file |> Option.forall (fun expected -> normalizePath definition.range.FileName |> fun file -> file.EndsWith(normalizePath expected, StringComparison.OrdinalIgnoreCase)))
         |> Seq.sortBy (fun (definitionType, definition) -> definitionType, definition.id, normalizePath definition.range.FileName, int definition.range.StartLine)
+        |> Seq.toList
+    let directEventTargets =
+        seedDefinitions
+        |> Seq.collect (fun (_, definition) ->
+            match findBlock definition.range.FileName definition.range with
+            | Some block ->
+                collectEventCalls definition.id (normalizePath definition.range.FileName) block
+                |> Seq.filter (fun call -> call.targetKind = "event")
+                |> Seq.map _.targetId
+            | None -> Seq.empty)
+        |> HashSet<string>
+    let definitions =
+        seq {
+            yield! seedDefinitions
+            for definitionType, definition in allDefinitions do
+                if directEventTargets.Contains definition.id && definitionType.Contains("event", StringComparison.OrdinalIgnoreCase) then
+                    yield definitionType, definition
+        }
+        |> Seq.distinctBy (fun (definitionType, definition) -> definitionType.ToLowerInvariant(), definition.id.ToLowerInvariant(), normalizePath definition.range.FileName, int definition.range.StartLine)
+        |> Seq.sortBy (fun (definitionType, definition) -> definitionType, definition.id, normalizePath definition.range.FileName, int definition.range.StartLine)
+        |> Seq.truncate (max 1 (min query.limit 500))
         |> Seq.toList
     let knownScriptedDefinitions =
         game.Types()
@@ -599,6 +709,7 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
             relations.AddRange(collectRelations block (normalizePath definition.range.FileName) definition.id definitionType)
             relations.AddRange(collectScriptedCalls definition.id definitionType (normalizePath definition.range.FileName) block)
             issues.AddRange(stateIssues definition.id (normalizePath definition.range.FileName) block)
+            stateAccessesByDefinition.[definition.id] <- collectStateAccesses block
             eventCalls.AddRange(collectEventCalls definition.id (normalizePath definition.range.FileName) block)
             if definitionType.ToLowerInvariant().Contains "event" || block.Key.ToLowerInvariant().EndsWith("_event") then
                 let isTriggeredOnly =
@@ -625,16 +736,41 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
 
     let adjacency = Dictionary<string, ResizeArray<string>>(StringComparer.OrdinalIgnoreCase)
     let incoming = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    let incomingCalls = Dictionary<string, ResizeArray<EventCall>>(StringComparer.OrdinalIgnoreCase)
     for call in eventCalls do
         checkCancelled ()
+        if call.targetKind = "on_action" then
+            relations.Add
+                { relationType = "fires_on_action"
+                  sourceId = call.sourceId
+                  targetId = call.targetId
+                  sourceType = "event_or_definition"
+                  targetType = "on_action"
+                  file = call.file
+                  line = call.line
+                  confidence = "semantic"
+                  provenance = "explicit-fire_on_action" }
+        else
+            let incomingForTarget =
+                match incomingCalls.TryGetValue call.targetId with
+                | true, values -> values
+                | _ -> let values = ResizeArray<EventCall>() in incomingCalls.[call.targetId] <- values; values
+            incomingForTarget.Add call
         let targets =
             match adjacency.TryGetValue call.sourceId with
             | true, values -> values
             | _ -> let values = ResizeArray<string>() in adjacency.[call.sourceId] <- values; values
-        targets.Add call.targetId
-        incoming.Add call.targetId |> ignore
-        match eventDefinitions.TryGetValue call.targetId with
-        | true, (targetKind, _, _, _) ->
+        if call.targetKind = "event" then
+            targets.Add call.targetId
+            incoming.Add call.targetId |> ignore
+        let targetDefinition =
+            if call.targetKind <> "event" then None
+            else
+                match eventDefinitions.TryGetValue call.targetId with
+                | true, value -> Some value
+                | _ -> None
+        match targetDefinition with
+        | Some(targetKind, _, _, _) ->
             let expectedKind =
                 if call.operator.StartsWith("any_", StringComparison.Ordinal) then call.operator.Substring(4)
                 else call.operator
@@ -651,6 +787,19 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
                       line = call.line
                       confidence = "semantic"
                       provenance = "event-operator-and-target-definition" }
+        | None -> ()
+        match call.sourceScope, call.targetScope with
+        | Some sourceScope, Some targetScope when sourceScope <> targetScope && call.scopeMap.IsNone ->
+            issues.Add
+                { kind = "scope_bridge_unproven"
+                  severity = "info"
+                  definitionId = call.sourceId
+                  subject = call.targetId
+                  message = sprintf "Call operator '%s' bridges %s to %s without an explicit scopes map; verify ROOT/FROM/PREV semantics." call.operator sourceScope targetScope
+                  file = call.file
+                  line = call.line
+                  confidence = "heuristic"
+                  provenance = "event-call-scope-map" }
         | _ -> ()
         if call.delayed && call.sourceId.Equals(call.targetId, StringComparison.OrdinalIgnoreCase) then
             issues.Add
@@ -663,6 +812,54 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
                   line = call.line
                   confidence = "semantic"
                   provenance = "event-call-graph" }
+    // Cross-event state propagation. A directed edge is emitted when a caller
+    // visibly initializes state before the call and the callee reads the same
+    // scoped subject. Reads with known callers but no visible incoming write
+    // remain warnings rather than definite errors because runtime entry points
+    // may initialize state outside the analyzed slice.
+    for KeyValue(targetId, callers) in incomingCalls do
+        match stateAccessesByDefinition.TryGetValue targetId with
+        | true, targetAccesses ->
+            let targetReads = targetAccesses |> List.filter (fun access -> access.operation = "read")
+            for read in targetReads do
+                let matchingWriters =
+                    callers
+                    |> Seq.choose (fun call ->
+                        match stateAccessesByDefinition.TryGetValue call.sourceId with
+                        | true, sourceAccesses ->
+                            sourceAccesses
+                            |> List.tryFind (fun access ->
+                                access.line <= call.line
+                                && (access.operation = "set" || access.operation = "save" || access.operation = "write")
+                                && access.scope.Equals(read.scope, StringComparison.OrdinalIgnoreCase)
+                                && access.subject.Equals(read.subject, StringComparison.OrdinalIgnoreCase))
+                            |> Option.map (fun _ -> call)
+                        | _ -> None)
+                    |> Seq.toList
+                for writer in matchingWriters do
+                    relations.Add
+                        { relationType = "state_flows_to_event:" + read.scope + ":" + read.subject
+                          sourceId = writer.sourceId
+                          targetId = targetId
+                          sourceType = "event"
+                          targetType = "event"
+                          file = writer.file
+                          line = writer.line
+                          confidence = "derived"
+                          provenance = "ordered-state-write-before-event-call" }
+                if matchingWriters.IsEmpty && callers.Count > 0 then
+                    issues.Add
+                        { kind = "interprocedural_use_before_initialization"
+                          severity = "info"
+                          definitionId = targetId
+                          subject = read.subject
+                          message = "Known incoming event callers do not visibly initialize this scoped state before the call; verify external or runtime initialization."
+                          file = callers.[0].file
+                          line = read.line
+                          confidence = "heuristic"
+                          provenance = "bounded-incoming-event-state-analysis" }
+        | _ -> ()
+
     let reaches start target =
         let visited = HashSet<string>(StringComparer.OrdinalIgnoreCase)
         let rec walk current depth =
@@ -701,7 +898,35 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
 
     let limit = max 1 (min query.limit 500)
     let allCosts = costs |> Seq.distinctBy (fun item -> item.name, item.file, item.line) |> Seq.toList
-    let allRelations = relations |> Seq.distinctBy (fun item -> item.relationType, item.sourceId, item.targetId, item.line) |> Seq.toList
+    let targetExists (relation: GameplayRelationFact) =
+        allDefinitions
+        |> List.exists (fun (definitionType, definition) ->
+            definition.id.Equals(relation.targetId, StringComparison.OrdinalIgnoreCase)
+            && (definitionType.Equals(relation.targetType, StringComparison.OrdinalIgnoreCase)
+                || definitionType.Contains(relation.targetType, StringComparison.OrdinalIgnoreCase)
+                || relation.targetType.Contains(definitionType, StringComparison.OrdinalIgnoreCase)))
+    let allRelations =
+        relations
+        |> Seq.distinctBy (fun item -> item.relationType, item.sourceId, item.targetId, item.line)
+        |> Seq.map (fun item ->
+            if targetExists item then
+                { item with confidence = "semantic"; provenance = "resolved-definition-id" }
+            else item)
+        |> Seq.toList
+    for relation in allRelations do
+        if relation.confidence <> "semantic"
+           && not (relation.targetId.Contains("$", StringComparison.Ordinal))
+           && not (relation.targetId.StartsWith("event_target:", StringComparison.OrdinalIgnoreCase)) then
+            issues.Add
+                { kind = "unresolved_gameplay_target"
+                  severity = "info"
+                  definitionId = relation.sourceId
+                  subject = relation.targetId
+                  message = sprintf "The typed target '%s' (%s) was not resolved in the active semantic catalog." relation.targetId relation.targetType
+                  file = relation.file
+                  line = relation.line
+                  confidence = "heuristic"
+                  provenance = "typed-relation-resolution" }
     let allIssues = issues |> Seq.distinctBy (fun item -> item.kind, item.definitionId, item.subject, item.line) |> Seq.toList
     checkCancelled ()
     { costs = allCosts |> List.truncate limit
@@ -752,7 +977,7 @@ let flowAnalysisJsonWithFreshness (facts: FlowAnalysisFacts) freshness staleReas
     jsonRecord
         [ Some("ok", JsonValue.Boolean true)
           Some("source", JsonValue.String "cwtools-pdx-flow-analysis")
-          Some("version", JsonValue.Number 2m)
+          Some("version", JsonValue.Number 3m)
           Some("freshness", jsonRecord
               [ Some("status", JsonValue.String freshness)
                 Some("source", JsonValue.String "active_lsp_model")
@@ -783,6 +1008,6 @@ let flowAnalysisJsonWithFreshness (facts: FlowAnalysisFacts) freshness staleReas
                 Some("issuesFound", JsonValue.Number(decimal facts.issues.Length))
                 Some("truncated", JsonValue.Boolean facts.truncated)
                 Some("staleReasons", jsonStringArray staleReasons)
-                Some("unsupportedConstructs", jsonStringArray [ "runtime_costs_require_profiling"; "dynamic_scope_dispatch_may_require_runtime_evidence" ]) ]) ]
+                Some("unsupportedConstructs", jsonStringArray [ "runtime_costs_require_profiling"; "dynamic_scope_dispatch_may_require_runtime_evidence"; "external_runtime_entrypoints_can_initialize_state" ]) ]) ]
 
 let flowAnalysisJson facts = flowAnalysisJsonWithFreshness facts "fresh" []

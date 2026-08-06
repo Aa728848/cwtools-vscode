@@ -89,6 +89,8 @@ describe('tool definitions', () => {
         }
         expect(TOOL_REGISTRY.get('rename_symbol')?.isWrite).to.equal(true);
         expect(TOOL_REGISTRY.get('rename_symbol')?.concurrencyClass).to.equal('global-exclusive');
+        const rename = TOOL_DEFINITIONS.find(tool => tool.function.name === 'rename_symbol');
+        expect(rename?.function.parameters.properties).to.have.property('expectedExpansionPlanHash');
     });
 
     it('registers get_lsp_status as a lightweight read-only LSP status tool', () => {

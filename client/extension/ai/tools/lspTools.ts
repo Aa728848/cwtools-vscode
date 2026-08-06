@@ -31,6 +31,12 @@ import { diagnosticMetadata } from './diagnosticMetadata';
 import { diagnosticCodeString, diagnosticMatchesIgnoredKey } from '../../diagnosticI18n';
 import { readProjectProfile } from '../projectProfile';
 import { parsePdxSemanticCatalog } from '../../../shared/pdxSemanticCatalog';
+import {
+    applyRenameEdits,
+    buildRenameExpansionPlan,
+    renameNeedsExpansionPlan,
+    type RenameEditPreview,
+} from './renameSafety';
 
 type CwtSchemaEntitySummary = NonNullable<QueryCwtSchemaResult['entities']>[number];
 
@@ -4214,7 +4220,7 @@ export class LspToolHandler {
     }
 
     async renameSymbol(
-        args: { file: string; line: number; column: number; newName: string },
+        args: { file: string; line: number; column: number; newName: string; expectedExpansionPlanHash?: string },
         context?: import('../types').AgentToolContext,
     ): Promise<unknown> {
         return this.lspOperation({ ...args, operation: 'rename' }, context);
@@ -4227,6 +4233,7 @@ export class LspToolHandler {
         line: number;
         column: number;
         newName?: string;
+        expectedExpansionPlanHash?: string;
     }, context?: import('../types').AgentToolContext): Promise<unknown> {
         const uri = vs.Uri.file(args.file);
         const position = new vs.Position(args.line, args.column);
@@ -4291,20 +4298,74 @@ export class LspToolHandler {
                         file: path.relative(this.ctx.workspaceRoot, target.fsPath).replace(/\\/g, '/'),
                         edits: edits.length,
                     }));
+                    const sourceDocument = await vs.workspace.openTextDocument(uri);
+                    const sourceRange = sourceDocument.getWordRangeAtPosition(position, /[A-Za-z0-9_.$:@-]+/);
+                    const oldName = sourceRange ? sourceDocument.getText(sourceRange) : sourceDocument.lineAt(position.line).text.slice(position.character).match(/^[A-Za-z0-9_.$:@-]+/)?.[0] ?? '';
+                    const previews: RenameEditPreview[] = [];
+                    const nextContents = new Map<string, { previousContent: string; content: string }>();
+                    for (const [target, targetEdits] of entries) {
+                        const document = await vs.workspace.openTextDocument(target);
+                        const previousContent = document.getText();
+                        const file = path.relative(this.ctx.workspaceRoot, target.fsPath).replace(/\\/g, '/');
+                        const filePreviews = targetEdits.map(targetEdit => {
+                            const line = document.lineAt(targetEdit.range.start.line).text;
+                            return {
+                                file,
+                                startOffset: document.offsetAt(targetEdit.range.start),
+                                endOffset: document.offsetAt(targetEdit.range.end),
+                                newText: targetEdit.newText,
+                                context: line,
+                            } satisfies RenameEditPreview;
+                        });
+                        previews.push(...filePreviews);
+                        nextContents.set(target.fsPath, {
+                            previousContent,
+                            content: applyRenameEdits(previousContent, filePreviews),
+                        });
+                    }
+                    const expansionPlan = buildRenameExpansionPlan(oldName, args.newName, previews);
+                    if (renameNeedsExpansionPlan(oldName, args.newName, previews)
+                        && args.expectedExpansionPlanHash !== expansionPlan.planHash) {
+                        return {
+                            applied: false,
+                            previewOnly: true,
+                            requiresExpansionPlan: true,
+                            ...(args.expectedExpansionPlanHash ? {
+                                error: 'Rename expansion plan changed or the supplied hash was invalid. Review the refreshed plan before retrying.',
+                            } : {}),
+                            expansionPlan,
+                            suggestedQueries: [
+                                'query_inline_instantiation for inline-generated identifiers',
+                                'query_localisation_index with referenceStatus/auditMode for localisation composites',
+                                'query_workspace_index with includeAssetChain for GUI/GFX composites',
+                            ],
+                        };
+                    }
                     const readTracker = context?.agentRunner?.readTracker;
                     for (const [target] of entries) {
-                        let previousContent: string | null = null;
-                        try {
-                            previousContent = fs.readFileSync(target.fsPath, 'utf8');
-                        } catch (error) {
-                            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-                                return { error: `Rename could not snapshot ${target.fsPath}: ${error instanceof Error ? error.message : String(error)}` };
-                            }
-                        }
+                        const contents = nextContents.get(target.fsPath);
+                        if (!contents) return { error: `Rename could not build the resulting content for ${target.fsPath}.` };
                         readTracker?.markRead(target.fsPath);
                         const writeAccess = readTracker?.canWrite(target.fsPath);
                         if (writeAccess && !writeAccess.ok) return { error: writeAccess.reason };
-                        context?.onBeforeFileWrite?.(target.fsPath, previousContent);
+                        context?.onBeforeFileWrite?.(target.fsPath, contents.previousContent);
+                        const extension = path.extname(target.fsPath).toLowerCase();
+                        if (context?.onBeforePdxWrite && ['.txt', '.gui', '.gfx', '.asset', '.yml', '.shader', '.fxh'].includes(extension)) {
+                            const preflight = await context.onBeforePdxWrite({
+                                toolName: 'rename_symbol',
+                                filePath: target.fsPath,
+                                previousContent: contents.previousContent,
+                                content: contents.content,
+                            });
+                            if (!preflight.allowed) {
+                                return {
+                                    applied: false,
+                                    error: preflight.message ?? `Rename was rejected by semantic preflight for ${relativeWorkspacePath(this.ctx.workspaceRoot, target.fsPath)}.`,
+                                    evidenceGateBlocked: true,
+                                    changes,
+                                };
+                            }
+                        }
                     }
                     // Permission check: rename modifies multiple files, require user confirmation
                     // in 'confirm' mode (consistent with edit_file/write_file permission model).
@@ -4321,7 +4382,10 @@ export class LspToolHandler {
                     if (!applied) return { error: 'Rename failed because the workspace rejected the edit.' };
                     for (const [target] of entries) readTracker?.markWritten(target.fsPath);
                     return {
+                        applied: true,
                         changes,
+                        writtenFiles: entries.map(([target]) => target.fsPath),
+                        expansionPlanHash: expansionPlan.planHash,
                         message: `Rename applied across ${changes.length} file(s), ${changes.reduce((s, c) => s + c.edits, 0)} edit(s).`,
                     };
                 }
@@ -4416,8 +4480,9 @@ export class LspToolHandler {
             count: number;
             evidence: 'lsp_reference_provider' | 'unavailable';
         }>();
-        const auditLimit = Math.min(entries.length, 20);
-        if (args.referenceStatus === true) {
+        const shouldAuditReferences = args.referenceStatus === true || args.auditMode === true;
+        const auditLimit = Math.min(entries.length, args.auditMode === true ? 50 : 20);
+        if (shouldAuditReferences) {
             for (const entry of entries.slice(0, auditLimit)) {
                 const cacheKey = `${entry.file.toLowerCase()}|${entry.line}|${entry.key}`;
                 if (audited.has(cacheKey)) continue;
@@ -4520,10 +4585,26 @@ export class LspToolHandler {
                         line: issue.line,
                         message: issue.message,
                     })),
-                    truncated: coverage.truncated === true,
+                    unreferencedDefinitions: entries.slice(0, auditLimit).flatMap(entry => {
+                        const audit = audited.get(`${entry.file.toLowerCase()}|${entry.line}|${entry.key}`);
+                        return audit?.status === 'unreferenced'
+                            ? [{ key: entry.key, language: entry.language, file: entry.file, line: entry.line }]
+                            : [];
+                    }),
+                    encodingAndHeaderIssues: entries.flatMap(entry => {
+                        const issues: Array<{ key: string; language: string; file: string; line: number; issue: string }> = [];
+                        if (entry.headerMatchesPath === false) issues.push({ key: entry.key, language: entry.language, file: entry.file, line: entry.line, issue: 'language_header_path_mismatch' });
+                        if (entry.encoding === 'utf8') issues.push({ key: entry.key, language: entry.language, file: entry.file, line: entry.line, issue: 'utf8_bom_missing' });
+                        return issues;
+                    }).slice(0, 100),
+                    truncated: coverage.truncated === true || entries.length > auditLimit,
                     staleReasons: Array.isArray(coverage.staleReasons)
                         ? coverage.staleReasons.filter((value): value is string => typeof value === 'string')
                         : [],
+                    unsupportedConstructs: [
+                        'engine_generated_localisation_keys_without_a_declared_static_contract',
+                        'runtime_constructed_keys_outside_inline_instantiation',
+                    ],
                 };
             } catch (error) {
                 semanticAudit = {
@@ -4532,8 +4613,13 @@ export class LspToolHandler {
                     issuesReturned: 0,
                     missingReferences: [],
                     commandAndScopeIssues: [],
+                    unreferencedDefinitions: [],
+                    encodingAndHeaderIssues: [],
                     truncated: false,
                     staleReasons: [`lsp_audit_unavailable:${error instanceof Error ? error.message : String(error)}`],
+                    unsupportedConstructs: [
+                        'semantic_missing_reference_and_command_scope_audit_unavailable',
+                    ],
                 };
             }
         }
@@ -4557,7 +4643,7 @@ export class LspToolHandler {
                     duplicateGroup: `${entry.key}|${entry.language}`,
                     active: winnerByGroup.get(`${entry.key}\u0000${entry.language}`) === `${entry.file}\u0000${entry.line}`,
                     winnerEvidence: 'deterministic_file_order' as const,
-                    origin: args.referenceStatus === true ? (isInsideWorkspace(entry.file) ? 'workspace' as const : 'vanilla' as const) : undefined,
+                    origin: shouldAuditReferences ? (isInsideWorkspace(entry.file) ? 'workspace' as const : 'vanilla' as const) : undefined,
                     referenceStatus: audit?.status,
                     referenceCount: audit?.count,
                     referenceEvidence: audit?.evidence,
@@ -4579,9 +4665,18 @@ export class LspToolHandler {
                 ],
             },
             semanticAudit,
-            referenceAudit: args.referenceStatus === true ? {
+            referenceAudit: shouldAuditReferences ? {
                 keysConsidered: auditLimit,
                 keysResolved: [...audited.values()].filter(value => value.status !== 'unknown').length,
+                referencedKeys: [...audited.values()].filter(value => value.status === 'referenced').length,
+                unreferencedKeys: [...audited.values()].filter(value => value.status === 'unreferenced').length,
+                unknownKeys: [...audited.values()].filter(value => value.status === 'unknown').length,
+                unreferencedSamples: entries.slice(0, auditLimit).flatMap(entry => {
+                    const audit = audited.get(`${entry.file.toLowerCase()}|${entry.line}|${entry.key}`);
+                    return audit?.status === 'unreferenced'
+                        ? [{ key: entry.key, language: entry.language, file: entry.file, line: entry.line }]
+                        : [];
+                }).slice(0, 50),
                 truncated: entries.length > auditLimit,
                 unsupportedConstructs: [
                     'dynamic_or_inline_composite_keys_may_not_be_resolved_by_the_reference_provider',
@@ -4718,10 +4813,12 @@ export class LspToolHandler {
                     .find(Boolean);
                 for (const reference of current.symbol.references ?? []) {
                     const context = reference.context ?? '';
-                    const match = context.match(/(?:^|[\s{])(texturefile|file|files?|effect|sprite|entity|mesh|animation|sound|material|shader)\s*=\s*"?([^"\s}]+)"?/i);
-                    if (!match?.[1] || !match[2]) continue;
-                    const property = match[1].toLowerCase();
-                    const target = match[2].replace(/\\/g, '/');
+                    const match = reference.property && reference.target
+                        ? undefined
+                        : context.match(/(?:^|[\s{])(texturefile|file|files?|effect|sprite|entity|mesh|animation|sound|material|shader)\s*=\s*"?([^"\s}]+)"?/i);
+                    const property = (reference.property ?? match?.[1] ?? '').toLowerCase();
+                    const target = (reference.target ?? match?.[2] ?? '').replace(/\\/g, '/');
+                    if (!property || !target) continue;
                     const seenKey = `${current.depth + 1}|${property}|${target.toLowerCase()}`;
                     if (seen.has(seenKey)) continue;
                     seen.add(seenKey);

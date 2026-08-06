@@ -29,6 +29,9 @@ export interface WorkspaceSymbolReference {
     file: string;
     line: number;
     context: string;
+    /** Parsed property/target for asset and GUI relationships. */
+    property?: string;
+    target?: string;
 }
 
 export interface WorkspaceSymbolQuery {
@@ -516,8 +519,8 @@ function parseNamedBlockSymbols(
                     const inlineEntry = blockStack[blockStack.length - 1]!.block.entry;
                     if (inlineButton && inlineEntry) {
                         inlineEntry.references = [
-                            { file: filePath, line: i + 1, context: `effect = ${inlineButton.effect}` },
-                            ...(inlineButton.sprite ? [{ file: filePath, line: i + 1, context: `sprite = ${inlineButton.sprite}` }] : []),
+                            { file: filePath, line: i + 1, context: `effect = ${inlineButton.effect}`, property: 'effect', target: inlineButton.effect },
+                            ...(inlineButton.sprite ? [{ file: filePath, line: i + 1, context: `sprite = ${inlineButton.sprite}`, property: 'sprite', target: inlineButton.sprite }] : []),
                         ];
                     }
                     updateGuiFacts(inlineEntry, inlineContent);
@@ -550,8 +553,8 @@ function parseNamedBlockSymbols(
                     container: top.block.name,
                     category: 'gui',
                     references: [
-                        { file: filePath, line: i + 1, context: `effect = ${effectButton.effect}` },
-                        ...(effectButton.sprite ? [{ file: filePath, line: i + 1, context: `sprite = ${effectButton.sprite}` }] : []),
+                        { file: filePath, line: i + 1, context: `effect = ${effectButton.effect}`, property: 'effect', target: effectButton.effect },
+                        ...(effectButton.sprite ? [{ file: filePath, line: i + 1, context: `sprite = ${effectButton.sprite}`, property: 'sprite', target: effectButton.sprite }] : []),
                     ],
                 };
                 entries.push(top.block.entry);
@@ -619,11 +622,14 @@ function findScalarAssignment(line: string, fieldName: string): string | undefin
 }
 
 function toAssetPropertyReference(line: string, filePath: string, lineNumber: number): WorkspaceSymbolReference | undefined {
-    if (!/^\s*(texturefile|file|files?|mesh|animation|material|shader|entity|sound|effect|sprite|noOfFrames)\s*=/i.test(line)) return undefined;
+    const match = /^\s*(texturefile|file|files?|mesh|animation|material|shader|entity|sound|effect|sprite|noOfFrames)\s*=\s*(?:"((?:\\.|[^"\\])*)"|([^\s{}#]+))/i.exec(line);
+    if (!match?.[1]) return undefined;
     return {
         file: filePath,
         line: lineNumber,
         context: line.trim().slice(0, 240),
+        property: match[1].toLowerCase(),
+        target: (match[2] ?? match[3] ?? '').trim(),
     };
 }
 

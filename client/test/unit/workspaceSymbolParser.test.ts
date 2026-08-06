@@ -96,6 +96,10 @@ describe('Workspace Symbol Parser (indexing)', () => {
             category: 'asset',
         });
         expect(entries.find(entry => entry.name === 'GFX_evt_kuat_echo')?.references?.[0]?.context).to.include('texturefile');
+        expect(entries.find(entry => entry.name === 'GFX_evt_kuat_echo')?.references?.[0]).to.include({
+            property: 'texturefile',
+            target: 'gfx/event_pictures/kuat.dds',
+        });
         expect(entries.find(entry => entry.name === 'kuat_force_echo')).to.deep.include({
             kind: 'sound',
             source: 'asset',
@@ -294,6 +298,10 @@ describe('Workspace Symbol Parser (GUI recursion)', () => {
         expect(button!.references ?? []).to.satisfy((refs: Array<{ context: string }>) =>
             refs.some(ref => ref.context.includes('kuat_button_effect_1'))
             && refs.some(ref => ref.context.includes('GFX_kuat_btn')));
+        expect(button!.references).to.deep.include({
+            file: '/mod/interface/kuat.gui', line: 3,
+            context: 'effect = kuat_button_effect_1', property: 'effect', target: 'kuat_button_effect_1',
+        });
     });
 
     it('does not treat field wrappers as named definitions', () => {

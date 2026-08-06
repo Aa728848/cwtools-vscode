@@ -811,7 +811,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'rename_symbol',
-            description: 'Rename the symbol at a 0-based file position using the active VS Code language provider. Applies one guarded workspace-wide edit after validating every target, capturing snapshots, and passing normal write policy.',
+            description: 'Rename the symbol at a 0-based file position using the active VS Code language provider. Validates every target and runs PDX evidence preflight before one workspace-wide edit. Dynamic/inline/composite names return an expansion plan first; repeat with its exact expectedExpansionPlanHash to apply.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -819,6 +819,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     line: { type: 'number', description: 'Line number (0-based).' },
                     column: { type: 'number', description: 'Column number (0-based).' },
                     newName: { type: 'string', description: 'New symbol name.' },
+                    expectedExpansionPlanHash: { type: 'string', description: 'Required on the second call when the first call reports requiresExpansionPlan=true. Must exactly match the returned expansionPlan.planHash.' },
                 },
                 required: ['file', 'line', 'column', 'newName'],
             },

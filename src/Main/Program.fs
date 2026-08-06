@@ -10535,7 +10535,7 @@ type Server(client: ILanguageClient) =
                                         JsonValue.Record
                                             [| "ok", JsonValue.Boolean true
                                                "source", JsonValue.String "cwtools-localisation-validator"
-                                               "version", JsonValue.Number 2m
+                                               "version", JsonValue.Number 3m
                                                "issues", JsonValue.Array(selected |> List.map issueJson |> List.toArray)
                                                "coverage", JsonValue.Record
                                                    [| "issuesConsidered", JsonValue.Number(decimal errors.Length)

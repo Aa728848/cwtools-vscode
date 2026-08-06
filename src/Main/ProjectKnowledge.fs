@@ -393,11 +393,11 @@ let private jsonRecord fields =
 let private capabilityVersionsJson =
     jsonRecord
         [ Some("inlineGraph", JsonValue.Number 2m)
-          Some("stateFlow", JsonValue.Number 2m)
+          Some("stateFlow", JsonValue.Number 3m)
           Some("overrideResolution", JsonValue.Number 2m)
-          Some("interfaceGraph", JsonValue.Number 1m)
-          Some("localisationAudit", JsonValue.Number 2m)
-          Some("pdxFlow", JsonValue.Number 2m) ]
+          Some("interfaceGraph", JsonValue.Number 2m)
+          Some("localisationAudit", JsonValue.Number 3m)
+          Some("pdxFlow", JsonValue.Number 3m) ]
 
 let private capabilityStatusJson =
     jsonRecord
@@ -1521,11 +1521,11 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
                     { sourceKind = "event"
                       sourceId = eventId
                       targetEventId = subject
-                      edgeType = "event_call"
+                      edgeType = if key = "fire_on_action" then "on_action_call" else "event_call"
                       label = Some key
                       sourceFile = file
                       line = int leaf.Position.StartLine
-                      confidence = if eventIds.Contains(subject.ToLowerInvariant()) then "ast_resolved" else "ast_unresolved"
+                      confidence = if key = "fire_on_action" then "ast_explicit" elif eventIds.Contains(subject.ToLowerInvariant()) then "ast_resolved" else "ast_unresolved"
                       callOperator = Some key
                       phase = Some(if String.IsNullOrWhiteSpace phase then "effect" else phase)
                       delay = None
@@ -1569,7 +1569,12 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
                         key :: conditionPath
                     else conditionPath
                 if eventCallOperators.Contains key then
-                    let targetId = tryDirectLeafValue "id" childNode
+                    let targetId =
+                        if key = "fire_on_action" then
+                            tryDirectLeafValue "on_action" childNode
+                            |> Option.orElseWith (fun () -> tryDirectLeafValue "name" childNode)
+                            |> Option.orElseWith (fun () -> tryDirectLeafValue "id" childNode)
+                        else tryDirectLeafValue "id" childNode
                     targetId
                     |> Option.filter (String.IsNullOrWhiteSpace >> not)
                     |> Option.iter (fun target ->
@@ -1590,7 +1595,7 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
                             { sourceKind = "event"
                               sourceId = eventId
                               targetEventId = target.Trim().Trim('"')
-                              edgeType = "event_call"
+                              edgeType = if key = "fire_on_action" then "on_action_call" else "event_call"
                               label = Some key
                               sourceFile = file
                               line = int childNode.Position.StartLine

@@ -880,12 +880,12 @@ M3、M5、M6 可在 M2 完成后并行开发，但它们修改共享 SQLite sche
 | Phase 1 | Profile V2：按目录/语言头采样、`defaultLanguage`/`encodingByLanguage`、混合 BOM warning、descriptor `supportedVersion`/`remoteFileId`/`dependencies`、`identifiers.byType`/`byTypeCounts` 从共享索引填充、`vanillaCache` 实际缓存文件验证、`freshness`/`warnings`、`compatibility` section；V1 读取端标记 `legacyProfile` |
 | Phase 2 | 当前 Knowledge schema：definitions 增加 `provenance_kind`/`source_file`/`source_line`/`source_end_line`/`has_real_range`/`confidence`/template/invocation 列；synthetic 与 derived 定义默认不参与项目模式排名，精确 ID 查询仍可返回；来源加权排序；stack_candidates 保存候选顺序/origin/logical_path/override_strategy |
 | Phase 3 | Inline 实例化图：参数按语法上下文推断 `usageKinds`/`inferredType`，参数保留 `resolvedValue`；有界递归实例化嵌套模板并输出生成定义、本地化/GFX/路径/事件/modifier 引用与模板/调用点双向 source map；检测不兼容参数使用、缺失/未使用、非法 ID、递归与重名；当前 SQLite V7 按内容哈希和反向调用闭包增量失效；`cwtools.ai.exploreInlineGraph` 与 `query_inline_instantiation` 均有界 |
-| Phase 4 | 事件边记录 `call_operator`/`phase`/`delay`/`condition_path`/`scope_map`/真实 source/target scope；状态流覆盖 variable/flag/event_target 与 created scope，并报告读前未初始化、分支不完整、生命周期失衡、延迟 local target、循环、不可达事件及 scope/type bridge 问题；scripted effect/trigger 使用已加载定义 ID 精确建边 |
+| Phase 4 | 事件边记录 `call_operator`/`phase`/`delay`/`condition_path`/`scope_map`/真实 source/target scope，并单独建模 `fire_on_action`；状态流覆盖 variable/flag/event_target 与 created scope，分析精确种子及一层直接事件目标，派生调用前写入到被调用事件读取的跨事件状态边，并报告读前未初始化、分支不完整、生命周期失衡、延迟 local target、循环、不可达事件及 scope/type bridge 问题；scripted effect/trigger 使用已加载定义 ID 精确建边 |
 | Phase 5 | `compare_definition_with_vanilla` LSP 命令提供递归字段 diff、重复 occurrence、source-order 和真实位置；definition stack 解释 FIOS/LIOS/MERGE/DUPL/NO/UNKNOWN；来源复用显式加载根和资源 scope，区分 workspace/dependency/vanilla 并返回 dependency candidates；`get_ignored_diagnostics` 提供 exact/message/type/broad/unmatched 审计 |
 | Phase 6 | GUI 递归索引保存深层控件、off-canvas 位置、localisation/custom_gui/effect/sprite 事实；`includeAssetChain` 有界遍历 button effect、sprite、entity、mesh、animation、material、shader、sound 与文件，并报告 origin、存在性、路径大小写和可验证 DDS 布局；interface knowledge 合并当前项目/vanilla GUI 图而非只返回静态指南 |
-| Phase 7 | `query_localisation_index` 保留 occurrence/重复组、语言差集、reference status 与 origin；`auditMode=true` 复用 CWTools validator 返回完全缺失脚本 key（CW100）和 command/scope 问题，动态 inline key 连接调用实例；`write_localisation` 对全部显式语言目标预验证、加锁、快照并在失败时整体回滚 |
-| Phase 8 | `analyze_pdx_flow` 提供带规则与不确定性的静态成本模型和玩法关系；字段名推断明确标为 heuristic，component 关系限定在 section/ship-design，技术/特殊项目/巨构/situation/scripted value/modifier 保持有类型边 |
-| Phase 9 | 高风险写前证据必须精确匹配 inline 模板、override ID、事件 ID、GUI 目标或 localisation audit；普通小修不被无差别阻断；写后按原参数重跑权威查询并更新结果 revision，失败重验证不会被视为通过 |
+| Phase 7 | `query_localisation_index` 保留 occurrence/重复组、语言差集、reference status 与 origin；`auditMode=true` 同时执行有界引用审计，报告孤立 key、未知引用、编码/BOM 与语言头问题，并复用 CWTools validator 返回完全缺失脚本 key（CW100）和 command/scope 问题；动态 inline key 连接调用实例；`write_localisation` 对全部显式语言目标预验证、加锁、快照并在失败时整体回滚 |
+| Phase 8 | `analyze_pdx_flow` 提供带规则与不确定性的静态成本模型和玩法关系；关系目标会在活动 TypeDef 中解析，解析成功标为 semantic，未解析目标结构化报告；component 关系限定在 section/ship-design，技术/特殊项目/巨构/situation/scripted value/modifier 保持有类型边 |
+| Phase 9 | 高风险写前证据必须精确匹配 inline 模板、override ID、事件 ID、GUI 目标或 localisation audit，证据服务不可用时 fail-closed；普通小修不被无差别阻断；`rename_symbol` 逐文件构建最终内容并进入同一证据门，动态/inline/composite 名称必须先返回哈希绑定的 expansion plan；写后重验证全部直接及间接受影响文件，失败重验证不会被视为通过 |
 
 ### 接口与工具
 
@@ -908,7 +908,7 @@ M3、M5、M6 可在 M2 完成后并行开发，但它们修改共享 SQLite sche
 - TypeScript 单元测试：1938 passing；rules-sync：35 passing（含 Profile V2、GUI/asset chain、Project Knowledge add/change/delete、localisation、精确 evidence gate 与工具合同）
 - F# 回归脚本：`ProjectKnowledge.Tests.fsx`（临时库清理/coverage/provenance/状态流/definition stack/40 次 warm-query p95）、`InlineGraph.Tests.fsx`（参数上下文、source map、传递展开、非法/重名/递归）、`SemanticGraph.Tests.fsx`、`PdxFlowAnalysis.Tests.fsx` 全部通过
 - `npm run compile`、`dotnet build src/Main/`、`dotnet build src/LSP/`、MCP schema 检查、`submodules/cwtools-mcp` build + contract tests（62+41）、`npm run verify` 全部通过；`verify` 包含 ESLint、compile、1941+35 tests 与 release gate
-- 详细的当前能力版本与最后待执行边界见 `stellaris-agent-improvement-implementation-status.md`
+- 当前能力版本与静态/运行时边界直接在本节维护，不再依赖独立状态文档。
 
 ### 边界说明
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.10.12] - 2026-08-06
+
+### 项目数据库与知识库 / Project Database and Knowledge Base
+- **[重要] 重构成项目数据库架构，不再兼容旧版数据库**：项目数据库格式进行了重构升级，旧版数据库不再支持。请在工作区中使用重新初始化命令以更新项目数据库。
+  English: [Important] Refactored project database architecture; legacy databases are no longer supported. Please run the re-initialization command in your workspace to update the database.
+
+### MCP 服务端同步与发布 / MCP Server Sync and Publishing
+- **[发布] 升级只读 MCP 服务端并同步发布至 npm 仓库**：`cwtools-mcp` 与 `cwtools-shared` 升级至 `0.2.0` 版本并发布至 npm 官方注册表，支持 Shader 语义工具与项目知识库 (Project Knowledge) 索引能力。
+  English: [Publish] Upgraded and published read-only MCP server packages (`cwtools-mcp` and `cwtools-shared`) to `0.2.0` on npm, introducing Shader semantic tools and Project Knowledge indexing capabilities.
+
 ## [2.10.11] - 2026-08-06
 
 ### 规则加载与离线可用性 / Rules Loading and Offline Availability

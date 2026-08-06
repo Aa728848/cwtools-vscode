@@ -67,6 +67,8 @@ export interface WorkspaceSymbolCacheSnapshot {
     coverage?: WorkspaceSymbolCacheCoverage;
 }
 
+export type WorkspaceSymbolCacheOpenResult = 'created' | 'rebuilt' | 'reused' | 'migrated';
+
 export interface WorkspaceSymbolCacheCoverage {
     discoveredFiles: number;
     discoveredFilesExact: boolean;
@@ -158,13 +160,15 @@ export class WorkspaceSymbolSqliteCache {
 		private readonly fallbackDatabasePaths: readonly string[] = [],
 	) {}
 
-    async open(): Promise<void> {
-        if (this.database) return;
+    async open(): Promise<WorkspaceSymbolCacheOpenResult> {
+        if (this.database) return 'reused';
         const SQL = await getSql(this.wasmDirectory);
         let bytes: Uint8Array | undefined;
-        const sourcePath = fs.existsSync(this.databasePath)
+        const primaryExists = fs.existsSync(this.databasePath);
+        const sourcePath = primaryExists
             ? this.databasePath
             : this.fallbackDatabasePaths.find(candidate => fs.existsSync(candidate)) ?? this.databasePath;
+        const sourceExists = primaryExists || fs.existsSync(sourcePath);
         const loadedFallback = path.resolve(sourcePath) !== path.resolve(this.databasePath);
         let rebuilt = false;
         try {
@@ -188,6 +192,9 @@ export class WorkspaceSymbolSqliteCache {
         if (loadedFallback) {
             removeMigratedFallback(sourcePath, this.sourceRoot);
         }
+        if (loadedFallback) return 'migrated';
+        if (!sourceExists) return 'created';
+        return rebuilt ? 'rebuilt' : 'reused';
     }
 
     load(): WorkspaceSymbolCacheSnapshot {

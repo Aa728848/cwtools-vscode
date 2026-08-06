@@ -91,7 +91,7 @@ describe('WorkspaceSymbolSqliteCache', () => {
 
         const { cache } = loadModules();
         const current = new cache.WorkspaceSymbolSqliteCache(databasePath, wasmDirectory, tempDir, 'cwb-v1');
-        await current.open();
+        expect(await current.open()).to.equal('rebuilt');
         expect(current.load().entries).to.deep.equal([]);
 
         // The obsolete file is replaced during open(), before a later indexing
@@ -132,6 +132,18 @@ describe('WorkspaceSymbolSqliteCache', () => {
         }], []);
         expect(current.load().entries[0]?.guiFacts?.localisationKeys).to.deep.equal(['KUAT_WINDOW']);
         current.close();
+    });
+
+    it('reports whether a cache was created or reused', async () => {
+        const { cache } = loadModules();
+        const first = new cache.WorkspaceSymbolSqliteCache(databasePath, wasmDirectory, tempDir, 'cwb-v1');
+        expect(await first.open()).to.equal('created');
+        await first.save();
+        first.close();
+
+        const second = new cache.WorkspaceSymbolSqliteCache(databasePath, wasmDirectory, tempDir, 'cwb-v1');
+        expect(await second.open()).to.equal('reused');
+        second.close();
     });
 
     it('persists symbols and applies changed/deleted files incrementally', async () => {

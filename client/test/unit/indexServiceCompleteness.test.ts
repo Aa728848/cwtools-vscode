@@ -149,4 +149,78 @@ describe('IndexService workspace symbol completeness', () => {
             delete require.cache[reporterPath];
         }
     });
+
+    it('announces completed vanilla symbol database generation without announcing cache reuse', async () => {
+        const vscodeStub = {
+            workspace: {
+                findFiles: async () => [],
+            },
+            window: {
+                createOutputChannel: () => ({ appendLine: () => undefined, dispose: () => undefined }),
+            },
+            Uri: { file: (fsPath: string) => ({ fsPath }) },
+            RelativePattern: class {
+                constructor(_base: unknown, _pattern: string) {}
+            },
+        };
+        const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+        const originalLoad = moduleLoader._load;
+        const modulePath = require.resolve('../../extension/indexing/indexService');
+        const reporterPath = require.resolve('../../extension/ai/errorReporter');
+        delete require.cache[modulePath];
+        delete require.cache[reporterPath];
+        moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
+            if (request === 'vscode') return vscodeStub;
+            return originalLoad.apply(this, [request, ...args]);
+        };
+
+        try {
+            const { IndexService } = require('../../extension/indexing/indexService') as typeof import('../../extension/indexing/indexService');
+            const events: Array<{ gameId: string; kind: string; databasePath: string; indexedFiles: number }> = [];
+            const service = new IndexService({
+                onVanillaSymbolCacheGenerated: event => events.push(event),
+            }) as any;
+            service._getConfiguredVanillaSources = () => [{ gameId: 'stellaris', root: 'C:\\stellaris' }];
+            const cache = {
+                load: () => ({ files: new Map(), entries: [] }),
+                update: () => undefined,
+                setCoverage: () => undefined,
+                save: async () => undefined,
+                close: () => undefined,
+            };
+            service._openVanillaSymbolCache = async () => ({
+                cache,
+                openResult: 'created',
+                databasePath: 'C:\\storage\\vanilla-stellaris.sqlite',
+            });
+
+            await service._indexVanillaWorkspaceSymbolFiles(false);
+            expect(events).to.deep.equal([{
+                gameId: 'stellaris',
+                kind: 'created',
+                databasePath: 'C:\\storage\\vanilla-stellaris.sqlite',
+                indexedFiles: 0,
+            }]);
+
+            service._openVanillaSymbolCache = async () => ({
+                cache,
+                openResult: 'reused',
+                databasePath: 'C:\\storage\\vanilla-stellaris.sqlite',
+            });
+            await service._indexVanillaWorkspaceSymbolFiles(false);
+            expect(events).to.have.length(1);
+
+            await service._indexVanillaWorkspaceSymbolFiles(true);
+            expect(events[1]).to.deep.equal({
+                gameId: 'stellaris',
+                kind: 'rebuilt',
+                databasePath: 'C:\\storage\\vanilla-stellaris.sqlite',
+                indexedFiles: 0,
+            });
+        } finally {
+            moduleLoader._load = originalLoad;
+            delete require.cache[modulePath];
+            delete require.cache[reporterPath];
+        }
+    });
 });

@@ -836,6 +836,17 @@ export async function activate(context: ExtensionContext) {
 	const indexService = new IndexService({
 		extensionPath: context.extensionPath,
 		globalStoragePath: context.globalStorageUri.fsPath,
+		onVanillaSymbolCacheGenerated: event => window.showInformationMessage(
+			event.kind === 'created'
+				? localize(
+					`CWTools: ${displayGameName(event.gameId)} vanilla symbol database generated (${event.indexedFiles} files).`,
+					`CWTools：${displayGameName(event.gameId)} 原版符号数据库已生成（${event.indexedFiles} 个文件）。`,
+				)
+				: localize(
+					`CWTools: ${displayGameName(event.gameId)} vanilla symbol database rebuilt (${event.indexedFiles} files).`,
+					`CWTools：${displayGameName(event.gameId)} 原版符号数据库已重新生成（${event.indexedFiles} 个文件）。`,
+				),
+		),
 	});
 	context.subscriptions.push(indexService);
 	void indexService.start();

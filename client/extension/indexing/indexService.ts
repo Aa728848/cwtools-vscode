@@ -41,6 +41,7 @@ import {
 	getProjectWorkspaceSymbolCachePath,
 	getWorkspaceSymbolCachePath,
 	type WorkspaceSymbolCachedFile,
+	type WorkspaceSymbolCacheOpenResult,
 	type WorkspaceSymbolFileFact,
 } from './workspaceSymbolCache';
 import {
@@ -93,6 +94,14 @@ export type { WorkspaceSymbolEntry, WorkspaceSymbolQuery };
 export interface IndexServiceOptions {
 	extensionPath?: string;
 	globalStoragePath?: string;
+	onVanillaSymbolCacheGenerated?: (event: VanillaSymbolCacheGeneratedEvent) => PromiseLike<unknown> | unknown;
+}
+
+export interface VanillaSymbolCacheGeneratedEvent {
+	gameId: string;
+	kind: 'created' | 'rebuilt';
+	databasePath: string;
+	indexedFiles: number;
 }
 
 interface VanillaSymbolSource {
@@ -639,7 +648,8 @@ export class IndexService implements vscode.Disposable {
 			const sourceKey = IndexService._normalizeFilePath(source.root);
 			for (const filePath of this._vanillaSourceFiles.get(sourceKey) ?? []) this._removeWorkspaceSymbolFile(filePath);
 			this._vanillaSourceFiles.set(sourceKey, new Set());
-			const cache = await this._openVanillaSymbolCache(source);
+			const openedCache = await this._openVanillaSymbolCache(source);
+			const cache = openedCache?.cache;
 			let cachedFiles = new Map<string, WorkspaceSymbolFileFact>();
 			if (cache) {
 				const snapshot = cache.load();
@@ -707,6 +717,22 @@ export class IndexService implements vscode.Disposable {
 				cache.close();
 			}
 			const indexedFiles = this._vanillaSourceFiles.get(sourceKey)!.size;
+			if (openedCache && (force || openedCache.openResult !== 'reused')) {
+				const kind = openedCache.openResult === 'created' ? 'created' : 'rebuilt';
+				try {
+					const notification = this._options.onVanillaSymbolCacheGenerated?.({
+						gameId: source.gameId,
+						kind,
+						databasePath: openedCache.databasePath,
+						indexedFiles,
+					});
+					void Promise.resolve(notification).catch(error => {
+						ErrorReporter.warn('IndexService', `Failed to show the vanilla symbol database completion message for ${source.gameId}`, error);
+					});
+				} catch (error) {
+					ErrorReporter.warn('IndexService', `Failed to show the vanilla symbol database completion message for ${source.gameId}`, error);
+				}
+			}
 			const discoveredLabel = truncated ? `at least ${discoveredFiles.length}` : String(discoveredFiles.length);
 			ErrorReporter.debug(
 				'IndexService',
@@ -933,17 +959,22 @@ export class IndexService implements vscode.Disposable {
 		return cache;
 	}
 
-	private async _openVanillaSymbolCache(source: VanillaSymbolSource): Promise<WorkspaceSymbolSqliteCache | undefined> {
+	private async _openVanillaSymbolCache(source: VanillaSymbolSource): Promise<{
+		cache: WorkspaceSymbolSqliteCache;
+		openResult: WorkspaceSymbolCacheOpenResult;
+		databasePath: string;
+	} | undefined> {
 		if (!this._options.extensionPath || !this._options.globalStoragePath) return undefined;
 		const rootHash = IndexService._hashParts([IndexService._normalizeFilePath(source.root)]).slice(0, 16);
+		const databasePath = path.join(this._options.globalStoragePath, 'symbol-index', `vanilla-${source.gameId}-${rootHash}.sqlite`);
 		const cache = new WorkspaceSymbolSqliteCache(
-			path.join(this._options.globalStoragePath, 'symbol-index', `vanilla-${source.gameId}-${rootHash}.sqlite`),
+			databasePath,
 			path.join(this._options.extensionPath, 'node_modules', 'sql.js', 'dist'),
 			source.root,
 			IndexService._hashParts([IndexService._pathStatFact(source.cacheFile), this._semanticCatalogFingerprint]),
 		);
-		await cache.open();
-		return cache;
+		const openResult = await cache.open();
+		return { cache, openResult, databasePath };
 	}
 
 	private async _persistWorkspaceSymbolChanges(changed: WorkspaceSymbolCachedFile[], removed: string[]): Promise<void> {

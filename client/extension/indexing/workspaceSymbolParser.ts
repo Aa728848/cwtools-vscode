@@ -21,6 +21,12 @@ export interface WorkspaceSymbolEntry {
         effectReferences: string[];
         spriteReferences: string[];
     };
+    scriptFacts?: {
+        stateAccesses: Array<{ operation: 'read' | 'set' | 'write' | 'clear' | 'save'; subject: string; scope: string; line: number }>;
+        localisationKeys: string[];
+        eventReferences: string[];
+        callCandidates: string[];
+    };
     updatedAt?: number;
     fileVersion?: number;
 }
@@ -335,6 +341,46 @@ function parseScriptSymbols(
     let depth = 0;
     let openBlock: OpenBlock | undefined;
     const normalizedFile = normalizePath(filePath);
+    const updateScriptFacts = (entry: WorkspaceSymbolEntry | undefined, rawLine: string, lineNumber: number): void => {
+        if (!entry) return;
+        const facts = entry.scriptFacts ?? { stateAccesses: [], localisationKeys: [], eventReferences: [], callCandidates: [] };
+        const assignment = /^\s*([A-Za-z_][A-Za-z0-9_.:-]*)\s*=\s*(.*)$/.exec(rawLine);
+        const key = assignment?.[1]?.toLowerCase();
+        const rhs = assignment?.[2] ?? '';
+        if (key) {
+            let operation: 'read' | 'set' | 'write' | 'clear' | 'save' | undefined;
+            if (key.startsWith('save_') && key.includes('event_target')) operation = 'save';
+            else if (key.startsWith('set_') && (key.includes('variable') || key.endsWith('_flag'))) operation = 'set';
+            else if (key.startsWith('change_') && key.includes('variable')) operation = 'write';
+            else if ((key.startsWith('remove_') || key.startsWith('clear_')) && /(variable|flag|event_target)/.test(key)) operation = 'clear';
+            else if ((key.startsWith('has_') || key.startsWith('check_') || key.startsWith('is_')) && /(variable|flag|event_target)/.test(key)) operation = 'read';
+            if (operation) {
+                const subject = /\b(?:which|name|flag|id|target)\s*=\s*"?([A-Za-z_][A-Za-z0-9_.:@$-]*)"?/i.exec(rhs)?.[1]
+                    ?? /^"?([A-Za-z_][A-Za-z0-9_.:@$-]*)"?/.exec(rhs.trim())?.[1];
+                if (subject && facts.stateAccesses.length < 40
+                    && !facts.stateAccesses.some(item => item.operation === operation && item.subject === subject && item.line === lineNumber)) {
+                    const scope = key.includes('global_event_target') ? 'global'
+                        : key.includes('event_target') ? 'local_event'
+                            : ['country', 'planet', 'fleet', 'ship', 'system'].find(candidate => key.includes(candidate)) ?? 'current_scope';
+                    facts.stateAccesses.push({ operation, subject, scope, line: lineNumber });
+                }
+            }
+            if (/^(?:title|desc|text|tooltip|name|custom_tooltip)$/.test(key)) {
+                const loc = /^"?([A-Za-z_][A-Za-z0-9_.:@$-]*)"?/.exec(rhs.trim())?.[1];
+                if (loc && !facts.localisationKeys.includes(loc) && facts.localisationKeys.length < 40) facts.localisationKeys.push(loc);
+            }
+            const eventTarget = key.endsWith('_event') || key === 'fire_on_action'
+                ? /\bid\s*=\s*"?([A-Za-z_][A-Za-z0-9_.:@$-]*)"?/i.exec(rhs)?.[1]
+                    ?? /^"?([A-Za-z_][A-Za-z0-9_.:@$-]*)"?/.exec(rhs.trim())?.[1]
+                : undefined;
+            if (eventTarget && !facts.eventReferences.includes(eventTarget) && facts.eventReferences.length < 40) facts.eventReferences.push(eventTarget);
+            const genericFields = new Set(['id', 'key', 'name', 'title', 'desc', 'text', 'tooltip', 'trigger', 'limit', 'effect', 'if', 'else', 'else_if', 'random', 'random_list']);
+            if (!operation && !key.endsWith('_event') && !genericFields.has(key)
+                && /^[A-Za-z_][A-Za-z0-9_.:-]*$/.test(key)
+                && !facts.callCandidates.includes(key) && facts.callCandidates.length < 60) facts.callCandidates.push(key);
+        }
+        entry.scriptFacts = facts;
+    };
 
     for (let i = 0; i < lines.length; i++) {
         const line = stripComment(lines[i] ?? '');
@@ -368,20 +414,22 @@ function parseScriptSymbols(
                 category: classification.category,
             };
             if (!classification.nameField) {
-                entries.push({
+                const entry: WorkspaceSymbolEntry = {
                     name: blockName,
                     kind,
                     file: filePath,
                     line: i + 1,
                     source: 'script',
                     category: classification.category,
-                });
+                };
+                entries.push(entry);
+                openBlock.entry = entry;
             }
         } else if (openBlock?.nameField && beforeDepth === 1) {
             const escapedField = openBlock.nameField.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const identityMatch = line.match(new RegExp(`^\\s*${escapedField}\\s*=\\s*"?([A-Za-z0-9_.:-]+)"?`, 'i'));
             if (identityMatch?.[1]) {
-                entries.push({
+                const entry: WorkspaceSymbolEntry = {
                     name: identityMatch[1],
                     kind: openBlock.kind,
                     file: filePath,
@@ -389,9 +437,13 @@ function parseScriptSymbols(
                     source: 'script',
                     container: openBlock.name,
                     category: openBlock.category,
-                });
+                };
+                entries.push(entry);
+                openBlock.entry = entry;
             }
         }
+
+        updateScriptFacts(openBlock?.entry, line, i + 1);
 
         depth += countBracesOutsideStrings(line);
         if (openBlock && depth <= 0) {
@@ -592,7 +644,7 @@ function isAssetContainerBlock(blockName: string): boolean {
 
 /** Field-wrapper keys that are not themselves named definitions. */
 function isFieldWrapperKey(blockName: string): boolean {
-    return ['trigger', 'effect', 'name', 'icon', 'background', 'text', 'format', 'size', 'position', 'border', 'sprite'].includes(blockName);
+    return ['trigger', 'effect', 'name', 'icon', 'background', 'text', 'format', 'size', 'position', 'border', 'sprite', 'quadTextureSprite'].includes(blockName);
 }
 
 interface GuiEffectButtonInfo {
@@ -601,13 +653,13 @@ interface GuiEffectButtonInfo {
     sprite?: string;
 }
 
-/** Parse a single-line `effectButtonType = { name = X effect = Y sprite = Z ... }`. */
+/** Parse a single-line effect button, including Stellaris' quadTextureSprite form. */
 function parseGuiEffectButton(line: string, blockName: string): GuiEffectButtonInfo | undefined {
     if (blockName !== 'effectButtonType' && blockName !== 'buttonType' && blockName !== 'effectButton') return undefined;
     const name = findScalarAssignment(line, 'name');
     const effect = findScalarAssignment(line, 'effect');
     if (!name || !effect) return undefined;
-    const sprite = findScalarAssignment(line, 'sprite');
+    const sprite = findScalarAssignment(line, 'sprite') ?? findScalarAssignment(line, 'quadTextureSprite');
     return { name, effect, sprite };
 }
 
@@ -622,7 +674,7 @@ function findScalarAssignment(line: string, fieldName: string): string | undefin
 }
 
 function toAssetPropertyReference(line: string, filePath: string, lineNumber: number): WorkspaceSymbolReference | undefined {
-    const match = /^\s*(texturefile|file|files?|mesh|animation|material|shader|entity|sound|effect|sprite|noOfFrames)\s*=\s*(?:"((?:\\.|[^"\\])*)"|([^\s{}#]+))/i.exec(line);
+    const match = /^\s*(texturefile|file|files?|mesh|animation|material|shader|entity|sound|effect|sprite|quadTextureSprite|noOfFrames)\s*=\s*(?:"((?:\\.|[^"\\])*)"|([^\s{}#]+))/i.exec(line);
     if (!match?.[1]) return undefined;
     return {
         file: filePath,

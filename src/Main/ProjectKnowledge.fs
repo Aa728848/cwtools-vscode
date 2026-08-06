@@ -392,12 +392,12 @@ let private jsonRecord fields =
 
 let private capabilityVersionsJson =
     jsonRecord
-        [ Some("inlineGraph", JsonValue.Number 2m)
+        [ Some("inlineGraph", JsonValue.Number 3m)
           Some("stateFlow", JsonValue.Number 3m)
           Some("overrideResolution", JsonValue.Number 2m)
           Some("interfaceGraph", JsonValue.Number 2m)
           Some("localisationAudit", JsonValue.Number 3m)
-          Some("pdxFlow", JsonValue.Number 3m) ]
+          Some("pdxFlow", JsonValue.Number 4m) ]
 
 let private capabilityStatusJson =
     jsonRecord
@@ -1432,11 +1432,7 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
           "create_army", "last_created_army"; "create_planet", "last_created_planet"; "create_starbase", "last_created_starbase"
           "create_megastructure", "last_created_megastructure" ]
         |> dict
-    let eventCallOperators =
-        [ "country_event"; "fleet_event"; "ship_event"; "planet_event"; "system_event"
-          "starbase_event"; "megastructure_event"; "pop_event"; "army_event"; "ambient_object_event"
-          "fire_on_action" ]
-        |> Set.ofList
+    let eventCallOperators = PdxEventSemantics.eventCallOperators game
     let phaseOf (node: Node) =
         let key = node.Key.ToLowerInvariant()
         if key = "trigger" then "trigger"

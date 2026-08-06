@@ -200,15 +200,60 @@ let private referenceKindForField (fieldName: string) =
     if lower.Contains "title" || lower.Contains "desc" || lower.Contains "text" || lower.Contains "tooltip" || lower.Contains "localisation" then Some "localisation"
     elif lower.Contains "sprite" || lower.Contains "icon" || lower.Contains "picture" || lower.Contains "texture" || lower.Contains "gfx" then Some "gfx"
     elif lower.Contains "path" || lower.Contains "file" then Some "path"
-    elif lower = "country_event" || lower = "planet_event" || lower = "fleet_event" || lower = "ship_event" || lower = "pop_event" || lower = "event" || lower = "fire_on_action" then Some "event"
+    elif lower.EndsWith("_event", StringComparison.Ordinal) || lower = "event" || lower = "fire_on_action" then Some "event"
     elif lower.Contains "special_project" then Some "special_project"
     elif lower.Contains "modifier" then Some "modifier"
     else None
 
 let private renderedReferences (template: Node) args =
     let references = ResizeArray<string * string * int>()
+    let stateOperation (key: string) =
+        let lower = key.ToLowerInvariant()
+        if lower.StartsWith("save_") && lower.Contains("event_target") then Some "save"
+        elif lower.StartsWith("set_") && (lower.Contains("variable") || lower.EndsWith("_flag")) then Some "set"
+        elif lower.StartsWith("change_") && lower.Contains("variable") then Some "write"
+        elif (lower.StartsWith("remove_") || lower.StartsWith("clear_")) && (lower.Contains("variable") || lower.Contains("flag") || lower.Contains("event_target")) then Some "clear"
+        elif (lower.StartsWith("has_") || lower.StartsWith("check_") || lower.StartsWith("is_")) && (lower.Contains("variable") || lower.Contains("flag") || lower.Contains("event_target")) then Some "read"
+        else None
+    let stateScope (key: string) =
+        let lower = key.ToLowerInvariant()
+        if lower.Contains("global_event_target") then "global"
+        elif lower.Contains("event_target") then "local_event"
+        elif lower.Contains("country") then "country"
+        elif lower.Contains("planet") then "planet"
+        elif lower.Contains("fleet") then "fleet"
+        elif lower.Contains("ship") then "ship"
+        elif lower.Contains("system") then "system"
+        else "current_scope"
+    let subjectFromNode (node: Node) =
+        node.Values
+        |> Seq.tryFind (fun value ->
+            let key = value.Key.ToLowerInvariant()
+            key = "which" || key = "name" || key = "flag" || key = "id" || key = "target")
+        |> Option.orElseWith (fun () -> node.Values |> Seq.tryHead)
+        |> Option.map (fun value -> renderExpandedId (string value.Value) args |> fun raw -> raw.Trim().Trim('"'))
     let rec visit (node: Node) =
+        let nodeKey = renderExpandedId node.Key args
+        match stateOperation nodeKey, subjectFromNode node with
+        | Some operation, Some subject when not (String.IsNullOrWhiteSpace subject) && not (subject.Contains "$" ) ->
+            references.Add($"state:{operation}:{stateScope nodeKey}", subject, int node.Position.StartLine)
+        | _ -> ()
+        if nodeKey.EndsWith("_event", StringComparison.OrdinalIgnoreCase) || nodeKey.Equals("fire_on_action", StringComparison.OrdinalIgnoreCase) then
+            let targetKeys = if nodeKey.Equals("fire_on_action", StringComparison.OrdinalIgnoreCase) then [ "on_action"; "name"; "id" ] else [ "id" ]
+            node.Values
+            |> Seq.tryFind (fun value -> targetKeys |> List.exists (fun key -> value.Key.Equals(key, StringComparison.OrdinalIgnoreCase)))
+            |> Option.map (fun value -> renderExpandedId (string value.Value) args |> fun raw -> raw.Trim().Trim('"'))
+            |> Option.filter (fun value -> not (String.IsNullOrWhiteSpace value) && not (value.Contains "$"))
+            |> Option.iter (fun value -> references.Add("event", value, int node.Position.StartLine))
+        if not (nodeKey.Equals("root", StringComparison.OrdinalIgnoreCase)) && not (nodeKey.Contains "$" ) then
+            references.Add("call_candidate", nodeKey, int node.Position.StartLine)
         for leaf in node.Values do
+            match stateOperation leaf.Key with
+            | Some operation ->
+                let rendered = renderExpandedId (string leaf.Value) args |> fun raw -> raw.Trim().Trim('"')
+                if not (String.IsNullOrWhiteSpace rendered) && not (rendered.Contains "$" ) then
+                    references.Add($"state:{operation}:{stateScope leaf.Key}", rendered, int leaf.Position.StartLine)
+            | None -> ()
             match referenceKindForField leaf.Key with
             | Some kind ->
                 let rendered = renderExpandedId (string leaf.Value) args
@@ -306,7 +351,13 @@ let private collectInvocations (root: Node) (filePath: string) =
                     addInvocation templatePath (int childNode.Position.StartLine) argNodes argLeaves enclosingDefinition
                 let nextEnclosing =
                     if enclosingDefinition.IsNone && not (childNode.Key.Equals("root", StringComparison.OrdinalIgnoreCase)) then
-                        Some childNode.Key
+                        childNode.Values
+                        |> Seq.tryFind (fun leaf ->
+                            leaf.Key.Equals("id", StringComparison.OrdinalIgnoreCase)
+                            || leaf.Key.Equals("key", StringComparison.OrdinalIgnoreCase)
+                            || leaf.Key.Equals("name", StringComparison.OrdinalIgnoreCase))
+                        |> Option.map (fun leaf -> string leaf.Value |> fun value -> value.Trim().Trim('"'))
+                        |> Option.orElse (Some childNode.Key)
                     else enclosingDefinition
                 visit childNode nextEnclosing
             | LeafC _ -> ()
@@ -627,7 +678,7 @@ let inlineGraphJsonWithCoverageAndFreshness (facts: InlineGraphFacts) (truncated
     jsonRecord
         [ Some("ok", JsonValue.Boolean true)
           Some("source", JsonValue.String "cwtools-inline-instantiation")
-          Some("version", JsonValue.Number 2m)
+          Some("version", JsonValue.Number 3m)
           Some("freshness", jsonRecord
               [ Some("status", JsonValue.String freshness)
                 Some("source", JsonValue.String "active_lsp_model")

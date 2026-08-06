@@ -100,6 +100,10 @@ let stateContent = """country_event = {
 }
 """
 let stateEntity = parseEntity stateContent "events/state.txt"
+let carrierEntity = parseEntity "carrier_event = { id = carrier.1 situation_event = { id = situation.2 } astral_rift_event = { id = astral.3 } }" "events/dynamic_events.txt"
+let carrierOperators = Main.PdxEventSemantics.eventCallOperatorsInNode carrierEntity.rawEntity
+assertTrue "event-shaped operators are discovered without a static subtype list"
+    (carrierOperators.Contains "carrier_event" && carrierOperators.Contains "situation_event" && carrierOperators.Contains "astral_rift_event")
 let issues = stateIssues "state.1" "events/state.txt" stateEntity.rawEntity
 assertTrue "state read before unconditional initialization is reported"
     (issues |> List.exists (fun item -> item.kind = "use_before_initialization" || item.kind = "branch_incomplete_initialization"))
@@ -110,19 +114,37 @@ assertTrue "delayed local event target risk is reported"
 assertTrue "last_created implicit state dependency is reported"
     (issues |> List.exists (fun item -> item.kind = "implicit_created_scope_dependency"))
 
+let monthlySeedCost =
+    { kind = "pulse_handler"; name = "on_monthly_pulse"; scope = "pulse"; phase = "effect"
+      nestingDepth = 0; frequency = "monthly"; traversalRange = "pulse"; amplification = "single_level"
+      file = "common/on_actions/pulse.txt"; line = 1; confidence = "heuristic-static" }
+let calledTraversalCost =
+    { kind = "traversal"; name = "every_country"; scope = "country"; phase = "effect"
+      nestingDepth = 0; frequency = "event_or_effect"; traversalRange = "country"; amplification = "country_wide"
+      file = "common/scripted_effects/called.txt"; line = 1; confidence = "heuristic-static" }
+let callRelation =
+    { relationType = "calls_scripted_effect"; sourceId = "on_monthly_pulse"; targetId = "kuat_monthly_work"
+      sourceType = "on_action"; targetType = "scripted_effect"; file = "common/on_actions/pulse.txt"; line = 2
+      confidence = "semantic"; provenance = "test" }
+let propagated = propagateCosts [ "on_monthly_pulse" ] [ "on_monthly_pulse", [ monthlySeedCost ]; "kuat_monthly_work", [ calledTraversalCost ] ] [ callRelation ]
+assertTrue "monthly pulse frequency propagates through scripted effects"
+    (propagated |> List.exists (fun item -> item.targetId = "kuat_monthly_work" && item.effectiveFrequency = "monthly" && item.relativeScore = 360))
+
 // ─── JSON contract ──────────────────────────────────────────────────────────
 let facts =
     { costs = costFacts
+      propagatedCosts = []
       relations = relations @ projectRelations
       issues = issues
       filesConsidered = 3
       definitionsConsidered = 2
+      inlineExpansionsConsidered = 0
       truncated = false }
 let json = flowAnalysisJson facts
 assertTrue "json ok flag"
     (json.Item("ok").AsBoolean())
 assertTrue "json advertises the interprocedural flow contract"
-    (json.Item("version").AsInteger() = 3)
+    (json.Item("version").AsInteger() = 4)
 assertTrue "json cost caveat present"
     (json.Item("costModel").Item("caveat").AsString().Contains "Relative static weights")
 assertTrue "json exposes costs and relations"

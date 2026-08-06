@@ -15,6 +15,7 @@ import {
     generateProjectKnowledge,
     getProjectKnowledgeManifestPath,
     ProjectKnowledgeModelNotReadyError,
+    queryProjectKnowledge,
     writeUnavailableProjectKnowledge,
 } from './projectKnowledge';
 import { getKnownProfileByLanguageId } from '../gameProfiles';
@@ -25,6 +26,7 @@ import {
     buildProjectProfile,
     extractCustomRules,
     getProjectProfilePath,
+    mergeDeepCompatibilityEvidence,
     renderProjectRulesMarkdown,
     writeProjectProfile,
 } from './projectProfile';
@@ -265,6 +267,21 @@ async function generateInitFileCore(
                 knowledgeGeneratedAt: manifest.generatedAt,
                 staleReasons: manifest.staleReasons ?? [],
             };
+            // Optional for embedders/tests that provide only the export surface.
+            if (typeof queryProjectKnowledge === 'function') {
+                const compatibilityEvidence = await queryProjectKnowledge(root, {
+                    includeUnresolved: true,
+                    includeTopology: true,
+                    includeProjectPatterns: true,
+                    limit: 200,
+                });
+                if (compatibilityEvidence.status !== 'error' && compatibilityEvidence.status !== 'missing') {
+                    mergeDeepCompatibilityEvidence(profile, {
+                        unresolved: compatibilityEvidence.unresolved,
+                        definitionStacks: compatibilityEvidence.definitionStacks,
+                    });
+                }
+            }
             if (manifest.status === 'partial') {
                 deepKnowledgeWarning = 'Deep project knowledge was exported with partial coverage.';
             } else if (manifest.status !== 'ready') {

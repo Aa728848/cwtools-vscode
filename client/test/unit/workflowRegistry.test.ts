@@ -84,6 +84,19 @@ describe('AI Workflow Registry', () => {
         expect(wf.toolPolicy.tools).to.include('get_design_blueprint_contract');
     });
 
+    it('all built-in workflows expose the current deep semantic read tools', () => {
+        const required = [
+            'query_inline_instantiation', 'analyze_pdx_flow', 'compare_definition_with_vanilla',
+            'query_interface_knowledge', 'search_rule_capabilities', 'explain_scope',
+            'parse_pdx_fragment', 'get_pdx_block', 'get_completion_at',
+        ];
+        for (const id of ['diagnostic-fix', 'loc-generation', 'event-chain-design', 'rules-sync-review', 'asset-wiring']) {
+            const workflow = getWorkflow(id)!;
+            expect(workflow.toolPolicy.strategy).to.equal('allowlist');
+            for (const tool of required) expect(workflow.toolPolicy.tools, `${id} missing ${tool}`).to.include(tool as any);
+        }
+    });
+
     it('event-chain-design includes common review and reward planning gates', () => {
         const wf = getWorkflow('event-chain-design')!;
         expect(wf.phases.map(p => p.id)).to.include.members(['common-review', 'rewards']);

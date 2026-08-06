@@ -625,6 +625,12 @@ export interface QueryWorkspaceIndexResult {
             effectReferences: string[];
             spriteReferences: string[];
         };
+        scriptFacts?: {
+            stateAccesses: Array<{ operation: 'read' | 'set' | 'write' | 'clear' | 'save'; subject: string; scope: string; line: number }>;
+            localisationKeys: string[];
+            eventReferences: string[];
+            callCandidates: string[];
+        };
         updatedAt?: number;
         fileVersion?: number;
     }>;
@@ -665,6 +671,27 @@ export interface QueryWorkspaceIndexResult {
         }>;
         truncated?: boolean;
     }>;
+    /** Unified bounded GUI -> script/state/localisation/asset graph. */
+    interfaceGraph?: {
+        nodes: Array<{
+            id: string;
+            kind: 'gui' | 'script' | 'state' | 'localisation' | 'asset' | 'file' | 'unresolved';
+            name: string;
+            exists: boolean;
+            file?: string;
+            line?: number;
+            origin?: 'workspace' | 'vanilla';
+        }>;
+        edges: Array<{
+            source: string;
+            target: string;
+            kind: 'gui_effect' | 'gui_sprite' | 'gui_custom' | 'gui_localisation' | 'script_call' | 'event_call' | 'state_access' | 'script_localisation' | 'asset_reference';
+            operation?: string;
+            line?: number;
+        }>;
+        truncated: boolean;
+        maxDepth: number;
+    };
     _hint?: string;
 }
 
@@ -695,7 +722,14 @@ export interface ProjectProfile {
     compatibility?: {
         supportedVersion?: string;
         declaredDependencies: Array<{ name: string; source: string }>;
-        possibleSoftDependencies: Array<{ idOrPrefix: string; evidence: string; confidence: 'heuristic' }>;
+        possibleSoftDependencies: Array<{
+            idOrPrefix: string;
+            evidence: string;
+            confidence: 'heuristic';
+            /** Independent project signals that contributed to this inference. */
+            sources?: Array<'placeholder' | 'ignored_diagnostic' | 'definition_stack' | 'unresolved_id'>;
+            sampleIds?: string[];
+        }>;
         dependencyRoots: Array<{ name: string; root?: string; status: 'resolved' | 'unresolved'; source: string }>;
         loadOrder: {
             source: 'descriptor_only' | 'launcher_or_lsp';
@@ -703,7 +737,12 @@ export interface ProjectProfile {
             orderedLayers: string[];
             warnings: string[];
         };
-        coverage: { unresolvedIdInference: 'not_available' | 'available'; truncated: boolean };
+        coverage: {
+            unresolvedIdInference: 'not_available' | 'available';
+            truncated: boolean;
+            evidenceSources?: string[];
+            unavailableSources?: string[];
+        };
     };
     keyDirectories: Array<{
         key: string;
@@ -723,6 +762,13 @@ export interface ProjectProfile {
     };
     identifiers: {
         namespaces: string[];
+        /** Provenance keeps project-owned event IDs distinct from compatibility and override layers. */
+        namespaceDetails?: Array<{
+            name: string;
+            origin: 'workspace_owned' | 'vanilla_override' | 'compatibility' | 'external';
+            files: string[];
+            evidence: string;
+        }>;
         variablePrefixes: string[];
         /** Current TypeDef samples, populated only by typed LSP/project-knowledge sources. */
         byType: Record<string, string[]>;
@@ -1513,6 +1559,9 @@ export type AgentToolName =
     | 'query_localisation_index'
     | 'query_workspace_index'
     | 'explore_pdx_project'
+    | 'query_inline_instantiation'
+    | 'analyze_pdx_flow'
+    | 'compare_definition_with_vanilla'
     | 'query_project_profile'
     | 'query_project_knowledge'
     | 'query_interface_knowledge'

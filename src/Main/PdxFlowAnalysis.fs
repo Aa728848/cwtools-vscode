@@ -53,12 +53,23 @@ type FlowIssueFact =
       confidence: string
       provenance: string }
 
+type PropagatedCostFact =
+    { sourceId: string
+      targetId: string
+      callPath: string list
+      effectiveFrequency: string
+      relativeScore: int
+      localCostCount: int
+      provenance: string }
+
 type FlowAnalysisFacts =
     { costs: CostFact list
+      propagatedCosts: PropagatedCostFact list
       relations: GameplayRelationFact list
       issues: FlowIssueFact list
       filesConsidered: int
       definitionsConsidered: int
+      inlineExpansionsConsidered: int
       truncated: bool }
 
 type FlowQuery =
@@ -140,12 +151,6 @@ let private isPulseHandler (key: string) =
     lower.Contains "on_daily" || lower.Contains "on_monthly" || lower.Contains "on_yearly"
     || lower.Contains "on_quarterly"
 
-let private eventCallOperators =
-    [ "country_event"; "fleet_event"; "ship_event"; "planet_event"; "system_event"
-      "starbase_event"; "megastructure_event"; "pop_event"; "army_event"; "ambient_object_event"
-      "any_country_event"; "any_planet_event"; "any_system_event"; "fire_on_action" ]
-    |> Set.ofList
-
 let private whileAmplification (node: Node) =
     let rec descendants (current: Node) =
         seq {
@@ -217,8 +222,74 @@ let collectCosts (root: Node) (file: string) =
     visit root ""
     costs |> Seq.toList
 
+let propagateCosts (seedIds: string list) (definitionCosts: (string * CostFact list) list) (relations: GameplayRelationFact list) =
+    let costsByDefinition = Dictionary<string, CostFact list>(StringComparer.OrdinalIgnoreCase)
+    for definitionId, costs in definitionCosts do costsByDefinition.[definitionId] <- costs
+    let callGraph = Dictionary<string, ResizeArray<string>>(StringComparer.OrdinalIgnoreCase)
+    for relation in relations do
+        if relation.relationType = "calls_event"
+           || relation.relationType = "calls_scripted_effect"
+           || relation.relationType = "calls_scripted_trigger"
+           || relation.relationType = "fires_on_action" then
+            let targets =
+                match callGraph.TryGetValue relation.sourceId with
+                | true, values -> values
+                | _ -> let values = ResizeArray<string>() in callGraph.[relation.sourceId] <- values; values
+            if not (targets.Contains relation.targetId) then targets.Add relation.targetId
+    let frequencyRank value =
+        match value with
+        | "daily" -> 365
+        | "monthly" -> 12
+        | "quarterly" -> 4
+        | "yearly" -> 1
+        | "per_tick_while_running" -> 500
+        | _ -> 1
+    let relativeCostScore (items: CostFact list) =
+        items
+        |> List.sumBy (fun cost ->
+            let scopeWeight = if traversalWeight.ContainsKey cost.scope then traversalWeight.[cost.scope] else 10
+            scopeWeight * max 1 (cost.nestingDepth + 1))
+    let propagated = ResizeArray<PropagatedCostFact>()
+    for seedId in seedIds do
+        let inheritedFrequency =
+            match costsByDefinition.TryGetValue seedId with
+            | true, seedCosts ->
+                seedCosts
+                |> List.sortByDescending (fun cost -> frequencyRank cost.frequency)
+                |> List.tryHead
+                |> Option.map _.frequency
+                |> Option.defaultValue "event_or_effect"
+            | _ -> "event_or_effect"
+        let queue = Queue<string * string list * int>()
+        let visited = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        queue.Enqueue(seedId, [ seedId ], 0)
+        while queue.Count > 0 do
+            let current, path, depth = queue.Dequeue()
+            if depth <= 8 && visited.Add current then
+                match callGraph.TryGetValue current with
+                | true, targets ->
+                    for target in targets |> Seq.sort do
+                        let nextPath = path @ [ target ]
+                        match costsByDefinition.TryGetValue target with
+                        | true, targetCosts when not targetCosts.IsEmpty ->
+                            propagated.Add
+                                { sourceId = seedId
+                                  targetId = target
+                                  callPath = nextPath
+                                  effectiveFrequency = inheritedFrequency
+                                  relativeScore = relativeCostScore targetCosts * frequencyRank inheritedFrequency
+                                  localCostCount = targetCosts.Length
+                                  provenance = "bounded-static-call-graph" }
+                        | _ -> ()
+                        if depth < 8 then queue.Enqueue(target, nextPath, depth + 1)
+                | _ -> ()
+    propagated
+    |> Seq.distinctBy (fun item -> item.sourceId, item.targetId, item.callPath)
+    |> Seq.sortByDescending _.relativeScore
+    |> Seq.toList
+
 /// Collect gameplay relations from a definition root.
-let collectRelations (root: Node) (file: string) (definitionId: string) (definitionType: string) =
+let private collectRelationsWithOperators (eventCallOperators: Set<string>) (root: Node) (file: string) (definitionId: string) (definitionType: string) =
     let relations = ResizeArray<GameplayRelationFact>()
     let addRelation relationType targetId targetType line =
         if not (String.IsNullOrWhiteSpace targetId) then
@@ -309,6 +380,9 @@ let collectRelations (root: Node) (file: string) (definitionId: string) (definit
             visit child
     visit root
     relations |> Seq.toList
+
+let collectRelations (root: Node) (file: string) (definitionId: string) (definitionType: string) =
+    collectRelationsWithOperators (PdxEventSemantics.eventCallOperatorsInNode root) root file definitionId definitionType
 
 type private StateAccess =
     { operation: string
@@ -423,7 +497,7 @@ let private conditionPathText path =
             else "requires"
         Some(relation + ":" + String.concat ">" ordered)
 
-let private collectEventCalls definitionId file (root: Node) =
+let private collectEventCalls (eventCallOperators: Set<string>) definitionId file (root: Node) =
     let calls = ResizeArray<EventCall>()
     let sourceScope = eventScopeFromKey root.Key
     let rec visit (node: Node) phase conditionPath =
@@ -499,7 +573,7 @@ let private collectEventCalls definitionId file (root: Node) =
     visit root "" []
     calls |> Seq.toList
 
-let stateIssues definitionId file (root: Node) =
+let private stateIssuesWithOperators eventCallOperators definitionId file (root: Node) =
     let issues = ResizeArray<FlowIssueFact>()
     let accesses = collectStateAccesses root
     let initialized = HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -543,7 +617,7 @@ let stateIssues definitionId file (root: Node) =
                   line = access.line
                   confidence = "heuristic"
                   provenance = "ordered-ast-state-analysis" }
-    let calls = collectEventCalls definitionId file root
+    let calls = collectEventCalls eventCallOperators definitionId file root
     let localTargets = accesses |> List.filter (fun item -> item.operation = "save" && item.scope = "local_event")
     for call in calls |> List.filter _.delayed do
         for target in localTargets |> List.filter (fun target -> target.line <= call.line) do
@@ -578,6 +652,9 @@ let stateIssues definitionId file (root: Node) =
               provenance = "explicit-operator" }
     issues |> Seq.distinctBy (fun item -> item.kind, item.subject, item.line) |> Seq.toList
 
+let stateIssues definitionId file (root: Node) =
+    stateIssuesWithOperators (PdxEventSemantics.eventCallOperatorsInNode root) definitionId file root
+
 let private rootsByFile (game: IGame<'T>) =
     let map = Dictionary<string, ResizeArray<Node>>(StringComparer.OrdinalIgnoreCase)
     for struct (entity, _) in game.AllEntities() do
@@ -596,14 +673,17 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
     let checkCancelled () = if shouldCancel () then raise (OperationCanceledException("PDX flow analysis was cancelled."))
     checkCancelled ()
     let byFile = rootsByFile game
+    let eventCallOperators = PdxEventSemantics.eventCallOperators game
     let costs = ResizeArray<CostFact>()
     let relations = ResizeArray<GameplayRelationFact>()
     let issues = ResizeArray<FlowIssueFact>()
     let eventCalls = ResizeArray<EventCall>()
     let stateAccessesByDefinition = Dictionary<string, StateAccess list>(StringComparer.OrdinalIgnoreCase)
+    let localCostsByDefinition = Dictionary<string, CostFact list>(StringComparer.OrdinalIgnoreCase)
     let eventDefinitions = Dictionary<string, string * string * int * bool>(StringComparer.OrdinalIgnoreCase)
     let visitedFiles = HashSet<string>(StringComparer.OrdinalIgnoreCase)
     let mutable definitionsConsidered = 0
+    let mutable inlineExpansionsConsidered = 0
 
     let considerFile (file: string) =
         checkCancelled ()
@@ -639,6 +719,7 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
         |> Map.toSeq
         |> Seq.collect (fun (definitionType, values) -> values |> Seq.map (fun value -> definitionType, value))
         |> Seq.toList
+    let inlineGraph = InlineGraph.collectInlineGraphCancellable shouldCancel (game.AllEntities())
     let seedDefinitions =
         allDefinitions
         |> Seq.ofList
@@ -648,36 +729,18 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
             && query.file |> Option.forall (fun expected -> normalizePath definition.range.FileName |> fun file -> file.EndsWith(normalizePath expected, StringComparison.OrdinalIgnoreCase)))
         |> Seq.sortBy (fun (definitionType, definition) -> definitionType, definition.id, normalizePath definition.range.FileName, int definition.range.StartLine)
         |> Seq.toList
-    let directEventTargets =
-        seedDefinitions
-        |> Seq.collect (fun (_, definition) ->
-            match findBlock definition.range.FileName definition.range with
-            | Some block ->
-                collectEventCalls definition.id (normalizePath definition.range.FileName) block
-                |> Seq.filter (fun call -> call.targetKind = "event")
-                |> Seq.map _.targetId
-            | None -> Seq.empty)
-        |> HashSet<string>
-    let definitions =
-        seq {
-            yield! seedDefinitions
-            for definitionType, definition in allDefinitions do
-                if directEventTargets.Contains definition.id && definitionType.Contains("event", StringComparison.OrdinalIgnoreCase) then
-                    yield definitionType, definition
-        }
-        |> Seq.distinctBy (fun (definitionType, definition) -> definitionType.ToLowerInvariant(), definition.id.ToLowerInvariant(), normalizePath definition.range.FileName, int definition.range.StartLine)
-        |> Seq.sortBy (fun (definitionType, definition) -> definitionType, definition.id, normalizePath definition.range.FileName, int definition.range.StartLine)
-        |> Seq.truncate (max 1 (min query.limit 500))
-        |> Seq.toList
-    let knownScriptedDefinitions =
-        game.Types()
-        |> Map.toSeq
-        |> Seq.collect (fun (definitionType, values) ->
-            let lower = definitionType.ToLowerInvariant()
-            if lower.Contains "scripted_effect" || lower.Contains "scripted_trigger" then
-                values |> Seq.map (fun definition -> definition.id.ToLowerInvariant(), (definition.id, definitionType))
-            else Seq.empty)
-        |> dict
+    let knownScriptedDefinitions = Dictionary<string, string * string>(StringComparer.OrdinalIgnoreCase)
+    let definitionsById = Dictionary<string, ResizeArray<string * CWTools.Common.NewScope.TypeDefInfo>>(StringComparer.OrdinalIgnoreCase)
+    for definitionType, definition in allDefinitions |> List.sortBy (fun (definitionType, definition) -> definitionType, definition.id) do
+        let bucket =
+            match definitionsById.TryGetValue definition.id with
+            | true, values -> values
+            | _ -> let values = ResizeArray() in definitionsById.[definition.id] <- values; values
+        bucket.Add(definitionType, definition)
+        let lower = definitionType.ToLowerInvariant()
+        if (lower.Contains "scripted_effect" || lower.Contains "scripted_trigger")
+           && not (knownScriptedDefinitions.ContainsKey definition.id) then
+            knownScriptedDefinitions.[definition.id] <- definition.id, definitionType
     let collectScriptedCalls (definitionId: string) (definitionType: string) file (root: Node) =
         let found = ResizeArray<GameplayRelationFact>()
         let add (key: string) line =
@@ -700,17 +763,140 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
             for child in node.Nodes do visit child
         visit root
         found
+    let invocationById = inlineGraph.invocations |> Seq.map (fun item -> item.invocationId, item) |> dict
+    let inlineReferencesFor definitionId =
+        inlineGraph.generatedReferences
+        |> List.filter (fun reference ->
+            match invocationById.TryGetValue reference.invocationId with
+            | true, invocation -> invocation.enclosingDefinition |> Option.exists (fun value -> value.Equals(definitionId, StringComparison.OrdinalIgnoreCase))
+            | _ -> false)
+    let selectionLimit = max 1 (min query.limit 500)
+    let selected = ResizeArray<string * CWTools.Common.NewScope.TypeDefInfo>()
+    let selectedKeys = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    let queuedKeys = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    let queue = Queue<string * CWTools.Common.NewScope.TypeDefInfo>()
+    let definitionKey (definitionType: string) (definition: CWTools.Common.NewScope.TypeDefInfo) =
+        definitionType + "\u0000" + definition.id + "\u0000" + normalizePath definition.range.FileName + "\u0000" + string definition.range.StartLine
+    let enqueue (definitionType, definition) =
+        let key = definitionKey definitionType definition
+        if queuedKeys.Add key then queue.Enqueue(definitionType, definition)
+    for definition in seedDefinitions do enqueue definition
+    let enqueueTarget targetId preferredKind =
+        match definitionsById.TryGetValue targetId with
+        | true, candidates ->
+            let preferred =
+                candidates
+                |> Seq.filter (fun (definitionType, _) ->
+                    match preferredKind with
+                    | "event" -> definitionType.Contains("event", StringComparison.OrdinalIgnoreCase)
+                    | "on_action" -> definitionType.Contains("on_action", StringComparison.OrdinalIgnoreCase)
+                    | "scripted" -> definitionType.Contains("scripted_", StringComparison.OrdinalIgnoreCase)
+                    | _ -> true)
+                |> Seq.toList
+            for candidate in (if preferred.IsEmpty then candidates |> Seq.toList else preferred) do enqueue candidate
+        | _ -> ()
+    while queue.Count > 0 && selected.Count < selectionLimit do
+        checkCancelled ()
+        let definitionType, definition = queue.Dequeue()
+        let key = definitionKey definitionType definition
+        if selectedKeys.Add key then
+            selected.Add(definitionType, definition)
+            match findBlock definition.range.FileName definition.range with
+            | Some block ->
+                for call in collectEventCalls eventCallOperators definition.id (normalizePath definition.range.FileName) block do
+                    enqueueTarget call.targetId call.targetKind
+                for relation in collectScriptedCalls definition.id definitionType (normalizePath definition.range.FileName) block do
+                    enqueueTarget relation.targetId "scripted"
+                for reference in inlineReferencesFor definition.id do
+                    if reference.referenceKind = "event" then enqueueTarget reference.expandedValue "event"
+                    elif reference.referenceKind = "call_candidate" && knownScriptedDefinitions.ContainsKey reference.expandedValue then
+                        enqueueTarget reference.expandedValue "scripted"
+            | None -> ()
+    let definitions = selected |> Seq.toList
     for definitionType, definition in definitions do
         checkCancelled ()
         definitionsConsidered <- definitionsConsidered + 1
         considerFile (normalizePath definition.range.FileName)
         match findBlock definition.range.FileName definition.range with
         | Some block ->
-            relations.AddRange(collectRelations block (normalizePath definition.range.FileName) definition.id definitionType)
-            relations.AddRange(collectScriptedCalls definition.id definitionType (normalizePath definition.range.FileName) block)
-            issues.AddRange(stateIssues definition.id (normalizePath definition.range.FileName) block)
-            stateAccessesByDefinition.[definition.id] <- collectStateAccesses block
-            eventCalls.AddRange(collectEventCalls definition.id (normalizePath definition.range.FileName) block)
+            let definitionFile = normalizePath definition.range.FileName
+            relations.AddRange(collectRelationsWithOperators eventCallOperators block definitionFile definition.id definitionType)
+            relations.AddRange(collectScriptedCalls definition.id definitionType definitionFile block)
+            issues.AddRange(stateIssuesWithOperators eventCallOperators definition.id definitionFile block)
+            let inlineReferences = inlineReferencesFor definition.id
+            let directCosts = collectCosts block definitionFile
+            let expandedCosts = ResizeArray<CostFact>()
+            let expandedState = ResizeArray<StateAccess>()
+            let relevantInvocations =
+                inlineGraph.invocations
+                |> List.filter (fun invocation ->
+                    invocation.enclosingDefinition
+                    |> Option.exists (fun value -> value.Equals(definition.id, StringComparison.OrdinalIgnoreCase)))
+            for invocation in relevantInvocations do
+                inlineExpansionsConsidered <- inlineExpansionsConsidered + 1
+                relations.Add
+                    { relationType = "expands_inline_script"
+                      sourceId = definition.id
+                      targetId = invocation.templateId
+                      sourceType = definitionType
+                      targetType = "inline_script"
+                      file = definitionFile
+                      line = invocation.callerLine
+                      confidence = "semantic"
+                      provenance = "inline-instantiation-graph" }
+                inlineGraph.templates
+                |> List.tryFind (fun template -> template.templateId.Equals(invocation.templateId, StringComparison.OrdinalIgnoreCase))
+                |> Option.iter (fun template ->
+                    match byFile.TryGetValue(normalizePath template.file) with
+                    | true, roots ->
+                        for root in roots do expandedCosts.AddRange(collectCosts root (normalizePath template.file))
+                    | _ -> ())
+            for reference in inlineReferences do
+                if reference.referenceKind.StartsWith("state:", StringComparison.Ordinal) then
+                    match reference.referenceKind.Split(':') with
+                    | [| _; operation; scope |] ->
+                        expandedState.Add
+                            { operation = operation
+                              subject = reference.expandedValue
+                              scope = scope
+                              line = reference.generatedLine
+                              conditional = false
+                              phase = "inline_expansion" }
+                    | _ -> ()
+                elif reference.referenceKind = "event" then
+                    eventCalls.Add
+                        { sourceId = definition.id
+                          targetId = reference.expandedValue
+                          targetKind = "event"
+                          operator = "inline_event_reference"
+                          file = definitionFile
+                          line = reference.generatedLine
+                          delayed = false
+                          delay = None
+                          phase = "inline_expansion"
+                          conditionPath = None
+                          scopeMap = None
+                          sourceScope = eventScopeFromKey block.Key
+                          targetScope = None }
+                elif reference.referenceKind = "call_candidate" then
+                    match knownScriptedDefinitions.TryGetValue reference.expandedValue with
+                    | true, (targetId, targetType) when not (targetId.Equals(definition.id, StringComparison.OrdinalIgnoreCase)) ->
+                        relations.Add
+                            { relationType = if targetType.ToLowerInvariant().Contains "trigger" then "calls_scripted_trigger" else "calls_scripted_effect"
+                              sourceId = definition.id
+                              targetId = targetId
+                              sourceType = definitionType
+                              targetType = targetType
+                              file = definitionFile
+                              line = reference.generatedLine
+                              confidence = "semantic"
+                              provenance = "inline-expanded-scripted-definition-id" }
+                    | _ -> ()
+            let combinedCosts = directCosts @ (expandedCosts |> Seq.toList)
+            localCostsByDefinition.[definition.id] <- combinedCosts
+            costs.AddRange expandedCosts
+            stateAccessesByDefinition.[definition.id] <- collectStateAccesses block @ (expandedState |> Seq.toList)
+            eventCalls.AddRange(collectEventCalls eventCallOperators definition.id definitionFile block)
             if definitionType.ToLowerInvariant().Contains "event" || block.Key.ToLowerInvariant().EndsWith("_event") then
                 let isTriggeredOnly =
                     block.Values
@@ -751,6 +937,16 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
                   confidence = "semantic"
                   provenance = "explicit-fire_on_action" }
         else
+            relations.Add
+                { relationType = "calls_event"
+                  sourceId = call.sourceId
+                  targetId = call.targetId
+                  sourceType = "event_or_definition"
+                  targetType = "event"
+                  file = call.file
+                  line = call.line
+                  confidence = "semantic"
+                  provenance = if call.operator = "inline_event_reference" then "inline-instantiation-graph" else "explicit-event-call" }
             let incomingForTarget =
                 match incomingCalls.TryGetValue call.targetId with
                 | true, values -> values
@@ -913,6 +1109,11 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
                 { item with confidence = "semantic"; provenance = "resolved-definition-id" }
             else item)
         |> Seq.toList
+    let propagatedCosts =
+        propagateCosts
+            (seedDefinitions |> List.map (fun (_, definition) -> definition.id))
+            (localCostsByDefinition |> Seq.map (fun pair -> pair.Key, pair.Value) |> Seq.toList)
+            allRelations
     for relation in allRelations do
         if relation.confidence <> "semantic"
            && not (relation.targetId.Contains("$", StringComparison.Ordinal))
@@ -930,11 +1131,13 @@ let analyzePdxFlowCancellable (shouldCancel: unit -> bool) (game: IGame<'T>) (qu
     let allIssues = issues |> Seq.distinctBy (fun item -> item.kind, item.definitionId, item.subject, item.line) |> Seq.toList
     checkCancelled ()
     { costs = allCosts |> List.truncate limit
+      propagatedCosts = propagatedCosts |> List.truncate limit
       relations = allRelations |> List.truncate limit
       issues = allIssues |> List.truncate limit
       filesConsidered = visitedFiles.Count
       definitionsConsidered = definitionsConsidered
-      truncated = allCosts.Length > limit || allRelations.Length > limit || allIssues.Length > limit }
+      inlineExpansionsConsidered = inlineExpansionsConsidered
+      truncated = allCosts.Length > limit || allRelations.Length > limit || allIssues.Length > limit || propagatedCosts.Length > limit }
 
 let analyzePdxFlow game query = analyzePdxFlowCancellable (fun () -> false) game query
 
@@ -974,10 +1177,19 @@ let flowAnalysisJsonWithFreshness (facts: FlowAnalysisFacts) freshness staleReas
               Some("line", JsonValue.Number(decimal issue.line))
               Some("confidence", JsonValue.String issue.confidence)
               Some("provenance", JsonValue.String issue.provenance) ]
+    let propagatedCostJson (cost: PropagatedCostFact) =
+        jsonRecord
+            [ Some("sourceId", JsonValue.String cost.sourceId)
+              Some("targetId", JsonValue.String cost.targetId)
+              Some("callPath", jsonStringArray cost.callPath)
+              Some("effectiveFrequency", JsonValue.String cost.effectiveFrequency)
+              Some("relativeScore", JsonValue.Number(decimal cost.relativeScore))
+              Some("localCostCount", JsonValue.Number(decimal cost.localCostCount))
+              Some("provenance", JsonValue.String cost.provenance) ]
     jsonRecord
         [ Some("ok", JsonValue.Boolean true)
           Some("source", JsonValue.String "cwtools-pdx-flow-analysis")
-          Some("version", JsonValue.Number 3m)
+          Some("version", JsonValue.Number 4m)
           Some("freshness", jsonRecord
               [ Some("status", JsonValue.String freshness)
                 Some("source", JsonValue.String "active_lsp_model")
@@ -992,6 +1204,9 @@ let flowAnalysisJsonWithFreshness (facts: FlowAnalysisFacts) freshness staleReas
           Some("costs", facts.costs
               |> List.sortByDescending (fun item -> item.nestingDepth)
               |> List.map costJson |> List.toArray |> JsonValue.Array)
+          Some("propagatedCosts", facts.propagatedCosts
+              |> List.sortByDescending _.relativeScore
+              |> List.map propagatedCostJson |> List.toArray |> JsonValue.Array)
           Some("relations", facts.relations
               |> List.sortBy (fun item -> item.relationType, item.sourceId)
               |> List.map relationJson |> List.toArray |> JsonValue.Array)
@@ -1003,7 +1218,9 @@ let flowAnalysisJsonWithFreshness (facts: FlowAnalysisFacts) freshness staleReas
                 Some("filesIndexed", JsonValue.Number(decimal facts.filesConsidered))
                 Some("definitionsConsidered", JsonValue.Number(decimal facts.definitionsConsidered))
                 Some("definitionsIndexed", JsonValue.Number(decimal facts.definitionsConsidered))
+                Some("inlineExpansionsConsidered", JsonValue.Number(decimal facts.inlineExpansionsConsidered))
                 Some("costsFound", JsonValue.Number(decimal facts.costs.Length))
+                Some("propagatedCostsFound", JsonValue.Number(decimal facts.propagatedCosts.Length))
                 Some("relationsFound", JsonValue.Number(decimal facts.relations.Length))
                 Some("issuesFound", JsonValue.Number(decimal facts.issues.Length))
                 Some("truncated", JsonValue.Boolean facts.truncated)

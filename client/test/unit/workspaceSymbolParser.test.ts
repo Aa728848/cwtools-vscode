@@ -284,11 +284,11 @@ describe('Workspace Symbol Parser (GUI recursion)', () => {
         expect(names).to.include('kuat_deepest');
     });
 
-    it('preserves single-line nested effectButtonType name, effect and sprite', () => {
+    it('preserves single-line nested effectButtonType name, effect and quadTextureSprite', () => {
         const gui = [
             'containerType = {',
             '    name = "kuat_actions"',
-            '    effectButtonType = { name = "kuat_btn_1" effect = "kuat_button_effect_1" sprite = "GFX_kuat_btn" }',
+            '    effectButtonType = { name = "kuat_btn_1" effect = "kuat_button_effect_1" quadTextureSprite = "GFX_kuat_btn" }',
             '}',
         ].join('\n');
         const entries = parseWorkspaceSymbols(gui, '/mod/interface/kuat.gui', { definitionTypes: [] });
@@ -302,6 +302,7 @@ describe('Workspace Symbol Parser (GUI recursion)', () => {
             file: '/mod/interface/kuat.gui', line: 3,
             context: 'effect = kuat_button_effect_1', property: 'effect', target: 'kuat_button_effect_1',
         });
+        expect(button!.guiFacts?.spriteReferences).to.include('GFX_kuat_btn');
     });
 
     it('does not treat field wrappers as named definitions', () => {
@@ -336,5 +337,25 @@ describe('Workspace Symbol Parser (GUI recursion)', () => {
         expect(entry?.guiFacts?.customGuiReferences).to.include('contract_window');
         expect(entry?.guiFacts?.effectReferences).to.include('contract_button_effect');
         expect(entry?.guiFacts?.spriteReferences).to.include('GFX_contract_button');
+    });
+});
+
+describe('Workspace Symbol Parser (script flow facts)', () => {
+    it('indexes state, event, scripted-call and localisation facts inside definitions', () => {
+        const script = [
+            'kuat_button_effect = {',
+            '    set_country_flag = kuat_ready',
+            '    custom_tooltip = KUAT_READY_TT',
+            '    carrier_event = { id = kuat.200 }',
+            '    kuat_followup_effect = { }',
+            '}',
+        ].join('\n');
+        const entry = parseWorkspaceSymbols(script, '/mod/common/button_effects/kuat.txt')
+            .find(item => item.name === 'kuat_button_effect');
+
+        expect(entry?.scriptFacts?.stateAccesses).to.deep.include({ operation: 'set', subject: 'kuat_ready', scope: 'country', line: 2 });
+        expect(entry?.scriptFacts?.localisationKeys).to.include('KUAT_READY_TT');
+        expect(entry?.scriptFacts?.eventReferences).to.include('kuat.200');
+        expect(entry?.scriptFacts?.callCandidates).to.include('kuat_followup_effect');
     });
 });

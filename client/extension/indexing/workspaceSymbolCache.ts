@@ -4,8 +4,8 @@ import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js';
 import { getWorkspaceCacheRoot } from '../ai/workspacePaths';
 import type { WorkspaceSymbolEntry, WorkspaceSymbolOrigin } from './workspaceSymbolParser';
 
-const SCHEMA_VERSION = 3;
-const PARSER_VERSION = 5;
+const SCHEMA_VERSION = 5;
+const PARSER_VERSION = 6;
 
 const CURRENT_SCHEMA_SQL = `
     CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -27,7 +27,9 @@ const CURRENT_SCHEMA_SQL = `
         container TEXT,
         category TEXT,
         updated_at REAL NOT NULL,
-        gui_facts_json TEXT
+        gui_facts_json TEXT,
+        script_facts_json TEXT,
+        references_json TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name_lower);
     CREATE INDEX IF NOT EXISTS idx_symbols_kind_name ON symbols(kind, name_lower);
@@ -149,6 +151,64 @@ function parseGuiFacts(value: unknown): WorkspaceSymbolEntry['guiFacts'] {
     }
 }
 
+function parseScriptFacts(value: unknown): WorkspaceSymbolEntry['scriptFacts'] {
+    if (typeof value !== 'string' || !value) return undefined;
+    try {
+        const parsed: unknown = JSON.parse(value);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+        const record = parsed as Record<string, unknown>;
+        const strings = (field: string): string[] => Array.isArray(record[field])
+            ? record[field].filter((item): item is string => typeof item === 'string').slice(0, 60)
+            : [];
+        const stateAccesses = Array.isArray(record.stateAccesses)
+            ? record.stateAccesses.flatMap(item => {
+                if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+                const access = item as Record<string, unknown>;
+                if (!['read', 'set', 'write', 'clear', 'save'].includes(String(access.operation))
+                    || typeof access.subject !== 'string' || typeof access.scope !== 'string'
+                    || typeof access.line !== 'number' || !Number.isFinite(access.line)) return [];
+                return [{
+                    operation: access.operation as 'read' | 'set' | 'write' | 'clear' | 'save',
+                    subject: access.subject,
+                    scope: access.scope,
+                    line: Math.max(1, Math.trunc(access.line)),
+                }];
+            }).slice(0, 40)
+            : [];
+        return {
+            stateAccesses,
+            localisationKeys: strings('localisationKeys'),
+            eventReferences: strings('eventReferences'),
+            callCandidates: strings('callCandidates'),
+        };
+    } catch {
+        return undefined;
+    }
+}
+
+function parseReferences(value: unknown): WorkspaceSymbolEntry['references'] {
+    if (typeof value !== 'string' || !value) return undefined;
+    try {
+        const parsed: unknown = JSON.parse(value);
+        if (!Array.isArray(parsed)) return undefined;
+        const references = parsed.flatMap(item => {
+            if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+            const reference = item as Record<string, unknown>;
+            if (typeof reference.file !== 'string' || typeof reference.line !== 'number' || typeof reference.context !== 'string') return [];
+            return [{
+                file: reference.file,
+                line: Math.max(1, Math.trunc(reference.line)),
+                context: reference.context.slice(0, 240),
+                property: typeof reference.property === 'string' ? reference.property : undefined,
+                target: typeof reference.target === 'string' ? reference.target : undefined,
+            }];
+        }).slice(0, 20);
+        return references.length > 0 ? references : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 export class WorkspaceSymbolSqliteCache {
     private database: Database | undefined;
 
@@ -217,7 +277,7 @@ export class WorkspaceSymbolSqliteCache {
         const rows = database.exec(`
             SELECT f.path, f.size, f.mtime_ms, f.origin, f.file_version,
                    s.name, s.kind, s.line, s.source, s.container, s.category,
-                   s.updated_at, s.gui_facts_json
+                   s.updated_at, s.gui_facts_json, s.script_facts_json, s.references_json
             FROM files f
             LEFT JOIN symbols s ON s.file_path = f.path
             ORDER BY f.path, s.id
@@ -248,6 +308,8 @@ export class WorkspaceSymbolSqliteCache {
                 updatedAt: Number(row[11] ?? fact.mtimeMs),
                 fileVersion: fact.fileVersion,
                 guiFacts: parseGuiFacts(row[12]),
+                scriptFacts: parseScriptFacts(row[13]),
+                references: parseReferences(row[14]),
             });
         }
         return { files, entries, coverage };
@@ -302,8 +364,8 @@ export class WorkspaceSymbolSqliteCache {
             const insertSymbol = database.prepare(`
                 INSERT INTO symbols(
                     file_path, name, name_lower, kind, line, source,
-                    container, category, updated_at, gui_facts_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    container, category, updated_at, gui_facts_json, script_facts_json, references_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
             for (const changed of changedFiles) {
                 const normalized = normalizePath(changed.path);
@@ -327,6 +389,8 @@ export class WorkspaceSymbolSqliteCache {
                         entry.category ?? null,
                         entry.updatedAt ?? changed.mtimeMs,
                         entry.guiFacts ? JSON.stringify(entry.guiFacts) : null,
+                        entry.scriptFacts ? JSON.stringify(entry.scriptFacts) : null,
+                        entry.references ? JSON.stringify(entry.references) : null,
                     ]);
                 }
             }
@@ -375,7 +439,9 @@ export class WorkspaceSymbolSqliteCache {
 			|| metadata.get('parser_version') !== String(PARSER_VERSION)
 			|| metadata.get('source_root') !== expectedRoot
 			|| metadata.get('source_fingerprint') !== this.sourceFingerprint
-			|| !symbolColumns.has('gui_facts_json');
+			|| !symbolColumns.has('gui_facts_json')
+			|| !symbolColumns.has('script_facts_json')
+			|| !symbolColumns.has('references_json');
 		if (invalid) {
 			// Generated symbol caches have no compatibility path. Replace every
 			// non-current layout so later SELECTs never depend on missing columns.

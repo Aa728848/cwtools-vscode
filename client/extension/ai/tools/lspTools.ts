@@ -4742,6 +4742,9 @@ export class LspToolHandler {
         const assetChain = args.includeAssetChain === true
             ? this.buildAssetChain(entries, args.origin !== 'workspace')
             : undefined;
+        const interfaceGraph = args.includeAssetChain === true
+            ? this.buildInterfaceGraph(entries, args.origin !== 'workspace')
+            : undefined;
 
         return {
             status: indexStatus,
@@ -4757,6 +4760,7 @@ export class LspToolHandler {
                 category: entry.category,
                 references: args.includeReferences ? entry.references : undefined,
                 guiFacts: entry.guiFacts,
+                scriptFacts: entry.scriptFacts,
                 updatedAt: entry.updatedAt,
                 fileVersion: entry.fileVersion,
             })),
@@ -4772,6 +4776,7 @@ export class LspToolHandler {
                 unsupportedConstructs: indexStatus === 'partial' ? ['index_file_limit_reached'] : [],
             },
             assetChain,
+            interfaceGraph,
             _hint: indexStatus === 'ready'
                 ? undefined
                 : indexStatus === 'partial'
@@ -4811,11 +4816,17 @@ export class LspToolHandler {
                 const frameCount = (current.symbol.references ?? [])
                     .map(reference => /(?:^|[\s{])noOfFrames\s*=\s*(\d+)/i.exec(reference.context ?? '')?.[1])
                     .find(Boolean);
-                for (const reference of current.symbol.references ?? []) {
+                const structuredReferences: import('../../indexing/workspaceSymbolParser').WorkspaceSymbolReference[] = [
+                    ...(current.symbol.references ?? []),
+                    ...((current.symbol.guiFacts?.effectReferences ?? []).map(target => ({ file: current.symbol.file, line: current.symbol.line, context: `effect = ${target}`, property: 'effect', target }))),
+                    ...((current.symbol.guiFacts?.spriteReferences ?? []).map(target => ({ file: current.symbol.file, line: current.symbol.line, context: `quadTextureSprite = ${target}`, property: 'quadtexturesprite', target }))),
+                    ...((current.symbol.guiFacts?.customGuiReferences ?? []).map(target => ({ file: current.symbol.file, line: current.symbol.line, context: `custom_gui = ${target}`, property: 'custom_gui', target }))),
+                ];
+                for (const reference of structuredReferences) {
                     const context = reference.context ?? '';
                     const match = reference.property && reference.target
                         ? undefined
-                        : context.match(/(?:^|[\s{])(texturefile|file|files?|effect|sprite|entity|mesh|animation|sound|material|shader)\s*=\s*"?([^"\s}]+)"?/i);
+                        : context.match(/(?:^|[\s{])(texturefile|file|files?|effect|sprite|quadTextureSprite|custom_gui|entity|mesh|animation|sound|material|shader)\s*=\s*"?([^"\s}]+)"?/i);
                     const property = (reference.property ?? match?.[1] ?? '').toLowerCase();
                     const target = (reference.target ?? match?.[2] ?? '').replace(/\\/g, '/');
                     if (!property || !target) continue;
@@ -4859,7 +4870,9 @@ export class LspToolHandler {
                         refs.push({
                             target,
                             exists: resolved.length > 0,
-                            kind: property === 'effect' ? 'button_effect_or_scripted_effect' : property,
+                            kind: property === 'effect' ? 'button_effect_or_scripted_effect'
+                                : property === 'quadtexturesprite' ? 'sprite'
+                                    : property,
                             depth: current.depth + 1,
                             sourceFile: reference.file,
                             sourceLine: reference.line,
@@ -4877,6 +4890,103 @@ export class LspToolHandler {
             }
         }
         return chain;
+    }
+
+    private buildInterfaceGraph(
+        entries: Array<import('../../indexing/workspaceSymbolParser').WorkspaceSymbolEntry>,
+        includeVanilla: boolean,
+    ): NonNullable<import('../types').QueryWorkspaceIndexResult['interfaceGraph']> {
+        type GraphNode = NonNullable<import('../types').QueryWorkspaceIndexResult['interfaceGraph']>['nodes'][number];
+        type GraphEdge = NonNullable<import('../types').QueryWorkspaceIndexResult['interfaceGraph']>['edges'][number];
+        const nodes = new Map<string, GraphNode>();
+        const edges: GraphEdge[] = [];
+        const edgeKeys = new Set<string>();
+        const queue: Array<{ symbol: import('../../indexing/workspaceSymbolParser').WorkspaceSymbolEntry; id: string; depth: number }> = [];
+        const visited = new Set<string>();
+        let truncated = false;
+        const maxDepth = 4;
+        const nodeId = (kind: GraphNode['kind'], name: string, file = '') => `${kind}:${name.toLowerCase()}:${file.toLowerCase()}`;
+        const addNode = (node: GraphNode): string => {
+            const id = node.id;
+            if (!nodes.has(id)) nodes.set(id, node);
+            if (nodes.size >= 300) truncated = true;
+            return id;
+        };
+        const addEdge = (edge: GraphEdge): void => {
+            const key = `${edge.source}|${edge.target}|${edge.kind}|${edge.operation ?? ''}|${edge.line ?? 0}`;
+            if (!edgeKeys.has(key) && edges.length < 500) { edgeKeys.add(key); edges.push(edge); }
+            else if (edges.length >= 500) truncated = true;
+        };
+        const addSymbol = (symbol: import('../../indexing/workspaceSymbolParser').WorkspaceSymbolEntry, depth: number): string => {
+            const kind: GraphNode['kind'] = symbol.source === 'gui' ? 'gui' : symbol.source === 'asset' ? 'asset' : 'script';
+            const id = nodeId(kind, symbol.name, symbol.file);
+            addNode({ id, kind, name: symbol.name, exists: true, file: symbol.file, line: symbol.line, origin: symbol.origin });
+            if (depth <= maxDepth) queue.push({ symbol, id, depth });
+            return id;
+        };
+        const resolveSymbol = (sourceId: string, target: string, kind: GraphEdge['kind'], line: number | undefined, depth: number, onlyIfResolved = false): void => {
+            const resolved = this.ctx.indexService!.queryWorkspaceSymbols({
+                name: target, exact: true, origin: includeVanilla ? 'both' : 'workspace', includeReferences: true, limit: 12,
+            });
+            if (resolved.length === 0) {
+                if (onlyIfResolved) return;
+                const targetId = nodeId('unresolved', target);
+                addNode({ id: targetId, kind: 'unresolved', name: target, exists: false });
+                addEdge({ source: sourceId, target: targetId, kind, line });
+                return;
+            }
+            for (const symbol of resolved) {
+                const targetId = addSymbol(symbol, depth + 1);
+                addEdge({ source: sourceId, target: targetId, kind, line });
+            }
+        };
+        const addLocalisation = (sourceId: string, key: string, kind: 'gui_localisation' | 'script_localisation', line?: number): void => {
+            const matches = this.ctx.indexService!.queryLocalisation({ key, limit: 8 });
+            const targetId = nodeId('localisation', key);
+            addNode({ id: targetId, kind: 'localisation', name: key, exists: matches.length > 0, file: matches[0]?.file, line: matches[0]?.line });
+            addEdge({ source: sourceId, target: targetId, kind, line });
+        };
+
+        for (const entry of entries.slice(0, 50)) addSymbol(entry, 0);
+        while (queue.length > 0 && !truncated) {
+            const current = queue.shift()!;
+            if (current.depth > maxDepth || visited.has(current.id)) continue;
+            visited.add(current.id);
+            const gui = current.symbol.guiFacts;
+            for (const target of gui?.effectReferences ?? []) resolveSymbol(current.id, target, 'gui_effect', current.symbol.line, current.depth);
+            for (const target of gui?.spriteReferences ?? []) resolveSymbol(current.id, target, 'gui_sprite', current.symbol.line, current.depth);
+            for (const target of gui?.customGuiReferences ?? []) resolveSymbol(current.id, target, 'gui_custom', current.symbol.line, current.depth);
+            for (const key of gui?.localisationKeys ?? []) addLocalisation(current.id, key, 'gui_localisation', current.symbol.line);
+            const script = current.symbol.scriptFacts;
+            for (const state of script?.stateAccesses ?? []) {
+                const targetId = nodeId('state', `${state.scope}:${state.subject}`);
+                addNode({ id: targetId, kind: 'state', name: `${state.scope}:${state.subject}`, exists: true, file: current.symbol.file, line: state.line });
+                addEdge({ source: current.id, target: targetId, kind: 'state_access', operation: state.operation, line: state.line });
+            }
+            for (const key of script?.localisationKeys ?? []) addLocalisation(current.id, key, 'script_localisation', current.symbol.line);
+            for (const target of script?.eventReferences ?? []) resolveSymbol(current.id, target, 'event_call', current.symbol.line, current.depth);
+            for (const target of script?.callCandidates ?? []) resolveSymbol(current.id, target, 'script_call', current.symbol.line, current.depth, true);
+            for (const reference of current.symbol.references ?? []) {
+                const property = reference.property?.toLowerCase();
+                const target = reference.target;
+                if (!property || !target) continue;
+                if (property === 'effect') resolveSymbol(current.id, target, current.symbol.source === 'gui' ? 'gui_effect' : 'script_call', reference.line, current.depth);
+                else if (property === 'sprite' || property === 'quadtexturesprite') resolveSymbol(current.id, target, 'gui_sprite', reference.line, current.depth);
+                else if (property !== 'noofframes') {
+                    const targetId = nodeId('file', target);
+                    const exists = this.assetTargetCandidates(target, this.ctx.indexService?.assetSearchRoots?.(includeVanilla) ?? [this.ctx.workspaceRoot])
+                        .some(candidate => { try { return require('fs').existsSync(candidate); } catch { return false; } });
+                    addNode({ id: targetId, kind: 'file', name: target, exists });
+                    addEdge({ source: current.id, target: targetId, kind: 'asset_reference', line: reference.line });
+                }
+            }
+        }
+        return {
+            nodes: [...nodes.values()].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
+            edges: edges.sort((a, b) => a.source.localeCompare(b.source) || a.kind.localeCompare(b.kind) || a.target.localeCompare(b.target)),
+            truncated,
+            maxDepth,
+        };
     }
 
     private assetTargetCandidates(target: string, roots: readonly string[]): string[] {

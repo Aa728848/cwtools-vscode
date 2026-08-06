@@ -222,7 +222,7 @@ describe('project knowledge current SQLite schema', () => {
         });
 
         expect(manifest.schemaVersion).to.equal(7);
-        expect(manifest.capabilityVersions.inlineGraph).to.equal(2);
+        expect(manifest.capabilityVersions.inlineGraph).to.equal(3);
         expect(manifest.capabilityStatus.localisationAudit).to.equal('unavailable');
         expect(manifest.artifacts).to.deep.equal(['knowledge.sqlite']);
         expect(manifest.counts.eventLogic).to.equal(9);
@@ -716,7 +716,7 @@ describe('project knowledge current SQLite schema', () => {
             ok: true,
             status: 'ready',
             schemaVersion: 7,
-            capabilityVersions: { inlineGraph: 2, stateFlow: 3, overrideResolution: 2, interfaceGraph: 2, localisationAudit: 3, pdxFlow: 3 },
+            capabilityVersions: { inlineGraph: 3, stateFlow: 3, overrideResolution: 2, interfaceGraph: 2, localisationAudit: 3, pdxFlow: 4 },
             game: 'stellaris',
             generatedAtUnixMs: Date.now(),
             projectRoots: [workspaceRoot],

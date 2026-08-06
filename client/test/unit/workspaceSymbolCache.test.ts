@@ -103,8 +103,10 @@ describe('WorkspaceSymbolSqliteCache', () => {
         );
         const persistedColumns = (persisted.exec('PRAGMA table_info(symbols)')[0]?.values ?? [])
             .map(row => String(row[1]));
-        expect(persistedMetadata.get('schema_version')).to.equal('3');
+        expect(persistedMetadata.get('schema_version')).to.equal('5');
         expect(persistedColumns).to.include('gui_facts_json');
+        expect(persistedColumns).to.include('script_facts_json');
+        expect(persistedColumns).to.include('references_json');
         expect(Number(persisted.exec('SELECT count(*) FROM symbols')[0]?.values[0]?.[0] ?? -1)).to.equal(0);
         persisted.close();
 
@@ -166,6 +168,13 @@ describe('WorkspaceSymbolSqliteCache', () => {
                 origin: 'workspace',
                 updatedAt: 100,
                 fileVersion: 1,
+                scriptFacts: {
+                    stateAccesses: [{ operation: 'set', subject: 'ready', scope: 'country', line: 3 }],
+                    localisationKeys: ['EXAMPLE_TITLE'],
+                    eventReferences: ['example.2'],
+                    callCandidates: ['example_followup'],
+                },
+                references: [{ file: path.join(tempDir, 'events', 'a.txt'), line: 4, context: 'quadTextureSprite = GFX_example', property: 'quadtexturesprite', target: 'GFX_example' }],
             }],
         }], []);
         first.setCoverage({
@@ -175,6 +184,7 @@ describe('WorkspaceSymbolSqliteCache', () => {
             indexedFiles: 10,
             truncated: false,
         });
+        expect(first.load().entries[0]?.scriptFacts?.stateAccesses).to.deep.include({ operation: 'set', subject: 'ready', scope: 'country', line: 3 });
         await first.save();
         first.close();
 
@@ -182,6 +192,8 @@ describe('WorkspaceSymbolSqliteCache', () => {
         await second.open();
         const secondSnapshot = second.load();
         expect(secondSnapshot.entries.map(entry => entry.name)).to.deep.equal(['example.1']);
+        expect(secondSnapshot.entries[0]?.scriptFacts?.callCandidates).to.deep.equal(['example_followup']);
+        expect(secondSnapshot.entries[0]?.references?.[0]?.target).to.equal('GFX_example');
         expect(secondSnapshot.coverage).to.deep.equal({
             discoveredFiles: 10,
             discoveredFilesExact: true,

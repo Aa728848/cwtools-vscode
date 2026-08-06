@@ -1196,14 +1196,21 @@ describe('agent sprite candidate tool contract', () => {
             kuat_btn: [{
                 name: 'kuat_btn', kind: 'effectButtonType', source: 'gui', origin: 'workspace',
                 file: path.join(workspaceRoot, 'interface', 'kuat.gui'), line: 3,
-                references: [
-                    { file: 'interface/kuat.gui', line: 3, context: 'effect = kuat_button_effect' },
-                    { file: 'interface/kuat.gui', line: 3, context: 'sprite = GFX_kuat_button' },
-                ],
+                guiFacts: {
+                    offCanvas: false,
+                    localisationKeys: ['KUAT_BUTTON_TT'],
+                    customGuiReferences: [],
+                    effectReferences: ['kuat_button_effect'],
+                    spriteReferences: ['GFX_kuat_button'],
+                },
             }],
             kuat_button_effect: [{
                 name: 'kuat_button_effect', kind: 'button_effect', source: 'script', origin: 'workspace',
                 file: path.join(workspaceRoot, 'common', 'button_effects', 'kuat.txt'), line: 1,
+                scriptFacts: {
+                    stateAccesses: [{ operation: 'set', subject: 'kuat_ready', scope: 'country', line: 2 }],
+                    localisationKeys: [], eventReferences: [], callCandidates: [],
+                },
             }],
             gfx_kuat_button: [{
                 name: 'GFX_kuat_button', kind: 'sprite', source: 'asset', origin: 'workspace',
@@ -1218,6 +1225,9 @@ describe('agent sprite candidate tool contract', () => {
             status: 'ready', workspaceSymbolStatus: 'ready', workspaceSymbolCount: 3, workspaceSymbolUpdatedAt: 1,
             ensureWorkspaceSymbolsReady: async () => undefined,
             assetSearchRoots: () => [workspaceRoot],
+            queryLocalisation: (query: any) => query.key === 'KUAT_BUTTON_TT'
+                ? [{ key: query.key, file: path.join(workspaceRoot, 'localisation', 'english', 'kuat.yml'), line: 2 }]
+                : [],
             queryWorkspaceSymbols: (query: any) => symbols[String(query.name ?? '').toLowerCase()] ?? [],
         };
         const executor = new AgentToolExecutor({} as any, workspaceRoot, fakeIndexService as any);
@@ -1231,6 +1241,10 @@ describe('agent sprite candidate tool contract', () => {
         const texture = refs.find((ref: any) => ref.target.endsWith('kuat_button.dds'));
         expect(texture.pathCaseMatches).to.equal(true);
         expect(texture.frameLayout).to.deep.include({ noOfFrames: 4, width: 64, height: 16, status: 'consistent' });
+        expect(result.interfaceGraph.edges.some((edge: any) => edge.kind === 'gui_effect')).to.equal(true);
+        expect(result.interfaceGraph.edges.some((edge: any) => edge.kind === 'gui_sprite')).to.equal(true);
+        expect(result.interfaceGraph.edges.some((edge: any) => edge.kind === 'gui_localisation')).to.equal(true);
+        expect(result.interfaceGraph.edges.some((edge: any) => edge.kind === 'state_access' && edge.operation === 'set')).to.equal(true);
     });
 
     it('returns partial workspace index results after a bounded wait while vanilla indexing continues', async () => {

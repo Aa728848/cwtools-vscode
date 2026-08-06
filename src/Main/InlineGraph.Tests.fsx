@@ -85,6 +85,24 @@ assertTrue "expanded.one is used as the generated definition id"
     (facts.expansions |> List.exists (fun item -> item.expandedSymbolId = "expanded.one" && item.entityType = "event" && item.templateFile.EndsWith("template_def.txt")))
 assertTrue "generated localisation references retain template and caller source maps"
     (facts.generatedReferences |> List.exists (fun item -> item.referenceKind = "localisation" && item.expandedValue = "expanded_one_desc" && item.callerFile.EndsWith("caller1.txt")))
+
+let flowTemplateContent = """set_country_flag = $FLAG$
+carrier_event = { id = $EVENT$ }
+"""
+let flowCallerContent = """carrier_event = {
+    id = caller.1
+    inline_script = { script = tests/flow FLAG = ready EVENT = target.1 }
+}
+"""
+let flowTemplate = parseEntity flowTemplateContent "common/inline_scripts/tests/flow.txt"
+let flowCaller = parseEntity flowCallerContent "events/flow_caller.txt"
+let flowFacts = collectInlineGraph [ struct (flowTemplate, ()); struct (flowCaller, ()) ]
+assertTrue "inline caller is attributed to its event id"
+    (flowFacts.invocations |> List.exists (fun item -> item.enclosingDefinition = Some "caller.1"))
+assertTrue "inline state access is rendered"
+    (flowFacts.generatedReferences |> List.exists (fun item -> item.referenceKind = "state:set:country" && item.expandedValue = "ready"))
+assertTrue "new event subtypes are rendered without a static allowlist"
+    (flowFacts.generatedReferences |> List.exists (fun item -> item.referenceKind = "event" && item.expandedValue = "target.1"))
 assertTrue "missing-parameter invocation produces a structured problem"
     (facts.problems |> List.exists (fun item -> item.kind = "missing_parameter" && item.message.Contains "NAME"))
 assertTrue "unresolved template produces a structured problem"

@@ -100,6 +100,7 @@ The extension entry point, indexing layer, and AI game knowledge should prioriti
 - Heavier workspace/vanilla symbol indexes are lazy-loaded via `ensureWorkspaceSymbolsReady()` to avoid slow startup. The workspace phase is published before the vanilla phase; Agent queries wait at most eight seconds, then consume the partial index while vanilla indexing continues in the background. Discovery requests one file beyond each configured cap so a capped index is published as `partial`, never `ready`; presence remains useful, but an empty partial result cannot prove absence.
 - Workspace symbols persist in `index/workspace-symbols.sqlite` under the per-workspace extension storage root (`context.storageUri`, falling back to a hashed global-storage directory); the previous in-project `.cwtools/index/...` and `.cwtools-ai/index/...` files are read-only migration fallbacks removed after a successful save. Vanilla symbols use root-keyed SQLite files under extension global storage. Builds restore cached rows first, compare file `size + mtime`, parse only changed files with bounded concurrency, and use a sorted-name array plus binary-search prefix ranges. Normal queries remain lazy, while `/init` eagerly materializes the workspace database before deep knowledge export. A successful `.cwb` + metadata rewrite emits a validated `vanillaCacheGenerated` notification; the Extension force-rebuilds the matching vanilla database before window reload, and coalesces a simultaneous same-game watcher refresh into that build.
 - The symbol layer supports `.txt`, `.gfx`, `.asset`, `.gui`, storing `origin`, `updatedAt`, and `fileVersion`. Initial parsing omits references; targeted queries load references only from the bounded result-file set.
+- Workspace-symbol rows also persist bounded structured GUI and script facts. GUI facts treat both `sprite` and `quadTextureSprite` as asset references; script facts retain state accesses, localisation keys, event references, and call candidates. `query_workspace_index(includeAssetChain=true)` joins those facts into a bounded `GUI -> effect/script -> state/localisation/asset` interface graph. The SQLite schema version invalidates older rows so they are rebuilt with the structured fields.
 - File system watchers incrementally update `.yml` and symbol files; symbol indexes are garbage-collected when idle.
 - The AI consumes these indexes via `query_localisation_index` and `query_workspace_index`.
 
@@ -110,6 +111,8 @@ The core constraint of this layer is: if the shared index can answer the query, 
 `src/Main/SemanticGraph.fs` builds a bounded semantic subgraph directly from the loaded CWTools `Types()`, `GetEventGraphData`, and per-file `ComputedData` caches. It does not maintain a second parser or a lexical reference database. `cwtools.ai.exploreProject` ranks typed seed definitions, traverses at most three hops, caps nodes/edges, and returns provenance, file facts, truncation, and validation/load freshness. The extension and MCP expose it as `explore_pdx_project`, the preferred first tool for project-structure and dependency questions; exact rule, scope, type, and block tools remain the write-time verification layer.
 
 Because the graph reads the existing game model, scripted-type refreshes and ordinary file updates become visible through the same cache/locking lifecycle as diagnostics and completion. User buffer changes are debounced into `UpdateFile`; agent writes and watched file-system changes force a disk-backed update; creates, changes, and deletes update or remove typed indexes; and graph reads hold the game-state read lock while incremental commits/full refreshes hold the write lock. Query-only graph caches are invalidated on every relevant workspace mutation. Standalone MCP uses a bounded Chokidar watcher to forward the same LSP watched-file events. Empty results from a loading or stale snapshot are explicitly non-authoritative.
+
+Event-call operators are derived from the active `event` TypeDef subtype and type-key filters instead of a built-in event-family list. Inline-script instantiations contribute their expanded event calls, scripted calls, and state operations to flow analysis. PdxFlow follows bounded on_action/event/scripted-effect/scripted-trigger/inline call paths and propagates relative cost with effective frequency and provenance; the result is a static prioritisation signal, not a runtime profiler.
 
 ##### Dynamic Semantic Catalog
 
@@ -603,6 +606,7 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 - 更重的 workspace/vanilla symbol 索引通过 `ensureWorkspaceSymbolsReady()` 懒加载，避免拖慢启动。工作区阶段先于原版阶段发布；Agent 查询最多等待八秒，之后使用已完成的部分索引，同时让原版索引继续在后台构建。文件发现会比配置上限多请求一个文件，用来准确识别截断；达到上限的索引发布为 `partial` 而不是 `ready`，因此已找到的存在性证据仍可使用，但空结果不能证明不存在。
 - 工作区符号持久化到按工作区隔离的扩展存储根目录（`context.storageUri`，缺失时回退到哈希命名的 global storage 子目录）下的 `index/workspace-symbols.sqlite`；原先项目内 `.cwtools/index/...` 与 `.cwtools-ai/index/...` 仅作为只读迁移回退，成功保存后删除。原版符号按原版根目录分库存入 extension global storage。构建时先恢复缓存行，再按文件 `size + mtime` 只解析变化文件，并使用有限并发、排序名称数组和二分前缀区间。普通查询仍保持懒加载，而 `/init` 会在深层知识导出前直接创建工作区数据库。`.cwb` 与元数据成功重写后会发送经过校验的 `vanillaCacheGenerated` 通知；Extension 在窗口重载前强制重建匹配的原版数据库，并把同时到达的同游戏 watcher 刷新合并进这次构建。
 - 符号层支持 `.txt`、`.gfx`、`.asset`、`.gui`，记录 `origin`、`updatedAt` 和 `fileVersion`。初始解析不收集引用；只有目标查询才从有界结果文件集合按需补充引用。
+- 工作区符号行还会持久化有界的结构化 GUI 与脚本事实。GUI 事实把 `sprite` 和 `quadTextureSprite` 都视为资产引用；脚本事实保留状态访问、本地化键、事件引用与调用候选。`query_workspace_index(includeAssetChain=true)` 将这些事实连接为有界的 `GUI -> effect/script -> state/localisation/asset` 界面图。SQLite schema 版本会使旧行失效，确保其按新结构重建。
 - watcher 对 `.yml` 与 symbol 文件做增量更新；symbol 索引闲置后可回收。
 - AI 通过 `query_localisation_index` 和 `query_workspace_index` 消费共享索引。
 
@@ -613,6 +617,8 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 `src/Main/SemanticGraph.fs` 直接基于已加载的 CWTools `Types()`、`GetEventGraphData` 和逐文件 `ComputedData` 缓存构建有界语义子图，不维护第二套解析器或词法引用数据库。`cwtools.ai.exploreProject` 对 typed seed definition 排序，最多遍历三跳，并限制节点/边数量，同时返回 provenance、文件语义事实、截断信息以及校验/加载 freshness。Extension 与 MCP 将其暴露为 `explore_pdx_project`，作为项目结构和依赖问题的首选入口；精确规则、作用域、类型和 block 工具仍负责写入前验证。
 
 语义图复用现有 game model，因此 scripted type 增量刷新和普通文件更新会沿诊断与补全相同的缓存/锁生命周期生效。用户未保存缓冲区经过防抖后进入 `UpdateFile`；Agent 写入和文件系统 watcher 事件强制从磁盘更新；创建、修改和删除会更新或移除 typed index；语义图读取持有 game-state 读锁，而增量提交和完整刷新持有写锁。任何相关工作区变更都会使纯 query 语义图缓存失效。Standalone MCP 通过有界 Chokidar watcher 转发相同的 LSP 文件事件。加载中或 stale snapshot 的空结果会被明确标记为非权威。
+
+事件调用操作符从活动 `event` TypeDef 的 subtype 与 type-key filter 动态派生，不再依赖内置事件族名单。inline script 实例化展开后的事件调用、脚本调用与状态操作会进入 flow analysis。PdxFlow 沿有界的 on_action/event/scripted-effect/scripted-trigger/inline 调用路径传播相对成本，并返回有效频率和来源；该结果是静态优先级信号，不是运行时 profiler。
 
 ##### 动态语义目录
 

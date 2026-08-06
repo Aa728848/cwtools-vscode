@@ -114,6 +114,14 @@ function registerWorkflow(workflow: AiWorkflow): void {
 	WORKFLOWS.set(workflow.id, workflow);
 }
 
+/** Shared live semantic tools required to keep built-in workflows on the
+ * current CWTools graph instead of falling back to raw scans. */
+const DEEP_PARADOX_READ_TOOLS: AgentToolName[] = [
+	'query_inline_instantiation', 'analyze_pdx_flow', 'compare_definition_with_vanilla',
+	'query_interface_knowledge', 'search_rule_capabilities', 'explain_scope',
+	'parse_pdx_fragment', 'get_pdx_block', 'get_completion_at',
+];
+
 // ── Diagnostic Fix Workflow ──────────────────────────────────────────────────
 
 registerWorkflow({
@@ -137,6 +145,7 @@ registerWorkflow({
 		strategy: 'allowlist',
 		tools: [
 			'explore_pdx_project',
+			...DEEP_PARADOX_READ_TOOLS,
 			// Read & analyze
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
@@ -208,6 +217,7 @@ registerWorkflow({
 		strategy: 'allowlist',
 		tools: [
 			'explore_pdx_project',
+			...DEEP_PARADOX_READ_TOOLS,
 			// Read & analyze
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
@@ -266,6 +276,7 @@ registerWorkflow({
 		strategy: 'allowlist',
 		tools: [
 			'explore_pdx_project',
+			...DEEP_PARADOX_READ_TOOLS,
 			// Read-only analysis
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
@@ -350,6 +361,7 @@ registerWorkflow({
 		strategy: 'allowlist',
 		tools: [
 			'explore_pdx_project',
+			...DEEP_PARADOX_READ_TOOLS,
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
 			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
@@ -405,6 +417,7 @@ registerWorkflow({
 		strategy: 'allowlist',
 		tools: [
 			'explore_pdx_project',
+			...DEEP_PARADOX_READ_TOOLS,
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
 			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',

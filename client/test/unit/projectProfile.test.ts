@@ -6,6 +6,7 @@ import {
     buildProjectProfile,
     extractCustomRules,
     getProjectProfilePath,
+    mergeDeepCompatibilityEvidence,
     queryProjectProfile,
     readProjectProfile,
     renderProjectRulesMarkdown,
@@ -95,6 +96,24 @@ describe('ProjectProfile localisation detection', () => {
 
             expect(profile.localisation.languages).to.deep.equal(['l_english', 'l_simp_chinese']);
             expect(profile.localisation.defaultLanguage).to.equal(undefined);
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
+
+    it('normalizes Stellaris english and simp_chinese directory names without an l_ prefix', () => {
+        const workspaceRoot = makeWorkspace();
+        try {
+            const locDir = path.join(workspaceRoot, 'localisation');
+            fs.mkdirSync(path.join(locDir, 'english'), { recursive: true });
+            fs.mkdirSync(path.join(locDir, 'simp_chinese'), { recursive: true });
+            fs.writeFileSync(path.join(locDir, 'english', 'kuat.yml'), '\ufeffl_english:\n', 'utf8');
+            fs.writeFileSync(path.join(locDir, 'simp_chinese', 'kuat.yml'), '\ufeffl_simp_chinese:\n', 'utf8');
+
+            const profile = buildProjectProfile(workspaceRoot);
+
+            expect(profile.localisation.languages).to.deep.equal(['l_english', 'l_simp_chinese']);
+            expect(profile.localisation.encoding).to.equal('UTF-8 with BOM');
         } finally {
             cleanupWorkspace(workspaceRoot);
         }
@@ -206,6 +225,37 @@ describe('ProjectProfile localisation detection', () => {
         }
     });
 
+    it('classifies namespace provenance and infers soft dependencies from compatibility evidence', () => {
+        const workspaceRoot = makeWorkspace();
+        try {
+            const eventsDir = path.join(workspaceRoot, 'events');
+            const placeholderDir = path.join(workspaceRoot, 'common', 'scripted_triggers');
+            fs.mkdirSync(eventsDir, { recursive: true });
+            fs.mkdirSync(placeholderDir, { recursive: true });
+            fs.mkdirSync(path.join(workspaceRoot, '.vscode'), { recursive: true });
+            fs.writeFileSync(path.join(eventsDir, 'kuat_events.txt'), 'namespace = kuat\ncountry_event = { id = kuat.1 }\n', 'utf8');
+            fs.writeFileSync(path.join(placeholderDir, 'compat_placeholder.txt'), '#_|acot/sofe|\nacot_has_dark_energy = { always = no }\n', 'utf8');
+            fs.writeFileSync(path.join(workspaceRoot, '.vscode', 'settings.json'), JSON.stringify({
+                'stellarisLanguageServices.ai.ignoredDiagnostics': ['acot_sr_dark_energy', 'giga_system_scale'],
+            }), 'utf8');
+
+            const profile = buildProjectProfile(workspaceRoot);
+
+            expect(profile.identifiers.namespaceDetails).to.deep.include({
+                name: 'kuat',
+                origin: 'workspace_owned',
+                files: ['events/kuat_events.txt'],
+                evidence: 'Namespace is declared in ordinary workspace event files.',
+            });
+            const acot = profile.compatibility?.possibleSoftDependencies.find(item => item.idOrPrefix === 'acot');
+            expect(acot?.sources).to.deep.equal(['ignored_diagnostic', 'placeholder']);
+            expect(profile.compatibility?.possibleSoftDependencies.map(item => item.idOrPrefix)).to.include('giga');
+            expect(profile.compatibility?.coverage.unresolvedIdInference).to.equal('available');
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
+
     it('writes and reads a schemaVersion 2 profile and reports legacy V1 as legacyProfile', () => {
         const workspaceRoot = makeWorkspace();
         try {
@@ -219,6 +269,26 @@ describe('ProjectProfile localisation detection', () => {
             const legacy = readProjectProfile(workspaceRoot);
             expect(legacy?.schemaVersion).to.equal(2);
             expect(legacy?.legacyProfile).to.equal(true);
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
+
+    it('merges unresolved IDs and definition stacks into compatibility and namespace provenance', () => {
+        const workspaceRoot = makeWorkspace();
+        try {
+            fs.mkdirSync(path.join(workspaceRoot, 'events'), { recursive: true });
+            fs.writeFileSync(path.join(workspaceRoot, 'events', 'override_events.txt'), 'namespace = core\ncountry_event = { id = core.1 }\n', 'utf8');
+            const profile = buildProjectProfile(workspaceRoot);
+
+            mergeDeepCompatibilityEvidence(profile, {
+                unresolved: [{ targetId: 'giga_system_scale', kind: 'missing_reference' }],
+                definitionStacks: [{ id: 'core.1', layers: [{ origin: 'vanilla' }, { origin: 'workspace' }] }],
+            });
+
+            expect(profile.compatibility?.possibleSoftDependencies.find(item => item.idOrPrefix === 'giga')?.sources).to.include('unresolved_id');
+            expect(profile.identifiers.namespaceDetails?.find(item => item.name === 'core')?.origin).to.equal('vanilla_override');
+            expect(profile.compatibility?.coverage.evidenceSources).to.include('definition_stack');
         } finally {
             cleanupWorkspace(workspaceRoot);
         }

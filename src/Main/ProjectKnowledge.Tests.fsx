@@ -8,6 +8,7 @@
 
 open System
 open System.IO
+open System.Text.RegularExpressions
 open FSharp.Data
 open Main.ProjectKnowledge
 
@@ -18,6 +19,23 @@ let private assertTrue name condition =
 
 let private assertFalse name condition =
     if condition then failwith $"{name}: expected false"
+
+// Full and incremental export use separate transaction bodies. Guard the full
+// writer against adding event-edge columns without binding their parameters.
+let projectKnowledgeSource = File.ReadAllText(Path.Combine(__SOURCE_DIRECTORY__, "ProjectKnowledge.fs"))
+let fullEventEdgeStart = projectKnowledgeSource.IndexOf("    use eventEdgeCommand = connection.CreateCommand()", StringComparison.Ordinal)
+let fullEventEdgeEnd = projectKnowledgeSource.IndexOf("    use eventLogicCommand = connection.CreateCommand()", fullEventEdgeStart, StringComparison.Ordinal)
+assertTrue "full event-edge writer block is present" (fullEventEdgeStart >= 0 && fullEventEdgeEnd > fullEventEdgeStart)
+let fullEventEdgeWriter = projectKnowledgeSource.Substring(fullEventEdgeStart, fullEventEdgeEnd - fullEventEdgeStart)
+for parameter in [ "$callOperator"; "$phase"; "$delay"; "$conditionPath"; "$scopeMap"; "$sourceScope"; "$targetScope" ] do
+    assertTrue
+        $"full event-edge writer binds {parameter} in SQL, preparation, and row values"
+        (Regex.Matches(fullEventEdgeWriter, Regex.Escape(parameter)).Count >= 3)
+
+assertTrue "complete export does not truncate event state facts"
+    (projectKnowledgeSource.Contains("if options.completeExport then distinctState else distinctState |> Seq.truncate 30000", StringComparison.Ordinal))
+assertTrue "full manifest eventLogic includes relation and state-access rows"
+    (projectKnowledgeSource.Contains("eventGraph.logic.Length + eventGraph.stateAccesses.Length", StringComparison.Ordinal))
 
 let outgoingSource, outgoingTarget = orientTypedReference "kuat_legacy.38" "kuat_legacy.39" true
 let incomingSource, incomingTarget = orientTypedReference "container_event" "referenced_event" false
@@ -35,6 +53,20 @@ assertTrue "dependency origin is not misclassified as vanilla"
     (resolveKnowledgeOrigin [ provenanceRootPath ] "dependency" (Path.Combine(dependencyRootPath, "events", "a.txt")) = "dependency")
 assertTrue "vanilla scope remains authoritative"
     (resolveKnowledgeOrigin [ provenanceRootPath ] "vanilla" (Path.Combine(Path.GetTempPath(), "game", "events", "a.txt")) = "vanilla")
+assertTrue "embedded files under the editable project remain workspace definitions"
+    (resolveKnowledgeOriginWithRoots
+        (Some provenanceRootPath)
+        [ provenanceRootPath ]
+        (Some(Path.Combine(Path.GetTempPath(), "game")))
+        "embedded"
+        (Path.Combine(provenanceRootPath, "gfx", "FX", "a.shader")) = "workspace")
+assertTrue "embedded files under the configured game root are vanilla definitions"
+    (resolveKnowledgeOriginWithRoots
+        (Some provenanceRootPath)
+        [ provenanceRootPath ]
+        (Some(Path.Combine(Path.GetTempPath(), "game")))
+        "embedded"
+        (Path.Combine(Path.GetTempPath(), "game", "common", "buildings", "a.txt")) = "vanilla")
 let vanillaOrder, vanillaRoot = resolveKnowledgeLoadOrder "vanilla" (Path.Combine(Path.GetTempPath(), "game", "events", "a.txt"))
 let workspaceOrder, workspaceRootName = resolveKnowledgeLoadOrder "workspace" (Path.Combine(provenanceRootPath, "events", "a.txt"))
 let dependencyOrder, dependencyRootName = resolveKnowledgeLoadOrder "dependency" (Path.Combine(dependencyRootPath, "events", "a.txt"))

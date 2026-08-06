@@ -8,6 +8,7 @@ import {
     getProjectProfilePath,
     queryProjectProfile,
     readProjectProfile,
+    renderProjectRulesMarkdown,
 } from '../../extension/ai/projectProfile';
 
 describe('ProjectProfile localisation detection', () => {
@@ -246,6 +247,22 @@ describe('Paradox project profile boundaries', () => {
         ].join('\r\n');
 
         expect(extractCustomRules(rules)).to.equal('- KEEP_THIS_RULE\r\n- KEEP_THIS_RULE_TOO');
+    });
+
+    it('writes the complete detected directory list to CWTOOLS.md', () => {
+        const profile = buildProjectProfile(workspaceRoot);
+        profile.keyDirectories = Array.from({ length: 20 }, (_, index) => ({
+            key: `dir-${index}`,
+            path: `common/dir-${index}`,
+            exists: true,
+            fileCount: index + 1,
+        }));
+
+        const markdown = renderProjectRulesMarkdown(profile);
+        expect(markdown).to.include('Complete list of 20 detected directories');
+        expect(markdown).to.include('section="directories"');
+        expect(markdown).to.include('`common/dir-0`');
+        expect(markdown).to.include('`common/dir-19`');
     });
 
     it('normalizes legacy schemaVersion 1 profiles without identifiers.byType', () => {

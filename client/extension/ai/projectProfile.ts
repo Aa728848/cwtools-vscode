@@ -402,12 +402,15 @@ export function extractCustomRules(existingContent: string | null | undefined): 
 
 export function renderProjectRulesMarkdown(profile: ProjectProfile, customRules = ''): string {
     const namespaces = profile.identifiers.namespaces.slice(0, 20);
-    const keyDirs = keyDirectoryLines(profile)
-        .slice(0, 16)
+    const allKeyDirs = keyDirectoryLines(profile);
+    const keyDirs = allKeyDirs
         .map(dir => `- \`${dir}\`${(() => {
             const entry = profile.keyDirectories.find(candidate => candidate.path === dir);
             return entry?.fileCount !== undefined ? ` (${entry.fileCount} files sampled)` : '';
         })()}`);
+    const directoryCoverage = allKeyDirs.length
+        ? `> Complete list of ${allKeyDirs.length} detected directories; the same data is available through \`query_project_profile\` with \`section="directories"\`.`
+        : '';
     const lines = [
         `# CWTools Agent Project Rules - ${profile.projectName}`,
         '',
@@ -430,6 +433,7 @@ export function renderProjectRulesMarkdown(profile: ProjectProfile, customRules 
         '',
         '## Project Structure',
         keyDirs.length ? keyDirs.join('\n') : '- No Paradox mod directories detected during `/init`.',
+        directoryCoverage,
         '',
         '## Known Identifiers',
         namespaces.length ? `### Event Namespaces\n${namespaces.map(ns => `- \`${ns}\``).join('\n')}` : '### Event Namespaces\n- None detected.',

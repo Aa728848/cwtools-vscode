@@ -29,6 +29,56 @@ describe('AIService session overrides', () => {
     });
 });
 
+describe('AIService inline provider isolation', () => {
+    it('uses the inline provider default instead of leaking the chat model into FIM', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        service.getConfig = () => ({
+            provider: 'codex-chatgpt',
+            model: 'gpt-5.6-sol',
+            inlineCompletion: {
+                provider: 'deepseek',
+                model: '',
+                endpoint: '',
+            },
+        });
+        service.getKeyForProvider = async () => 'inline-key';
+        service.getEndpointForProvider = () => '';
+
+        const originalFetch = globalThis.fetch;
+        const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+        globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+            requests.push({
+                url: String(input),
+                body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+            });
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({ choices: [{ text: 'fleet_event' }] }),
+            } as Response;
+        }) as typeof fetch;
+
+        try {
+            const completion = await service.fimCompletion('prefix', 'suffix');
+            expect(completion).to.equal('fleet_event');
+            expect(requests).to.deep.equal([{
+                url: 'https://api.deepseek.com/beta/completions',
+                body: {
+                    model: 'deepseek-v4-pro',
+                    prompt: 'prefix',
+                    suffix: 'suffix',
+                    max_tokens: 256,
+                    temperature: 0.2,
+                    stream: false,
+                },
+            }]);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+});
+
 describe('AIService provider protocol routing', () => {
     it('routes the built-in OpenAI provider through the Responses API', async () => {
         const { AIService } = loadAIService();

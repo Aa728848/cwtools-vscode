@@ -2795,13 +2795,22 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 return;
             }
             case 'init': {
-                const success = await this.generateInitFile();
+                const result = await this.generateInitFile();
+                const knowledgeReady = result.success && result.knowledgeReady === true;
                 this.emitSlashCommandResult(
                     raw,
-                    success ? 'success' : 'error',
-                    success
+                    knowledgeReady ? 'success' : 'error',
+                    knowledgeReady
                         ? aiText('CWTOOLS.md and the project knowledge pack were generated.', '已生成 CWTOOLS.md 与项目知识包。')
-                        : aiText('Project initialization did not complete.', '项目初始化未完成。'),
+                        : result.success
+                        ? aiText(
+                            `Base /init artifacts were generated, but knowledge.sqlite was not exported${result.message ? `: ${result.message}` : '.'}`,
+                            `已生成 /init 基础产物，但 knowledge.sqlite 未导出${result.message ? `：${result.message}` : '。'}`,
+                        )
+                        : aiText(
+                            `Project initialization did not complete${result.message ? `: ${result.message}` : '.'}`,
+                            `项目初始化未完成${result.message ? `：${result.message}` : '。'}`,
+                        ),
                 );
                 return;
             }
@@ -2862,7 +2871,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         await this.handleUserMessage(prompt, undefined, undefined, true, false, false, visibleCommand);
     }
 
-    private async generateInitFile(): Promise<boolean> {
+    private async generateInitFile(): Promise<Awaited<ReturnType<typeof generateInitFile>>> {
         const result = await generateInitFile(
             (msg) => this.postMessage(msg),
             (filePath) => this._recordFileSnapshot(filePath),
@@ -2871,7 +2880,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (result.success) {
             this.agentRunner.clearPromptCache();
         }
-        return result.success;
+        return result;
     }
 
 

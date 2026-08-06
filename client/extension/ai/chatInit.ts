@@ -14,6 +14,7 @@ import { UI, aiText } from './messages';
 import {
     generateProjectKnowledge,
     getProjectKnowledgeManifestPath,
+    ProjectKnowledgeModelNotReadyError,
     writeUnavailableProjectKnowledge,
 } from './projectKnowledge';
 import { getKnownProfileByLanguageId } from '../gameProfiles';
@@ -35,6 +36,8 @@ type InitProgress = vs.Progress<{ message?: string; increment?: number }>;
 export interface InitGenerationResult {
     success: boolean;
     degraded?: boolean;
+    /** True only when knowledge.sqlite was published with ready or partial coverage. */
+    knowledgeReady?: boolean;
     rulesPath?: string;
     profilePath?: string;
     knowledgeManifestPath?: string;
@@ -105,6 +108,7 @@ async function generateDeepKnowledgeWithRetry(root: string, profile: import('./t
             // should proceed to the next attempt.
             if (manifest.status === 'ready' || manifest.status === 'partial') return manifest;
         } catch (error) {
+            if (!(error instanceof ProjectKnowledgeModelNotReadyError)) throw error;
             lastError = error;
         }
     }
@@ -128,6 +132,9 @@ async function generateInitFileCore(
     }
 
     const root = folders[0]!.uri.fsPath;
+    const initStartedAt = Date.now();
+    let stage = 'scan_project_profile';
+    ErrorReporter.debug('ChatInit', `/init started for ${root}`);
     progress.report({
         message: aiText(
             'Scanning workspace and generating the project profile...',
@@ -153,13 +160,19 @@ async function generateInitFileCore(
         const customRules = extractCustomRules(existingRules);
 
         const profile = buildProjectProfile(root);
+        ErrorReporter.debug(
+            'ChatInit',
+            `/init profile scan completed for ${root}: game=${profile.game.id}, keyDirectories=${profile.keyDirectories.length}, namespaces=${profile.identifiers.namespaces.length}`,
+        );
 
+        stage = 'write_base_artifacts';
         recordFileSnapshot(profilePath);
         writeProjectProfile(root, profile);
         recordFileSnapshot(rulesPath);
         fs.writeFileSync(rulesPath, renderProjectRulesMarkdown(profile, customRules), 'utf8');
 
         const workspaceIndexPath = getWorkspaceSymbolCachePath(root);
+        let workspaceIndexWarning: string | undefined;
         if (indexService) {
             progress.report({
                 message: aiText(
@@ -178,14 +191,31 @@ async function generateInitFileCore(
                     timestamp: Date.now(),
                 },
             });
-            await indexService.ensureWorkspaceSymbolsReady({ includeVanilla: false });
-            // Fill a bounded per-kind identifier summary from the shared index so
-            // profile routing no longer depends on an empty byType.
-            const typeSummary = indexService.workspaceSymbolTypeSummary();
-            profile.identifiers.byType = typeSummary.byType;
-            profile.identifiers.byTypeCounts = typeSummary.byTypeCounts;
-            if (Object.keys(typeSummary.byType).length === 0 && profile.identifiers.namespaces.length === 0) {
-                ErrorReporter.debug('ChatInit', 'Workspace symbol index built without typed entries; profile byType stays empty.');
+            stage = 'build_workspace_symbol_index';
+            try {
+                await indexService.ensureWorkspaceSymbolsReady({ includeVanilla: false });
+                // Fill a bounded per-kind identifier summary from the shared index so
+                // profile routing no longer depends on an empty byType.
+                const typeSummary = indexService.workspaceSymbolTypeSummary();
+                profile.identifiers.byType = typeSummary.byType;
+                profile.identifiers.byTypeCounts = typeSummary.byTypeCounts;
+                profile.validation.indexStatus = 'ready';
+                ErrorReporter.debug(
+                    'ChatInit',
+                    `/init workspace symbol index ready for ${root}: types=${Object.keys(typeSummary.byType).length}`,
+                );
+                if (Object.keys(typeSummary.byType).length === 0 && profile.identifiers.namespaces.length === 0) {
+                    ErrorReporter.debug('ChatInit', 'Workspace symbol index built without typed entries; profile byType stays empty.');
+                }
+            } catch (error) {
+                const detail = error instanceof Error ? error.message : String(error);
+                workspaceIndexWarning = `Workspace symbol index is unavailable: ${detail}`;
+                profile.validation.indexStatus = 'unavailable';
+                ErrorReporter.warn(
+                    'ChatInit',
+                    `/init workspace symbol index degraded for ${root}; continuing with the LSP knowledge export`,
+                    error,
+                );
             }
         }
 
@@ -207,10 +237,19 @@ async function generateInitFileCore(
             },
         });
 
+        stage = 'export_project_knowledge';
         let deepKnowledgeError: string | undefined;
         let deepKnowledgeWarning: string | undefined;
+        let knowledgeReady = false;
         try {
             const manifest = await generateDeepKnowledgeWithRetry(root, profile, progress);
+            knowledgeReady = manifest.status === 'ready' || manifest.status === 'partial';
+            const databaseSizeCandidate = manifest.baseline?.databaseSizeBytes;
+            const databaseSizeBytes = typeof databaseSizeCandidate === 'number' ? databaseSizeCandidate : 0;
+            ErrorReporter.debug(
+                'ChatInit',
+                `/init knowledge export completed for ${root}: schema=${manifest.schemaVersion}, status=${manifest.status}, complete=${manifest.completeExport === true}, definitions=${manifest.counts.definitions ?? 0}, workspace=${manifest.counts.workspaceDefinitions ?? 0}, workspaceDeclared=${manifest.counts.workspaceDeclaredDefinitions ?? 0}, workspaceSynthetic=${manifest.counts.workspaceSyntheticDefinitions ?? 0}, dependency=${manifest.counts.dependencyDefinitions ?? 0}, vanilla=${manifest.counts.vanillaDefinitions ?? 0}, curated=${manifest.counts.curatedDefinitions ?? 0}, lineZero=${manifest.counts.lineZeroDefinitions ?? 0}, topologyFiles=${manifest.counts.topologyFiles ?? 0}, topologyEdges=${manifest.counts.topologyEdges ?? 0}, eventNodes=${manifest.counts.eventNodes ?? 0}, eventEdges=${manifest.counts.eventEdges ?? 0}, eventLogic=${manifest.counts.eventLogic ?? 0}, databaseSizeBytes=${databaseSizeBytes}`,
+            );
             profile.game.id = manifest.game || profile.game.id;
             profile.game.displayName = getKnownProfileByLanguageId(manifest.game)?.displayName ?? profile.game.displayName;
             profile.game.confidence = manifest.game && manifest.game !== 'paradox' ? 'high' : profile.game.confidence;
@@ -238,6 +277,7 @@ async function generateInitFileCore(
             profile.freshness = { knowledgeStatus: 'unavailable', staleReasons: ['lsp_export_unavailable'] };
             writeUnavailableProjectKnowledge(root, profile, deepKnowledgeError);
         }
+        stage = 'publish_project_artifacts';
         progress.report({
             message: aiText(
                 'Publishing the knowledge database and project rules...',
@@ -248,6 +288,7 @@ async function generateInitFileCore(
 
         fs.writeFileSync(rulesPath, renderProjectRulesMarkdown(profile, customRules), 'utf8');
 
+        stage = 'open_generated_rules';
         const doc = await vs.workspace.openTextDocument(vs.Uri.file(rulesPath));
         await vs.window.showTextDocument(doc, { preview: false });
 
@@ -257,8 +298,8 @@ async function generateInitFileCore(
                 type: 'validation',
                 content: deepKnowledgeError
                     ? aiText(
-                        `Generated CWTOOLS.md, Agent profile, and a recoverable knowledge pack. Deep LSP export is pending: ${deepKnowledgeError}`,
-                        `已生成 CWTOOLS.md、Agent 项目画像和可恢复知识包。LSP 深层导出仍待完成：${deepKnowledgeError}`,
+                        `Generated CWTOOLS.md and the Agent profile, but knowledge.sqlite was not exported. A failure manifest was written for diagnosis: ${deepKnowledgeError}`,
+                        `已生成 CWTOOLS.md 和 Agent 项目画像，但 knowledge.sqlite 未导出。已写入失败清单供诊断：${deepKnowledgeError}`,
                     )
                     : deepKnowledgeWarning
                     ? aiText(
@@ -275,8 +316,8 @@ async function generateInitFileCore(
 
         if (deepKnowledgeError) {
             vs.window.showWarningMessage(aiText(
-                `Eddy CWTool Code: base /init artifacts were generated for ${path.basename(root)}; deep LSP knowledge will retry when ready.`,
-                `Eddy CWTool Code：已为 ${path.basename(root)} 生成 /init 基础产物；LSP 就绪后将重试深层知识导出。`,
+                `Eddy CWTool Code: base /init artifacts were generated for ${path.basename(root)}, but knowledge.sqlite was not created. See the Eddy CWTool Code output.`,
+                `Eddy CWTool Code：已为 ${path.basename(root)} 生成 /init 基础产物，但 knowledge.sqlite 未创建。请查看 Eddy CWTool Code 输出。`,
             ));
         } else if (deepKnowledgeWarning) {
             vs.window.showWarningMessage(aiText(
@@ -289,17 +330,29 @@ async function generateInitFileCore(
                 `Eddy CWTool Code：已为 ${path.basename(root)} 生成项目与原版知识包`,
             ));
         }
+        const degradationMessages = [workspaceIndexWarning, deepKnowledgeError, deepKnowledgeWarning]
+            .filter((value): value is string => !!value);
+        ErrorReporter.debug(
+            'ChatInit',
+            `/init completed for ${root}: degraded=${degradationMessages.length > 0}, durationMs=${Date.now() - initStartedAt}, manifest=${getProjectKnowledgeManifestPath(root)}`,
+        );
         return {
             success: true,
-            degraded: !!deepKnowledgeError || !!deepKnowledgeWarning,
+            degraded: degradationMessages.length > 0,
+            knowledgeReady,
             rulesPath,
             profilePath,
             knowledgeManifestPath: getProjectKnowledgeManifestPath(root),
             workspaceIndexPath: indexService ? workspaceIndexPath : undefined,
-            message: deepKnowledgeError ?? deepKnowledgeWarning,
+            message: degradationMessages.length > 0 ? degradationMessages.join(' ') : undefined,
         };
     } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
+        ErrorReporter.warn(
+            'ChatInit',
+            `/init failed during ${stage} for ${root} after ${Date.now() - initStartedAt}ms`,
+            e,
+        );
         postMessage({
             type: 'agentStep',
             step: { type: 'error', content: `/init failed: ${message}`, timestamp: Date.now() },

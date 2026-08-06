@@ -682,7 +682,10 @@ export class AIService {
         if (!endpoint) {
             throw new Error(`${provider.name} endpoint is not configured. Please set an API endpoint in the AI Settings panel.`);
         }
-        const rawModel = options?.model ?? getEffectiveModel(providerId, config.inlineCompletion.model || config.model);
+        // Inline completion owns its provider/model selection. In particular, do not
+        // fall back to the chat model while settings are switching providers: a Codex
+        // chat model is not a valid DeepSeek (or other FIM provider) model.
+        const rawModel = options?.model ?? getEffectiveModel(providerId, config.inlineCompletion.model);
         const model = rawModel.replace(/\s*\(免费\)$/i, '');
 
         const controller = new AbortController();

@@ -132,12 +132,15 @@ export class IndexService implements vscode.Disposable {
 
 	private _fileWatcher: vscode.FileSystemWatcher | undefined;
 	private _symbolFileWatcher: vscode.FileSystemWatcher | undefined;
+	private _symbolFileWatcherErrorReported = false;
 	private _pendingUpdateUris: Map<string, vscode.Uri> = new Map();
 	private _locBuildPromise: Promise<void> | undefined;
 	private _debounceTimer: ReturnType<typeof setTimeout> | undefined;
 	private static readonly DEBOUNCE_MS = 300;
 	private static readonly WORKSPACE_SYMBOL_FILE_LIMIT = 4000;
-	private static readonly VANILLA_SYMBOL_FILE_LIMIT = 1200;
+	// Remain bounded, but cover current Stellaris installations in full. The
+	// previous 1,200-file limit indexed only about one quarter of vanilla.
+	private static readonly VANILLA_SYMBOL_FILE_LIMIT = 10000;
 	private static readonly MAX_SYMBOL_FILE_BYTES = 2 * 1024 * 1024;
 	/** Number of files to parse between event-loop yields during bulk indexing. */
 	private static readonly INDEX_BATCH_SIZE = 12;
@@ -540,11 +543,11 @@ export class IndexService implements vscode.Disposable {
 			this._addWorkspaceSymbolEntries(snapshot.entries);
 		}
 
-		const discoveredFiles = await vscode.workspace.findFiles(
+		const discoveredFiles = (await vscode.workspace.findFiles(
 			'**/*.{txt,gfx,asset,gui}',
 			'**/{node_modules,.git,.cwtools,.cwtools-ai,release,artifacts,dist,coverage,out}/**',
 			IndexService.WORKSPACE_SYMBOL_FILE_LIMIT + 1,
-		);
+		)).slice().sort((a, b) => IndexService._normalizeFilePath(a.fsPath).localeCompare(IndexService._normalizeFilePath(b.fsPath)));
 		this._workspaceSymbolTruncated = discoveredFiles.length > IndexService.WORKSPACE_SYMBOL_FILE_LIMIT;
 		const files = discoveredFiles.slice(0, IndexService.WORKSPACE_SYMBOL_FILE_LIMIT);
 		const current = new Map<string, { uri: vscode.Uri; stat: vscode.FileStat }>();
@@ -652,7 +655,9 @@ export class IndexService implements vscode.Disposable {
 
 			const uri = vscode.Uri.file(source.root);
 			const pattern = new vscode.RelativePattern(uri, '**/*.{txt,gfx,asset,gui}');
-			const discoveredFiles = await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,.cwtools,.cwtools-ai,release,artifacts,dist,coverage,out}/**', IndexService.VANILLA_SYMBOL_FILE_LIMIT + 1);
+			const discoveredFiles = (await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,.cwtools,.cwtools-ai,release,artifacts,dist,coverage,out}/**', IndexService.VANILLA_SYMBOL_FILE_LIMIT + 1))
+				.slice()
+				.sort((a, b) => IndexService._normalizeFilePath(a.fsPath).localeCompare(IndexService._normalizeFilePath(b.fsPath)));
 			const truncated = discoveredFiles.length > IndexService.VANILLA_SYMBOL_FILE_LIMIT;
 			if (truncated) this._truncatedVanillaSources.add(sourceKey);
 			else this._truncatedVanillaSources.delete(sourceKey);
@@ -691,10 +696,22 @@ export class IndexService implements vscode.Disposable {
 			}
 			if (cache) {
 				cache.update(changed, removed);
+				cache.setCoverage({
+					discoveredFiles: discoveredFiles.length,
+					discoveredFilesExact: !truncated,
+					selectedFiles: files.length,
+					indexedFiles: this._vanillaSourceFiles.get(sourceKey)!.size,
+					truncated,
+				});
 				await cache.save();
 				cache.close();
 			}
-			ErrorReporter.debug('IndexService', `Vanilla symbol phase (${source.gameId}): ${files.length - changed.length} cached, ${changed.length} parsed, ${removed.length} removed`);
+			const indexedFiles = this._vanillaSourceFiles.get(sourceKey)!.size;
+			const discoveredLabel = truncated ? `at least ${discoveredFiles.length}` : String(discoveredFiles.length);
+			ErrorReporter.debug(
+				'IndexService',
+				`Vanilla symbol phase (${source.gameId}): discovered=${discoveredLabel}, selected=${files.length}, indexed=${indexedFiles}, cached=${files.length - changed.length}, parsed=${changed.length}, removed=${removed.length}, truncated=${truncated}`,
+			);
 		}
 	}
 
@@ -971,17 +988,31 @@ export class IndexService implements vscode.Disposable {
 	/** Create the broad symbol watcher on demand; lives only while the symbol index does. */
 	private _ensureSymbolFileWatcher(): void {
 		if (this._symbolFileWatcher) return;
-		this._symbolFileWatcher = vscode.workspace.createFileSystemWatcher(
-			'**/*.{txt,gfx,asset,gui}'
-		);
-		this._symbolFileWatcher.onDidChange(uri => this._onFileChanged(uri));
-		this._symbolFileWatcher.onDidCreate(uri => this._onFileChanged(uri));
-		this._symbolFileWatcher.onDidDelete(uri => this._onFileDeleted(uri));
+		let watcher: vscode.FileSystemWatcher | undefined;
+		try {
+			watcher = vscode.workspace.createFileSystemWatcher('**/*.{txt,gfx,asset,gui}');
+			watcher.onDidChange(uri => this._onFileChanged(uri));
+			watcher.onDidCreate(uri => this._onFileChanged(uri));
+			watcher.onDidDelete(uri => this._onFileDeleted(uri));
+			this._symbolFileWatcher = watcher;
+			this._symbolFileWatcherErrorReported = false;
+		} catch (error) {
+			watcher?.dispose();
+			if (!this._symbolFileWatcherErrorReported) {
+				this._symbolFileWatcherErrorReported = true;
+				ErrorReporter.warn(
+					'IndexService',
+					'Workspace symbol file watcher is unavailable; on-demand indexing remains enabled',
+					error,
+				);
+			}
+		}
 	}
 
 	private _disposeSymbolFileWatcher(): void {
 		this._symbolFileWatcher?.dispose();
 		this._symbolFileWatcher = undefined;
+		this._symbolFileWatcherErrorReported = false;
 	}
 
 	/**

@@ -42,8 +42,15 @@ export interface ProjectKnowledgeManifest {
         definitions: number;
         availableDefinitions?: number;
         workspaceDefinitions: number;
+        workspaceDeclaredDefinitions?: number;
+        workspaceSyntheticDefinitions?: number;
         dependencyDefinitions?: number;
         vanillaDefinitions: number;
+        curatedDefinitions?: number;
+        declaredDefinitions?: number;
+        syntheticDefinitions?: number;
+        derivedDefinitions?: number;
+        lineZeroDefinitions?: number;
         definitionStacks: number;
         topologyFiles: number;
         topologyEdges: number;
@@ -112,7 +119,7 @@ interface LspValidationStatus {
     loading?: unknown;
 }
 
-class ProjectKnowledgeModelNotReadyError extends Error {}
+export class ProjectKnowledgeModelNotReadyError extends Error {}
 
 export interface GenerateProjectKnowledgeOptions {
     mode?: 'full' | 'incremental';
@@ -335,8 +342,12 @@ function removeNonCurrentKnowledgeArtifacts(root: string): void {
 
 async function requestLspKnowledgeSnapshot(
     workspaceRoot: string,
+    gameId: string,
     options: GenerateProjectKnowledgeOptions,
 ): Promise<LspKnowledgeSnapshot> {
+    const configuredVanillaRoot = gameId && gameId !== 'unknown' && gameId !== 'paradox'
+        ? vs.workspace.getConfiguration('stellarisLanguageServices').get<string>(getCacheSettingKey(gameId), '')?.trim()
+        : '';
     const result = await vs.commands.executeCommand<LspKnowledgeSnapshot>(
         'cwtools.ai.exportProjectKnowledge',
         {
@@ -349,6 +360,8 @@ async function requestLspKnowledgeSnapshot(
             completeExport: options.complete === true,
             requireReady: options.requireReady === true,
             databasePath: getProjectKnowledgeDatabasePath(workspaceRoot),
+            workspaceRoot: path.resolve(workspaceRoot),
+            vanillaRoot: configuredVanillaRoot ? path.resolve(configuredVanillaRoot) : undefined,
             generationMode: options.mode ?? 'full',
         },
     );
@@ -375,7 +388,7 @@ export async function generateProjectKnowledge(
 ): Promise<ProjectKnowledgeManifest> {
     const root = primaryKnowledgeRoot(workspaceRoot);
     fs.mkdirSync(root, { recursive: true });
-    const snapshot = await requestLspKnowledgeSnapshot(workspaceRoot, options);
+    const snapshot = await requestLspKnowledgeSnapshot(workspaceRoot, profile.game.id, options);
     const databasePath = getProjectKnowledgeDatabasePath(workspaceRoot);
     if (!fs.existsSync(databasePath)) {
         throw new Error('CWTools reported a successful export but knowledge.sqlite was not created.');
@@ -678,7 +691,10 @@ export function buildProjectKnowledgePrompt(workspaceRoot: string): string {
     const stateFlowWarning = eventLogic === 0
         ? '\nWARNING: eventLogic=0 means no directed state facts (variables/flags/event targets) are indexed. If the design depends on state flow, do NOT treat an empty unresolvedCritical as settled: call query_project_knowledge with the involved IDs, or analyze_pdx_flow, and record any missing state evidence as unresolved before approval.'
         : '';
-    return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: manifest + current SQLite V${PROJECT_KNOWLEDGE_SCHEMA_VERSION}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace + ${manifest.counts.vanillaDefinitions ?? 0} vanilla; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; typed graph: ${manifest.counts.eventNodes ?? 0} event nodes / ${manifest.counts.eventEdges ?? 0} directed edges / ${eventLogic} logic facts${stateFlowWarning}\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}Event IDs, numeric/source order, and missing incoming edges are never entry or causality evidence. For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Enumerate the involved TypeDefs and dependency families from the current semantic catalog, then load their project/vanilla patterns, typed topology, unresolved facts, and relevant graph slices. A blueprint must cite exact directed evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
+    const syntheticDetail = manifest.counts.workspaceSyntheticDefinitions
+        ? `, ${manifest.counts.workspaceSyntheticDefinitions} synthetic`
+        : '';
+    return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: manifest + current SQLite V${PROJECT_KNOWLEDGE_SCHEMA_VERSION}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace (${manifest.counts.workspaceDeclaredDefinitions ?? 'unknown'} declared${syntheticDetail}) + ${manifest.counts.vanillaDefinitions ?? 0} vanilla + ${manifest.counts.dependencyDefinitions ?? 0} dependency + ${manifest.counts.curatedDefinitions ?? 0} curated; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; typed graph: ${manifest.counts.eventNodes ?? 0} event nodes / ${manifest.counts.eventEdges ?? 0} directed edges / ${eventLogic} logic facts${stateFlowWarning}\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}Event IDs, numeric/source order, and missing incoming edges are never entry or causality evidence. For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Enumerate the involved TypeDefs and dependency families from the current semantic catalog, then load their project/vanilla patterns, typed topology, unresolved facts, and relevant graph slices. A blueprint must cite exact directed evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
 }
 
 const FULL_REFRESH_STALE_REASONS = new Set([

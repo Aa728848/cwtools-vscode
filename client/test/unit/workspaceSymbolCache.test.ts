@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import initSqlJs from 'sql.js';
 
 const vscodeStub = {
     workspace: {
@@ -67,6 +68,72 @@ describe('WorkspaceSymbolSqliteCache', () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
+    it('replaces a non-current cache layout instead of querying missing GUI fact columns', async () => {
+        const SQL = await initSqlJs({ locateFile: file => path.join(wasmDirectory, file) });
+        const oldDatabase = new SQL.Database();
+        oldDatabase.run(`
+            CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE files(path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime_ms REAL NOT NULL, origin TEXT NOT NULL, file_version INTEGER NOT NULL);
+            CREATE TABLE symbols(
+                id INTEGER PRIMARY KEY, file_path TEXT NOT NULL, name TEXT NOT NULL, name_lower TEXT NOT NULL,
+                kind TEXT NOT NULL, line INTEGER NOT NULL, source TEXT NOT NULL, container TEXT,
+                category TEXT, updated_at REAL NOT NULL
+            );
+        `);
+        const metadata = oldDatabase.prepare('INSERT INTO metadata(key, value) VALUES (?, ?)');
+        metadata.run(['schema_version', '2']);
+        metadata.run(['parser_version', '4']);
+        metadata.run(['source_root', path.resolve(tempDir).replace(/\\/g, '/')]);
+        metadata.run(['source_fingerprint', 'cwb-v1']);
+        metadata.free();
+        fs.writeFileSync(databasePath, oldDatabase.export());
+        oldDatabase.close();
+
+        const { cache } = loadModules();
+        const current = new cache.WorkspaceSymbolSqliteCache(databasePath, wasmDirectory, tempDir, 'cwb-v1');
+        await current.open();
+        expect(current.load().entries).to.deep.equal([]);
+
+        // The obsolete file is replaced during open(), before a later indexing
+        // pass has a chance to populate or save any rows.
+        const persisted = new SQL.Database(new Uint8Array(fs.readFileSync(databasePath)));
+        const persistedMetadata = new Map(
+            (persisted.exec('SELECT key, value FROM metadata')[0]?.values ?? [])
+                .map(row => [String(row[0]), String(row[1])]),
+        );
+        const persistedColumns = (persisted.exec('PRAGMA table_info(symbols)')[0]?.values ?? [])
+            .map(row => String(row[1]));
+        expect(persistedMetadata.get('schema_version')).to.equal('3');
+        expect(persistedColumns).to.include('gui_facts_json');
+        expect(Number(persisted.exec('SELECT count(*) FROM symbols')[0]?.values[0]?.[0] ?? -1)).to.equal(0);
+        persisted.close();
+
+        current.update([{
+            path: path.join(tempDir, 'interface', 'window.gui'),
+            size: 20,
+            mtimeMs: 200,
+            origin: 'workspace',
+            fileVersion: 1,
+            entries: [{
+                name: 'kuat_window',
+                kind: 'containerWindowType',
+                file: path.join(tempDir, 'interface', 'window.gui'),
+                line: 1,
+                source: 'gui',
+                origin: 'workspace',
+                guiFacts: {
+                    offCanvas: false,
+                    localisationKeys: ['KUAT_WINDOW'],
+                    customGuiReferences: [],
+                    effectReferences: [],
+                    spriteReferences: [],
+                },
+            }],
+        }], []);
+        expect(current.load().entries[0]?.guiFacts?.localisationKeys).to.deep.equal(['KUAT_WINDOW']);
+        current.close();
+    });
+
     it('persists symbols and applies changed/deleted files incrementally', async () => {
         const { cache } = loadModules();
         const { WorkspaceSymbolSqliteCache } = cache;
@@ -89,12 +156,27 @@ describe('WorkspaceSymbolSqliteCache', () => {
                 fileVersion: 1,
             }],
         }], []);
+        first.setCoverage({
+            discoveredFiles: 10,
+            discoveredFilesExact: true,
+            selectedFiles: 10,
+            indexedFiles: 10,
+            truncated: false,
+        });
         await first.save();
         first.close();
 
         const second = new WorkspaceSymbolSqliteCache(databasePath, wasmDirectory, tempDir, 'cwb-v1');
         await second.open();
-        expect(second.load().entries.map(entry => entry.name)).to.deep.equal(['example.1']);
+        const secondSnapshot = second.load();
+        expect(secondSnapshot.entries.map(entry => entry.name)).to.deep.equal(['example.1']);
+        expect(secondSnapshot.coverage).to.deep.equal({
+            discoveredFiles: 10,
+            discoveredFilesExact: true,
+            selectedFiles: 10,
+            indexedFiles: 10,
+            truncated: false,
+        });
         second.update([], [path.join(tempDir, 'events', 'a.txt')]);
         await second.save();
         second.close();

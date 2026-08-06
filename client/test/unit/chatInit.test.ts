@@ -24,6 +24,7 @@ describe('/init artifact generation', () => {
         let workspaceIndexOptions: Record<string, unknown> | undefined;
         let exportAttempts = 0;
         let exportOptions: Record<string, unknown> | undefined;
+        class ProjectKnowledgeModelNotReadyError extends Error {}
         const vscodeStub = {
             workspace: {
                 workspaceFolders: [{ uri: { fsPath: workspaceRoot } }],
@@ -51,8 +52,9 @@ describe('/init artifact generation', () => {
             generateProjectKnowledge: async (_root: string, _profile: unknown, options: Record<string, unknown>) => {
                 exportAttempts += 1;
                 exportOptions = options;
-                throw new Error('LSP server has not loaded a game model yet.');
+                throw new ProjectKnowledgeModelNotReadyError('LSP server has not loaded a game model yet.');
             },
+            ProjectKnowledgeModelNotReadyError,
             getProjectKnowledgeManifestPath: () => manifestPath,
             writeUnavailableProjectKnowledge: (_root: string, _profile: unknown, reason: string) => {
                 fs.mkdirSync(knowledgeRoot, { recursive: true });
@@ -68,7 +70,7 @@ describe('/init artifact generation', () => {
         moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
             if (request === 'vscode') return vscodeStub;
             if (request === './projectKnowledge') return projectKnowledgeStub;
-            if (request === './errorReporter') return { ErrorReporter: { warn: () => undefined } };
+            if (request === './errorReporter') return { ErrorReporter: { debug: () => undefined, warn: () => undefined } };
             return originalLoad.apply(this, [request, ...args]);
         };
 
@@ -88,6 +90,7 @@ describe('/init artifact generation', () => {
 
             expect(result.success).to.equal(true);
             expect(result.degraded).to.equal(true);
+            expect(result.knowledgeReady).to.equal(false);
             expect(fs.existsSync(path.join(workspaceRoot, 'CWTOOLS.md'))).to.equal(true);
             expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'))).to.equal(true);
             expect(fs.existsSync(manifestPath)).to.equal(true);
@@ -102,6 +105,61 @@ describe('/init artifact generation', () => {
             expect(exportOptions).to.deep.equal({ mode: 'full', complete: true, requireReady: true });
         } finally {
             clock.restore();
+            moduleLoader._load = originalLoad;
+            delete require.cache[modulePath];
+        }
+    });
+
+    it('does not repeat a deterministic knowledge export failure', async () => {
+        const manifestPath = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge', 'manifest.json');
+        let exportAttempts = 0;
+        class ProjectKnowledgeModelNotReadyError extends Error {}
+        const vscodeStub = {
+            workspace: {
+                workspaceFolders: [{ uri: { fsPath: workspaceRoot } }],
+                openTextDocument: async (uri: unknown) => ({ uri }),
+            },
+            window: {
+                showWarningMessage: async () => undefined,
+                showInformationMessage: async () => undefined,
+                showTextDocument: async () => undefined,
+                withProgress: async (_options: unknown, task: (progress: { report(): void }) => Promise<unknown>) => task({ report: () => undefined }),
+            },
+            ProgressLocation: { Window: 10 },
+            Uri: { file: (filePath: string) => ({ fsPath: filePath }) },
+        };
+        const projectKnowledgeStub = {
+            ProjectKnowledgeModelNotReadyError,
+            generateProjectKnowledge: async () => {
+                exportAttempts += 1;
+                throw new Error('Must add values for the following parameters: $phase, $delay');
+            },
+            getProjectKnowledgeManifestPath: () => manifestPath,
+            writeUnavailableProjectKnowledge: (_root: string, _profile: unknown, reason: string) => {
+                fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+                fs.writeFileSync(manifestPath, JSON.stringify({ status: 'unavailable', warnings: [reason] }), 'utf8');
+            },
+        };
+        const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+        const originalLoad = moduleLoader._load;
+        const modulePath = require.resolve('../../extension/ai/chatInit');
+        delete require.cache[modulePath];
+        moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
+            if (request === 'vscode') return vscodeStub;
+            if (request === './projectKnowledge') return projectKnowledgeStub;
+            if (request === './errorReporter') return { ErrorReporter: { debug: () => undefined, warn: () => undefined } };
+            return originalLoad.apply(this, [request, ...args]);
+        };
+
+        try {
+            const { generateInitFile } = require('../../extension/ai/chatInit') as typeof import('../../extension/ai/chatInit');
+            const result = await generateInitFile(() => undefined, () => undefined);
+
+            expect(exportAttempts).to.equal(1);
+            expect(result.success).to.equal(true);
+            expect(result.knowledgeReady).to.equal(false);
+            expect(result.message).to.include('Must add values');
+        } finally {
             moduleLoader._load = originalLoad;
             delete require.cache[modulePath];
         }
@@ -145,7 +203,7 @@ describe('/init artifact generation', () => {
         moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
             if (request === 'vscode') return vscodeStub;
             if (request === './projectKnowledge') return projectKnowledgeStub;
-            if (request === './errorReporter') return { ErrorReporter: { warn: () => undefined } };
+            if (request === './errorReporter') return { ErrorReporter: { debug: () => undefined, warn: () => undefined } };
             return originalLoad.apply(this, [request, ...args]);
         };
 
@@ -159,11 +217,75 @@ describe('/init artifact generation', () => {
             expect(attempts).to.equal(1);
             expect(result.success).to.equal(true);
             expect(result.degraded).to.equal(true);
+            expect(result.knowledgeReady).to.equal(true);
             expect(result.message).to.include('partial coverage');
             expect(warnings).to.have.length(1);
             expect(warnings[0]).to.include('generated a partial project + vanilla knowledge pack');
         } finally {
             clock.restore();
+            moduleLoader._load = originalLoad;
+            delete require.cache[modulePath];
+        }
+    });
+
+    it('continues /init when the optional workspace symbol index fails', async () => {
+        const manifestPath = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge', 'manifest.json');
+        const warnings: string[] = [];
+        const vscodeStub = {
+            workspace: {
+                workspaceFolders: [{ uri: { fsPath: workspaceRoot } }],
+                openTextDocument: async (uri: unknown) => ({ uri }),
+            },
+            window: {
+                showWarningMessage: async () => undefined,
+                showInformationMessage: async () => undefined,
+                showTextDocument: async () => undefined,
+                withProgress: async (_options: unknown, task: (progress: { report(): void }) => Promise<unknown>) => task({ report: () => undefined }),
+            },
+            ProgressLocation: { Window: 10 },
+            Uri: { file: (filePath: string) => ({ fsPath: filePath }) },
+        };
+        const projectKnowledgeStub = {
+            generateProjectKnowledge: async () => ({
+                status: 'ready' as const,
+                game: 'stellaris',
+                generatedAt: new Date().toISOString(),
+                counts: { vanillaDefinitions: 1 },
+                staleReasons: [],
+            }),
+            getProjectKnowledgeManifestPath: () => manifestPath,
+            writeUnavailableProjectKnowledge: () => { throw new Error('ready knowledge must not be replaced'); },
+        };
+        const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+        const originalLoad = moduleLoader._load;
+        const modulePath = require.resolve('../../extension/ai/chatInit');
+        delete require.cache[modulePath];
+        moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
+            if (request === 'vscode') return vscodeStub;
+            if (request === './projectKnowledge') return projectKnowledgeStub;
+            if (request === './errorReporter') {
+                return { ErrorReporter: { debug: () => undefined, warn: (_source: string, message: string) => warnings.push(message) } };
+            }
+            return originalLoad.apply(this, [request, ...args]);
+        };
+
+        try {
+            const { generateInitFile } = require('../../extension/ai/chatInit') as typeof import('../../extension/ai/chatInit');
+            const result = await generateInitFile(() => undefined, () => undefined, {
+                ensureWorkspaceSymbolsReady: async () => { throw new Error('EPERM: operation not permitted, watch'); },
+                workspaceSymbolTypeSummary: () => ({ byType: {}, byTypeCounts: {} }),
+            } as any);
+
+            expect(result.success).to.equal(true);
+            expect(result.degraded).to.equal(true);
+            expect(result.knowledgeReady).to.equal(true);
+            expect(result.message).to.include('EPERM: operation not permitted, watch');
+            expect(warnings.some(message => message.includes('continuing with the LSP knowledge export'))).to.equal(true);
+            expect(fs.existsSync(path.join(workspaceRoot, 'CWTOOLS.md'))).to.equal(true);
+            const profile = JSON.parse(fs.readFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), 'utf8'));
+            expect(profile.validation.indexStatus).to.equal('unavailable');
+            expect(profile.freshness.knowledgeStatus).to.equal('ready');
+        } finally {
             moduleLoader._load = originalLoad;
             delete require.cache[modulePath];
         }

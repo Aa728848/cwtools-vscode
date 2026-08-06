@@ -246,6 +246,8 @@ describe('project knowledge current SQLite schema', () => {
             completeExport: true,
             requireReady: false,
             databasePath: path.join(root, 'knowledge.sqlite'),
+            workspaceRoot: path.resolve(workspaceRoot),
+            vanillaRoot: undefined,
             generationMode: 'incremental',
         }]);
     });

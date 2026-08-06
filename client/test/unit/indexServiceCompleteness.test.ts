@@ -2,6 +2,46 @@ import { expect } from 'chai';
 import * as path from 'path';
 
 describe('IndexService workspace symbol completeness', () => {
+    it('keeps on-demand indexing available when the filesystem watcher cannot be created', () => {
+        const output: string[] = [];
+        let createAttempts = 0;
+        const vscodeStub = {
+            workspace: {
+                createFileSystemWatcher: () => {
+                    createAttempts += 1;
+                    throw new Error('EPERM: operation not permitted, watch');
+                },
+            },
+            window: {
+                createOutputChannel: () => ({ appendLine: (line: string) => output.push(line), dispose: () => undefined }),
+                setStatusBarMessage: () => undefined,
+            },
+        };
+        const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+        const originalLoad = moduleLoader._load;
+        const modulePath = require.resolve('../../extension/indexing/indexService');
+        const reporterPath = require.resolve('../../extension/ai/errorReporter');
+        delete require.cache[modulePath];
+        delete require.cache[reporterPath];
+        moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
+            if (request === 'vscode') return vscodeStub;
+            return originalLoad.apply(this, [request, ...args]);
+        };
+
+        try {
+            const { IndexService } = require('../../extension/indexing/indexService') as typeof import('../../extension/indexing/indexService');
+            const service = new IndexService();
+            expect(() => (service as any)._ensureSymbolFileWatcher()).to.not.throw();
+            expect(() => (service as any)._ensureSymbolFileWatcher()).to.not.throw();
+            expect(createAttempts).to.equal(2);
+            expect(output.filter(line => line.includes('Workspace symbol file watcher is unavailable'))).to.have.length(1);
+        } finally {
+            moduleLoader._load = originalLoad;
+            delete require.cache[modulePath];
+            delete require.cache[reporterPath];
+        }
+    });
+
     it('reports partial when discovery exceeds the bounded file limit', async () => {
         const files = ['one.txt', 'two.txt', 'three.txt'].map(name => ({ fsPath: path.join('C:\\workspace', name) }));
         const vscodeStub = {

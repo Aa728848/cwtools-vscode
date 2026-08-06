@@ -231,6 +231,22 @@ suite('Paradox Shader LSP contract', function () {
         const emptyLabels = emptyCompletion?.items.map(item => item.label) ?? [];
         assert.ok(emptyLabels.includes('id'), `empty event completion must contain id; received: ${emptyLabels.slice(0, 40).join(', ')}`);
 
+        const rootCompletion = await client.sendRequest<{ items: Array<{ label: string }> } | null>(
+            'textDocument/completion',
+            {
+                textDocument: { uri: emptyEventDocument.uri.toString() },
+                position: { line: emptyEventDocument.lineCount - 1, character: 0 },
+                context: { triggerKind: 1 },
+            },
+        );
+        const rootLabels = rootCompletion?.items.map(item => item.label) ?? [];
+        for (const eventType of ['country_event', 'planet_event', 'fleet_event', 'ship_event', 'event']) {
+            assert.ok(
+                rootLabels.includes(eventType),
+                `root event completion must contain ${eventType}; received: ${rootLabels.slice(0, 40).join(', ')}`,
+            );
+        }
+
         const eventPath = path.join(workspaceFolder.uri.fsPath, 'events', 'completion_contract.txt');
         const eventDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(eventPath));
         await vscode.languages.setTextDocumentLanguage(eventDocument, 'stellaris');

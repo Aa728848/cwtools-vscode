@@ -4,8 +4,35 @@ import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js';
 import { getWorkspaceCacheRoot } from '../ai/workspacePaths';
 import type { WorkspaceSymbolEntry, WorkspaceSymbolOrigin } from './workspaceSymbolParser';
 
-const SCHEMA_VERSION = 2;
-const PARSER_VERSION = 4;
+const SCHEMA_VERSION = 3;
+const PARSER_VERSION = 5;
+
+const CURRENT_SCHEMA_SQL = `
+    CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS files(
+        path TEXT PRIMARY KEY,
+        size INTEGER NOT NULL,
+        mtime_ms REAL NOT NULL,
+        origin TEXT NOT NULL,
+        file_version INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS symbols(
+        id INTEGER PRIMARY KEY,
+        file_path TEXT NOT NULL,
+        name TEXT NOT NULL,
+        name_lower TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        line INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        container TEXT,
+        category TEXT,
+        updated_at REAL NOT NULL,
+        gui_facts_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name_lower);
+    CREATE INDEX IF NOT EXISTS idx_symbols_kind_name ON symbols(kind, name_lower);
+    CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file_path);
+`;
 export const WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH = path.join('index', 'workspace-symbols.sqlite');
 
 /** Primary cache location: per-workspace extension storage once configured. */
@@ -37,6 +64,15 @@ export interface WorkspaceSymbolCachedFile extends WorkspaceSymbolFileFact {
 export interface WorkspaceSymbolCacheSnapshot {
     files: Map<string, WorkspaceSymbolFileFact>;
     entries: WorkspaceSymbolEntry[];
+    coverage?: WorkspaceSymbolCacheCoverage;
+}
+
+export interface WorkspaceSymbolCacheCoverage {
+    discoveredFiles: number;
+    discoveredFilesExact: boolean;
+    selectedFiles: number;
+    indexedFiles: number;
+    truncated: boolean;
 }
 
 let sqlPromise: Promise<SqlJsStatic> | undefined;
@@ -130,6 +166,7 @@ export class WorkspaceSymbolSqliteCache {
             ? this.databasePath
             : this.fallbackDatabasePaths.find(candidate => fs.existsSync(candidate)) ?? this.databasePath;
         const loadedFallback = path.resolve(sourcePath) !== path.resolve(this.databasePath);
+        let rebuilt = false;
         try {
             bytes = new Uint8Array(await fs.promises.readFile(sourcePath));
         } catch {
@@ -137,14 +174,18 @@ export class WorkspaceSymbolSqliteCache {
         }
         try {
             this.database = bytes?.length ? new SQL.Database(bytes) : new SQL.Database();
-            this.ensureSchema();
+            rebuilt = this.ensureSchema();
         } catch {
             this.database?.close();
             this.database = new SQL.Database();
-            this.ensureSchema(true);
+            rebuilt = this.ensureSchema(true);
+        }
+        // Persist an empty current-schema database immediately. A process crash
+        // before indexing finishes must not leave the obsolete file in place.
+        if (rebuilt || loadedFallback) {
+            await this.save();
         }
         if (loadedFallback) {
-            await this.save();
             removeMigratedFallback(sourcePath, this.sourceRoot);
         }
     }
@@ -153,6 +194,19 @@ export class WorkspaceSymbolSqliteCache {
         const database = this.requireDatabase();
         const files = new Map<string, WorkspaceSymbolFileFact>();
         const entries: WorkspaceSymbolEntry[] = [];
+        const metadata = new Map<string, string>();
+        for (const row of database.exec('SELECT key, value FROM metadata')[0]?.values ?? []) {
+            metadata.set(String(row[0]), String(row[1]));
+        }
+        const coverage = metadata.get('coverage_format') === '1'
+            ? {
+                discoveredFiles: Number(metadata.get('coverage_discovered_files') ?? 0),
+                discoveredFilesExact: metadata.get('coverage_discovered_exact') === 'true',
+                selectedFiles: Number(metadata.get('coverage_selected_files') ?? 0),
+                indexedFiles: Number(metadata.get('coverage_indexed_files') ?? 0),
+                truncated: metadata.get('coverage_truncated') === 'true',
+            }
+            : undefined;
         const rows = database.exec(`
             SELECT f.path, f.size, f.mtime_ms, f.origin, f.file_version,
                    s.name, s.kind, s.line, s.source, s.container, s.category,
@@ -162,7 +216,7 @@ export class WorkspaceSymbolSqliteCache {
             ORDER BY f.path, s.id
         `);
         const result = rows[0];
-        if (!result) return { files, entries };
+        if (!result) return { files, entries, coverage };
         for (const row of result.values) {
             const filePath = String(row[0] ?? '');
             const origin = row[3] === 'vanilla' ? 'vanilla' : 'workspace';
@@ -189,7 +243,28 @@ export class WorkspaceSymbolSqliteCache {
                 guiFacts: parseGuiFacts(row[12]),
             });
         }
-        return { files, entries };
+        return { files, entries, coverage };
+    }
+
+    setCoverage(coverage: WorkspaceSymbolCacheCoverage): void {
+        const database = this.requireDatabase();
+        const statement = database.prepare(`
+            INSERT INTO metadata(key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        `);
+        try {
+            const values: Array<[string, string]> = [
+                ['coverage_format', '1'],
+                ['coverage_discovered_files', String(coverage.discoveredFiles)],
+                ['coverage_discovered_exact', String(coverage.discoveredFilesExact)],
+                ['coverage_selected_files', String(coverage.selectedFiles)],
+                ['coverage_indexed_files', String(coverage.indexedFiles)],
+                ['coverage_truncated', String(coverage.truncated)],
+            ];
+            for (const value of values) statement.run(value);
+        } finally {
+            statement.free();
+        }
     }
 
     update(changedFiles: WorkspaceSymbolCachedFile[], removedFiles: string[]): void {
@@ -277,52 +352,37 @@ export class WorkspaceSymbolSqliteCache {
         this.database = undefined;
     }
 
-    private ensureSchema(forceReset = false): void {
+    private ensureSchema(forceReset = false): boolean {
         const database = this.requireDatabase();
-        database.run(`
-            CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS files(
-                path TEXT PRIMARY KEY,
-                size INTEGER NOT NULL,
-                mtime_ms REAL NOT NULL,
-                origin TEXT NOT NULL,
-                file_version INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS symbols(
-                id INTEGER PRIMARY KEY,
-                file_path TEXT NOT NULL,
-                name TEXT NOT NULL,
-                name_lower TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                line INTEGER NOT NULL,
-                source TEXT NOT NULL,
-                container TEXT,
-                category TEXT,
-                updated_at REAL NOT NULL,
-                gui_facts_json TEXT
-            );
-            CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name_lower);
-            CREATE INDEX IF NOT EXISTS idx_symbols_kind_name ON symbols(kind, name_lower);
-            CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file_path);
-        `);
+        database.run(CURRENT_SCHEMA_SQL);
         const expectedRoot = normalizePath(this.sourceRoot);
         const metadata = new Map<string, string>();
         const rows = database.exec('SELECT key, value FROM metadata');
         for (const row of rows[0]?.values ?? []) metadata.set(String(row[0]), String(row[1]));
+		const symbolColumns = new Set(
+			(database.exec('PRAGMA table_info(symbols)')[0]?.values ?? [])
+				.map(row => String(row[1] ?? '')),
+		);
 		const invalid = forceReset
 			|| metadata.get('schema_version') !== String(SCHEMA_VERSION)
 			|| metadata.get('parser_version') !== String(PARSER_VERSION)
 			|| metadata.get('source_root') !== expectedRoot
-			|| metadata.get('source_fingerprint') !== this.sourceFingerprint;
+			|| metadata.get('source_fingerprint') !== this.sourceFingerprint
+			|| !symbolColumns.has('gui_facts_json');
 		if (invalid) {
-            database.run('DELETE FROM symbols; DELETE FROM files; DELETE FROM metadata;');
+			// Generated symbol caches have no compatibility path. Replace every
+			// non-current layout so later SELECTs never depend on missing columns.
+			database.run('DROP TABLE IF EXISTS symbols; DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS metadata;');
+			database.run(CURRENT_SCHEMA_SQL);
             const statement = database.prepare('INSERT INTO metadata(key, value) VALUES (?, ?)');
             statement.run(['schema_version', String(SCHEMA_VERSION)]);
 			statement.run(['parser_version', String(PARSER_VERSION)]);
 			statement.run(['source_root', expectedRoot]);
-			statement.run(['source_fingerprint', this.sourceFingerprint]);
+            statement.run(['source_fingerprint', this.sourceFingerprint]);
             statement.free();
+			return true;
         }
+		return false;
     }
 
     private requireDatabase(): Database {

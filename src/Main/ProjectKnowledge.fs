@@ -24,6 +24,8 @@ type ExportOptions =
       archetypesPerDomain: int
       completeExport: bool
       databasePath: string option
+      workspaceRoot: string option
+      vanillaRoot: string option
       generationMode: string }
 
 type RuntimeMetadata =
@@ -186,6 +188,9 @@ type private EventGraphFacts =
       logic: EventLogicFact list
       stateAccesses: EventLogicFact list }
 
+let private eventLogicFactCount (eventGraph: EventGraphFacts) =
+    eventGraph.logic.Length + eventGraph.stateAccesses.Length
+
 let private clamp minimum maximum value = max minimum (min maximum value)
 
 let private normalizePath (value: string) =
@@ -194,6 +199,14 @@ let private normalizePath (value: string) =
 let private normalizeFileKey (value: string) =
     let normalized = value |> Path.GetFullPath |> normalizePath
     if OperatingSystem.IsWindows() then normalized.ToLowerInvariant() else normalized
+
+let private normalizeOptionalRoot value =
+    value
+    |> Option.bind (fun candidate ->
+        try
+            if String.IsNullOrWhiteSpace candidate then None
+            else Some(Path.GetFullPath candidate)
+        with _ -> None)
 
 let normalizeOptions (options: ExportOptions) : ExportOptions =
     { domains =
@@ -211,6 +224,8 @@ let normalizeOptions (options: ExportOptions) : ExportOptions =
       archetypesPerDomain = clamp 1 20 options.archetypesPerDomain
       completeExport = options.completeExport
       databasePath = options.databasePath
+      workspaceRoot = normalizeOptionalRoot options.workspaceRoot
+      vanillaRoot = normalizeOptionalRoot options.vanillaRoot
       generationMode = if options.generationMode = "incremental" then "incremental" else "full" }
 
 let private comparison =
@@ -298,26 +313,31 @@ let cleanupStaleKnowledgeTemporaryFiles (databasePath: string) =
             CWTools.Utilities.Utils.logWarning
                 $"Failed to enumerate project knowledge temporary databases beside {target}: {e.Message}"
 
-let private originName =
-    function
-    | PdxShaderProject.Vanilla -> "vanilla"
-    | PdxShaderProject.Dependency _ -> "dependency"
-    | PdxShaderProject.CurrentDocument
-    | PdxShaderProject.Workspace -> "workspace"
+/// Prefer explicit filesystem roots over CWTools resource scope. Stellaris
+/// exposes most base-game script resources as `embedded`, and mods can expose
+/// shader resources the same way, so scope alone cannot distinguish vanilla,
+/// dependencies, and the editable project.
+let resolveKnowledgeOriginWithRoots workspaceRoot projectRoots vanillaRoot scope filePath =
+    let editableRoot = workspaceRoot |> Option.orElseWith (fun () -> projectRoots |> List.tryHead)
+    if editableRoot |> Option.exists (fun root -> pathInside root filePath) then
+        "workspace"
+    elif vanillaRoot |> Option.exists (fun root -> pathInside root filePath) then
+        "vanilla"
+    elif projectRoots |> List.exists (fun root -> pathInside root filePath) then
+        "dependency"
+    else
+        match PdxShaderProject.originForResource scope filePath with
+        | PdxShaderProject.Vanilla -> "vanilla"
+        | PdxShaderProject.Dependency _ -> "dependency"
+        | PdxShaderProject.CurrentDocument
+        | PdxShaderProject.Workspace -> "dependency"
 
-/// Resolve provenance from the same explicit load-order roots used by the
-/// shader/project runtime.  Resource scope is authoritative for vanilla and
-/// embedded resources; paths outside the editable root are dependencies unless
-/// CWTools explicitly marks them as vanilla.
 let resolveKnowledgeOrigin projectRoots scope filePath =
-    match PdxShaderProject.originForResource scope filePath with
-    | PdxShaderProject.Workspace when not (projectRoots |> List.exists (fun root -> pathInside root filePath)) ->
-        if String.Equals(scope, "vanilla", StringComparison.OrdinalIgnoreCase) then "vanilla" else "dependency"
-    | origin -> originName origin
+    resolveKnowledgeOriginWithRoots (projectRoots |> List.tryHead) projectRoots None scope filePath
 
-let private originForResource projectRoots (resource: ResourceFact option) filePath =
+let private originForResource workspaceRoot projectRoots vanillaRoot (resource: ResourceFact option) filePath =
     let scope = resource |> Option.map _.scope |> Option.defaultValue ""
-    resolveKnowledgeOrigin projectRoots scope filePath
+    resolveKnowledgeOriginWithRoots workspaceRoot projectRoots vanillaRoot scope filePath
 
 let private overwriteName = function
     | Overwrite.Overwrote -> "overwrote"
@@ -463,9 +483,7 @@ let private shaderEntityType =
     | PdxShaderRuntime.DepthStencilStateDeclaration -> "shader_render_state", [ "depth_stencil" ]
     | PdxShaderRuntime.RasterizerStateDeclaration -> "shader_render_state", [ "rasterizer" ]
 
-let private shaderOriginName = originName
-
-let private collectShaderDefinitions (model: PdxShaderRuntime.ShaderRuntimeModel option) (resources: IDictionary<string, ResourceFact>) =
+let private collectShaderDefinitions (model: PdxShaderRuntime.ShaderRuntimeModel option) (resources: IDictionary<string, ResourceFact>) workspaceRoot projectRoots vanillaRoot =
     match model with
     | None -> []
     | Some model ->
@@ -482,7 +500,7 @@ let private collectShaderDefinitions (model: PdxShaderRuntime.ShaderRuntimeModel
                   logicalPath = declaration.logicalPath
                   line = int declaration.range.StartLine
                   endLine = int declaration.range.EndLine
-                  origin = shaderOriginName declaration.origin
+                  origin = originForResource workspaceRoot projectRoots vanillaRoot resource declaration.file
                   validate = true
                   subtypes = subtypes
                   overwrite = resource |> Option.map (fun item -> item.overwrite) |> Option.defaultValue "none"
@@ -515,7 +533,7 @@ let private collectShaderDefinitions (model: PdxShaderRuntime.ShaderRuntimeModel
                       logicalPath = invocation.logicalPath
                       line = int invocation.blockRange.StartLine
                       endLine = int invocation.blockRange.EndLine
-                      origin = shaderOriginName invocation.origin
+                      origin = originForResource workspaceRoot projectRoots vanillaRoot resource invocation.sourceFile
                       validate = true
                       subtypes = [ invocation.rendererSubtype ]
                       overwrite = resource |> Option.map (fun item -> item.overwrite) |> Option.defaultValue "none"
@@ -629,7 +647,7 @@ let private collectDefinitions (game: IGame) (projectRoots: string list) (resour
                   logicalPath = logicalPath
                   line = line
                   endLine = endLine
-                  origin = originForResource projectRoots resource definition.range.FileName
+                  origin = originForResource options.workspaceRoot projectRoots options.vanillaRoot resource definition.range.FileName
                   validate = definition.validate
                   subtypes = definition.subtypes
                   overwrite = resource |> Option.map (fun item -> item.overwrite) |> Option.defaultValue "none"
@@ -648,7 +666,7 @@ let private collectDefinitions (game: IGame) (projectRoots: string list) (resour
                   hasRealRange = provenance.hasRealRange
                   confidence = provenance.confidence }))
 
-    Seq.append typedDefinitions (collectShaderDefinitions shaderModel resources)
+    Seq.append typedDefinitions (collectShaderDefinitions shaderModel resources options.workspaceRoot projectRoots options.vanillaRoot)
     |> Seq.filter (fun definition ->
         (options.domains.IsEmpty && changedFiles.IsEmpty)
         || options.domains |> List.contains definition.domain
@@ -777,7 +795,7 @@ let private baselineJson (databasePath: string) (definitions: DefinitionFact lis
           Some("eventGraph", jsonRecord
               [ Some("nodes", JsonValue.Number(decimal eventGraph.nodes.Length))
                 Some("edges", JsonValue.Number(decimal eventGraph.edges.Length))
-                Some("logicFacts", JsonValue.Number(decimal eventGraph.logic.Length))
+                Some("logicFacts", JsonValue.Number(decimal (eventLogicFactCount eventGraph)))
                 Some("edgeLabeledRatio", JsonValue.Float eventEdgeLabelRatio)
                 Some("edgeResolutionRatio", JsonValue.Float eventResolutionRatio) ]) ]
 
@@ -928,10 +946,12 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
     let changedFiles = options.changedFiles |> Set.ofList
 
     let resources = resourceFacts (game :> IGame)
+    let resolvedOrigin filePath =
+        originForResource options.workspaceRoot projectRoots options.vanillaRoot (resourceForFile resources filePath) filePath
 
     for struct (entity, lazyData) in game.AllEntities() do
         let resource = resourceForFile resources entity.filepath
-        if originForResource projectRoots resource entity.filepath = "workspace" then
+        if originForResource options.workspaceRoot projectRoots options.vanillaRoot resource entity.filepath = "workspace" then
             let domain = domainFor "" entity.logicalpath
             if (options.domains.IsEmpty && changedFiles.IsEmpty)
                || options.domains |> List.contains domain
@@ -973,7 +993,7 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
                         { file = normalizedFile
                           logicalPath = normalizePath entity.logicalpath
                           domain = domain
-                          origin = originForResource projectRoots resource entity.filepath })
+                          origin = originForResource options.workspaceRoot projectRoots options.vanillaRoot resource entity.filepath })
 
     let shaderSourceSelected sourceFile =
         (options.domains.IsEmpty && changedFiles.IsEmpty)
@@ -1019,7 +1039,7 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
     shaderModel
     |> Option.iter (fun model ->
         for snapshot in model.snapshots do
-            let origin = shaderOriginName snapshot.origin
+            let origin = resolvedOrigin snapshot.displayPath
 
             for includeEntry in PdxShaderProject.extractIncludes snapshot do
                 let targetId, referenceType, associatedType =
@@ -1053,7 +1073,7 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
             addShaderEdge
                 declaration.file
                 declaration.logicalPath
-                (shaderOriginName declaration.origin)
+                (resolvedOrigin declaration.file)
                 declaration.stableId
                 entityType
                 (int declaration.selectionRange.StartLine)
@@ -1079,7 +1099,7 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
                 addShaderEdge
                     reference.file
                     reference.logicalPath
-                    (shaderOriginName reference.origin)
+                    (resolvedOrigin reference.file)
                     target
                     typeGroup
                     (int reference.span.StartLine)
@@ -1102,7 +1122,7 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
             addShaderEdge
                 evidence.sourceFile
                 evidence.logicalPath
-                (shaderOriginName evidence.origin)
+                (resolvedOrigin evidence.sourceFile)
                 targetId
                 typeGroup
                 (int evidence.span.StartLine)
@@ -1115,7 +1135,7 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
                 addShaderEdge
                     invocation.sourceFile
                     invocation.logicalPath
-                    (shaderOriginName invocation.origin)
+                    (resolvedOrigin invocation.sourceFile)
                     (normalizePath input.value)
                     "shader_renderer_input"
                     (int input.span.StartLine)
@@ -1129,7 +1149,7 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
                     addShaderEdge
                         invocation.sourceFile
                         invocation.logicalPath
-                        (shaderOriginName invocation.origin)
+                        (resolvedOrigin invocation.sourceFile)
                         effectName
                         "shader_effect"
                         (int invocation.shaderFileSpan.StartLine)
@@ -1142,7 +1162,7 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
             addShaderEdge
                 guiUse.sourceFile
                 guiUse.logicalPath
-                (shaderOriginName guiUse.origin)
+                (resolvedOrigin guiUse.sourceFile)
                 guiUse.spriteName
                 "shader_interface_sprite"
                 (int guiUse.span.StartLine)
@@ -1691,11 +1711,11 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
                 |> List.sumBy (function Some value when not (String.IsNullOrWhiteSpace value) -> 1 | _ -> 0))
             |> Seq.head)
     let distinctLogic = logic |> Seq.distinctBy (fun item -> item.eventId, item.relationType, item.subject, item.scope, item.line)
-    let distinctState = stateAccesses |> Seq.distinctBy (fun item -> item.eventId, item.relationType, item.subject, item.phase, item.line) |> Seq.truncate 30000 |> Seq.toList
+    let distinctState = stateAccesses |> Seq.distinctBy (fun item -> item.eventId, item.relationType, item.subject, item.phase, item.line)
     { nodes = nodes |> Seq.distinctBy (fun item -> item.eventId, item.file, item.line) |> Seq.toList
       edges = (if options.completeExport then distinctEdges else distinctEdges |> Seq.truncate 30000) |> Seq.toList
       logic = (if options.completeExport then distinctLogic else distinctLogic |> Seq.truncate 30000) |> Seq.toList
-      stateAccesses = distinctState }
+      stateAccesses = (if options.completeExport then distinctState else distinctState |> Seq.truncate 30000) |> Seq.toList }
 
 let private collectEventGraph options definitions topology game =
     collectEventGraphWithKnownIds Set.empty options definitions topology game
@@ -1957,11 +1977,30 @@ let private setCommandParameters (command: SqliteCommand) values =
     command.Parameters.Clear()
     values |> List.iter (fun (name, value) -> addParameter command name value)
 
+let private requireCompleteParameterSet operation (required: Set<string>) (values: (string * obj) list) =
+    let provided = values |> List.map fst |> Set.ofList
+    let missing = Set.difference required provided
+    if not missing.IsEmpty then
+        let missingNames = String.concat ", " (Set.toList missing)
+        invalidOp $"{operation} is missing SQLite values for: {missingNames}"
+
 let private prepareCommandParameters (command: SqliteCommand) (values: (string * obj) list) =
+    let sqlParameters =
+        Regex.Matches(command.CommandText, @"\$[A-Za-z_][A-Za-z0-9_]*")
+        |> Seq.cast<Match>
+        |> Seq.map (fun item -> item.Value)
+        |> Set.ofSeq
+    requireCompleteParameterSet "Prepared command" sqlParameters values
     setCommandParameters command values
     command.Prepare()
 
 let private setPreparedCommandParameters (command: SqliteCommand) (values: (string * obj) list) =
+    let preparedParameters =
+        command.Parameters
+        |> Seq.cast<SqliteParameter>
+        |> Seq.map (fun item -> item.ParameterName)
+        |> Set.ofSeq
+    requireCompleteParameterSet "Prepared command row" preparedParameters values
     values
     |> List.iter (fun (name, value) ->
         command.Parameters.[name].Value <- if isNull value then DBNull.Value :> obj else value)
@@ -2021,8 +2060,21 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
     insertMetadata "topology_truncated" ((string topology.truncated).ToLowerInvariant())
     insertMetadata "warnings" (JsonValue.Array(warnings |> Seq.map JsonValue.String |> Seq.toArray).ToString(JsonSaveOptions.DisableFormatting))
     insertMetadata "definition_count" (definitions.Length.ToString())
+    insertMetadata "workspace_definition_count" ((definitions |> List.filter (fun item -> item.origin = "workspace") |> List.length).ToString())
+    insertMetadata "workspace_declared_definition_count" ((definitions |> List.filter (fun item -> item.origin = "workspace" && item.provenanceKind = "declared") |> List.length).ToString())
+    insertMetadata "workspace_synthetic_definition_count" ((definitions |> List.filter (fun item -> item.origin = "workspace" && item.provenanceKind = "synthetic") |> List.length).ToString())
+    insertMetadata "dependency_definition_count" ((definitions |> List.filter (fun item -> item.origin = "dependency") |> List.length).ToString())
+    insertMetadata "vanilla_definition_count" ((definitions |> List.filter (fun item -> item.origin = "vanilla") |> List.length).ToString())
+    insertMetadata "curated_definition_count" ((definitions |> List.filter (fun item -> item.origin = "curated") |> List.length).ToString())
+    insertMetadata "declared_definition_count" ((definitions |> List.filter (fun item -> item.provenanceKind = "declared") |> List.length).ToString())
+    insertMetadata "synthetic_definition_count" ((definitions |> List.filter (fun item -> item.provenanceKind = "synthetic") |> List.length).ToString())
+    insertMetadata "derived_definition_count" ((definitions |> List.filter (fun item -> item.provenanceKind = "derived") |> List.length).ToString())
+    insertMetadata "line_zero_definition_count" ((definitions |> List.filter (fun item -> item.line <= 0) |> List.length).ToString())
     insertMetadata "topology_file_count" (topology.files.Length.ToString())
     insertMetadata "topology_edge_count" (topology.edges.Length.ToString())
+    insertMetadata "event_node_count" (eventGraph.nodes.Length.ToString())
+    insertMetadata "event_edge_count" (eventGraph.edges.Length.ToString())
+    insertMetadata "event_logic_count" ((eventLogicFactCount eventGraph).ToString())
 
     use domainCommand = connection.CreateCommand()
     domainCommand.Transaction <- transaction
@@ -2178,11 +2230,16 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
     eventEdgeCommand.CommandText <- "INSERT INTO event_edges(source_kind, source_id, target_event_id, edge_type, label, source_file, line, confidence, call_operator, phase, delay, condition_path, scope_map, source_scope, target_scope) VALUES ($kind, $source, $target, $type, $label, $file, $line, $confidence, $callOperator, $phase, $delay, $conditionPath, $scopeMap, $sourceScope, $targetScope)"
     prepareCommandParameters eventEdgeCommand
         [ "$kind", box ""; "$source", box ""; "$target", box ""; "$type", box ""; "$label", box ""; "$file", box ""
-          "$line", box 0; "$confidence", box "" ]
+          "$line", box 0; "$confidence", box ""; "$callOperator", box ""; "$phase", box ""; "$delay", box ""
+          "$conditionPath", box ""; "$scopeMap", box ""; "$sourceScope", box ""; "$targetScope", box "" ]
     for edge in eventGraph.edges do
         setPreparedCommandParameters eventEdgeCommand
             [ "$kind", box edge.sourceKind; "$source", box edge.sourceId; "$target", box edge.targetEventId; "$type", box edge.edgeType
-              "$label", box (edge.label |> Option.toObj); "$file", box edge.sourceFile; "$line", box edge.line; "$confidence", box edge.confidence ]
+              "$label", box (edge.label |> Option.toObj); "$file", box edge.sourceFile; "$line", box edge.line; "$confidence", box edge.confidence
+              "$callOperator", box (edge.callOperator |> Option.toObj); "$phase", box (edge.phase |> Option.toObj)
+              "$delay", box (edge.delay |> Option.toObj); "$conditionPath", box (edge.conditionPath |> Option.toObj)
+              "$scopeMap", box (edge.scopeMap |> Option.toObj); "$sourceScope", box (edge.sourceScope |> Option.toObj)
+              "$targetScope", box (edge.targetScope |> Option.toObj) ]
         eventEdgeCommand.ExecuteNonQuery() |> ignore
     use eventLogicCommand = connection.CreateCommand()
     eventLogicCommand.Transaction <- transaction
@@ -3330,14 +3387,21 @@ let private exportProjectKnowledgeRebuild shouldCancel (activeGame: string) (pro
                 [ Some("definitions", JsonValue.Number(decimal definitions.Length))
                   Some("availableDefinitions", JsonValue.Number(decimal availableDefinitions.Length))
                   Some("workspaceDefinitions", JsonValue.Number(decimal (definitions |> List.filter (fun item -> item.origin = "workspace") |> List.length)))
+                  Some("workspaceDeclaredDefinitions", JsonValue.Number(decimal (definitions |> List.filter (fun item -> item.origin = "workspace" && item.provenanceKind = "declared") |> List.length)))
+                  Some("workspaceSyntheticDefinitions", JsonValue.Number(decimal (definitions |> List.filter (fun item -> item.origin = "workspace" && item.provenanceKind = "synthetic") |> List.length)))
                   Some("dependencyDefinitions", JsonValue.Number(decimal (definitions |> List.filter (fun item -> item.origin = "dependency") |> List.length)))
                   Some("vanillaDefinitions", JsonValue.Number(decimal (definitions |> List.filter (fun item -> item.origin = "vanilla") |> List.length)))
+                  Some("curatedDefinitions", JsonValue.Number(decimal (definitions |> List.filter (fun item -> item.origin = "curated") |> List.length)))
+                  Some("declaredDefinitions", JsonValue.Number(decimal (definitions |> List.filter (fun item -> item.provenanceKind = "declared") |> List.length)))
+                  Some("syntheticDefinitions", JsonValue.Number(decimal (definitions |> List.filter (fun item -> item.provenanceKind = "synthetic") |> List.length)))
+                  Some("derivedDefinitions", JsonValue.Number(decimal (definitions |> List.filter (fun item -> item.provenanceKind = "derived") |> List.length)))
+                  Some("lineZeroDefinitions", JsonValue.Number(decimal (definitions |> List.filter (fun item -> item.line <= 0) |> List.length)))
                   Some("definitionStacks", JsonValue.Number(decimal (definitionStackCount definitions)))
                   Some("topologyFiles", JsonValue.Number(decimal topology.files.Length))
                   Some("topologyEdges", JsonValue.Number(decimal topology.edges.Length))
                   Some("eventNodes", JsonValue.Number(decimal eventGraph.nodes.Length))
                   Some("eventEdges", JsonValue.Number(decimal eventGraph.edges.Length))
-                  Some("eventLogic", JsonValue.Number(decimal eventGraph.logic.Length)) ])
+                  Some("eventLogic", JsonValue.Number(decimal (eventLogicFactCount eventGraph))) ])
               Some("freshness", jsonRecord
                   [ Some("validationInProgress", JsonValue.Boolean runtime.validationInProgress)
                     Some("loadingInProgress", JsonValue.Boolean runtime.loadingInProgress)
@@ -4008,16 +4072,45 @@ ORDER BY lower(d.entity_type), lower(d.symbol_id), d.id
                             use command = connection.CreateCommand()
                             command.CommandText <- sql
                             Convert.ToInt32(command.ExecuteScalar())
+                        let groupedCounts sql =
+                            use command = connection.CreateCommand()
+                            command.CommandText <- sql
+                            use reader = command.ExecuteReader()
+                            let values = ResizeArray<string * int>()
+                            while reader.Read() do
+                                values.Add(reader.GetString 0, Convert.ToInt32(reader.GetInt64 1))
+                            values |> Seq.toList
+                        let statsJson counts =
+                            counts
+                            |> List.map (fun (key, count) -> key, JsonValue.Number(decimal count))
+                            |> List.toArray
+                            |> JsonValue.Record
+                        let ratio numerator denominator =
+                            if denominator = 0 then 0.0 else float numerator / float denominator
                         let definitionCount = scalarCount "SELECT count(*) FROM definitions"
                         let workspaceDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'workspace'"
+                        let workspaceDeclaredDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'workspace' AND provenance_kind = 'declared'"
+                        let workspaceSyntheticDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'workspace' AND provenance_kind = 'synthetic'"
                         let dependencyDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'dependency'"
                         let vanillaDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'vanilla'"
+                        let curatedDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'curated'"
+                        let declaredDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE provenance_kind = 'declared'"
+                        let syntheticDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE provenance_kind = 'synthetic'"
+                        let derivedDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE provenance_kind = 'derived'"
+                        let lineZeroDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE line <= 0"
                         let definitionStackCount = scalarCount "SELECT count(*) FROM definition_stacks"
                         let topologyFileCount = scalarCount "SELECT count(*) FROM files"
                         let topologyEdgeCount = scalarCount "SELECT count(*) FROM references_graph"
                         let eventNodeCount = scalarCount "SELECT count(*) FROM event_nodes"
                         let eventEdgeCount = scalarCount "SELECT count(*) FROM event_edges"
                         let eventLogicCount = scalarCount "SELECT count(*) FROM event_logic"
+                        let definitionOriginCounts = groupedCounts "SELECT origin, count(*) FROM definitions GROUP BY origin ORDER BY origin"
+                        let definitionProvenanceCounts = groupedCounts "SELECT provenance_kind, count(*) FROM definitions GROUP BY provenance_kind ORDER BY provenance_kind"
+                        let definitionEntityTypeCounts = groupedCounts "SELECT entity_type, count(*) AS total FROM definitions GROUP BY entity_type ORDER BY lower(entity_type) LIMIT 200"
+                        let topologyEdgeKindCounts = groupedCounts "SELECT type_group, count(*) FROM references_graph GROUP BY type_group ORDER BY type_group"
+                        let labeledTopologyEdgeCount = scalarCount "SELECT count(*) FROM references_graph WHERE trim(coalesce(label, '')) <> ''"
+                        let labeledEventEdgeCount = scalarCount "SELECT count(*) FROM event_edges WHERE trim(coalesce(label, '')) <> ''"
+                        let resolvedEventEdgeCount = scalarCount "SELECT count(*) FROM event_edges WHERE confidence <> 'unresolved'"
                         let inlineTemplateCount = scalarCount "SELECT count(*) FROM inline_templates"
                         let inlineInvocationCount = scalarCount "SELECT count(*) FROM inline_invocations"
                         let inlineExpansionCount = scalarCount "SELECT count(*) FROM inline_expansions"
@@ -4032,6 +4125,16 @@ ORDER BY lower(d.entity_type), lower(d.symbol_id), d.id
                             addParameter command "$value" (box value)
                             command.ExecuteNonQuery() |> ignore
                         upsertFinalMetadata "definition_count" (string definitionCount)
+                        upsertFinalMetadata "workspace_definition_count" (string workspaceDefinitionCount)
+                        upsertFinalMetadata "workspace_declared_definition_count" (string workspaceDeclaredDefinitionCount)
+                        upsertFinalMetadata "workspace_synthetic_definition_count" (string workspaceSyntheticDefinitionCount)
+                        upsertFinalMetadata "dependency_definition_count" (string dependencyDefinitionCount)
+                        upsertFinalMetadata "vanilla_definition_count" (string vanillaDefinitionCount)
+                        upsertFinalMetadata "curated_definition_count" (string curatedDefinitionCount)
+                        upsertFinalMetadata "declared_definition_count" (string declaredDefinitionCount)
+                        upsertFinalMetadata "synthetic_definition_count" (string syntheticDefinitionCount)
+                        upsertFinalMetadata "derived_definition_count" (string derivedDefinitionCount)
+                        upsertFinalMetadata "line_zero_definition_count" (string lineZeroDefinitionCount)
                         upsertFinalMetadata "topology_file_count" (string topologyFileCount)
                         upsertFinalMetadata "topology_edge_count" (string topologyEdgeCount)
                         upsertFinalMetadata "event_node_count" (string eventNodeCount)
@@ -4075,14 +4178,26 @@ ORDER BY lower(d.entity_type), lower(d.symbol_id), d.id
                                   Some("domains", JsonValue.Array compactDomains)
                                   Some("baseline", jsonRecord
                                     [ Some("deterministicOrdering", JsonValue.Boolean true)
+                                      Some("exportDurationMs", JsonValue.Number(decimal incrementalDurationMs))
                                       Some("incrementalDurationMs", JsonValue.Number(decimal incrementalDurationMs))
                                       Some("changedFiles", JsonValue.Number(decimal changedFiles.Length))
                                       Some("databaseSizeBytes", JsonValue.Number(decimal databaseSizeBytes))
                                       Some("definitions", jsonRecord
                                         [ Some("total", JsonValue.Number(decimal definitionCount))
-                                          Some("workspace", JsonValue.Number(decimal workspaceDefinitionCount))
-                                          Some("dependency", JsonValue.Number(decimal dependencyDefinitionCount))
-                                          Some("vanilla", JsonValue.Number(decimal vanillaDefinitionCount)) ])
+                                          Some("byOrigin", statsJson definitionOriginCounts)
+                                          Some("byProvenanceKind", statsJson definitionProvenanceCounts)
+                                          Some("lineZeroRecords", JsonValue.Number(decimal lineZeroDefinitionCount))
+                                          Some("byEntityType", statsJson definitionEntityTypeCounts) ])
+                                      Some("edges", jsonRecord
+                                        [ Some("total", JsonValue.Number(decimal topologyEdgeCount))
+                                          Some("byKind", statsJson topologyEdgeKindCounts)
+                                          Some("labeledRatio", JsonValue.Float(ratio labeledTopologyEdgeCount topologyEdgeCount)) ])
+                                      Some("eventGraph", jsonRecord
+                                        [ Some("nodes", JsonValue.Number(decimal eventNodeCount))
+                                          Some("edges", JsonValue.Number(decimal eventEdgeCount))
+                                          Some("logicFacts", JsonValue.Number(decimal eventLogicCount))
+                                          Some("edgeLabeledRatio", JsonValue.Float(ratio labeledEventEdgeCount eventEdgeCount))
+                                          Some("edgeResolutionRatio", JsonValue.Float(ratio resolvedEventEdgeCount eventEdgeCount)) ])
                                       Some("inlineGraph", jsonRecord
                                         [ Some("templates", JsonValue.Number(decimal inlineTemplateCount))
                                           Some("invocations", JsonValue.Number(decimal inlineInvocationCount))
@@ -4101,8 +4216,15 @@ ORDER BY lower(d.entity_type), lower(d.symbol_id), d.id
                                     [ Some("definitions", JsonValue.Number(decimal definitionCount))
                                       Some("availableDefinitions", JsonValue.Number(decimal definitionCount))
                                       Some("workspaceDefinitions", JsonValue.Number(decimal workspaceDefinitionCount))
+                                      Some("workspaceDeclaredDefinitions", JsonValue.Number(decimal workspaceDeclaredDefinitionCount))
+                                      Some("workspaceSyntheticDefinitions", JsonValue.Number(decimal workspaceSyntheticDefinitionCount))
                                       Some("dependencyDefinitions", JsonValue.Number(decimal dependencyDefinitionCount))
                                       Some("vanillaDefinitions", JsonValue.Number(decimal vanillaDefinitionCount))
+                                      Some("curatedDefinitions", JsonValue.Number(decimal curatedDefinitionCount))
+                                      Some("declaredDefinitions", JsonValue.Number(decimal declaredDefinitionCount))
+                                      Some("syntheticDefinitions", JsonValue.Number(decimal syntheticDefinitionCount))
+                                      Some("derivedDefinitions", JsonValue.Number(decimal derivedDefinitionCount))
+                                      Some("lineZeroDefinitions", JsonValue.Number(decimal lineZeroDefinitionCount))
                                       Some("definitionStacks", JsonValue.Number(decimal definitionStackCount))
                                       Some("topologyFiles", JsonValue.Number(decimal topologyFileCount))
                                       Some("topologyEdges", JsonValue.Number(decimal topologyEdgeCount))

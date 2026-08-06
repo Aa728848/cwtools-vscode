@@ -33,7 +33,8 @@ param (
     [switch]$SkipServer,
     [switch]$SkipClient,
     [switch]$IncludeMcp,
-    [switch]$Publish
+    [switch]$Publish,
+    [switch]$SkipDocs
 )
 
 $StartTime = Get-Date
@@ -286,6 +287,8 @@ if ($Install) {
     } else {
         Write-Error "No VSIX bundle found to install!"
     }
+}
+
 # 7. GitHub Release Publishing
 if ($Publish) {
     if ($VsixFile) {

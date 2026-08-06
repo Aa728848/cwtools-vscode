@@ -8449,6 +8449,19 @@ type Server(client: ILanguageClient) =
             |> catchError { documentChanges = None; changes = Map.empty }
 
         member this.ExecuteCommand(p: ExecuteCommandParams) : Async<ExecuteCommandResponse option> =
+            let analysisFreshnessSnapshot () =
+                let runtime = validationRuntimeSnapshot ()
+                let loading = loadingRuntimeSnapshot ()
+                let pendingDomains = pendingRefreshDomainList ()
+                let staleReasons =
+                    [ if loading.inProgress then yield "project_loading"
+                      if runtime.inProgress then yield "validation_in_progress"
+                      if not pendingDomains.IsEmpty then yield! pendingDomains |> List.map (fun value -> "pending_refresh:" + value) ]
+                let status =
+                    if loading.inProgress then "loading"
+                    elif runtime.inProgress || not pendingDomains.IsEmpty then "partial"
+                    else "fresh"
+                status, staleReasons
             let validationStatusResult () =
                 let currentEpoch = diagnosticEpoch.Value
                 let currentModelEpoch = modelEpochSnapshot ()
@@ -8568,6 +8581,7 @@ type Server(client: ILanguageClient) =
                 // the game-state write lock or has failed before gameObj is assigned.
                 async.Return(Some(validationStatusResult ()))
             else async {
+                let! cancellationToken = Async.CancellationToken
                 return
                     match gameObj with
                     | Some game ->
@@ -10469,6 +10483,188 @@ type Server(client: ILanguageClient) =
                                                "status", JsonValue.String "unavailable"
                                                "error", JsonValue.String "LSP server has not loaded a game model yet." |])
 
+                        // - cwtools.ai.queryLocalisationAudit -
+                        // Authoritative missing-reference and command/scope audit
+                        // from the active CWTools localisation validator.
+                        | { command = "cwtools.ai.queryLocalisationAudit"
+                            arguments = args } ->
+                            let fields = args |> List.tryHead |> Option.bind (function JsonValue.Record value -> Some value | _ -> None) |> Option.defaultValue [||]
+                            let field name = fields |> Array.tryPick (fun (key, value) -> if key = name then Some value else None)
+                            let stringField name = field name |> Option.bind (function JsonValue.String value when not (String.IsNullOrWhiteSpace value) -> Some value | _ -> None)
+                            let boolField name fallback = field name |> Option.bind (function JsonValue.Boolean value -> Some value | _ -> None) |> Option.defaultValue fallback
+                            let limit = field "limit" |> Option.bind (function JsonValue.Number value -> Some(int value) | JsonValue.Float value -> Some(int value) | _ -> None) |> Option.defaultValue 100 |> max 1 |> min 500
+                            let query = stringField "key"
+                            let prefix = boolField "prefix" false
+                            let contains = boolField "contains" false
+                            let caseSensitive = boolField "caseSensitive" false
+                            let comparison = if caseSensitive then StringComparison.Ordinal else StringComparison.OrdinalIgnoreCase
+                            let matches (value: string) =
+                                query
+                                |> Option.forall (fun expected ->
+                                    if prefix then value.StartsWith(expected, comparison)
+                                    elif contains then value.Contains(expected, comparison)
+                                    else value.Equals(expected, comparison))
+                            let visitor =
+                                { new IGameVisitor<JsonValue> with
+                                    member _.Visit game =
+                                        let errors =
+                                            game.LocalisationErrors(true, true)
+                                            |> List.filter (fun error -> error.code.StartsWith("CW1", StringComparison.Ordinal) || error.code.StartsWith("CW2", StringComparison.Ordinal))
+                                            |> List.filter (fun error -> error.data |> Option.forall matches)
+                                            |> List.sortBy (fun error -> error.range.FileName, error.range.StartLine, error.code)
+                                        let selected = errors |> List.truncate limit
+                                        let issueJson error =
+                                            let key = error.data |> Option.defaultValue ""
+                                            let normalizedFile = error.range.FileName.Replace('\\', '/')
+                                            let inlineTemplate =
+                                                let marker = "/common/inline_scripts/"
+                                                let lower = normalizedFile.ToLowerInvariant()
+                                                let index = lower.IndexOf(marker, StringComparison.Ordinal)
+                                                if index >= 0 then
+                                                    let relative = normalizedFile.Substring(index + marker.Length)
+                                                    Some(if relative.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) then relative.Substring(0, relative.Length - 4) else relative)
+                                                else None
+                                            JsonValue.Record
+                                                [| "code", JsonValue.String error.code
+                                                   "key", JsonValue.String key
+                                                   "file", JsonValue.String normalizedFile
+                                                   "line", JsonValue.Number(decimal (int error.range.StartLine))
+                                                   "message", JsonValue.String error.message
+                                                   "dynamic", JsonValue.Boolean(key.Contains("$", StringComparison.Ordinal))
+                                                   "inlineTemplate", (inlineTemplate |> Option.map JsonValue.String |> Option.defaultValue JsonValue.Null) |]
+                                        JsonValue.Record
+                                            [| "ok", JsonValue.Boolean true
+                                               "source", JsonValue.String "cwtools-localisation-validator"
+                                               "version", JsonValue.Number 2m
+                                               "issues", JsonValue.Array(selected |> List.map issueJson |> List.toArray)
+                                               "coverage", JsonValue.Record
+                                                   [| "issuesConsidered", JsonValue.Number(decimal errors.Length)
+                                                      "issuesIndexed", JsonValue.Number(decimal selected.Length)
+                                                      "truncated", JsonValue.Boolean(errors.Length > selected.Length)
+                                                      "staleReasons", JsonValue.Array [||] |] |] }
+                            match gameDispatcher.Dispatch visitor with
+                            | Some result -> Some result
+                            | None -> Some(JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "unavailable"; "error", JsonValue.String "LSP server has not loaded a game model yet." |])
+
+                        // - cwtools.ai.compareDefinitionWithVanilla -
+                        // Field-level diff of a workspace definition against its
+                        // vanilla counterpart. Accepts exact entityType + symbolId.
+                        | { command = "cwtools.ai.compareDefinitionWithVanilla"
+                            arguments = args } ->
+                            let stringArg index =
+                                args
+                                |> List.tryItem index
+                                |> Option.bind (function
+                                    | JsonValue.String value when not (String.IsNullOrWhiteSpace value) -> Some value
+                                    | _ -> None)
+                            match stringArg 0, stringArg 1 with
+                            | None, _ | _, None ->
+                                Some(
+                                    JsonValue.Record
+                                        [| "ok", JsonValue.Boolean false
+                                           "status", JsonValue.String "error"
+                                           "error", JsonValue.String "compareDefinitionWithVanilla requires entityType and symbolId." |])
+                            | Some entityType, Some symbolId ->
+                                let visitor =
+                                    { new IGameVisitor<JsonValue> with
+                                        member _.Visit game =
+                                            let freshness, staleReasons = analysisFreshnessSnapshot ()
+                                            SemanticGraph.compareDefinitionWithVanillaWithRuntime
+                                                (fun () -> cancellationToken.IsCancellationRequested)
+                                                freshness staleReasons game entityType symbolId }
+                                match gameDispatcher.Dispatch visitor with
+                                | Some result -> Some result
+                                | None ->
+                                    Some(
+                                        JsonValue.Record
+                                            [| "ok", JsonValue.Boolean false
+                                               "status", JsonValue.String "unavailable"
+                                               "error", JsonValue.String "LSP server has not loaded a game model yet." |])
+
+                        // - cwtools.ai.analyzePdxFlow -
+                        // Static cost model and gameplay relations for a file,
+                        // definition or identifier. Bounded, read-only, never
+                        // predicts real runtime.
+                        | { command = "cwtools.ai.analyzePdxFlow"
+                            arguments = args } ->
+                            let fields = args |> List.tryHead |> Option.bind (function JsonValue.Record value -> Some value | _ -> None) |> Option.defaultValue [||]
+                            let field name = fields |> Array.tryPick (fun (key, value) -> if key = name then Some value else None)
+                            let stringField name = field name |> Option.bind (function JsonValue.String value when not (String.IsNullOrWhiteSpace value) -> Some value | _ -> None)
+                            let legacyString index = args |> List.tryItem index |> Option.bind (function JsonValue.String value when not (String.IsNullOrWhiteSpace value) -> Some value | _ -> None)
+                            let query: PdxFlowAnalysis.FlowQuery =
+                                { file = stringField "file" |> Option.orElseWith (fun () -> legacyString 0)
+                                  definitionId = stringField "definitionId" |> Option.orElseWith (fun () -> legacyString 1)
+                                  entityType = stringField "entityType"
+                                  limit = field "limit" |> Option.bind (function JsonValue.Number value -> Some(int value) | JsonValue.Float value -> Some(int value) | _ -> None) |> Option.defaultValue 100 }
+                            if query.file.IsNone && query.definitionId.IsNone && query.entityType.IsNone then
+                                Some(
+                                    JsonValue.Record
+                                        [| "ok", JsonValue.Boolean false
+                                           "status", JsonValue.String "error"
+                                           "error", JsonValue.String "analyzePdxFlow requires file, definitionId, or entityType." |])
+                            else
+                                let visitor =
+                                    { new IGameVisitor<JsonValue> with
+                                        member _.Visit game =
+                                            let freshness, staleReasons = analysisFreshnessSnapshot ()
+                                            PdxFlowAnalysis.flowAnalysisJsonWithFreshness
+                                                (PdxFlowAnalysis.analyzePdxFlowCancellable (fun () -> cancellationToken.IsCancellationRequested) game query)
+                                                freshness staleReasons }
+                                match gameDispatcher.Dispatch visitor with
+                                | Some result -> Some result
+                                | None ->
+                                    Some(
+                                        JsonValue.Record
+                                            [| "ok", JsonValue.Boolean false
+                                               "status", JsonValue.String "unavailable"
+                                               "error", JsonValue.String "LSP server has not loaded a game model yet." |])
+
+                        // - cwtools.ai.exploreInlineGraph -
+                        // Read-only inline-script instantiation graph: templates,
+                        // parameters, invocations, arguments, expansions and
+                        // structured parameter problems. Bounded and deterministic.
+                        | { command = "cwtools.ai.exploreInlineGraph"
+                            arguments = args } ->
+                            let optionFields =
+                                args
+                                |> List.tryHead
+                                |> Option.bind (function JsonValue.Record fields -> Some fields | _ -> None)
+                                |> Option.defaultValue [||]
+                            let tryField name =
+                                optionFields
+                                |> Array.tryPick (fun (key, value) -> if key = name then Some value else None)
+                            let stringField name =
+                                tryField name
+                                |> Option.bind (function JsonValue.String value when not (String.IsNullOrWhiteSpace value) -> Some value | _ -> None)
+                            let intField name fallback =
+                                tryField name
+                                |> Option.bind (function JsonValue.Number value -> Some(int value) | JsonValue.Float value -> Some(int value) | _ -> None)
+                                |> Option.defaultValue fallback
+                            let legacyFile =
+                                args
+                                |> List.tryHead
+                                |> Option.bind (function JsonValue.String value when not (String.IsNullOrWhiteSpace value) -> Some value | _ -> None)
+                            let query: InlineGraph.InlineGraphQuery =
+                                { template = stringField "template"
+                                  callerFile = stringField "file" |> Option.orElse legacyFile
+                                  callerLine = tryField "line" |> Option.bind (function JsonValue.Number value -> Some(int value) | JsonValue.Float value -> Some(int value) | _ -> None)
+                                  limit = intField "limit" 50 }
+                            let visitor =
+                                { new IGameVisitor<JsonValue> with
+                                    member _.Visit game =
+                                        let freshness, staleReasons = analysisFreshnessSnapshot ()
+                                        let facts = InlineGraph.collectInlineGraphCancellable (fun () -> cancellationToken.IsCancellationRequested) (game.AllEntities())
+                                        let filtered, truncated, considered = InlineGraph.filterInlineGraph query facts
+                                        InlineGraph.inlineGraphJsonWithCoverageAndFreshness filtered truncated considered freshness staleReasons }
+                            match gameDispatcher.Dispatch visitor with
+                            | Some result -> Some result
+                            | None ->
+                                Some(
+                                    JsonValue.Record
+                                        [| "ok", JsonValue.Boolean false
+                                           "status", JsonValue.String "unavailable"
+                                           "error", JsonValue.String "LSP server has not loaded a game model yet." |])
+
                         // - cwtools.ai.exportProjectKnowledge -
                         // Exports a bounded, provenance-rich snapshot for /init. The command
                         // reads the same coherent IGame model used by diagnostics/completion,
@@ -10560,7 +10756,9 @@ type Server(client: ILanguageClient) =
                                 let visitor =
                                     { new IGameVisitor<JsonValue> with
                                         member _.Visit game =
-                                            Main.ProjectKnowledge.exportProjectKnowledge gameName projectRoots exportOptions runtime game }
+                                            Main.ProjectKnowledge.exportProjectKnowledgeCancellable
+                                                (fun () -> cancellationToken.IsCancellationRequested)
+                                                gameName projectRoots exportOptions runtime game }
                                 try
                                     match gameDispatcher.Dispatch visitor with
                                     | Some result -> Some result

@@ -13,6 +13,14 @@ export interface WorkspaceSymbolEntry {
     category?: string;
     origin?: WorkspaceSymbolOrigin;
     references?: WorkspaceSymbolReference[];
+    guiFacts?: {
+        offCanvas: boolean;
+        position?: { x?: number; y?: number; expression?: string };
+        localisationKeys: string[];
+        customGuiReferences: string[];
+        effectReferences: string[];
+        spriteReferences: string[];
+    };
     updatedAt?: number;
     fileVersion?: number;
 }
@@ -173,6 +181,30 @@ export function queryWorkspaceSymbolIndex(
     }
 
     return results;
+}
+
+/** Count matching symbol rows without allocating an unbounded result array. */
+export function countWorkspaceSymbolIndex(
+    index: Map<string, WorkspaceSymbolEntry[]>,
+    query: WorkspaceSymbolQuery,
+): number {
+    const name = (query.name ?? '').trim().toLowerCase();
+    const kind = (query.kind ?? '').trim().toLowerCase();
+    const category = (query.category ?? '').trim().toLowerCase();
+    const origin = query.origin && query.origin !== 'both' ? query.origin : undefined;
+    const directory = query.directory ? normalizePath(query.directory).toLowerCase().replace(/^\/+|\/+$/g, '') : '';
+    let count = 0;
+    for (const entries of index.values()) for (const entry of entries) {
+        const entryName = entry.name.toLowerCase();
+        if (name && (query.exact ? entryName !== name : query.prefix ? !entryName.startsWith(name) : !entryName.includes(name))) continue;
+        if (kind && entry.kind.toLowerCase() !== kind) continue;
+        if (category && (entry.category ?? '').toLowerCase() !== category) continue;
+        if (query.source && entry.source !== query.source) continue;
+        if (origin && (entry.origin ?? 'workspace') !== origin) continue;
+        if (directory && !normalizePath(entry.file).toLowerCase().includes(`/${directory}/`)) continue;
+        count++;
+    }
+    return count;
 }
 
 export function populateWorkspaceSymbolReferences(
@@ -377,9 +409,45 @@ function parseNamedBlockSymbols(
 ): WorkspaceSymbolEntry[] {
     const entries: WorkspaceSymbolEntry[] = [];
     const lines = content.split(/\r?\n/);
-    let depth = 0;
-    let openBlock: OpenBlock | undefined;
+    // A stack of open named blocks. Each frame remembers its block metadata,
+    // the depth at which it opened, and whether a name was already emitted.
+    const blockStack: Array<{
+        block: OpenBlock;
+        openDepth: number;
+        named: boolean;
+    }> = [];
     const normalizedFile = normalizePath(filePath);
+
+    const updateGuiFacts = (entry: WorkspaceSymbolEntry | undefined, rawLine: string): void => {
+        if (!entry || source !== 'gui') return;
+        const facts = entry.guiFacts ?? {
+            offCanvas: false,
+            localisationKeys: [],
+            customGuiReferences: [],
+            effectReferences: [],
+            spriteReferences: [],
+        };
+        const position = /\bposition\s*=\s*(?:\{[^}]*\bx\s*=\s*(-?\d+)[^}]*\by\s*=\s*(-?\d+)[^}]*\}|([@A-Za-z_][A-Za-z0-9_@.-]*))/i.exec(rawLine);
+        if (position) {
+            const x = position[1] === undefined ? undefined : Number(position[1]);
+            const y = position[2] === undefined ? undefined : Number(position[2]);
+            const expression = position[3];
+            facts.position = { x, y, expression };
+            facts.offCanvas = (!!x && Math.abs(x) > 5000) || (!!y && Math.abs(y) > 5000)
+                || !!expression && /invisible|off.?canvas|hidden/i.test(expression);
+        }
+        for (const match of rawLine.matchAll(/\b(?:text|title|desc|tooltip|buttonText|buttonTooltip)\s*=\s*"?([A-Za-z_][A-Za-z0-9_.:@$-]*)"?/gi)) {
+            if (match[1] && !facts.localisationKeys.includes(match[1])) facts.localisationKeys.push(match[1]);
+        }
+        for (const [pattern, target] of [
+            [/\bcustom_gui\s*=\s*"?([A-Za-z_][A-Za-z0-9_.:@-]*)"?/gi, facts.customGuiReferences],
+            [/\beffect\s*=\s*"?([A-Za-z_][A-Za-z0-9_.:@-]*)"?/gi, facts.effectReferences],
+            [/\b(?:sprite|quadTextureSprite)\s*=\s*"?([A-Za-z_][A-Za-z0-9_.:@-]*)"?/gi, facts.spriteReferences],
+        ] as Array<[RegExp, string[]]>) {
+            for (const match of rawLine.matchAll(pattern)) if (match[1] && !target.includes(match[1])) target.push(match[1]);
+        }
+        entry.guiFacts = facts;
+    };
 
     const addEntry = (block: OpenBlock, rawName: string, line: number): void => {
         const entry: WorkspaceSymbolEntry = {
@@ -393,51 +461,151 @@ function parseNamedBlockSymbols(
             references: block.references?.slice(0, 12),
         };
         block.entry = entry;
+        updateGuiFacts(entry, '');
         entries.push(entry);
     };
 
+    let depth = 0;
     for (let i = 0; i < lines.length; i++) {
         const line = stripComment(lines[i] ?? '');
         const beforeDepth = depth;
-        const topBlockMatch = beforeDepth <= 1
-            ? line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*\{/)
-            : null;
 
-        if (topBlockMatch?.[1]) {
-            const blockName = topBlockMatch[1];
+        // Nested named control: any `name = {` (or typed `nameField = {`) at any
+        // depth inside a gui/asset file opens a new block frame. GUI controls
+        // are recursive (containers nest), so this must not stop at depth 1.
+        const blockMatch = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*\{/);
+        if (blockMatch?.[1]) {
+            const blockName = blockMatch[1];
             const definition = matchPdxDefinitionType(definitionTypes, normalizedFile, blockName);
             const nameField = definition?.nameField ?? 'name';
-            openBlock = {
-                name: blockName,
-                kind: definition?.name ?? (source === 'gui' ? inferGuiKind(blockName) : inferAssetKind(blockName)),
-                source,
-                references: [],
-                nameField,
-            };
-            const inlineContent = line.slice(topBlockMatch[0].length);
-            const inlineName = findScalarAssignment(inlineContent, nameField);
-            if (inlineName) addEntry(openBlock, inlineName, i + 1);
-        } else if (openBlock && beforeDepth > 0) {
+            const isTypedContainer = source === 'gui'
+                ? isGuiContainerBlock(blockName)
+                : isAssetContainerBlock(blockName);
+            // Heuristic: a block whose own key looks like a definition name
+            // (e.g. `kuat_icon = { type = iconType ... }`) is a nested control
+            // even without a TypeDef; skip pure field wrappers.
+            const looksNamed = blockName.endsWith('Type')
+                || /^[a-z0-9_]+$/.test(blockName) && !isFieldWrapperKey(blockName);
+            const opensIndexableBlock = isTypedContainer || looksNamed;
+            if (opensIndexableBlock) {
+                const kind = definition?.name
+                    ?? (source === 'gui' && (blockName === 'effectButtonType' || blockName === 'effectButton' || blockName === 'buttonType')
+                        ? 'effectButtonType'
+                        : source === 'gui' ? inferGuiKind(blockName) : inferAssetKind(blockName));
+                blockStack.push({
+                    block: {
+                        name: blockName,
+                        kind,
+                        source,
+                        references: [],
+                        nameField,
+                    },
+                    openDepth: beforeDepth,
+                    named: false,
+                });
+                const inlineContent = line.slice(blockMatch[0].length);
+                const inlineName = findScalarAssignment(inlineContent, nameField);
+                if (inlineName && blockStack.length > 0) {
+                    addEntry(blockStack[blockStack.length - 1]!.block, inlineName, i + 1);
+                    blockStack[blockStack.length - 1]!.named = true;
+                    // Single-line nested effectButtonType keeps its effect and
+                    // sprite references even when everything sits on one line.
+                    const inlineButton = source === 'gui'
+                        ? parseGuiEffectButton(inlineContent, blockName)
+                        : undefined;
+                    const inlineEntry = blockStack[blockStack.length - 1]!.block.entry;
+                    if (inlineButton && inlineEntry) {
+                        inlineEntry.references = [
+                            { file: filePath, line: i + 1, context: `effect = ${inlineButton.effect}` },
+                            ...(inlineButton.sprite ? [{ file: filePath, line: i + 1, context: `sprite = ${inlineButton.sprite}` }] : []),
+                        ];
+                    }
+                    updateGuiFacts(inlineEntry, inlineContent);
+                }
+            } else if (blockStack.length > 0) {
+                // Field wrappers such as `position = { ... }` belong to the
+                // nearest named control; they are not nested GUI definitions.
+                updateGuiFacts(blockStack[blockStack.length - 1]!.block.entry, line);
+            }
+        } else if (blockStack.length > 0) {
+            const top = blockStack[blockStack.length - 1]!;
             const assetRef = collectPropertyReferences ? toAssetPropertyReference(line, filePath, i + 1) : undefined;
-            if (assetRef && openBlock.references) {
-                openBlock.references.push(assetRef);
-                if (openBlock.entry) {
-                    openBlock.entry.references = openBlock.references.slice(0, 12);
+            if (assetRef && top.block.references) {
+                top.block.references.push(assetRef);
+                if (top.block.entry) {
+                    top.block.entry.references = top.block.references.slice(0, 12);
                 }
             }
-
-            const rawName = findScalarAssignment(line, openBlock.nameField ?? 'name');
-            if (rawName) addEntry(openBlock, rawName, i + 1);
+            updateGuiFacts(top.block.entry, line);
+            // Single-line nested effectButtonType keeps its identity:
+            // `effectButtonType = { name = btn_x effect = button_effect_x sprite = GFX_x }`
+            const effectButton = source === 'gui' ? parseGuiEffectButton(line, top.block.name) : undefined;
+            if (effectButton) {
+                top.block.entry = {
+                    name: effectButton.name,
+                    kind: 'effectButtonType',
+                    file: filePath,
+                    line: i + 1,
+                    source: 'gui',
+                    container: top.block.name,
+                    category: 'gui',
+                    references: [
+                        { file: filePath, line: i + 1, context: `effect = ${effectButton.effect}` },
+                        ...(effectButton.sprite ? [{ file: filePath, line: i + 1, context: `sprite = ${effectButton.sprite}` }] : []),
+                    ],
+                };
+                entries.push(top.block.entry);
+                updateGuiFacts(top.block.entry, line);
+                top.named = true;
+            } else {
+                const rawName = findScalarAssignment(line, top.block.nameField ?? 'name');
+                if (rawName && !top.named) {
+                    addEntry(top.block, rawName, i + 1);
+                    top.named = true;
+                }
+            }
         }
 
         depth += countBracesOutsideStrings(line);
-        if (openBlock && depth <= 1 && line.includes('}')) {
-            openBlock = undefined;
+        // Close every frame whose block ended on this line.
+        while (blockStack.length > 0 && depth <= blockStack[blockStack.length - 1]!.openDepth) {
+            blockStack.pop();
         }
         depth = Math.max(0, depth);
     }
 
     return entries;
+}
+
+/** GUI container blocks that may hold nested named controls. */
+function isGuiContainerBlock(blockName: string): boolean {
+    return blockName.endsWith('Type') || blockName === 'container' || blockName === 'listbox';
+}
+
+/** Asset container blocks that may hold nested named entries. */
+function isAssetContainerBlock(blockName: string): boolean {
+    return blockName === 'entity' || blockName === 'pdxmesh' || blockName === 'animation';
+}
+
+/** Field-wrapper keys that are not themselves named definitions. */
+function isFieldWrapperKey(blockName: string): boolean {
+    return ['trigger', 'effect', 'name', 'icon', 'background', 'text', 'format', 'size', 'position', 'border', 'sprite'].includes(blockName);
+}
+
+interface GuiEffectButtonInfo {
+    name: string;
+    effect: string;
+    sprite?: string;
+}
+
+/** Parse a single-line `effectButtonType = { name = X effect = Y sprite = Z ... }`. */
+function parseGuiEffectButton(line: string, blockName: string): GuiEffectButtonInfo | undefined {
+    if (blockName !== 'effectButtonType' && blockName !== 'buttonType' && blockName !== 'effectButton') return undefined;
+    const name = findScalarAssignment(line, 'name');
+    const effect = findScalarAssignment(line, 'effect');
+    if (!name || !effect) return undefined;
+    const sprite = findScalarAssignment(line, 'sprite');
+    return { name, effect, sprite };
 }
 
 function findScalarAssignment(line: string, fieldName: string): string | undefined {
@@ -451,7 +619,7 @@ function findScalarAssignment(line: string, fieldName: string): string | undefin
 }
 
 function toAssetPropertyReference(line: string, filePath: string, lineNumber: number): WorkspaceSymbolReference | undefined {
-    if (!/^\s*(texturefile|textureFile|file|files?)\s*=/i.test(line)) return undefined;
+    if (!/^\s*(texturefile|file|files?|mesh|animation|material|shader|entity|sound|effect|sprite|noOfFrames)\s*=/i.test(line)) return undefined;
     return {
         file: filePath,
         line: lineNumber,

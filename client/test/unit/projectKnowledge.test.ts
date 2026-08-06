@@ -97,7 +97,9 @@ const vscodeStub = {
                     fs.writeFileSync(options.databasePath, 'sqlite-v2');
                 }
             }
-            return nextSnapshot;
+            return command === 'cwtools.ai.exportProjectKnowledge' && nextSnapshot?.ok === true
+                ? { ...nextSnapshot, schemaVersion: 7 }
+                : nextSnapshot;
         },
     },
     window: {
@@ -148,7 +150,7 @@ function loadProjectKnowledge() {
     }
 }
 
-describe('project knowledge SQLite V3', () => {
+describe('project knowledge current SQLite schema', () => {
     const projectKnowledge = loadProjectKnowledge();
     let workspaceRoot: string;
 
@@ -178,7 +180,7 @@ describe('project knowledge SQLite V3', () => {
         fs.rmSync(workspaceRoot, { recursive: true, force: true });
     });
 
-    it('publishes only manifest + SQLite and cleans V1 artifacts after a successful export', async () => {
+    it('publishes only the current manifest and SQLite artifact set', async () => {
         const root = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
         fs.mkdirSync(path.join(root, 'capabilities'), { recursive: true });
         fs.mkdirSync(path.join(root, 'archetypes'), { recursive: true });
@@ -190,7 +192,7 @@ describe('project knowledge SQLite V3', () => {
         nextSnapshot = {
             ok: true,
             status: 'ready',
-            schemaVersion: 3,
+            schemaVersion: 4,
             game: 'stellaris',
             graphVersion: 1,
             completeExport: true,
@@ -219,7 +221,9 @@ describe('project knowledge SQLite V3', () => {
             complete: true,
         });
 
-        expect(manifest.schemaVersion).to.equal(3);
+        expect(manifest.schemaVersion).to.equal(7);
+        expect(manifest.capabilityVersions.inlineGraph).to.equal(2);
+        expect(manifest.capabilityStatus.localisationAudit).to.equal('unavailable');
         expect(manifest.artifacts).to.deep.equal(['knowledge.sqlite']);
         expect(manifest.counts.eventLogic).to.equal(9);
         expect(manifest.completeExport).to.equal(true);
@@ -274,7 +278,7 @@ describe('project knowledge SQLite V3', () => {
         expect(commandCalls).to.deep.equal([]);
     });
 
-    it('moves a legacy knowledge pack to .cwtools and keeps subsequent writes there', async () => {
+    it('ignores the removed .cwtools-ai knowledge path and writes only to .cwtools', async () => {
         const legacyRoot = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
         const primaryRoot = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
         fs.mkdirSync(legacyRoot, { recursive: true });
@@ -287,7 +291,7 @@ describe('project knowledge SQLite V3', () => {
         nextSnapshot = {
             ok: true,
             status: 'ready',
-            schemaVersion: 3,
+            schemaVersion: 4,
             game: 'stellaris',
             graphVersion: 1,
             generatedAtUnixMs: Date.now(),
@@ -305,7 +309,7 @@ describe('project knowledge SQLite V3', () => {
 
         expect(fs.readFileSync(path.join(primaryRoot, 'knowledge.sqlite'), 'utf8')).to.equal('sqlite-v2');
         expect(fs.existsSync(path.join(primaryRoot, 'manifest.json'))).to.equal(true);
-        expect(fs.existsSync(legacyRoot)).to.equal(false);
+        expect(fs.readFileSync(path.join(legacyRoot, 'knowledge.sqlite'), 'utf8')).to.equal('legacy-sqlite');
         expect((commandCalls[0]!.args[0] as { databasePath: string }).databasePath)
             .to.equal(path.join(primaryRoot, 'knowledge.sqlite'));
     });
@@ -362,6 +366,12 @@ describe('project knowledge SQLite V3', () => {
                 edges: [{ sourceId: 'example.1', targetEventId: 'example.2', edgeType: 'option' }],
                 logic: [{ eventId: 'example.1', relationType: 'flag_set', subject: 'example_started' }],
             },
+            inlineGraph: {
+                templates: [{ templateId: 'example/template' }], parameters: [],
+                invocations: [{ invocationId: 'inv-1', callerFile: 'events/example.txt' }], arguments: [],
+                expansions: [{ invocationId: 'inv-1', expandedSymbolId: 'example.1' }], generatedReferences: [], problems: [],
+            },
+            definitionStacks: [{ entityType: 'event', id: 'example.1' }],
         };
 
         const result = await projectKnowledge.queryProjectKnowledge(workspaceRoot, {
@@ -373,6 +383,8 @@ describe('project knowledge SQLite V3', () => {
         expect(result.retrieval?.seedIdentifiers).to.deep.equal(['example.1']);
         expect(result.eventGraph?.edges[0]?.edgeType).to.equal('option');
         expect(result.eventGraph?.logic[0]?.relationType).to.equal('flag_set');
+        expect(result.inlineGraph?.expansions[0]?.expandedSymbolId).to.equal('example.1');
+        expect(result.definitionStacks?.[0]?.id).to.equal('example.1');
         expect(commandCalls[1]!.command).to.equal('cwtools.ai.queryProjectKnowledgeDb');
     });
 
@@ -405,7 +417,7 @@ describe('project knowledge SQLite V3', () => {
         expect(result._hint).to.include('export limits');
     });
 
-    it('keeps one-version V1 JSON query compatibility', async () => {
+    it('requires obsolete JSON knowledge packs to be rebuilt', async () => {
         const root = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
         fs.mkdirSync(path.join(root, 'capabilities'), { recursive: true });
         fs.writeFileSync(path.join(root, 'manifest.json'), JSON.stringify({
@@ -436,7 +448,11 @@ describe('project knowledge SQLite V3', () => {
             identifiers: ['legacy.1'],
             domains: ['events'],
         });
-        expect(result.evidence.some(item => item.id === 'legacy.1')).to.equal(true);
+        expect(result.status).to.equal('stale');
+        expect(result.rebuildRequired).to.equal(true);
+        expect(result.foundSchemaVersion).to.equal(1);
+        expect(result.currentSchemaVersion).to.equal(7);
+        expect(result.evidence).to.deep.equal([]);
         expect(commandCalls).to.have.length(0);
     });
 
@@ -690,6 +706,54 @@ describe('project knowledge SQLite V3', () => {
         expect(progressCalls).to.have.length(2);
         expect(projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)?.staleReasons).to.deep.equal([]);
         expect(secondManifest?.staleReasons).to.deep.equal([]);
+    });
+
+    it('runs the synthetic add-change-delete lifecycle through incremental exports', async () => {
+        const profile = { schemaVersion: 2, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        nextSnapshot = {
+            ok: true,
+            status: 'ready',
+            schemaVersion: 7,
+            capabilityVersions: { inlineGraph: 2, stateFlow: 2, overrideResolution: 2, interfaceGraph: 1, localisationAudit: 2, pdxFlow: 2 },
+            game: 'stellaris',
+            generatedAtUnixMs: Date.now(),
+            projectRoots: [workspaceRoot],
+            generationMode: 'full',
+            domains: [{ id: 'event' }],
+            counts: { definitions: 1, workspaceDefinitions: 1, dependencyDefinitions: 0, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
+            warnings: [],
+        };
+        await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
+        fs.mkdirSync(path.join(workspaceRoot, '.cwtools', 'project'), { recursive: true });
+        fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), JSON.stringify(profile), 'utf8');
+        commandCalls = [];
+        nextSnapshot = { ...nextSnapshot, generationMode: 'incremental' };
+        const context = {
+            globalStorageUri: { fsPath: path.join(workspaceRoot, 'global-storage') },
+            subscriptions: [] as Array<{ dispose(): void }>,
+        };
+        projectKnowledge.registerProjectKnowledgeWatcher(context as any);
+        const target = path.join(workspaceRoot, 'events', 'synthetic_lifecycle.txt');
+        const clock = sinon.useFakeTimers();
+        try {
+            watcherStubs[0]!.create?.({ fsPath: target });
+            await clock.tickAsync(2000);
+            await clock.runAllAsync();
+            watcherStubs[0]!.change?.({ fsPath: target });
+            await clock.tickAsync(2000);
+            await clock.runAllAsync();
+            watcherStubs[0]!.delete?.({ fsPath: target });
+            await clock.tickAsync(2000);
+            await clock.runAllAsync();
+        } finally {
+            clock.restore();
+            for (const disposable of context.subscriptions.reverse()) disposable.dispose();
+        }
+        const exports = commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge');
+        expect(exports).to.have.length(3);
+        expect(exports.every(call => (call.args[0] as { generationMode: string }).generationMode === 'incremental')).to.equal(true);
+        expect(exports.every(call => (call.args[0] as { changedFiles: string[] }).changedFiles.includes(target))).to.equal(true);
+        expect(projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)?.schemaVersion).to.equal(7);
     });
 
     it('keeps Git-style file changes queued without leaving progress active during startup validation', async () => {

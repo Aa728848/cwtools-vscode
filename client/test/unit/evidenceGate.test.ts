@@ -462,7 +462,9 @@ describe('EvidenceGate', () => {
         ].join('\n'), deps);
 
         expect(decision.verdict).to.equal('allow');
-        expect(decision.missingEvidence).to.have.lengthOf(0);
+        // A plain effect body is not an event/state declaration and therefore
+        // does not require the high-blast-radius event graph preflight.
+        expect(decision.missingEvidence.some(item => item.kind === 'call_chain')).to.equal(false);
         const statuses = new Map(decision.claims.map(c => [c.kind + ':' + c.claim, c.status]));
         for (const [key, status] of statuses) {
             expect(status, key).to.equal('verified');
@@ -727,18 +729,20 @@ describe('EvidenceGate', () => {
         const reference = decision.claims.find(claim => claim.kind === 'reference_exists' && claim.claim.includes('local_event.2'));
         expect(reference?.status).to.equal('verified');
         expect(reference?.sources.some(source => source.tool === 'pending_write.localDefinition')).to.equal(true);
-        expect(decision.verdict).to.equal('allow');
+        expect(decision.verdict).to.equal('block');
+        expect(decision.missingEvidence.some(item => item.claim.includes('inbound/outbound state relations'))).to.equal(true);
     });
 
-    it('leaves declaration reachability to the task graph and typed project topology', async () => {
+    it('requires typed project topology before event declaration writes', async () => {
         const content = 'country_event = { id = local_event.3 is_triggered_only = yes }';
         const unreachable = await evaluate(content, makeGateDeps({ workspaceRoot }), 'enforce');
         expect(unreachable.claims.some(claim => claim.kind === 'call_chain')).to.equal(false);
-        expect(unreachable.verdict).to.equal('allow');
+        expect(unreachable.missingEvidence.some(item => item.kind === 'call_chain')).to.equal(true);
+        expect(unreachable.verdict).to.equal('block');
 
         const reachable = await evaluate(content, makeGateDeps({ workspaceRoot }), 'enforce');
         expect(reachable.claims.some(claim => claim.kind === 'call_chain')).to.equal(false);
-        expect(reachable.verdict).to.equal('allow');
+        expect(reachable.verdict).to.equal('block');
     });
 
     it('marks claims stale when the target file changes during collection', async () => {
@@ -834,6 +838,32 @@ describe('EvidenceGate', () => {
             expect(item.status).to.be.oneOf(['unknown', 'conflict', 'stale']);
             expect(item.suggestedQueries.length).to.be.greaterThan(0);
         }
+    });
+
+    it('removes impact-scope advisories after the matching authoritative query succeeds', async () => {
+        const gate = new EvidenceGate(makeGateDeps({ workspaceRoot }));
+        const targetFile = path.join(workspaceRoot, 'common', 'inline_scripts', 'template_def.txt');
+        const withoutEvidence = await gate.evaluate({
+            toolName: 'edit_file', targetFile, text: 'x = yes', mode: 'enforce',
+        });
+        expect(withoutEvidence.missingEvidence.some(item => item.claim.includes('caller closure'))).to.equal(true);
+        expect(withoutEvidence.verdict).to.equal('block');
+
+        const withEvidence = await gate.evaluate({
+            toolName: 'edit_file',
+            targetFile,
+            text: 'x = yes',
+            mode: 'enforce',
+            evidenceCalls: [{
+                tool: 'query_inline_instantiation',
+                args: { template: 'common/inline_scripts/template_def.txt' },
+                target: 'template_def',
+                revision: 'graph:7',
+                observedAt: new Date().toISOString(),
+            }],
+        });
+        expect(withEvidence.missingEvidence.some(item => item.claim.includes('caller closure'))).to.equal(false);
+        expect(withEvidence.verdict).to.equal('allow');
     });
 
     it('parses the complete oversized file and marks bounded semantic coverage pending', async () => {

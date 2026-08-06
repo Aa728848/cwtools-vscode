@@ -8,18 +8,27 @@ import { isPathInsideOrEqual } from '../pathScope';
 import { ErrorReporter } from './errorReporter';
 import { aiText } from './messages';
 import { readProjectProfile } from './projectProfile';
-import { migrateLegacyAiStorageRoot } from './workspacePaths';
 import type {
     ProjectProfile,
     QueryProjectKnowledgeArgs,
     QueryProjectKnowledgeResult,
 } from './types';
 
-export const PROJECT_KNOWLEDGE_SCHEMA_VERSION = 3;
+export const PROJECT_KNOWLEDGE_SCHEMA_VERSION = 7;
+export const PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS = Object.freeze({
+    inlineGraph: 2,
+    stateFlow: 2,
+    overrideResolution: 2,
+    interfaceGraph: 1,
+    localisationAudit: 2,
+    pdxFlow: 2,
+});
 export const PROJECT_KNOWLEDGE_RELATIVE_DIR = path.join('.cwtools', 'project', 'knowledge');
 
 export interface ProjectKnowledgeManifest {
-    schemaVersion: 1 | 2 | 3;
+    schemaVersion: 7;
+    capabilityVersions: Record<keyof typeof PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS, number>;
+    capabilityStatus: Record<keyof typeof PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS, 'ready' | 'legacy' | 'unavailable'>;
     generatedAt: string;
     generationMode: 'full' | 'incremental';
     status: 'ready' | 'partial' | 'stale' | 'loading' | 'unavailable' | 'error';
@@ -33,6 +42,7 @@ export interface ProjectKnowledgeManifest {
         definitions: number;
         availableDefinitions?: number;
         workspaceDefinitions: number;
+        dependencyDefinitions?: number;
         vanillaDefinitions: number;
         definitionStacks: number;
         topologyFiles: number;
@@ -47,13 +57,17 @@ export interface ProjectKnowledgeManifest {
         rules: string;
     };
     freshness?: Record<string, unknown>;
+    /** Deterministic export benchmark (provenance counts, line-0, ratios, size). */
+    baseline?: Record<string, unknown>;
+    /** Unified coverage contract (considered/indexed/truncated/staleReasons). */
+    coverage?: Record<string, unknown>;
     warnings: string[];
     staleReasons: string[];
     artifacts: string[];
     database?: {
         path: string;
         format: 'sqlite';
-        schemaVersion: 2 | 3;
+        schemaVersion: 7;
     };
 }
 
@@ -62,6 +76,8 @@ interface LspKnowledgeSnapshot {
     status: ProjectKnowledgeManifest['status'];
     source?: string;
     schemaVersion?: number;
+    capabilityVersions?: Partial<Record<keyof typeof PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS, number>>;
+    capabilityStatus?: Partial<Record<keyof typeof PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS, 'ready' | 'legacy' | 'unavailable'>>;
     game?: string;
     generatedAtUnixMs?: number;
     graphVersion?: number;
@@ -82,6 +98,8 @@ interface LspKnowledgeSnapshot {
     overrideModes?: Array<Record<string, unknown>>;
     overrideModeInfo?: Array<Record<string, unknown>>;
     freshness?: Record<string, unknown>;
+    baseline?: Record<string, unknown>;
+    coverage?: Record<string, unknown>;
     warnings?: string[];
     error?: string;
 }
@@ -159,26 +177,8 @@ function primaryKnowledgeRoot(workspaceRoot: string): string {
     return path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
 }
 
-function legacyKnowledgeRoot(workspaceRoot: string): string {
-    return path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
-}
-
-function knowledgeRoot(workspaceRoot: string): string {
-    const primary = primaryKnowledgeRoot(workspaceRoot);
-    const legacy = legacyKnowledgeRoot(workspaceRoot);
-    if (fs.existsSync(path.join(primary, 'manifest.json'))) return primary;
-    if (fs.existsSync(path.join(legacy, 'manifest.json'))) return legacy;
-    return primary;
-}
-
-function ensurePrimaryKnowledgeRoot(workspaceRoot: string): string {
-    const primary = primaryKnowledgeRoot(workspaceRoot);
-    migrateLegacyAiStorageRoot(workspaceRoot);
-    return primary;
-}
-
 function existingProjectKnowledgeManifestPath(workspaceRoot: string): string {
-    return path.join(knowledgeRoot(workspaceRoot), 'manifest.json');
+    return path.join(primaryKnowledgeRoot(workspaceRoot), 'manifest.json');
 }
 
 export function getProjectKnowledgeManifestPath(workspaceRoot: string): string {
@@ -191,13 +191,6 @@ export function getProjectKnowledgeDatabasePath(workspaceRoot: string): string {
 
 function normalizePath(value: string): string {
     return value.replace(/\\/g, '/');
-}
-
-function stableStringify(value: unknown): string {
-    if (value === null || typeof value !== 'object') return JSON.stringify(value);
-    if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`;
 }
 
 function hashParts(parts: string[]): string {
@@ -323,7 +316,7 @@ function stringField(record: Record<string, unknown>, key: string): string {
     return typeof record[key] === 'string' ? String(record[key]) : '';
 }
 
-const LEGACY_KNOWLEDGE_ARTIFACTS = [
+const NON_CURRENT_KNOWLEDGE_ARTIFACTS = [
     'snapshot.json',
     'topology.json',
     'definition-stacks.json',
@@ -331,11 +324,11 @@ const LEGACY_KNOWLEDGE_ARTIFACTS = [
     'unresolved.json',
 ];
 
-function removeLegacyKnowledgeArtifacts(root: string): void {
+function removeNonCurrentKnowledgeArtifacts(root: string): void {
     for (const directory of ['capabilities', 'archetypes']) {
         try { fs.rmSync(path.join(root, directory), { recursive: true, force: true }); } catch { /* ignore */ }
     }
-    for (const artifact of LEGACY_KNOWLEDGE_ARTIFACTS) {
+    for (const artifact of NON_CURRENT_KNOWLEDGE_ARTIFACTS) {
         try { fs.rmSync(path.join(root, artifact), { force: true }); } catch { /* ignore */ }
     }
 }
@@ -367,6 +360,11 @@ async function requestLspKnowledgeSnapshot(
         }
         throw new Error(result?.error || 'CWTools project knowledge export is unavailable.');
     }
+    if (Number(result.schemaVersion) !== PROJECT_KNOWLEDGE_SCHEMA_VERSION) {
+        throw new Error(
+            `CWTools returned obsolete project knowledge schema V${Number(result.schemaVersion) || 0}; current V${PROJECT_KNOWLEDGE_SCHEMA_VERSION} is required.`,
+        );
+    }
     return result;
 }
 
@@ -375,7 +373,7 @@ export async function generateProjectKnowledge(
     profile: ProjectProfile,
     options: GenerateProjectKnowledgeOptions = {},
 ): Promise<ProjectKnowledgeManifest> {
-    const root = ensurePrimaryKnowledgeRoot(workspaceRoot);
+    const root = primaryKnowledgeRoot(workspaceRoot);
     fs.mkdirSync(root, { recursive: true });
     const snapshot = await requestLspKnowledgeSnapshot(workspaceRoot, options);
     const databasePath = getProjectKnowledgeDatabasePath(workspaceRoot);
@@ -401,6 +399,12 @@ export async function generateProjectKnowledge(
     const projectRoots = snapshot.projectRoots ?? [workspaceRoot];
     const manifest: ProjectKnowledgeManifest = {
         schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
+        capabilityVersions: { ...PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS, ...snapshot.capabilityVersions },
+        capabilityStatus: {
+            inlineGraph: 'unavailable', stateFlow: 'unavailable', overrideResolution: 'unavailable',
+            interfaceGraph: 'unavailable', localisationAudit: 'unavailable', pdxFlow: 'unavailable',
+            ...snapshot.capabilityStatus,
+        },
         generatedAt: new Date(snapshot.generatedAtUnixMs ?? Date.now()).toISOString(),
         generationMode: snapshot.generationMode ?? 'full',
         status: snapshot.status,
@@ -416,6 +420,8 @@ export async function generateProjectKnowledge(
             rules: computeRulesFingerprint(gameId, snapshot.graphVersion),
         },
         freshness: snapshot.freshness,
+        baseline: snapshot.baseline,
+        coverage: snapshot.coverage,
         warnings: snapshot.warnings ?? [],
         staleReasons: [],
         artifacts: ['knowledge.sqlite'],
@@ -429,7 +435,7 @@ export async function generateProjectKnowledge(
     // manifest only after it exists, then remove V1 files so a failed migration
     // always leaves the previous knowledge pack recoverable.
     writeJson(getProjectKnowledgeManifestPath(workspaceRoot), manifest);
-    removeLegacyKnowledgeArtifacts(root);
+    removeNonCurrentKnowledgeArtifacts(root);
     return manifest;
 }
 
@@ -438,13 +444,22 @@ export function writeUnavailableProjectKnowledge(
     profile: ProjectProfile,
     reason: string,
 ): ProjectKnowledgeManifest {
-    const root = ensurePrimaryKnowledgeRoot(workspaceRoot);
+    const root = primaryKnowledgeRoot(workspaceRoot);
     fs.mkdirSync(root, { recursive: true });
     const generatedAt = new Date().toISOString();
     const gameId = profile.game.id || 'unknown';
+    const existingManifest = readProjectKnowledgeManifest(workspaceRoot);
+    const hasCurrentDatabase = fs.existsSync(getProjectKnowledgeDatabasePath(workspaceRoot))
+        && Number(existingManifest?.schemaVersion) === PROJECT_KNOWLEDGE_SCHEMA_VERSION
+        && Number(existingManifest?.database?.schemaVersion) === PROJECT_KNOWLEDGE_SCHEMA_VERSION;
 
     const manifest: ProjectKnowledgeManifest = {
         schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
+        capabilityVersions: { ...PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS },
+        capabilityStatus: {
+            inlineGraph: 'unavailable', stateFlow: 'unavailable', overrideResolution: 'unavailable',
+            interfaceGraph: 'unavailable', localisationAudit: 'unavailable', pdxFlow: 'unavailable',
+        },
         generatedAt,
         generationMode: 'full',
         status: 'unavailable',
@@ -466,12 +481,12 @@ export function writeUnavailableProjectKnowledge(
         },
         warnings: [reason],
         staleReasons: ['lsp_export_unavailable'],
-        artifacts: fs.existsSync(getProjectKnowledgeDatabasePath(workspaceRoot)) ? ['knowledge.sqlite'] : [],
-        database: {
+        artifacts: hasCurrentDatabase ? ['knowledge.sqlite'] : [],
+        database: hasCurrentDatabase ? {
             path: 'knowledge.sqlite',
             format: 'sqlite',
             schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
-        },
+        } : undefined,
     };
     writeJson(getProjectKnowledgeManifestPath(workspaceRoot), manifest);
     return manifest;
@@ -486,7 +501,11 @@ export function readProjectKnowledgeManifest(workspaceRoot: string): ProjectKnow
 function currentStaleReasons(workspaceRoot: string, manifest: ProjectKnowledgeManifest): string[] {
     const reasons = [...(manifest.staleReasons ?? [])];
     if (manifest.status !== 'ready' && manifest.status !== 'partial') reasons.push(`knowledge_${manifest.status}`);
-    if (manifest.schemaVersion !== PROJECT_KNOWLEDGE_SCHEMA_VERSION) reasons.push('schema_version_changed');
+    if (Number(manifest.schemaVersion) !== PROJECT_KNOWLEDGE_SCHEMA_VERSION
+        || Number(manifest.database?.schemaVersion) !== PROJECT_KNOWLEDGE_SCHEMA_VERSION) {
+        reasons.push('schema_version_changed');
+        return Array.from(new Set(reasons));
+    }
     if (computeProjectKnowledgeFingerprint(workspaceRoot, manifest.projectRoots) !== manifest.fingerprints.project) reasons.push('workspace_files_changed');
     if (computeVanillaFingerprint(manifest.game) !== manifest.fingerprints.vanilla) reasons.push('vanilla_changed');
     if (computeRulesFingerprint(manifest.game, manifest.graphVersion) !== manifest.fingerprints.rules) reasons.push('rules_changed');
@@ -500,25 +519,14 @@ export function markProjectKnowledgeStale(workspaceRoot: string, reasons: string
     if (manifest.status === 'stale' && staleReasons.length === (manifest.staleReasons ?? []).length) return;
     manifest.status = 'stale';
     manifest.staleReasons = staleReasons;
-    const primary = path.join(ensurePrimaryKnowledgeRoot(workspaceRoot), 'manifest.json');
+    const primary = path.join(primaryKnowledgeRoot(workspaceRoot), 'manifest.json');
     writeJson(primary, manifest);
 }
 
-function tokenizeQuery(args: QueryProjectKnowledgeArgs): string[] {
-    return [args.intent ?? '', ...(args.identifiers ?? []), ...(args.entityTypes ?? [])]
-        .join(' ')
-        .toLowerCase()
-        .match(/[@a-z0-9_.:-]{2,}/g)
-        ?.slice(0, 30) ?? [];
-}
-
-function scoreEvidence(record: Record<string, unknown>, tokens: string[]): number {
-    if (tokens.length === 0) return 1;
-    const text = stableStringify(record).toLowerCase();
-    return tokens.reduce((score, token) => score + (text.includes(token) ? (text.includes(`"id":"${token}`) ? 20 : 3) : 0), 0);
-}
-
-function queryLegacyProjectKnowledge(workspaceRoot: string, args: QueryProjectKnowledgeArgs = {}): QueryProjectKnowledgeResult {
+export async function queryProjectKnowledge(
+    workspaceRoot: string,
+    args: QueryProjectKnowledgeArgs = {},
+): Promise<QueryProjectKnowledgeResult> {
     const manifest = readProjectKnowledgeManifest(workspaceRoot);
     if (!manifest) {
         return {
@@ -527,77 +535,30 @@ function queryLegacyProjectKnowledge(workspaceRoot: string, args: QueryProjectKn
             domains: [],
             evidence: [],
             unresolved: [],
-            _hint: 'Run /init and wait for the deep knowledge phase to complete.',
+            _hint: 'Run /init and wait for the current project knowledge database to be built.',
         };
     }
-    const staleReasons = currentStaleReasons(workspaceRoot, manifest);
-    const requestedDomains = (args.domains?.length ? args.domains : manifest.domains)
-        .map(value => value.trim().toLowerCase())
-        .filter(Boolean)
-        .slice(0, 12);
-    const tokens = tokenizeQuery(args);
-    const evidence: Array<Record<string, unknown>> = [];
-    const capabilities: Array<Record<string, unknown>> = [];
-    const limit = Math.max(1, Math.min(Number(args.limit ?? 80) || 80, 300));
-
-    for (const domain of requestedDomains) {
-        const capability = readJson<Record<string, unknown>>(path.join(knowledgeRoot(workspaceRoot), 'capabilities', `${domain}.json`));
-        if (!capability) continue;
-        capabilities.push({
-            domain,
-            summary: capability.summary,
-            evidencePolicy: capability.evidencePolicy,
-        });
-        const candidates: Array<Record<string, unknown>> = [];
-        if (Array.isArray(capability.definitions)) candidates.push(...capability.definitions as Array<Record<string, unknown>>);
-        if (args.includeProjectPatterns !== false && Array.isArray(capability.projectExamples)) candidates.push(...capability.projectExamples as Array<Record<string, unknown>>);
-        if (args.includeVanillaArchetypes !== false && Array.isArray(capability.vanillaArchetypes)) candidates.push(...capability.vanillaArchetypes as Array<Record<string, unknown>>);
-        if (args.includeTopology !== false && capability.topology && typeof capability.topology === 'object') {
-            const topology = capability.topology as Record<string, unknown>;
-            if (Array.isArray(topology.edges)) candidates.push(...topology.edges as Array<Record<string, unknown>>);
-        }
-        evidence.push(...candidates
-            .map(item => ({ item, score: scoreEvidence(item, tokens), domain }))
-            .filter(item => tokens.length === 0 || item.score > 0)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, Math.max(5, Math.ceil(limit / requestedDomains.length)))
-            .map(({ item, score, domain: itemDomain }) => ({ domain: itemDomain, score, ...item })));
+    if (Number(manifest.schemaVersion) !== PROJECT_KNOWLEDGE_SCHEMA_VERSION
+        || Number(manifest.database?.schemaVersion) !== PROJECT_KNOWLEDGE_SCHEMA_VERSION) {
+        return {
+            status: 'stale',
+            manifestPath: existingProjectKnowledgeManifestPath(workspaceRoot),
+            generatedAt: manifest.generatedAt,
+            game: manifest.game,
+            graphVersion: manifest.graphVersion,
+            staleReasons: ['schema_version_obsolete'],
+            rebuildRequired: true,
+            foundSchemaVersion: Number(manifest.database?.schemaVersion ?? manifest.schemaVersion) || 0,
+            currentSchemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
+            domains: [],
+            evidence: [],
+            unresolved: [],
+            error: `Project knowledge schema is obsolete. Rebuild it with the current V${PROJECT_KNOWLEDGE_SCHEMA_VERSION} extension.`,
+            _hint: 'Run /init or reopen the project and wait for the automatic full rebuild. Old database schemas are not queried.',
+        };
     }
 
-    const unresolvedFile = readJson<{ entries?: Array<Record<string, unknown>> }>(path.join(knowledgeRoot(workspaceRoot), 'unresolved.json'));
-    const unresolved = args.includeUnresolved === false ? [] : (unresolvedFile?.entries ?? []).slice(0, 100);
-    return {
-        status: staleReasons.length > 0 || manifest.status !== 'ready' ? 'stale' : 'ready',
-        manifestPath: existingProjectKnowledgeManifestPath(workspaceRoot),
-        generatedAt: manifest.generatedAt,
-        game: manifest.game,
-        graphVersion: manifest.graphVersion,
-        staleReasons,
-        domains: requestedDomains,
-        capabilities,
-        evidence: evidence.slice(0, limit),
-        unresolved,
-        requiredNextChecks: [
-            'Use query_cwt_schema/query_rules/query_scope for legality before writing.',
-            'Use query_override_modes for every target directory with vanilla definitions.',
-            'Read exact project/vanilla blocks referenced by evidence before approving a complex blueprint.',
-        ],
-        _hint: staleReasons.length > 0
-            ? 'Knowledge is stale. The background watcher will refresh it when the LSP is ready; rerun /init for an immediate full rebuild.'
-            : 'Treat this as retrieval evidence. Exact CWT/LSP checks remain authoritative.',
-    };
-}
-
-export async function queryProjectKnowledge(
-    workspaceRoot: string,
-    args: QueryProjectKnowledgeArgs = {},
-): Promise<QueryProjectKnowledgeResult> {
-    const manifest = readProjectKnowledgeManifest(workspaceRoot);
-    if (!manifest || manifest.schemaVersion === 1) {
-        return queryLegacyProjectKnowledge(workspaceRoot, args);
-    }
-
-    const root = knowledgeRoot(workspaceRoot);
+    const root = primaryKnowledgeRoot(workspaceRoot);
     const manifestPath = path.join(root, 'manifest.json');
     const configuredDatabasePath = typeof manifest.database?.path === 'string' && manifest.database.path.trim()
         ? manifest.database.path
@@ -665,6 +626,9 @@ export async function queryProjectKnowledge(
             retrieval: result.retrieval && typeof result.retrieval === 'object'
                 ? result.retrieval as QueryProjectKnowledgeResult['retrieval']
                 : undefined,
+            coverage: result.coverage && typeof result.coverage === 'object'
+                ? result.coverage as QueryProjectKnowledgeResult['coverage']
+                : undefined,
             staleReasons,
             domains: Array.isArray(result.domains) ? result.domains.filter((item): item is string => typeof item === 'string') : [],
             capabilities: Array.isArray(result.capabilities) ? result.capabilities as Array<Record<string, unknown>> : [],
@@ -673,6 +637,12 @@ export async function queryProjectKnowledge(
             eventGraph: result.eventGraph && typeof result.eventGraph === 'object'
                 ? result.eventGraph as QueryProjectKnowledgeResult['eventGraph']
                 : { nodes: [], edges: [], logic: [] },
+            inlineGraph: result.inlineGraph && typeof result.inlineGraph === 'object'
+                ? result.inlineGraph as QueryProjectKnowledgeResult['inlineGraph']
+                : undefined,
+            definitionStacks: Array.isArray(result.definitionStacks)
+                ? result.definitionStacks as Array<Record<string, unknown>>
+                : [],
             requiredNextChecks: Array.isArray(result.requiredNextChecks)
                 ? result.requiredNextChecks.filter((item): item is string => typeof item === 'string')
                 : [],
@@ -704,7 +674,11 @@ export function buildProjectKnowledgePrompt(workspaceRoot: string): string {
     const manifest = readProjectKnowledgeManifest(workspaceRoot);
     if (!manifest) return '';
     const staleReasons = manifest.staleReasons ?? [];
-    return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: ${manifest.schemaVersion >= 2 ? `manifest + SQLite V${manifest.schemaVersion}` : 'legacy JSON V1'}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace + ${manifest.counts.vanillaDefinitions ?? 0} vanilla; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; typed graph: ${manifest.counts.eventNodes ?? 0} event nodes / ${manifest.counts.eventEdges ?? 0} directed edges / ${manifest.counts.eventLogic ?? 0} logic facts\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}Event IDs, numeric/source order, and missing incoming edges are never entry or causality evidence. For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Enumerate the involved TypeDefs and dependency families from the current semantic catalog, then load their project/vanilla patterns, typed topology, unresolved facts, and relevant graph slices. A blueprint must cite exact directed evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
+    const eventLogic = manifest.counts.eventLogic ?? 0;
+    const stateFlowWarning = eventLogic === 0
+        ? '\nWARNING: eventLogic=0 means no directed state facts (variables/flags/event targets) are indexed. If the design depends on state flow, do NOT treat an empty unresolvedCritical as settled: call query_project_knowledge with the involved IDs, or analyze_pdx_flow, and record any missing state evidence as unresolved before approval.'
+        : '';
+    return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: manifest + current SQLite V${PROJECT_KNOWLEDGE_SCHEMA_VERSION}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace + ${manifest.counts.vanillaDefinitions ?? 0} vanilla; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; typed graph: ${manifest.counts.eventNodes ?? 0} event nodes / ${manifest.counts.eventEdges ?? 0} directed edges / ${eventLogic} logic facts${stateFlowWarning}\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}Event IDs, numeric/source order, and missing incoming edges are never entry or causality evidence. For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Enumerate the involved TypeDefs and dependency families from the current semantic catalog, then load their project/vanilla patterns, typed topology, unresolved facts, and relevant graph slices. A blueprint must cite exact directed evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
 }
 
 const FULL_REFRESH_STALE_REASONS = new Set([

@@ -38,7 +38,7 @@ function isStringArrayRecord(value: unknown): value is Record<string, string[]> 
 
 function normalizeLegacyProjectProfile(value: unknown): unknown {
     if (!isRecord(value)
-        || value.schemaVersion !== 1
+        || (value.schemaVersion !== 1 && value.schemaVersion !== 2)
         || !isRecord(value.game)
         || typeof value.game.id !== 'string') return value;
     const game = value.game;
@@ -50,8 +50,10 @@ function normalizeLegacyProjectProfile(value: unknown): unknown {
         || !isRecord(identifiers)
         || !isRecord(routing)
         || !isRecord(validation)) return value;
-    return {
+    const normalized = {
         ...value,
+        schemaVersion: value.schemaVersion === 1 ? 2 : 2,
+        legacyProfile: value.schemaVersion === 1 ? true : undefined,
         generatedAt: value.generatedAt ?? '',
         workspaceRoot: value.workspaceRoot ?? '',
         workspaceKind: value.workspaceKind ?? 'generic',
@@ -61,6 +63,29 @@ function normalizeLegacyProjectProfile(value: unknown): unknown {
             displayName: game.displayName ?? game.id,
             confidence: game.confidence ?? 'low',
             evidence: game.evidence ?? [],
+        },
+        modInfo: isRecord(value.modInfo)
+            ? {
+                name: value.modInfo.name,
+                version: value.modInfo.version,
+                tags: Array.isArray(value.modInfo.tags) ? value.modInfo.tags : undefined,
+                supportedVersion: value.modInfo.supportedVersion,
+                remoteFileId: value.modInfo.remoteFileId,
+                dependencies: Array.isArray(value.modInfo.dependencies) ? value.modInfo.dependencies : undefined,
+            }
+            : value.modInfo,
+        compatibility: isRecord(value.compatibility) ? value.compatibility : {
+            supportedVersion: isRecord(value.modInfo) ? value.modInfo.supportedVersion : undefined,
+            declaredDependencies: isRecord(value.modInfo) && Array.isArray(value.modInfo.dependencies)
+                ? value.modInfo.dependencies.filter((item): item is string => typeof item === 'string').map(name => ({ name, source: 'descriptor.mod' }))
+                : [],
+            possibleSoftDependencies: [],
+            dependencyRoots: [],
+            loadOrder: {
+                source: 'descriptor_only', confidence: 'partial', orderedLayers: ['vanilla', 'workspace'],
+                warnings: ['Launcher dependency roots and active load order were not present in this legacy profile.'],
+            },
+            coverage: { unresolvedIdInference: 'not_available', truncated: false },
         },
         keyDirectories: value.keyDirectories ?? [],
         localisation: {
@@ -91,12 +116,13 @@ function normalizeLegacyProjectProfile(value: unknown): unknown {
         promptCards: value.promptCards ?? {},
         efficiencyHints: value.efficiencyHints ?? [],
     };
+    return normalized;
 }
 
 /** Validate the generated profile before it reaches prompts, LSP, or MCP paths. */
 export function isProjectProfile(value: unknown): value is ProjectProfile {
     if (!isRecord(value)
-        || value.schemaVersion !== 1
+        || (value.schemaVersion !== 1 && value.schemaVersion !== 2)
         || typeof value.generatedAt !== 'string'
         || typeof value.workspaceRoot !== 'string'
         || !PROFILE_WORKSPACE_KINDS.has(String(value.workspaceKind))
@@ -150,8 +176,28 @@ export function isProjectProfile(value: unknown): value is ProjectProfile {
         && (!isRecord(value.modInfo)
             || (value.modInfo.name !== undefined && typeof value.modInfo.name !== 'string')
             || (value.modInfo.version !== undefined && typeof value.modInfo.version !== 'string')
-            || (value.modInfo.tags !== undefined && !isStringArray(value.modInfo.tags)))) {
+            || (value.modInfo.tags !== undefined && !isStringArray(value.modInfo.tags))
+            || (value.modInfo.supportedVersion !== undefined && typeof value.modInfo.supportedVersion !== 'string')
+            || (value.modInfo.remoteFileId !== undefined && typeof value.modInfo.remoteFileId !== 'string')
+            || (value.modInfo.dependencies !== undefined && !isStringArray(value.modInfo.dependencies)))) {
         return false;
+    }
+    if (value.compatibility !== undefined) {
+        if (!isRecord(value.compatibility)
+            || !Array.isArray(value.compatibility.declaredDependencies)
+            || !value.compatibility.declaredDependencies.every(item => isRecord(item) && typeof item.name === 'string' && typeof item.source === 'string')
+            || !Array.isArray(value.compatibility.possibleSoftDependencies)
+            || !value.compatibility.possibleSoftDependencies.every(item => isRecord(item) && typeof item.idOrPrefix === 'string' && typeof item.evidence === 'string' && item.confidence === 'heuristic')
+            || !Array.isArray(value.compatibility.dependencyRoots)
+            || !value.compatibility.dependencyRoots.every(item => isRecord(item) && typeof item.name === 'string' && (item.root === undefined || typeof item.root === 'string') && (item.status === 'resolved' || item.status === 'unresolved') && typeof item.source === 'string')
+            || !isRecord(value.compatibility.loadOrder)
+            || (value.compatibility.loadOrder.source !== 'descriptor_only' && value.compatibility.loadOrder.source !== 'launcher_or_lsp')
+            || (value.compatibility.loadOrder.confidence !== 'partial' && value.compatibility.loadOrder.confidence !== 'active')
+            || !isStringArray(value.compatibility.loadOrder.orderedLayers)
+            || !isStringArray(value.compatibility.loadOrder.warnings)
+            || !isRecord(value.compatibility.coverage)
+            || (value.compatibility.coverage.unresolvedIdInference !== 'not_available' && value.compatibility.coverage.unresolvedIdInference !== 'available')
+            || typeof value.compatibility.coverage.truncated !== 'boolean') return false;
     }
     for (const key of ['scriptedTriggers', 'scriptedEffects', 'events', 'onActions', 'staticModifiers']) {
         const legacyValue = value.identifiers[key];
@@ -218,6 +264,8 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
     const variablePrefixes = collectVariablePrefixes(scriptFiles);
     const localisation = detectLocalisation(root);
     const game = detectGame(root, descriptor, keyDirectories.map(d => d.path));
+    const vanillaCache = detectVanillaCache(root);
+    const warnings = [...localisation.warnings, ...(descriptor.warnings ?? [])];
     const preferredReadTools = [
         'query_project_profile',
         'query_project_knowledge',
@@ -232,7 +280,7 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
     ];
 
     const profileBase: Omit<ProjectProfile, 'promptCards' | 'efficiencyHints'> = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         generatedAt: new Date().toISOString(),
         workspaceRoot: root,
         workspaceKind,
@@ -242,9 +290,38 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
             name: descriptor.name,
             version: descriptor.version,
             tags: descriptor.tags,
+            supportedVersion: descriptor.supportedVersion,
+            remoteFileId: descriptor.remoteFileId,
+            dependencies: descriptor.dependencies,
         } : undefined,
+        compatibility: {
+            supportedVersion: descriptor.supportedVersion,
+            declaredDependencies: (descriptor.dependencies ?? []).map(name => ({ name, source: 'descriptor.mod dependencies' })),
+            possibleSoftDependencies: [],
+            dependencyRoots: (descriptor.dependencies ?? []).map(name => ({
+                name,
+                status: 'unresolved' as const,
+                source: 'descriptor.mod declares a display name but not a filesystem root',
+            })),
+            loadOrder: {
+                source: 'descriptor_only',
+                confidence: 'partial',
+                orderedLayers: ['vanilla', ...(descriptor.dependencies ?? []).map(name => `dependency:${name}`), 'workspace'],
+                warnings: descriptor.dependencies?.length
+                    ? ['Descriptor dependency order is declarative evidence only; confirm the active launcher/LSP load order before resolving overrides.']
+                    : ['No declared dependencies were found; optional soft dependencies still require unresolved-ID evidence.'],
+            },
+            coverage: { unresolvedIdInference: 'not_available', truncated: false },
+        },
         keyDirectories,
-        localisation,
+        localisation: {
+            roots: localisation.roots,
+            languages: localisation.languages,
+            defaultLanguage: localisation.defaultLanguage,
+            encoding: localisation.encoding,
+            encodingByLanguage: localisation.encodingByLanguage,
+            sampleFiles: localisation.sampleFiles,
+        },
         identifiers: {
             namespaces,
             variablePrefixes,
@@ -293,8 +370,10 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
         validation: {
             lspReady: 'unknown',
             indexStatus: 'unknown',
-            vanillaCache: detectVanillaCache(root),
+            vanillaCache: vanillaCache.state,
+            vanillaCacheEvidence: vanillaCache.evidence,
         },
+        warnings,
     };
 
     const promptCards = buildPromptCards(profileBase);
@@ -323,9 +402,12 @@ export function extractCustomRules(existingContent: string | null | undefined): 
 
 export function renderProjectRulesMarkdown(profile: ProjectProfile, customRules = ''): string {
     const namespaces = profile.identifiers.namespaces.slice(0, 20);
-    const keyDirs = profile.keyDirectories
-        .filter(dir => dir.exists)
-        .map(dir => `- \`${dir.path}\`${dir.fileCount !== undefined ? ` (${dir.fileCount} files sampled)` : ''}`);
+    const keyDirs = keyDirectoryLines(profile)
+        .slice(0, 16)
+        .map(dir => `- \`${dir}\`${(() => {
+            const entry = profile.keyDirectories.find(candidate => candidate.path === dir);
+            return entry?.fileCount !== undefined ? ` (${entry.fileCount} files sampled)` : '';
+        })()}`);
     const lines = [
         `# CWTools Agent Project Rules - ${profile.projectName}`,
         '',
@@ -335,9 +417,11 @@ export function renderProjectRulesMarkdown(profile: ProjectProfile, customRules 
         '## Mod Info',
         `- **Workspace Kind**: ${profile.workspaceKind}`,
         `- **Game**: ${profile.game.displayName} (${profile.game.confidence} confidence)`,
+        profile.modInfo?.supportedVersion ? `- **Supported Version**: ${profile.modInfo.supportedVersion}` : '',
         profile.modInfo?.name ? `- **Name**: ${profile.modInfo.name}` : '',
         profile.modInfo?.version ? `- **Version**: ${profile.modInfo.version}` : '',
         profile.modInfo?.tags?.length ? `- **Tags**: ${profile.modInfo.tags.join(', ')}` : '',
+        profile.modInfo?.dependencies?.length ? `- **Dependencies**: ${profile.modInfo.dependencies.join(', ')}` : '',
         '',
         '## Agent Routing',
         '- Start with `query_project_profile` for project facts and workflow routing.',
@@ -355,7 +439,7 @@ export function renderProjectRulesMarkdown(profile: ProjectProfile, customRules 
         '',
         '## Agent Guidelines',
         profile.localisation.languages.length
-            ? `- Localisation languages: ${profile.localisation.languages.join(', ')}. Use \`write_localisation\` for YML writes.`
+            ? `- Localisation languages: ${profile.localisation.languages.join(', ')}${profile.localisation.defaultLanguage ? ` (default: ${profile.localisation.defaultLanguage})` : ''}. Use \`write_localisation\` for YML writes.`
             : '- No localisation languages detected; verify target language before creating keys.',
         profile.localisation.encoding !== 'unknown'
             ? `- Localisation encoding: ${profile.localisation.encoding}. Preserve this convention.`
@@ -426,17 +510,52 @@ export function getPromptCardForMode(profile: ProjectProfile, mode: AgentMode | 
 }
 
 export function buildProfileSummary(profile: ProjectProfile): string {
-    const dirs = profile.keyDirectories.filter(dir => dir.exists).map(dir => dir.path).slice(0, 8).join(', ') || 'none';
+    const dirs = keyDirectoryLines(profile).slice(0, 8).join(', ') || 'none';
     const namespaces = profile.identifiers.namespaces.slice(0, 8).join(', ') || 'none';
     const languages = profile.localisation.languages.join(', ') || 'unknown';
+    const supportedVersion = profile.modInfo?.supportedVersion ? ` (${profile.modInfo.supportedVersion})` : '';
     return [
         `Project: ${profile.projectName}`,
         `Kind: ${profile.workspaceKind}`,
-        `Game: ${profile.game.displayName}`,
+        `Game: ${profile.game.displayName}${supportedVersion}`,
         `Key dirs: ${dirs}`,
         `Namespaces: ${namespaces}`,
         `Localisation: ${languages} (${profile.localisation.encoding})`,
     ].join('\n');
+}
+
+/** High-value Stellaris subsystems shown first, then remaining dirs by file count. */
+const HIGH_VALUE_SUBSYSTEMS = [
+    'common/inline_scripts',
+    'common/scripted_effects',
+    'common/scripted_triggers',
+    'common/scripted_values',
+    'events',
+    'common/on_actions',
+    'common/situations',
+    'common/megastructures',
+    'interface',
+    'common/special_projects',
+    'common/event_chains',
+    'common/technologies',
+    'common/component_templates',
+    'common/section_templates',
+    'common/ship_sizes',
+    'gfx',
+    'sound',
+];
+
+/** Sort existing key directories: high-value subsystems first, then by file count. */
+function keyDirectoryLines(profile: Pick<ProjectProfile, 'keyDirectories'>): string[] {
+    const existing = profile.keyDirectories.filter(dir => dir.exists);
+    const subsystemRank = (pathValue: string): number => {
+        const index = HIGH_VALUE_SUBSYSTEMS.indexOf(pathValue);
+        return index < 0 ? HIGH_VALUE_SUBSYSTEMS.length : index;
+    };
+    return existing
+        .slice()
+        .sort((a, b) => subsystemRank(a.path) - subsystemRank(b.path) || (b.fileCount ?? 0) - (a.fileCount ?? 0) || a.path.localeCompare(b.path))
+        .map(dir => dir.path);
 }
 
 function selectProfileSection(profile: ProjectProfile, section: NonNullable<QueryProjectProfileArgs['section']>): unknown {
@@ -446,6 +565,15 @@ function selectProfileSection(profile: ProjectProfile, section: NonNullable<Quer
         case 'localisation': return profile.localisation;
         case 'identifiers': return profile.identifiers;
         case 'validation': return profile.validation;
+        case 'compatibility': return {
+            ...(profile.compatibility ?? {}),
+            supportedVersion: profile.compatibility?.supportedVersion ?? profile.modInfo?.supportedVersion,
+            remoteFileId: profile.modInfo?.remoteFileId,
+            dependencies: profile.modInfo?.dependencies ?? [],
+            vanillaCache: profile.validation.vanillaCache,
+            vanillaCacheEvidence: profile.validation.vanillaCacheEvidence,
+            game: profile.game,
+        };
         case 'promptCards': return profile.promptCards;
         case 'summary':
         default:
@@ -453,7 +581,10 @@ function selectProfileSection(profile: ProjectProfile, section: NonNullable<Quer
                 workspaceKind: profile.workspaceKind,
                 projectName: profile.projectName,
                 game: profile.game,
+                supportedVersion: profile.modInfo?.supportedVersion,
                 generatedAt: profile.generatedAt,
+                freshness: profile.freshness,
+                warnings: profile.warnings ?? [],
                 efficiencyHints: profile.efficiencyHints,
             };
     }
@@ -463,7 +594,7 @@ function buildPromptCards(profile: Omit<ProjectProfile, 'promptCards' | 'efficie
     const namespaces = profile.identifiers.namespaces.slice(0, 12).join(', ') || 'none detected';
     const languages = profile.localisation.languages.join(', ') || 'unknown';
     const encoding = profile.localisation.encoding;
-    const keyDirs = profile.keyDirectories.filter(dir => dir.exists).map(dir => dir.path).slice(0, 10).join(', ') || 'none detected';
+    const keyDirs = keyDirectoryLines(profile).slice(0, 10).join(', ') || 'none detected';
     return {
         build: [
             'Build mode project card:',
@@ -538,15 +669,40 @@ function renderModeCards(profile: ProjectProfile): string {
         .join('\n\n');
 }
 
-function readDescriptor(root: string): { exists: boolean; name?: string; version?: string; tags?: string[] } {
+function readDescriptor(root: string): {
+    exists: boolean;
+    name?: string;
+    version?: string;
+    tags?: string[];
+    supportedVersion?: string;
+    remoteFileId?: string;
+    dependencies?: string[];
+    warnings?: string[];
+} {
     const descriptorPath = path.join(root, 'descriptor.mod');
     if (!fs.existsSync(descriptorPath)) return { exists: false };
-    const content = fs.readFileSync(descriptorPath, 'utf8');
+    let content: string;
+    try {
+        content = fs.readFileSync(descriptorPath, 'utf8');
+    } catch {
+        return { exists: true, warnings: ['descriptor.mod is not readable; treating it as absent.'] };
+    }
+    const warnings: string[] = [];
     const name = content.match(/^name\s*=\s*"?([^"\r\n]+)"?/m)?.[1]?.trim();
     const version = content.match(/^version\s*=\s*"?([^"\r\n]+)"?/m)?.[1]?.trim();
+    const supportedVersion = content.match(/^supported_version\s*=\s*"?([^"\r\n]+)"?/m)?.[1]?.trim();
+    const remoteFileId = content.match(/^remote_file_id\s*=\s*"?(\d+)"?/m)?.[1]?.trim();
     const tagsBlock = content.match(/^tags\s*=\s*\{([\s\S]*?)\}/m)?.[1] ?? '';
     const tags = Array.from(tagsBlock.matchAll(/"([^"]+)"/g)).map(match => match[1]).filter((tag): tag is string => !!tag);
-    return { exists: true, name, version, tags };
+    const dependenciesBlock = content.match(/^dependencies\s*=\s*\{([\s\S]*?)\}/m)?.[1] ?? '';
+    const dependencies = Array.from(dependenciesBlock.matchAll(/"([^"]+)"/g))
+        .map(match => match[1])
+        .filter((value): value is string => !!value)
+        .filter((value, index, values) => values.indexOf(value) === index);
+    if (content.includes('supported_version') && !supportedVersion) warnings.push('descriptor.mod declares supported_version but it could not be parsed.');
+    if (content.includes('remote_file_id') && !remoteFileId) warnings.push('descriptor.mod declares remote_file_id but it could not be parsed.');
+    if (content.includes('dependencies') && dependencies.length === 0) warnings.push('descriptor.mod declares dependencies but none could be parsed.');
+    return { exists: true, name, version, tags, supportedVersion, remoteFileId, dependencies, warnings };
 }
 
 function detectGame(
@@ -585,46 +741,185 @@ function detectGame(
     return { id: 'unknown', displayName: 'Unknown', confidence: 'low', evidence: ['No Paradox game marker detected'] };
 }
 
-function detectLocalisation(root: string): ProjectProfile['localisation'] {
+interface LocalisationDetectionResult {
+    roots: string[];
+    languages: string[];
+    defaultLanguage?: string;
+    encoding: string;
+    encodingByLanguage?: Record<string, string>;
+    sampleFiles: string[];
+    warnings: string[];
+}
+
+/** Normalize a language directory/file name to its `l_<tag>` form when possible. */
+function normalizeLanguageTag(value: string): string | undefined {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    // Match the final `l_<tag>` segment; a negative lookahead stops greedy
+    // consumption across another `l_` marker (e.g. `my_l_cool_l_simp_chinese`).
+    const fromName = trimmed.match(/(?:^|_)(l_(?:(?!(?:\b|_)l_)[a-z_])+)(?:\.yml)?$/i)?.[1]?.toLowerCase();
+    if (fromName) return fromName;
+    const directoryTag = trimmed.match(/^l?_[a-z_]+$/i);
+    if (directoryTag) {
+        const raw = directoryTag[0].toLowerCase();
+        return raw.startsWith('l_') ? raw : `l_${raw}`;
+    }
+    return undefined;
+}
+
+/** Read the declared language header of a localisation file (e.g. `l_english:`). */
+function readLocalisationHeader(filePath: string): { language?: string; bom: boolean; readable: boolean } {
+    try {
+        const buf = fs.readFileSync(filePath);
+        const bom = buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf;
+        const text = buf.toString('utf8', bom ? 3 : 0);
+        const firstLine = text.split(/\r?\n/, 1)[0] ?? '';
+        const header = firstLine.match(/^\s*(l_[a-z_]+)\s*:/i)?.[1]?.toLowerCase();
+        return { language: header, bom, readable: true };
+    } catch {
+        return { bom: false, readable: false };
+    }
+}
+
+function detectLocalisation(root: string): LocalisationDetectionResult {
     const roots = ['localisation', 'localization'].filter(rel => fs.existsSync(path.join(root, rel)));
-    const sampleFiles = roots.flatMap(rel => collectFiles(path.join(root, rel), 12, ['.yml']).map(file => toRelative(root, file)));
-    const languages = Array.from(new Set(sampleFiles.map(file => {
-        const base = path.basename(file);
-        const lang = base.match(/(?:\b|_)l_((?:(?!(?:\b|_)l_)[a-z_])+)\.yml$/i)?.[1]
-            ?? file.split(/[\\/]/).find(part => /^l?_[a-z_]+$/i.test(part));
-        if (!lang) return undefined;
-        return lang.startsWith('l_') ? lang : `l_${lang}`;
-    }).filter((value): value is string => !!value))).sort();
+    const warnings: string[] = [];
+    const languageFiles = new Map<string, string[]>();
+    const languageDirectories = new Set<string>();
+
+    for (const rel of roots) {
+        const base = path.join(root, rel);
+        // 1. Collect every first-level language directory name.
+        let entries: fs.Dirent[] = [];
+        try {
+            entries = fs.readdirSync(base, { withFileTypes: true })
+                .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
+                .sort((a, b) => a.name.localeCompare(b.name));
+        } catch {
+            continue;
+        }
+        for (const entry of entries) {
+            const language = normalizeLanguageTag(entry.name);
+            if (!language) continue;
+            languageDirectories.add(language);
+            // Sample up to three files per language so mixed BOM within one
+            // language can be detected instead of being majority-voted away.
+            const files = collectFiles(path.join(base, entry.name), 4, ['.yml'])
+                .filter(file => path.dirname(file) === path.join(base, entry.name));
+            for (const file of files.slice(0, 3)) {
+                const bucket = languageFiles.get(language) ?? [];
+                bucket.push(file);
+                languageFiles.set(language, bucket);
+            }
+        }
+        // 2. Fall back to file-name sampling inside the root.
+        if (languageFiles.size === 0) {
+            const rootFiles = collectFiles(base, 12, ['.yml'])
+                .filter(file => path.dirname(file) === base);
+            for (const file of rootFiles) {
+                const language = normalizeLanguageTag(path.basename(file));
+                if (!language) continue;
+                const bucket = languageFiles.get(language) ?? [];
+                bucket.push(file);
+                languageFiles.set(language, bucket);
+            }
+        }
+    }
+
+    const languages = Array.from(new Set([...languageDirectories, ...languageFiles.keys()])).sort();
+    const sampleFiles = Array.from(languageFiles.values()).flat().map(file => toRelative(root, file)).sort();
+    const samples = languages
+        .map(language => ({
+            language,
+            files: languageFiles.get(language) ?? [],
+        }))
+        .filter(sample => sample.files.length > 0)
+        .flatMap(sample => sample.files.map(file => {
+            const header = readLocalisationHeader(file);
+            if (header.readable && header.language && header.language !== sample.language) {
+                warnings.push(`Localisation file ${toRelative(root, file)} declares header '${header.language}' but sits under a '${sample.language}' name.`);
+            }
+            if (!header.readable) {
+                warnings.push(`Localisation sample ${toRelative(root, file)} could not be read.`);
+            }
+            return { language: sample.language, file, ...header };
+        }));
+
+    // 3. Per-language encoding; mixed BOM inside one language becomes a warning
+    //    instead of being silently resolved by majority vote.
+    const encodingByLanguage: Record<string, string> = {};
+    const languageBomCounts = new Map<string, { bom: number; noBom: number }>();
+    for (const sample of samples) {
+        const counts = languageBomCounts.get(sample.language) ?? { bom: 0, noBom: 0 };
+        if (sample.bom) counts.bom++; else counts.noBom++;
+        languageBomCounts.set(sample.language, counts);
+    }
+    for (const [language, counts] of languageBomCounts) {
+        const total = counts.bom + counts.noBom;
+        if (total === 0) continue;
+        encodingByLanguage[language] = counts.bom >= counts.noBom ? 'UTF-8 with BOM' : 'UTF-8 without BOM';
+        if (counts.bom > 0 && counts.noBom > 0) {
+            warnings.push(`Localisation language ${language} mixes BOM and non-BOM files (${counts.bom} BOM / ${counts.noBom} non-BOM); per-language encoding reflects the majority.`);
+        }
+    }
+    let bomCount = 0;
+    let noBomCount = 0;
+    for (const sample of samples) {
+        if (sample.bom) bomCount++; else noBomCount++;
+    }
+    const dominantEncoding = bomCount + noBomCount > 0
+        ? (bomCount >= noBomCount ? 'UTF-8 with BOM' : 'UTF-8 without BOM')
+        : 'unknown';
+    let defaultLanguage: string | undefined;
+    if (languages.length === 1) {
+        defaultLanguage = languages[0];
+    } else if (languageBomCounts.size > 0) {
+        const totals = [...languageBomCounts.entries()]
+            .map(([language, counts]) => ({ language, total: counts.bom + counts.noBom }))
+            .sort((a, b) => b.total - a.total || a.language.localeCompare(b.language));
+        const top = totals[0];
+        const second = totals[1];
+        if (top && (!second || top.total > second.total)) defaultLanguage = top.language;
+    }
+
     return {
         roots,
         languages,
-        encoding: detectEncoding(sampleFiles.map(file => path.join(root, file))),
+        defaultLanguage,
+        encoding: dominantEncoding,
+        encodingByLanguage: Object.keys(encodingByLanguage).length > 0 ? encodingByLanguage : undefined,
         sampleFiles,
+        warnings,
     };
 }
 
-function detectEncoding(files: string[]): string {
-    let bom = 0;
-    let noBom = 0;
-    for (const file of files.slice(0, 10)) {
-        try {
-            const buf = fs.readFileSync(file);
-            if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) bom++;
-            else noBom++;
-        } catch {
-            // Ignore unreadable samples.
-        }
-    }
-    if (bom === 0 && noBom === 0) return 'unknown';
-    return bom >= noBom ? 'UTF-8 with BOM' : 'UTF-8 without BOM';
-}
-
-function detectVanillaCache(root: string): ProjectProfile['validation']['vanillaCache'] {
+function detectVanillaCache(root: string): { state: ProjectProfile['validation']['vanillaCache']; evidence?: string } {
+    // A bare `.cwtools` directory is not proof of a usable vanilla cache: verify
+    // that a serialized cache file or a vanilla data folder is actually present.
     const candidates = [
         path.join(root, '.cwtools'),
         path.join(root, '.cwtools-ai'),
     ];
-    return candidates.some(candidate => fs.existsSync(candidate)) ? 'configured' : 'unknown';
+    for (const candidate of candidates) {
+        if (!fs.existsSync(candidate)) continue;
+        const cacheFiles = collectFiles(candidate, 8, ['.cwb']);
+        if (cacheFiles.length > 0) {
+            return { state: 'configured', evidence: toRelative(root, cacheFiles[0]!) };
+        }
+        const vanillaDir = path.join(candidate, 'vanilla');
+        if (fs.existsSync(vanillaDir)) {
+            const vanillaEntries = collectFiles(vanillaDir, 8, ['.txt', '.yml', '.json']);
+            if (vanillaEntries.length > 0) {
+                return { state: 'configured', evidence: toRelative(root, vanillaEntries[0]!) };
+            }
+        }
+        const cacheMetadata = path.join(candidate, 'cache.json');
+        if (fs.existsSync(cacheMetadata)) {
+            return { state: 'configured', evidence: toRelative(root, cacheMetadata) };
+        }
+        return { state: 'missing', evidence: `${toRelative(root, candidate)} exists but contains no readable vanilla cache` };
+    }
+    return { state: 'unknown' };
 }
 
 function discoverKeyDirectories(root: string): ProjectProfile['keyDirectories'] {
@@ -639,17 +934,20 @@ function discoverKeyDirectories(root: string): ProjectProfile['keyDirectories'] 
     } catch {
         return [];
     }
+    let commonHasSubdirectories = false;
     for (const entry of entries) {
         const absolute = path.join(root, entry.name);
         if (collectFiles(absolute, 1, supportedExtensions).length === 0) continue;
         relativePaths.add(entry.name);
         if (entry.name.toLowerCase() !== 'common') continue;
         try {
-            for (const child of fs.readdirSync(absolute, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+            const childDirectories = fs.readdirSync(absolute, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+            for (const child of childDirectories) {
                 if (!child.isDirectory() || child.name.startsWith('.')) continue;
                 const childPath = path.join(absolute, child.name);
                 if (collectFiles(childPath, 1, supportedExtensions).length > 0) {
                     relativePaths.add(path.join(entry.name, child.name));
+                    commonHasSubdirectories = true;
                 }
             }
         } catch {
@@ -660,13 +958,32 @@ function discoverKeyDirectories(root: string): ProjectProfile['keyDirectories'] 
         .sort((a, b) => a.localeCompare(b))
         .map(relativePath => {
             const absolute = path.join(root, relativePath);
+            // When `common` is split into subdirectories, count only its direct
+            // files so parent and children are not double-counted.
+            const fileCount = commonHasSubdirectories && relativePath === 'common'
+                ? countDirectFiles(absolute, supportedExtensions)
+                : collectFiles(absolute, 400, supportedExtensions).length;
             return {
                 key: relativePath.replace(/\\/g, '/'),
                 path: relativePath.replace(/\\/g, '/'),
                 exists: true,
-                fileCount: collectFiles(absolute, 400, supportedExtensions).length,
+                fileCount,
             };
         });
+}
+
+/** Count files directly inside a directory without descending into subdirectories. */
+function countDirectFiles(dir: string, extensions: string[]): number {
+    const allowed = new Set(extensions.map(ext => ext.toLowerCase()));
+    let count = 0;
+    try {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (entry.isFile() && !entry.name.startsWith('.') && allowed.has(path.extname(entry.name).toLowerCase())) count++;
+        }
+    } catch {
+        // Unreadable directory contributes zero direct files.
+    }
+    return count;
 }
 
 function collectFiles(dir: string, maxCount: number, extensions?: string[]): string[] {

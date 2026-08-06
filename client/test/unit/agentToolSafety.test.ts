@@ -627,6 +627,72 @@ describe('agent tool file path safety', () => {
         expect(fs.existsSync(rejectedPath)).to.equal(false);
     });
 
+    it('writes localisation entries into an explicit multi-file language transaction', async () => {
+        const handler = createFileHandler();
+        fs.mkdirSync(path.join(workspaceRoot, 'localisation', 'english'), { recursive: true });
+        const base = path.join('localisation', 'english', 'kuat_events_l_english.yml');
+        const result = await handler.writeLocalisation({
+            filePath: base,
+            language: 'l_english',
+            languages: ['l_english', 'l_simp_chinese'],
+            entries: [{ key: 'kuat.1.title', value: 'Kuat Echo' }],
+        }, makeContext('topic-123'));
+        expect(result.success).to.equal(true);
+        const englishPath = path.join(workspaceRoot, 'localisation', 'english', 'kuat_events_l_english.yml');
+        const chinesePath = path.join(workspaceRoot, 'localisation', 'simp_chinese', 'kuat_events_l_simp_chinese.yml');
+        expect(fs.existsSync(englishPath)).to.equal(true);
+        expect(fs.existsSync(chinesePath)).to.equal(true);
+        expect(fs.readFileSync(englishPath, 'utf8')).to.include('kuat.1.title');
+        expect(fs.readFileSync(chinesePath, 'utf8')).to.include('kuat.1.title');
+    });
+
+    it('rolls back every language when a multi-file localisation write fails', async () => {
+        const handler = createFileHandler();
+        const englishPath = path.join(workspaceRoot, 'localisation', 'english', 'rollback_l_english.yml');
+        const chinesePath = path.join(workspaceRoot, 'localisation', 'simp_chinese', 'rollback_l_simp_chinese.yml');
+        fs.mkdirSync(path.dirname(englishPath), { recursive: true });
+        fs.mkdirSync(path.dirname(chinesePath), { recursive: true });
+        const englishOriginal = '\uFEFFl_english:\n old_key:0 "Old"\n';
+        const chineseOriginal = '\uFEFFl_simp_chinese:\n old_key:0 "旧"\n';
+        fs.writeFileSync(englishPath, englishOriginal, 'utf8');
+        fs.writeFileSync(chinesePath, chineseOriginal, 'utf8');
+        const originalWriteFile = fs.promises.writeFile.bind(fs.promises);
+        let injected = false;
+        const writeStub = sinon.stub(fs.promises, 'writeFile').callsFake(async (target: any, data: any, options: any) => {
+            if (!injected && path.resolve(String(target)) === path.resolve(chinesePath) && String(data).includes('new_key')) {
+                injected = true;
+                throw new Error('injected second-language failure');
+            }
+            return originalWriteFile(target, data, options as any);
+        });
+        try {
+            const result = await handler.writeLocalisation({
+                filePath: path.relative(workspaceRoot, englishPath),
+                language: 'l_english',
+                languages: ['l_english', 'l_simp_chinese'],
+                entries: [{ key: 'new_key', value: 'New' }],
+            }, makeContext('topic-rollback'));
+            expect(result.success).to.equal(false);
+            expect(result.message).to.include('rolled back');
+            expect(fs.readFileSync(englishPath, 'utf8')).to.equal(englishOriginal);
+            expect(fs.readFileSync(chinesePath, 'utf8')).to.equal(chineseOriginal);
+        } finally {
+            writeStub.restore();
+        }
+    });
+
+    it('rejects a multi-file transaction when the primary file is outside localisation folders', async () => {
+        const handler = createFileHandler();
+        const result = await handler.writeLocalisation({
+            filePath: '.cwtools-ai/scratch/kuat_events_l_english.yml',
+            language: 'l_english',
+            languages: ['l_english', 'l_simp_chinese'],
+            entries: [{ key: 'kuat.1.title', value: 'Kuat Echo' }],
+        }, makeContext('topic-123'));
+        expect(result.success).to.equal(false);
+        expect(result.message).to.include('multi-file transaction rejected');
+    });
+
     it('reports list_directory truncation metadata without claiming a full total', async () => {
         const handler = createFileHandler();
         const dirAbs = path.join(workspaceRoot, 'many-files');
@@ -646,8 +712,13 @@ describe('agent tool file path safety', () => {
     });
 
     it('extracts write target paths for runner scheduling without marking localisation as superseded', () => {
-        expect(getAgentToolTargetFiles('write_localisation', { filePath: 'localisation/english/kuat_l_english.yml' }, workspaceRoot))
-            .to.deep.equal([path.join(workspaceRoot, 'localisation', 'english', 'kuat_l_english.yml')]);
+        expect(getAgentToolTargetFiles('write_localisation', {
+            filePath: 'localisation/english/kuat_l_english.yml',
+            languages: ['l_english', 'l_simp_chinese'],
+        }, workspaceRoot)).to.deep.equal([
+            path.join(workspaceRoot, 'localisation', 'english', 'kuat_l_english.yml'),
+            path.join(workspaceRoot, 'localisation', 'simp_chinese', 'kuat_l_simp_chinese.yml'),
+        ]);
         expect(getAgentToolTargetFiles('replace_lines', { filePath: 'common/scripted_effects/kuat.txt' }, workspaceRoot))
             .to.deep.equal([path.join(workspaceRoot, 'common', 'scripted_effects', 'kuat.txt')]);
         expect(getAgentToolTargetFiles('write_file', { file: 'common/relics/kuat.txt' }, workspaceRoot))
@@ -998,7 +1069,7 @@ describe('agent sprite candidate tool contract', () => {
         if (!definition) {
             throw new Error('explore_pdx_project tool definition is missing');
         }
-        expect(definition.function.description).to.include('Primary semantic exploration entry point');
+        expect(definition.function.description).to.include('Primary semantic exploration');
         expect(definition.function.parameters.properties).to.have.property('depth');
         expect(definition.function.parameters.properties.depth.maximum).to.equal(3);
         expect(definition.function.parameters.properties.maxNodes.maximum).to.equal(100);
@@ -1041,6 +1112,8 @@ describe('agent sprite candidate tool contract', () => {
     it('queries the shared localisation index when IndexService is provided', async () => {
         const fakeIndexService = {
             status: 'ready',
+            locLanguages: () => ['l_english'],
+            locDuplicateGroups: () => [],
             queryLocalisation: (query: any) => [{
                 key: query.key,
                 value: 'Hello',
@@ -1109,6 +1182,55 @@ describe('agent sprite candidate tool contract', () => {
         expect(result.indexedSymbolNames).to.equal(42);
         expect(result.indexUpdatedAt).to.equal(2000);
         expect(ensureArgs).to.deep.equal({ includeVanilla: true });
+    });
+
+    it('traverses GUI button effect and sprite to a concrete texture asset', async () => {
+        const texturePath = path.join(workspaceRoot, 'gfx', 'interface', 'kuat_button.dds');
+        fs.mkdirSync(path.dirname(texturePath), { recursive: true });
+        const dds = Buffer.alloc(128);
+        dds.write('DDS ', 0, 'ascii');
+        dds.writeUInt32LE(16, 12);
+        dds.writeUInt32LE(64, 16);
+        fs.writeFileSync(texturePath, dds);
+        const symbols: Record<string, any[]> = {
+            kuat_btn: [{
+                name: 'kuat_btn', kind: 'effectButtonType', source: 'gui', origin: 'workspace',
+                file: path.join(workspaceRoot, 'interface', 'kuat.gui'), line: 3,
+                references: [
+                    { file: 'interface/kuat.gui', line: 3, context: 'effect = kuat_button_effect' },
+                    { file: 'interface/kuat.gui', line: 3, context: 'sprite = GFX_kuat_button' },
+                ],
+            }],
+            kuat_button_effect: [{
+                name: 'kuat_button_effect', kind: 'button_effect', source: 'script', origin: 'workspace',
+                file: path.join(workspaceRoot, 'common', 'button_effects', 'kuat.txt'), line: 1,
+            }],
+            gfx_kuat_button: [{
+                name: 'GFX_kuat_button', kind: 'sprite', source: 'asset', origin: 'workspace',
+                file: path.join(workspaceRoot, 'interface', 'kuat.gfx'), line: 2,
+                references: [
+                    { file: 'interface/kuat.gfx', line: 3, context: 'texturefile = "gfx/interface/kuat_button.dds"' },
+                    { file: 'interface/kuat.gfx', line: 4, context: 'noOfFrames = 4' },
+                ],
+            }],
+        };
+        const fakeIndexService = {
+            status: 'ready', workspaceSymbolStatus: 'ready', workspaceSymbolCount: 3, workspaceSymbolUpdatedAt: 1,
+            ensureWorkspaceSymbolsReady: async () => undefined,
+            assetSearchRoots: () => [workspaceRoot],
+            queryWorkspaceSymbols: (query: any) => symbols[String(query.name ?? '').toLowerCase()] ?? [],
+        };
+        const executor = new AgentToolExecutor({} as any, workspaceRoot, fakeIndexService as any);
+        const result = await executor.execute('query_workspace_index', {
+            name: 'kuat_btn', exact: true, source: 'gui', includeAssetChain: true,
+        }) as any;
+        const refs = result.assetChain[0].references;
+        expect(refs.some((ref: any) => ref.target === 'kuat_button_effect' && ref.exists)).to.equal(true);
+        expect(refs.some((ref: any) => ref.target === 'GFX_kuat_button' && ref.exists)).to.equal(true);
+        expect(refs.some((ref: any) => ref.target.endsWith('kuat_button.dds') && ref.exists && ref.depth === 2)).to.equal(true);
+        const texture = refs.find((ref: any) => ref.target.endsWith('kuat_button.dds'));
+        expect(texture.pathCaseMatches).to.equal(true);
+        expect(texture.frameLayout).to.deep.include({ noOfFrames: 4, width: 64, height: 16, status: 'consistent' });
     });
 
     it('returns partial workspace index results after a bounded wait while vanilla indexing continues', async () => {
@@ -2150,6 +2272,33 @@ describe('agent tool progress and aborts', () => {
         expect(sendRequest.firstCall.args[0]).to.equal('workspace/executeCommand');
         expect(sendRequest.firstCall.args[1].command).to.equal('cwtools.ai.revalidateFiles');
         expect(result.revalidation.ok).to.equal(true);
+    });
+
+    it('revalidates indirect inline callers discovered by post-write evidence', async () => {
+        const changedFile = path.join(workspaceRoot, 'common', 'inline_scripts', 'template.txt');
+        const callerFile = path.join(workspaceRoot, 'events', 'caller.txt');
+        fs.mkdirSync(path.dirname(changedFile), { recursive: true });
+        fs.mkdirSync(path.dirname(callerFile), { recursive: true });
+        fs.writeFileSync(changedFile, 'root = {}\n', 'utf8');
+        fs.writeFileSync(callerFile, 'country_event = {}\n', 'utf8');
+        const sendRequest = sinon.stub().resolves({ ok: true, requested: 2 });
+        const executor = new AgentToolExecutor({
+            onNotification: () => undefined,
+            sendNotification: () => undefined,
+            sendRequest,
+        } as any, workspaceRoot);
+        sinon.stub(executor as any, 'executeInternal').resolves({ writtenFiles: [changedFile], exitCode: 0 });
+        (executor as any).postWriteAffectedFiles.set('topic:default', [callerFile]);
+
+        const result = await executor.execute('git_ops', { action: 'checkout', file: 'common/inline_scripts/template.txt' }, {
+            runnerOptions: { mode: 'build' },
+            agentRunner: { readTracker: { invalidate: () => undefined } },
+            onPermissionRequest: sinon.stub().resolves(true),
+        } as any) as any;
+
+        const requestedUris = sendRequest.firstCall.args[1].arguments[0] as string[];
+        expect(requestedUris).to.have.lengthOf(2);
+        expect(result.indirectRevalidationFiles).to.deep.equal([callerFile]);
     });
 
     it('requests CWTools revalidation for .shader and .fxh files reported by tools', async () => {

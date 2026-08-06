@@ -472,6 +472,16 @@ export interface QueryLocalisationIndexArgs {
     prefix?: boolean;
     contains?: boolean;
     caseSensitive?: boolean;
+    /** Include per-key duplicate groups with all occurrences. Default false. */
+    includeDuplicates?: boolean;
+    /** Include a language-coverage comparison for the matched keys. Default false. */
+    compareLanguages?: boolean;
+    /** Reference language for key-set differences. Defaults to l_english when indexed. */
+    referenceLanguage?: string;
+    /** Include per-entry origin (workspace/vanilla) and reference status. Default false. */
+    referenceStatus?: boolean;
+    /** Include authoritative CWTools localisation diagnostics, including script-referenced keys that have no YML definition. */
+    auditMode?: boolean;
     limit?: number;
 }
 
@@ -484,7 +494,88 @@ export interface QueryLocalisationIndexResult {
         file: string;
         line: number;
         language: string;
+        valueHash?: string;
+        hasBom?: boolean;
+        encoding?: 'utf8-bom' | 'utf8';
+        header?: string;
+        headerMatchesPath?: boolean;
+        duplicateGroup?: string;
+        active?: boolean;
+        winnerEvidence?: 'deterministic_file_order';
+        origin?: 'workspace' | 'vanilla';
+        referenceStatus?: 'referenced' | 'unreferenced' | 'unknown';
+        referenceCount?: number;
+        referenceEvidence?: 'lsp_reference_provider' | 'unavailable';
     }>;
+    /** Duplicate groups when includeDuplicates is set. */
+    duplicates?: Array<{
+        key: string;
+        language: string;
+        occurrences: Array<{
+            key: string;
+            value: string;
+            file: string;
+            line: number;
+            language: string;
+            valueHash?: string;
+            hasBom?: boolean;
+            encoding?: 'utf8-bom' | 'utf8';
+            header?: string;
+            headerMatchesPath?: boolean;
+            active?: boolean;
+            winnerEvidence?: 'deterministic_file_order';
+        }>;
+    }>;
+    /** Per-language presence for the matched keys when compareLanguages is set. */
+    languageComparison?: Array<{
+        language: string;
+        referenceLanguage: string;
+        present: boolean;
+        matchedKeyCount: number;
+        missingKeys: string[];
+        extraKeys: string[];
+        truncated: boolean;
+    }>;
+    /** Distinct indexed languages. */
+    languages?: string[];
+    coverage?: {
+        filesConsidered: number;
+        filesIndexed: number;
+        occurrencesConsidered: number;
+        occurrencesReturned: number;
+        truncated: boolean;
+        staleReasons: string[];
+        unsupportedConstructs: string[];
+    };
+    referenceAudit?: {
+        keysConsidered: number;
+        keysResolved: number;
+        truncated: boolean;
+        unsupportedConstructs: string[];
+    };
+    semanticAudit?: {
+        source: 'cwtools_localisation_validator';
+        issuesConsidered: number;
+        issuesReturned: number;
+        missingReferences: Array<{
+            key: string;
+            file: string;
+            line: number;
+            message: string;
+            dynamic: boolean;
+            inlineTemplate?: string;
+            inlineInvocationIds?: string[];
+        }>;
+        commandAndScopeIssues: Array<{
+            code: string;
+            file: string;
+            line: number;
+            message: string;
+        }>;
+        truncated: boolean;
+        staleReasons: string[];
+        unsupportedConstructs?: string[];
+    };
     _hint?: string;
 }
 
@@ -498,6 +589,8 @@ export interface QueryWorkspaceIndexArgs {
     prefix?: boolean;
     exact?: boolean;
     includeReferences?: boolean;
+    /** Verify referenced texture/sound/entity targets exist on disk. */
+    includeAssetChain?: boolean;
     limit?: number;
 }
 
@@ -518,22 +611,67 @@ export interface QueryWorkspaceIndexResult {
             line: number;
             context: string;
         }>;
+        guiFacts?: {
+            offCanvas: boolean;
+            position?: { x?: number; y?: number; expression?: string };
+            localisationKeys: string[];
+            customGuiReferences: string[];
+            effectReferences: string[];
+            spriteReferences: string[];
+        };
         updatedAt?: number;
         fileVersion?: number;
     }>;
     indexedSymbolNames?: number;
     indexUpdatedAt?: number;
+    coverage?: {
+        filesConsidered: number;
+        filesIndexed: number;
+        symbolsConsidered: number;
+        symbolsIndexed: number;
+        truncated: boolean;
+        staleReasons: string[];
+        unsupportedConstructs?: string[];
+    };
+    /** Per-entry referenced asset targets and whether each exists. */
+    assetChain?: Array<{
+        name: string;
+        kind: string;
+        file: string;
+        references: Array<{
+            target: string;
+            exists: boolean;
+            kind: string;
+            depth: number;
+            sourceFile: string;
+            sourceLine: number;
+            resolvedFiles?: string[];
+            origins?: Array<'workspace' | 'vanilla'>;
+            resolution?: 'single' | 'multiple_candidates' | 'missing';
+            pathCaseMatches?: boolean;
+            frameLayout?: {
+                noOfFrames: number;
+                width: number;
+                height: number;
+                status: 'consistent' | 'inconsistent' | 'unknown';
+                reason: string;
+            };
+        }>;
+        truncated?: boolean;
+    }>;
     _hint?: string;
 }
 
 export type ProjectProfileWorkspaceKind = 'paradox_mod' | 'extension_source' | 'mixed' | 'generic';
 
 export interface ProjectProfile {
-    schemaVersion: 1;
+    schemaVersion: 2;
     generatedAt: string;
     workspaceRoot: string;
     workspaceKind: ProjectProfileWorkspaceKind;
     projectName: string;
+    /** True when a schemaVersion 1 profile was read and normalized; V2 writes false/absent. */
+    legacyProfile?: boolean;
     game: {
         id: string;
         displayName: string;
@@ -544,6 +682,22 @@ export interface ProjectProfile {
         name?: string;
         version?: string;
         tags?: string[];
+        supportedVersion?: string;
+        remoteFileId?: string;
+        dependencies?: string[];
+    };
+    compatibility?: {
+        supportedVersion?: string;
+        declaredDependencies: Array<{ name: string; source: string }>;
+        possibleSoftDependencies: Array<{ idOrPrefix: string; evidence: string; confidence: 'heuristic' }>;
+        dependencyRoots: Array<{ name: string; root?: string; status: 'resolved' | 'unresolved'; source: string }>;
+        loadOrder: {
+            source: 'descriptor_only' | 'launcher_or_lsp';
+            confidence: 'partial' | 'active';
+            orderedLayers: string[];
+            warnings: string[];
+        };
+        coverage: { unresolvedIdInference: 'not_available' | 'available'; truncated: boolean };
     };
     keyDirectories: Array<{
         key: string;
@@ -554,7 +708,11 @@ export interface ProjectProfile {
     localisation: {
         roots: string[];
         languages: string[];
+        /** Primary language used by the majority of samples; undefined when ambiguous. */
+        defaultLanguage?: string;
         encoding: string;
+        /** Per-language encoding when a mixed set of encodings is detected. */
+        encodingByLanguage?: Record<string, string>;
         sampleFiles: string[];
     };
     identifiers: {
@@ -562,6 +720,8 @@ export interface ProjectProfile {
         variablePrefixes: string[];
         /** Current TypeDef samples, populated only by typed LSP/project-knowledge sources. */
         byType: Record<string, string[]>;
+        /** Total counts per TypeDef name; byType holds bounded samples. */
+        byTypeCounts?: Record<string, number>;
         /** Legacy schemaVersion 1 fields accepted when reading older generated profiles. */
         scriptedTriggers?: string[];
         scriptedEffects?: string[];
@@ -583,13 +743,23 @@ export interface ProjectProfile {
         lspReady: 'unknown' | 'ready' | 'not_ready';
         indexStatus: 'unknown' | 'ready' | 'partial' | 'indexing' | 'idle' | 'unavailable';
         vanillaCache: 'unknown' | 'configured' | 'missing';
+        /** Concrete cache file or metadata used to decide vanillaCache. */
+        vanillaCacheEvidence?: string;
     };
+    /** Freshness of the profile relative to the knowledge manifest. */
+    freshness?: {
+        knowledgeStatus?: 'ready' | 'partial' | 'stale' | 'unavailable';
+        knowledgeGeneratedAt?: string;
+        staleReasons?: string[];
+    };
+    /** Non-fatal detection warnings (mixed BOM, descriptor issues, ...). */
+    warnings?: string[];
     promptCards: Partial<Record<AgentMode | 'asset', string>>;
     efficiencyHints: string[];
 }
 
 export interface QueryProjectProfileArgs {
-    section?: 'summary' | 'routing' | 'directories' | 'localisation' | 'identifiers' | 'validation' | 'promptCards' | 'all';
+    section?: 'summary' | 'routing' | 'directories' | 'localisation' | 'identifiers' | 'validation' | 'compatibility' | 'promptCards' | 'all';
     mode?: AgentMode | 'asset';
 }
 
@@ -717,6 +887,8 @@ export interface ExplorePdxProjectArgs {
     maxNodes?: number;
     maxEdges?: number;
     includeMetadata?: boolean;
+    /** Extra relationship kinds: inline_invocation / inline_expansion. */
+    relationshipKinds?: string[];
 }
 
 export interface ExplorePdxProjectResult {
@@ -758,6 +930,22 @@ export interface QueryProjectKnowledgeResult {
     generatedAt?: string;
     game?: string;
     graphVersion?: number;
+    /** Old knowledge databases are never queried; callers must trigger a full rebuild. */
+    rebuildRequired?: boolean;
+    foundSchemaVersion?: number;
+    currentSchemaVersion?: number;
+    /** Unified coverage contract; empty results are never proof of absence. */
+    coverage?: {
+        filesConsidered?: number;
+        filesIndexed?: number;
+        definitionsConsidered?: number;
+        definitionsIndexed?: number;
+        edgesConsidered?: number;
+        edgesIndexed?: number;
+        truncated?: boolean;
+        staleReasons?: string[];
+        unsupportedConstructs?: string[];
+    };
     retrieval?: {
         strategy: 'indexed_graph' | 'bounded_token_scan';
         seedIdentifiers: string[];
@@ -766,6 +954,9 @@ export interface QueryProjectKnowledgeResult {
         eventNodesReturned: number;
         eventEdgesReturned: number;
         eventLogicReturned: number;
+        inlineTemplatesReturned?: number;
+        inlineInvocationsReturned?: number;
+        inlineExpansionsReturned?: number;
     };
     staleReasons?: string[];
     domains: string[];
@@ -777,6 +968,18 @@ export interface QueryProjectKnowledgeResult {
         edges: Array<Record<string, unknown>>;
         logic: Array<Record<string, unknown>>;
     };
+    inlineGraph?: {
+        templates: Array<Record<string, unknown>>;
+        parameters: Array<Record<string, unknown>>;
+        invocations: Array<Record<string, unknown>>;
+        arguments: Array<Record<string, unknown>>;
+        expansions: Array<Record<string, unknown>>;
+        generatedReferences: Array<Record<string, unknown>>;
+        problems: Array<Record<string, unknown>>;
+        truncated?: boolean;
+        seedKinds?: string[];
+    };
+    definitionStacks?: Array<Record<string, unknown>>;
     requiredNextChecks?: string[];
     _hint?: string;
     error?: string;

@@ -4,8 +4,8 @@ import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js';
 import { getWorkspaceCacheRoot } from '../ai/workspacePaths';
 import type { WorkspaceSymbolEntry, WorkspaceSymbolOrigin } from './workspaceSymbolParser';
 
-const SCHEMA_VERSION = 1;
-const PARSER_VERSION = 3;
+const SCHEMA_VERSION = 2;
+const PARSER_VERSION = 4;
 export const WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH = path.join('index', 'workspace-symbols.sqlite');
 
 /** Primary cache location: per-workspace extension storage once configured. */
@@ -82,6 +82,35 @@ function stringValue(value: unknown): string | undefined {
     return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
+function parseGuiFacts(value: unknown): WorkspaceSymbolEntry['guiFacts'] {
+    if (typeof value !== 'string' || !value) return undefined;
+    try {
+        const parsed: unknown = JSON.parse(value);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+        const record = parsed as Record<string, unknown>;
+        const strings = (field: string): string[] => Array.isArray(record[field])
+            ? record[field].filter((item): item is string => typeof item === 'string')
+            : [];
+        const positionRecord = record.position && typeof record.position === 'object' && !Array.isArray(record.position)
+            ? record.position as Record<string, unknown>
+            : undefined;
+        return {
+            offCanvas: record.offCanvas === true,
+            position: positionRecord ? {
+                x: typeof positionRecord.x === 'number' ? positionRecord.x : undefined,
+                y: typeof positionRecord.y === 'number' ? positionRecord.y : undefined,
+                expression: typeof positionRecord.expression === 'string' ? positionRecord.expression : undefined,
+            } : undefined,
+            localisationKeys: strings('localisationKeys'),
+            customGuiReferences: strings('customGuiReferences'),
+            effectReferences: strings('effectReferences'),
+            spriteReferences: strings('spriteReferences'),
+        };
+    } catch {
+        return undefined;
+    }
+}
+
 export class WorkspaceSymbolSqliteCache {
     private database: Database | undefined;
 
@@ -127,7 +156,7 @@ export class WorkspaceSymbolSqliteCache {
         const rows = database.exec(`
             SELECT f.path, f.size, f.mtime_ms, f.origin, f.file_version,
                    s.name, s.kind, s.line, s.source, s.container, s.category,
-                   s.updated_at
+                   s.updated_at, s.gui_facts_json
             FROM files f
             LEFT JOIN symbols s ON s.file_path = f.path
             ORDER BY f.path, s.id
@@ -157,6 +186,7 @@ export class WorkspaceSymbolSqliteCache {
                 origin,
                 updatedAt: Number(row[11] ?? fact.mtimeMs),
                 fileVersion: fact.fileVersion,
+                guiFacts: parseGuiFacts(row[12]),
             });
         }
         return { files, entries };
@@ -190,8 +220,8 @@ export class WorkspaceSymbolSqliteCache {
             const insertSymbol = database.prepare(`
                 INSERT INTO symbols(
                     file_path, name, name_lower, kind, line, source,
-                    container, category, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    container, category, updated_at, gui_facts_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
             for (const changed of changedFiles) {
                 const normalized = normalizePath(changed.path);
@@ -214,6 +244,7 @@ export class WorkspaceSymbolSqliteCache {
                         entry.container ?? null,
                         entry.category ?? null,
                         entry.updatedAt ?? changed.mtimeMs,
+                        entry.guiFacts ? JSON.stringify(entry.guiFacts) : null,
                     ]);
                 }
             }
@@ -267,7 +298,8 @@ export class WorkspaceSymbolSqliteCache {
                 source TEXT NOT NULL,
                 container TEXT,
                 category TEXT,
-                updated_at REAL NOT NULL
+                updated_at REAL NOT NULL,
+                gui_facts_json TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name_lower);
             CREATE INDEX IF NOT EXISTS idx_symbols_kind_name ON symbols(kind, name_lower);

@@ -179,6 +179,14 @@ async function generateInitFileCore(
                 },
             });
             await indexService.ensureWorkspaceSymbolsReady({ includeVanilla: false });
+            // Fill a bounded per-kind identifier summary from the shared index so
+            // profile routing no longer depends on an empty byType.
+            const typeSummary = indexService.workspaceSymbolTypeSummary();
+            profile.identifiers.byType = typeSummary.byType;
+            profile.identifiers.byTypeCounts = typeSummary.byTypeCounts;
+            if (Object.keys(typeSummary.byType).length === 0 && profile.identifiers.namespaces.length === 0) {
+                ErrorReporter.debug('ChatInit', 'Workspace symbol index built without typed entries; profile byType stays empty.');
+            }
         }
 
         progress.report({
@@ -209,6 +217,15 @@ async function generateInitFileCore(
             profile.game.evidence = Array.from(new Set([...profile.game.evidence, 'active CWTools LSP game model']));
             profile.validation.lspReady = manifest.status === 'ready' || manifest.status === 'partial' ? 'ready' : 'not_ready';
             profile.validation.vanillaCache = manifest.counts.vanillaDefinitions > 0 ? 'configured' : 'missing';
+            profile.freshness = {
+                knowledgeStatus: manifest.status === 'ready'
+                    ? 'ready'
+                    : manifest.status === 'partial'
+                        ? 'partial'
+                        : 'stale',
+                knowledgeGeneratedAt: manifest.generatedAt,
+                staleReasons: manifest.staleReasons ?? [],
+            };
             if (manifest.status === 'partial') {
                 deepKnowledgeWarning = 'Deep project knowledge was exported with partial coverage.';
             } else if (manifest.status !== 'ready') {
@@ -218,6 +235,7 @@ async function generateInitFileCore(
             deepKnowledgeError = error instanceof Error ? error.message : String(error);
             ErrorReporter.warn('ChatInit', 'Deep project knowledge export was unavailable; wrote a recoverable knowledge pack.', error);
             profile.validation.lspReady = 'not_ready';
+            profile.freshness = { knowledgeStatus: 'unavailable', staleReasons: ['lsp_export_unavailable'] };
             writeUnavailableProjectKnowledge(root, profile, deepKnowledgeError);
         }
         progress.report({

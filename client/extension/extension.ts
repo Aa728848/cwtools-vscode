@@ -826,7 +826,7 @@ export async function activate(context: ExtensionContext) {
 	if (aiStorageMigration.migrated) {
 		ErrorReporter.debug(
 			'Extension',
-			`Migrated AI workspace storage to ${aiStorageMigration.primaryRoot} (${aiStorageMigration.movedEntries} moved, ${aiStorageMigration.resolvedConflicts} conflicts kept from .cwtools)`,
+			`Migrated AI workspace storage to ${aiStorageMigration.primaryRoot} (${aiStorageMigration.movedEntries} moved, ${aiStorageMigration.resolvedConflicts} conflicts kept from .cwtools, obsolete knowledge removed: ${aiStorageMigration.obsoleteKnowledgeRemoved})`,
 		);
 		await repairMovedAgentWorktrees(workspaceRoot).catch(error =>
 			ErrorReporter.warn('Extension', 'Failed to repair Agent worktrees after AI storage migration', error)

@@ -12,6 +12,9 @@ open CWTools.Process
 open CWTools.Utilities.Position
 open CWTools.Utilities.StringResource
 
+[<Literal>]
+let KnowledgeSchemaVersion = 7
+
 type ExportOptions =
     { domains: string list
       changedFiles: string list
@@ -64,7 +67,54 @@ type private DefinitionFact =
       resourceScope: string option
       domain: string
       overridePath: string option
-      overrideStrategy: string option }
+      overrideStrategy: string option
+      provenanceKind: string
+      sourceFile: string
+      sourceLine: int
+      sourceEndLine: int
+      templateFile: string option
+      templateLine: int option
+      invocationFile: string option
+      invocationLine: int option
+      hasRealRange: bool
+      confidence: string }
+
+type private ProvenanceFact =
+    { provenanceKind: string
+      sourceFile: string
+      sourceLine: int
+      sourceEndLine: int
+      templateFile: string option
+      templateLine: int option
+      invocationFile: string option
+      invocationLine: int option
+      hasRealRange: bool
+      confidence: string }
+
+let private declaredProvenance line endLine =
+    let hasRealRange = line > 0 || endLine > line
+    { provenanceKind = if hasRealRange then "declared" else "synthetic"
+      sourceFile = ""
+      sourceLine = 0
+      sourceEndLine = 0
+      templateFile = None
+      templateLine = None
+      invocationFile = None
+      invocationLine = None
+      hasRealRange = hasRealRange
+      confidence = if hasRealRange then "high" else "medium" }
+
+let private syntheticProvenance confidence =
+    { provenanceKind = "synthetic"
+      sourceFile = ""
+      sourceLine = 0
+      sourceEndLine = 0
+      templateFile = None
+      templateLine = None
+      invocationFile = None
+      invocationLine = None
+      hasRealRange = false
+      confidence = confidence }
 
 type private FileFact =
     { file: string
@@ -111,7 +161,14 @@ type private EventEdgeFact =
       label: string option
       sourceFile: string
       line: int
-      confidence: string }
+      confidence: string
+      callOperator: string option
+      phase: string option
+      delay: string option
+      conditionPath: string option
+      scopeMap: string option
+      sourceScope: string option
+      targetScope: string option }
 
 type private EventLogicFact =
     { eventId: string
@@ -126,7 +183,8 @@ type private EventLogicFact =
 type private EventGraphFacts =
     { nodes: EventNodeFact list
       edges: EventEdgeFact list
-      logic: EventLogicFact list }
+      logic: EventLogicFact list
+      stateAccesses: EventLogicFact list }
 
 let private clamp minimum maximum value = max minimum (min maximum value)
 
@@ -240,9 +298,26 @@ let cleanupStaleKnowledgeTemporaryFiles (databasePath: string) =
             CWTools.Utilities.Utils.logWarning
                 $"Failed to enumerate project knowledge temporary databases beside {target}: {e.Message}"
 
-let private originForPath projectRoots filePath =
-    if projectRoots |> List.exists (fun root -> pathInside root filePath) then "workspace"
-    else "vanilla"
+let private originName =
+    function
+    | PdxShaderProject.Vanilla -> "vanilla"
+    | PdxShaderProject.Dependency _ -> "dependency"
+    | PdxShaderProject.CurrentDocument
+    | PdxShaderProject.Workspace -> "workspace"
+
+/// Resolve provenance from the same explicit load-order roots used by the
+/// shader/project runtime.  Resource scope is authoritative for vanilla and
+/// embedded resources; paths outside the editable root are dependencies unless
+/// CWTools explicitly marks them as vanilla.
+let resolveKnowledgeOrigin projectRoots scope filePath =
+    match PdxShaderProject.originForResource scope filePath with
+    | PdxShaderProject.Workspace when not (projectRoots |> List.exists (fun root -> pathInside root filePath)) ->
+        if String.Equals(scope, "vanilla", StringComparison.OrdinalIgnoreCase) then "vanilla" else "dependency"
+    | origin -> originName origin
+
+let private originForResource projectRoots (resource: ResourceFact option) filePath =
+    let scope = resource |> Option.map _.scope |> Option.defaultValue ""
+    resolveKnowledgeOrigin projectRoots scope filePath
 
 let private overwriteName = function
     | Overwrite.Overwrote -> "overwrote"
@@ -295,12 +370,52 @@ let private jsonStringArray values =
 let private jsonRecord fields =
     fields |> List.choose id |> List.toArray |> JsonValue.Record
 
+let private capabilityVersionsJson =
+    jsonRecord
+        [ Some("inlineGraph", JsonValue.Number 2m)
+          Some("stateFlow", JsonValue.Number 2m)
+          Some("overrideResolution", JsonValue.Number 2m)
+          Some("interfaceGraph", JsonValue.Number 1m)
+          Some("localisationAudit", JsonValue.Number 2m)
+          Some("pdxFlow", JsonValue.Number 2m) ]
+
+let private capabilityStatusJson =
+    jsonRecord
+        [ Some("inlineGraph", JsonValue.String "ready")
+          Some("stateFlow", JsonValue.String "ready")
+          Some("overrideResolution", JsonValue.String "ready")
+          // These are live LSP/Extension capabilities, not facts stored in this
+          // SQLite snapshot. Advertising them as ready here made a missing or
+          // stale live subsystem indistinguishable from exported evidence.
+          Some("interfaceGraph", JsonValue.String "unavailable")
+          Some("localisationAudit", JsonValue.String "unavailable")
+          Some("pdxFlow", JsonValue.String "unavailable") ]
+
 let private resourceForFile (resources: IDictionary<string, ResourceFact>) file =
     match resources.TryGetValue(normalizePath file) with
     | true, value -> Some value
     | false, _ -> None
 
+let private configuredLoadOrderForFile (origin: string) (file: string) =
+    if origin.Equals("vanilla", StringComparison.OrdinalIgnoreCase) then 0, Some "vanilla"
+    else
+        let candidate = PdxShaderProject.canonicalizePath file
+        PdxShaderProject.configuredLoadOrderRoots ()
+        |> List.mapi (fun index root -> index, root)
+        |> List.filter (fun (_, root) ->
+            candidate = root.path
+            || (candidate.Length > root.path.Length
+                && candidate.StartsWith(root.path, StringComparison.Ordinal)
+                && candidate[root.path.Length] = '/'))
+        |> List.sortByDescending (fun (_, root) -> root.path.Length)
+        |> List.tryHead
+        |> Option.map (fun (index, root) -> index + 1, Some root.name)
+        |> Option.defaultValue (Int32.MaxValue - 1, None)
+
+let resolveKnowledgeLoadOrder origin file = configuredLoadOrderForFile origin file
+
 let private definitionJson (definition: DefinitionFact) =
+    let loadOrderIndex, loadOrderRoot = configuredLoadOrderForFile definition.origin definition.file
     jsonRecord
         [ Some("id", JsonValue.String definition.id)
           Some("entityType", JsonValue.String definition.entityType)
@@ -309,13 +424,26 @@ let private definitionJson (definition: DefinitionFact) =
           Some("line", JsonValue.Number(decimal definition.line))
           Some("endLine", JsonValue.Number(decimal definition.endLine))
           Some("origin", JsonValue.String definition.origin)
+          Some("loadOrderIndex", JsonValue.Number(decimal loadOrderIndex))
+          loadOrderRoot |> Option.map (fun value -> "loadOrderRoot", JsonValue.String value)
           Some("validate", JsonValue.Boolean definition.validate)
           Some("subtypes", jsonStringArray definition.subtypes)
           Some("overwrite", JsonValue.String definition.overwrite)
           definition.resourceScope |> Option.map (fun value -> "resourceScope", JsonValue.String value)
           Some("domain", JsonValue.String definition.domain)
           definition.overridePath |> Option.map (fun value -> "overridePath", JsonValue.String value)
-          definition.overrideStrategy |> Option.map (fun value -> "overrideStrategy", JsonValue.String value) ]
+          definition.overrideStrategy |> Option.map (fun value -> "overrideStrategy", JsonValue.String value)
+          Some("provenance", jsonRecord
+            [ Some("kind", JsonValue.String definition.provenanceKind)
+              Some("sourceFile", JsonValue.String(normalizePath definition.sourceFile))
+              Some("sourceLine", JsonValue.Number(decimal definition.sourceLine))
+              Some("sourceEndLine", JsonValue.Number(decimal definition.sourceEndLine))
+              Some("hasRealRange", JsonValue.Boolean definition.hasRealRange)
+              Some("confidence", JsonValue.String definition.confidence)
+              definition.templateFile |> Option.map (fun value -> "templateFile", JsonValue.String(normalizePath value))
+              definition.templateLine |> Option.map (fun value -> "templateLine", JsonValue.Number(decimal value))
+              definition.invocationFile |> Option.map (fun value -> "invocationFile", JsonValue.String(normalizePath value))
+              definition.invocationLine |> Option.map (fun value -> "invocationLine", JsonValue.Number(decimal value)) ]) ]
 
 let private shaderEntityType =
     function
@@ -335,12 +463,7 @@ let private shaderEntityType =
     | PdxShaderRuntime.DepthStencilStateDeclaration -> "shader_render_state", [ "depth_stencil" ]
     | PdxShaderRuntime.RasterizerStateDeclaration -> "shader_render_state", [ "rasterizer" ]
 
-let private shaderOriginName =
-    function
-    | PdxShaderProject.Vanilla -> "vanilla"
-    | PdxShaderProject.Dependency _ -> "dependency"
-    | PdxShaderProject.CurrentDocument
-    | PdxShaderProject.Workspace -> "workspace"
+let private shaderOriginName = originName
 
 let private collectShaderDefinitions (model: PdxShaderRuntime.ShaderRuntimeModel option) (resources: IDictionary<string, ResourceFact>) =
     match model with
@@ -351,6 +474,7 @@ let private collectShaderDefinitions (model: PdxShaderRuntime.ShaderRuntimeModel
             |> List.map (fun declaration ->
                 let resource = resourceForFile resources declaration.file
                 let entityType, subtypes = shaderEntityType declaration.kind
+                let provenance = declaredProvenance (int declaration.range.StartLine) (int declaration.range.EndLine)
 
                 { id = declaration.stableId
                   entityType = entityType
@@ -365,7 +489,17 @@ let private collectShaderDefinitions (model: PdxShaderRuntime.ShaderRuntimeModel
                   resourceScope = resource |> Option.map (fun item -> item.scope) |> Option.filter (String.IsNullOrWhiteSpace >> not)
                   domain = "shader"
                   overridePath = None
-                  overrideStrategy = None })
+                  overrideStrategy = None
+                  provenanceKind = provenance.provenanceKind
+                  sourceFile = declaration.file
+                  sourceLine = int declaration.range.StartLine
+                  sourceEndLine = int declaration.range.EndLine
+                  templateFile = provenance.templateFile
+                  templateLine = provenance.templateLine
+                  invocationFile = provenance.invocationFile
+                  invocationLine = provenance.invocationLine
+                  hasRealRange = provenance.hasRealRange
+                  confidence = provenance.confidence })
 
         let interfaceSprites =
             model.interfaceSprites
@@ -373,6 +507,7 @@ let private collectShaderDefinitions (model: PdxShaderRuntime.ShaderRuntimeModel
                 invocation.spriteName
                 |> Option.map (fun spriteName ->
                     let resource = resourceForFile resources invocation.sourceFile
+                    let provenance = syntheticProvenance "medium"
 
                     { id = spriteName
                       entityType = "shader_interface_sprite"
@@ -387,7 +522,17 @@ let private collectShaderDefinitions (model: PdxShaderRuntime.ShaderRuntimeModel
                       resourceScope = resource |> Option.map (fun item -> item.scope) |> Option.filter (String.IsNullOrWhiteSpace >> not)
                       domain = "shader"
                       overridePath = None
-                      overrideStrategy = None }))
+                      overrideStrategy = None
+                      provenanceKind = "derived"
+                      sourceFile = invocation.sourceFile
+                      sourceLine = int invocation.blockRange.StartLine
+                      sourceEndLine = int invocation.blockRange.EndLine
+                      templateFile = provenance.templateFile
+                      templateLine = provenance.templateLine
+                      invocationFile = provenance.invocationFile
+                      invocationLine = provenance.invocationLine
+                      hasRealRange = provenance.hasRealRange
+                      confidence = provenance.confidence }))
 
         let rendererContractSource =
             PdxShaderRuntime.spriteRendererContractInfo ()
@@ -410,7 +555,17 @@ let private collectShaderDefinitions (model: PdxShaderRuntime.ShaderRuntimeModel
                   resourceScope = None
                   domain = "shader"
                   overridePath = None
-                  overrideStrategy = None })
+                  overrideStrategy = None
+                  provenanceKind = "synthetic"
+                  sourceFile = rendererContractSource
+                  sourceLine = 1
+                  sourceEndLine = 1
+                  templateFile = None
+                  templateLine = None
+                  invocationFile = None
+                  invocationLine = None
+                  hasRealRange = false
+                  confidence = "high" })
 
         let abiAuditDefinitions =
             match PdxShaderRuntime.shaderAbiAuditInfo () with
@@ -431,7 +586,17 @@ let private collectShaderDefinitions (model: PdxShaderRuntime.ShaderRuntimeModel
                     resourceScope = None
                     domain = "shader"
                     overridePath = None
-                    overrideStrategy = None } ]
+                    overrideStrategy = None
+                    provenanceKind = "synthetic"
+                    sourceFile = source |> Option.defaultValue "shader/abi-audit.json"
+                    sourceLine = 1
+                    sourceEndLine = 1
+                    templateFile = None
+                    templateLine = None
+                    invocationFile = None
+                    invocationLine = None
+                    hasRealRange = false
+                    confidence = "high" } ]
             | _ -> []
 
         declarations @ interfaceSprites @ rendererContracts @ abiAuditDefinitions
@@ -455,20 +620,33 @@ let private collectDefinitions (game: IGame) (projectRoots: string list) (resour
                 let logicalPath = resource |> Option.map (fun item -> item.logicalPath) |> Option.defaultValue definition.range.FileName
                 let domain = domainFor entityType logicalPath
                 let matchedMode = game.OverrideModeAtPath logicalPath
+                let line = int definition.range.StartLine
+                let endLine = int definition.range.EndLine
+                let provenance = declaredProvenance line endLine
                 { id = definition.id
                   entityType = entityType
                   file = definition.range.FileName
                   logicalPath = logicalPath
-                  line = int definition.range.StartLine
-                  endLine = int definition.range.EndLine
-                  origin = originForPath projectRoots definition.range.FileName
+                  line = line
+                  endLine = endLine
+                  origin = originForResource projectRoots resource definition.range.FileName
                   validate = definition.validate
                   subtypes = definition.subtypes
                   overwrite = resource |> Option.map (fun item -> item.overwrite) |> Option.defaultValue "none"
                   resourceScope = resource |> Option.map (fun item -> item.scope) |> Option.filter (String.IsNullOrWhiteSpace >> not)
                   domain = domain
                   overridePath = matchedMode |> Option.map (fun item -> item.path)
-                  overrideStrategy = matchedMode |> Option.map (fun item -> item.strategy) }))
+                  overrideStrategy = matchedMode |> Option.map (fun item -> item.strategy)
+                  provenanceKind = provenance.provenanceKind
+                  sourceFile = definition.range.FileName
+                  sourceLine = line
+                  sourceEndLine = int definition.range.EndLine
+                  templateFile = provenance.templateFile
+                  templateLine = provenance.templateLine
+                  invocationFile = provenance.invocationFile
+                  invocationLine = provenance.invocationLine
+                  hasRealRange = provenance.hasRealRange
+                  confidence = provenance.confidence }))
 
     Seq.append typedDefinitions (collectShaderDefinitions shaderModel resources)
     |> Seq.filter (fun definition ->
@@ -525,6 +703,144 @@ let private typeSummaries (definitions: DefinitionFact seq) =
     |> Seq.sortBy (fun value -> value.ToString())
     |> Seq.toArray
 
+/// Deterministic baseline report for the knowledge export: provenance counts,
+/// line-0 / synthetic pollution, edge label and resolution ratios, and the
+/// database size. Every number is stable for identical inputs.
+let private baselineJson (databasePath: string) (definitions: DefinitionFact list) (topology: TopologyFacts) (eventGraph: EventGraphFacts) (generatedAt: DateTimeOffset) (startedAt: DateTimeOffset) =
+    let originCounts =
+        definitions
+        |> Seq.groupBy (fun item -> item.origin)
+        |> Seq.map (fun (origin, values) -> origin, Seq.length values)
+        |> Seq.sortBy fst
+        |> Seq.toList
+    let provenanceKinds =
+        definitions
+        |> Seq.groupBy (fun item -> item.provenanceKind)
+        |> Seq.map (fun (kind, values) -> kind, Seq.length values)
+        |> Seq.sortBy fst
+        |> Seq.toList
+    let lineZeroCount = definitions |> List.filter (fun item -> item.line <= 0) |> List.length
+    let entityTypeCounts =
+        definitions
+        |> Seq.groupBy (fun item -> item.entityType)
+        |> Seq.map (fun (entityType, values) -> entityType, Seq.length values)
+        |> Seq.sortBy (fun (entityType, _) -> entityType.ToLowerInvariant())
+        |> Seq.truncate 200
+        |> Seq.toList
+    let edgeKindCounts =
+        topology.edges
+        |> Seq.groupBy (fun item -> item.typeGroup)
+        |> Seq.map (fun (typeGroup, values) -> typeGroup, Seq.length values)
+        |> Seq.sortBy fst
+        |> Seq.toList
+    let edgeLabelRatio =
+        if topology.edges.IsEmpty then 0.0
+        else
+            let labeled = topology.edges |> List.filter (fun item -> item.label |> Option.exists (String.IsNullOrWhiteSpace >> not)) |> List.length
+            float labeled / float topology.edges.Length
+    let eventEdgeLabelRatio =
+        if eventGraph.edges.IsEmpty then 0.0
+        else
+            let labeled = eventGraph.edges |> List.filter (fun item -> item.label |> Option.exists (String.IsNullOrWhiteSpace >> not)) |> List.length
+            float labeled / float eventGraph.edges.Length
+    let eventResolutionRatio =
+        if eventGraph.edges.IsEmpty then 0.0
+        else
+            let resolved = eventGraph.edges |> List.filter (fun item -> item.confidence <> "unresolved") |> List.length
+            float resolved / float eventGraph.edges.Length
+    let databaseSizeBytes =
+        try
+            if File.Exists databasePath then FileInfo(databasePath).Length else 0L
+        with _ -> 0L
+    let exportDurationMs = int ((generatedAt - startedAt).TotalMilliseconds)
+    let stats (counts: (string * int) list) =
+        counts
+        |> List.map (fun (key, count) -> key, JsonValue.Number(decimal count))
+        |> List.map (fun (key, value) -> Some(key, value))
+        |> List.choose id
+        |> List.toArray
+        |> JsonValue.Record
+    jsonRecord
+        [ Some("deterministicOrdering", JsonValue.Boolean true)
+          Some("exportDurationMs", JsonValue.Number(decimal exportDurationMs))
+          Some("databaseSizeBytes", JsonValue.Number(decimal databaseSizeBytes))
+          Some("definitions", jsonRecord
+              [ Some("total", JsonValue.Number(decimal definitions.Length))
+                Some("byOrigin", stats originCounts)
+                Some("byProvenanceKind", stats provenanceKinds)
+                Some("lineZeroRecords", JsonValue.Number(decimal lineZeroCount))
+                Some("byEntityType", stats entityTypeCounts) ])
+          Some("edges", jsonRecord
+              [ Some("total", JsonValue.Number(decimal topology.edges.Length))
+                Some("byKind", stats edgeKindCounts)
+                Some("labeledRatio", JsonValue.Float edgeLabelRatio) ])
+          Some("eventGraph", jsonRecord
+              [ Some("nodes", JsonValue.Number(decimal eventGraph.nodes.Length))
+                Some("edges", JsonValue.Number(decimal eventGraph.edges.Length))
+                Some("logicFacts", JsonValue.Number(decimal eventGraph.logic.Length))
+                Some("edgeLabeledRatio", JsonValue.Float eventEdgeLabelRatio)
+                Some("edgeResolutionRatio", JsonValue.Float eventResolutionRatio) ]) ]
+
+/// Unified coverage contract for every semantic query result: what was
+/// considered, what was indexed, truncation and staleness. Empty results must
+/// never be interpreted as "does not exist".
+let private coverageJson (options: ExportOptions) (runtime: RuntimeMetadata) (definitions: DefinitionFact list) (topology: TopologyFacts) (truncated: bool) =
+    jsonRecord
+        [ Some("filesConsidered", JsonValue.Number(decimal topology.files.Length))
+          Some("filesIndexed", JsonValue.Number(decimal topology.files.Length))
+          Some("definitionsConsidered", JsonValue.Number(decimal definitions.Length))
+          Some("definitionsIndexed", JsonValue.Number(decimal definitions.Length))
+          Some("edgesConsidered", JsonValue.Number(decimal topology.edges.Length))
+          Some("edgesIndexed", JsonValue.Number(decimal topology.edges.Length))
+          Some("truncated", JsonValue.Boolean truncated)
+          Some("staleReasons", jsonStringArray
+              [ if runtime.status <> "ready" then yield "lsp_not_ready"
+                if truncated then yield "export_limits_reached"
+                if definitions |> List.forall (fun item -> item.origin <> "vanilla") then yield "no_vanilla_definitions" ])
+          Some("unsupportedConstructs", jsonStringArray
+              [ if options.generationMode = "incremental" && not (options.domains.IsEmpty || options.changedFiles.IsEmpty) then yield "partial_export_scope" ]) ]
+
+type private DefinitionStackResolution =
+    { ordered: DefinitionFact list
+      winner: DefinitionFact option
+      resolution: string
+      ambiguousReason: string option }
+
+let private resolveDefinitionStack (items: DefinitionFact list) =
+    let ordered =
+        items
+        |> List.sortBy (fun item ->
+            let loadOrderIndex, _ = configuredLoadOrderForFile item.origin item.file
+            loadOrderIndex, normalizePath item.logicalPath, normalizePath item.file, item.line)
+    let overwriteActive = ordered |> List.filter (fun item -> item.overwrite <> "overwritten")
+    let strategies =
+        ordered
+        |> List.choose (fun item -> item.overrideStrategy)
+        |> List.map (fun value -> value.ToUpperInvariant())
+        |> List.distinct
+    let strategy = strategies |> List.tryHead
+    if overwriteActive.Length = 1 then
+        { ordered = ordered; winner = overwriteActive |> List.tryHead; resolution = "cwtools_single_active"; ambiguousReason = None }
+    else
+        match strategy with
+        | Some "LIOS" ->
+            { ordered = ordered; winner = ordered |> List.tryLast; resolution = "last_in_only_served"; ambiguousReason = None }
+        | Some "FIOS" ->
+            { ordered = ordered; winner = ordered |> List.tryHead; resolution = "first_in_only_served"; ambiguousReason = None }
+        | Some "NO" ->
+            { ordered = ordered
+              winner = ordered |> List.tryHead
+              resolution = "no_individual_override"
+              ambiguousReason = Some "NO does not permit an individual same-key override; the earliest existing candidate remains effective unless the owning file is replaced." }
+        | Some "MERGE" ->
+            { ordered = ordered; winner = None; resolution = "merged_definitions"; ambiguousReason = Some "MERGE keeps contributions from multiple candidates; there is no single winner." }
+        | Some "DUPL" ->
+            { ordered = ordered; winner = None; resolution = "duplicate_definitions"; ambiguousReason = Some "DUPL permits multiple candidates; there is no single winner." }
+        | Some mode ->
+            { ordered = ordered; winner = None; resolution = "ambiguous"; ambiguousReason = Some(sprintf "Override mode %s has no deterministic resolver." mode) }
+        | None ->
+            { ordered = ordered; winner = None; resolution = "ambiguous"; ambiguousReason = Some "No active override mode or unique CWTools overwrite winner was available." }
+
 let private definitionStacks (definitions: DefinitionFact seq) =
     definitions
     |> Seq.groupBy (fun definition -> definition.entityType.ToLowerInvariant(), definition.id.ToLowerInvariant())
@@ -532,22 +848,25 @@ let private definitionStacks (definitions: DefinitionFact seq) =
         let items = values |> Seq.toList
         if items.Length <= 1 then None
         else
-            let entityType = items.Head.entityType
-            let id = items.Head.id
-            let active = items |> List.filter (fun item -> item.overwrite <> "overwritten")
+            let resolved = resolveDefinitionStack items
+            let entityType = resolved.ordered.Head.entityType
+            let id = resolved.ordered.Head.id
             let origins = items |> List.map (fun item -> item.origin) |> List.distinct
-            let resolution =
-                if active.Length = 1 then "single_active_definition"
-                elif items |> List.exists (fun item -> item.overrideStrategy.IsSome) then "consult_override_mode"
-                else "ambiguous"
             Some(
                 jsonRecord
                     [ Some("entityType", JsonValue.String entityType)
                       Some("id", JsonValue.String id)
                       Some("origins", jsonStringArray origins)
-                      Some("resolution", JsonValue.String resolution)
-                      Some("definitions", JsonValue.Array(items |> List.map definitionJson |> List.toArray))
-                      Some("activeDefinitions", JsonValue.Array(active |> List.map definitionJson |> List.toArray)) ]))
+                      Some("resolution", JsonValue.String resolved.resolution)
+                      Some("ambiguous", JsonValue.Boolean(resolved.resolution = "ambiguous"))
+                      resolved.ambiguousReason |> Option.map (fun reason -> "ambiguousReason", JsonValue.String reason)
+                      resolved.winner |> Option.map (fun winner -> "winner", definitionJson winner)
+                      Some("definitions", JsonValue.Array(resolved.ordered |> List.map definitionJson |> List.toArray))
+                      Some("losers", JsonValue.Array(
+                          (match resolved.winner with
+                           | Some winner -> resolved.ordered |> List.filter ((<>) winner)
+                           | None -> [])
+                          |> List.map definitionJson |> List.toArray)) ]))
     |> Seq.truncate 2000
     |> Seq.toArray
 
@@ -608,8 +927,11 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
     let mutable edgeLimitExceeded = false
     let changedFiles = options.changedFiles |> Set.ofList
 
+    let resources = resourceFacts (game :> IGame)
+
     for struct (entity, lazyData) in game.AllEntities() do
-        if originForPath projectRoots entity.filepath = "workspace" then
+        let resource = resourceForFile resources entity.filepath
+        if originForResource projectRoots resource entity.filepath = "workspace" then
             let domain = domainFor "" entity.logicalpath
             if (options.domains.IsEmpty && changedFiles.IsEmpty)
                || options.domains |> List.contains domain
@@ -651,7 +973,7 @@ let private collectTopology (projectRoots: string list) (options: ExportOptions)
                         { file = normalizedFile
                           logicalPath = normalizePath entity.logicalpath
                           domain = domain
-                          origin = originForPath projectRoots entity.filepath })
+                          origin = originForResource projectRoots resource entity.filepath })
 
     let shaderSourceSelected sourceFile =
         (options.domains.IsEmpty && changedFiles.IsEmpty)
@@ -993,7 +1315,14 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
                       label = reference.label
                       sourceFile = reference.sourceFile
                       line = reference.line
-                      confidence = "lsp" }
+                      confidence = "lsp"
+                      callOperator = reference.associatedType
+                      phase = None
+                      delay = None
+                      conditionPath = None
+                      scopeMap = None
+                      sourceScope = reference.associatedType
+                      targetScope = None }
                 reference.associatedType
                 |> Option.iter (fun scope ->
                     logic.Add
@@ -1025,13 +1354,348 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
                           label = reference.label
                           sourceFile = reference.sourceFile
                           line = reference.line
-                          confidence = "lsp" })
+                          confidence = "lsp"
+                          callOperator = reference.associatedType
+                          phase = None
+                          delay = None
+                          conditionPath = None
+                          scopeMap = None
+                          sourceScope = reference.associatedType
+                          targetScope = None })
 
-    let distinctEdges = edges |> Seq.distinctBy (fun item -> item.sourceKind, item.sourceId, item.targetEventId, item.edgeType, item.line)
+    // ─── State access extraction ────────────────────────────────────────────
+    // Variables, flags and event targets touched inside an event definition,
+    // with the phase (trigger/immediate/option/...) and condition path they
+    // sit under. Written as EventLogicFact rows so they share the same query
+    // surface; relation_type names the operation family.
+    let stateAccesses = ResizeArray<EventLogicFact>()
+    let variableOperators =
+        dict [
+            "set_variable", "variable_set"
+            "change_variable", "variable_change"
+            "clear_variable", "variable_clear"
+            "check_variable", "variable_check"
+            "export_to_variable", "variable_export"
+            "read_global_variable", "variable_read"
+        ]
+    let flagOperators =
+        [ "set_country_flag", "country_flag_set"; "remove_country_flag", "country_flag_remove"
+          "has_country_flag", "country_flag_check"
+          "set_planet_flag", "planet_flag_set"; "remove_planet_flag", "planet_flag_remove"
+          "has_planet_flag", "planet_flag_check"
+          "set_fleet_flag", "fleet_flag_set"; "remove_fleet_flag", "fleet_flag_remove"
+          "has_fleet_flag", "fleet_flag_check"
+          "set_ship_flag", "ship_flag_set"; "remove_ship_flag", "ship_flag_remove"
+          "has_ship_flag", "ship_flag_check"
+          "set_system_flag", "system_flag_set"; "remove_system_flag", "system_flag_remove"
+          "has_system_flag", "system_flag_check"
+          "set_global_flag", "global_flag_set"; "remove_global_flag", "global_flag_remove"
+          "has_global_flag", "global_flag_check" ]
+        |> dict
+    let targetOperators =
+        dict [
+            "save_event_target_as", "event_target_save"
+            "save_global_event_target_as", "global_event_target_save"
+            "clear_event_target", "event_target_clear"
+            "clear_global_event_target", "global_event_target_clear"
+        ]
+    let lifecycleOperators =
+        [ "has_technology", "technology_check"; "give_technology", "technology_unlock"; "set_technology", "technology_set"
+          "enable_special_project", "special_project_enable"; "abort_special_project", "special_project_abort"; "complete_special_project", "special_project_complete"
+          "start_situation", "situation_start"; "abort_situation", "situation_abort"; "complete_situation", "situation_complete"
+          "add_situation_progress", "situation_progress_change"; "set_situation_progress", "situation_progress_set"
+          "begin_event_chain", "event_chain_begin"; "end_event_chain", "event_chain_end" ]
+        |> dict
+    let createdObjectOperators =
+        [ "create_country", "last_created_country"; "create_fleet", "last_created_fleet"; "create_ship", "last_created_ship"
+          "create_pop", "last_created_pop"; "create_species", "last_created_species"; "create_leader", "last_created_leader"
+          "create_army", "last_created_army"; "create_planet", "last_created_planet"; "create_starbase", "last_created_starbase"
+          "create_megastructure", "last_created_megastructure" ]
+        |> dict
+    let eventCallOperators =
+        [ "country_event"; "fleet_event"; "ship_event"; "planet_event"; "system_event"
+          "starbase_event"; "megastructure_event"; "pop_event"; "army_event"; "ambient_object_event"
+          "fire_on_action" ]
+        |> Set.ofList
+    let phaseOf (node: Node) =
+        let key = node.Key.ToLowerInvariant()
+        if key = "trigger" then "trigger"
+        elif key = "immediate" then "immediate"
+        elif key = "option" then "option"
+        elif key = "hidden_effect" then "hidden_effect"
+        elif key = "after" then "after"
+        elif key = "on_success" then "on_success"
+        elif key = "on_fail" then "on_fail"
+        elif key = "potential" then "potential"
+        elif key = "allow" then "allow"
+        else ""
+    let conditionPathOf (path: string list) =
+        if path.IsEmpty then None
+        else
+            let ordered = path |> List.rev
+            let role =
+                if ordered |> List.exists (fun item -> item = "not" || item = "nor" || item = "else") then "blocks"
+                elif ordered |> List.exists (fun item -> item = "or" || item = "random_list" || item = "switch" || item = "else_if") then "alternative"
+                else "requires"
+            Some(role + ":" + String.concat ">" ordered)
+
+    let subjectFromNode (node: Node) =
+        node.Leaves
+        |> Seq.tryFind (fun leaf ->
+            leaf.Key.Equals("which", StringComparison.OrdinalIgnoreCase)
+            || leaf.Key.Equals("name", StringComparison.OrdinalIgnoreCase)
+            || leaf.Key.Equals("flag", StringComparison.OrdinalIgnoreCase)
+            || leaf.Key.Equals("target", StringComparison.OrdinalIgnoreCase)
+            || leaf.Key.Equals("technology", StringComparison.OrdinalIgnoreCase)
+            || leaf.Key.Equals("tech", StringComparison.OrdinalIgnoreCase)
+            || leaf.Key.Equals("project", StringComparison.OrdinalIgnoreCase)
+            || leaf.Key.Equals("situation", StringComparison.OrdinalIgnoreCase)
+            || leaf.Key.Equals("type", StringComparison.OrdinalIgnoreCase))
+        |> Option.orElseWith (fun () -> node.Leaves |> Seq.tryHead)
+        |> Option.map (fun leaf -> string leaf.Value |> fun value -> value.Trim().Trim('"'))
+        |> Option.orElseWith (fun () -> node.Values |> Seq.tryHead |> Option.map (fun leaf -> string leaf.Value |> fun value -> value.Trim().Trim('"')))
+
+    let scopeForCallOperator (operator: string) =
+        if operator.EndsWith("_event", StringComparison.OrdinalIgnoreCase) then
+            Some(operator.Substring(0, operator.Length - "_event".Length))
+        else None
+
+    let addStateAccess eventId (relationType: string) subject phase file line details =
+        if not (String.IsNullOrWhiteSpace subject) then
+            let stateScope =
+                if relationType.StartsWith("global_event_target", StringComparison.OrdinalIgnoreCase) then Some "global"
+                elif relationType.StartsWith("event_target", StringComparison.OrdinalIgnoreCase) then Some "local_event"
+                elif relationType.StartsWith("country_", StringComparison.OrdinalIgnoreCase) then Some "country"
+                elif relationType.StartsWith("planet_", StringComparison.OrdinalIgnoreCase) then Some "planet"
+                elif relationType.StartsWith("fleet_", StringComparison.OrdinalIgnoreCase) then Some "fleet"
+                elif relationType.StartsWith("ship_", StringComparison.OrdinalIgnoreCase) then Some "ship"
+                elif relationType.StartsWith("system_", StringComparison.OrdinalIgnoreCase) then Some "system"
+                elif relationType.StartsWith("global_", StringComparison.OrdinalIgnoreCase) then Some "global"
+                elif relationType.StartsWith("variable_", StringComparison.OrdinalIgnoreCase) then Some "current_scope"
+                elif relationType.StartsWith("technology_", StringComparison.OrdinalIgnoreCase) then Some "country"
+                elif relationType.StartsWith("special_project_", StringComparison.OrdinalIgnoreCase) then Some "country"
+                elif relationType.StartsWith("situation_", StringComparison.OrdinalIgnoreCase) then Some "situation"
+                elif relationType.StartsWith("event_chain_", StringComparison.OrdinalIgnoreCase) then Some "country"
+                elif relationType = "created_object_produce" then Some "implicit_last_created"
+                elif relationType = "created_object_read" then Some "implicit_last_created"
+                else None
+            stateAccesses.Add
+                { eventId = eventId
+                  relationType = relationType
+                  subject = subject
+                  scope = stateScope
+                  phase = if String.IsNullOrWhiteSpace phase then "effect" else phase
+                  sourceFile = file
+                  line = line
+                  details = details }
+
+    let rec walkEffects (eventId: string) (sourceScope: string option) (file: string) (phase: string) (conditionPath: string list) (node: Node) =
+        // Scalar script statements live in Node.Values and are not guaranteed
+        // to appear in Node.All. Handle them explicitly so common flag/target
+        // operations and leaf-form event calls are not lost.
+        for leaf in node.Values do
+            let key = leaf.Key.ToLowerInvariant()
+            let subject = string leaf.Value |> fun value -> value.Trim().Trim('"')
+            if eventCallOperators.Contains key && not (String.IsNullOrWhiteSpace subject) then
+                edges.Add
+                    { sourceKind = "event"
+                      sourceId = eventId
+                      targetEventId = subject
+                      edgeType = "event_call"
+                      label = Some key
+                      sourceFile = file
+                      line = int leaf.Position.StartLine
+                      confidence = if eventIds.Contains(subject.ToLowerInvariant()) then "ast_resolved" else "ast_unresolved"
+                      callOperator = Some key
+                      phase = Some(if String.IsNullOrWhiteSpace phase then "effect" else phase)
+                      delay = None
+                      conditionPath = conditionPathOf conditionPath
+                      scopeMap = None
+                      sourceScope = sourceScope
+                      targetScope = scopeForCallOperator key }
+            match variableOperators.TryGetValue key with
+            | true, relationType -> addStateAccess eventId relationType subject phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+            | _ ->
+                match targetOperators.TryGetValue key with
+                | true, relationType -> addStateAccess eventId relationType subject phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+                | _ ->
+                    match flagOperators.TryGetValue key with
+                    | true, relationType -> addStateAccess eventId relationType subject phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+                    | _ -> ()
+            match lifecycleOperators.TryGetValue key with
+            | true, relationType -> addStateAccess eventId relationType subject phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+            | _ -> ()
+            match createdObjectOperators.TryGetValue key with
+            | true, createdSubject -> addStateAccess eventId "created_object_produce" createdSubject phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+            | _ -> ()
+            let raw = key + "=" + subject
+            for found in Regex.Matches(raw, @"event_target:([A-Za-z_][A-Za-z0-9_.-]*)", RegexOptions.IgnoreCase) do
+                addStateAccess eventId "event_target_read" found.Groups.[1].Value phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+            for found in Regex.Matches(raw, @"last_created_[A-Za-z_][A-Za-z0-9_]*", RegexOptions.IgnoreCase) do
+                addStateAccess eventId "created_object_read" found.Value phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+        for child in node.All do
+            match child with
+            | NodeC childNode ->
+                let key = childNode.Key.ToLowerInvariant()
+                let childPhase = if phaseOf childNode <> "" then phaseOf childNode else phase
+                let isCondition =
+                    key = "if" || key = "else_if" || key = "else"
+                    || key = "and" || key = "or" || key = "nor" || key = "not"
+                    || key = "random_list" || key = "switch" || key = "while"
+                let nextPath =
+                    if key = "if" || key = "else_if" || key = "else" || key = "and"
+                       || key = "or" || key = "nor" || key = "not" || key = "random_list"
+                       || key = "switch" || key = "while" then
+                        key :: conditionPath
+                    else conditionPath
+                if eventCallOperators.Contains key then
+                    let targetId = tryDirectLeafValue "id" childNode
+                    targetId
+                    |> Option.filter (String.IsNullOrWhiteSpace >> not)
+                    |> Option.iter (fun target ->
+                        let delay =
+                            [ "days"; "months"; "years"; "random" ]
+                            |> List.choose (fun delayKey -> tryDirectLeafValue delayKey childNode |> Option.map (fun value -> delayKey + "=" + value))
+                            |> function [] -> None | values -> Some(String.concat "," values)
+                        let scopeMap =
+                            childNode.Nodes
+                            |> Seq.tryFind (fun inner -> inner.Key.Equals("scopes", StringComparison.OrdinalIgnoreCase))
+                            |> Option.map (fun scopes ->
+                                scopes.Leaves
+                                |> Seq.map (fun leaf -> leaf.Key + "->" + string leaf.Value)
+                                |> Seq.sort
+                                |> String.concat ",")
+                            |> Option.filter (String.IsNullOrWhiteSpace >> not)
+                        edges.Add
+                            { sourceKind = "event"
+                              sourceId = eventId
+                              targetEventId = target.Trim().Trim('"')
+                              edgeType = "event_call"
+                              label = Some key
+                              sourceFile = file
+                              line = int childNode.Position.StartLine
+                              confidence = if eventIds.Contains(target.Trim().Trim('"').ToLowerInvariant()) then "ast_resolved" else "ast_unresolved"
+                              callOperator = Some key
+                              phase = Some(if String.IsNullOrWhiteSpace childPhase then "effect" else childPhase)
+                              delay = delay
+                              conditionPath = conditionPathOf nextPath
+                              scopeMap = scopeMap
+                              sourceScope = sourceScope
+                              targetScope = scopeForCallOperator key })
+                match variableOperators.TryGetValue key with
+                | true, relationType ->
+                    subjectFromNode childNode
+                    |> Option.iter (fun subject -> addStateAccess eventId relationType subject childPhase file (int childNode.Position.StartLine) (conditionPathOf nextPath))
+                | _ ->
+                    match targetOperators.TryGetValue key with
+                    | true, relationType ->
+                        subjectFromNode childNode
+                        |> Option.iter (fun subject -> addStateAccess eventId relationType subject childPhase file (int childNode.Position.StartLine) (conditionPathOf nextPath))
+                    | _ ->
+                        match flagOperators.TryGetValue key with
+                        | true, relationType ->
+                            subjectFromNode childNode
+                            |> Option.iter (fun subject -> addStateAccess eventId relationType subject childPhase file (int childNode.Position.StartLine) (conditionPathOf nextPath))
+                        | _ -> ()
+                match lifecycleOperators.TryGetValue key with
+                | true, relationType ->
+                    subjectFromNode childNode
+                    |> Option.iter (fun subject -> addStateAccess eventId relationType subject childPhase file (int childNode.Position.StartLine) (conditionPathOf nextPath))
+                | _ -> ()
+                match createdObjectOperators.TryGetValue key with
+                | true, createdSubject -> addStateAccess eventId "created_object_produce" createdSubject childPhase file (int childNode.Position.StartLine) (conditionPathOf nextPath)
+                | _ -> ()
+                // event_target:name reads
+                if key.StartsWith "event_target:" then
+                    let targetName = key.Substring "event_target:".Length
+                    if not (String.IsNullOrWhiteSpace targetName) then
+                        stateAccesses.Add
+                            { eventId = eventId
+                              relationType = "event_target_read"
+                              subject = targetName
+                              scope = Some "local_event"
+                              phase = if childPhase <> "" then childPhase else "effect"
+                              sourceFile = file
+                              line = int childNode.Position.StartLine
+                              details = conditionPathOf nextPath }
+                if isCondition || childPhase <> phase || key = "effect" then
+                    walkEffects eventId sourceScope file childPhase nextPath childNode
+                else
+                    walkEffects eventId sourceScope file phase nextPath childNode
+            | LeafC leaf ->
+                let key = leaf.Key.ToLowerInvariant()
+                let subject = string leaf.Value |> fun value -> value.Trim().Trim('"')
+                match variableOperators.TryGetValue key with
+                | true, relationType -> addStateAccess eventId relationType subject phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+                | _ ->
+                    match targetOperators.TryGetValue key with
+                    | true, relationType -> addStateAccess eventId relationType subject phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+                    | _ ->
+                        match flagOperators.TryGetValue key with
+                        | true, relationType -> addStateAccess eventId relationType subject phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+                        | _ -> ()
+                match lifecycleOperators.TryGetValue key with
+                | true, relationType -> addStateAccess eventId relationType subject phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+                | _ -> ()
+                match createdObjectOperators.TryGetValue key with
+                | true, createdSubject -> addStateAccess eventId "created_object_produce" createdSubject phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+                | _ -> ()
+                let raw = key + "=" + subject
+                for found in Regex.Matches(raw, @"event_target:([A-Za-z_][A-Za-z0-9_.-]*)", RegexOptions.IgnoreCase) do
+                    let targetName = found.Groups.[1].Value
+                    addStateAccess eventId "event_target_read" targetName phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+                for found in Regex.Matches(raw, @"last_created_[A-Za-z_][A-Za-z0-9_]*", RegexOptions.IgnoreCase) do
+                    addStateAccess eventId "created_object_read" found.Value phase file (int leaf.Position.StartLine) (conditionPathOf conditionPath)
+            | _ -> ()
+
+    // Locate each event definition's AST node once.
+    let rootsByFile = Dictionary<string, ResizeArray<Node>>(pathComparer)
+    for struct (entity, _) in game.AllEntities() do
+        let file = normalizePath entity.filepath
+        let roots =
+            match rootsByFile.TryGetValue file with
+            | true, values -> values
+            | false, _ ->
+                let values = ResizeArray<Node>()
+                rootsByFile.[file] <- values
+                values
+        roots.Add entity.rawEntity
+
+    for definition in eventDefinitions do
+        match rootsByFile.TryGetValue(normalizePath definition.file) with
+        | false, _ -> ()
+        | true, roots ->
+            roots
+            |> Seq.collect descendantNodes
+            |> Seq.filter (fun node ->
+                int node.Position.StartLine <= definition.line
+                && int node.Position.EndLine >= definition.endLine)
+            |> Seq.sortBy (fun node -> int node.Position.EndLine - int node.Position.StartLine)
+            |> Seq.tryHead
+            |> Option.iter (fun node ->
+                let eventScope =
+                    definition.subtypes
+                    |> List.tryHead
+                    |> Option.bind (fun subtype ->
+                        scopeForCallOperator subtype
+                        |> Option.orElseWith (fun () -> if String.IsNullOrWhiteSpace subtype then None else Some subtype))
+                walkEffects definition.id eventScope (normalizePath definition.file) "" [] node)
+
+    let distinctEdges =
+        edges
+        |> Seq.groupBy (fun item -> item.sourceKind, item.sourceId, item.targetEventId, item.line)
+        |> Seq.map (fun (_, candidates) ->
+            candidates
+            |> Seq.sortByDescending (fun item ->
+                [ item.callOperator; item.phase; item.delay; item.conditionPath; item.scopeMap; item.sourceScope; item.targetScope ]
+                |> List.sumBy (function Some value when not (String.IsNullOrWhiteSpace value) -> 1 | _ -> 0))
+            |> Seq.head)
     let distinctLogic = logic |> Seq.distinctBy (fun item -> item.eventId, item.relationType, item.subject, item.scope, item.line)
+    let distinctState = stateAccesses |> Seq.distinctBy (fun item -> item.eventId, item.relationType, item.subject, item.phase, item.line) |> Seq.truncate 30000 |> Seq.toList
     { nodes = nodes |> Seq.distinctBy (fun item -> item.eventId, item.file, item.line) |> Seq.toList
       edges = (if options.completeExport then distinctEdges else distinctEdges |> Seq.truncate 30000) |> Seq.toList
-      logic = (if options.completeExport then distinctLogic else distinctLogic |> Seq.truncate 30000) |> Seq.toList }
+      logic = (if options.completeExport then distinctLogic else distinctLogic |> Seq.truncate 30000) |> Seq.toList
+      stateAccesses = distinctState }
 
 let private collectEventGraph options definitions topology game =
     collectEventGraphWithKnownIds Set.empty options definitions topology game
@@ -1093,7 +1757,17 @@ CREATE TABLE definitions (
   resource_scope TEXT,
   domain TEXT NOT NULL,
   override_path TEXT,
-  override_strategy TEXT
+  override_strategy TEXT,
+  provenance_kind TEXT NOT NULL DEFAULT 'declared',
+  source_file TEXT NOT NULL DEFAULT '',
+  source_line INTEGER NOT NULL DEFAULT 0,
+  source_end_line INTEGER NOT NULL DEFAULT 0,
+  template_file TEXT,
+  template_line INTEGER,
+  invocation_file TEXT,
+  invocation_line INTEGER,
+  has_real_range INTEGER NOT NULL DEFAULT 1,
+  confidence TEXT NOT NULL DEFAULT 'high'
 );
 CREATE TABLE definition_subtypes (
   definition_id INTEGER NOT NULL REFERENCES definitions(id) ON DELETE CASCADE,
@@ -1111,6 +1785,10 @@ CREATE TABLE stack_candidates (
   stack_id INTEGER NOT NULL REFERENCES definition_stacks(id) ON DELETE CASCADE,
   definition_id INTEGER NOT NULL REFERENCES definitions(id) ON DELETE CASCADE,
   is_active INTEGER NOT NULL,
+  candidate_order INTEGER NOT NULL DEFAULT 0,
+  origin TEXT NOT NULL DEFAULT '',
+  logical_path TEXT NOT NULL DEFAULT '',
+  override_strategy TEXT,
   PRIMARY KEY(stack_id, definition_id)
 );
 CREATE TABLE references_graph (
@@ -1168,7 +1846,14 @@ CREATE TABLE event_edges (
   label TEXT,
   source_file TEXT NOT NULL,
   line INTEGER NOT NULL,
-  confidence TEXT NOT NULL
+  confidence TEXT NOT NULL,
+  call_operator TEXT,
+  phase TEXT,
+  delay TEXT,
+  condition_path TEXT,
+  scope_map TEXT,
+  source_scope TEXT,
+  target_scope TEXT
 );
 CREATE TABLE event_logic (
   id INTEGER PRIMARY KEY,
@@ -1180,6 +1865,66 @@ CREATE TABLE event_logic (
   source_file TEXT NOT NULL,
   line INTEGER NOT NULL,
   details TEXT
+);
+CREATE TABLE inline_templates (
+  template_id TEXT PRIMARY KEY,
+  logical_path TEXT NOT NULL,
+  file TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  content_hash TEXT NOT NULL
+);
+CREATE TABLE inline_parameters (
+  template_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  usage_kind TEXT NOT NULL,
+  usage_kinds TEXT NOT NULL,
+  inferred_type TEXT NOT NULL,
+  required INTEGER NOT NULL,
+  occurrences INTEGER NOT NULL,
+  PRIMARY KEY(template_id, name)
+);
+CREATE TABLE inline_invocations (
+  invocation_id TEXT PRIMARY KEY,
+  caller_file TEXT NOT NULL,
+  caller_line INTEGER NOT NULL,
+  template_id TEXT NOT NULL,
+  enclosing_definition TEXT
+);
+CREATE TABLE inline_arguments (
+  invocation_id TEXT NOT NULL REFERENCES inline_invocations(invocation_id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  raw_value TEXT NOT NULL,
+  resolved_value TEXT NOT NULL,
+  value_kind TEXT NOT NULL,
+  PRIMARY KEY(invocation_id, name)
+);
+CREATE TABLE inline_expansions (
+  invocation_id TEXT NOT NULL REFERENCES inline_invocations(invocation_id) ON DELETE CASCADE,
+  expanded_symbol_id TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  template_file TEXT NOT NULL,
+  caller_file TEXT NOT NULL,
+  template_line INTEGER NOT NULL,
+  generated_line INTEGER NOT NULL,
+  confidence TEXT NOT NULL,
+  PRIMARY KEY(invocation_id, expanded_symbol_id)
+);
+CREATE TABLE inline_generated_references (
+  invocation_id TEXT NOT NULL REFERENCES inline_invocations(invocation_id) ON DELETE CASCADE,
+  reference_kind TEXT NOT NULL,
+  expanded_value TEXT NOT NULL,
+  template_file TEXT NOT NULL,
+  caller_file TEXT NOT NULL,
+  template_line INTEGER NOT NULL,
+  generated_line INTEGER NOT NULL,
+  confidence TEXT NOT NULL,
+  PRIMARY KEY(invocation_id, reference_kind, expanded_value, template_line)
+);
+CREATE TABLE inline_problems (
+  invocation_id TEXT NOT NULL REFERENCES inline_invocations(invocation_id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  message TEXT NOT NULL,
+  line INTEGER NOT NULL
 );
 """
 
@@ -1200,6 +1945,12 @@ CREATE INDEX idx_event_edges_file ON event_edges(source_file COLLATE NOCASE, lin
 CREATE INDEX idx_event_logic_event ON event_logic(event_id COLLATE NOCASE);
 CREATE INDEX idx_event_logic_subject ON event_logic(subject COLLATE NOCASE);
 CREATE INDEX idx_event_logic_file ON event_logic(source_file COLLATE NOCASE, line);
+CREATE INDEX idx_inline_templates_logical ON inline_templates(logical_path COLLATE NOCASE);
+CREATE INDEX idx_inline_templates_file ON inline_templates(file COLLATE NOCASE, line);
+CREATE INDEX idx_inline_invocations_template ON inline_invocations(template_id COLLATE NOCASE);
+CREATE INDEX idx_inline_invocations_caller ON inline_invocations(caller_file COLLATE NOCASE, caller_line);
+CREATE INDEX idx_inline_expansions_symbol ON inline_expansions(expanded_symbol_id COLLATE NOCASE);
+CREATE INDEX idx_inline_generated_value ON inline_generated_references(reference_kind, expanded_value COLLATE NOCASE);
 """
 
 let private setCommandParameters (command: SqliteCommand) values =
@@ -1215,7 +1966,7 @@ let private setPreparedCommandParameters (command: SqliteCommand) (values: (stri
     |> List.iter (fun (name, value) ->
         command.Parameters.[name].Value <- if isNull value then DBNull.Value :> obj else value)
 
-let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (projectRoots: string list) (options: ExportOptions) (runtime: RuntimeMetadata) (definitions: DefinitionFact list) (topology: TopologyFacts) (eventGraph: EventGraphFacts) (game: IGame) (warnings: seq<string>) =
+let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (projectRoots: string list) (options: ExportOptions) (runtime: RuntimeMetadata) (definitions: DefinitionFact list) (topology: TopologyFacts) (eventGraph: EventGraphFacts) (inlineGraph: InlineGraph.InlineGraphFacts) (game: IGame) (warnings: seq<string>) =
     let target = Path.GetFullPath databasePath
     let allowed = isKnowledgeDatabasePathAllowed projectRoots target
     if not allowed then invalidArg "databasePath" "Project knowledge database must be inside a project root."
@@ -1254,7 +2005,7 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
         command.ExecuteNonQuery() |> ignore
 
     let generatedAt = DateTimeOffset.UtcNow
-    insertMetadata "schema_version" "3"
+    insertMetadata "schema_version" (string KnowledgeSchemaVersion)
     insertMetadata "status" runtime.status
     insertMetadata "game" activeGame
     insertMetadata "generated_at" (generatedAt.ToString("O"))
@@ -1269,6 +2020,9 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
     insertMetadata "last_global_refresh_at_unix_ms" (runtime.lastGlobalRefreshAtUnixMs.ToString())
     insertMetadata "topology_truncated" ((string topology.truncated).ToLowerInvariant())
     insertMetadata "warnings" (JsonValue.Array(warnings |> Seq.map JsonValue.String |> Seq.toArray).ToString(JsonSaveOptions.DisableFormatting))
+    insertMetadata "definition_count" (definitions.Length.ToString())
+    insertMetadata "topology_file_count" (topology.files.Length.ToString())
+    insertMetadata "topology_edge_count" (topology.edges.Length.ToString())
 
     use domainCommand = connection.CreateCommand()
     domainCommand.Transaction <- transaction
@@ -1300,11 +2054,13 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
 
     use definitionCommand = connection.CreateCommand()
     definitionCommand.Transaction <- transaction
-    definitionCommand.CommandText <- "INSERT INTO definitions(symbol_id, entity_type, file_path, logical_path, line, end_line, origin, validate, overwrite_state, resource_scope, domain, override_path, override_strategy) VALUES ($symbol, $type, $file, $logical, $line, $end, $origin, $validate, $overwrite, $scope, $domain, $overridePath, $overrideStrategy) RETURNING id"
+    definitionCommand.CommandText <- "INSERT INTO definitions(symbol_id, entity_type, file_path, logical_path, line, end_line, origin, validate, overwrite_state, resource_scope, domain, override_path, override_strategy, provenance_kind, source_file, source_line, source_end_line, template_file, template_line, invocation_file, invocation_line, has_real_range, confidence) VALUES ($symbol, $type, $file, $logical, $line, $end, $origin, $validate, $overwrite, $scope, $domain, $overridePath, $overrideStrategy, $provenance, $sourceFile, $sourceLine, $sourceEndLine, $templateFile, $templateLine, $invocationFile, $invocationLine, $hasRealRange, $confidence) RETURNING id"
     prepareCommandParameters definitionCommand
         [ "$symbol", box ""; "$type", box ""; "$file", box ""; "$logical", box ""; "$line", box 0; "$end", box 0
           "$origin", box ""; "$validate", box 0; "$overwrite", box ""; "$scope", box ""; "$domain", box ""
-          "$overridePath", box ""; "$overrideStrategy", box "" ]
+          "$overridePath", box ""; "$overrideStrategy", box ""; "$provenance", box ""; "$sourceFile", box ""
+          "$sourceLine", box 0; "$sourceEndLine", box 0; "$templateFile", box ""; "$templateLine", box 0
+          "$invocationFile", box ""; "$invocationLine", box 0; "$hasRealRange", box 0; "$confidence", box "" ]
     use subtypeCommand = connection.CreateCommand()
     subtypeCommand.Transaction <- transaction
     subtypeCommand.CommandText <- "INSERT OR IGNORE INTO definition_subtypes(definition_id, subtype) VALUES ($definition, $subtype)"
@@ -1317,7 +2073,12 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
               "$logical", box (normalizePath definition.logicalPath); "$line", box definition.line; "$end", box definition.endLine
               "$origin", box definition.origin; "$validate", box (if definition.validate then 1 else 0); "$overwrite", box definition.overwrite
               "$scope", box (definition.resourceScope |> Option.toObj); "$domain", box definition.domain
-              "$overridePath", box (definition.overridePath |> Option.toObj); "$overrideStrategy", box (definition.overrideStrategy |> Option.toObj) ]
+              "$overridePath", box (definition.overridePath |> Option.toObj); "$overrideStrategy", box (definition.overrideStrategy |> Option.toObj)
+              "$provenance", box definition.provenanceKind; "$sourceFile", box (normalizePath definition.sourceFile)
+              "$sourceLine", box definition.sourceLine; "$sourceEndLine", box definition.sourceEndLine
+              "$templateFile", box (definition.templateFile |> Option.toObj); "$templateLine", box (definition.templateLine |> Option.map box |> Option.toObj)
+              "$invocationFile", box (definition.invocationFile |> Option.toObj); "$invocationLine", box (definition.invocationLine |> Option.map box |> Option.toObj)
+              "$hasRealRange", box (if definition.hasRealRange then 1 else 0); "$confidence", box definition.confidence ]
         let definitionId = definitionCommand.ExecuteScalar() :?> int64
         definitionIds.[definitionKey definition] <- definitionId
         for subtype in definition.subtypes do
@@ -1329,27 +2090,29 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
     stackCommand.CommandText <- "INSERT INTO definition_stacks(entity_type, symbol_id, resolution) VALUES ($type, $symbol, $resolution) RETURNING id"
     use candidateCommand = connection.CreateCommand()
     candidateCommand.Transaction <- transaction
-    candidateCommand.CommandText <- "INSERT OR IGNORE INTO stack_candidates(stack_id, definition_id, is_active) VALUES ($stack, $definition, $active)"
+    candidateCommand.CommandText <- "INSERT OR IGNORE INTO stack_candidates(stack_id, definition_id, is_active, candidate_order, origin, logical_path, override_strategy) VALUES ($stack, $definition, $active, $order, $origin, $logical, $strategy)"
     use unresolvedCommand = connection.CreateCommand()
     unresolvedCommand.Transaction <- transaction
     unresolvedCommand.CommandText <- "INSERT INTO unresolved(kind, entity_type, symbol_id, resolution, message) VALUES ($kind, $type, $symbol, $resolution, $message)"
     for ((_typeKey, _idKey), values) in definitions |> Seq.groupBy (fun item -> item.entityType.ToLowerInvariant(), item.id.ToLowerInvariant()) do
         let items = values |> Seq.toList
         if items.Length > 1 then
-            let active = items |> List.filter (fun item -> item.overwrite <> "overwritten")
-            let resolution = if active.Length = 1 then "single_active_definition" elif items |> List.exists (fun item -> item.overrideStrategy.IsSome) then "consult_override_mode" else "ambiguous"
-            setCommandParameters stackCommand [ "$type", box items.Head.entityType; "$symbol", box items.Head.id; "$resolution", box resolution ]
+            let resolved = resolveDefinitionStack items
+            setCommandParameters stackCommand [ "$type", box resolved.ordered.Head.entityType; "$symbol", box resolved.ordered.Head.id; "$resolution", box resolved.resolution ]
             let stackId = stackCommand.ExecuteScalar() :?> int64
-            for definition in items do
+            for index, definition in resolved.ordered |> List.indexed do
                 match definitionIds.TryGetValue(definitionKey definition) with
                 | true, definitionId ->
-                    setCommandParameters candidateCommand [ "$stack", box stackId; "$definition", box definitionId; "$active", box (if definition.overwrite <> "overwritten" then 1 else 0) ]
+                    setCommandParameters candidateCommand
+                        [ "$stack", box stackId; "$definition", box definitionId; "$active", box (if resolved.winner = Some definition then 1 else 0)
+                          "$order", box index; "$origin", box definition.origin; "$logical", box (normalizePath definition.logicalPath)
+                          "$strategy", box (definition.overrideStrategy |> Option.toObj) ]
                     candidateCommand.ExecuteNonQuery() |> ignore
                 | _ -> ()
-            if resolution = "ambiguous" || resolution = "consult_override_mode" then
+            if resolved.winner.IsNone && resolved.resolution <> "merged_definitions" && resolved.resolution <> "duplicate_definitions" then
                 setCommandParameters unresolvedCommand
-                    [ "$kind", box "definition_resolution"; "$type", box items.Head.entityType; "$symbol", box items.Head.id; "$resolution", box resolution
-                      "$message", box "The effective definition requires override-mode or ambiguity review." ]
+                    [ "$kind", box "definition_resolution"; "$type", box resolved.ordered.Head.entityType; "$symbol", box resolved.ordered.Head.id; "$resolution", box resolved.resolution
+                      "$message", box (resolved.ambiguousReason |> Option.defaultValue "The effective definition remains ambiguous.") ]
                 unresolvedCommand.ExecuteNonQuery() |> ignore
 
     use archetypeCommand = connection.CreateCommand()
@@ -1412,7 +2175,7 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
         eventNodeCommand.ExecuteNonQuery() |> ignore
     use eventEdgeCommand = connection.CreateCommand()
     eventEdgeCommand.Transaction <- transaction
-    eventEdgeCommand.CommandText <- "INSERT INTO event_edges(source_kind, source_id, target_event_id, edge_type, label, source_file, line, confidence) VALUES ($kind, $source, $target, $type, $label, $file, $line, $confidence)"
+    eventEdgeCommand.CommandText <- "INSERT INTO event_edges(source_kind, source_id, target_event_id, edge_type, label, source_file, line, confidence, call_operator, phase, delay, condition_path, scope_map, source_scope, target_scope) VALUES ($kind, $source, $target, $type, $label, $file, $line, $confidence, $callOperator, $phase, $delay, $conditionPath, $scopeMap, $sourceScope, $targetScope)"
     prepareCommandParameters eventEdgeCommand
         [ "$kind", box ""; "$source", box ""; "$target", box ""; "$type", box ""; "$label", box ""; "$file", box ""
           "$line", box 0; "$confidence", box "" ]
@@ -1432,9 +2195,98 @@ let private writeKnowledgeDatabase (databasePath: string) (activeGame: string) (
             [ "$event", box item.eventId; "$type", box item.relationType; "$subject", box item.subject; "$scope", box (item.scope |> Option.toObj)
               "$phase", box item.phase; "$file", box item.sourceFile; "$line", box item.line; "$details", box (item.details |> Option.toObj) ]
         eventLogicCommand.ExecuteNonQuery() |> ignore
+    for item in eventGraph.stateAccesses do
+        setPreparedCommandParameters eventLogicCommand
+            [ "$event", box item.eventId; "$type", box item.relationType; "$subject", box item.subject; "$scope", box (item.scope |> Option.toObj)
+              "$phase", box item.phase; "$file", box item.sourceFile; "$line", box item.line; "$details", box (item.details |> Option.toObj) ]
+        eventLogicCommand.ExecuteNonQuery() |> ignore
+
+    // Inline-script instantiation graph (current schema).
+    use inlineTemplateCommand = connection.CreateCommand()
+    inlineTemplateCommand.Transaction <- transaction
+    inlineTemplateCommand.CommandText <- "INSERT OR REPLACE INTO inline_templates(template_id, logical_path, file, line, content_hash) VALUES ($id, $logical, $file, $line, $hash)"
+    prepareCommandParameters inlineTemplateCommand
+        [ "$id", box ""; "$logical", box ""; "$file", box ""; "$line", box 0; "$hash", box "" ]
+    for template in inlineGraph.templates do
+        setPreparedCommandParameters inlineTemplateCommand
+            [ "$id", box template.templateId; "$logical", box template.logicalPath; "$file", box template.file
+              "$line", box template.line; "$hash", box template.contentHash ]
+        inlineTemplateCommand.ExecuteNonQuery() |> ignore
+    use inlineParameterCommand = connection.CreateCommand()
+    inlineParameterCommand.Transaction <- transaction
+    inlineParameterCommand.CommandText <- "INSERT OR REPLACE INTO inline_parameters(template_id, name, usage_kind, usage_kinds, inferred_type, required, occurrences) VALUES ($id, $name, $kind, $kinds, $inferred, $required, $occurrences)"
+    prepareCommandParameters inlineParameterCommand
+        [ "$id", box ""; "$name", box ""; "$kind", box ""; "$kinds", box ""; "$inferred", box ""; "$required", box 0; "$occurrences", box 0 ]
+    for parameter in inlineGraph.parameters do
+        setPreparedCommandParameters inlineParameterCommand
+            [ "$id", box parameter.templateId; "$name", box parameter.name; "$kind", box parameter.usageKind
+              "$kinds", box (String.concat "|" parameter.usageKinds); "$inferred", box parameter.inferredType
+              "$required", box (if parameter.required then 1 else 0); "$occurrences", box parameter.occurrences ]
+        inlineParameterCommand.ExecuteNonQuery() |> ignore
+    use inlineInvocationCommand = connection.CreateCommand()
+    inlineInvocationCommand.Transaction <- transaction
+    inlineInvocationCommand.CommandText <- "INSERT OR REPLACE INTO inline_invocations(invocation_id, caller_file, caller_line, template_id, enclosing_definition) VALUES ($id, $file, $line, $template, $enclosing)"
+    prepareCommandParameters inlineInvocationCommand
+        [ "$id", box ""; "$file", box ""; "$line", box 0; "$template", box ""; "$enclosing", box "" ]
+    for invocation in inlineGraph.invocations do
+        setPreparedCommandParameters inlineInvocationCommand
+            [ "$id", box invocation.invocationId; "$file", box invocation.callerFile; "$line", box invocation.callerLine
+              "$template", box invocation.templateId; "$enclosing", box (invocation.enclosingDefinition |> Option.toObj) ]
+        inlineInvocationCommand.ExecuteNonQuery() |> ignore
+    use inlineArgumentCommand = connection.CreateCommand()
+    inlineArgumentCommand.Transaction <- transaction
+    inlineArgumentCommand.CommandText <- "INSERT OR REPLACE INTO inline_arguments(invocation_id, name, raw_value, resolved_value, value_kind) VALUES ($id, $name, $raw, $resolved, $kind)"
+    prepareCommandParameters inlineArgumentCommand
+        [ "$id", box ""; "$name", box ""; "$raw", box ""; "$resolved", box ""; "$kind", box "" ]
+    for argument in inlineGraph.arguments do
+        setPreparedCommandParameters inlineArgumentCommand
+            [ "$id", box argument.invocationId; "$name", box argument.name; "$raw", box argument.rawValue
+              "$resolved", box argument.resolvedValue; "$kind", box argument.valueKind ]
+        inlineArgumentCommand.ExecuteNonQuery() |> ignore
+    use inlineExpansionCommand = connection.CreateCommand()
+    inlineExpansionCommand.Transaction <- transaction
+    inlineExpansionCommand.CommandText <- "INSERT OR REPLACE INTO inline_expansions(invocation_id, expanded_symbol_id, entity_type, template_file, caller_file, template_line, generated_line, confidence) VALUES ($id, $symbol, $type, $templateFile, $callerFile, $templateLine, $generatedLine, $confidence)"
+    prepareCommandParameters inlineExpansionCommand
+        [ "$id", box ""; "$symbol", box ""; "$type", box ""; "$templateFile", box ""; "$callerFile", box ""; "$templateLine", box 0; "$generatedLine", box 0; "$confidence", box "" ]
+    for expansion in inlineGraph.expansions do
+        setPreparedCommandParameters inlineExpansionCommand
+            [ "$id", box expansion.invocationId; "$symbol", box expansion.expandedSymbolId; "$type", box expansion.entityType
+              "$templateFile", box expansion.templateFile; "$callerFile", box expansion.callerFile
+              "$templateLine", box expansion.templateLine; "$generatedLine", box expansion.generatedLine; "$confidence", box expansion.confidence ]
+        inlineExpansionCommand.ExecuteNonQuery() |> ignore
+    use inlineGeneratedReferenceCommand = connection.CreateCommand()
+    inlineGeneratedReferenceCommand.Transaction <- transaction
+    inlineGeneratedReferenceCommand.CommandText <- "INSERT OR REPLACE INTO inline_generated_references(invocation_id, reference_kind, expanded_value, template_file, caller_file, template_line, generated_line, confidence) VALUES ($id, $kind, $value, $templateFile, $callerFile, $templateLine, $generatedLine, $confidence)"
+    prepareCommandParameters inlineGeneratedReferenceCommand
+        [ "$id", box ""; "$kind", box ""; "$value", box ""; "$templateFile", box ""; "$callerFile", box ""; "$templateLine", box 0; "$generatedLine", box 0; "$confidence", box "" ]
+    for reference in inlineGraph.generatedReferences do
+        setPreparedCommandParameters inlineGeneratedReferenceCommand
+            [ "$id", box reference.invocationId; "$kind", box reference.referenceKind; "$value", box reference.expandedValue
+              "$templateFile", box reference.templateFile; "$callerFile", box reference.callerFile
+              "$templateLine", box reference.templateLine; "$generatedLine", box reference.generatedLine; "$confidence", box reference.confidence ]
+        inlineGeneratedReferenceCommand.ExecuteNonQuery() |> ignore
+    use inlineProblemCommand = connection.CreateCommand()
+    inlineProblemCommand.Transaction <- transaction
+    inlineProblemCommand.CommandText <- "INSERT OR REPLACE INTO inline_problems(invocation_id, kind, message, line) VALUES ($id, $kind, $message, $line)"
+    prepareCommandParameters inlineProblemCommand
+        [ "$id", box ""; "$kind", box ""; "$message", box ""; "$line", box 0 ]
+    for problem in inlineGraph.problems do
+        setPreparedCommandParameters inlineProblemCommand
+            [ "$id", box problem.invocationId; "$kind", box problem.kind; "$message", box problem.message; "$line", box problem.line ]
+        inlineProblemCommand.ExecuteNonQuery() |> ignore
 
     createKnowledgeIndexes connection transaction
     transaction.Commit()
+    // Record the deterministic benchmark in metadata before publishing; the
+    // temporary file is complete at this point and equals the final content.
+    let databaseSizeBytes =
+        try
+            if File.Exists temporary then FileInfo(temporary).Length else 0L
+        with _ -> 0L
+    use baselineCommand = connection.CreateCommand()
+    baselineCommand.CommandText <- "INSERT OR REPLACE INTO metadata(key, value) VALUES ('baseline', $value)"
+    baselineCommand.Parameters.AddWithValue("$value", string databaseSizeBytes) |> ignore
+    baselineCommand.ExecuteNonQuery() |> ignore
     publishDatabase <- true
     target, generatedAt
 
@@ -1481,7 +2333,7 @@ let private readRetainedKnowledgeDatabase (databasePath: string) (excludedDomain
 
             let definitions = ResizeArray<DefinitionFact>()
             use definitionCommand = connection.CreateCommand()
-            definitionCommand.CommandText <- "SELECT id, symbol_id, entity_type, file_path, logical_path, line, end_line, origin, validate, overwrite_state, resource_scope, domain, override_path, override_strategy FROM definitions"
+            definitionCommand.CommandText <- "SELECT id, symbol_id, entity_type, file_path, logical_path, line, end_line, origin, validate, overwrite_state, resource_scope, domain, override_path, override_strategy, provenance_kind, source_file, source_line, source_end_line, template_file, template_line, invocation_file, invocation_line, has_real_range, confidence FROM definitions"
             use definitionReader = definitionCommand.ExecuteReader()
             while definitionReader.Read() do
                 let domain = definitionReader.GetString 11
@@ -1492,13 +2344,26 @@ let private readRetainedKnowledgeDatabase (databasePath: string) (excludedDomain
                         match subtypes.TryGetValue definitionId with
                         | true, values -> values |> Seq.toList
                         | _ -> []
+                    let line = int (definitionReader.GetInt64 5)
+                    let endLine = int (definitionReader.GetInt64 6)
+                    let provenanceKind, sourceFile, sourceLine, sourceEndLine, templateFile, templateLine, invocationFile, invocationLine, hasRealRange, confidence =
+                        definitionReader.GetString 14,
+                        definitionReader.GetString 15,
+                        int (definitionReader.GetInt64 16),
+                        int (definitionReader.GetInt64 17),
+                        stringOrNone definitionReader 18,
+                        (if definitionReader.IsDBNull 19 then None else Some(int (definitionReader.GetInt64 19))),
+                        stringOrNone definitionReader 20,
+                        (if definitionReader.IsDBNull 21 then None else Some(int (definitionReader.GetInt64 21))),
+                        definitionReader.GetInt64 22 <> 0L,
+                        definitionReader.GetString 23
                     definitions.Add
                         { id = definitionReader.GetString 1
                           entityType = definitionReader.GetString 2
                           file = file
                           logicalPath = definitionReader.GetString 4
-                          line = int (definitionReader.GetInt64 5)
-                          endLine = int (definitionReader.GetInt64 6)
+                          line = line
+                          endLine = endLine
                           origin = definitionReader.GetString 7
                           validate = definitionReader.GetInt64 8 <> 0L
                           subtypes = definitionSubtypes
@@ -1506,7 +2371,17 @@ let private readRetainedKnowledgeDatabase (databasePath: string) (excludedDomain
                           resourceScope = stringOrNone definitionReader 10
                           domain = domain
                           overridePath = stringOrNone definitionReader 12
-                          overrideStrategy = stringOrNone definitionReader 13 }
+                          overrideStrategy = stringOrNone definitionReader 13
+                          provenanceKind = provenanceKind
+                          sourceFile = sourceFile
+                          sourceLine = sourceLine
+                          sourceEndLine = sourceEndLine
+                          templateFile = templateFile
+                          templateLine = templateLine
+                          invocationFile = invocationFile
+                          invocationLine = invocationLine
+                          hasRealRange = hasRealRange
+                          confidence = confidence }
 
             let files = ResizeArray<FileFact>()
             use fileCommand = connection.CreateCommand()
@@ -1623,7 +2498,7 @@ let private combineSqlPredicates predicates =
     let clauses = predicates |> List.choose id
     if clauses.IsEmpty then "" else " WHERE " + String.concat " AND " clauses
 
-let queryProjectKnowledgeDatabase (options: QueryOptions) =
+let private queryCurrentProjectKnowledgeDatabase (options: QueryOptions) =
     let databasePath = Path.GetFullPath options.databasePath
     if not (File.Exists databasePath) then
         jsonRecord
@@ -1637,11 +2512,7 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
         connection.Open()
         let metadata = readMetadata connection
         let getMetadata key fallback = match metadata.TryGetValue key with true, value -> value | _ -> fallback
-        let knowledgeSchemaVersion =
-            match Int32.TryParse(getMetadata "schema_version" "0") with
-            | true, value -> value
-            | _ -> 0
-        let eventFactsKnownExpression = if knowledgeSchemaVersion >= 3 then "facts_known" else "0"
+        let eventFactsKnownExpression = "facts_known"
         let eventEntryStatusExpression =
             "CASE WHEN " + eventFactsKnownExpression + " = 0 THEN 'unknown' "
             + "WHEN is_triggered_only <> 0 THEN 'triggered_only' "
@@ -1701,9 +2572,27 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
             | true, false -> Some("origin = 'workspace'")
             | false, true -> Some("origin = 'vanilla'")
             | false, false -> Some("0 = 1")
+        // Synthetic and no-real-range facts pollute intent queries with generated
+        // candidates. They stay available for exact identifier matches or when a
+        // caller explicitly requests derived/synthetic provenance.
+        let includeSynthetic = not (identifiers.IsEmpty)
+        let provenanceSelectColumns =
+            ", provenance_kind, source_file, source_line, source_end_line, has_real_range, confidence, template_file, template_line, invocation_file, invocation_line"
+        let provenanceOrderColumns =
+            "CASE"
+            + " WHEN origin = 'workspace' AND provenance_kind = 'declared' THEN 0"
+            + " WHEN origin = 'workspace' AND provenance_kind = 'expanded' THEN 1"
+            + " WHEN origin = 'vanilla' AND provenance_kind IN ('declared', 'expanded') THEN 2"
+            + " WHEN provenance_kind IN ('derived', 'synthetic') THEN 3"
+            + " ELSE 4 END, "
+        let definitionProvenancePredicate =
+            if includeSynthetic then None
+            else Some("has_real_range <> 0 AND provenance_kind NOT IN ('synthetic', 'derived')")
         let definitionWhere =
-            combineSqlPredicates [ definitionSearchPredicate; definitionDomainPredicate; definitionTypePredicate; definitionOriginPredicate ]
-        definitionCommand.CommandText <- "SELECT id, symbol_id, entity_type, file_path, logical_path, line, end_line, origin, validate, overwrite_state, resource_scope, domain, override_path, override_strategy FROM definitions" + definitionWhere + " ORDER BY CASE origin WHEN 'workspace' THEN 0 ELSE 1 END, symbol_id LIMIT $limit"
+            combineSqlPredicates [ definitionSearchPredicate; definitionDomainPredicate; definitionTypePredicate; definitionOriginPredicate; definitionProvenancePredicate ]
+        // Provenance-aware ranking: workspace declared > workspace expanded >
+        // vanilla declared > derived/synthetic > heuristic (never by source order).
+        definitionCommand.CommandText <- "SELECT id, symbol_id, entity_type, file_path, logical_path, line, end_line, origin, validate, overwrite_state, resource_scope, domain, override_path, override_strategy" + provenanceSelectColumns + " FROM definitions" + definitionWhere + " ORDER BY " + provenanceOrderColumns + "symbol_id LIMIT $limit"
         addParameter definitionCommand "$limit" (box (max 500 (limit * 20)))
         use definitionReader = definitionCommand.ExecuteReader()
         while definitionReader.Read() && evidence.Count < limit do
@@ -1717,7 +2606,15 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                 (origin = "workspace" && options.includeProjectPatterns)
                 || (origin = "vanilla" && options.includeVanillaArchetypes)
             let allowedType = options.entityTypes.IsEmpty || options.entityTypes |> List.exists (fun item -> entityType.Contains(item, StringComparison.OrdinalIgnoreCase))
-            if allowedDomain domain && allowedOrigin && allowedType && matchesTokens tokens [ symbolId; entityType; file; logicalPath; domain ] then
+            let provenanceKind = definitionReader.GetString 14
+            let hasRealRange = definitionReader.GetInt64 18 <> 0L
+            // Exact identifier queries may surface synthetic facts; intent scans
+            // never show them as ordinary declarations.
+            let allowedSynthetic =
+                includeSynthetic
+                || (provenanceKind <> "synthetic" && provenanceKind <> "derived")
+                || not options.includeProjectPatterns
+            if allowedDomain domain && allowedOrigin && allowedType && allowedSynthetic && matchesTokens tokens [ symbolId; entityType; file; logicalPath; domain ] then
                 let line = int (definitionReader.GetInt64 5)
                 let endLine = int (definitionReader.GetInt64 6)
                 // CWTools may expose the same source definition through several
@@ -1739,10 +2636,156 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                               stringOrNone definitionReader 10 |> Option.map (fun value -> "resourceScope", JsonValue.String value)
                               Some("domain", JsonValue.String domain)
                               stringOrNone definitionReader 12 |> Option.map (fun value -> "overridePath", JsonValue.String value)
-                              stringOrNone definitionReader 13 |> Option.map (fun value -> "overrideStrategy", JsonValue.String value) ])
+                              stringOrNone definitionReader 13 |> Option.map (fun value -> "overrideStrategy", JsonValue.String value)
+                              Some("provenance", jsonRecord
+                                  [ Some("kind", JsonValue.String provenanceKind)
+                                    Some("sourceFile", JsonValue.String(definitionReader.GetString 15))
+                                    Some("sourceLine", JsonValue.Number(decimal (definitionReader.GetInt64 16)))
+                                    Some("sourceEndLine", JsonValue.Number(decimal (definitionReader.GetInt64 17)))
+                                    Some("hasRealRange", JsonValue.Boolean hasRealRange)
+                                    Some("confidence", JsonValue.String(definitionReader.GetString 19))
+                                    if not (definitionReader.IsDBNull 20) then Some("templateFile", JsonValue.String(definitionReader.GetString 20))
+                                    if not (definitionReader.IsDBNull 21) then Some("templateLine", JsonValue.Number(decimal (definitionReader.GetInt64 21)))
+                                    if not (definitionReader.IsDBNull 22) then Some("invocationFile", JsonValue.String(definitionReader.GetString 22))
+                                    if not (definitionReader.IsDBNull 23) then Some("invocationLine", JsonValue.Number(decimal (definitionReader.GetInt64 23))) ]) ])
                     if not identifiers.IsEmpty && seedDefinitionRanges.Count < 40 then
                         seedDefinitionRanges.Add(file, line, endLine)
         definitionReader.Close()
+
+        // Inline instantiation is a first-class retrieval surface. Seed it by
+        // template path/id, invocation id or caller, expanded symbol, or a
+        // generated reference value, then return every facet for the selected
+        // bounded invocation closure.
+        let inlineTemplates = ResizeArray<JsonValue>()
+        let inlineParameters = ResizeArray<JsonValue>()
+        let inlineInvocations = ResizeArray<JsonValue>()
+        let inlineArguments = ResizeArray<JsonValue>()
+        let inlineExpansions = ResizeArray<JsonValue>()
+        let inlineGeneratedReferences = ResizeArray<JsonValue>()
+        let inlineProblems = ResizeArray<JsonValue>()
+        let selectedInvocationIds = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        let selectedTemplateIds = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        if not identifiers.IsEmpty || not tokens.IsEmpty then
+            use inlineSeedCommand = connection.CreateCommand()
+            let inlineSeedPredicate =
+                if identifiers.IsEmpty then
+                    sqliteTokenPredicate inlineSeedCommand tokens
+                        [ "i.invocation_id"; "i.caller_file"; "i.template_id"; "t.logical_path"; "t.file"
+                          "e.expanded_symbol_id"; "g.expanded_value" ]
+                else
+                    sqliteIndexedIdentifierPredicate inlineSeedCommand "inlineSeed" identifiers
+                        [ "i.invocation_id"; "i.caller_file"; "i.template_id"; "t.logical_path"; "t.file"
+                          "e.expanded_symbol_id"; "g.expanded_value" ]
+            inlineSeedCommand.CommandText <-
+                "SELECT DISTINCT i.invocation_id, i.template_id FROM inline_invocations i "
+                + "LEFT JOIN inline_templates t ON t.template_id = i.template_id COLLATE NOCASE "
+                + "LEFT JOIN inline_expansions e ON e.invocation_id = i.invocation_id "
+                + "LEFT JOIN inline_generated_references g ON g.invocation_id = i.invocation_id"
+                + combineSqlPredicates [ inlineSeedPredicate ]
+                + " ORDER BY i.invocation_id LIMIT $limit"
+            addParameter inlineSeedCommand "$limit" (box limit)
+            use inlineSeedReader = inlineSeedCommand.ExecuteReader()
+            while inlineSeedReader.Read() do
+                selectedInvocationIds.Add(inlineSeedReader.GetString 0) |> ignore
+                selectedTemplateIds.Add(inlineSeedReader.GetString 1) |> ignore
+            inlineSeedReader.Close()
+
+            // A template may have no current callers, so query template seeds
+            // independently instead of requiring an invocation join.
+            use inlineTemplateSeedCommand = connection.CreateCommand()
+            let templateSeedPredicate =
+                if identifiers.IsEmpty then
+                    sqliteTokenPredicate inlineTemplateSeedCommand tokens [ "template_id"; "logical_path"; "file" ]
+                else
+                    sqliteIndexedIdentifierPredicate inlineTemplateSeedCommand "inlineTemplateSeed" identifiers [ "template_id"; "logical_path"; "file" ]
+            inlineTemplateSeedCommand.CommandText <-
+                "SELECT template_id FROM inline_templates"
+                + combineSqlPredicates [ templateSeedPredicate ]
+                + " ORDER BY template_id LIMIT $limit"
+            addParameter inlineTemplateSeedCommand "$limit" (box limit)
+            use inlineTemplateSeedReader = inlineTemplateSeedCommand.ExecuteReader()
+            while inlineTemplateSeedReader.Read() do selectedTemplateIds.Add(inlineTemplateSeedReader.GetString 0) |> ignore
+            inlineTemplateSeedReader.Close()
+
+            let invocationIds = selectedInvocationIds |> Seq.sort |> Seq.truncate limit |> Seq.toList
+            let templateIds = selectedTemplateIds |> Seq.sort |> Seq.truncate limit |> Seq.toList
+
+            if not templateIds.IsEmpty then
+                use templateCommand = connection.CreateCommand()
+                let predicate = sqliteValueSetPredicate templateCommand "selectedTemplate" templateIds "template_id"
+                templateCommand.CommandText <- "SELECT template_id, logical_path, file, line, content_hash FROM inline_templates" + combineSqlPredicates [ predicate ] + " ORDER BY template_id"
+                use reader = templateCommand.ExecuteReader()
+                while reader.Read() do
+                    inlineTemplates.Add(jsonRecord
+                        [ Some("templateId", JsonValue.String(reader.GetString 0))
+                          Some("logicalPath", JsonValue.String(reader.GetString 1))
+                          Some("file", JsonValue.String(reader.GetString 2))
+                          Some("line", JsonValue.Number(decimal (reader.GetInt64 3)))
+                          Some("contentHash", JsonValue.String(reader.GetString 4)) ])
+                reader.Close()
+
+                use parameterCommand = connection.CreateCommand()
+                let predicate = sqliteValueSetPredicate parameterCommand "selectedParameterTemplate" templateIds "template_id"
+                parameterCommand.CommandText <- "SELECT template_id, name, usage_kind, usage_kinds, inferred_type, required, occurrences FROM inline_parameters" + combineSqlPredicates [ predicate ] + " ORDER BY template_id, name"
+                use reader = parameterCommand.ExecuteReader()
+                while reader.Read() do
+                    inlineParameters.Add(jsonRecord
+                        [ Some("templateId", JsonValue.String(reader.GetString 0))
+                          Some("name", JsonValue.String(reader.GetString 1))
+                          Some("usageKind", JsonValue.String(reader.GetString 2))
+                          Some("usageKinds", JsonValue.Parse(reader.GetString 3))
+                          Some("inferredType", JsonValue.String(reader.GetString 4))
+                          Some("required", JsonValue.Boolean(reader.GetInt64 5 <> 0L))
+                          Some("occurrences", JsonValue.Number(decimal (reader.GetInt64 6))) ])
+                reader.Close()
+
+            if not invocationIds.IsEmpty then
+                let readInvocationFacet commandPrefix selectSql addRow =
+                    use command = connection.CreateCommand()
+                    let predicate = sqliteValueSetPredicate command commandPrefix invocationIds "invocation_id"
+                    command.CommandText <- selectSql + combineSqlPredicates [ predicate ] + " ORDER BY invocation_id"
+                    use reader = command.ExecuteReader()
+                    while reader.Read() do addRow reader
+                    reader.Close()
+
+                readInvocationFacet "selectedInvocation"
+                    "SELECT invocation_id, caller_file, caller_line, template_id, enclosing_definition FROM inline_invocations"
+                    (fun reader ->
+                        inlineInvocations.Add(jsonRecord
+                            [ Some("invocationId", JsonValue.String(reader.GetString 0))
+                              Some("callerFile", JsonValue.String(reader.GetString 1))
+                              Some("callerLine", JsonValue.Number(decimal (reader.GetInt64 2)))
+                              Some("templateId", JsonValue.String(reader.GetString 3))
+                              stringOrNone reader 4 |> Option.map (fun value -> "enclosingDefinition", JsonValue.String value) ]))
+                readInvocationFacet "selectedArgument"
+                    "SELECT invocation_id, name, raw_value, resolved_value, value_kind FROM inline_arguments"
+                    (fun reader ->
+                        inlineArguments.Add(jsonRecord
+                            [ Some("invocationId", JsonValue.String(reader.GetString 0)); Some("name", JsonValue.String(reader.GetString 1))
+                              Some("rawValue", JsonValue.String(reader.GetString 2)); Some("resolvedValue", JsonValue.String(reader.GetString 3))
+                              Some("valueKind", JsonValue.String(reader.GetString 4)) ]))
+                readInvocationFacet "selectedExpansion"
+                    "SELECT invocation_id, expanded_symbol_id, entity_type, template_file, caller_file, template_line, generated_line, confidence FROM inline_expansions"
+                    (fun reader ->
+                        inlineExpansions.Add(jsonRecord
+                            [ Some("invocationId", JsonValue.String(reader.GetString 0)); Some("expandedSymbolId", JsonValue.String(reader.GetString 1))
+                              Some("entityType", JsonValue.String(reader.GetString 2)); Some("templateFile", JsonValue.String(reader.GetString 3))
+                              Some("callerFile", JsonValue.String(reader.GetString 4)); Some("templateLine", JsonValue.Number(decimal (reader.GetInt64 5)))
+                              Some("generatedLine", JsonValue.Number(decimal (reader.GetInt64 6))); Some("confidence", JsonValue.String(reader.GetString 7)) ]))
+                readInvocationFacet "selectedGeneratedReference"
+                    "SELECT invocation_id, reference_kind, expanded_value, template_file, caller_file, template_line, generated_line, confidence FROM inline_generated_references"
+                    (fun reader ->
+                        inlineGeneratedReferences.Add(jsonRecord
+                            [ Some("invocationId", JsonValue.String(reader.GetString 0)); Some("referenceKind", JsonValue.String(reader.GetString 1))
+                              Some("expandedValue", JsonValue.String(reader.GetString 2)); Some("templateFile", JsonValue.String(reader.GetString 3))
+                              Some("callerFile", JsonValue.String(reader.GetString 4)); Some("templateLine", JsonValue.Number(decimal (reader.GetInt64 5)))
+                              Some("generatedLine", JsonValue.Number(decimal (reader.GetInt64 6))); Some("confidence", JsonValue.String(reader.GetString 7)) ]))
+                readInvocationFacet "selectedInlineProblem"
+                    "SELECT invocation_id, kind, message, line FROM inline_problems"
+                    (fun reader ->
+                        inlineProblems.Add(jsonRecord
+                            [ Some("invocationId", JsonValue.String(reader.GetString 0)); Some("kind", JsonValue.String(reader.GetString 1))
+                              Some("message", JsonValue.String(reader.GetString 2)); Some("line", JsonValue.Number(decimal (reader.GetInt64 3))) ]))
 
         if options.includeTopology && evidence.Count < limit then
             let addReferenceRow (reader: SqliteDataReader) graphExpansion =
@@ -1857,7 +2900,9 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                     sqliteTokenPredicate edgeCommand tokens [ "source_kind"; "source_id"; "target_event_id"; "edge_type"; "label"; "source_file" ]
                 else
                     sqliteIndexedIdentifierPredicate edgeCommand "eventEdge" identifiers [ "source_id"; "target_event_id" ]
-            edgeCommand.CommandText <- "SELECT source_kind, source_id, target_event_id, edge_type, label, source_file, line, confidence FROM event_edges" + combineSqlPredicates [ edgeSearchPredicate ] + " LIMIT $limit"
+            let edgeSelectColumns =
+                "source_kind, source_id, target_event_id, edge_type, label, source_file, line, confidence, call_operator, phase, delay, condition_path, scope_map, source_scope, target_scope"
+            edgeCommand.CommandText <- "SELECT " + edgeSelectColumns + " FROM event_edges" + combineSqlPredicates [ edgeSearchPredicate ] + " LIMIT $limit"
             addParameter edgeCommand "$limit" (box (max 500 (limit * 20)))
             use edgeReader = edgeCommand.ExecuteReader()
             while edgeReader.Read() && eventEdges.Count < limit do
@@ -1867,7 +2912,7 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                 if matchesTokens tokens [ sourceId; targetId; edgeType; edgeReader.GetString 0 ] then
                     if edgeReader.GetString 0 = "event" then relatedEventIds.Add sourceId |> ignore
                     relatedEventIds.Add targetId |> ignore
-                    eventEdges.Add(
+                    let edgeBase =
                         jsonRecord
                             [ Some("sourceKind", JsonValue.String(edgeReader.GetString 0)); Some("sourceId", JsonValue.String sourceId)
                               Some("targetEventId", JsonValue.String targetId); Some("edgeType", JsonValue.String edgeType)
@@ -1875,7 +2920,18 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                               Some("causality", JsonValue.String "directed_typed_reference")
                               stringOrNone edgeReader 4 |> Option.map (fun value -> "label", JsonValue.String value)
                               Some("sourceFile", JsonValue.String(edgeReader.GetString 5)); Some("line", JsonValue.Number(decimal (edgeReader.GetInt64 6)))
-                              Some("confidence", JsonValue.String(edgeReader.GetString 7)) ])
+                              Some("confidence", JsonValue.String(edgeReader.GetString 7)) ]
+                    let context =
+                        [ stringOrNone edgeReader 8 |> Option.map (fun value -> "callOperator", JsonValue.String value)
+                          stringOrNone edgeReader 9 |> Option.map (fun value -> "phase", JsonValue.String value)
+                          stringOrNone edgeReader 10 |> Option.map (fun value -> "delay", JsonValue.String value)
+                          stringOrNone edgeReader 11 |> Option.map (fun value -> "conditionPath", JsonValue.String value)
+                          stringOrNone edgeReader 12 |> Option.map (fun value -> "scopeMap", JsonValue.String value)
+                          stringOrNone edgeReader 13 |> Option.map (fun value -> "sourceScope", JsonValue.String value)
+                          stringOrNone edgeReader 14 |> Option.map (fun value -> "targetScope", JsonValue.String value) ]
+                        |> List.choose id
+                    let fields = edgeBase.Properties() |> Array.toList |> List.map (fun (key, value) -> key, value)
+                    eventEdges.Add(JsonValue.Record(Array.ofList (fields @ context)))
             edgeReader.Close()
             use logicCommand = connection.CreateCommand()
             let logicSearchPredicate =
@@ -1982,15 +3038,103 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                           stringOrNone unresolvedReader 3 |> Option.map (fun value -> "resolution", JsonValue.String value)
                           Some("message", JsonValue.String(unresolvedReader.GetString 4)) ])
 
+        // Definition stacks: concrete candidates, origins, logical paths and
+        // override strategy, plus the resolved winner. Only surfaced for exact
+        // identifier queries so intent scans stay compact.
+        let definitionStacksResult = ResizeArray<JsonValue>()
+        if not identifiers.IsEmpty then
+            use stackCommand = connection.CreateCommand()
+            let stackSearchPredicate =
+                sqliteIndexedIdentifierPredicate stackCommand "stackSymbol" identifiers [ "ds.symbol_id" ]
+            stackCommand.CommandText <-
+                "SELECT ds.entity_type, ds.symbol_id, ds.resolution, d.symbol_id, d.entity_type, d.origin, d.logical_path, d.override_strategy, d.overwrite_state, sc.candidate_order, d.file_path, d.line, sc.is_active "
+                + "FROM definition_stacks ds JOIN stack_candidates sc ON sc.stack_id = ds.id "
+                + "JOIN definitions d ON d.id = sc.definition_id "
+                + combineSqlPredicates [ stackSearchPredicate ]
+                + " ORDER BY ds.entity_type, ds.symbol_id, sc.candidate_order LIMIT 500"
+            use stackReader = stackCommand.ExecuteReader()
+            let current = ResizeArray<JsonValue>()
+            let mutable currentKey = ""
+            let mutable currentEntityType = ""
+            let mutable currentSymbolId = ""
+            let mutable currentResolution = ""
+            let mutable currentWinner: JsonValue option = None
+            let flushStack () =
+                if current.Count > 0 then
+                    let isAmbiguous = currentResolution = "ambiguous"
+                    definitionStacksResult.Add(
+                        jsonRecord
+                            [ Some("entityType", JsonValue.String currentEntityType)
+                              Some("id", JsonValue.String currentSymbolId)
+                              Some("resolution", JsonValue.String currentResolution)
+                              Some("ambiguous", JsonValue.Boolean isAmbiguous)
+                              if isAmbiguous then Some("ambiguousReason", JsonValue.String "No unique CWTools winner or deterministic override mode was available.") else None
+                              currentWinner |> Option.map (fun winner -> "winner", winner)
+                              Some("definitions", JsonValue.Array(current.ToArray()))
+                              Some("losers", JsonValue.Array(
+                                  current
+                                  |> Seq.mapi (fun index candidate -> index, candidate)
+                                  |> Seq.choose (fun (index, candidate) ->
+                                      match currentWinner with
+                                      | Some _ when candidate <> currentWinner.Value -> Some candidate
+                                      | _ -> None)
+                                  |> Seq.toArray)) ])
+                current.Clear()
+                currentWinner <- None
+            while stackReader.Read() do
+                let entityType = stackReader.GetString 0
+                let symbolId = stackReader.GetString 1
+                let resolution = stackReader.GetString 2
+                let key = entityType.ToLowerInvariant() + "|" + symbolId.ToLowerInvariant()
+                if key <> currentKey then
+                    flushStack ()
+                    currentKey <- key
+                    currentEntityType <- entityType
+                    currentSymbolId <- symbolId
+                    currentResolution <- resolution
+                let candidate =
+                    let candidateOrigin = stackReader.GetString 5
+                    let candidateFile = stackReader.GetString 10
+                    let loadOrderIndex, loadOrderRoot = configuredLoadOrderForFile candidateOrigin candidateFile
+                    jsonRecord
+                        [ Some("symbolId", JsonValue.String(stackReader.GetString 3))
+                          Some("entityType", JsonValue.String(stackReader.GetString 4))
+                          Some("origin", JsonValue.String candidateOrigin)
+                          Some("loadOrderIndex", JsonValue.Number(decimal loadOrderIndex))
+                          loadOrderRoot |> Option.map (fun value -> "loadOrderRoot", JsonValue.String value)
+                          Some("logicalPath", JsonValue.String(stackReader.GetString 6))
+                          stringOrNone stackReader 7 |> Option.map (fun value -> "overrideStrategy", JsonValue.String value)
+                          Some("overwriteState", JsonValue.String(stackReader.GetString 8))
+                          Some("candidateOrder", JsonValue.Number(decimal (stackReader.GetInt64 9)))
+                          Some("file", JsonValue.String candidateFile)
+                          Some("line", JsonValue.Number(decimal (stackReader.GetInt64 11))) ]
+                current.Add candidate
+                if stackReader.GetInt64 12 <> 0L then currentWinner <- Some candidate
+            flushStack ()
+
         jsonRecord
             [ Some("ok", JsonValue.Boolean true)
               Some("status", JsonValue.String(getMetadata "status" "stale"))
               Some("source", JsonValue.String "cwtools-project-knowledge-sqlite")
-              Some("schemaVersion", JsonValue.Number(decimal knowledgeSchemaVersion))
+              Some("schemaVersion", JsonValue.Number(decimal KnowledgeSchemaVersion))
+              Some("capabilityVersions", capabilityVersionsJson)
+              Some("capabilityStatus", capabilityStatusJson)
               Some("databasePath", JsonValue.String(normalizePath databasePath))
               Some("generatedAt", JsonValue.String(getMetadata "generated_at" ""))
               Some("game", JsonValue.String(getMetadata "game" "unknown"))
               Some("graphVersion", JsonValue.Number(decimal (Int64.Parse(getMetadata "graph_version" "0"))))
+              Some("coverage", jsonRecord
+                [ Some("definitionsConsidered", JsonValue.Number(decimal (Int64.Parse(getMetadata "definition_count" "0"))))
+                  Some("definitionsIndexed", JsonValue.Number(decimal (Int64.Parse(getMetadata "definition_count" "0"))))
+                  Some("filesConsidered", JsonValue.Number(decimal (Int64.Parse(getMetadata "topology_file_count" "0"))))
+                  Some("filesIndexed", JsonValue.Number(decimal (Int64.Parse(getMetadata "topology_file_count" "0"))))
+                  Some("edgesConsidered", JsonValue.Number(decimal (Int64.Parse(getMetadata "topology_edge_count" "0"))))
+                  Some("edgesIndexed", JsonValue.Number(decimal (Int64.Parse(getMetadata "topology_edge_count" "0"))))
+                  Some("truncated", JsonValue.Boolean(String.Equals(getMetadata "topology_truncated" "false", "true", StringComparison.OrdinalIgnoreCase)))
+                  Some("staleReasons", jsonStringArray
+                    [ if not (String.IsNullOrWhiteSpace(getMetadata "status" "stale")) && getMetadata "status" "stale" <> "ready" && getMetadata "status" "stale" <> "partial" then yield "knowledge_" + getMetadata "status" "stale" ])
+                  Some("unsupportedConstructs", jsonStringArray
+                    [ if Int64.Parse(getMetadata "graph_version" "0") = 0L then yield "graph_version_unknown" ]) ])
               Some("retrieval", jsonRecord
                 [ Some("strategy", JsonValue.String(if identifiers.IsEmpty then "bounded_token_scan" else "indexed_graph"))
                   Some("seedIdentifiers", jsonStringArray identifiers)
@@ -1998,7 +3142,10 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                   Some("evidenceReturned", JsonValue.Number(decimal evidence.Count))
                   Some("eventNodesReturned", JsonValue.Number(decimal eventNodes.Count))
                   Some("eventEdgesReturned", JsonValue.Number(decimal eventEdges.Count))
-                  Some("eventLogicReturned", JsonValue.Number(decimal eventLogic.Count)) ])
+                  Some("eventLogicReturned", JsonValue.Number(decimal eventLogic.Count))
+                  Some("inlineTemplatesReturned", JsonValue.Number(decimal inlineTemplates.Count))
+                  Some("inlineInvocationsReturned", JsonValue.Number(decimal inlineInvocations.Count))
+                  Some("inlineExpansionsReturned", JsonValue.Number(decimal inlineExpansions.Count)) ])
               Some("domains", jsonStringArray (capabilities |> Seq.map (fun item -> item.GetProperty("domain").AsString())))
               Some("capabilities", JsonValue.Array(capabilities.ToArray()))
               Some("evidence", JsonValue.Array(evidence.ToArray()))
@@ -2008,7 +3155,19 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                   Some("logic", JsonValue.Array(eventLogic.ToArray()))
                   Some("incomingCoverage", JsonValue.String incomingCoverage)
                   Some("causalityPolicy", JsonValue.String "Only directed typed references and explicit execution facts are evidence; IDs, source order, layout, and missing edges are not.") ])
+              Some("inlineGraph", jsonRecord
+                [ Some("templates", JsonValue.Array(inlineTemplates.ToArray()))
+                  Some("parameters", JsonValue.Array(inlineParameters.ToArray()))
+                  Some("invocations", JsonValue.Array(inlineInvocations.ToArray()))
+                  Some("arguments", JsonValue.Array(inlineArguments.ToArray()))
+                  Some("expansions", JsonValue.Array(inlineExpansions.ToArray()))
+                  Some("generatedReferences", JsonValue.Array(inlineGeneratedReferences.ToArray()))
+                  Some("problems", JsonValue.Array(inlineProblems.ToArray()))
+                  Some("truncated", JsonValue.Boolean(
+                    selectedInvocationIds.Count > inlineInvocations.Count || selectedTemplateIds.Count > inlineTemplates.Count))
+                  Some("seedKinds", jsonStringArray [ "template_path"; "template_id"; "caller_file"; "invocation_id"; "expanded_symbol_id"; "generated_reference" ]) ])
               Some("unresolved", JsonValue.Array(unresolved.ToArray()))
+              Some("definitionStacks", JsonValue.Array(definitionStacksResult.ToArray()))
               Some("requiredNextChecks", jsonStringArray
                 [ "Use query_cwt_schema/query_rules/query_scope for legality before writing."
                   "For shader evidence, use query_shader_compile_unit/query_shader_callers/explain_shader_reachability before editing."
@@ -2017,7 +3176,43 @@ let queryProjectKnowledgeDatabase (options: QueryOptions) =
                   "Verify event scope bridges and state lifecycles before approving complex blueprints."
                   "Never infer event or entity causality from numeric IDs, file/source order, proximity, graph layout, or a missing incoming edge." ]) ]
 
-let private exportProjectKnowledgeRebuild (activeGame: string) (projectRoots: string list) (rawOptions: ExportOptions) (runtime: RuntimeMetadata) (game: IGame<'T>) =
+let queryProjectKnowledgeDatabase (options: QueryOptions) =
+    let databasePath = Path.GetFullPath options.databasePath
+    if not (File.Exists databasePath) then
+        queryCurrentProjectKnowledgeDatabase options
+    else
+        try
+            let foundVersion =
+                let connectionString = SqliteConnectionStringBuilder(DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false).ToString()
+                use connection = new SqliteConnection(connectionString)
+                connection.Open()
+                let metadata = readMetadata connection
+                match metadata.TryGetValue "schema_version" with
+                | true, value -> match Int32.TryParse value with true, parsed -> parsed | _ -> 0
+                | _ -> 0
+            if foundVersion <> KnowledgeSchemaVersion then
+                jsonRecord
+                    [ Some("ok", JsonValue.Boolean false)
+                      Some("status", JsonValue.String "stale")
+                      Some("rebuildRequired", JsonValue.Boolean true)
+                      Some("foundSchemaVersion", JsonValue.Number(decimal foundVersion))
+                      Some("currentSchemaVersion", JsonValue.Number(decimal KnowledgeSchemaVersion))
+                      Some("databasePath", JsonValue.String(normalizePath databasePath))
+                      Some("error", JsonValue.String $"Project knowledge schema V{foundVersion} is obsolete. Rebuild the knowledge database with the current V{KnowledgeSchemaVersion} extension.") ]
+            else
+                queryCurrentProjectKnowledgeDatabase options
+        with error ->
+            jsonRecord
+                [ Some("ok", JsonValue.Boolean false)
+                  Some("status", JsonValue.String "error")
+                  Some("rebuildRequired", JsonValue.Boolean true)
+                  Some("currentSchemaVersion", JsonValue.Number(decimal KnowledgeSchemaVersion))
+                  Some("databasePath", JsonValue.String(normalizePath databasePath))
+                  Some("error", JsonValue.String $"Project knowledge schema could not be verified: {error.Message}. Rebuild the knowledge database.") ]
+
+let private exportProjectKnowledgeRebuild shouldCancel (activeGame: string) (projectRoots: string list) (rawOptions: ExportOptions) (runtime: RuntimeMetadata) (game: IGame<'T>) =
+    let checkCancelled () = if shouldCancel () then raise (OperationCanceledException("Project knowledge export was cancelled."))
+    checkCancelled ()
     let normalizedOptions = normalizeOptions rawOptions
     let shaderRelevantFile (file: string) =
         match Path.GetExtension(file).ToLowerInvariant() with
@@ -2050,6 +3245,7 @@ let private exportProjectKnowledgeRebuild (activeGame: string) (projectRoots: st
         | Some _, None -> { requestedOptions with domains = []; changedFiles = []; generationMode = "full" }
         | _ -> requestedOptions
     let resources = resourceFacts (game :> IGame)
+    checkCancelled ()
     let shaderRefreshRequired =
         match incrementalBase with
         | None -> true
@@ -2062,7 +3258,9 @@ let private exportProjectKnowledgeRebuild (activeGame: string) (projectRoots: st
         else
             None
     let freshDefinitions = collectDefinitions (game :> IGame) projectRoots resources shaderModel collectionOptions
+    checkCancelled ()
     let freshTopology = collectTopology projectRoots collectionOptions shaderModel game
+    checkCancelled ()
     let availableDefinitions, topology, generationMode =
         match incrementalBase with
         | Some(retainedDefinitions, retainedTopology) ->
@@ -2085,11 +3283,14 @@ let private exportProjectKnowledgeRebuild (activeGame: string) (projectRoots: st
         | None -> freshDefinitions, freshTopology, collectionOptions.generationMode
     // Even incremental refreshes publish a full normalized database atomically;
     // only the changed files/domains are re-extracted, while retained rows are loaded
-    // from the previous V2 database before stacks and event relationships rebuild.
+    // from the previous current-schema database before stacks and event relationships rebuild.
     let options = { collectionOptions with domains = []; changedFiles = []; generationMode = generationMode }
     let definitions = selectDefinitions options availableDefinitions
     let domains = domainSummaries options definitions
     let eventGraph = collectEventGraph options availableDefinitions topology game
+    checkCancelled ()
+    let inlineGraph = InlineGraph.collectInlineGraphCancellable shouldCancel (game.AllEntities())
+    checkCancelled ()
     let warnings = ResizeArray<string>()
     if runtime.status <> "ready" then warnings.Add("The knowledge snapshot was exported while CWTools was loading or stale.")
     if topology.truncated then warnings.Add("Topology and event relationships are partial because the configured export limits were reached.")
@@ -2103,13 +3304,18 @@ let private exportProjectKnowledgeRebuild (activeGame: string) (projectRoots: st
 
     match options.databasePath with
     | Some databasePath ->
+        let exportStartedAt = DateTimeOffset.UtcNow
         let storedPath, generatedAt =
-            writeKnowledgeDatabase databasePath activeGame projectRoots options publishedRuntime definitions topology eventGraph (game :> IGame) warnings
+            writeKnowledgeDatabase databasePath activeGame projectRoots options publishedRuntime definitions topology eventGraph inlineGraph (game :> IGame) warnings
+        let baseline = baselineJson storedPath definitions topology eventGraph generatedAt exportStartedAt
+        let coverage = coverageJson options runtime availableDefinitions topology (definitions.Length < availableDefinitions.Length || topology.truncated)
         jsonRecord
             [ Some("ok", JsonValue.Boolean true)
               Some("status", JsonValue.String publishedRuntime.status)
               Some("source", JsonValue.String "cwtools-project-knowledge-sqlite")
-              Some("schemaVersion", JsonValue.Number 3m)
+              Some("schemaVersion", JsonValue.Number(decimal KnowledgeSchemaVersion))
+              Some("capabilityVersions", capabilityVersionsJson)
+              Some("capabilityStatus", capabilityStatusJson)
               Some("game", JsonValue.String activeGame)
               Some("generatedAtUnixMs", JsonValue.Number(decimal (generatedAt.ToUnixTimeMilliseconds())))
               Some("graphVersion", JsonValue.Number(decimal runtime.graphVersion))
@@ -2118,10 +3324,13 @@ let private exportProjectKnowledgeRebuild (activeGame: string) (projectRoots: st
               Some("databasePath", JsonValue.String(normalizePath storedPath))
               Some("generationMode", JsonValue.String generationMode)
               Some("domains", JsonValue.Array(compactDomainSummaries definitions))
+              Some("coverage", coverage)
+              Some("baseline", baseline)
               Some("counts", jsonRecord
                 [ Some("definitions", JsonValue.Number(decimal definitions.Length))
                   Some("availableDefinitions", JsonValue.Number(decimal availableDefinitions.Length))
                   Some("workspaceDefinitions", JsonValue.Number(decimal (definitions |> List.filter (fun item -> item.origin = "workspace") |> List.length)))
+                  Some("dependencyDefinitions", JsonValue.Number(decimal (definitions |> List.filter (fun item -> item.origin = "dependency") |> List.length)))
                   Some("vanillaDefinitions", JsonValue.Number(decimal (definitions |> List.filter (fun item -> item.origin = "vanilla") |> List.length)))
                   Some("definitionStacks", JsonValue.Number(decimal (definitionStackCount definitions)))
                   Some("topologyFiles", JsonValue.Number(decimal topology.files.Length))
@@ -2140,7 +3349,7 @@ let private exportProjectKnowledgeRebuild (activeGame: string) (projectRoots: st
             [ Some("ok", JsonValue.Boolean true)
               Some("status", JsonValue.String runtime.status)
               Some("source", JsonValue.String "cwtools-project-knowledge")
-              Some("schemaVersion", JsonValue.Number 1m)
+              Some("schemaVersion", JsonValue.Number(decimal KnowledgeSchemaVersion))
               Some("game", JsonValue.String activeGame)
               Some("generatedAtUnixMs", JsonValue.Number(decimal (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())))
               Some("graphVersion", JsonValue.Number(decimal runtime.graphVersion))
@@ -2169,13 +3378,25 @@ let private incrementalExportError status message =
           Some("status", JsonValue.String status)
           Some("error", JsonValue.String message) ]
 
+let private obsoleteKnowledgeSchemaError foundVersion =
+    jsonRecord
+        [ Some("ok", JsonValue.Boolean false)
+          Some("status", JsonValue.String "stale")
+          Some("rebuildRequired", JsonValue.Boolean true)
+          Some("foundSchemaVersion", JsonValue.Number(decimal foundVersion))
+          Some("currentSchemaVersion", JsonValue.Number(decimal KnowledgeSchemaVersion))
+          Some("error", JsonValue.String $"Project knowledge schema V{foundVersion} is obsolete. A full V{KnowledgeSchemaVersion} rebuild is required.") ]
+
 let private tryIncrementalProjectKnowledgeExport
+    (shouldCancel: unit -> bool)
     (activeGame: string)
     (projectRoots: string list)
     (rawOptions: ExportOptions)
     (runtime: RuntimeMetadata)
     (game: IGame<'T>)
     =
+    let checkCancelled () = if shouldCancel () then raise (OperationCanceledException("Incremental project knowledge export was cancelled."))
+    checkCancelled ()
     let options = normalizeOptions rawOptions
     if options.generationMode <> "incremental" then None
     else
@@ -2204,14 +3425,20 @@ let private tryIncrementalProjectKnowledgeExport
                 if not (isKnowledgeDatabasePathAllowed projectRoots target) then
                     Some(incrementalExportError "error" "Project knowledge database must be inside a project root.")
                 else
+                    let incrementalStartedAt = DateTimeOffset.UtcNow
                     let collectionOptions =
                         { options with
                             domains = []
                             changedFiles = changedFiles
                             generationMode = "incremental" }
                     let resources = resourceFacts (game :> IGame)
+                    checkCancelled ()
                     let freshDefinitions = collectDefinitions (game :> IGame) projectRoots resources None collectionOptions
+                    checkCancelled ()
                     let freshTopology = collectTopology projectRoots collectionOptions None game
+                    checkCancelled ()
+                    let freshInlineGraph = InlineGraph.collectInlineGraphCancellable shouldCancel (game.AllEntities())
+                    checkCancelled ()
                     let connectionString =
                         SqliteConnectionStringBuilder(
                             DataSource = target,
@@ -2226,8 +3453,9 @@ let private tryIncrementalProjectKnowledgeExport
                         match metadata.TryGetValue "schema_version" with
                         | true, value -> value
                         | _ -> ""
-                    if schemaVersion <> "3" then
-                        Some(incrementalExportError "stale" "The project knowledge schema changed; reload the project to rebuild it.")
+                    if schemaVersion <> string KnowledgeSchemaVersion then
+                        let foundVersion = match Int32.TryParse schemaVersion with true, value -> value | _ -> 0
+                        Some(obsoleteKnowledgeSchemaError foundVersion)
                     else
                         let knownEventIds =
                             use command = connection.CreateCommand()
@@ -2307,6 +3535,55 @@ WHERE lower(d.entity_type) = 'event';
                             affectedDomainCommand.ExecuteNonQuery() |> ignore
 
                         executeSql connection (Some transaction) $"""
+CREATE TEMP TABLE affected_inline_templates(template_id TEXT PRIMARY KEY COLLATE NOCASE);
+CREATE TEMP TABLE affected_inline_invocations(invocation_id TEXT PRIMARY KEY COLLATE NOCASE);
+"""
+                        use affectedInlineTemplateCommand = connection.CreateCommand()
+                        affectedInlineTemplateCommand.Transaction <- transaction
+                        affectedInlineTemplateCommand.CommandText <- "INSERT OR IGNORE INTO affected_inline_templates(template_id) VALUES ($template)"
+                        prepareCommandParameters affectedInlineTemplateCommand [ "$template", box "" ]
+                        let freshChangedTemplates =
+                            freshInlineGraph.templates
+                            |> List.filter (fun template -> changedFiles |> List.exists (fun file -> normalizeFileKey file = normalizeFileKey template.file))
+                        let freshChangedById = freshChangedTemplates |> Seq.map (fun template -> template.templateId, template) |> dict
+                        use oldInlineTemplateCommand = connection.CreateCommand()
+                        oldInlineTemplateCommand.Transaction <- transaction
+                        oldInlineTemplateCommand.CommandText <- $"SELECT t.template_id, t.content_hash FROM inline_templates t JOIN changed_paths c ON t.file = c.path {pathComparison}"
+                        use oldInlineTemplateReader = oldInlineTemplateCommand.ExecuteReader()
+                        let oldChangedTemplates = ResizeArray<string * string>()
+                        while oldInlineTemplateReader.Read() do
+                            oldChangedTemplates.Add(oldInlineTemplateReader.GetString 0, oldInlineTemplateReader.GetString 1)
+                        oldInlineTemplateReader.Close()
+                        for templateId, oldHash in oldChangedTemplates do
+                            match freshChangedById.TryGetValue templateId with
+                            | true, fresh when String.Equals(oldHash, fresh.contentHash, StringComparison.OrdinalIgnoreCase) -> ()
+                            | _ ->
+                                setPreparedCommandParameters affectedInlineTemplateCommand [ "$template", box templateId ]
+                                affectedInlineTemplateCommand.ExecuteNonQuery() |> ignore
+                        let oldChangedIds = oldChangedTemplates |> Seq.map fst |> HashSet<string>
+                        for template in freshChangedTemplates do
+                            if not (oldChangedIds.Contains template.templateId) then
+                                setPreparedCommandParameters affectedInlineTemplateCommand [ "$template", box template.templateId ]
+                                affectedInlineTemplateCommand.ExecuteNonQuery() |> ignore
+                        executeSql connection (Some transaction) $"""
+WITH RECURSIVE reverse_callers(template_id) AS (
+  SELECT template_id FROM affected_inline_templates
+  UNION
+  SELECT caller.template_id
+  FROM inline_invocations invocation
+  JOIN inline_templates caller ON caller.file = invocation.caller_file {pathComparison}
+  JOIN reverse_callers affected ON lower(invocation.template_id) = lower(affected.template_id)
+)
+INSERT OR IGNORE INTO affected_inline_templates(template_id)
+SELECT template_id FROM reverse_callers;
+INSERT OR IGNORE INTO affected_inline_invocations(invocation_id)
+SELECT invocation.invocation_id
+FROM inline_invocations invocation
+WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE invocation.caller_file = c.path {pathComparison})
+   OR EXISTS (SELECT 1 FROM affected_inline_templates t WHERE lower(t.template_id) = lower(invocation.template_id));
+"""
+
+                        executeSql connection (Some transaction) $"""
 DELETE FROM definition_stacks
 WHERE EXISTS (
   SELECT 1 FROM affected_symbols a
@@ -2332,6 +3609,13 @@ DELETE FROM files
 WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE files.path = c.path {pathComparison});
 DELETE FROM definitions
 WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE definitions.file_path = c.path {pathComparison});
+DELETE FROM inline_problems WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
+DELETE FROM inline_generated_references WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
+DELETE FROM inline_expansions WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
+DELETE FROM inline_arguments WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
+DELETE FROM inline_invocations WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
+DELETE FROM inline_parameters WHERE template_id IN (SELECT template_id FROM affected_inline_templates);
+DELETE FROM inline_templates WHERE template_id IN (SELECT template_id FROM affected_inline_templates);
 DELETE FROM event_edges
 WHERE lower(target_event_id) IN (
   SELECT event_id FROM affected_event_ids
@@ -2340,11 +3624,13 @@ WHERE lower(target_event_id) IN (
 """
                         use definitionCommand = connection.CreateCommand()
                         definitionCommand.Transaction <- transaction
-                        definitionCommand.CommandText <- "INSERT INTO definitions(symbol_id, entity_type, file_path, logical_path, line, end_line, origin, validate, overwrite_state, resource_scope, domain, override_path, override_strategy) VALUES ($symbol, $type, $file, $logical, $line, $end, $origin, $validate, $overwrite, $scope, $domain, $overridePath, $overrideStrategy) RETURNING id"
+                        definitionCommand.CommandText <- "INSERT INTO definitions(symbol_id, entity_type, file_path, logical_path, line, end_line, origin, validate, overwrite_state, resource_scope, domain, override_path, override_strategy, provenance_kind, source_file, source_line, source_end_line, template_file, template_line, invocation_file, invocation_line, has_real_range, confidence) VALUES ($symbol, $type, $file, $logical, $line, $end, $origin, $validate, $overwrite, $scope, $domain, $overridePath, $overrideStrategy, $provenance, $sourceFile, $sourceLine, $sourceEndLine, $templateFile, $templateLine, $invocationFile, $invocationLine, $hasRealRange, $confidence) RETURNING id"
                         prepareCommandParameters definitionCommand
                             [ "$symbol", box ""; "$type", box ""; "$file", box ""; "$logical", box ""; "$line", box 0; "$end", box 0
                               "$origin", box ""; "$validate", box 0; "$overwrite", box ""; "$scope", box ""; "$domain", box ""
-                              "$overridePath", box ""; "$overrideStrategy", box "" ]
+                              "$overridePath", box ""; "$overrideStrategy", box ""; "$provenance", box ""; "$sourceFile", box ""
+                              "$sourceLine", box 0; "$sourceEndLine", box 0; "$templateFile", box ""; "$templateLine", box 0
+                              "$invocationFile", box ""; "$invocationLine", box 0; "$hasRealRange", box 0; "$confidence", box "" ]
                         use subtypeCommand = connection.CreateCommand()
                         subtypeCommand.Transaction <- transaction
                         subtypeCommand.CommandText <- "INSERT OR IGNORE INTO definition_subtypes(definition_id, subtype) VALUES ($definition, $subtype)"
@@ -2355,7 +3641,12 @@ WHERE lower(target_event_id) IN (
                                   "$logical", box (normalizePath definition.logicalPath); "$line", box definition.line; "$end", box definition.endLine
                                   "$origin", box definition.origin; "$validate", box (if definition.validate then 1 else 0); "$overwrite", box definition.overwrite
                                   "$scope", box (definition.resourceScope |> Option.toObj); "$domain", box definition.domain
-                                  "$overridePath", box (definition.overridePath |> Option.toObj); "$overrideStrategy", box (definition.overrideStrategy |> Option.toObj) ]
+                                  "$overridePath", box (definition.overridePath |> Option.toObj); "$overrideStrategy", box (definition.overrideStrategy |> Option.toObj)
+                                  "$provenance", box definition.provenanceKind; "$sourceFile", box (normalizePath definition.sourceFile)
+                                  "$sourceLine", box definition.sourceLine; "$sourceEndLine", box definition.sourceEndLine
+                                  "$templateFile", box (definition.templateFile |> Option.toObj); "$templateLine", box (definition.templateLine |> Option.map box |> Option.toObj)
+                                  "$invocationFile", box (definition.invocationFile |> Option.toObj); "$invocationLine", box (definition.invocationLine |> Option.map box |> Option.toObj)
+                                  "$hasRealRange", box (if definition.hasRealRange then 1 else 0); "$confidence", box definition.confidence ]
                             let definitionId = definitionCommand.ExecuteScalar() :?> int64
                             for subtype in definition.subtypes do
                                 setPreparedCommandParameters subtypeCommand [ "$definition", box definitionId; "$subtype", box subtype ]
@@ -2400,15 +3691,20 @@ WHERE lower(target_event_id) IN (
                             eventNodeCommand.ExecuteNonQuery() |> ignore
                         use eventEdgeCommand = connection.CreateCommand()
                         eventEdgeCommand.Transaction <- transaction
-                        eventEdgeCommand.CommandText <- "INSERT INTO event_edges(source_kind, source_id, target_event_id, edge_type, label, source_file, line, confidence) VALUES ($kind, $source, $target, $type, $label, $file, $line, $confidence)"
+                        eventEdgeCommand.CommandText <- "INSERT INTO event_edges(source_kind, source_id, target_event_id, edge_type, label, source_file, line, confidence, call_operator, phase, delay, condition_path, scope_map, source_scope, target_scope) VALUES ($kind, $source, $target, $type, $label, $file, $line, $confidence, $callOperator, $phase, $delay, $conditionPath, $scopeMap, $sourceScope, $targetScope)"
                         prepareCommandParameters eventEdgeCommand
                             [ "$kind", box ""; "$source", box ""; "$target", box ""; "$type", box ""; "$label", box ""; "$file", box ""
-                              "$line", box 0; "$confidence", box "" ]
+                              "$line", box 0; "$confidence", box ""; "$callOperator", box ""; "$phase", box ""; "$delay", box ""
+                              "$conditionPath", box ""; "$scopeMap", box ""; "$sourceScope", box ""; "$targetScope", box "" ]
                         for edge in eventGraph.edges do
                             setPreparedCommandParameters eventEdgeCommand
                                 [ "$kind", box edge.sourceKind; "$source", box edge.sourceId; "$target", box edge.targetEventId
                                   "$type", box edge.edgeType; "$label", box (edge.label |> Option.toObj); "$file", box edge.sourceFile
-                                  "$line", box edge.line; "$confidence", box edge.confidence ]
+                                  "$line", box edge.line; "$confidence", box edge.confidence
+                                  "$callOperator", box (edge.callOperator |> Option.toObj); "$phase", box (edge.phase |> Option.toObj)
+                                  "$delay", box (edge.delay |> Option.toObj); "$conditionPath", box (edge.conditionPath |> Option.toObj)
+                                  "$scopeMap", box (edge.scopeMap |> Option.toObj); "$sourceScope", box (edge.sourceScope |> Option.toObj)
+                                  "$targetScope", box (edge.targetScope |> Option.toObj) ]
                             eventEdgeCommand.ExecuteNonQuery() |> ignore
                         use eventLogicCommand = connection.CreateCommand()
                         eventLogicCommand.Transaction <- transaction
@@ -2422,12 +3718,120 @@ WHERE lower(target_event_id) IN (
                                   "$scope", box (item.scope |> Option.toObj); "$phase", box item.phase; "$file", box item.sourceFile
                                   "$line", box item.line; "$details", box (item.details |> Option.toObj) ]
                             eventLogicCommand.ExecuteNonQuery() |> ignore
+                        for item in eventGraph.stateAccesses do
+                            setPreparedCommandParameters eventLogicCommand
+                                [ "$event", box item.eventId; "$type", box item.relationType; "$subject", box item.subject
+                                  "$scope", box (item.scope |> Option.toObj); "$phase", box item.phase; "$file", box item.sourceFile
+                                  "$line", box item.line; "$details", box (item.details |> Option.toObj) ]
+                            eventLogicCommand.ExecuteNonQuery() |> ignore
+
+                        let readAffectedSet tableName columnName =
+                            use command = connection.CreateCommand()
+                            command.Transaction <- transaction
+                            command.CommandText <- sprintf "SELECT %s FROM %s" columnName tableName
+                            use reader = command.ExecuteReader()
+                            let values = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                            while reader.Read() do values.Add(reader.GetString 0) |> ignore
+                            values
+                        let affectedInlineTemplates = readAffectedSet "affected_inline_templates" "template_id"
+                        let freshTemplateByFile =
+                            freshInlineGraph.templates
+                            |> Seq.map (fun template -> normalizeFileKey template.file, template.templateId)
+                            |> dict
+                        let callerChanged callerFile =
+                            changedFiles |> List.exists (fun file -> normalizeFileKey file = normalizeFileKey callerFile)
+                        let invocationAffected (invocation: InlineGraph.InlineInvocationFact) =
+                            callerChanged invocation.callerFile
+                            || affectedInlineTemplates.Contains invocation.templateId
+                            || match freshTemplateByFile.TryGetValue(normalizeFileKey invocation.callerFile) with
+                               | true, callerTemplate -> affectedInlineTemplates.Contains callerTemplate
+                               | _ -> false
+                        let affectedFreshInvocationIds =
+                            freshInlineGraph.invocations
+                            |> Seq.filter invocationAffected
+                            |> Seq.map _.invocationId
+                            |> HashSet<string>
+
+                        // Refresh only the changed template/caller reverse closure.
+                        // Unrelated inline facts retain their rows and hashes.
+                        use inlineTemplateCommand = connection.CreateCommand()
+                        inlineTemplateCommand.Transaction <- transaction
+                        inlineTemplateCommand.CommandText <- "INSERT OR REPLACE INTO inline_templates(template_id, logical_path, file, line, content_hash) VALUES ($id, $logical, $file, $line, $hash)"
+                        prepareCommandParameters inlineTemplateCommand
+                            [ "$id", box ""; "$logical", box ""; "$file", box ""; "$line", box 0; "$hash", box "" ]
+                        for template in freshInlineGraph.templates |> Seq.filter (fun template -> affectedInlineTemplates.Contains template.templateId) do
+                            setPreparedCommandParameters inlineTemplateCommand
+                                [ "$id", box template.templateId; "$logical", box template.logicalPath; "$file", box template.file
+                                  "$line", box template.line; "$hash", box template.contentHash ]
+                            inlineTemplateCommand.ExecuteNonQuery() |> ignore
+                        use inlineParameterCommand = connection.CreateCommand()
+                        inlineParameterCommand.Transaction <- transaction
+                        inlineParameterCommand.CommandText <- "INSERT OR REPLACE INTO inline_parameters(template_id, name, usage_kind, usage_kinds, inferred_type, required, occurrences) VALUES ($id, $name, $kind, $kinds, $inferred, $required, $occurrences)"
+                        prepareCommandParameters inlineParameterCommand
+                            [ "$id", box ""; "$name", box ""; "$kind", box ""; "$kinds", box ""; "$inferred", box ""; "$required", box 0; "$occurrences", box 0 ]
+                        for parameter in freshInlineGraph.parameters |> Seq.filter (fun parameter -> affectedInlineTemplates.Contains parameter.templateId) do
+                            setPreparedCommandParameters inlineParameterCommand
+                                [ "$id", box parameter.templateId; "$name", box parameter.name; "$kind", box parameter.usageKind
+                                  "$kinds", box (String.concat "|" parameter.usageKinds); "$inferred", box parameter.inferredType
+                                  "$required", box (if parameter.required then 1 else 0); "$occurrences", box parameter.occurrences ]
+                            inlineParameterCommand.ExecuteNonQuery() |> ignore
+                        use inlineInvocationCommand = connection.CreateCommand()
+                        inlineInvocationCommand.Transaction <- transaction
+                        inlineInvocationCommand.CommandText <- "INSERT OR REPLACE INTO inline_invocations(invocation_id, caller_file, caller_line, template_id, enclosing_definition) VALUES ($id, $file, $line, $template, $enclosing)"
+                        prepareCommandParameters inlineInvocationCommand
+                            [ "$id", box ""; "$file", box ""; "$line", box 0; "$template", box ""; "$enclosing", box "" ]
+                        for invocation in freshInlineGraph.invocations |> Seq.filter invocationAffected do
+                            setPreparedCommandParameters inlineInvocationCommand
+                                [ "$id", box invocation.invocationId; "$file", box invocation.callerFile; "$line", box invocation.callerLine
+                                  "$template", box invocation.templateId; "$enclosing", box (invocation.enclosingDefinition |> Option.toObj) ]
+                            inlineInvocationCommand.ExecuteNonQuery() |> ignore
+                        use inlineArgumentCommand = connection.CreateCommand()
+                        inlineArgumentCommand.Transaction <- transaction
+                        inlineArgumentCommand.CommandText <- "INSERT OR REPLACE INTO inline_arguments(invocation_id, name, raw_value, resolved_value, value_kind) VALUES ($id, $name, $raw, $resolved, $kind)"
+                        prepareCommandParameters inlineArgumentCommand
+                            [ "$id", box ""; "$name", box ""; "$raw", box ""; "$resolved", box ""; "$kind", box "" ]
+                        for argument in freshInlineGraph.arguments |> Seq.filter (fun argument -> affectedFreshInvocationIds.Contains argument.invocationId) do
+                            setPreparedCommandParameters inlineArgumentCommand
+                                [ "$id", box argument.invocationId; "$name", box argument.name; "$raw", box argument.rawValue
+                                  "$resolved", box argument.resolvedValue; "$kind", box argument.valueKind ]
+                            inlineArgumentCommand.ExecuteNonQuery() |> ignore
+                        use inlineExpansionCommand = connection.CreateCommand()
+                        inlineExpansionCommand.Transaction <- transaction
+                        inlineExpansionCommand.CommandText <- "INSERT OR REPLACE INTO inline_expansions(invocation_id, expanded_symbol_id, entity_type, template_file, caller_file, template_line, generated_line, confidence) VALUES ($id, $symbol, $type, $templateFile, $callerFile, $templateLine, $generatedLine, $confidence)"
+                        prepareCommandParameters inlineExpansionCommand
+                            [ "$id", box ""; "$symbol", box ""; "$type", box ""; "$templateFile", box ""; "$callerFile", box ""; "$templateLine", box 0; "$generatedLine", box 0; "$confidence", box "" ]
+                        for expansion in freshInlineGraph.expansions |> Seq.filter (fun expansion -> affectedFreshInvocationIds.Contains expansion.invocationId) do
+                            setPreparedCommandParameters inlineExpansionCommand
+                                [ "$id", box expansion.invocationId; "$symbol", box expansion.expandedSymbolId; "$type", box expansion.entityType
+                                  "$templateFile", box expansion.templateFile; "$callerFile", box expansion.callerFile
+                                  "$templateLine", box expansion.templateLine; "$generatedLine", box expansion.generatedLine; "$confidence", box expansion.confidence ]
+                            inlineExpansionCommand.ExecuteNonQuery() |> ignore
+                        use inlineGeneratedReferenceCommand = connection.CreateCommand()
+                        inlineGeneratedReferenceCommand.Transaction <- transaction
+                        inlineGeneratedReferenceCommand.CommandText <- "INSERT OR REPLACE INTO inline_generated_references(invocation_id, reference_kind, expanded_value, template_file, caller_file, template_line, generated_line, confidence) VALUES ($id, $kind, $value, $templateFile, $callerFile, $templateLine, $generatedLine, $confidence)"
+                        prepareCommandParameters inlineGeneratedReferenceCommand
+                            [ "$id", box ""; "$kind", box ""; "$value", box ""; "$templateFile", box ""; "$callerFile", box ""; "$templateLine", box 0; "$generatedLine", box 0; "$confidence", box "" ]
+                        for reference in freshInlineGraph.generatedReferences |> Seq.filter (fun reference -> affectedFreshInvocationIds.Contains reference.invocationId) do
+                            setPreparedCommandParameters inlineGeneratedReferenceCommand
+                                [ "$id", box reference.invocationId; "$kind", box reference.referenceKind; "$value", box reference.expandedValue
+                                  "$templateFile", box reference.templateFile; "$callerFile", box reference.callerFile
+                                  "$templateLine", box reference.templateLine; "$generatedLine", box reference.generatedLine; "$confidence", box reference.confidence ]
+                            inlineGeneratedReferenceCommand.ExecuteNonQuery() |> ignore
+                        use inlineProblemCommand = connection.CreateCommand()
+                        inlineProblemCommand.Transaction <- transaction
+                        inlineProblemCommand.CommandText <- "INSERT OR REPLACE INTO inline_problems(invocation_id, kind, message, line) VALUES ($id, $kind, $message, $line)"
+                        prepareCommandParameters inlineProblemCommand
+                            [ "$id", box ""; "$kind", box ""; "$message", box ""; "$line", box 0 ]
+                        for problem in freshInlineGraph.problems |> Seq.filter (fun problem -> affectedFreshInvocationIds.Contains problem.invocationId) do
+                            setPreparedCommandParameters inlineProblemCommand
+                                [ "$id", box problem.invocationId; "$kind", box problem.kind; "$message", box problem.message; "$line", box problem.line ]
+                            inlineProblemCommand.ExecuteNonQuery() |> ignore
 
                         let affectedDefinitionRows =
                             use command = connection.CreateCommand()
                             command.Transaction <- transaction
                             command.CommandText <- """
-SELECT d.id, d.entity_type, d.symbol_id, d.overwrite_state, d.override_strategy
+SELECT d.id, d.entity_type, d.symbol_id, d.overwrite_state, d.override_strategy, d.origin, d.logical_path
 FROM definitions d
 JOIN affected_symbols a
   ON d.entity_type = a.entity_type_key COLLATE NOCASE
@@ -2435,41 +3839,56 @@ JOIN affected_symbols a
 ORDER BY lower(d.entity_type), lower(d.symbol_id), d.id
 """
                             use reader = command.ExecuteReader()
-                            let rows = ResizeArray<int64 * string * string * string * string option>()
+                            let rows = ResizeArray<int64 * string * string * string * string option * string * string>()
                             while reader.Read() do
                                 rows.Add(
                                     reader.GetInt64 0,
                                     reader.GetString 1,
                                     reader.GetString 2,
                                     reader.GetString 3,
-                                    stringOrNone reader 4)
+                                    stringOrNone reader 4,
+                                    reader.GetString 5,
+                                    reader.GetString 6)
                             rows |> Seq.toList
                         use stackCommand = connection.CreateCommand()
                         stackCommand.Transaction <- transaction
                         stackCommand.CommandText <- "INSERT INTO definition_stacks(entity_type, symbol_id, resolution) VALUES ($type, $symbol, $resolution) RETURNING id"
                         use candidateCommand = connection.CreateCommand()
                         candidateCommand.Transaction <- transaction
-                        candidateCommand.CommandText <- "INSERT INTO stack_candidates(stack_id, definition_id, is_active) VALUES ($stack, $definition, $active)"
+                        candidateCommand.CommandText <- "INSERT INTO stack_candidates(stack_id, definition_id, is_active, candidate_order, origin, logical_path, override_strategy) VALUES ($stack, $definition, $active, $order, $origin, $logical, $strategy)"
                         use unresolvedCommand = connection.CreateCommand()
                         unresolvedCommand.Transaction <- transaction
                         unresolvedCommand.CommandText <- "INSERT INTO unresolved(kind, entity_type, symbol_id, resolution, message) VALUES ('definition_resolution', $type, $symbol, $resolution, 'The effective definition requires override-mode or ambiguity review.')"
-                        for _, values in affectedDefinitionRows |> Seq.groupBy (fun (_, entityType, symbolId, _, _) -> entityType.ToLowerInvariant(), symbolId.ToLowerInvariant()) do
+                        for _, values in affectedDefinitionRows |> Seq.groupBy (fun (_, entityType, symbolId, _, _, _, _) -> entityType.ToLowerInvariant(), symbolId.ToLowerInvariant()) do
                             let items = values |> Seq.toList
                             if items.Length > 1 then
-                                let _, entityType, symbolId, _, _ = items.Head
-                                let active = items |> List.filter (fun (_, _, _, overwrite, _) -> overwrite <> "overwritten")
-                                let resolution =
-                                    if active.Length = 1 then "single_active_definition"
-                                    elif items |> List.exists (fun (_, _, _, _, strategy) -> strategy.IsSome) then "consult_override_mode"
-                                    else "ambiguous"
+                                let originRank origin = if origin = "vanilla" then 0 elif origin = "workspace" then 2 else 1
+                                let ordered = items |> List.sortBy (fun (_, _, _, _, _, origin, logical) -> originRank origin, normalizePath logical)
+                                let _, entityType, symbolId, _, _, _, _ = ordered.Head
+                                let active = ordered |> List.filter (fun (_, _, _, overwrite, _, _, _) -> overwrite <> "overwritten")
+                                let strategy = ordered |> List.tryPick (fun (_, _, _, _, value, _, _) -> value |> Option.map (fun mode -> mode.ToUpperInvariant()))
+                                let winnerId, resolution =
+                                    if active.Length = 1 then let id, _, _, _, _, _, _ = active.Head in Some id, "cwtools_single_active"
+                                    else
+                                        match strategy with
+                                        | Some "LIOS" -> let id, _, _, _, _, _, _ = ordered |> List.last in Some id, "last_in_only_served"
+                                        | Some "FIOS" -> let id, _, _, _, _, _, _ = ordered.Head in Some id, "first_in_only_served"
+                                        | Some "NO" -> let id, _, _, _, _, _, _ = ordered.Head in Some id, "no_individual_override"
+                                        | Some "MERGE" -> None, "merged_definitions"
+                                        | Some "DUPL" -> None, "duplicate_definitions"
+                                        | _ -> None, "ambiguous"
                                 setCommandParameters stackCommand [ "$type", box entityType; "$symbol", box symbolId; "$resolution", box resolution ]
                                 let stackId = stackCommand.ExecuteScalar() :?> int64
-                                for definitionId, _, _, overwrite, _ in items do
+                                for index, (definitionId, _, _, _, candidateStrategy, origin, logical) in ordered |> List.indexed do
                                     setCommandParameters candidateCommand
                                         [ "$stack", box stackId; "$definition", box definitionId
-                                          "$active", box (if overwrite <> "overwritten" then 1 else 0) ]
+                                          "$active", box (if winnerId = Some definitionId then 1 else 0)
+                                          "$order", box index
+                                          "$origin", box origin
+                                          "$logical", box logical
+                                          "$strategy", box (candidateStrategy |> Option.toObj) ]
                                     candidateCommand.ExecuteNonQuery() |> ignore
-                                if resolution <> "single_active_definition" then
+                                if resolution = "ambiguous" then
                                     setCommandParameters unresolvedCommand
                                         [ "$type", box entityType; "$symbol", box symbolId; "$resolution", box resolution ]
                                     unresolvedCommand.ExecuteNonQuery() |> ignore
@@ -2589,6 +4008,41 @@ ORDER BY lower(d.entity_type), lower(d.symbol_id), d.id
                             use command = connection.CreateCommand()
                             command.CommandText <- sql
                             Convert.ToInt32(command.ExecuteScalar())
+                        let definitionCount = scalarCount "SELECT count(*) FROM definitions"
+                        let workspaceDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'workspace'"
+                        let dependencyDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'dependency'"
+                        let vanillaDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'vanilla'"
+                        let definitionStackCount = scalarCount "SELECT count(*) FROM definition_stacks"
+                        let topologyFileCount = scalarCount "SELECT count(*) FROM files"
+                        let topologyEdgeCount = scalarCount "SELECT count(*) FROM references_graph"
+                        let eventNodeCount = scalarCount "SELECT count(*) FROM event_nodes"
+                        let eventEdgeCount = scalarCount "SELECT count(*) FROM event_edges"
+                        let eventLogicCount = scalarCount "SELECT count(*) FROM event_logic"
+                        let inlineTemplateCount = scalarCount "SELECT count(*) FROM inline_templates"
+                        let inlineInvocationCount = scalarCount "SELECT count(*) FROM inline_invocations"
+                        let inlineExpansionCount = scalarCount "SELECT count(*) FROM inline_expansions"
+                        let incrementalDurationMs = max 0 (int ((DateTimeOffset.UtcNow - incrementalStartedAt).TotalMilliseconds))
+                        let databaseSizeBytes = try FileInfo(target).Length with _ -> 0L
+                        use finalMetadataTransaction = connection.BeginTransaction()
+                        let upsertFinalMetadata key value =
+                            use command = connection.CreateCommand()
+                            command.Transaction <- finalMetadataTransaction
+                            command.CommandText <- "INSERT INTO metadata(key, value) VALUES ($key, $value) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+                            addParameter command "$key" (box key)
+                            addParameter command "$value" (box value)
+                            command.ExecuteNonQuery() |> ignore
+                        upsertFinalMetadata "definition_count" (string definitionCount)
+                        upsertFinalMetadata "topology_file_count" (string topologyFileCount)
+                        upsertFinalMetadata "topology_edge_count" (string topologyEdgeCount)
+                        upsertFinalMetadata "event_node_count" (string eventNodeCount)
+                        upsertFinalMetadata "event_edge_count" (string eventEdgeCount)
+                        upsertFinalMetadata "event_logic_count" (string eventLogicCount)
+                        upsertFinalMetadata "inline_template_count" (string inlineTemplateCount)
+                        upsertFinalMetadata "inline_invocation_count" (string inlineInvocationCount)
+                        upsertFinalMetadata "inline_expansion_count" (string inlineExpansionCount)
+                        upsertFinalMetadata "last_incremental_duration_ms" (string incrementalDurationMs)
+                        upsertFinalMetadata "database_size_bytes" (string databaseSizeBytes)
+                        finalMetadataTransaction.Commit()
                         let compactDomains =
                             use command = connection.CreateCommand()
                             command.CommandText <- "SELECT id, definition_count, workspace_count, vanilla_count, entity_types_json FROM domains ORDER BY id"
@@ -2608,7 +4062,9 @@ ORDER BY lower(d.entity_type), lower(d.symbol_id), d.id
                                 [ Some("ok", JsonValue.Boolean true)
                                   Some("status", JsonValue.String runtime.status)
                                   Some("source", JsonValue.String "cwtools-project-knowledge-sqlite")
-                                  Some("schemaVersion", JsonValue.Number 3m)
+                                  Some("schemaVersion", JsonValue.Number(decimal KnowledgeSchemaVersion))
+                                  Some("capabilityVersions", capabilityVersionsJson)
+                                  Some("capabilityStatus", capabilityStatusJson)
                                   Some("game", JsonValue.String activeGame)
                                   Some("generatedAtUnixMs", JsonValue.Number(decimal (generatedAt.ToUnixTimeMilliseconds())))
                                   Some("graphVersion", JsonValue.Number(decimal runtime.graphVersion))
@@ -2617,17 +4073,42 @@ ORDER BY lower(d.entity_type), lower(d.symbol_id), d.id
                                   Some("databasePath", JsonValue.String(normalizePath target))
                                   Some("generationMode", JsonValue.String "incremental")
                                   Some("domains", JsonValue.Array compactDomains)
+                                  Some("baseline", jsonRecord
+                                    [ Some("deterministicOrdering", JsonValue.Boolean true)
+                                      Some("incrementalDurationMs", JsonValue.Number(decimal incrementalDurationMs))
+                                      Some("changedFiles", JsonValue.Number(decimal changedFiles.Length))
+                                      Some("databaseSizeBytes", JsonValue.Number(decimal databaseSizeBytes))
+                                      Some("definitions", jsonRecord
+                                        [ Some("total", JsonValue.Number(decimal definitionCount))
+                                          Some("workspace", JsonValue.Number(decimal workspaceDefinitionCount))
+                                          Some("dependency", JsonValue.Number(decimal dependencyDefinitionCount))
+                                          Some("vanilla", JsonValue.Number(decimal vanillaDefinitionCount)) ])
+                                      Some("inlineGraph", jsonRecord
+                                        [ Some("templates", JsonValue.Number(decimal inlineTemplateCount))
+                                          Some("invocations", JsonValue.Number(decimal inlineInvocationCount))
+                                          Some("expansions", JsonValue.Number(decimal inlineExpansionCount)) ]) ])
+                                  Some("coverage", jsonRecord
+                                    [ Some("filesConsidered", JsonValue.Number(decimal topologyFileCount))
+                                      Some("filesIndexed", JsonValue.Number(decimal topologyFileCount))
+                                      Some("definitionsConsidered", JsonValue.Number(decimal definitionCount))
+                                      Some("definitionsIndexed", JsonValue.Number(decimal definitionCount))
+                                      Some("edgesConsidered", JsonValue.Number(decimal topologyEdgeCount))
+                                      Some("edgesIndexed", JsonValue.Number(decimal topologyEdgeCount))
+                                      Some("truncated", JsonValue.Boolean(oldTopologyTruncated || freshTopology.truncated))
+                                      Some("staleReasons", jsonStringArray [ if runtime.status <> "ready" then yield "lsp_not_ready" ])
+                                      Some("unsupportedConstructs", jsonStringArray [ if oldTopologyTruncated || freshTopology.truncated then yield "topology_export_limits_reached" ]) ])
                                   Some("counts", jsonRecord
-                                    [ Some("definitions", JsonValue.Number(decimal (scalarCount "SELECT count(*) FROM definitions")))
-                                      Some("availableDefinitions", JsonValue.Number(decimal (scalarCount "SELECT count(*) FROM definitions")))
-                                      Some("workspaceDefinitions", JsonValue.Number(decimal (scalarCount "SELECT count(*) FROM definitions WHERE origin = 'workspace'")))
-                                      Some("vanillaDefinitions", JsonValue.Number(decimal (scalarCount "SELECT count(*) FROM definitions WHERE origin = 'vanilla'")))
-                                      Some("definitionStacks", JsonValue.Number(decimal (scalarCount "SELECT count(*) FROM definition_stacks")))
-                                      Some("topologyFiles", JsonValue.Number(decimal (scalarCount "SELECT count(*) FROM files")))
-                                      Some("topologyEdges", JsonValue.Number(decimal (scalarCount "SELECT count(*) FROM references_graph")))
-                                      Some("eventNodes", JsonValue.Number(decimal (scalarCount "SELECT count(*) FROM event_nodes")))
-                                      Some("eventEdges", JsonValue.Number(decimal (scalarCount "SELECT count(*) FROM event_edges")))
-                                      Some("eventLogic", JsonValue.Number(decimal (scalarCount "SELECT count(*) FROM event_logic"))) ])
+                                    [ Some("definitions", JsonValue.Number(decimal definitionCount))
+                                      Some("availableDefinitions", JsonValue.Number(decimal definitionCount))
+                                      Some("workspaceDefinitions", JsonValue.Number(decimal workspaceDefinitionCount))
+                                      Some("dependencyDefinitions", JsonValue.Number(decimal dependencyDefinitionCount))
+                                      Some("vanillaDefinitions", JsonValue.Number(decimal vanillaDefinitionCount))
+                                      Some("definitionStacks", JsonValue.Number(decimal definitionStackCount))
+                                      Some("topologyFiles", JsonValue.Number(decimal topologyFileCount))
+                                      Some("topologyEdges", JsonValue.Number(decimal topologyEdgeCount))
+                                      Some("eventNodes", JsonValue.Number(decimal eventNodeCount))
+                                      Some("eventEdges", JsonValue.Number(decimal eventEdgeCount))
+                                      Some("eventLogic", JsonValue.Number(decimal eventLogicCount)) ])
                                   Some("freshness", jsonRecord
                                     [ Some("validationInProgress", JsonValue.Boolean runtime.validationInProgress)
                                       Some("loadingInProgress", JsonValue.Boolean runtime.loadingInProgress)
@@ -2635,14 +4116,17 @@ ORDER BY lower(d.entity_type), lower(d.symbol_id), d.id
                                       Some("lastGlobalRefreshAtUnixMs", JsonValue.Number(decimal runtime.lastGlobalRefreshAtUnixMs)) ])
                                   Some("warnings", jsonStringArray warnings) ])
 
-let exportProjectKnowledge (activeGame: string) (projectRoots: string list) (rawOptions: ExportOptions) (runtime: RuntimeMetadata) (game: IGame<'T>) =
+let exportProjectKnowledgeCancellable shouldCancel (activeGame: string) (projectRoots: string list) (rawOptions: ExportOptions) (runtime: RuntimeMetadata) (game: IGame<'T>) =
     let run () =
-        match tryIncrementalProjectKnowledgeExport activeGame projectRoots rawOptions runtime game with
+        match tryIncrementalProjectKnowledgeExport shouldCancel activeGame projectRoots rawOptions runtime game with
         | Some result -> result
-        | None -> exportProjectKnowledgeRebuild activeGame projectRoots rawOptions runtime game
+        | None -> exportProjectKnowledgeRebuild shouldCancel activeGame projectRoots rawOptions runtime game
     match rawOptions.databasePath with
     | Some databasePath ->
         let key = Path.GetFullPath databasePath
         let gate = databaseWriteGates.GetOrAdd(key, fun _ -> obj())
         lock gate run
     | None -> run ()
+
+let exportProjectKnowledge activeGame projectRoots rawOptions runtime game =
+    exportProjectKnowledgeCancellable (fun () -> false) activeGame projectRoots rawOptions runtime game

@@ -38,6 +38,8 @@
     <Compile Include="CompletionFallbackPolicy.fs" />
     <Compile Include="GraphTypes.fs" />
     <Compile Include="SemanticGraph.fs" />
+    <Compile Include="InlineGraph.fs" />
+    <Compile Include="PdxFlowAnalysis.fs" />
     <Compile Include="ProjectKnowledge.fs" />
     <Compile Include="DiagnosticMerge.fs" />
     <Compile Include="PdxFolding.fs" />

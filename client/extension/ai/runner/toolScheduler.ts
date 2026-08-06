@@ -12,6 +12,30 @@ import { ToolConcurrencyClass } from '../types';
 
 export const SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS = new Set<string>(['write_file']);
 
+/** Resolve sibling localisation files, including Stellaris' per-language directories. */
+export function getLocalisationTransactionTargets(filePath: string, languages: readonly string[]): Array<{ languageTag: string; filePath: string }> {
+    const parent = path.dirname(filePath);
+    const parentName = path.basename(parent).toLowerCase();
+    const grandParent = path.dirname(parent);
+    const grandParentName = path.basename(grandParent).toLowerCase();
+    const hasLanguageDirectory = grandParentName === 'localisation' || grandParentName === 'localization';
+    const baseName = path.basename(filePath).replace(/\.yml$/i, '').replace(/_l_[a-z_]+$/i, '');
+    const seen = new Set<string>();
+    const targets: Array<{ languageTag: string; filePath: string }> = [];
+    for (const rawLanguage of languages) {
+        const normalized = rawLanguage.trim().toLowerCase().replace(/^l_/, '');
+        if (!normalized || !/^[a-z][a-z_]*$/.test(normalized)) continue;
+        const languageTag = `l_${normalized}`;
+        if (seen.has(languageTag)) continue;
+        seen.add(languageTag);
+        const targetDir = hasLanguageDirectory && parentName !== 'localisation' && parentName !== 'localization'
+            ? path.join(grandParent, normalized)
+            : parent;
+        targets.push({ languageTag, filePath: path.join(targetDir, `${baseName}_${languageTag}.yml`) });
+    }
+    return targets;
+}
+
 type SchedulerQueueKind = 'lsp' | 'network' | 'global';
 
 interface SchedulerWaiter {
@@ -75,9 +99,19 @@ export function getAgentToolTargetFiles(
             add(args.file);
             break;
         case 'replace_lines':
-        case 'write_localisation':
             add(args.filePath);
             break;
+        case 'write_localisation': {
+            const languages = Array.isArray(args.languages)
+                ? args.languages.filter((value): value is string => typeof value === 'string')
+                : [];
+            if (languages.length > 0 && typeof args.filePath === 'string') {
+                for (const target of getLocalisationTransactionTargets(args.filePath, languages)) add(target.filePath);
+            } else {
+                add(args.filePath);
+            }
+            break;
+        }
         case 'deploy_mod_asset':
             if (workspaceRoot && typeof args.targetRelativePath === 'string') {
                 paths.push(path.resolve(workspaceRoot, args.targetRelativePath));

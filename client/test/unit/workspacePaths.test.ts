@@ -120,6 +120,22 @@ describe('workspace AI storage paths', () => {
         expect(fs.existsSync(legacyRoot)).to.equal(false);
     });
 
+    it('drops obsolete project knowledge instead of migrating it into .cwtools', () => {
+        const workspacePaths = loadWorkspacePaths();
+        const primaryRoot = path.join(projectRoot, '.cwtools');
+        const legacyKnowledge = path.join(legacyRoot, 'project', 'knowledge');
+        fs.mkdirSync(legacyKnowledge, { recursive: true });
+        fs.writeFileSync(path.join(legacyKnowledge, 'manifest.json'), JSON.stringify({ schemaVersion: 6 }), 'utf8');
+        fs.writeFileSync(path.join(legacyRoot, 'keep.txt'), 'current-independent-state', 'utf8');
+
+        const result = workspacePaths.migrateLegacyAiStorageRoot(legacyRoot);
+
+        expect(result.obsoleteKnowledgeRemoved).to.equal(true);
+        expect(fs.existsSync(path.join(primaryRoot, 'project', 'knowledge'))).to.equal(false);
+        expect(fs.readFileSync(path.join(primaryRoot, 'keep.txt'), 'utf8')).to.equal('current-independent-state');
+        expect(fs.existsSync(legacyRoot)).to.equal(false);
+    });
+
     it('is a no-op when no legacy storage root exists', () => {
         const workspacePaths = loadWorkspacePaths();
         fs.rmSync(legacyRoot, { recursive: true, force: true });

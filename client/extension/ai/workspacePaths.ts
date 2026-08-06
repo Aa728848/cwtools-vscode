@@ -29,6 +29,7 @@ export interface AiStorageMigrationResult {
     migrated: boolean;
     movedEntries: number;
     resolvedConflicts: number;
+    obsoleteKnowledgeRemoved: boolean;
 }
 
 /** Configure the extension-owned directory used for private Agent state. */
@@ -186,15 +187,32 @@ function mergeLegacyStorageEntry(
 export function migrateLegacyAiStorageRoot(fallbackWorkspaceRoot = ''): AiStorageMigrationResult {
     const roots = resolveAiStorageRoots(fallbackWorkspaceRoot);
     if (!roots) {
-        return { legacyRoot: '', primaryRoot: '', migrated: false, movedEntries: 0, resolvedConflicts: 0 };
+        return { legacyRoot: '', primaryRoot: '', migrated: false, movedEntries: 0, resolvedConflicts: 0, obsoleteKnowledgeRemoved: false };
     }
     const result: AiStorageMigrationResult = {
         ...roots,
         migrated: false,
         movedEntries: 0,
         resolvedConflicts: 0,
+        obsoleteKnowledgeRemoved: false,
     };
     if (!fs.existsSync(roots.legacyRoot)) return result;
+
+    // Project Knowledge has a single current schema and must be rebuilt from
+    // the active LSP model. Never migrate the removed .cwtools-ai knowledge
+    // pack into the current root as if it were usable data.
+    const obsoleteKnowledgeRoot = path.join(roots.legacyRoot, 'project', 'knowledge');
+    if (fs.existsSync(obsoleteKnowledgeRoot)) {
+        fs.rmSync(obsoleteKnowledgeRoot, { recursive: true, force: true });
+        result.obsoleteKnowledgeRemoved = true;
+        result.migrated = true;
+        for (const candidate of [path.dirname(obsoleteKnowledgeRoot), roots.legacyRoot]) {
+            try {
+                if (fs.existsSync(candidate) && fs.readdirSync(candidate).length === 0) fs.rmdirSync(candidate);
+            } catch { /* another legacy entry still owns the directory */ }
+        }
+        if (!fs.existsSync(roots.legacyRoot)) return result;
+    }
 
     if (!fs.existsSync(roots.primaryRoot)) {
         fs.mkdirSync(path.dirname(roots.primaryRoot), { recursive: true });

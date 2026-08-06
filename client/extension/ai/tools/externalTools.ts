@@ -907,11 +907,61 @@ export class ExternalToolHandler {
 
     // ─── getIgnoredDiagnostics ────────────────────────────────────────────────
 
-    async getIgnoredDiagnostics(): Promise<{ success: boolean; ignoredKeys: string[]; count: number }> {
+    async getIgnoredDiagnostics(): Promise<{
+        success: boolean;
+        ignoredKeys: string[];
+        count: number;
+        audit?: Array<{
+            key: string;
+            category: 'exact_id' | 'message_fragment' | 'type_name' | 'broad_pattern' | 'unmatched';
+            stillHits: boolean;
+            matchCount: number;
+        }>;
+    }> {
         try {
             const vs = await import('vscode');
             const ignored = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string[]>('ignoredDiagnostics', []);
-            return { success: true, count: ignored.length, ignoredKeys: ignored };
+            // Audit every ignore entry against the current diagnostics so the
+            // model can distinguish exact suppressions from dangerous broad
+            // patterns and stale entries that no longer match anything.
+            const allDiags: Array<{ code: string; message: string; source: string }> = [];
+            for (const [, diags] of vs.languages.getDiagnostics()) {
+                for (const d of diags) {
+                    const code = typeof d.code === 'object' && d.code !== null
+                        ? String((d.code as { value?: unknown }).value ?? '')
+                        : String(d.code ?? '');
+                    allDiags.push({ code, message: d.message, source: String(d.source ?? '') });
+                }
+            }
+            const audit = ignored.map(key => {
+                const trimmed = key.trim();
+                let category: 'exact_id' | 'message_fragment' | 'type_name' | 'broad_pattern' | 'unmatched' = 'unmatched';
+                const lowerKey = trimmed.toLowerCase();
+                const broad = /^[a-z0-9_ -]+$/i.test(trimmed)
+                    && !trimmed.includes(':')
+                    && trimmed.split(/[\s_-]+/).filter(Boolean).length <= 2;
+                const exactHits = allDiags.filter(d => d.code.toLowerCase() === lowerKey);
+                const fragmentHits = allDiags.filter(d => d.message.toLowerCase().includes(lowerKey) || d.source.toLowerCase().includes(lowerKey));
+                const matchCount = exactHits.length + fragmentHits.length;
+                category = trimmed.includes(':') && exactHits.length > 0
+                    ? 'exact_id'
+                    : broad && matchCount === 0
+                        ? 'broad_pattern'
+                        : broad
+                            ? 'broad_pattern'
+                            : fragmentHits.length > 0
+                                ? 'message_fragment'
+                                : matchCount > 0
+                                    ? 'type_name'
+                                    : 'unmatched';
+                return {
+                    key: trimmed,
+                    category,
+                    stillHits: matchCount > 0,
+                    matchCount,
+                };
+            });
+            return { success: true, count: ignored.length, ignoredKeys: ignored, audit };
         } catch {
             return { success: false, count: 0, ignoredKeys: [] };
         }

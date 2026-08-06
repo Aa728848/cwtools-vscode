@@ -5,7 +5,7 @@ import { analyzeSchema, flattenSchema } from './schemaFlatten';
 export type AgentToolName =
     | 'select_tools' | 'create_goal' | 'get_goal' | 'update_goal' | 'set_goal_budget'
     | 'query_scope' | 'query_types' | 'query_rules' | 'query_cwt_schema' | 'query_override_modes' | 'search_rule_capabilities' | 'explain_scope' | 'parse_pdx_fragment' | 'remove_ignored_diagnostic'
-    | 'query_localisation_index' | 'query_workspace_index' | 'explore_pdx_project' | 'query_project_profile' | 'query_project_knowledge' | 'query_interface_knowledge' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'query_references'
+    | 'query_localisation_index' | 'query_workspace_index' | 'explore_pdx_project' | 'query_inline_instantiation' | 'analyze_pdx_flow' | 'compare_definition_with_vanilla' | 'query_project_profile' | 'query_project_knowledge' | 'query_interface_knowledge' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'query_references'
     | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
     | 'go_to_definition' | 'find_references' | 'hover_symbol' | 'rename_symbol'
@@ -95,6 +95,9 @@ const TOOL_DOMAINS = {
     query_localisation_index: 'paradox',
     query_workspace_index: 'paradox',
     explore_pdx_project: 'paradox',
+    query_inline_instantiation: 'paradox',
+    analyze_pdx_flow: 'paradox',
+    compare_definition_with_vanilla: 'paradox',
     query_project_profile: 'paradox',
     query_project_knowledge: 'paradox',
     query_interface_knowledge: 'paradox',
@@ -276,7 +279,7 @@ const GENERAL_WORKFLOW_SCHEMA: ToolDefinition = {
 // Categories to help assign modes
 const BASE_READ: AgentToolName[] = [
     'select_tools', 'get_goal',
-    'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_references', 'get_design_blueprint_contract',
+    'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_inline_instantiation', 'analyze_pdx_flow', 'compare_definition_with_vanilla', 'query_references', 'get_design_blueprint_contract',
     'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge', 'run_skill', 'history', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol',
     'verify_pdx_identifier', 'read_file', 'list_directory', 'glob_files',
@@ -385,7 +388,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
         effect = 'workspace_read';
         riskLevel = 0;
         if (['document_symbols', 'workspace_symbols', 'get_lsp_status', 'get_diagnostics', 'lsp_operation', 'query_references', 'query_definition', 'explore_pdx_project',
-            'query_shader_symbol', 'query_shader_compile_unit', 'query_shader_platform_variants', 'query_shader_callers', 'explain_shader_reachability', 'validate_shader', 'compare_shader_with_vanilla'].includes(name)) {
+            'query_shader_symbol', 'query_shader_compile_unit', 'query_shader_platform_variants', 'query_shader_callers', 'explain_shader_reachability', 'validate_shader', 'compare_shader_with_vanilla', 'query_inline_instantiation', 'analyze_pdx_flow', 'compare_definition_with_vanilla'].includes(name)) {
             concurrencyClass = 'lsp-limited';
         } else {
             concurrencyClass = 'parallel';

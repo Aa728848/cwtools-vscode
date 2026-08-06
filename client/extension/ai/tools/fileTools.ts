@@ -35,6 +35,7 @@ import {
 } from '../workspaceSandbox';
 import { GRAPHICS_EXTS, matchesExt } from '../../fileExtensions';
 import { queryProjectKnowledge, readProjectKnowledgeManifest } from '../projectKnowledge';
+import { getLocalisationTransactionTargets } from '../runner/toolScheduler';
 
 // - Shared file-system helpers -
 
@@ -1563,6 +1564,87 @@ export class FileToolHandler {
         filePath: string;
         language: string;
         entries: Array<{ key: string; value: string; number?: number; comment?: string }>;
+        /** Explicit multi-file transaction: sibling language files to write in lockstep. */
+        languages?: string[];
+    }, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
+        // Explicit multi-file transaction: validate every target first; if any
+        // target is invalid, reject the whole transaction with no partial writes.
+        const languages = Array.isArray(args.languages) && args.languages.length > 0
+            ? args.languages.map(value => value.trim()).filter(Boolean)
+            : [];
+        if (languages.length > 0) {
+            const rawTargets = getLocalisationTransactionTargets(args.filePath, languages);
+            const targets: Array<{ languageTag: string; filePath: string }> = [];
+            for (const target of rawTargets) {
+                try {
+                    const authorized = await this.resolveAndAuthorizeWrite(target.filePath, 'write_localisation', context);
+                    targets.push({ ...target, filePath: authorized });
+                } catch {
+                    targets.push(target);
+                }
+            }
+            const invalid = targets.filter(target => this.validateLocalisationTarget(target.filePath) !== null);
+            if (invalid.length > 0) {
+                return {
+                    success: false,
+                    message: `write_localisation multi-file transaction rejected: ${invalid.length} of ${targets.length} target language files are outside localisation/ or localization/ (${invalid.map(item => item.languageTag).join(', ')}). No files were written.`,
+                };
+            }
+            const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
+            const snapshots = new Map<string, { existed: boolean; content?: string }>();
+            for (const target of targets) {
+                if (vfsOverlay) {
+                    snapshots.set(target.filePath, { existed: vfsOverlay.has(target.filePath), content: vfsOverlay.get(target.filePath) });
+                } else if (fs.existsSync(target.filePath)) {
+                    snapshots.set(target.filePath, { existed: true, content: await fs.promises.readFile(target.filePath, 'utf8') });
+                } else {
+                    snapshots.set(target.filePath, { existed: false });
+                }
+            }
+            const results: string[] = [];
+            const written: string[] = [];
+            for (const target of targets) {
+                written.push(target.filePath);
+                const result = await this.writeSingleLocalisation({
+                    filePath: target.filePath,
+                    language: target.languageTag,
+                    entries: args.entries,
+                }, context);
+                if (!result.success) {
+                    const rollbackErrors: string[] = [];
+                    for (const writtenPath of [...written].reverse()) {
+                        const snapshot = snapshots.get(writtenPath)!;
+                        try {
+                            if (vfsOverlay) {
+                                if (snapshot.existed) vfsOverlay.set(writtenPath, snapshot.content ?? '');
+                                else vfsOverlay.delete(writtenPath);
+                            } else if (snapshot.existed) {
+                                await fs.promises.writeFile(writtenPath, snapshot.content ?? '', 'utf8');
+                            } else if (fs.existsSync(writtenPath)) {
+                                await fs.promises.unlink(writtenPath);
+                            }
+                        } catch (error) {
+                            rollbackErrors.push(`${path.basename(writtenPath)}: ${error instanceof Error ? error.message : String(error)}`);
+                        }
+                    }
+                    return {
+                        success: false,
+                        message: rollbackErrors.length === 0
+                            ? `write_localisation multi-file transaction failed at ${target.languageTag}: ${result.message ?? 'unknown error'}. All earlier writes were rolled back.`
+                            : `write_localisation multi-file transaction failed at ${target.languageTag}; rollback was incomplete: ${rollbackErrors.join('; ')}`,
+                    };
+                }
+                results.push(`${target.languageTag}: ${result.message ?? 'ok'}`);
+            }
+            return { success: true, message: results.join(' | ') };
+        }
+        return this.writeSingleLocalisation(args, context);
+    }
+
+    private async writeSingleLocalisation(args: {
+        filePath: string;
+        language: string;
+        entries: Array<{ key: string; value: string; number?: number; comment?: string }>;
     }, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
         return this.executeWithLock(args.filePath, async () => {
             try {
@@ -1778,7 +1860,7 @@ export class FileToolHandler {
                     return failBlueprint(`Design blueprint refused: unresolved critical fact(s): ${args.unresolvedCritical.join('; ')}`);
                 }
                 const evidenceKinds = (args.evidence ?? []).map(item => `${item.sourceType} ${item.source}`.toLowerCase());
-                const hasKnowledge = evidenceKinds.some(value => value.includes('project_knowledge') || value.includes('query_project_knowledge') || value.includes('.cwtools/project/knowledge') || value.includes('.cwtools-ai/project/knowledge'));
+                const hasKnowledge = evidenceKinds.some(value => value.includes('project_knowledge') || value.includes('query_project_knowledge') || value.includes('.cwtools/project/knowledge'));
                 const hasVanilla = evidenceKinds.some(value => value.includes('vanilla'));
                 const hasCwt = evidenceKinds.some(value => /\b(cwt|lsp|schema|rule)\b/.test(value));
                 const missingEvidence = [

@@ -227,14 +227,34 @@ export function queryInterfaceKnowledge(input: unknown = {}): Record<string, unk
         query: query || undefined,
         elementType: elementType || undefined,
         source: SOURCE,
-        criticalSafetyRules,
-        entries: ranked,
+        // Fact-layer split: static versioned engine guidance vs project facts
+        // vs the current-version vanilla contract vs what still needs runtime
+        // confirmation. The model must never present engineGuidance as a
+        // project fact or an unresolved behavior as settled.
+        engineGuidance: {
+            versioned: true,
+            bundledAt: SOURCE.revisionId,
+            criticalSafetyRules,
+            entries: ranked,
+            instruction: 'Large off-canvas coordinates are intentional compatibility evidence. Never delete, rename, reparent, clamp, or auto-arrange those controls as cleanup.',
+        },
+        projectGraph: {
+            available: false,
+            hint: 'Use query_workspace_index with source="gui" (and includeAssetChain for sprite targets) or explore_pdx_project for current project GUI facts.',
+        },
+        vanillaContract: {
+            available: false,
+            hint: 'Use query_workspace_index with origin="vanilla" source="gui" or explore_pdx_project on the vanilla GUI file for current-version structure.',
+        },
+        unresolved: [
+            'Window open/close timing and engine-bound control lookup are hardcoded runtime behavior that static analysis cannot confirm.',
+            'Effect identifiers resolved through scripted GUI or generated button effects still require an in-game verification.',
+        ],
         requiredNextChecks: [
             'Read the complete current project or vanilla parent GUI block before editing.',
             'Verify .gui to GFX_* to .gfx references with current project and vanilla evidence.',
             'Resolve effectButtonType effect identifiers in /common/button_effects/ or the current scripted GUI model.',
             'Run fresh diagnostics after writing; runtime-bound window contracts still require an in-game check.',
         ],
-        instruction: 'Large off-canvas coordinates are intentional compatibility evidence. Never delete, rename, reparent, clamp, or auto-arrange those controls as cleanup.',
     };
 }

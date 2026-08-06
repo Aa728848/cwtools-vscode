@@ -81,14 +81,64 @@ describe('ProjectProfile localisation detection', () => {
         }
     });
 
-    it('should detect the canonical .cwtools vanilla cache directory', () => {
+    it('reports every first-level language directory even without matching files', () => {
+        const workspaceRoot = makeWorkspace();
+        try {
+            const locDir = path.join(workspaceRoot, 'localisation');
+            fs.mkdirSync(path.join(locDir, 'l_english'), { recursive: true });
+            fs.mkdirSync(path.join(locDir, 'l_simp_chinese'), { recursive: true });
+            fs.writeFileSync(path.join(locDir, 'l_english', 'events.yml'), '\ufeffl_english:\n', 'utf8');
+            fs.writeFileSync(path.join(locDir, 'l_simp_chinese', 'events.yml'), '\ufeffl_simp_chinese:\n', 'utf8');
+
+            const profile = buildProjectProfile(workspaceRoot);
+
+            expect(profile.localisation.languages).to.deep.equal(['l_english', 'l_simp_chinese']);
+            expect(profile.localisation.defaultLanguage).to.equal(undefined);
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
+
+    it('flags header mismatches and mixed BOM as warnings', () => {
+        const workspaceRoot = makeWorkspace();
+        try {
+            const locDir = path.join(workspaceRoot, 'localisation', 'l_english');
+            fs.mkdirSync(locDir, { recursive: true });
+            fs.writeFileSync(path.join(locDir, 'a.yml'), '\ufeffl_english:\n', 'utf8');
+            fs.writeFileSync(path.join(locDir, 'b.yml'), 'l_english:\n', 'utf8'); // no BOM, mixed with a.yml
+
+            const profile = buildProjectProfile(workspaceRoot);
+
+            expect(profile.localisation.encodingByLanguage).to.not.equal(undefined);
+            expect(profile.warnings ?? []).to.satisfy((warnings: string[]) => warnings.some(warning => warning.includes('mixes BOM')));
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
+
+    it('should not report configured vanillaCache for an empty .cwtools directory', () => {
         const workspaceRoot = makeWorkspace();
         try {
             fs.mkdirSync(path.join(workspaceRoot, '.cwtools'));
 
             const profile = buildProjectProfile(workspaceRoot);
 
+            expect(profile.validation.vanillaCache).to.equal('missing');
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
+
+    it('reports configured vanillaCache only when a readable cache file exists', () => {
+        const workspaceRoot = makeWorkspace();
+        try {
+            fs.mkdirSync(path.join(workspaceRoot, '.cwtools'));
+            fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'stl.cwb'), 'binary-cache-data', 'utf8');
+
+            const profile = buildProjectProfile(workspaceRoot);
+
             expect(profile.validation.vanillaCache).to.equal('configured');
+            expect(profile.validation.vanillaCacheEvidence).to.match(/stl\.cwb$/);
         } finally {
             cleanupWorkspace(workspaceRoot);
         }
@@ -106,6 +156,68 @@ describe('ProjectProfile localisation detection', () => {
             expect(profile.keyDirectories.map(directory => directory.path)).to.include('common/ritual_definitions');
             expect(profile.identifiers.byType).to.deep.equal({});
             expect(profile.identifiers.scriptedEffects).to.equal(undefined);
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
+
+    it('does not double count common vs its child directories', () => {
+        const workspaceRoot = makeWorkspace();
+        try {
+            fs.mkdirSync(path.join(workspaceRoot, 'common', 'events'), { recursive: true });
+            fs.mkdirSync(path.join(workspaceRoot, 'common', 'on_actions'), { recursive: true });
+            fs.writeFileSync(path.join(workspaceRoot, 'common', 'direct.txt'), 'x = { }\n', 'utf8');
+            fs.writeFileSync(path.join(workspaceRoot, 'common', 'events', 'e.txt'), 'event_a = { }\n', 'utf8');
+            fs.writeFileSync(path.join(workspaceRoot, 'common', 'on_actions', 'o.txt'), 'on_x = { }\n', 'utf8');
+
+            const profile = buildProjectProfile(workspaceRoot);
+            const common = profile.keyDirectories.find(dir => dir.path === 'common');
+
+            expect(common?.fileCount).to.equal(1);
+            expect(profile.keyDirectories.map(dir => dir.path)).to.include('common/events');
+            expect(profile.keyDirectories.map(dir => dir.path)).to.include('common/on_actions');
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
+
+    it('extracts descriptor supported_version, remote_file_id and dependencies', () => {
+        const workspaceRoot = makeWorkspace();
+        try {
+            fs.writeFileSync(path.join(workspaceRoot, 'descriptor.mod'), [
+                'name="Kuat Test Mod"',
+                'supported_version="3.12.*"',
+                'remote_file_id="123456789"',
+                'tags={"Fleet" "Events"}',
+                'dependencies={"Another Mod" "Third Mod"}',
+            ].join('\n'), 'utf8');
+
+            const profile = buildProjectProfile(workspaceRoot);
+
+            expect(profile.modInfo?.supportedVersion).to.equal('3.12.*');
+            expect(profile.modInfo?.remoteFileId).to.equal('123456789');
+            expect(profile.modInfo?.dependencies).to.deep.equal(['Another Mod', 'Third Mod']);
+            expect(profile.compatibility?.declaredDependencies.map(item => item.name)).to.deep.equal(['Another Mod', 'Third Mod']);
+            expect(profile.compatibility?.dependencyRoots.every(item => item.status === 'unresolved')).to.equal(true);
+            expect(profile.compatibility?.loadOrder.source).to.equal('descriptor_only');
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
+
+    it('writes and reads a schemaVersion 2 profile and reports legacy V1 as legacyProfile', () => {
+        const workspaceRoot = makeWorkspace();
+        try {
+            const profile = buildProjectProfile(workspaceRoot);
+            expect(profile.schemaVersion).to.equal(2);
+
+            const profilePath = getProjectProfilePath(workspaceRoot);
+            fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+            fs.writeFileSync(profilePath, JSON.stringify({ ...profile, schemaVersion: 1 }), 'utf8');
+
+            const legacy = readProjectProfile(workspaceRoot);
+            expect(legacy?.schemaVersion).to.equal(2);
+            expect(legacy?.legacyProfile).to.equal(true);
         } finally {
             cleanupWorkspace(workspaceRoot);
         }
@@ -171,5 +283,21 @@ describe('Paradox project profile boundaries', () => {
         fs.writeFileSync(profilePath, 'x'.repeat(2 * 1024 * 1024 + 1), 'utf8');
         expect(readProjectProfile(workspaceRoot)).to.equal(null);
         expect(queryProjectProfile(workspaceRoot).status).to.equal('error');
+    });
+
+    it('returns compatibility section through query_project_profile', () => {
+        const profile = buildProjectProfile(workspaceRoot);
+        profile.modInfo = { ...profile.modInfo, supportedVersion: '3.12.*', dependencies: ['Other Mod'] };
+        const profilePath = getProjectProfilePath(workspaceRoot);
+        fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+        fs.writeFileSync(profilePath, JSON.stringify(profile), 'utf8');
+
+        const result = queryProjectProfile(workspaceRoot, { section: 'compatibility' });
+        expect(result.status).to.equal('ready');
+        const data = result.data as { supportedVersion?: string; dependencies?: string[]; loadOrder?: { confidence: string }; coverage?: { unresolvedIdInference: string } };
+        expect(data.supportedVersion).to.equal('3.12.*');
+        expect(data.dependencies).to.deep.equal(['Other Mod']);
+        expect(data.loadOrder?.confidence).to.equal('partial');
+        expect(data.coverage?.unresolvedIdInference).to.equal('not_available');
     });
 });

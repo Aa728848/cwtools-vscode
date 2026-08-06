@@ -81,6 +81,7 @@ describe('/init artifact generation', () => {
                     fs.mkdirSync(path.dirname(workspaceIndexPath), { recursive: true });
                     fs.writeFileSync(workspaceIndexPath, 'sqlite');
                 },
+                workspaceSymbolTypeSummary: () => ({ byType: { event: ['test_event'] }, byTypeCounts: { event: 1 } }),
             } as any);
             await clock.runAllAsync();
             const result = await pending;

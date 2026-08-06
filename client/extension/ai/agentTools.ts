@@ -9,6 +9,7 @@
  */
 
 import * as vs from 'vscode';
+import * as nodeCrypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { LanguageClient } from 'vscode-languageclient/node';
@@ -52,7 +53,7 @@ import { preflightCommand, type ConfiguredCommandPolicyRule } from './runner/com
 import { sessionFileWriteMode, sessionPolicyPreset } from './runner/sessionPermissions';
 import type { ApiKeyManager } from './aiService';
 import { normalizeLegacyWebToolCall, type WebSearchProvider } from './tools/webAccess';
-import { EvidenceGate } from './evidence/evidenceGate';
+import { EvidenceGate, type EvidenceCallRecord } from './evidence/evidenceGate';
 import { normalizeEvidenceGateMode, type EvidenceGateDecision, type EvidenceGateMode, type EvidenceGatePhase } from './evidence/evidenceTypes';
 import { isPdxScriptTarget } from './evidence/claimExtractor';
 import { runLedger } from './runner/runLedger';
@@ -89,6 +90,9 @@ const AUTHORITATIVE_MEMORY_EVIDENCE_TOOLS = new Set<string>([
     'workspace_symbols',
     'document_symbols',
     'explore_pdx_project',
+    'query_inline_instantiation',
+    'analyze_pdx_flow',
+    'compare_definition_with_vanilla',
     'search_mod_files',
 ]);
 
@@ -175,6 +179,9 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_localisation_index: 45_000,
     query_workspace_index: 45_000,
     explore_pdx_project: 45_000,
+    query_inline_instantiation: 30_000,
+    analyze_pdx_flow: 30_000,
+    compare_definition_with_vanilla: 30_000,
     query_project_profile: 5_000,
     query_project_knowledge: 10_000,
     query_interface_knowledge: 5_000,
@@ -381,6 +388,8 @@ export class AgentToolExecutor {
     private memoryHandler: MemoryToolHandler;
     private readonly diagnosticAnalysisCounts = new Map<string, { count: number; lastSeen: number }>();
     private readonly activeSkillPolicies = new Map<string, { skillNames: string[]; allowedTools: Set<string> }>();
+    private readonly impactEvidenceCalls = new Map<string, EvidenceCallRecord[]>();
+    private readonly postWriteAffectedFiles = new Map<string, string[]>();
     private static readonly ACTIVE_SKILL_POLICY_LIMIT = 64;
     /** Lazily constructed semantic evidence gate (plan §4 P0). */
     private evidenceGate?: EvidenceGate;
@@ -466,12 +475,65 @@ export class AgentToolExecutor {
         return stored || legacy || undefined;
     }
 
-    private queryLocalisationIndex(args: import('./types').QueryLocalisationIndexArgs): import('./types').QueryLocalisationIndexResult {
+    private async queryLocalisationIndex(args: import('./types').QueryLocalisationIndexArgs): Promise<import('./types').QueryLocalisationIndexResult> {
         return this.lspHandler.queryLocalisationIndex(args);
     }
 
     private async queryWorkspaceIndex(args: import('./types').QueryWorkspaceIndexArgs): Promise<import('./types').QueryWorkspaceIndexResult> {
         return this.lspHandler.queryWorkspaceIndex(args);
+    }
+
+    private async queryInterfaceKnowledgeWithProject(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+        const guidance = queryInterfaceKnowledge(args);
+        const rawQuery = typeof args.query === 'string' ? args.query.trim() : '';
+        const identifier = /^[A-Za-z_][A-Za-z0-9_.:@-]*$/.test(rawQuery) ? rawQuery : undefined;
+        try {
+            const indexed = await this.queryWorkspaceIndex({
+                name: identifier,
+                source: 'gui',
+                origin: 'both',
+                includeReferences: true,
+                includeAssetChain: true,
+                limit: 100,
+            });
+            const projectEntries = indexed.entries.filter(entry => entry.origin !== 'vanilla');
+            const vanillaEntries = indexed.entries.filter(entry => entry.origin === 'vanilla');
+            return {
+                ...guidance,
+                projectGraph: {
+                    available: indexed.status === 'ready' || indexed.status === 'partial',
+                    status: indexed.status,
+                    entries: projectEntries,
+                    facts: {
+                        guiElements: projectEntries.length,
+                        references: projectEntries.reduce((count, entry) => count + (entry.references?.length ?? 0), 0),
+                        offCanvasControls: projectEntries.filter(entry => entry.guiFacts?.offCanvas).map(entry => ({ name: entry.name, file: entry.file, line: entry.line, position: entry.guiFacts?.position })),
+                        localisationKeys: Array.from(new Set(projectEntries.flatMap(entry => entry.guiFacts?.localisationKeys ?? []))).sort(),
+                        customGuiReferences: Array.from(new Set(projectEntries.flatMap(entry => entry.guiFacts?.customGuiReferences ?? []))).sort(),
+                        effectReferences: Array.from(new Set(projectEntries.flatMap(entry => entry.guiFacts?.effectReferences ?? []))).sort(),
+                        spriteReferences: Array.from(new Set(projectEntries.flatMap(entry => entry.guiFacts?.spriteReferences ?? []))).sort(),
+                        assetChains: indexed.assetChain ?? [],
+                    },
+                },
+                vanillaContract: {
+                    available: indexed.status === 'ready' || indexed.status === 'partial',
+                    entries: vanillaEntries,
+                },
+                coverage: {
+                    filesConsidered: new Set(indexed.entries.map(entry => entry.file)).size,
+                    filesIndexed: new Set(indexed.entries.map(entry => entry.file)).size,
+                    symbolsConsidered: indexed.indexedSymbolNames ?? indexed.totalCount,
+                    symbolsIndexed: indexed.entries.length,
+                    truncated: indexed.entries.length >= 100,
+                    staleReasons: indexed.status === 'ready' ? [] : [`index_${indexed.status}`],
+                },
+            };
+        } catch (error) {
+            return {
+                ...guidance,
+                projectGraph: { available: false, error: error instanceof Error ? error.message : String(error) },
+            };
+        }
     }
 
     suspendLsp = (): void => {
@@ -888,7 +950,7 @@ export class AgentToolExecutor {
         const targetRel = path.isAbsolute(decision.target)
             ? (path.relative(this.workspaceRoot, decision.target) || decision.target)
             : decision.target;
-        const conflicts = decision.missingEvidence.filter(item => item.status === 'conflict');
+        const conflicts = decision.missingEvidence.filter(item => item.status === 'conflict' || item.status === 'unknown' || item.status === 'stale');
         const header = EVIDENCE_GATE_MSG.BLOCKED_HEADER(conflicts.length, targetRel);
         return {
             success: false,
@@ -932,6 +994,7 @@ export class AgentToolExecutor {
                 text,
                 previousText,
                 mode,
+                evidenceCalls: this.impactEvidenceCalls.get(this.getImpactEvidenceKey(context)),
             });
         } catch (error) {
             // Evidence collection is advisory when its infrastructure fails;
@@ -961,7 +1024,7 @@ export class AgentToolExecutor {
         if (requestPermission) {
             const targetRel = path.relative(this.workspaceRoot, resolvedTargetFile) || resolvedTargetFile;
             const claimLines = decision.missingEvidence
-                .filter(item => item.status === 'conflict')
+                .filter(item => item.status === 'conflict' || item.status === 'unknown' || item.status === 'stale')
                 .slice(0, 5)
                 .map(m => EVIDENCE_GATE_MSG.CLAIM_LINE(m.kind, m.status, m.claim));
             try {
@@ -993,6 +1056,7 @@ export class AgentToolExecutor {
         const mode = this.evidenceGateMode();
         if (mode === 'off') return undefined;
         try {
+            await this.refreshImpactEvidenceAfterWrite(context);
             const decision = await this.getEvidenceGate().evaluate({
                 toolName: request.toolName,
                 targetFile: request.filePath,
@@ -1000,6 +1064,7 @@ export class AgentToolExecutor {
                 previousText: '',
                 mode,
                 phase,
+                evidenceCalls: this.impactEvidenceCalls.get(this.getImpactEvidenceKey(context)),
             });
             const summary = await this.recordEvidenceGateDecision(decision, context);
             return { decision, summary };
@@ -1017,6 +1082,83 @@ export class AgentToolExecutor {
                 },
             };
         }
+    }
+
+    /** Re-run the exact authoritative reads used by preflight so post-write
+     * evidence is bound to the current model/database revision, not merely to
+     * the fact that a tool with the right name ran earlier. */
+    private extractIndirectEvidenceFiles(result: unknown): string[] {
+        const files = new Set<string>();
+        const visit = (value: unknown, key = '', depth = 0): void => {
+            if (depth > 8 || files.size >= 200 || value === null || value === undefined) return;
+            if (typeof value === 'string') {
+                if (/^(?:file|sourceFile|callerFile|invocationFile|templateFile)$/i.test(key)
+                    && this.isDiagnosticRelevantFile(value)) {
+                    const resolved = path.isAbsolute(value) ? path.resolve(value) : path.resolve(this.workspaceRoot, value);
+                    const relative = path.relative(this.workspaceRoot, resolved);
+                    if (relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))) files.add(resolved);
+                }
+                return;
+            }
+            if (Array.isArray(value)) {
+                for (const item of value) visit(item, key, depth + 1);
+                return;
+            }
+            if (typeof value === 'object') {
+                for (const [childKey, child] of Object.entries(value as Record<string, unknown>)) visit(child, childKey, depth + 1);
+            }
+        };
+        visit(result);
+        return [...files].sort((a, b) => a.localeCompare(b));
+    }
+
+    private async refreshImpactEvidenceAfterWrite(context?: import('./types').AgentToolContext): Promise<void> {
+        const key = this.getImpactEvidenceKey(context);
+        const existing = this.impactEvidenceCalls.get(key);
+        if (!existing?.length) return;
+        const refreshed: EvidenceCallRecord[] = [];
+        const affectedFiles = new Set<string>();
+        const abortSignal = context?.runnerOptions?.abortSignal;
+        const deadline = Date.now() + 10_000;
+        for (const call of existing.slice(-8)) {
+            if (abortSignal?.aborted) throw abortSignalError(abortSignal);
+            if (Date.now() >= deadline) {
+                ErrorReporter.warn('AgentTools', 'Post-write impact revalidation reached its 10 second bound.');
+                break;
+            }
+            try {
+                let result: unknown;
+                switch (call.tool) {
+                    case 'query_inline_instantiation':
+                        result = await this.lspHandler.queryInlineInstantiation(call.args); break;
+                    case 'explore_pdx_project':
+                        result = await this.lspHandler.explorePdxProject(call.args); break;
+                    case 'query_workspace_index':
+                        result = await this.queryWorkspaceIndex(call.args); break;
+                    case 'query_localisation_index':
+                        result = await this.queryLocalisationIndex(call.args); break;
+                    case 'query_project_knowledge':
+                        result = await queryProjectKnowledge(this.workspaceRoot, call.args); break;
+                    case 'compare_definition_with_vanilla':
+                        result = await this.lspHandler.compareDefinitionWithVanilla(call.args); break;
+                    case 'query_override_modes':
+                        result = await this.lspHandler.queryOverrideModes(call.args); break;
+                    default:
+                        continue;
+                }
+                const record = result && typeof result === 'object' && !Array.isArray(result)
+                    ? result as Record<string, unknown>
+                    : {};
+                if (record.ok === false || record.success === false || record.status === 'error' || record.status === 'unavailable') continue;
+                for (const file of this.extractIndirectEvidenceFiles(result)) affectedFiles.add(file);
+                const revision = nodeCrypto.createHash('sha256').update(JSON.stringify(result ?? null)).digest('hex');
+                refreshed.push({ ...call, revision: `sha256:${revision}`, observedAt: new Date().toISOString() });
+            } catch (error) {
+                ErrorReporter.warn('AgentTools', `Post-write impact revalidation failed for ${call.tool}`, error);
+            }
+        }
+        this.impactEvidenceCalls.set(key, refreshed);
+        this.postWriteAffectedFiles.set(key, [...affectedFiles].sort((a, b) => a.localeCompare(b)).slice(0, 200));
     }
 
     private isShaderTarget(filePath: string): boolean {
@@ -1686,9 +1828,13 @@ export class AgentToolExecutor {
                         this.invalidateCacheForFile(file);
                     }
                     if (result && typeof result === 'object') {
-                        const revalidation = await this.requestRevalidateFiles(writtenFiles);
+                        const indirectFiles = this.postWriteAffectedFiles.get(this.getImpactEvidenceKey(context)) ?? [];
+                        const revalidationTargets = Array.from(new Set([...writtenFiles, ...indirectFiles])).slice(0, 200);
+                        const revalidation = await this.requestRevalidateFiles(revalidationTargets);
                         if (revalidation) {
                             (result as Record<string, unknown>).revalidation = revalidation;
+                            (result as Record<string, unknown>).indirectRevalidationFiles = indirectFiles
+                                .filter(file => !writtenFiles.includes(file));
                         }
                     }
                 }
@@ -1721,17 +1867,23 @@ export class AgentToolExecutor {
             case 'query_types':
                 result = await this.lspHandler.queryTypes(args as any); break;
             case 'query_localisation_index':
-                result = this.queryLocalisationIndex(args as any); break;
+                result = await this.queryLocalisationIndex(args as any); break;
             case 'query_workspace_index':
                 result = await this.queryWorkspaceIndex(args as any); break;
             case 'explore_pdx_project':
                 result = await this.lspHandler.explorePdxProject(args as any); break;
+            case 'query_inline_instantiation':
+                result = await this.lspHandler.queryInlineInstantiation(args as any); break;
+            case 'compare_definition_with_vanilla':
+                result = await this.lspHandler.compareDefinitionWithVanilla(args as any); break;
+            case 'analyze_pdx_flow':
+                result = await this.lspHandler.analyzePdxFlow(args as any); break;
             case 'query_project_profile':
                 result = queryProjectProfile(this.workspaceRoot, args as any); break;
             case 'query_project_knowledge':
                 result = await queryProjectKnowledge(this.workspaceRoot, args as any); break;
             case 'query_interface_knowledge':
-                result = queryInterfaceKnowledge(args); break;
+                result = await this.queryInterfaceKnowledgeWithProject(args); break;
             case 'run_skill':
                 result = this.runSkill(args, context); break;
             case 'query_rules':
@@ -2056,6 +2208,49 @@ export class AgentToolExecutor {
                     throw new Error(`Unknown tool: ${toolName}`);
                 }
         }
+        const authoritativeImpactTools = new Set([
+            'query_inline_instantiation', 'explore_pdx_project', 'query_workspace_index',
+            'query_project_knowledge', 'compare_definition_with_vanilla', 'query_override_modes',
+            'query_localisation_index',
+        ]);
+        const failed = !!result && typeof result === 'object' && (
+            (result as Record<string, unknown>).success === false
+            || (result as Record<string, unknown>).ok === false
+            || ['error', 'unavailable'].includes(String((result as Record<string, unknown>).status ?? ''))
+        );
+        if (!failed && authoritativeImpactTools.has(toolName)) {
+            const key = this.getImpactEvidenceKey(context);
+            const calls = this.impactEvidenceCalls.get(key) ?? [];
+            const resultRecord = result && typeof result === 'object' && !Array.isArray(result)
+                ? result as Record<string, unknown>
+                : {};
+            const revisionParts = [
+                resultRecord.graphVersion,
+                resultRecord.schemaVersion,
+                resultRecord.version,
+                resultRecord.indexUpdatedAt,
+                resultRecord.generatedAt,
+                resultRecord.status,
+            ].filter(value => typeof value === 'string' || typeof value === 'number');
+            calls.push({
+                tool: toolName,
+                args: { ...args },
+                target: JSON.stringify(args).slice(0, 1_000),
+                revision: revisionParts.length > 0
+                    ? revisionParts.join(':')
+                    : `sha256:${nodeCrypto.createHash('sha256').update(JSON.stringify(result ?? null)).digest('hex')}`,
+                observedAt: new Date().toISOString(),
+            });
+            this.impactEvidenceCalls.delete(key);
+            this.postWriteAffectedFiles.delete(key);
+            this.impactEvidenceCalls.set(key, calls.slice(-100));
+            while (this.impactEvidenceCalls.size > 64) {
+                const oldest = this.impactEvidenceCalls.keys().next().value as string | undefined;
+                if (!oldest) break;
+                this.impactEvidenceCalls.delete(oldest);
+                this.postWriteAffectedFiles.delete(oldest);
+            }
+        }
         return result;
     }
 
@@ -2128,7 +2323,19 @@ export class AgentToolExecutor {
     }
 
     public clearSkillPolicyForRun(runId: string): void {
-        if (runId) this.activeSkillPolicies.delete(`run:${runId}`);
+        if (runId) {
+            this.activeSkillPolicies.delete(`run:${runId}`);
+            this.impactEvidenceCalls.delete(`run:${runId}`);
+            this.postWriteAffectedFiles.delete(`run:${runId}`);
+        }
+    }
+
+    private getImpactEvidenceKey(context?: import('./types').AgentToolContext): string {
+        const runId = context?.runnerOptions?.runRecord?.runId;
+        if (runId) return `run:${runId}`;
+        const threadId = context?.runnerOptions?.threadId;
+        if (threadId) return `thread:${threadId}`;
+        return `topic:${context?.runnerOptions?.topicId ?? 'default'}`;
     }
 
     private getSkillPolicyKey(context?: import('./types').AgentToolContext): string | undefined {

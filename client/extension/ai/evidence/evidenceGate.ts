@@ -93,6 +93,16 @@ export interface EvidenceGateEvaluateInput {
     truncated?: boolean;
     mode: Exclude<EvidenceGateMode, 'off'>;
     phase?: EvidenceGatePhase;
+    /** Successful authoritative read calls already made in this run/thread. */
+    evidenceCalls?: EvidenceCallRecord[];
+}
+
+export interface EvidenceCallRecord {
+    tool: string;
+    args: Record<string, unknown>;
+    target: string;
+    revision: string;
+    observedAt: string;
 }
 
 /** Total per-write evidence collection budget (plan §4.2 performance bound). */
@@ -254,6 +264,7 @@ export class EvidenceGate {
             input.targetFile,
             sha256Text(input.previousText ?? ''),
             sha256Text(input.text),
+            sha256Text(JSON.stringify(input.evidenceCalls ?? [])),
         ].join('|'));
         const cached = this.decisionCache.get(cacheKey);
         if (cached && cached.expiresAt > startedAt && cached.evidenceRevision === evidenceRevision) {
@@ -429,11 +440,26 @@ export class EvidenceGate {
         }
 
         const missingEvidence = this.buildMissingEvidence(claims, input);
+
+        // Impact-scope evidence (plan §9.1): files whose edits change shared
+        // contracts must surface the read-only queries that establish the
+        // blast radius before writing. Advisory in shadow mode; in enforce
+        // mode the missing evidence is surfaced for a manual override.
+        const impactEvidence = this.buildImpactScopeEvidence(input);
+        if (impactEvidence.length > 0) {
+            for (const item of impactEvidence) {
+                if (!missingEvidence.some(existing => existing.claim === item.claim)) {
+                    missingEvidence.push(item);
+                }
+            }
+        }
+
         // Write stability takes precedence over incomplete evidence. Unknown
         // and stale claims remain visible and are rechecked after the write,
         // but only a positively established contradiction blocks preflight.
         const verdict: EvidenceGateDecision['verdict'] = claims.some(claim =>
             claim.blocking && claim.status === 'conflict')
+            || (input.mode === 'enforce' && impactEvidence.length > 0)
             ? 'block'
             : 'allow';
 
@@ -452,6 +478,139 @@ export class EvidenceGate {
             degraded: degraded || undefined,
             evidenceUnavailable: lspDown || undefined,
         };
+    }
+
+    /**
+     * Impact-scope evidence for high-blast-radius writes (plan §9.1):
+     * inline template edits must be preceded by their caller closure, vanilla
+     * override edits by the resolved winner and diff, and event/state edits
+     * by their inbound/outbound state relations. These are advisory
+     * requirements the model must satisfy; they never auto-block ordinary
+     * small PDXScript edits.
+     */
+    private buildImpactScopeEvidence(
+        input: EvidenceGateEvaluateInput,
+    ): EvidenceMissingItem[] {
+        const targetLower = input.targetFile.replace(/\\/g, '/').toLowerCase();
+        const items: EvidenceMissingItem[] = [];
+        const calls = input.evidenceCalls ?? [];
+        const normalizedTarget = targetLower.replace(/^.*?\/(common|events|interface|gfx|localisation|localization)\//, '/$1/');
+        const sourceText = `${input.previousText ?? ''}\n${input.text}`;
+        const identifierSet = new Set<string>();
+        for (const match of sourceText.matchAll(/\b(?:id|key|name)\s*=\s*"?([A-Za-z_][A-Za-z0-9_.:@-]*)"?/gi)) {
+            if (match[1]) identifierSet.add(match[1].toLowerCase());
+        }
+        for (const match of sourceText.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_.:@-]*)\s*=\s*\{/gm)) {
+            if (match[1] && !['if', 'else', 'limit', 'trigger', 'immediate', 'option'].includes(match[1].toLowerCase())) {
+                identifierSet.add(match[1].toLowerCase());
+            }
+        }
+        const callIsFresh = (call: EvidenceCallRecord) => !!call.revision && !!call.observedAt && !!call.target;
+        const hasCall = (tool: string, predicate?: (args: Record<string, unknown>) => boolean) =>
+            calls.some(call => call.tool === tool && callIsFresh(call) && (!predicate || predicate(call.args)));
+        if (targetLower.includes('/inline_scripts/')) {
+            const marker = '/common/inline_scripts/';
+            const markerIndex = targetLower.lastIndexOf(marker);
+            const expectedTemplate = (markerIndex >= 0
+                ? targetLower.slice(markerIndex + marker.length)
+                : path.basename(targetLower)).replace(/\.txt$/i, '').replace(/^\/+/, '');
+            const satisfied = hasCall('query_inline_instantiation', args => {
+                const template = typeof args.template === 'string'
+                    ? args.template.replace(/\\/g, '/').toLowerCase().replace(/\.txt$/i, '').replace(/^.*?common\/inline_scripts\//, '').replace(/^\/+/, '')
+                    : '';
+                return template === expectedTemplate;
+            }) || hasCall('explore_pdx_project', args => {
+                const file = typeof args.file === 'string' ? args.file.replace(/\\/g, '/').toLowerCase() : '';
+                return (file === targetLower || file.endsWith(normalizedTarget))
+                    && Array.isArray(args.relationshipKinds)
+                    && args.relationshipKinds.includes('inline_invocation');
+            });
+            if (!satisfied) {
+            items.push({
+                kind: 'call_chain',
+                claim: "Editing an inline_script template requires its caller closure: query_inline_instantiation(template=<path>) or explore_pdx_project(relationshipKinds=['inline_invocation']) before writing.",
+                status: 'unknown',
+                suggestedQueries: [
+                    `query_inline_instantiation({ "template": "${path.basename(input.targetFile)}" })`,
+                    `explore_pdx_project({ "file": "${input.targetFile}", "relationshipKinds": ["inline_invocation", "inline_expansion"] })`,
+                ],
+            });
+            }
+        }
+        if (targetLower.includes('/interface/') || targetLower.endsWith('.gfx')) {
+            const guiNames = identifierSet;
+            const satisfied = hasCall('query_workspace_index', args => {
+                if (args.includeAssetChain !== true) return false;
+                const name = typeof args.name === 'string' ? args.name.toLowerCase() : '';
+                const directory = typeof args.directory === 'string' ? args.directory.replace(/\\/g, '/').toLowerCase() : '';
+                const sourceMatches = args.source === undefined || args.source === 'gui' || args.source === 'asset';
+                return sourceMatches && ((!!name && guiNames.has(name)) || (!!directory && targetLower.includes(`/${directory.replace(/^\/+|\/+$/g, '')}/`)));
+            });
+            if (!satisfied) {
+            items.push({
+                kind: 'reference_exists',
+                claim: 'GUI/sprite edits require the referenced button effect and sprite targets: query_workspace_index(source="gui", includeAssetChain=true) before writing.',
+                status: 'unknown',
+                suggestedQueries: [
+                    `query_workspace_index({ "source": "gui", "includeAssetChain": true })`,
+                ],
+            });
+            }
+        }
+        // A state operator in an arbitrary fragment is not enough to identify
+        // an event graph node. Require an on_action file or an actual top-level
+        // event declaration with an id, otherwise the evidence query cannot be
+        // bound to a concrete target and would false-block ordinary effects.
+        const eventStateHighRisk = targetLower.includes('/common/on_actions/')
+            || /^(?:country|planet|fleet|ship|system|pop|army|starbase|megastructure)_event\s*=\s*\{[\s\S]{0,400}?\bid\s*=/im.test(sourceText);
+        if ((targetLower.includes('/events/') || targetLower.includes('/common/on_actions/')) && eventStateHighRisk) {
+            const satisfied = hasCall('query_project_knowledge', args =>
+                args.includeEventGraph !== false
+                && Array.isArray(args.identifiers)
+                && args.identifiers.some(identifier => typeof identifier === 'string' && identifierSet.has(identifier.toLowerCase())));
+            if (!satisfied) {
+            items.push({
+                kind: 'call_chain',
+                claim: 'Event/on_action edits require inbound/outbound state relations: query_project_knowledge with the event ID before renaming variables, flags or event targets.',
+                status: 'unknown',
+                suggestedQueries: [
+                    `query_project_knowledge({ "identifiers": ["<eventId>"], "includeEventGraph": true })`,
+                ],
+            });
+            }
+        }
+        // Vanilla-override detection is best-effort: any file under a
+        // directory that CWT override modes commonly target.
+        const overrideSensitivePath = /\/(?:common\/(?:static_modifiers|technology|buildings|traits|component_templates|ship_sizes|megastructures)|gfx)\//.test(targetLower);
+        if (overrideSensitivePath) {
+            const satisfied = hasCall('compare_definition_with_vanilla', args =>
+                typeof args.entityType === 'string'
+                && typeof args.symbolId === 'string'
+                && identifierSet.has(args.symbolId.toLowerCase()));
+            if (!satisfied) {
+            items.push({
+                kind: 'symbol_exists',
+                claim: 'Edits that may override vanilla require the resolved winner and diff: compare_definition_with_vanilla(entityType, symbolId) before writing.',
+                status: 'unknown',
+                suggestedQueries: [
+                    `compare_definition_with_vanilla({ "entityType": "<type>", "symbolId": "<id>" })`,
+                    `query_override_modes({ "path": "${input.targetFile}" })`,
+                ],
+            });
+            }
+        }
+        if (targetLower.includes('/localisation/') || targetLower.includes('/localization/') || targetLower.endsWith('.yml')) {
+            const satisfied = hasCall('query_localisation_index', args => args.auditMode === true);
+            if (!satisfied) {
+                items.push({
+                    kind: 'reference_exists',
+                    claim: 'Localisation writes require a target-bound semantic audit for missing script references, language parity, duplicate winners, and command/scope validity.',
+                    status: 'unknown',
+                    suggestedQueries: ['query_localisation_index({ "auditMode": true, "compareLanguages": true, "includeDuplicates": true })'],
+                });
+            }
+        }
+        return items.slice(0, 4);
     }
 
     private unresolved(candidate: ExtractedClaimCandidate, reason: string): EvidenceClaim {

@@ -34,7 +34,7 @@ import { parsePdxSemanticCatalog, type PdxDefinitionType } from '../../shared/pd
 import { ErrorReporter } from '../ai/errorReporter';
 import { matchesExt } from '../fileExtensions';
 import { getAllProfiles, getLocalisationDirectoryGlob, getVanillaCacheFileName } from '../gameProfiles';
-import { parseLocFile, addEntriesToIndex, removeFileFromIndex, queryLocIndex } from './locParser';
+import { parseLocFile, addEntriesToIndex, removeFileFromIndex, queryLocIndex, countLocIndex } from './locParser';
 import {
 	WorkspaceSymbolSqliteCache,
 	getLegacyWorkspaceSymbolCachePath,
@@ -49,6 +49,7 @@ import {
 	parseWorkspaceSymbols,
 	populateWorkspaceSymbolReferences,
 	queryWorkspaceSymbolIndex,
+	countWorkspaceSymbolIndex,
 	sortedWorkspaceSymbolNames,
 	type WorkspaceSymbolEntry,
 	type WorkspaceSymbolOrigin,
@@ -69,6 +70,11 @@ export interface LocEntry {
 	file: string;
 	line: number;
 	language: string;
+	valueHash: string;
+	hasBom: boolean;
+	encoding: 'utf8-bom' | 'utf8';
+	header: string;
+	headerMatchesPath?: boolean;
 }
 
 export interface LocQuery {
@@ -157,9 +163,33 @@ export class IndexService implements vscode.Disposable {
 		return this._locIndex.size;
 	}
 
+	/** Total localisation occurrences, including duplicates. */
+	get locOccurrenceCount(): number {
+		let count = 0;
+		for (const entries of this._locIndex.values()) count += entries.length;
+		return count;
+	}
+
+	get locFileCount(): number {
+		const files = new Set<string>();
+		for (const entries of this._locIndex.values()) for (const entry of entries) files.add(entry.file);
+		return files.size;
+	}
+
 	/** Number of indexed workspace symbol names. */
 	get workspaceSymbolCount(): number {
 		return this._workspaceSymbolIndex.size;
+	}
+
+	/** Actual indexed symbol rows and source files, not query-result counts. */
+	get workspaceSymbolEntryCount(): number {
+		let count = 0;
+		for (const entries of this._workspaceSymbolIndex.values()) count += entries.length;
+		return count;
+	}
+
+	get workspaceSymbolFileCount(): number {
+		return this._workspaceSymbolFileFacts.size;
 	}
 
 	/** Last successful workspace-symbol refresh/update timestamp. */
@@ -282,6 +312,10 @@ export class IndexService implements vscode.Disposable {
 		return queryLocIndex(this._locIndex, query);
 	}
 
+	countLocalisation(query: Omit<LocQuery, 'limit'>): number {
+		return countLocIndex(this._locIndex, query);
+	}
+
 	/**
 	 * Query localisation keys, waiting for the index to be ready first.
 	 * Use this from definition providers to avoid returning empty results
@@ -294,6 +328,94 @@ export class IndexService implements vscode.Disposable {
 		return queryLocIndex(this._locIndex, query);
 	}
 
+	/** Distinct indexed localisation languages, sorted. */
+	locLanguages(): string[] {
+		const languages = new Set<string>();
+		for (const entries of this._locIndex.values()) {
+			for (const entry of entries) {
+				if (entry.language) languages.add(entry.language);
+			}
+		}
+		return Array.from(languages).sort((a, b) => a.localeCompare(b));
+	}
+
+	/**
+	 * Keys with more than one occurrence (across files or within one file),
+	 * grouped deterministically by key. The active/winner occurrence is the
+	 * last parsed one; every occurrence carries its own file/line so the
+	 * model can audit duplicates instead of trusting the last write.
+	 */
+	locDuplicateGroups(limit = 50): Array<{ key: string; language: string; occurrences: LocEntry[] }> {
+		const groups: Array<{ key: string; language: string; occurrences: LocEntry[] }> = [];
+		for (const [key, entries] of this._locIndex) {
+			const byLanguage = new Map<string, LocEntry[]>();
+			for (const entry of entries) {
+				const languageEntries = byLanguage.get(entry.language) ?? [];
+				languageEntries.push(entry);
+				byLanguage.set(entry.language, languageEntries);
+			}
+			for (const [language, occurrences] of byLanguage) {
+				if (occurrences.length <= 1) continue;
+				groups.push({
+					key,
+					language,
+					occurrences: [...occurrences].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line),
+				});
+			}
+		}
+		groups.sort((a, b) => a.key.localeCompare(b.key) || a.language.localeCompare(b.language));
+		return groups.slice(0, limit);
+	}
+
+	/** Workspace plus configured vanilla roots for bounded asset-file resolution. */
+	assetSearchRoots(includeVanilla = true): string[] {
+		const roots = new Set<string>();
+		for (const folder of vscode.workspace.workspaceFolders ?? []) roots.add(path.resolve(folder.uri.fsPath));
+		if (includeVanilla) for (const source of this._getConfiguredVanillaSources()) roots.add(path.resolve(source.root));
+		return [...roots].sort((a, b) => a.localeCompare(b));
+	}
+
+	/** True key-set differences between languages, independent of query result truncation. */
+	locLanguageDifferences(query: Omit<LocQuery, 'language' | 'limit'>, referenceLanguage?: string, limit = 100): Array<{
+		language: string; referenceLanguage: string; present: boolean; matchedKeyCount: number;
+		missingKeys: string[]; extraKeys: string[]; truncated: boolean;
+	}> {
+		const languages = this.locLanguages();
+		if (languages.length === 0) return [];
+		const reference = referenceLanguage && languages.includes(referenceLanguage)
+			? referenceLanguage
+			: languages.find(language => language === 'l_english') ?? languages[0]!;
+		const rawNeedle = query.key ?? '';
+		const needle = query.caseSensitive ? rawNeedle : rawNeedle.toLowerCase();
+		const matches = (key: string): boolean => {
+			if (!query.key) return true;
+			const comparable = query.caseSensitive ? key : key.toLowerCase();
+			if (query.contains) return comparable.includes(needle);
+			if (query.prefix) return comparable.startsWith(needle);
+			return comparable === needle;
+		};
+		const keysByLanguage = new Map(languages.map(language => [language, new Set<string>()]));
+		for (const [key, entries] of this._locIndex) {
+			if (!matches(key)) continue;
+			for (const entry of entries) keysByLanguage.get(entry.language)?.add(key);
+		}
+		const referenceKeys = keysByLanguage.get(reference) ?? new Set<string>();
+		return languages.map(language => {
+			const languageKeys = keysByLanguage.get(language) ?? new Set<string>();
+			const allMissing = [...referenceKeys].filter(key => !languageKeys.has(key)).sort((a, b) => a.localeCompare(b));
+			const allExtra = [...languageKeys].filter(key => !referenceKeys.has(key)).sort((a, b) => a.localeCompare(b));
+			return {
+				language,
+				referenceLanguage: reference,
+				present: allMissing.length === 0,
+				matchedKeyCount: languageKeys.size,
+				missingKeys: allMissing.slice(0, limit),
+				extraKeys: allExtra.slice(0, limit),
+				truncated: allMissing.length > limit || allExtra.length > limit,
+			};
+		});
+	}
+
 	/**
 	 * Query indexed PDXScript symbols and named asset/gui entries.
 	 */
@@ -303,6 +425,38 @@ export class IndexService implements vscode.Disposable {
 		}
 		this._touchSymbolQuery();
 		return queryWorkspaceSymbolIndex(this._workspaceSymbolIndex, query, this._getSortedWorkspaceSymbolNames());
+	}
+
+	/**
+	 * Bounded per-kind summary of workspace-origin symbols: stable name samples
+	 * (sorted) plus the distinct-name count. Used to fill profile identifiers.
+	 */
+	workspaceSymbolTypeSummary(limitPerType = 12, maxTypes = 40): { byType: Record<string, string[]>; byTypeCounts: Record<string, number> } {
+		const namesByKind = new Map<string, Set<string>>();
+		for (const entries of this._workspaceSymbolIndex.values()) {
+			for (const entry of entries) {
+				if ((entry.origin ?? 'workspace') !== 'workspace') continue;
+				if (!entry.kind || entry.kind === 'namespace' || entry.kind === 'pdx_block') continue;
+				const names = namesByKind.get(entry.kind) ?? new Set<string>();
+				names.add(entry.name);
+				namesByKind.set(entry.kind, names);
+			}
+		}
+		const kinds = Array.from(namesByKind.keys())
+			.sort((a, b) => a.localeCompare(b))
+			.slice(0, maxTypes);
+		const byType: Record<string, string[]> = {};
+		const byTypeCounts: Record<string, number> = {};
+		for (const kind of kinds) {
+			const names = Array.from(namesByKind.get(kind) ?? []).sort((a, b) => a.localeCompare(b));
+			byType[kind] = names.slice(0, limitPerType);
+			byTypeCounts[kind] = names.length;
+		}
+		return { byType, byTypeCounts };
+	}
+
+	countWorkspaceSymbols(query: Omit<WorkspaceSymbolQuery, 'limit' | 'includeReferences'>): number {
+		return countWorkspaceSymbolIndex(this._workspaceSymbolIndex, query);
 	}
 
 	/** Query symbols and populate references only for the small set of returned files. */

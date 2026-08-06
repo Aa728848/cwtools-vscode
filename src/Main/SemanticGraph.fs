@@ -94,8 +94,44 @@ let private definitionScore (options: ExploreOptions) (tokens: string list) (ent
 let private originForPath path =
     let value = normalizePath path
     if String.IsNullOrWhiteSpace value || value = "-1" then "embedded"
-    elif value.Contains("/vanilla/") || value.Contains("/cache/") || value.Contains("/.cwtools/") then "vanilla"
-    else "workspace"
+    else
+        let roots = PdxShaderProject.configuredLoadOrderRoots ()
+        let candidate = PdxShaderProject.canonicalizePath path
+        let belongsToConfiguredRoot =
+            roots
+            |> List.exists (fun root ->
+                candidate = root.path
+                || (candidate.Length > root.path.Length
+                    && candidate.StartsWith(root.path, StringComparison.Ordinal)
+                    && candidate[root.path.Length] = '/'))
+        if not belongsToConfiguredRoot then "vanilla"
+        else
+            match PdxShaderProject.originForResourceWithRoots roots "" path with
+            | PdxShaderProject.Dependency _ -> "dependency"
+            | PdxShaderProject.Vanilla -> "vanilla"
+            | _ -> "workspace"
+
+let private originForResource scope path =
+    match PdxShaderProject.originForResource scope path with
+    | PdxShaderProject.Dependency _ -> "dependency"
+    | PdxShaderProject.Vanilla -> "vanilla"
+    | _ -> originForPath path
+
+let private configuredLoadOrderForPath origin path =
+    if origin = "vanilla" then 0, Some "vanilla"
+    else
+        let candidate = PdxShaderProject.canonicalizePath path
+        PdxShaderProject.configuredLoadOrderRoots ()
+        |> List.mapi (fun index root -> index, root)
+        |> List.filter (fun (_, root) ->
+            candidate = root.path
+            || (candidate.Length > root.path.Length
+                && candidate.StartsWith(root.path, StringComparison.Ordinal)
+                && candidate[root.path.Length] = '/'))
+        |> List.sortByDescending (fun (_, root) -> root.path.Length)
+        |> List.tryHead
+        |> Option.map (fun (index, root) -> index + 1, Some root.name)
+        |> Option.defaultValue (Int32.MaxValue - 1, None)
 
 let private itemKey (item: GraphDataItem) =
     let file = item.location |> Option.map (fun range -> normalizePath range.FileName) |> Option.defaultValue ""
@@ -387,3 +423,249 @@ let exploreProject (game: IGame<'T>) rawOptions runtime =
                 Some("pendingGlobalKinds", jsonStringArray runtime.pendingGlobalKinds)
                 Some("lastGlobalRefreshAtUnixMs", JsonValue.Number(decimal runtime.lastGlobalRefreshAtUnixMs)) ])
           Some("warnings", jsonStringArray warnings) ]
+
+let rec private descendantNodes (node: CWTools.Process.Node) =
+    seq {
+        yield node
+        for child in node.Nodes do
+            yield! descendantNodes child
+    }
+
+let private itemKeyFromRange (range: range) =
+    normalizePath range.FileName
+
+type SemanticFieldFact =
+    { path: string
+      key: string
+      occurrence: int
+      value: string
+      file: string
+      line: int }
+
+/// Flatten a definition recursively without discarding repeated keys. Node
+/// identity fields make paths stable across formatting and sibling insertion;
+/// an occurrence suffix remains for anonymous/repeated clauses.
+let collectSemanticFields (node: CWTools.Process.Node) =
+    let facts = ResizeArray<SemanticFieldFact>()
+    let clean (value: string) = value.Trim().Trim('"')
+    let identityFor (child: CWTools.Process.Node) =
+        child.Values
+        |> Seq.tryFind (fun value ->
+            value.Key.Equals("id", StringComparison.OrdinalIgnoreCase)
+            || value.Key.Equals("key", StringComparison.OrdinalIgnoreCase)
+            || value.Key.Equals("name", StringComparison.OrdinalIgnoreCase))
+        |> Option.map (fun value -> clean (string value.Value))
+        |> Option.filter (String.IsNullOrWhiteSpace >> not)
+    let rec visit prefix (current: CWTools.Process.Node) =
+        let valueOccurrences = Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        for value in current.Values do
+            let key = value.Key.ToLowerInvariant()
+            let occurrence = match valueOccurrences.TryGetValue key with true, count -> count | _ -> 0
+            valueOccurrences.[key] <- occurrence + 1
+            let fieldPath = if String.IsNullOrWhiteSpace prefix then sprintf "%s[%d]" key occurrence else sprintf "%s.%s[%d]" prefix key occurrence
+            facts.Add
+                { path = fieldPath
+                  key = key
+                  occurrence = occurrence
+                  value = clean (string value.Value)
+                  file = normalizePath value.Position.FileName
+                  line = int value.Position.StartLine }
+        let nodeOccurrences = Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        for child in current.Nodes do
+            let key = child.Key.ToLowerInvariant()
+            let occurrence = match nodeOccurrences.TryGetValue key with true, count -> count | _ -> 0
+            nodeOccurrences.[key] <- occurrence + 1
+            let identity = identityFor child |> Option.defaultValue (string occurrence)
+            let segment = sprintf "%s[%s]" key identity
+            let childPrefix = if String.IsNullOrWhiteSpace prefix then segment else prefix + "." + segment
+            visit childPrefix child
+    visit "" node
+    facts |> Seq.toList
+
+/// Field-level comparison of a workspace definition against its vanilla
+/// counterpart. Candidates are matched by (entityType, id); the workspace
+/// block and the vanilla block are aligned by recursive semantic paths and
+/// occurrences. Formatting and comment
+/// differences are never treated as semantic changes.
+let compareDefinitionWithVanillaWithRuntime (shouldCancel: unit -> bool) freshness staleReasons (game: IGame<'T>) (entityType: string) (symbolId: string) =
+    let checkCancelled () = if shouldCancel () then raise (OperationCanceledException("Definition comparison was cancelled."))
+    checkCancelled ()
+    let candidates =
+        game.Types()
+        |> Map.tryFind entityType
+        |> Option.defaultValue [||]
+        |> Array.filter (fun definition -> String.Equals(definition.id, symbolId, StringComparison.OrdinalIgnoreCase))
+    let resourceInfo = Dictionary<string, string * CWTools.Games.Overwrite * string>(StringComparer.OrdinalIgnoreCase)
+    for resource in game.AllFiles() do
+        checkCancelled ()
+        match resource with
+        | EntityResource(_, item) -> resourceInfo.[normalizePath item.filepath] <- normalizePath item.logicalpath, item.overwrite, item.scope
+        | FileWithContentResource(_, item) -> resourceInfo.[normalizePath item.filepath] <- normalizePath item.logicalpath, item.overwrite, item.scope
+        | FileResource(_, item) -> resourceInfo.[normalizePath item.filepath] <- normalizePath item.logicalpath, CWTools.Games.Overwrite.No, item.scope
+    let logicalPathFor file =
+        match resourceInfo.TryGetValue(normalizePath file) with
+        | true, (logicalPath, _, _) -> logicalPath
+        | _ -> normalizePath file
+    let overwriteFor file =
+        match resourceInfo.TryGetValue(normalizePath file) with
+        | true, (_, overwrite, _) -> overwrite
+        | _ -> CWTools.Games.Overwrite.No
+    let originForDefinition file =
+        match resourceInfo.TryGetValue(normalizePath file) with
+        | true, (_, _, scope) -> originForResource scope file
+        | _ -> originForPath file
+    let ordered =
+        candidates
+        |> Array.sortBy (fun definition ->
+            let file = definition.range.FileName
+            let rank, _ = configuredLoadOrderForPath (originForDefinition file) file
+            rank, logicalPathFor file, normalizePath file, int definition.range.StartLine)
+    let workspace = ordered |> Array.filter (fun definition -> originForDefinition definition.range.FileName = "workspace") |> Array.tryLast
+    let dependencies = ordered |> Array.filter (fun definition -> originForDefinition definition.range.FileName = "dependency")
+    let vanilla = ordered |> Array.filter (fun definition -> originForDefinition definition.range.FileName = "vanilla") |> Array.tryHead
+    let workspaceItem = workspace |> Option.map (fun item -> itemKeyFromRange item.range)
+    let vanillaItem = vanilla |> Option.map (fun item -> itemKeyFromRange item.range)
+    let semanticFields (range: range) =
+        game.AllEntities()
+        |> Seq.tryFind (fun struct (entity, _) -> normalizePath entity.filepath = normalizePath range.FileName)
+        |> Option.map (fun struct (entity, _) ->
+            let block =
+                entity.rawEntity
+                |> descendantNodes
+                |> Seq.filter (fun node ->
+                    int node.Position.StartLine = int range.StartLine
+                    && int node.Position.EndLine = int range.EndLine)
+                |> Seq.tryHead
+            match block with
+            | None -> []
+            | Some node -> collectSemanticFields node)
+        |> Option.defaultValue []
+    let workspaceFields = workspace |> Option.map (fun item -> semanticFields item.range) |> Option.defaultValue []
+    let vanillaFields = vanilla |> Option.map (fun item -> semanticFields item.range) |> Option.defaultValue []
+    let byPath values = values |> Seq.map (fun item -> item.path, item) |> Map.ofSeq
+    let workspaceByPath = byPath workspaceFields
+    let vanillaByPath = byPath vanillaFields
+    let added =
+        workspaceByPath
+        |> Map.toSeq
+        |> Seq.filter (fun (key, _) -> not (vanillaByPath.ContainsKey key))
+        |> Seq.map snd
+        |> Seq.sortBy (fun item -> item.path)
+        |> Seq.toList
+    let removed =
+        vanillaByPath
+        |> Map.toSeq
+        |> Seq.filter (fun (key, _) -> not (workspaceByPath.ContainsKey key))
+        |> Seq.map snd
+        |> Seq.sortBy (fun item -> item.path)
+        |> Seq.toList
+    let modified =
+        workspaceByPath
+        |> Map.toSeq
+        |> Seq.choose (fun (key, workspaceValue) ->
+            match vanillaByPath.TryFind key with
+            | Some vanillaValue when not (String.Equals(workspaceValue.value, vanillaValue.value, StringComparison.OrdinalIgnoreCase)) ->
+                Some(key, vanillaValue, workspaceValue)
+            | _ -> None)
+        |> Seq.sortBy (fun (key, _, _) -> key)
+        |> Seq.toList
+    let commonVanillaOrder = vanillaFields |> List.map (fun item -> item.path) |> List.filter workspaceByPath.ContainsKey
+    let commonWorkspaceOrder = workspaceFields |> List.map (fun item -> item.path) |> List.filter vanillaByPath.ContainsKey
+    let vanillaOrder = commonVanillaOrder |> List.indexed |> List.map (fun (index, field) -> field, index) |> Map.ofList
+    let workspaceOrder = commonWorkspaceOrder |> List.indexed |> List.map (fun (index, field) -> field, index) |> Map.ofList
+    let orderChanged =
+        commonWorkspaceOrder
+        |> List.choose (fun field ->
+            match vanillaOrder.TryFind field, workspaceOrder.TryFind field with
+            | Some vanillaIndex, Some workspaceIndex when vanillaIndex <> workspaceIndex -> Some(field, vanillaIndex, workspaceIndex)
+            | _ -> None)
+        |> List.truncate 200
+    let fieldJson (field: SemanticFieldFact) =
+        jsonRecord
+            [ Some("field", JsonValue.String field.key)
+              Some("path", JsonValue.String field.path)
+              Some("occurrence", JsonValue.Number(decimal field.occurrence))
+              Some("value", JsonValue.String field.value)
+              Some("source", jsonRecord [ Some("file", JsonValue.String field.file); Some("line", JsonValue.Number(decimal field.line)) ]) ]
+    let modifiedJson (key: string, vanillaValue: SemanticFieldFact, workspaceValue: SemanticFieldFact) =
+        jsonRecord
+            [ Some("field", JsonValue.String key)
+              Some("vanillaValue", JsonValue.String vanillaValue.value)
+              Some("workspaceValue", JsonValue.String workspaceValue.value)
+              Some("vanillaSource", jsonRecord [ Some("file", JsonValue.String vanillaValue.file); Some("line", JsonValue.Number(decimal vanillaValue.line)) ])
+              Some("workspaceSource", jsonRecord [ Some("file", JsonValue.String workspaceValue.file); Some("line", JsonValue.Number(decimal workspaceValue.line)) ]) ]
+    let active = ordered |> Array.filter (fun definition -> overwriteFor definition.range.FileName <> CWTools.Games.Overwrite.Overwritten)
+    let strategy =
+        ordered
+        |> Array.tryPick (fun definition -> game.OverrideModeAtPath(logicalPathFor definition.range.FileName) |> Option.map (fun mode -> mode.strategy.ToUpperInvariant()))
+    let winner, resolution, ambiguous, ambiguousReason =
+        if active.Length = 1 then Some active.[0], "cwtools_single_active", false, None
+        else
+            match strategy with
+            | Some "LIOS" -> ordered |> Array.tryLast, "last_in_only_served", false, None
+            | Some "FIOS" -> ordered |> Array.tryHead, "first_in_only_served", false, None
+            | Some "NO" ->
+                ordered |> Array.tryHead,
+                "no_individual_override",
+                false,
+                Some "NO does not permit an individual same-key override; the earliest existing candidate remains effective unless the owning file is replaced."
+            | Some "MERGE" -> None, "merged_definitions", false, Some "MERGE combines candidates; no single definition wins."
+            | Some "DUPL" -> None, "duplicate_definitions", false, Some "DUPL preserves multiple candidates; no single definition wins."
+            | Some mode -> None, "ambiguous", true, Some(sprintf "Override mode %s has no deterministic resolver." mode)
+            | None when ordered.Length = 1 -> Some ordered.[0], "single_candidate", false, None
+            | None -> None, "ambiguous", true, Some "No unique CWTools active candidate or recognized override mode was available."
+    let candidateJson (definition: CWTools.Common.NewScope.TypeDefInfo) =
+        let file = definition.range.FileName
+        let origin = originForDefinition file
+        let loadOrderIndex, loadOrderRoot = configuredLoadOrderForPath origin file
+        jsonRecord
+            [ Some("file", JsonValue.String(itemKeyFromRange definition.range))
+              Some("logicalPath", JsonValue.String(logicalPathFor file))
+              Some("origin", JsonValue.String origin)
+              Some("loadOrderIndex", JsonValue.Number(decimal loadOrderIndex))
+              loadOrderRoot |> Option.map (fun value -> "loadOrderRoot", JsonValue.String value)
+              Some("line", JsonValue.Number(decimal (int definition.range.StartLine))) ]
+    jsonRecord
+        [ Some("ok", JsonValue.Boolean true)
+          Some("entityType", JsonValue.String entityType)
+          Some("symbolId", JsonValue.String symbolId)
+          Some("workspace", jsonRecord
+              [ Some("present", JsonValue.Boolean workspace.IsSome)
+                workspaceItem |> Option.map (fun value -> "file", JsonValue.String value) ])
+          Some("vanilla", jsonRecord
+              [ Some("present", JsonValue.Boolean vanilla.IsSome)
+                vanillaItem |> Option.map (fun value -> "file", JsonValue.String value) ])
+          Some("dependencies", JsonValue.Array(dependencies |> Array.map candidateJson))
+          Some("added", JsonValue.Array(added |> List.map fieldJson |> List.toArray))
+          Some("removed", JsonValue.Array(removed |> List.map fieldJson |> List.toArray))
+          Some("modified", JsonValue.Array(modified |> List.map modifiedJson |> List.toArray))
+          Some("orderChanged", JsonValue.Array(orderChanged |> List.map (fun (field, vanillaIndex, workspaceIndex) ->
+              jsonRecord
+                  [ Some("field", JsonValue.String field)
+                    Some("vanillaOrder", JsonValue.Number(decimal vanillaIndex))
+                    Some("workspaceOrder", JsonValue.Number(decimal workspaceIndex)) ]) |> List.toArray))
+          Some("candidates", JsonValue.Array(ordered |> Array.map candidateJson))
+          winner |> Option.map (fun value -> "winner", candidateJson value)
+          Some("resolution", JsonValue.String resolution)
+          Some("ambiguous", JsonValue.Boolean ambiguous)
+          ambiguousReason |> Option.map (fun value -> "ambiguousReason", JsonValue.String value)
+          Some("coverage", jsonRecord
+              [ Some("filesConsidered", JsonValue.Number(decimal (ordered |> Seq.map (fun item -> normalizePath item.range.FileName) |> Seq.distinct |> Seq.length)))
+                Some("filesIndexed", JsonValue.Number(decimal (ordered |> Seq.map (fun item -> normalizePath item.range.FileName) |> Seq.distinct |> Seq.length)))
+                Some("definitionsConsidered", JsonValue.Number(decimal ordered.Length))
+                Some("definitionsIndexed", JsonValue.Number(decimal ordered.Length))
+                Some("candidatesConsidered", JsonValue.Number(decimal ordered.Length))
+                Some("workspaceFields", JsonValue.Number(decimal workspaceFields.Length))
+                Some("vanillaFields", JsonValue.Number(decimal vanillaFields.Length))
+                Some("truncated", JsonValue.Boolean false)
+                Some("staleReasons", jsonStringArray staleReasons)
+                Some("unsupportedConstructs", jsonStringArray [ "runtime_merge_side_effects" ]) ])
+          Some("freshness", jsonRecord
+              [ Some("status", JsonValue.String freshness)
+                Some("source", JsonValue.String "active_lsp_model")
+                Some("staleReasons", jsonStringArray staleReasons) ])
+          Some("version", JsonValue.Number 2m)
+          Some("confidence", JsonValue.String "cwtools-aligned-recursive") ]
+
+let compareDefinitionWithVanilla game entityType symbolId =
+    compareDefinitionWithVanillaWithRuntime (fun () -> false) "fresh" [] game entityType symbolId

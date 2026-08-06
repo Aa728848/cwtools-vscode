@@ -530,9 +530,13 @@ export class LspToolHandler {
                 error: 'explore_pdx_project requires query, file, or typeName.',
             };
         }
+        const relationshipKinds = Array.isArray(args.relationshipKinds)
+            ? args.relationshipKinds.filter((kind): kind is string => typeof kind === 'string').slice(0, 8)
+            : [];
         const cacheKey = `semanticGraph:${JSON.stringify([
             query, file, typeName, !!args.exact, args.depth ?? 1,
             args.maxNodes ?? 30, args.maxEdges ?? 80, args.includeMetadata !== false,
+            relationshipKinds.join(','),
         ])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
@@ -546,11 +550,56 @@ export class LspToolHandler {
                     args.maxEdges ?? 80,
                     args.includeMetadata !== false,
                 ], 30_000) as import('../types').ExplorePdxProjectResult | undefined;
+                if (raw?.ok && relationshipKinds.length > 0) {
+                    const inlineRaw = await this.lspRequestWithRetry('cwtools.ai.exploreInlineGraph', [
+                        file || '',
+                    ], 20_000) as Record<string, unknown> | undefined;
+                    if (inlineRaw && inlineRaw.ok === true) {
+                        const inline = raw as unknown as Record<string, unknown>;
+                        if (relationshipKinds.includes('inline_invocation')) {
+                            inline.inlineInvocations = inlineRaw.invocations;
+                        }
+                        if (relationshipKinds.includes('inline_expansion')) {
+                            inline.inlineExpansions = inlineRaw.expansions;
+                        }
+                        inline.inlineProblems = inlineRaw.problems;
+                        inline.inlineCoverage = inlineRaw.coverage;
+                    }
+                }
                 return raw ?? { ok: false, status: 'unavailable', error: 'LSP returned no semantic graph response.' };
             } catch (error) {
                 return { ok: false, status: 'unavailable', error: String(error) };
             }
         }, 3000);
+    }
+
+    /**
+     * Preview the complete instantiation of one inline_script template.
+     * Input must be a precise template path or a caller file+line; never an
+     * unbounded whole-project expansion.
+     */
+    async queryInlineInstantiation(args: { template?: string; file?: string; line?: number; limit?: number }): Promise<unknown> {
+        const template = args.template?.trim() ?? '';
+        const file = args.file?.trim() ?? '';
+        if (!template && !file) {
+            return {
+                ok: false,
+                error: 'query_inline_instantiation requires a template path or a caller file (optionally with line).',
+            };
+        }
+        try {
+            const limit = Math.max(1, Math.min(Number(args.limit ?? 50) || 50, 200));
+            const raw = await this.lspRequestWithRetry('cwtools.ai.exploreInlineGraph', [
+                { template: template || undefined, file: file || undefined, line: args.line, limit },
+            ], 20_000) as Record<string, unknown> | undefined;
+            if (!raw || raw.ok !== true) return raw ?? { ok: false, error: 'LSP returned no inline graph response.' };
+            return {
+                ...raw,
+                _hint: 'Template edits affect every matched caller; use query_project_knowledge with an inline seed for impact analysis.',
+            };
+        } catch (error) {
+            return { ok: false, error: String(error) };
+        }
     }
 
     async queryScriptedEffects(args: { filter?: string; limit?: number }): Promise<unknown> {
@@ -617,6 +666,49 @@ export class LspToolHandler {
                 return raw ?? { ok: false, error: 'No response.' };
         } catch (e) {
             return { ok: false, error: String(e) };
+        }
+    }
+
+    async analyzePdxFlow(args: { file?: string; definitionId?: string; entityType?: string; limit?: number }): Promise<unknown> {
+        const file = args.file?.trim() ?? '';
+        const definitionId = args.definitionId?.trim() ?? '';
+        if (!file && !definitionId) {
+            return {
+                ok: false,
+                status: 'error',
+                error: 'analyze_pdx_flow requires a file or a definitionId.',
+            };
+        }
+        try {
+            const raw = await this.lspRequestWithRetry('cwtools.ai.analyzePdxFlow', [{
+                file: file || undefined,
+                definitionId: definitionId || undefined,
+                entityType: args.entityType?.trim() || undefined,
+                limit: Math.max(1, Math.min(500, Math.trunc(args.limit ?? 100))),
+            }], 30_000) as any;
+            return raw ?? { ok: false, status: 'unavailable', error: 'LSP returned no flow analysis response.' };
+        } catch (e) {
+            return { ok: false, status: 'unavailable', error: String(e) };
+        }
+    }
+
+    async compareDefinitionWithVanilla(args: { entityType?: string; symbolId?: string }): Promise<unknown> {
+        const entityType = args.entityType?.trim() ?? '';
+        const symbolId = args.symbolId?.trim() ?? '';
+        if (!entityType || !symbolId) {
+            return {
+                ok: false,
+                status: 'error',
+                error: 'compare_definition_with_vanilla requires entityType and symbolId.',
+            };
+        }
+        try {
+            const raw = await this.lspRequestWithRetry('cwtools.ai.compareDefinitionWithVanilla', [
+                entityType, symbolId,
+            ], 30_000) as any;
+            return raw ?? { ok: false, status: 'unavailable', error: 'LSP returned no comparison response.' };
+        } catch (e) {
+            return { ok: false, status: 'unavailable', error: String(e) };
         }
     }
 
@@ -4240,7 +4332,7 @@ export class LspToolHandler {
             return { error: `LSP operation failed: ${e instanceof Error ? e.message : String(e)}` };
         }
     }
-    queryLocalisationIndex(args: import('../types').QueryLocalisationIndexArgs): import('../types').QueryLocalisationIndexResult {
+    async queryLocalisationIndex(args: import('../types').QueryLocalisationIndexArgs): Promise<import('../types').QueryLocalisationIndexResult> {
         if (!this.ctx.indexService) {
             return {
                 status: 'unavailable',
@@ -4259,17 +4351,243 @@ export class LspToolHandler {
             caseSensitive: args.caseSensitive ?? false,
             limit,
         });
+        const localisationQuery = {
+            key: args.key,
+            language: args.language,
+            prefix: !!args.prefix,
+            contains: !!args.contains,
+            caseSensitive: args.caseSensitive ?? false,
+        };
+        const countLocalisation = (this.ctx.indexService as Partial<import('../../indexing/indexService').IndexService>)
+            .countLocalisation;
+        // Older embedders and lightweight test doubles predate the exact-count
+        // API. Preserve their bounded behavior without claiming more than the
+        // returned sample; the real IndexService always supplies the counter.
+        const totalCount = typeof countLocalisation === 'function'
+            ? countLocalisation.call(this.ctx.indexService, localisationQuery)
+            : entries.length;
+        const winnerByGroup = new Map<string, string>();
+        for (const entry of entries) {
+            const group = `${entry.key}\u0000${entry.language}`;
+            if (winnerByGroup.has(group)) continue;
+            const occurrences = this.ctx.indexService.queryLocalisation({ key: entry.key, language: entry.language, limit: 1000 })
+                .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+            const winner = occurrences.at(-1);
+            if (winner) winnerByGroup.set(group, `${winner.file}\u0000${winner.line}`);
+        }
+
+        const duplicates = args.includeDuplicates === true
+            ? this.ctx.indexService.locDuplicateGroups(limit).map(group => ({
+                key: group.key,
+                language: group.language,
+                occurrences: group.occurrences.map(entry => ({
+                    key: entry.key,
+                    value: entry.value,
+                    file: entry.file,
+                    line: entry.line,
+                    language: entry.language,
+                    valueHash: entry.valueHash,
+                    hasBom: entry.hasBom,
+                    encoding: entry.encoding,
+                    header: entry.header,
+                    headerMatchesPath: entry.headerMatchesPath,
+                    active: entry === group.occurrences.at(-1),
+                    winnerEvidence: 'deterministic_file_order' as const,
+                })),
+            }))
+            : undefined;
+
+        const languageComparison = args.compareLanguages === true
+            ? this.ctx.indexService.locLanguageDifferences({
+                key: args.key,
+                prefix: !!args.prefix,
+                contains: !!args.contains,
+                caseSensitive: args.caseSensitive ?? false,
+            }, args.referenceLanguage, limit)
+            : undefined;
+
+        const root = path.resolve(this.ctx.workspaceRoot);
+        const isInsideWorkspace = (file: string): boolean => {
+            const relative = path.relative(root, path.resolve(file));
+            return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+        };
+        const audited = new Map<string, {
+            status: 'referenced' | 'unreferenced' | 'unknown';
+            count: number;
+            evidence: 'lsp_reference_provider' | 'unavailable';
+        }>();
+        const auditLimit = Math.min(entries.length, 20);
+        if (args.referenceStatus === true) {
+            for (const entry of entries.slice(0, auditLimit)) {
+                const cacheKey = `${entry.file.toLowerCase()}|${entry.line}|${entry.key}`;
+                if (audited.has(cacheKey)) continue;
+                try {
+                    const uri = vs.Uri.file(entry.file);
+                    const document = await vs.workspace.openTextDocument(uri);
+                    const lineIndex = Math.max(0, Math.min(document.lineCount - 1, entry.line - 1));
+                    const lineText = document.lineAt(lineIndex).text;
+                    const column = Math.max(0, lineText.indexOf(entry.key));
+                    const references = await this.vsCommand<vs.Location[]>(
+                        'vscode.executeReferenceProvider',
+                        [uri, new vs.Position(lineIndex, column)],
+                    );
+                    if (!Array.isArray(references)) {
+                        audited.set(cacheKey, { status: 'unknown', count: 0, evidence: 'unavailable' });
+                        continue;
+                    }
+                    const external = references.filter(reference =>
+                        reference.uri.fsPath.toLowerCase() !== entry.file.toLowerCase()
+                        || reference.range.start.line !== lineIndex);
+                    audited.set(cacheKey, {
+                        status: external.length > 0 ? 'referenced' : 'unreferenced',
+                        count: external.length,
+                        evidence: 'lsp_reference_provider',
+                    });
+                } catch {
+                    audited.set(cacheKey, { status: 'unknown', count: 0, evidence: 'unavailable' });
+                }
+            }
+        }
+
+        let semanticAudit: import('../types').QueryLocalisationIndexResult['semanticAudit'];
+        if (args.auditMode === true) {
+            try {
+                const raw = await this.lspRequestWithRetry('cwtools.ai.queryLocalisationAudit', [{
+                    key: args.key,
+                    prefix: args.prefix === true,
+                    contains: args.contains === true,
+                    caseSensitive: args.caseSensitive === true,
+                    limit: Math.min(500, Math.max(limit, 100)),
+                }]);
+                const record = raw && typeof raw === 'object' && !Array.isArray(raw)
+                    ? raw as Record<string, unknown>
+                    : undefined;
+                const rawIssues = Array.isArray(record?.issues) ? record.issues : [];
+                const normalizedIssues = rawIssues.flatMap(issue => {
+                    if (!issue || typeof issue !== 'object' || Array.isArray(issue)) return [];
+                    const value = issue as Record<string, unknown>;
+                    const code = typeof value.code === 'string' ? value.code : '';
+                    const key = typeof value.key === 'string' ? value.key : '';
+                    const file = typeof value.file === 'string' ? value.file : '';
+                    const line = typeof value.line === 'number' && Number.isFinite(value.line) ? Math.max(0, Math.trunc(value.line)) : 0;
+                    const message = typeof value.message === 'string' ? value.message : '';
+                    const dynamic = value.dynamic === true;
+                    const inlineTemplate = typeof value.inlineTemplate === 'string' && value.inlineTemplate.trim()
+                        ? value.inlineTemplate
+                        : undefined;
+                    return [{ code, key, file, line, message, dynamic, inlineTemplate }];
+                });
+                const inlineInvocationIds = new Map<string, string[]>();
+                const inlineTemplates = Array.from(new Set(normalizedIssues
+                    .map(issue => issue.inlineTemplate)
+                    .filter((value): value is string => !!value))).slice(0, 10);
+                for (const template of inlineTemplates) {
+                    try {
+                        const inlineRaw = await this.lspRequestWithRetry('cwtools.ai.exploreInlineGraph', [{ template, limit: 100 }]);
+                        const inlineRecord = inlineRaw && typeof inlineRaw === 'object' && !Array.isArray(inlineRaw)
+                            ? inlineRaw as Record<string, unknown>
+                            : undefined;
+                        const invocations = Array.isArray(inlineRecord?.invocations) ? inlineRecord.invocations : [];
+                        inlineInvocationIds.set(template, invocations.flatMap(invocation => {
+                            if (!invocation || typeof invocation !== 'object' || Array.isArray(invocation)) return [];
+                            const id = (invocation as Record<string, unknown>).invocationId;
+                            return typeof id === 'string' ? [id] : [];
+                        }).slice(0, 100));
+                    } catch {
+                        inlineInvocationIds.set(template, []);
+                    }
+                }
+                const coverage = record?.coverage && typeof record.coverage === 'object' && !Array.isArray(record.coverage)
+                    ? record.coverage as Record<string, unknown>
+                    : {};
+                const issuesConsidered = typeof coverage.issuesConsidered === 'number' ? coverage.issuesConsidered : normalizedIssues.length;
+                semanticAudit = {
+                    source: 'cwtools_localisation_validator',
+                    issuesConsidered,
+                    issuesReturned: normalizedIssues.length,
+                    missingReferences: normalizedIssues.filter(issue => issue.code === 'CW100').map(issue => ({
+                        key: issue.key,
+                        file: issue.file,
+                        line: issue.line,
+                        message: issue.message,
+                        dynamic: issue.dynamic,
+                        inlineTemplate: issue.inlineTemplate,
+                        inlineInvocationIds: issue.inlineTemplate ? inlineInvocationIds.get(issue.inlineTemplate) : undefined,
+                    })),
+                    commandAndScopeIssues: normalizedIssues.filter(issue => issue.code !== 'CW100').map(issue => ({
+                        code: issue.code,
+                        file: issue.file,
+                        line: issue.line,
+                        message: issue.message,
+                    })),
+                    truncated: coverage.truncated === true,
+                    staleReasons: Array.isArray(coverage.staleReasons)
+                        ? coverage.staleReasons.filter((value): value is string => typeof value === 'string')
+                        : [],
+                };
+            } catch (error) {
+                semanticAudit = {
+                    source: 'cwtools_localisation_validator',
+                    issuesConsidered: 0,
+                    issuesReturned: 0,
+                    missingReferences: [],
+                    commandAndScopeIssues: [],
+                    truncated: false,
+                    staleReasons: [`lsp_audit_unavailable:${error instanceof Error ? error.message : String(error)}`],
+                };
+            }
+        }
 
         return {
             status: this.ctx.indexService.status,
-            totalCount: entries.length,
-            entries: entries.map(entry => ({
-                key: entry.key,
-                value: entry.value,
-                file: entry.file,
-                line: entry.line,
-                language: entry.language,
-            })),
+            totalCount,
+            entries: entries.map(entry => {
+                const audit = audited.get(`${entry.file.toLowerCase()}|${entry.line}|${entry.key}`);
+                return {
+                    key: entry.key,
+                    value: entry.value,
+                    file: entry.file,
+                    line: entry.line,
+                    language: entry.language,
+                    valueHash: entry.valueHash,
+                    hasBom: entry.hasBom,
+                    encoding: entry.encoding,
+                    header: entry.header,
+                    headerMatchesPath: entry.headerMatchesPath,
+                    duplicateGroup: `${entry.key}|${entry.language}`,
+                    active: winnerByGroup.get(`${entry.key}\u0000${entry.language}`) === `${entry.file}\u0000${entry.line}`,
+                    winnerEvidence: 'deterministic_file_order' as const,
+                    origin: args.referenceStatus === true ? (isInsideWorkspace(entry.file) ? 'workspace' as const : 'vanilla' as const) : undefined,
+                    referenceStatus: audit?.status,
+                    referenceCount: audit?.count,
+                    referenceEvidence: audit?.evidence,
+                };
+            }),
+            duplicates,
+            languageComparison,
+            languages: this.ctx.indexService.locLanguages(),
+            coverage: {
+                filesConsidered: this.ctx.indexService.locFileCount,
+                filesIndexed: this.ctx.indexService.locFileCount,
+                occurrencesConsidered: totalCount,
+                occurrencesReturned: entries.length,
+                truncated: entries.length < totalCount,
+                staleReasons: this.ctx.indexService.status === 'ready' ? [] : [`index_${this.ctx.indexService.status}`],
+                unsupportedConstructs: [
+                    'invalid_utf8_bytes_are_replaced_by_the_vscode_text_decoder_before_parsing',
+                    'winner_is_deterministic_file_order_without_launcher_load_order_evidence',
+                ],
+            },
+            semanticAudit,
+            referenceAudit: args.referenceStatus === true ? {
+                keysConsidered: auditLimit,
+                keysResolved: [...audited.values()].filter(value => value.status !== 'unknown').length,
+                truncated: entries.length > auditLimit,
+                unsupportedConstructs: [
+                    'dynamic_or_inline_composite_keys_may_not_be_resolved_by_the_reference_provider',
+                    'automatic_engine_generated_localisation_keys_require_runtime_or_type-specific review',
+                ],
+            } : undefined,
             _hint: this.ctx.indexService.status === 'ready'
                 ? undefined
                 : 'Index may still be building; retry after the initial refresh completes.',
@@ -4308,7 +4626,7 @@ export class LspToolHandler {
             directory: args.directory,
             prefix: !!args.prefix,
             exact: !!args.exact,
-            includeReferences: !!args.includeReferences,
+            includeReferences: !!args.includeReferences || !!args.includeAssetChain,
             limit,
         };
         const queryAsync = (this.ctx.indexService as Partial<import('../../indexing/indexService').IndexService>)
@@ -4317,10 +4635,22 @@ export class LspToolHandler {
             ? await queryAsync.call(this.ctx.indexService, query)
             : this.ctx.indexService.queryWorkspaceSymbols(query);
         const indexStatus = this.ctx.indexService.workspaceSymbolStatus ?? this.ctx.indexService.status;
+        const countWorkspaceSymbols = (this.ctx.indexService as Partial<import('../../indexing/indexService').IndexService>)
+            .countWorkspaceSymbols;
+        const totalCount = typeof countWorkspaceSymbols === 'function'
+            ? countWorkspaceSymbols.call(this.ctx.indexService, query)
+            : entries.length;
+
+        // Asset chain: verify texturefile/file references point at files that
+        // actually exist (case-insensitive on Windows), so missing DDS/GFX
+        // targets surface structurally instead of silently.
+        const assetChain = args.includeAssetChain === true
+            ? this.buildAssetChain(entries, args.origin !== 'workspace')
+            : undefined;
 
         return {
             status: indexStatus,
-            totalCount: entries.length,
+            totalCount,
             entries: entries.map(entry => ({
                 name: entry.name,
                 kind: entry.kind,
@@ -4331,17 +4661,199 @@ export class LspToolHandler {
                 container: entry.container,
                 category: entry.category,
                 references: args.includeReferences ? entry.references : undefined,
+                guiFacts: entry.guiFacts,
                 updatedAt: entry.updatedAt,
                 fileVersion: entry.fileVersion,
             })),
             indexedSymbolNames: this.ctx.indexService.workspaceSymbolCount,
             indexUpdatedAt: this.ctx.indexService.workspaceSymbolUpdatedAt,
+            coverage: {
+                filesConsidered: this.ctx.indexService.workspaceSymbolFileCount,
+                filesIndexed: this.ctx.indexService.workspaceSymbolFileCount,
+                symbolsConsidered: totalCount,
+                symbolsIndexed: this.ctx.indexService.workspaceSymbolEntryCount,
+                truncated: indexStatus === 'partial' || entries.length < totalCount,
+                staleReasons: indexStatus === 'ready' ? [] : [`index_${indexStatus}`],
+                unsupportedConstructs: indexStatus === 'partial' ? ['index_file_limit_reached'] : [],
+            },
+            assetChain,
             _hint: indexStatus === 'ready'
                 ? undefined
                 : indexStatus === 'partial'
                     ? 'The workspace/vanilla symbol file limit was reached. Presence results are usable, but an empty result cannot prove absence; use targeted CWT/LSP queries for confirmation.'
                     : 'Workspace/vanilla symbol indexing is still running. Partial indexed results were returned after an 8-second bounded wait; retry this targeted query shortly or use query_project_knowledge/explore_pdx_project for semantic lookup.',
         };
+    }
+
+    /**
+     * Resolve sprite/entity/sound references to concrete files and report
+     * which targets exist. Bounded to the queried entries.
+     */
+    private buildAssetChain(
+        entries: Array<import('../../indexing/workspaceSymbolParser').WorkspaceSymbolEntry>,
+        includeVanilla: boolean,
+    ): Array<{
+        name: string; kind: string; file: string;
+        references: Array<{ target: string; exists: boolean; kind: string; depth: number; sourceFile: string; sourceLine: number; resolvedFiles?: string[]; origins?: Array<'workspace' | 'vanilla'>; resolution?: 'single' | 'multiple_candidates' | 'missing'; pathCaseMatches?: boolean; frameLayout?: { noOfFrames: number; width: number; height: number; status: 'consistent' | 'inconsistent' | 'unknown'; reason: string } }>;
+        truncated?: boolean;
+    }> {
+        const fs = require('fs') as typeof import('fs');
+        const chain: Array<{
+            name: string; kind: string; file: string;
+            references: Array<{ target: string; exists: boolean; kind: string; depth: number; sourceFile: string; sourceLine: number; resolvedFiles?: string[]; origins?: Array<'workspace' | 'vanilla'>; resolution?: 'single' | 'multiple_candidates' | 'missing'; pathCaseMatches?: boolean; frameLayout?: { noOfFrames: number; width: number; height: number; status: 'consistent' | 'inconsistent' | 'unknown'; reason: string } }>;
+            truncated?: boolean;
+        }> = [];
+        const roots = this.ctx.indexService?.assetSearchRoots?.(includeVanilla) ?? [this.ctx.workspaceRoot];
+        for (const entry of entries.slice(0, 50)) {
+            if (entry.source !== 'asset' && entry.source !== 'gui') continue;
+            const refs: Array<{ target: string; exists: boolean; kind: string; depth: number; sourceFile: string; sourceLine: number; resolvedFiles?: string[]; origins?: Array<'workspace' | 'vanilla'>; resolution?: 'single' | 'multiple_candidates' | 'missing'; pathCaseMatches?: boolean; frameLayout?: { noOfFrames: number; width: number; height: number; status: 'consistent' | 'inconsistent' | 'unknown'; reason: string } }> = [];
+            const queue: Array<{ symbol: import('../../indexing/workspaceSymbolParser').WorkspaceSymbolEntry; depth: number }> = [{ symbol: entry, depth: 0 }];
+            const seen = new Set<string>();
+            let truncated = false;
+            while (queue.length > 0) {
+                const current = queue.shift()!;
+                if (current.depth >= 3) continue;
+                const frameCount = (current.symbol.references ?? [])
+                    .map(reference => /(?:^|[\s{])noOfFrames\s*=\s*(\d+)/i.exec(reference.context ?? '')?.[1])
+                    .find(Boolean);
+                for (const reference of current.symbol.references ?? []) {
+                    const context = reference.context ?? '';
+                    const match = context.match(/(?:^|[\s{])(texturefile|file|files?|effect|sprite|entity|mesh|animation|sound|material|shader)\s*=\s*"?([^"\s}]+)"?/i);
+                    if (!match?.[1] || !match[2]) continue;
+                    const property = match[1].toLowerCase();
+                    const target = match[2].replace(/\\/g, '/');
+                    const seenKey = `${current.depth + 1}|${property}|${target.toLowerCase()}`;
+                    if (seen.has(seenKey)) continue;
+                    seen.add(seenKey);
+                    const isFile = property === 'texturefile' || property === 'file' || property === 'files'
+                        || /[\\/]/.test(target) || /\.(dds|mesh|asset|entity|anim|animation|wav|ogg|mp3)$/i.test(target);
+                    if (isFile) {
+                        const candidates = this.assetTargetCandidates(target, roots);
+                        const resolvedFiles = candidates.filter(candidate => {
+                            try { return fs.existsSync(candidate) && fs.statSync(candidate).isFile(); } catch { return false; }
+                        });
+                        const firstResolved = resolvedFiles[0];
+                        const frameLayout = firstResolved && /\.dds$/i.test(firstResolved) && frameCount
+                            ? this.inspectDdsFrameLayout(firstResolved, Number(frameCount))
+                            : undefined;
+                        refs.push({
+                            target,
+                            exists: resolvedFiles.length > 0,
+                            kind: /\.dds$/i.test(target) ? 'texture'
+                                : /\.(mesh|asset|entity|anim|animation)$/i.test(target) ? 'model_asset'
+                                    : /\.(wav|ogg|mp3)$/i.test(target) ? 'sound' : 'file',
+                            depth: current.depth + 1,
+                            sourceFile: reference.file,
+                            sourceLine: reference.line,
+                            resolvedFiles: resolvedFiles.length > 0 ? resolvedFiles : undefined,
+                            origins: resolvedFiles.length > 0 ? Array.from(new Set(resolvedFiles.map(file => this.assetOrigin(file)))) : undefined,
+                            resolution: resolvedFiles.length === 0 ? 'missing' : resolvedFiles.length === 1 ? 'single' : 'multiple_candidates',
+                            pathCaseMatches: firstResolved ? this.pathCaseMatches(firstResolved, roots) : undefined,
+                            frameLayout,
+                        });
+                    } else {
+                        const resolved = this.ctx.indexService!.queryWorkspaceSymbols({
+                            name: target,
+                            exact: true,
+                            origin: includeVanilla ? 'both' : 'workspace',
+                            includeReferences: true,
+                            limit: 10,
+                        });
+                        refs.push({
+                            target,
+                            exists: resolved.length > 0,
+                            kind: property === 'effect' ? 'button_effect_or_scripted_effect' : property,
+                            depth: current.depth + 1,
+                            sourceFile: reference.file,
+                            sourceLine: reference.line,
+                            resolvedFiles: resolved.length > 0 ? resolved.map(value => value.file) : undefined,
+                            origins: resolved.length > 0 ? Array.from(new Set(resolved.map(value => value.origin ?? 'workspace'))) : undefined,
+                            resolution: resolved.length === 0 ? 'missing' : resolved.length === 1 ? 'single' : 'multiple_candidates',
+                        });
+                        for (const symbol of resolved) queue.push({ symbol, depth: current.depth + 1 });
+                    }
+                    if (refs.length >= 100) { truncated = true; queue.length = 0; break; }
+                }
+            }
+            if (refs.length > 0) {
+                chain.push({ name: entry.name, kind: entry.kind, file: entry.file, references: refs, truncated });
+            }
+        }
+        return chain;
+    }
+
+    private assetTargetCandidates(target: string, roots: readonly string[]): string[] {
+        const candidates: string[] = [];
+        const normalized = target.replace(/^\.?\//, '');
+        for (const root of roots) {
+            candidates.push(path.resolve(root, normalized));
+            if (!normalized.toLowerCase().startsWith('gfx/')) candidates.push(path.resolve(root, 'gfx', normalized));
+        }
+        return Array.from(new Set(candidates));
+    }
+
+    private assetOrigin(file: string): 'workspace' | 'vanilla' {
+        const relative = path.relative(path.resolve(this.ctx.workspaceRoot), path.resolve(file));
+        return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
+            ? 'workspace'
+            : 'vanilla';
+    }
+
+    private pathCaseMatches(file: string, roots: readonly string[]): boolean {
+        const fs = require('fs') as typeof import('fs');
+        const resolved = path.resolve(file);
+        const containingRoot = roots
+            .map(root => path.resolve(root))
+            .filter(root => {
+                const relative = path.relative(root, resolved);
+                return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+            })
+            .sort((a, b) => b.length - a.length)[0];
+        const parsed = path.parse(resolved);
+        let current = containingRoot ?? parsed.root;
+        const remainder = containingRoot ? path.relative(containingRoot, resolved) : resolved.slice(parsed.root.length);
+        for (const segment of remainder.split(path.sep).filter(Boolean)) {
+            try {
+                const actual = fs.readdirSync(current).find(name => name.toLowerCase() === segment.toLowerCase());
+                if (!actual || actual !== segment) return false;
+                current = path.join(current, actual);
+            } catch {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private inspectDdsFrameLayout(file: string, noOfFrames: number): { noOfFrames: number; width: number; height: number; status: 'consistent' | 'inconsistent' | 'unknown'; reason: string } {
+        const fs = require('fs') as typeof import('fs');
+        if (!Number.isInteger(noOfFrames) || noOfFrames <= 0) {
+            return { noOfFrames, width: 0, height: 0, status: 'unknown', reason: 'noOfFrames is not a positive integer.' };
+        }
+        try {
+            const handle = fs.openSync(file, 'r');
+            try {
+                const header = Buffer.alloc(20);
+                if (fs.readSync(handle, header, 0, header.length, 0) < header.length || header.toString('ascii', 0, 4) !== 'DDS ') {
+                    return { noOfFrames, width: 0, height: 0, status: 'unknown', reason: 'The target is not a readable DDS header.' };
+                }
+                const height = header.readUInt32LE(12);
+                const width = header.readUInt32LE(16);
+                const consistent = width > 0 && width % noOfFrames === 0;
+                return {
+                    noOfFrames,
+                    width,
+                    height,
+                    status: consistent ? 'consistent' : 'inconsistent',
+                    reason: consistent
+                        ? 'DDS width is evenly divisible by noOfFrames (horizontal frame layout).'
+                        : 'DDS width is not evenly divisible by noOfFrames; verify the declared sprite-sheet layout.',
+                };
+            } finally {
+                fs.closeSync(handle);
+            }
+        } catch {
+            return { noOfFrames, width: 0, height: 0, status: 'unknown', reason: 'DDS dimensions could not be read.' };
+        }
     }
 
 }

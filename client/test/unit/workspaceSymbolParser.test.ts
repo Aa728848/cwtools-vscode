@@ -260,3 +260,73 @@ describe('Workspace Symbol Parser (indexing)', () => {
         expect(fallback[0]).to.deep.include({ kind: 'pdx_block', category: 'script' });
     });
 });
+
+describe('Workspace Symbol Parser (GUI recursion)', () => {
+    it('indexes deeply nested named GUI controls', () => {
+        const gui = [
+            'containerType = {',
+            '    name = "kuat_root"',
+            '    background = { name = "kuat_bg" }',
+            '    nested = {',
+            '        name = "kuat_inner"',
+            '        deeper = { name = "kuat_deepest" }',
+            '    }',
+            '}',
+        ].join('\n');
+        const entries = parseWorkspaceSymbols(gui, '/mod/interface/kuat.gui', { definitionTypes: [] });
+        const names = entries.map(entry => entry.name);
+        expect(names).to.include('kuat_root');
+        expect(names).to.include('kuat_inner');
+        expect(names).to.include('kuat_deepest');
+    });
+
+    it('preserves single-line nested effectButtonType name, effect and sprite', () => {
+        const gui = [
+            'containerType = {',
+            '    name = "kuat_actions"',
+            '    effectButtonType = { name = "kuat_btn_1" effect = "kuat_button_effect_1" sprite = "GFX_kuat_btn" }',
+            '}',
+        ].join('\n');
+        const entries = parseWorkspaceSymbols(gui, '/mod/interface/kuat.gui', { definitionTypes: [] });
+        const button = entries.find(entry => entry.name === 'kuat_btn_1');
+        expect(button).to.not.equal(undefined);
+        expect(button!.kind).to.equal('effectButtonType');
+        expect(button!.references ?? []).to.satisfy((refs: Array<{ context: string }>) =>
+            refs.some(ref => ref.context.includes('kuat_button_effect_1'))
+            && refs.some(ref => ref.context.includes('GFX_kuat_btn')));
+    });
+
+    it('does not treat field wrappers as named definitions', () => {
+        const gui = [
+            'containerType = {',
+            '    name = "kuat_root"',
+            '    position = { x = 10 y = 20 }',
+            '    format = { font = "medium" }',
+            '}',
+        ].join('\n');
+        const entries = parseWorkspaceSymbols(gui, '/mod/interface/kuat.gui', { definitionTypes: [] });
+        expect(entries.map(entry => entry.name)).to.not.include('position');
+        expect(entries.map(entry => entry.name)).to.not.include('format');
+    });
+
+    it('captures off-canvas, localisation, custom GUI, effect and sprite facts', () => {
+        const gui = [
+            'effectButtonType = {',
+            '    name = "hidden_contract_button"',
+            '    position = { x = -9999 y = -9999 }',
+            '    text = "HIDDEN_CONTRACT_BUTTON"',
+            '    tooltip = "HIDDEN_CONTRACT_BUTTON_TT"',
+            '    custom_gui = "contract_window"',
+            '    effect = "contract_button_effect"',
+            '    sprite = "GFX_contract_button"',
+            '}',
+        ].join('\n');
+        const entry = parseWorkspaceSymbols(gui, '/mod/interface/contract.gui', { definitionTypes: [] })
+            .find(item => item.name === 'hidden_contract_button');
+        expect(entry?.guiFacts?.offCanvas).to.equal(true);
+        expect(entry?.guiFacts?.localisationKeys).to.include('HIDDEN_CONTRACT_BUTTON_TT');
+        expect(entry?.guiFacts?.customGuiReferences).to.include('contract_window');
+        expect(entry?.guiFacts?.effectReferences).to.include('contract_button_effect');
+        expect(entry?.guiFacts?.spriteReferences).to.include('GFX_contract_button');
+    });
+});

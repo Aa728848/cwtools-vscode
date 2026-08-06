@@ -34,6 +34,19 @@ describe('Localisation Parser (indexing)', () => {
         expect(entries[0]!.language).to.equal('l_english');
         expect(entries[0]!.file).to.equal('/test/loc_english.yml');
         expect(entries[0]!.line).to.equal(2);
+        expect(entries[0]!.valueHash).to.match(/^[0-9a-f]{8}$/);
+        expect(entries[0]!.header).to.equal('l_english');
+        expect(entries[0]!.hasBom).to.equal(true);
+        expect(entries[0]!.encoding).to.equal('utf8-bom');
+    });
+
+    it('records BOM and validates the header against the localisation language directory', () => {
+        const entries = parseLocFile(SAMPLE_LOC_SIMP_CHINESE, '/mod/localisation/simp_chinese/sample.yml');
+        expect(entries[0]!.hasBom).to.equal(true);
+        expect(entries[0]!.encoding).to.equal('utf8-bom');
+        expect(entries[0]!.headerMatchesPath).to.equal(true);
+        const mismatched = parseLocFile(SAMPLE_LOC, '/mod/localisation/simp_chinese/wrong.yml');
+        expect(mismatched[0]!.headerMatchesPath).to.equal(false);
     });
 
     it('parses entries with version numbers', () => {
@@ -293,5 +306,139 @@ building_kuat_command_center_auto:0 "Command Center"
                 expect(r.language).to.equal('l_simp_chinese');
             }
         });
+    });
+});
+
+describe('IndexService workspaceSymbolTypeSummary', () => {
+    const vscodeStub = {
+        workspace: {
+            workspaceFolders: [{ uri: { fsPath: 'C:\\workspace' } }],
+        },
+        window: {
+            createOutputChannel: () => ({ appendLine: () => undefined, dispose: () => undefined }),
+        },
+        Uri: { file: (fsPath: string) => ({ fsPath }) },
+    };
+
+    function loadIndexService() {
+        const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+        const originalLoad = moduleLoader._load;
+        const modulePath = require.resolve('../../extension/indexing/indexService');
+        const reporterPath = require.resolve('../../extension/ai/errorReporter');
+        delete require.cache[modulePath];
+        delete require.cache[reporterPath];
+        moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
+            if (request === 'vscode') return vscodeStub;
+            return originalLoad.apply(this, [request, ...args]);
+        };
+        const service = require('../../extension/indexing/indexService') as typeof import('../../extension/indexing/indexService');
+        return { service, originalLoad, modulePath, reporterPath };
+    }
+
+    function restoreLoader(loaded: { originalLoad: (...args: any[]) => any; modulePath: string; reporterPath: string }): void {
+        const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+        moduleLoader._load = loaded.originalLoad;
+        delete require.cache[loaded.modulePath];
+        delete require.cache[loaded.reporterPath];
+    }
+
+    it('groups workspace symbols by kind with bounded samples and counts', () => {
+        const loaded = loadIndexService();
+        try {
+        const { IndexService } = loaded.service;
+        const service = new IndexService() as unknown as {
+            _workspaceSymbolIndex: Map<string, Array<{ name: string; kind: string; origin?: string }>>;
+            workspaceSymbolTypeSummary(limitPerType?: number, maxTypes?: number): { byType: Record<string, string[]>; byTypeCounts: Record<string, number> };
+        };
+        const index = new Map<string, Array<{ name: string; kind: string; origin?: string }>>();
+        index.set('a', [{ name: 'a', kind: 'event' }, { name: 'a', kind: 'event' }]);
+        index.set('b', [{ name: 'b', kind: 'event' }, { name: 'b', kind: 'event', origin: 'vanilla' }]);
+        index.set('c', [{ name: 'c', kind: 'scripted_effect' }, { name: 'c', kind: 'namespace' }]);
+        index.set('d', [{ name: 'd', kind: 'pdx_block' }]);
+        service._workspaceSymbolIndex = index;
+
+        const summary = service.workspaceSymbolTypeSummary(2, 10);
+
+        expect(summary.byType.event).to.deep.equal(['a', 'b']);
+        expect(summary.byTypeCounts.event).to.equal(2);
+        expect(summary.byType.scripted_effect).to.deep.equal(['c']);
+        expect(summary.byType.namespace).to.equal(undefined);
+        expect(summary.byType.pdx_block).to.equal(undefined);
+        // vanilla origin is excluded
+        expect(summary.byTypeCounts.event).to.equal(2);
+        } finally {
+            restoreLoader(loaded);
+        }
+    });
+
+    it('limits the number of sample names and kinds', () => {
+        const loaded = loadIndexService();
+        try {
+        const { IndexService } = loaded.service;
+        const service = new IndexService() as unknown as {
+            _workspaceSymbolIndex: Map<string, Array<{ name: string; kind: string; origin?: string }>>;
+            workspaceSymbolTypeSummary(limitPerType?: number, maxTypes?: number): { byType: Record<string, string[]>; byTypeCounts: Record<string, number> };
+        };
+        const index = new Map<string, Array<{ name: string; kind: string; origin?: string }>>();
+        for (let i = 0; i < 20; i++) {
+            index.set(`n${i}`, [{ name: `n${i}`, kind: 'event' }]);
+        }
+        service._workspaceSymbolIndex = index;
+
+        const summary = service.workspaceSymbolTypeSummary(3, 5);
+
+        expect(summary.byType.event).to.have.lengthOf(3);
+        expect(summary.byTypeCounts.event).to.equal(20);
+        } finally {
+            restoreLoader(loaded);
+        }
+    });
+
+    it('computes true language key-set differences before result truncation', () => {
+        const loaded = loadIndexService();
+        try {
+            const { IndexService } = loaded.service;
+            const service = new IndexService() as any;
+            service._locIndex = new Map<string, LocEntry[]>([
+                ['shared', [
+                    { key: 'shared', value: 'Shared', file: 'en.yml', line: 2, language: 'l_english' },
+                    { key: 'shared', value: '共享', file: 'zh.yml', line: 2, language: 'l_simp_chinese' },
+                ]],
+                ['english_only', [{ key: 'english_only', value: 'Only', file: 'en.yml', line: 3, language: 'l_english' }]],
+                ['chinese_only', [{ key: 'chinese_only', value: '仅有', file: 'zh.yml', line: 3, language: 'l_simp_chinese' }]],
+            ]);
+
+            const comparison = service.locLanguageDifferences({}, 'l_english', 1);
+            const chinese = comparison.find((item: any) => item.language === 'l_simp_chinese');
+            expect(chinese.missingKeys).to.deep.equal(['english_only']);
+            expect(chinese.extraKeys).to.deep.equal(['chinese_only']);
+            expect(chinese.present).to.equal(false);
+        } finally {
+            restoreLoader(loaded);
+        }
+    });
+
+    it('does not misclassify normal translations as duplicate keys', () => {
+        const loaded = loadIndexService();
+        try {
+            const { IndexService } = loaded.service;
+            const service = new IndexService() as any;
+            service._locIndex = new Map<string, LocEntry[]>([
+                ['shared', [
+                    { key: 'shared', value: 'Shared', file: 'en.yml', line: 2, language: 'l_english' },
+                    { key: 'shared', value: '共享', file: 'zh.yml', line: 2, language: 'l_simp_chinese' },
+                ]],
+                ['duplicate', [
+                    { key: 'duplicate', value: 'One', file: 'en-a.yml', line: 2, language: 'l_english' },
+                    { key: 'duplicate', value: 'Two', file: 'en-b.yml', line: 4, language: 'l_english' },
+                ]],
+            ]);
+            const groups = service.locDuplicateGroups(10);
+            expect(groups).to.have.lengthOf(1);
+            expect(groups[0].key).to.equal('duplicate');
+            expect(groups[0].language).to.equal('l_english');
+        } finally {
+            restoreLoader(loaded);
+        }
     });
 });

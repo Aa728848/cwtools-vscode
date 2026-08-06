@@ -1,8 +1,17 @@
+#r "../../artifacts/bin/Main/debug/CWTools.dll"
 #r "../../artifacts/bin/Main/debug/CWTools Server.dll"
+#r "../../artifacts/bin/Main/debug/Microsoft.Data.Sqlite.dll"
+#r "../../artifacts/bin/Main/debug/SQLitePCLRaw.core.dll"
+#r "../../artifacts/bin/Main/debug/SQLitePCLRaw.batteries_v2.dll"
+#r "../../artifacts/bin/Main/debug/FSharp.Data.DesignTime.dll"
+#r "../../artifacts/bin/Main/debug/FSharp.Data.dll"
 
 open System
 open System.IO
+open FSharp.Data
 open Main.ProjectKnowledge
+
+SQLitePCL.Batteries_V2.Init()
 
 let private assertTrue name condition =
     if not condition then failwith $"{name}: expected true"
@@ -14,6 +23,27 @@ let outgoingSource, outgoingTarget = orientTypedReference "kuat_legacy.38" "kuat
 let incomingSource, incomingTarget = orientTypedReference "container_event" "referenced_event" false
 assertTrue "outgoing typed reference preserves source-to-target direction" (outgoingSource = "kuat_legacy.38" && outgoingTarget = "kuat_legacy.39")
 assertTrue "incoming typed reference reverses target-to-source direction" (incomingSource = "referenced_event" && incomingTarget = "container_event")
+
+let provenanceRootPath = Path.Combine(Path.GetTempPath(), "cwtools-origin-workspace")
+let dependencyRootPath = Path.Combine(Path.GetTempPath(), "cwtools-origin-dependency")
+let secondDependencyRootPath = Path.Combine(Path.GetTempPath(), "cwtools-origin-dependency-two")
+CWTools.Games.PdxShaderProject.configureLoadOrderRoots
+    [ "workspace", provenanceRootPath; "dependency", dependencyRootPath; "dependency-two", secondDependencyRootPath ]
+assertTrue "workspace origin uses explicit load order roots"
+    (resolveKnowledgeOrigin [ provenanceRootPath ] "workspace" (Path.Combine(provenanceRootPath, "events", "a.txt")) = "workspace")
+assertTrue "dependency origin is not misclassified as vanilla"
+    (resolveKnowledgeOrigin [ provenanceRootPath ] "dependency" (Path.Combine(dependencyRootPath, "events", "a.txt")) = "dependency")
+assertTrue "vanilla scope remains authoritative"
+    (resolveKnowledgeOrigin [ provenanceRootPath ] "vanilla" (Path.Combine(Path.GetTempPath(), "game", "events", "a.txt")) = "vanilla")
+let vanillaOrder, vanillaRoot = resolveKnowledgeLoadOrder "vanilla" (Path.Combine(Path.GetTempPath(), "game", "events", "a.txt"))
+let workspaceOrder, workspaceRootName = resolveKnowledgeLoadOrder "workspace" (Path.Combine(provenanceRootPath, "events", "a.txt"))
+let dependencyOrder, dependencyRootName = resolveKnowledgeLoadOrder "dependency" (Path.Combine(dependencyRootPath, "events", "a.txt"))
+let secondDependencyOrder, secondDependencyRootName = resolveKnowledgeLoadOrder "dependency" (Path.Combine(secondDependencyRootPath, "events", "a.txt"))
+assertTrue "configured roots retain exact LSP load order"
+    (vanillaOrder = 0 && workspaceOrder = 1 && dependencyOrder = 2 && secondDependencyOrder = 3)
+assertTrue "configured roots retain dependency identity"
+    (vanillaRoot = Some "vanilla" && workspaceRootName = Some "workspace" && dependencyRootName = Some "dependency" && secondDependencyRootName = Some "dependency-two")
+CWTools.Games.PdxShaderProject.resetLoadOrderRoots ()
 
 let root =
     Path.Combine(Path.GetTempPath(), "cwtools-project-knowledge-temp-cleanup-" + Guid.NewGuid().ToString("N"))
@@ -50,3 +80,366 @@ finally
     Directory.Delete(root, true)
 
 printfn "ProjectKnowledge temporary database cleanup regression tests passed"
+
+let obsoleteRoot =
+    Path.Combine(Path.GetTempPath(), "cwtools-project-knowledge-obsolete-" + Guid.NewGuid().ToString("N"))
+Directory.CreateDirectory(obsoleteRoot) |> ignore
+try
+    let obsoleteDb = Path.Combine(obsoleteRoot, "knowledge.sqlite")
+    do
+        use connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + obsoleteDb)
+        connection.Open()
+        use command = connection.CreateCommand()
+        command.CommandText <- "CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO metadata(key, value) VALUES ('schema_version', '6');"
+        command.ExecuteNonQuery() |> ignore
+    let result =
+        queryProjectKnowledgeDatabase
+            { databasePath = obsoleteDb
+              intent = None
+              domains = []
+              identifiers = []
+              entityTypes = []
+              includeProjectPatterns = true
+              includeVanillaArchetypes = true
+              includeTopology = true
+              includeUnresolved = true
+              includeEventGraph = true
+              limit = 10 }
+    assertFalse "obsolete schema is not queried" (result.Item("ok").AsBoolean())
+    assertTrue "obsolete schema requires a rebuild" (result.Item("rebuildRequired").AsBoolean())
+    assertTrue "obsolete schema reports the current version"
+        (result.Item("foundSchemaVersion").AsInteger() = 6
+         && result.Item("currentSchemaVersion").AsInteger() = KnowledgeSchemaVersion)
+finally
+    Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools()
+    GC.Collect()
+    GC.WaitForPendingFinalizers()
+    Directory.Delete(obsoleteRoot, true)
+
+printfn "ProjectKnowledge obsolete schema rejection regression tests passed"
+
+// ─── coverage contract: query results must carry freshness/coverage ─────────
+let coverageRoot =
+    Path.Combine(Path.GetTempPath(), "cwtools-project-knowledge-coverage-" + Guid.NewGuid().ToString("N"))
+Directory.CreateDirectory(coverageRoot) |> ignore
+try
+    let coverageDb = Path.Combine(coverageRoot, "knowledge.sqlite")
+    do
+        use connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + coverageDb)
+        connection.Open()
+        let createTables = [
+            "CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            "CREATE TABLE domains (id TEXT PRIMARY KEY, definition_count INTEGER NOT NULL, workspace_count INTEGER NOT NULL, vanilla_count INTEGER NOT NULL, entity_types_json TEXT NOT NULL, directories_json TEXT NOT NULL)"
+            "CREATE TABLE definitions (id INTEGER PRIMARY KEY, symbol_id TEXT NOT NULL, entity_type TEXT NOT NULL, file_path TEXT NOT NULL, logical_path TEXT NOT NULL, line INTEGER NOT NULL, end_line INTEGER NOT NULL, origin TEXT NOT NULL, validate INTEGER NOT NULL, overwrite_state TEXT NOT NULL, resource_scope TEXT, domain TEXT NOT NULL, override_path TEXT, override_strategy TEXT, provenance_kind TEXT NOT NULL DEFAULT 'declared', source_file TEXT NOT NULL DEFAULT '', source_line INTEGER NOT NULL DEFAULT 0, source_end_line INTEGER NOT NULL DEFAULT 0, template_file TEXT, template_line INTEGER, invocation_file TEXT, invocation_line INTEGER, has_real_range INTEGER NOT NULL DEFAULT 1, confidence TEXT NOT NULL DEFAULT 'high')"
+            "CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, logical_path TEXT NOT NULL, domain TEXT NOT NULL, origin TEXT NOT NULL)"
+            "CREATE TABLE references_graph (id INTEGER PRIMARY KEY, source_file TEXT NOT NULL, source_logical_path TEXT NOT NULL, target_id TEXT NOT NULL, type_group TEXT NOT NULL, line INTEGER NOT NULL, is_outgoing INTEGER NOT NULL, reference_type TEXT NOT NULL, label TEXT, associated_type TEXT, domain TEXT NOT NULL)"
+            "CREATE TABLE event_nodes (id INTEGER PRIMARY KEY, event_id TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT, file_path TEXT NOT NULL, logical_path TEXT NOT NULL, line INTEGER NOT NULL, end_line INTEGER NOT NULL, origin TEXT NOT NULL, is_triggered_only INTEGER NOT NULL, is_hidden INTEGER NOT NULL, has_mtth INTEGER NOT NULL, facts_known INTEGER NOT NULL)"
+            "CREATE TABLE event_edges (id INTEGER PRIMARY KEY, source_kind TEXT NOT NULL, source_id TEXT NOT NULL, target_event_id TEXT NOT NULL, edge_type TEXT NOT NULL, label TEXT, source_file TEXT NOT NULL, line INTEGER NOT NULL, confidence TEXT NOT NULL, call_operator TEXT, phase TEXT, delay TEXT, condition_path TEXT, scope_map TEXT, source_scope TEXT, target_scope TEXT)"
+            "CREATE TABLE event_logic (id INTEGER PRIMARY KEY, event_id TEXT NOT NULL, relation_type TEXT NOT NULL, subject TEXT NOT NULL, scope TEXT, phase TEXT NOT NULL, source_file TEXT NOT NULL, line INTEGER NOT NULL, details TEXT)"
+            "CREATE TABLE unresolved (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, entity_type TEXT, symbol_id TEXT, resolution TEXT, message TEXT NOT NULL)"
+            "CREATE TABLE definition_stacks (id INTEGER PRIMARY KEY, entity_type TEXT NOT NULL, symbol_id TEXT NOT NULL, resolution TEXT NOT NULL, UNIQUE(entity_type, symbol_id))"
+            "CREATE TABLE stack_candidates (stack_id INTEGER NOT NULL REFERENCES definition_stacks(id) ON DELETE CASCADE, definition_id INTEGER NOT NULL REFERENCES definitions(id) ON DELETE CASCADE, is_active INTEGER NOT NULL, candidate_order INTEGER NOT NULL DEFAULT 0, origin TEXT NOT NULL DEFAULT '', logical_path TEXT NOT NULL DEFAULT '', override_strategy TEXT, PRIMARY KEY(stack_id, definition_id))"
+            "CREATE TABLE archetypes (definition_id INTEGER NOT NULL REFERENCES definitions(id) ON DELETE CASCADE, domain TEXT NOT NULL, origin TEXT NOT NULL, rank INTEGER NOT NULL, role TEXT NOT NULL, PRIMARY KEY(definition_id, role))"
+            "CREATE TABLE inline_templates (template_id TEXT PRIMARY KEY, logical_path TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL, content_hash TEXT NOT NULL)"
+            "CREATE TABLE inline_parameters (template_id TEXT NOT NULL, name TEXT NOT NULL, usage_kind TEXT NOT NULL, usage_kinds TEXT NOT NULL, inferred_type TEXT NOT NULL, required INTEGER NOT NULL, occurrences INTEGER NOT NULL, PRIMARY KEY(template_id, name))"
+            "CREATE TABLE inline_invocations (invocation_id TEXT PRIMARY KEY, caller_file TEXT NOT NULL, caller_line INTEGER NOT NULL, template_id TEXT NOT NULL, enclosing_definition TEXT)"
+            "CREATE TABLE inline_arguments (invocation_id TEXT NOT NULL, name TEXT NOT NULL, raw_value TEXT NOT NULL, resolved_value TEXT NOT NULL, value_kind TEXT NOT NULL, PRIMARY KEY(invocation_id, name))"
+            "CREATE TABLE inline_expansions (invocation_id TEXT NOT NULL, expanded_symbol_id TEXT NOT NULL, entity_type TEXT NOT NULL, template_file TEXT NOT NULL, caller_file TEXT NOT NULL, template_line INTEGER NOT NULL, generated_line INTEGER NOT NULL, confidence TEXT NOT NULL, PRIMARY KEY(invocation_id, expanded_symbol_id))"
+            "CREATE TABLE inline_generated_references (invocation_id TEXT NOT NULL, reference_kind TEXT NOT NULL, expanded_value TEXT NOT NULL, template_file TEXT NOT NULL, caller_file TEXT NOT NULL, template_line INTEGER NOT NULL, generated_line INTEGER NOT NULL, confidence TEXT NOT NULL, PRIMARY KEY(invocation_id, reference_kind, expanded_value, template_line))"
+            "CREATE TABLE inline_problems (invocation_id TEXT NOT NULL, kind TEXT NOT NULL, message TEXT NOT NULL, line INTEGER NOT NULL)"
+        ]
+        for sql in createTables do
+            use command = connection.CreateCommand()
+            command.CommandText <- sql
+            command.ExecuteNonQuery() |> ignore
+        let insert (key: string) (value: string) =
+            use cmd = connection.CreateCommand()
+            cmd.CommandText <- "INSERT INTO metadata(key, value) VALUES ($k, $v)"
+            cmd.Parameters.AddWithValue("$k", key) |> ignore
+            cmd.Parameters.AddWithValue("$v", value) |> ignore
+            cmd.ExecuteNonQuery() |> ignore
+        insert "schema_version" "7"
+        insert "status" "stale"
+        insert "game" "stellaris"
+        insert "generated_at" "2026-01-01T00:00:00.000Z"
+        insert "graph_version" "4"
+        insert "topology_truncated" "true"
+        insert "definition_count" "10"
+        insert "topology_file_count" "5"
+        insert "topology_edge_count" "20"
+
+    let options =
+        { databasePath = coverageDb
+          intent = Some "test"
+          domains = []
+          identifiers = []
+          entityTypes = []
+          includeProjectPatterns = true
+          includeVanillaArchetypes = true
+          includeTopology = true
+          includeUnresolved = true
+          includeEventGraph = true
+          limit = 10 }
+    let result = queryProjectKnowledgeDatabase options
+    let coverage = result.Item("coverage")
+    assertTrue "coverage.definitionsIndexed reports the indexed definition count"
+        (coverage.Item("definitionsIndexed").AsInteger() = 10)
+    assertTrue "coverage.filesIndexed reports the indexed file count"
+        (coverage.Item("filesIndexed").AsInteger() = 5)
+    assertTrue "coverage.truncated is carried from topology metadata"
+        (coverage.Item("truncated").AsBoolean())
+    let staleReasons = coverage.Item("staleReasons").AsArray()
+    assertTrue "coverage.staleReasons flags a non-ready status"
+        (staleReasons |> Seq.exists (fun value -> value.AsString() = "knowledge_stale"))
+    assertTrue "query ok without schema-dependent tables"
+        (result.Item("ok").AsBoolean())
+finally
+    GC.Collect()
+    GC.WaitForPendingFinalizers()
+    try
+        Directory.Delete(coverageRoot, true)
+    with _ -> ()
+
+printfn "ProjectKnowledge coverage contract regression tests passed"
+
+// ─── provenance contract: synthetic definitions are excluded from intent
+// scans, exact identifier queries still surface them, and every real
+// definition carries a nonzero source line ───────────────────────────────────
+let provenanceRoot =
+    Path.Combine(Path.GetTempPath(), "cwtools-project-knowledge-provenance-" + Guid.NewGuid().ToString("N"))
+Directory.CreateDirectory(provenanceRoot) |> ignore
+try
+    let provenanceDb = Path.Combine(provenanceRoot, "knowledge.sqlite")
+    do
+        use connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + provenanceDb)
+        connection.Open()
+        let createTables = [
+            "CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            "CREATE TABLE domains (id TEXT PRIMARY KEY, definition_count INTEGER NOT NULL, workspace_count INTEGER NOT NULL, vanilla_count INTEGER NOT NULL, entity_types_json TEXT NOT NULL, directories_json TEXT NOT NULL)"
+            "CREATE TABLE definitions (id INTEGER PRIMARY KEY, symbol_id TEXT NOT NULL, entity_type TEXT NOT NULL, file_path TEXT NOT NULL, logical_path TEXT NOT NULL, line INTEGER NOT NULL, end_line INTEGER NOT NULL, origin TEXT NOT NULL, validate INTEGER NOT NULL, overwrite_state TEXT NOT NULL, resource_scope TEXT, domain TEXT NOT NULL, override_path TEXT, override_strategy TEXT, provenance_kind TEXT NOT NULL DEFAULT 'declared', source_file TEXT NOT NULL DEFAULT '', source_line INTEGER NOT NULL DEFAULT 0, source_end_line INTEGER NOT NULL DEFAULT 0, template_file TEXT, template_line INTEGER, invocation_file TEXT, invocation_line INTEGER, has_real_range INTEGER NOT NULL DEFAULT 1, confidence TEXT NOT NULL DEFAULT 'high')"
+            "CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, logical_path TEXT NOT NULL, domain TEXT NOT NULL, origin TEXT NOT NULL)"
+            "CREATE TABLE references_graph (id INTEGER PRIMARY KEY, source_file TEXT NOT NULL, source_logical_path TEXT NOT NULL, target_id TEXT NOT NULL, type_group TEXT NOT NULL, line INTEGER NOT NULL, is_outgoing INTEGER NOT NULL, reference_type TEXT NOT NULL, label TEXT, associated_type TEXT, domain TEXT NOT NULL)"
+            "CREATE TABLE event_nodes (id INTEGER PRIMARY KEY, event_id TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT, file_path TEXT NOT NULL, logical_path TEXT NOT NULL, line INTEGER NOT NULL, end_line INTEGER NOT NULL, origin TEXT NOT NULL, is_triggered_only INTEGER NOT NULL, is_hidden INTEGER NOT NULL, has_mtth INTEGER NOT NULL, facts_known INTEGER NOT NULL)"
+            "CREATE TABLE event_edges (id INTEGER PRIMARY KEY, source_kind TEXT NOT NULL, source_id TEXT NOT NULL, target_event_id TEXT NOT NULL, edge_type TEXT NOT NULL, label TEXT, source_file TEXT NOT NULL, line INTEGER NOT NULL, confidence TEXT NOT NULL, call_operator TEXT, phase TEXT, delay TEXT, condition_path TEXT, scope_map TEXT, source_scope TEXT, target_scope TEXT)"
+            "CREATE TABLE event_logic (id INTEGER PRIMARY KEY, event_id TEXT NOT NULL, relation_type TEXT NOT NULL, subject TEXT NOT NULL, scope TEXT, phase TEXT NOT NULL, source_file TEXT NOT NULL, line INTEGER NOT NULL, details TEXT)"
+            "CREATE TABLE unresolved (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, entity_type TEXT, symbol_id TEXT, resolution TEXT, message TEXT NOT NULL)"
+            "CREATE TABLE definition_stacks (id INTEGER PRIMARY KEY, entity_type TEXT NOT NULL, symbol_id TEXT NOT NULL, resolution TEXT NOT NULL, UNIQUE(entity_type, symbol_id))"
+            "CREATE TABLE stack_candidates (stack_id INTEGER NOT NULL REFERENCES definition_stacks(id) ON DELETE CASCADE, definition_id INTEGER NOT NULL REFERENCES definitions(id) ON DELETE CASCADE, is_active INTEGER NOT NULL, candidate_order INTEGER NOT NULL DEFAULT 0, origin TEXT NOT NULL DEFAULT '', logical_path TEXT NOT NULL DEFAULT '', override_strategy TEXT, PRIMARY KEY(stack_id, definition_id))"
+            "CREATE TABLE archetypes (definition_id INTEGER NOT NULL REFERENCES definitions(id) ON DELETE CASCADE, domain TEXT NOT NULL, origin TEXT NOT NULL, rank INTEGER NOT NULL, role TEXT NOT NULL, PRIMARY KEY(definition_id, role))"
+            "CREATE TABLE inline_templates (template_id TEXT PRIMARY KEY, logical_path TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL, content_hash TEXT NOT NULL)"
+            "CREATE TABLE inline_parameters (template_id TEXT NOT NULL, name TEXT NOT NULL, usage_kind TEXT NOT NULL, usage_kinds TEXT NOT NULL, inferred_type TEXT NOT NULL, required INTEGER NOT NULL, occurrences INTEGER NOT NULL, PRIMARY KEY(template_id, name))"
+            "CREATE TABLE inline_invocations (invocation_id TEXT PRIMARY KEY, caller_file TEXT NOT NULL, caller_line INTEGER NOT NULL, template_id TEXT NOT NULL, enclosing_definition TEXT)"
+            "CREATE TABLE inline_arguments (invocation_id TEXT NOT NULL, name TEXT NOT NULL, raw_value TEXT NOT NULL, resolved_value TEXT NOT NULL, value_kind TEXT NOT NULL, PRIMARY KEY(invocation_id, name))"
+            "CREATE TABLE inline_expansions (invocation_id TEXT NOT NULL, expanded_symbol_id TEXT NOT NULL, entity_type TEXT NOT NULL, template_file TEXT NOT NULL, caller_file TEXT NOT NULL, template_line INTEGER NOT NULL, generated_line INTEGER NOT NULL, confidence TEXT NOT NULL, PRIMARY KEY(invocation_id, expanded_symbol_id))"
+            "CREATE TABLE inline_generated_references (invocation_id TEXT NOT NULL, reference_kind TEXT NOT NULL, expanded_value TEXT NOT NULL, template_file TEXT NOT NULL, caller_file TEXT NOT NULL, template_line INTEGER NOT NULL, generated_line INTEGER NOT NULL, confidence TEXT NOT NULL, PRIMARY KEY(invocation_id, reference_kind, expanded_value, template_line))"
+            "CREATE TABLE inline_problems (invocation_id TEXT NOT NULL, kind TEXT NOT NULL, message TEXT NOT NULL, line INTEGER NOT NULL)"
+        ]
+        for sql in createTables do
+            use command = connection.CreateCommand()
+            command.CommandText <- sql
+            command.ExecuteNonQuery() |> ignore
+        let insert (sql: string) (values: (string * obj) list) =
+            use cmd = connection.CreateCommand()
+            cmd.CommandText <- sql
+            for key, value in values do
+                cmd.Parameters.AddWithValue(key, value) |> ignore
+            cmd.ExecuteNonQuery() |> ignore
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "schema_version"; "$v", box "7" ]
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "status"; "$v", box "ready" ]
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "game"; "$v", box "stellaris" ]
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "generated_at"; "$v", box "2026-01-01T00:00:00.000Z" ]
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "graph_version"; "$v", box "4" ]
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "topology_truncated"; "$v", box "false" ]
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "definition_count"; "$v", box "2" ]
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "topology_file_count"; "$v", box "1" ]
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "topology_edge_count"; "$v", box "0" ]
+        let definitionSql = "INSERT INTO definitions(symbol_id, entity_type, file_path, logical_path, line, end_line, origin, validate, overwrite_state, resource_scope, domain, override_path, override_strategy, provenance_kind, source_file, source_line, source_end_line, template_file, template_line, invocation_file, invocation_line, has_real_range, confidence) VALUES ($symbol, $type, $file, $logical, $line, $end, $origin, $validate, $overwrite, $scope, $domain, $overridePath, $overrideStrategy, $provenance, $sourceFile, $sourceLine, $sourceEndLine, $templateFile, $templateLine, $invocationFile, $invocationLine, $hasRealRange, $confidence)"
+        insert definitionSql [ "$symbol", box "real_event.1"; "$type", box "event"; "$file", box "events/a.txt"; "$logical", box "events/a.txt"; "$line", box 5; "$end", box 9; "$origin", box "workspace"; "$validate", box 1; "$overwrite", box "none"; "$scope", box ""; "$domain", box "events"; "$overridePath", box ""; "$overrideStrategy", box ""; "$provenance", box "declared"; "$sourceFile", box "events/a.txt"; "$sourceLine", box 5; "$sourceEndLine", box 9; "$templateFile", box ""; "$templateLine", box 0; "$invocationFile", box ""; "$invocationLine", box 0; "$hasRealRange", box 1; "$confidence", box "high" ]
+        insert definitionSql [ "$symbol", box "synthetic_mod_1"; "$type", box "modifier"; "$file", box "common/static_modifiers/generated.txt"; "$logical", box "common/static_modifiers/generated.txt"; "$line", box 0; "$end", box 0; "$origin", box "workspace"; "$validate", box 1; "$overwrite", box "none"; "$scope", box ""; "$domain", box "common"; "$overridePath", box ""; "$overrideStrategy", box ""; "$provenance", box "synthetic"; "$sourceFile", box ""; "$sourceLine", box 0; "$sourceEndLine", box 0; "$templateFile", box ""; "$templateLine", box 0; "$invocationFile", box ""; "$invocationLine", box 0; "$hasRealRange", box 0; "$confidence", box "low" ]
+        insert "INSERT INTO definition_stacks(id, entity_type, symbol_id, resolution) VALUES (1, 'event', 'real_event.1', 'last_in_only_served')" []
+        insert "INSERT INTO stack_candidates(stack_id, definition_id, is_active, candidate_order, origin, logical_path, override_strategy) VALUES (1, 1, 0, 0, 'vanilla', 'events/a.txt', 'LIOS')" []
+        insert "INSERT INTO stack_candidates(stack_id, definition_id, is_active, candidate_order, origin, logical_path, override_strategy) VALUES (1, 2, 1, 1, 'workspace', 'events/!!a.txt', 'LIOS')" []
+
+    let intentOptions =
+        { databasePath = provenanceDb
+          intent = Some "design a new event"
+          domains = []
+          identifiers = []
+          entityTypes = []
+          includeProjectPatterns = true
+          includeVanillaArchetypes = true
+          includeTopology = true
+          includeUnresolved = true
+          includeEventGraph = true
+          limit = 20 }
+    let intentResult = queryProjectKnowledgeDatabase intentOptions
+    let intentEvidence = intentResult.Item("evidence").AsArray()
+    assertTrue "intent queries exclude synthetic definitions"
+        (intentEvidence |> Seq.forall (fun item -> item.Item("id").AsString() <> "synthetic_mod_1"))
+    assertTrue "intent queries still return real declared definitions"
+        (intentEvidence |> Seq.exists (fun item -> item.Item("id").AsString() = "real_event.1"))
+    let realProvenance = intentEvidence |> Seq.find (fun item -> item.Item("id").AsString() = "real_event.1") |> fun item -> item.Item("provenance")
+    assertTrue "returned definitions carry provenance kind"
+        (realProvenance.Item("kind").AsString() = "declared")
+
+    let stackResult = queryProjectKnowledgeDatabase { intentOptions with intent = None; identifiers = [ "real_event.1" ] }
+    let stacks = stackResult.Item("definitionStacks").AsArray()
+    assertTrue "definition stack query returns a structured stack object rather than a nested candidate array"
+        (stacks.Length = 1
+         && stacks.[0].Item("resolution").AsString() = "last_in_only_served"
+         && stacks.[0].Item("ambiguous").AsBoolean() = false
+         && stacks.[0].Item("winner").Item("candidateOrder").AsInteger() = 1
+         && stacks.[0].Item("losers").AsArray().Length = 1)
+
+    let exactOptions =
+        { intentOptions with
+            intent = None
+            identifiers = [ "synthetic_mod_1" ] }
+    let exactResult = queryProjectKnowledgeDatabase exactOptions
+    let exactEvidence = exactResult.Item("evidence").AsArray()
+    assertTrue "exact identifier queries can surface synthetic facts"
+        (exactEvidence |> Seq.exists (fun item -> item.Item("id").AsString() = "synthetic_mod_1"))
+finally
+    GC.Collect()
+    GC.WaitForPendingFinalizers()
+    try
+        Directory.Delete(provenanceRoot, true)
+    with _ -> ()
+
+printfn "ProjectKnowledge provenance regression tests passed"
+
+
+// ─── state flow contract: variable/flag/target accesses surface with phase
+// and condition path, and are queryable in both directions ───────────────────
+let stateRoot =
+    Path.Combine(Path.GetTempPath(), "cwtools-project-knowledge-state-" + Guid.NewGuid().ToString("N"))
+Directory.CreateDirectory(stateRoot) |> ignore
+try
+    let stateDb = Path.Combine(stateRoot, "knowledge.sqlite")
+    do
+        use connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + stateDb)
+        connection.Open()
+        let createTables = [
+            "CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            "CREATE TABLE domains (id TEXT PRIMARY KEY, definition_count INTEGER NOT NULL, workspace_count INTEGER NOT NULL, vanilla_count INTEGER NOT NULL, entity_types_json TEXT NOT NULL, directories_json TEXT NOT NULL)"
+            "CREATE TABLE definitions (id INTEGER PRIMARY KEY, symbol_id TEXT NOT NULL, entity_type TEXT NOT NULL, file_path TEXT NOT NULL, logical_path TEXT NOT NULL, line INTEGER NOT NULL, end_line INTEGER NOT NULL, origin TEXT NOT NULL, validate INTEGER NOT NULL, overwrite_state TEXT NOT NULL, resource_scope TEXT, domain TEXT NOT NULL, override_path TEXT, override_strategy TEXT, provenance_kind TEXT NOT NULL DEFAULT 'declared', source_file TEXT NOT NULL DEFAULT '', source_line INTEGER NOT NULL DEFAULT 0, source_end_line INTEGER NOT NULL DEFAULT 0, template_file TEXT, template_line INTEGER, invocation_file TEXT, invocation_line INTEGER, has_real_range INTEGER NOT NULL DEFAULT 1, confidence TEXT NOT NULL DEFAULT 'high')"
+            "CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, logical_path TEXT NOT NULL, domain TEXT NOT NULL, origin TEXT NOT NULL)"
+            "CREATE TABLE references_graph (id INTEGER PRIMARY KEY, source_file TEXT NOT NULL, source_logical_path TEXT NOT NULL, target_id TEXT NOT NULL, type_group TEXT NOT NULL, line INTEGER NOT NULL, is_outgoing INTEGER NOT NULL, reference_type TEXT NOT NULL, label TEXT, associated_type TEXT, domain TEXT NOT NULL)"
+            "CREATE TABLE event_nodes (id INTEGER PRIMARY KEY, event_id TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT, file_path TEXT NOT NULL, logical_path TEXT NOT NULL, line INTEGER NOT NULL, end_line INTEGER NOT NULL, origin TEXT NOT NULL, is_triggered_only INTEGER NOT NULL, is_hidden INTEGER NOT NULL, has_mtth INTEGER NOT NULL, facts_known INTEGER NOT NULL)"
+            "CREATE TABLE event_edges (id INTEGER PRIMARY KEY, source_kind TEXT NOT NULL, source_id TEXT NOT NULL, target_event_id TEXT NOT NULL, edge_type TEXT NOT NULL, label TEXT, source_file TEXT NOT NULL, line INTEGER NOT NULL, confidence TEXT NOT NULL, call_operator TEXT, phase TEXT, delay TEXT, condition_path TEXT, scope_map TEXT, source_scope TEXT, target_scope TEXT)"
+            "CREATE TABLE event_logic (id INTEGER PRIMARY KEY, event_id TEXT NOT NULL, relation_type TEXT NOT NULL, subject TEXT NOT NULL, scope TEXT, phase TEXT NOT NULL, source_file TEXT NOT NULL, line INTEGER NOT NULL, details TEXT)"
+            "CREATE TABLE unresolved (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, entity_type TEXT, symbol_id TEXT, resolution TEXT, message TEXT NOT NULL)"
+            "CREATE TABLE definition_stacks (id INTEGER PRIMARY KEY, entity_type TEXT NOT NULL, symbol_id TEXT NOT NULL, resolution TEXT NOT NULL, UNIQUE(entity_type, symbol_id))"
+            "CREATE TABLE stack_candidates (stack_id INTEGER NOT NULL REFERENCES definition_stacks(id) ON DELETE CASCADE, definition_id INTEGER NOT NULL REFERENCES definitions(id) ON DELETE CASCADE, is_active INTEGER NOT NULL, candidate_order INTEGER NOT NULL DEFAULT 0, origin TEXT NOT NULL DEFAULT '', logical_path TEXT NOT NULL DEFAULT '', override_strategy TEXT, PRIMARY KEY(stack_id, definition_id))"
+            "CREATE TABLE archetypes (definition_id INTEGER NOT NULL REFERENCES definitions(id) ON DELETE CASCADE, domain TEXT NOT NULL, origin TEXT NOT NULL, rank INTEGER NOT NULL, role TEXT NOT NULL, PRIMARY KEY(definition_id, role))"
+        ]
+        for sql in createTables do
+            use command = connection.CreateCommand()
+            command.CommandText <- sql
+            command.ExecuteNonQuery() |> ignore
+        let insert (sql: string) (values: (string * obj) list) =
+            use cmd = connection.CreateCommand()
+            cmd.CommandText <- sql
+            for key, value in values do
+                cmd.Parameters.AddWithValue(key, value) |> ignore
+            cmd.ExecuteNonQuery() |> ignore
+        let inlineTables = [
+            "CREATE TABLE inline_templates (template_id TEXT PRIMARY KEY, logical_path TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL, content_hash TEXT NOT NULL)"
+            "CREATE TABLE inline_parameters (template_id TEXT NOT NULL, name TEXT NOT NULL, usage_kind TEXT NOT NULL, usage_kinds TEXT NOT NULL, inferred_type TEXT NOT NULL, required INTEGER NOT NULL, occurrences INTEGER NOT NULL, PRIMARY KEY(template_id, name))"
+            "CREATE TABLE inline_invocations (invocation_id TEXT PRIMARY KEY, caller_file TEXT NOT NULL, caller_line INTEGER NOT NULL, template_id TEXT NOT NULL, enclosing_definition TEXT)"
+            "CREATE TABLE inline_arguments (invocation_id TEXT NOT NULL, name TEXT NOT NULL, raw_value TEXT NOT NULL, resolved_value TEXT NOT NULL, value_kind TEXT NOT NULL, PRIMARY KEY(invocation_id, name))"
+            "CREATE TABLE inline_expansions (invocation_id TEXT NOT NULL, expanded_symbol_id TEXT NOT NULL, entity_type TEXT NOT NULL, template_file TEXT NOT NULL, caller_file TEXT NOT NULL, template_line INTEGER NOT NULL, generated_line INTEGER NOT NULL, confidence TEXT NOT NULL, PRIMARY KEY(invocation_id, expanded_symbol_id))"
+            "CREATE TABLE inline_generated_references (invocation_id TEXT NOT NULL, reference_kind TEXT NOT NULL, expanded_value TEXT NOT NULL, template_file TEXT NOT NULL, caller_file TEXT NOT NULL, template_line INTEGER NOT NULL, generated_line INTEGER NOT NULL, confidence TEXT NOT NULL, PRIMARY KEY(invocation_id, reference_kind, expanded_value, template_line))"
+            "CREATE TABLE inline_problems (invocation_id TEXT NOT NULL, kind TEXT NOT NULL, message TEXT NOT NULL, line INTEGER NOT NULL)"
+        ]
+        for sql in inlineTables do insert sql []
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "schema_version"; "$v", box "7" ]
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "status"; "$v", box "ready" ]
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "game"; "$v", box "stellaris" ]
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "generated_at"; "$v", box "2026-01-01T00:00:00.000Z" ]
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "graph_version"; "$v", box "6" ]
+        insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "topology_truncated"; "$v", box "false" ]
+        insert "INSERT INTO event_logic(event_id, relation_type, subject, scope, phase, source_file, line, details) VALUES ($event, $type, $subject, $scope, $phase, $file, $line, $details)"
+            [ "$event", box "kuat.100"; "$type", box "variable_set"; "$subject", box "kuat_counter"
+              "$scope", box ""; "$phase", box "immediate"; "$file", box "events/kuat.txt"; "$line", box 12
+              "$details", box "if>AND" ]
+        insert "INSERT INTO event_logic(event_id, relation_type, subject, scope, phase, source_file, line, details) VALUES ($event, $type, $subject, $scope, $phase, $file, $line, $details)"
+            [ "$event", box "kuat.101"; "$type", box "event_target_save"; "$subject", box "kuat_target"
+              "$scope", box ""; "$phase", box "option"; "$file", box "events/kuat.txt"; "$line", box 30
+              "$details", box "" ]
+        insert "INSERT INTO event_edges(source_kind, source_id, target_event_id, edge_type, label, source_file, line, confidence, call_operator, phase, delay, condition_path, scope_map, source_scope, target_scope) VALUES ($kind, $source, $target, $type, $label, $file, $line, $confidence, $callOperator, $phase, $delay, $conditionPath, $scopeMap, $sourceScope, $targetScope)"
+            [ "$kind", box "event"; "$source", box "kuat.100"; "$target", box "kuat.101"; "$type", box "typed_reference"
+              "$label", box ""; "$file", box "events/kuat.txt"; "$line", box 20; "$confidence", box "lsp"
+              "$callOperator", box "country_event"; "$phase", box "option"; "$delay", box "days=30"
+              "$conditionPath", box "option"; "$scopeMap", box "ROOT->FROM"; "$sourceScope", box "country"; "$targetScope", box "country" ]
+        insert "INSERT INTO inline_templates VALUES ($id,$logical,$file,1,$hash)"
+            [ "$id", box "kuat/generate_event"; "$logical", box "common/inline_scripts/kuat/generate_event.txt"; "$file", box "common/inline_scripts/kuat/generate_event.txt"; "$hash", box "abc" ]
+        insert "INSERT INTO inline_parameters VALUES ($template,$name,$kind,$kinds,$type,1,2)"
+            [ "$template", box "kuat/generate_event"; "$name", box "ID"; "$kind", box "identifier"; "$kinds", box "[\"identifier\"]"; "$type", box "identifier" ]
+        insert "INSERT INTO inline_invocations VALUES ($id,$file,42,$template,$enclosing)"
+            [ "$id", box "inv-kuat-42"; "$file", box "events/kuat_caller.txt"; "$template", box "kuat/generate_event"; "$enclosing", box "kuat.1" ]
+        insert "INSERT INTO inline_arguments VALUES ($inv,$name,$raw,$resolved,$kind)"
+            [ "$inv", box "inv-kuat-42"; "$name", box "ID"; "$raw", box "kuat.42"; "$resolved", box "kuat.42"; "$kind", box "identifier" ]
+        insert "INSERT INTO inline_expansions VALUES ($inv,$symbol,$type,$templateFile,$caller,3,42,$confidence)"
+            [ "$inv", box "inv-kuat-42"; "$symbol", box "kuat.42"; "$type", box "event"; "$templateFile", box "common/inline_scripts/kuat/generate_event.txt"; "$caller", box "events/kuat_caller.txt"; "$confidence", box "expanded" ]
+
+    let stateOptions =
+        { databasePath = stateDb
+          intent = None
+          domains = []
+          identifiers = []
+          entityTypes = []
+          includeProjectPatterns = true
+          includeVanillaArchetypes = true
+          includeTopology = true
+          includeUnresolved = true
+          includeEventGraph = true
+          limit = 30 }
+    let stateResult = queryProjectKnowledgeDatabase stateOptions
+    let stateLogic = stateResult.Item("eventGraph").Item("logic").AsArray()
+    assertTrue "variable accesses surface with relation type and phase"
+        (stateLogic |> Seq.exists (fun item ->
+            item.Item("relationType").AsString() = "variable_set"
+            && item.Item("subject").AsString() = "kuat_counter"
+            && item.Item("phase").AsString() = "immediate"
+            && item.Item("details").AsString() = "if>AND"))
+    assertTrue "event target saves surface as state facts"
+        (stateLogic |> Seq.exists (fun item ->
+            item.Item("relationType").AsString() = "event_target_save"
+            && item.Item("subject").AsString() = "kuat_target"
+            && item.Item("phase").AsString() = "option"))
+    let stateEdges = stateResult.Item("eventGraph").Item("edges").AsArray()
+    assertTrue "event edges carry call operator, delay and scope map"
+        (stateEdges |> Seq.exists (fun item ->
+            item.Item("callOperator").AsString() = "country_event"
+            && item.Item("delay").AsString() = "days=30"
+            && item.Item("scopeMap").AsString() = "ROOT->FROM"))
+    let inlineResult = queryProjectKnowledgeDatabase { stateOptions with identifiers = [ "kuat.42" ] }
+    let inlineGraph = inlineResult.Item("inlineGraph")
+    assertTrue "knowledge query seeds inline graph by expanded symbol id"
+        (inlineGraph.Item("expansions").AsArray() |> Seq.exists (fun item -> item.Item("expandedSymbolId").AsString() = "kuat.42"))
+    assertTrue "knowledge query returns the caller and arguments for an expanded id"
+        (inlineGraph.Item("invocations").AsArray().Length = 1 && inlineGraph.Item("arguments").AsArray().Length = 1)
+    // Synthetic bounded-query performance budget. This is deliberately a
+    // generous CI guard, not a machine benchmark; the measured p95 is emitted
+    // so regressions remain visible in logs.
+    queryProjectKnowledgeDatabase stateOptions |> ignore
+    let queryDurations =
+        [ for _ in 1..40 do
+            let timer = Diagnostics.Stopwatch.StartNew()
+            queryProjectKnowledgeDatabase stateOptions |> ignore
+            timer.Stop()
+            yield timer.Elapsed.TotalMilliseconds ]
+        |> List.sort
+    let p95Index = min (queryDurations.Length - 1) (int (Math.Ceiling(float queryDurations.Length * 0.95)) - 1)
+    let p95Ms = queryDurations.[p95Index]
+    printfn "ProjectKnowledge synthetic query p95=%.2fms budget=250ms" p95Ms
+    assertTrue "synthetic project knowledge query p95 stays within budget" (p95Ms < 250.0)
+finally
+    GC.Collect()
+    GC.WaitForPendingFinalizers()
+    try
+        Directory.Delete(stateRoot, true)
+    with _ -> ()
+
+printfn "ProjectKnowledge state flow regression tests passed"

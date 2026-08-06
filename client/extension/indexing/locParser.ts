@@ -408,6 +408,7 @@ export function tokenizeLocalisationRichText(value: string, baseOffset = 0): Loc
 export function parseLocFile(content: string, filePath: string): LocEntry[] {
 	const entries: LocEntry[] = [];
 	const lines = content.split(/\r?\n/);
+	const hasBom = content.charCodeAt(0) === 0xFEFF;
 
 	// Detect language from header (e.g. "l_english:")
 	let language = '';
@@ -415,6 +416,19 @@ export function parseLocFile(content: string, filePath: string): LocEntry[] {
 	if (headerMatch) {
 		language = headerMatch[1]!;
 	}
+	const normalizedPath = filePath.replace(/\\/g, '/');
+	const languageDirectory = normalizedPath.match(/\/localisation(?:_synced)?\/([^/]+)\//i)?.[1];
+	const expectedHeader = languageDirectory ? `l_${languageDirectory.toLowerCase()}` : undefined;
+	const valueHash = (value: string): string => {
+		// Stable FNV-1a is sufficient for occurrence/change identity and keeps this
+		// parser browser-safe; it is not used as a security digest.
+		let hash = 0x811c9dc5;
+		for (let index = 0; index < value.length; index++) {
+			hash ^= value.charCodeAt(index);
+			hash = Math.imul(hash, 0x01000193);
+		}
+		return (hash >>> 0).toString(16).padStart(8, '0');
+	};
 
 	for (let i = 0; i < lines.length; i++) {
 		const parsed = parseLocalisationLine(lines[i]!);
@@ -426,6 +440,11 @@ export function parseLocFile(content: string, filePath: string): LocEntry[] {
 			file: filePath,
 			line: i + 1,
 			language,
+			valueHash: valueHash(parsed.value),
+			hasBom,
+			encoding: hasBom ? 'utf8-bom' : 'utf8',
+			header: language,
+			headerMatchesPath: expectedHeader ? language.toLowerCase() === expectedHeader : undefined,
 		});
 	}
 
@@ -523,4 +542,24 @@ export function queryLocIndex(
 	}
 
 	return results;
+}
+
+/** Count all matching occurrences without materialising an unbounded result. */
+export function countLocIndex(
+	index: Map<string, LocEntry[]>,
+	query: { key?: string; language?: string; prefix?: boolean; contains?: boolean; caseSensitive?: boolean },
+): number {
+	const queryKey = query.key ?? '';
+	const needle = query.caseSensitive ? queryKey : queryKey.toLowerCase();
+	let count = 0;
+	for (const [key, entries] of index.entries()) {
+		const comparable = query.caseSensitive ? key : key.toLowerCase();
+		const matched = !query.key
+			|| (query.prefix ? comparable.startsWith(needle)
+				: query.contains ? comparable.includes(needle)
+					: comparable === needle);
+		if (!matched) continue;
+		for (const entry of entries) if (!query.language || entry.language === query.language) count++;
+	}
+	return count;
 }

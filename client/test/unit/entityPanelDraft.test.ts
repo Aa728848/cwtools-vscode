@@ -69,6 +69,15 @@ describe('entity preview locator drafts', () => {
         expect(host).to.include('不会建立动态绑定');
     });
 
+    it('writes a newly created locator and its attach in the same draft edit', () => {
+        const addLocator = methodSource('_handleAddLocator');
+        expect(addLocator).to.include('locator = { name = "${msg.locatorName}"');
+        expect(addLocator).to.include('attach = { "${msg.locatorName}" = "${msg.attachEntity}" }');
+        expect(addLocator.match(/_applyDraftEdit/g)).to.have.length(1);
+        expect(addLocator).to.include('this._currentModelAnchorNames.has(msg.locatorName.toLowerCase())');
+        expect(addLocator).not.to.include('.includes(Buffer.from');
+    });
+
     it('routes undo and redo through focused edit-mode keybindings', () => {
         expect(extension).to.include('safeRegisterCommand(context, "cwtools.entityPreview.undo"');
         expect(extension).to.include('safeRegisterCommand(context, "cwtools.entityPreview.redo"');
@@ -141,6 +150,8 @@ describe('entity preview locator drafts', () => {
         expect(host).to.include('const locator = parsedEntity?.locators.find');
         expect(host).to.include('Rejected transform for non-script locator');
         expect(host).to.include('Rejected transform for model locator or bone');
+        expect(host).to.include('normalizedPdxMeshAnchorNames');
+        expect(host).not.to.match(/\.includes\(Buffer\.from\([^)]*(?:locator|anchor|name)/);
         expect(host).not.to.include('Inserted locator override for mesh locator');
     });
 

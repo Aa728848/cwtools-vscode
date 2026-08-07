@@ -18,6 +18,7 @@ import { matchesExt } from './fileExtensions';
 import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { isPathInsideOrEqual } from './pathScope';
 import { resolveNamedParticleResources } from './particleResourceResolver';
+import { normalizedPdxMeshAnchorNames } from './pdxMeshAnchors';
 import { loadEnvironmentPresets } from './worldgfxPresets';
 
 type LocatorTransformUpdate = {
@@ -80,7 +81,7 @@ export class EntityPanel {
     private _skipNextReload = false;
     private _currentEntityName: string | undefined;
     private _currentEntityIndex = 0;
-    private _currentMeshData: Buffer | undefined;
+    private _currentModelAnchorNames = new Set<string>();
     private _messageQueue: Promise<void> = Promise.resolve();
     private _editMode = false;
     private readonly _draftDocuments = new Map<string, EntityDraftDocument>();
@@ -585,8 +586,9 @@ export class EntityPanel {
             .find(entity => entity.name === entityName);
         if (parsedEntity?.locators.some(locator => locator.name === anchorName)) return true;
 
+        const normalizedAnchorName = anchorName.toLowerCase();
         if (document === this._document && entityName === this._currentEntityName
-            && this._currentMeshData?.includes(Buffer.from(anchorName, 'utf8'))) {
+            && this._currentModelAnchorNames.has(normalizedAnchorName)) {
             return true;
         }
         const entityDefinition = this._entityGraph?.entities.get(entityName);
@@ -596,10 +598,15 @@ export class EntityPanel {
         const meshFile = meshDefinition ? this._resolveFilePath(meshDefinition.file, this._searchRoots) : undefined;
         if (!meshFile) return false;
         try {
-            return fs.readFileSync(meshFile).includes(Buffer.from(anchorName, 'utf8'));
+            return this._readMeshAnchorNames(fs.readFileSync(meshFile)).has(normalizedAnchorName);
         } catch {
             return false;
         }
+    }
+
+    private _readMeshAnchorNames(data: Buffer): Set<string> {
+        const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+        return normalizedPdxMeshAnchorNames(buffer) ?? new Set<string>();
     }
 
     /**
@@ -639,7 +646,7 @@ export class EntityPanel {
                 console.warn(`[EntityPanel] Rejected transform for non-script locator "${update.locatorName}"`);
                 continue;
             }
-            if (this._currentMeshData?.includes(Buffer.from(update.locatorName, 'utf8'))) {
+            if (this._currentModelAnchorNames.has(update.locatorName.toLowerCase())) {
                 console.warn(`[EntityPanel] Rejected transform for model locator or bone "${update.locatorName}"`);
                 continue;
             }
@@ -676,8 +683,8 @@ export class EntityPanel {
         const locator = entity?.locators.find(candidate => candidate.name === msg.oldName);
         const collides = entity?.locators.some(candidate => candidate.name === msg.newName)
             || entity?.states.some(state => state.locators.some(candidate => candidate.name === msg.newName))
-            || this._currentMeshData?.includes(Buffer.from(msg.newName, 'utf8'));
-        if (!entity || !locator || collides || this._currentMeshData?.includes(Buffer.from(msg.oldName, 'utf8'))) return;
+            || this._currentModelAnchorNames.has(msg.newName.toLowerCase());
+        if (!entity || !locator || collides || this._currentModelAnchorNames.has(msg.oldName.toLowerCase())) return;
 
         const locatorLines = findLocatorTextBlock(lines, locator.line);
         if (!locatorLines) return;
@@ -758,7 +765,7 @@ export class EntityPanel {
         const parsedEntity = parseAssetFile(text, doc.uri.fsPath).entities.find(entity => entity.name === entityName);
         const existsInAsset = parsedEntity?.locators.some(locator => locator.name === msg.locatorName)
             || parsedEntity?.states.some(state => state.locators.some(locator => locator.name === msg.locatorName));
-        const existsInModel = this._currentMeshData?.includes(Buffer.from(msg.locatorName, 'utf8')) ?? false;
+        const existsInModel = this._currentModelAnchorNames.has(msg.locatorName.toLowerCase());
         if (existsInAsset || existsInModel) {
             console.warn(`[EntityPanel] Rejected duplicate or model-backed locator name "${msg.locatorName}"`);
             return;
@@ -827,16 +834,6 @@ export class EntityPanel {
         }
 
         const entityBlockText = lines.slice(entityBlockStart, entityBlockEnd + 1).join('\n');
-        let meshData: Buffer | undefined;
-        if (this._entityGraph) {
-            const entityDef = this._entityGraph.entities.get(entityName);
-            const meshDef = entityDef?.pdxmesh ? this._entityGraph.meshes.get(entityDef.pdxmesh) : undefined;
-            const meshFilePath = meshDef ? this._resolveFilePath(meshDef.file, this._searchRoots) : undefined;
-            if (meshFilePath) {
-                try { meshData = fs.readFileSync(meshFilePath); } catch { /* skip mesh collision check */ }
-            }
-        }
-
         const accepted: typeof msg.locators = [];
         const acceptedNames = new Set<string>();
         for (const locator of msg.locators.slice(0, 100)) {
@@ -849,7 +846,7 @@ export class EntityPanel {
             const nameEsc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const scriptNamePattern = new RegExp(`locator\\s*=\\s*\\{[\\s\\S]*?name\\s*=\\s*"?${nameEsc}"?(?:\\s|$)`, 'i');
             const existsInScript = scriptNamePattern.test(entityBlockText);
-            const existsInMesh = meshData?.includes(Buffer.from(name, 'utf8')) ?? false;
+            const existsInMesh = this._currentModelAnchorNames.has(lowerName);
             if (existsInScript || existsInMesh) {
                 console.warn(`[EntityPanel] Skipped duplicate locator name "${name}"`);
                 continue;
@@ -909,7 +906,7 @@ export class EntityPanel {
         const parsedEntity = parseAssetFile(text, doc.uri.fsPath).entities.find(entity => entity.name === entityName);
         const editableLocators = (parsedEntity?.locators ?? []).filter(locator =>
             requestedSet.has(locator.name)
-            && !(this._currentMeshData?.includes(Buffer.from(locator.name, 'utf8')) ?? false));
+            && !this._currentModelAnchorNames.has(locator.name.toLowerCase()));
         const names = editableLocators.map(locator => locator.name);
         if (names.length === 0) {
             console.warn('[EntityPanel] Rejected delete request without editable static locators');
@@ -1371,7 +1368,7 @@ export class EntityPanel {
 
     private async _loadAndRender(document: vscode.TextDocument, entityIndex = 0) {
         const content = this._getDraftText(document);
-        this._currentMeshData = undefined;
+        this._currentModelAnchorNames.clear();
         const docDir = path.dirname(document.uri.fsPath);
         const modRoot = this._findModRoot(docDir);
 
@@ -1438,7 +1435,7 @@ export class EntityPanel {
                     try {
                         const data = await fs.promises.readFile(meshFilePath);
                         const buf = Buffer.from(data);
-                        this._currentMeshData = buf;
+                        this._currentModelAnchorNames = this._readMeshAnchorNames(buf);
                         meshBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
                     } catch (e) {
                         console.warn(`Failed to read mesh file: ${meshFilePath}`, e);
@@ -2053,7 +2050,7 @@ export class EntityPanel {
         this._document = undefined;
         this._searchRoots = [];
         this._entityGraph = null;
-        this._currentMeshData = undefined;
+        this._currentModelAnchorNames.clear();
         this._editMode = false;
         this._updateKeybindingContext();
         this._draftDocuments.clear();

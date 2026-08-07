@@ -1107,7 +1107,7 @@ function collectSoftDependencies(root: string, scriptFiles: string[]): NonNullab
         try {
             const content = fs.readFileSync(file, 'utf8');
             for (const marker of content.matchAll(/^\s*#.*?\|([A-Za-z0-9_/-]{2,80})\|/gm)) {
-                for (const token of (marker[1] ?? '').split(/[\/|_-]+/)) add(token, 'placeholder', `${relative}: ${marker[1]}`);
+                for (const token of (marker[1] ?? '').split(/[/|_-]+/)) add(token, 'placeholder', `${relative}: ${marker[1]}`);
             }
             for (const definition of content.matchAll(/^\s*([A-Za-z][A-Za-z0-9_.:-]{2,})\s*=\s*\{/gm)) {
                 if (definition[1]) add(definition[1], 'placeholder', `${relative}: ${definition[1]}`);

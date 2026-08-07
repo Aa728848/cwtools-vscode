@@ -228,7 +228,6 @@
   "configuration.stellarisLanguageServices.ai.mcp.servers.description": "MCP（模型上下文协议）服务器配置。每个服务器需声明用于 Paradox、通用编码或两者；旧条目默认仅允许 Paradox。",
   "configuration.stellarisLanguageServices.ai.orchestrator.agentModels.description": "协调模式子 Agent 的自定义模型配置（如 explorer, reviewer）。",
   "configuration.stellarisLanguageServices.ai.performance.legacyFullToolset.description": "使用旧版宽工具集，而不是按模式过滤工具。",
-  "configuration.stellarisLanguageServices.ai.performance.fullProjectRulesInBuild.description": "在 Build 模式提示词中注入完整项目规则文件，而不是精简摘要。",
   "configuration.stellarisLanguageServices.ai.performance.includeFullSmallFiles.description": "对 100 行以下当前文件注入完整内容，而不是文件头和局部上下文。",
   "configuration.stellarisLanguageServices.ai.performance.compactionMinIntervalSeconds.description": "两次自动上下文压缩之间的最小间隔秒数；手动压缩与循环内安全压缩不受此限制。",
   "configuration.stellarisLanguageServices.ai.performance.dynamicToolDisclosure.enabled.description": "对支持分阶段 Agent 运行时的模型仅发送常驻与当前已披露的工具 schema。",

@@ -20,6 +20,8 @@ describe('/init artifact generation', () => {
         const manifestPath = path.join(knowledgeRoot, 'manifest.json');
         const workspaceIndexPath = path.join(workspaceRoot, '.cwtools', 'index', 'workspace-symbols.sqlite');
         const progressMessages: string[] = [];
+        const existingInstructions = '# Project Instructions\r\n\r\n- NEVER_REWRITE_THIS\r\n';
+        fs.writeFileSync(path.join(workspaceRoot, 'CWTOOLS.md'), existingInstructions, 'utf8');
         let progressOptions: Record<string, unknown> | undefined;
         let workspaceIndexOptions: Record<string, unknown> | undefined;
         let exportAttempts = 0;
@@ -92,6 +94,8 @@ describe('/init artifact generation', () => {
             expect(result.degraded).to.equal(true);
             expect(result.knowledgeReady).to.equal(false);
             expect(fs.existsSync(path.join(workspaceRoot, 'CWTOOLS.md'))).to.equal(true);
+            expect(fs.readFileSync(path.join(workspaceRoot, 'CWTOOLS.md'), 'utf8').replace(/\r\n/g, '\n'))
+                .to.equal(existingInstructions.replace(/\r\n/g, '\n'));
             expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'))).to.equal(true);
             expect(fs.existsSync(manifestPath)).to.equal(true);
             expect(fs.existsSync(workspaceIndexPath)).to.equal(true);
@@ -159,6 +163,10 @@ describe('/init artifact generation', () => {
             expect(result.success).to.equal(true);
             expect(result.knowledgeReady).to.equal(false);
             expect(result.message).to.include('Must add values');
+            const instructions = fs.readFileSync(path.join(workspaceRoot, 'CWTOOLS.md'), 'utf8');
+            expect(instructions).to.include('user-owned project instruction file');
+            expect(instructions).to.include('## Project Instructions');
+            expect(instructions).to.not.include('## Mod Info');
         } finally {
             moduleLoader._load = originalLoad;
             delete require.cache[modulePath];

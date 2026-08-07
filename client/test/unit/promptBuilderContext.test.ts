@@ -79,7 +79,7 @@ describe('PromptBuilder context budgeting', () => {
         expect(withoutRepositoryInstructions(prompt)).to.not.match(/\b(?:Paradox|PDXScript|CWTools|CWT)\b/i);
     });
 
-    it('injects the /init project profile card instead of full CWTOOLS.md when available', () => {
+    it('injects generated profile facts and user-owned CWTOOLS.md instructions independently', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const workspaceRoot = makeWorkspace();
         try {
@@ -117,6 +117,12 @@ describe('PromptBuilder context budgeting', () => {
                 promptCards: { build: 'Build card from profile' },
                 efficiencyHints: ['Use profile first'],
             }), 'utf8');
+            fs.writeFileSync(path.join(workspaceRoot, 'CWTOOLS.md'), [
+                '# Project Instructions',
+                '',
+                '## Architecture Decisions',
+                '- PRESERVE_USER_ARCHITECTURE_RULE',
+            ].join('\n'), 'utf8');
 
             const builder = new PromptBuilder(workspaceRoot);
             const prompt = builder.buildSystemPromptForMode('build');
@@ -124,6 +130,8 @@ describe('PromptBuilder context budgeting', () => {
             expect(prompt).to.include('PROJECT PROFILE');
             expect(prompt).to.include('Build card from profile');
             expect(prompt).to.include('query_project_profile');
+            expect(prompt).to.include('PROJECT INSTRUCTIONS');
+            expect(prompt).to.include('PRESERVE_USER_ARCHITECTURE_RULE');
             expect(prompt).to.not.include('PROJECT RULES SUMMARY');
         } finally {
             cleanupWorkspace(workspaceRoot);
@@ -279,14 +287,14 @@ describe('PromptBuilder context budgeting', () => {
         expect(String(context[0]!.content)).to.not.include('Agent Helper Script');
     });
 
-    it('inherits bounded Paradox Custom Rules in slim sub-agent prompts', () => {
+    it('inherits user-owned CWTOOLS.md instructions in slim Paradox prompts', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const workspaceRoot = makeWorkspace();
         try {
             fs.writeFileSync(path.join(workspaceRoot, 'CWTOOLS.md'), [
                 '# CWTools Agent Project Rules',
                 '',
-                '## Custom Rules',
+                '## Any User Heading',
                 '- SLIM_MUST_KEEP_THIS_RULE',
                 '',
             ].join('\r\n'), 'utf8');

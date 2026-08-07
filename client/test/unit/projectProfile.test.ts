@@ -4,12 +4,10 @@ import * as os from 'os';
 import * as path from 'path';
 import {
     buildProjectProfile,
-    extractCustomRules,
     getProjectProfilePath,
     mergeDeepCompatibilityEvidence,
     queryProjectProfile,
     readProjectProfile,
-    renderProjectRulesMarkdown,
 } from '../../extension/ai/projectProfile';
 
 describe('ProjectProfile localisation detection', () => {
@@ -304,35 +302,6 @@ describe('Paradox project profile boundaries', () => {
 
     afterEach(() => {
         fs.rmSync(workspaceRoot, { recursive: true, force: true });
-    });
-
-    it('preserves Custom Rules from CRLF CWTOOLS.md content', () => {
-        const rules = [
-            '# CWTools Agent Project Rules',
-            '',
-            '## Custom Rules',
-            '- KEEP_THIS_RULE',
-            '- KEEP_THIS_RULE_TOO',
-            '',
-        ].join('\r\n');
-
-        expect(extractCustomRules(rules)).to.equal('- KEEP_THIS_RULE\r\n- KEEP_THIS_RULE_TOO');
-    });
-
-    it('writes the complete detected directory list to CWTOOLS.md', () => {
-        const profile = buildProjectProfile(workspaceRoot);
-        profile.keyDirectories = Array.from({ length: 20 }, (_, index) => ({
-            key: `dir-${index}`,
-            path: `common/dir-${index}`,
-            exists: true,
-            fileCount: index + 1,
-        }));
-
-        const markdown = renderProjectRulesMarkdown(profile);
-        expect(markdown).to.include('Complete list of 20 detected directories');
-        expect(markdown).to.include('section="directories"');
-        expect(markdown).to.include('`common/dir-0`');
-        expect(markdown).to.include('`common/dir-19`');
     });
 
     it('normalizes legacy schemaVersion 1 profiles without identifiers.byType', () => {

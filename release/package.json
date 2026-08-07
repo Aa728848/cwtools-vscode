@@ -1749,12 +1749,6 @@
                         "default": false,
                         "description": "%configuration.stellarisLanguageServices.ai.performance.legacyFullToolset.description%"
                     },
-                    "stellarisLanguageServices.ai.performance.fullProjectRulesInBuild": {
-                        "scope": "window",
-                        "type": "boolean",
-                        "default": false,
-                        "description": "%configuration.stellarisLanguageServices.ai.performance.fullProjectRulesInBuild.description%"
-                    },
                     "stellarisLanguageServices.ai.performance.includeFullSmallFiles": {
                         "scope": "window",
                         "type": "boolean",

@@ -2801,7 +2801,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     raw,
                     knowledgeReady ? 'success' : 'error',
                     knowledgeReady
-                        ? aiText('CWTOOLS.md and the project knowledge pack were generated.', '已生成 CWTOOLS.md 与项目知识包。')
+                        ? aiText('CWTOOLS.md instructions are ready and the project knowledge pack was generated.', 'CWTOOLS.md 指令已就绪，项目知识包已生成。')
                         : result.success
                         ? aiText(
                             `Base /init artifacts were generated, but knowledge.sqlite was not exported${result.message ? `: ${result.message}` : '.'}`,

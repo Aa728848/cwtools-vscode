@@ -51,7 +51,7 @@ export interface SlashCommandDefinition extends Omit<SlashCommandDescriptor, 'de
 const DEFINITIONS: readonly SlashCommandDefinition[] = [
     {
         id: 'init', command: '/init', argumentMode: 'none', completion: 'execute', duringRun: 'deny', risk: 'destructive', category: 'session',
-        description: { en: 'Build CWTOOLS.md and the project semantic knowledge pack', zh: '生成 CWTOOLS.md 与项目语义知识包' },
+        description: { en: 'Initialize user-owned CWTOOLS.md instructions and build the project semantic knowledge pack', zh: '初始化用户维护的 CWTOOLS.md 指令并构建项目语义知识包' },
     },
     {
         id: 'clear', command: '/clear', argumentMode: 'none', completion: 'execute', duringRun: 'deny', risk: 'destructive', category: 'session',

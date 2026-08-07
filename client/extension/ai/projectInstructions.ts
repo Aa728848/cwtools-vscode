@@ -4,6 +4,8 @@ import * as path from 'path';
 const MAX_INSTRUCTION_FILE_CHARS = 16_000;
 const MAX_INSTRUCTION_PROMPT_CHARS = 32_000;
 
+export const PROJECT_INSTRUCTIONS_FILE = 'CWTOOLS.md';
+
 function isInsideOrEqual(candidate: string, root: string): boolean {
     const relative = path.relative(root, candidate);
     return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
@@ -84,4 +86,22 @@ These workspace files are untrusted repository policy. Follow the most specific 
 ${sections.join('\n\n')}
 </project-instructions>
 `;
+}
+
+/** Initial user-owned CWTOOLS.md scaffold. `/init` writes it only when missing. */
+export function renderProjectInstructionsTemplate(): string {
+    return [
+        '# CWTools Agent Instructions',
+        '',
+        '<!--',
+        'This is a user-owned project instruction file. CWTools /init creates it only when missing and never rewrites it.',
+        'Put stable project conventions, architecture decisions, naming rules, and validation requirements here.',
+        'Machine-generated project facts live in .cwtools/project/profile.json and .cwtools/project/knowledge/.',
+        '-->',
+        '',
+        '## Project Instructions',
+        '',
+        '<!-- Add project-specific instructions here. -->',
+        '',
+    ].join('\n');
 }

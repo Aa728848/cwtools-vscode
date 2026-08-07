@@ -1,9 +1,8 @@
 /**
  * Eddy CWTool Code - /init command.
  *
- * Builds a compact human rules file plus a machine-readable project profile.
- * The profile is used by PromptBuilder and query_project_profile to reduce
- * repeated workspace exploration during future agent runs.
+ * Creates a user-owned project instruction scaffold when missing, then builds
+ * the machine-readable profile and semantic knowledge database.
  */
 
 import * as vs from 'vscode';
@@ -24,12 +23,11 @@ import type { IndexService } from '../indexing/indexService';
 import { getWorkspaceSymbolCachePath } from '../indexing/workspaceSymbolCache';
 import {
     buildProjectProfile,
-    extractCustomRules,
     getProjectProfilePath,
     mergeDeepCompatibilityEvidence,
-    renderProjectRulesMarkdown,
     writeProjectProfile,
 } from './projectProfile';
+import { PROJECT_INSTRUCTIONS_FILE, renderProjectInstructionsTemplate } from './projectInstructions';
 
 type PostMessageFn = (msg: HostMessage) => void;
 type RecordSnapshotFn = (filePath: string) => void;
@@ -119,7 +117,7 @@ async function generateDeepKnowledgeWithRetry(root: string, profile: import('./t
 }
 
 /**
- * Generate project rules and the machine-readable Agent project profile.
+ * Ensure project instructions exist and generate the machine-readable Agent project profile.
  */
 async function generateInitFileCore(
     postMessage: PostMessageFn,
@@ -156,10 +154,9 @@ async function generateInitFileCore(
     });
 
     try {
-        const rulesPath = path.join(root, 'CWTOOLS.md');
+        const rulesPath = path.join(root, PROJECT_INSTRUCTIONS_FILE);
         const profilePath = getProjectProfilePath(root);
-        const existingRules = fs.existsSync(rulesPath) ? fs.readFileSync(rulesPath, 'utf8') : '';
-        const customRules = extractCustomRules(existingRules);
+        const rulesCreated = !fs.existsSync(rulesPath);
 
         const profile = buildProjectProfile(root);
         ErrorReporter.debug(
@@ -170,8 +167,10 @@ async function generateInitFileCore(
         stage = 'write_base_artifacts';
         recordFileSnapshot(profilePath);
         writeProjectProfile(root, profile);
-        recordFileSnapshot(rulesPath);
-        fs.writeFileSync(rulesPath, renderProjectRulesMarkdown(profile, customRules), 'utf8');
+        if (rulesCreated) {
+            recordFileSnapshot(rulesPath);
+            fs.writeFileSync(rulesPath, renderProjectInstructionsTemplate(), 'utf8');
+        }
 
         const workspaceIndexPath = getWorkspaceSymbolCachePath(root);
         let workspaceIndexWarning: string | undefined;
@@ -303,9 +302,7 @@ async function generateInitFileCore(
         });
         writeProjectProfile(root, profile);
 
-        fs.writeFileSync(rulesPath, renderProjectRulesMarkdown(profile, customRules), 'utf8');
-
-        stage = 'open_generated_rules';
+        stage = 'open_project_instructions';
         const doc = await vs.workspace.openTextDocument(vs.Uri.file(rulesPath));
         await vs.window.showTextDocument(doc, { preview: false });
 
@@ -315,17 +312,17 @@ async function generateInitFileCore(
                 type: 'validation',
                 content: deepKnowledgeError
                     ? aiText(
-                        `Generated CWTOOLS.md and the Agent profile, but knowledge.sqlite was not exported. A failure manifest was written for diagnosis: ${deepKnowledgeError}`,
-                        `已生成 CWTOOLS.md 和 Agent 项目画像，但 knowledge.sqlite 未导出。已写入失败清单供诊断：${deepKnowledgeError}`,
+                        `${rulesCreated ? 'Created' : 'Preserved'} user-owned CWTOOLS.md and generated the Agent profile, but knowledge.sqlite was not exported. A failure manifest was written for diagnosis: ${deepKnowledgeError}`,
+                        `${rulesCreated ? '已创建' : '已保留'}用户维护的 CWTOOLS.md，并生成了 Agent 项目画像，但 knowledge.sqlite 未导出。已写入失败清单供诊断：${deepKnowledgeError}`,
                     )
                     : deepKnowledgeWarning
                     ? aiText(
-                        `Generated CWTOOLS.md, Agent profile, workspace symbol index, and a partial semantic knowledge pack -> ${getProjectKnowledgeManifestPath(root)}`,
-                        `已生成 CWTOOLS.md、Agent 项目画像、工作区符号索引和部分覆盖的语义知识包 -> ${getProjectKnowledgeManifestPath(root)}`,
+                        `${rulesCreated ? 'Created' : 'Preserved'} user-owned CWTOOLS.md; generated the Agent profile, workspace symbol index, and a partial semantic knowledge pack -> ${getProjectKnowledgeManifestPath(root)}`,
+                        `${rulesCreated ? '已创建' : '已保留'}用户维护的 CWTOOLS.md；已生成 Agent 项目画像、工作区符号索引和部分覆盖的语义知识包 -> ${getProjectKnowledgeManifestPath(root)}`,
                     )
                     : aiText(
-                        `Generated CWTOOLS.md, Agent profile, workspace symbol index, and semantic knowledge pack -> ${getProjectKnowledgeManifestPath(root)}`,
-                        `已生成 CWTOOLS.md、Agent 项目画像、工作区符号索引和语义知识包 -> ${getProjectKnowledgeManifestPath(root)}`,
+                        `${rulesCreated ? 'Created' : 'Preserved'} user-owned CWTOOLS.md; generated the Agent profile, workspace symbol index, and semantic knowledge pack -> ${getProjectKnowledgeManifestPath(root)}`,
+                        `${rulesCreated ? '已创建' : '已保留'}用户维护的 CWTOOLS.md；已生成 Agent 项目画像、工作区符号索引和语义知识包 -> ${getProjectKnowledgeManifestPath(root)}`,
                     ),
                 timestamp: Date.now(),
             },
@@ -379,7 +376,7 @@ async function generateInitFileCore(
 }
 
 /**
- * Generate project rules and the machine-readable Agent project profile.
+ * Initialize project instructions and generate the machine-readable Agent profile.
  * ProgressLocation.Window renders the long-running /init phase in VS Code's
  * lower-left status area until the knowledge database has been published.
  */

@@ -32,12 +32,6 @@ import type { ProjectProfile } from './types';
 
 interface ParsedProjectRules {
     raw: string;
-    modInfo?: string;
-    projectStructure?: string;
-    knownIdentifiers?: string;
-    agentGuidelines?: string;
-    customRules?: string;
-    namespaces?: string[];
 }
 
 interface RuntimePromptState {
@@ -89,7 +83,7 @@ import { buildSkillIndexPrompt, listSkills } from './skills';
  * shared policy text edited) so prompts cached by older builds are never
  * reused across extension updates (plan §7.1).
  */
-export const PROMPT_TEMPLATE_VERSION = 3;
+export const PROMPT_TEMPLATE_VERSION = 4;
 
 /**
  * Why a frozen system prompt lookup missed. Process-local diagnostics only —
@@ -591,7 +585,6 @@ export class PromptBuilder {
     private computePromptFlagsHash(): string {
         const perfConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
         return shortSha256(JSON.stringify({
-            fullProjectRulesInBuild: perfConfig.get<boolean>('fullProjectRulesInBuild') === true,
             includeFullSmallFiles: perfConfig.get<boolean>('includeFullSmallFiles') === true,
             legacyFullToolset: perfConfig.get<boolean>('legacyFullToolset') === true,
         }));
@@ -822,7 +815,7 @@ export class PromptBuilder {
         return finalPrompt;
     }
 
-    /** Parsed CWTOOLS.md cache — invalidated when file mtime changes */
+    /** User-owned CWTOOLS.md cache — invalidated when file mtime changes. */
     private _parsedRulesCache: ParsedProjectRules | null = null;
     private _parsedRulesMtime: number = 0;
     private _projectProfileCache: ProjectProfile | null = null;
@@ -851,10 +844,7 @@ export class PromptBuilder {
         }
     }
 
-    /**
-     * Parse CWTOOLS.md into structured sections for selective injection.
-     * Returns null if file doesn't exist or is empty.
-     */
+    /** Read the user-owned CWTOOLS.md instruction file without interpreting its headings. */
     private parseProjectRules(): ParsedProjectRules | null {
         try {
             if (!this.workspaceRoot) return null;
@@ -872,31 +862,6 @@ export class PromptBuilder {
 
             const parsed: ParsedProjectRules = { raw: content };
 
-            // Extract sections by ## headers
-            const modInfoMatch = content.match(/## Mod Info\r?\n([\s\S]*?)(?=\r?\n## |$)/);
-            if (modInfoMatch) parsed.modInfo = modInfoMatch[1]!.trim();  
-
-            const structureMatch = content.match(/## Project Structure\r?\n([\s\S]*?)(?=\r?\n## |$)/);
-            if (structureMatch) parsed.projectStructure = structureMatch[1]!.trim();  
-
-            const idsMatch = content.match(/## Known Identifiers\r?\n([\s\S]*?)(?=\r?\n## |$)/);
-            if (idsMatch) parsed.knownIdentifiers = idsMatch[1]!.trim();  
-
-            const guidelinesMatch = content.match(/## Agent Guidelines\r?\n([\s\S]*?)(?=\r?\n## |$)/);
-            if (guidelinesMatch) parsed.agentGuidelines = guidelinesMatch[1]!.trim();  
-
-            const customMatch = content.match(/## Custom Rules\r?\n([\s\S]*)/);
-            if (customMatch && customMatch[1]!.trim() && !customMatch[1]!.includes('<!-- Add')) {  
-                parsed.customRules = customMatch[1]!.trim();  
-            }
-
-            // Extract namespaces list
-            const nsMatch = content.match(/### Event Namespaces\r?\n([\s\S]*?)(?=\r?\n### |\r?\n## |$)/);
-            if (nsMatch) {
-                 
-                parsed.namespaces = (nsMatch[1]!.match(/`([^`]+)`/g) || []).map(s => s.replace(/`/g, ''));
-            }
-
             this._parsedRulesCache = parsed;
             this._parsedRulesMtime = mtime;
             return parsed;
@@ -912,79 +877,45 @@ export class PromptBuilder {
         return content.slice(0, maxChars).trimEnd() + '\n...[truncated; read CWTOOLS.md for the full project rules]';
     }
 
-    private buildProjectProfilePrompt(mode: AgentMode | undefined, profile: ProjectProfile, customRules?: string): string {
+    private boundedProjectInstructions(content: string, maxChars: number): string {
+        if (content.length <= maxChars) return content;
+        const notice = '\n\n... [CWTOOLS.md middle omitted; read the file before acting on project rules] ...\n\n';
+        const available = Math.max(0, maxChars - notice.length);
+        const headLength = Math.ceil(available * 0.75);
+        const tailLength = Math.max(0, available - headLength);
+        return `${content.slice(0, headLength).trimEnd()}${notice}${content.slice(-tailLength).trimStart()}`;
+    }
+
+    private buildProjectProfilePrompt(mode: AgentMode | undefined, profile: ProjectProfile): string {
         const activeMode = mode ?? 'build';
         const promptCard = getPromptCardForMode(profile, activeMode);
         const workflowHints = profile.routing.recommendedWorkflowByIntent
             .slice(0, 5)
             .map(item => `- ${item.intent}: ${item.workflowId} (${item.mode})`)
             .join('\n');
-        const custom = customRules?.trim()
-            ? `\n\n## Custom Rules (from CWTOOLS.md)\n${this.truncateProjectRuleSection(customRules.trim(), 1800)}`
-            : '';
-        return `<project-premise>\n# PROJECT PROFILE (from .cwtools/project/profile.json)\nUse this compact profile for routing and project convention hints. Do not broad-scan the workspace until you have checked the profile and the relevant indexed tools. Cross-check profile facts against current files and CWT/LSP evidence before treating them as binding. For more details, call \`query_project_profile\` with a targeted section.\n\n## Summary\n${buildProfileSummary(profile)}\n\n## Active Mode Card\n${this.truncateProjectRuleSection(promptCard || 'No mode-specific project card was generated.', 1800)}\n\n## Recommended Workflows\n${workflowHints || '- No workflow recommendations generated.'}\n\n## Efficiency Hints\n${profile.efficiencyHints.slice(0, 5).map(hint => `- ${hint}`).join('\n')}${custom}\n</project-premise>\n`;
+        return `<project-premise>\n# PROJECT PROFILE (from .cwtools/project/profile.json)\nUse this compact profile for routing and project convention hints. Do not broad-scan the workspace until you have checked the profile and the relevant indexed tools. Cross-check profile facts against current files and CWT/LSP evidence before treating them as binding. For more details, call \`query_project_profile\` with a targeted section.\n\n## Summary\n${buildProfileSummary(profile)}\n\n## Active Mode Card\n${this.truncateProjectRuleSection(promptCard || 'No mode-specific project card was generated.', 1800)}\n\n## Recommended Workflows\n${workflowHints || '- No workflow recommendations generated.'}\n\n## Efficiency Hints\n${profile.efficiencyHints.slice(0, 5).map(hint => `- ${hint}`).join('\n')}\n</project-premise>\n`;
     }
 
-    /**
-     * Build mode-aware project rules prompt.
-     * Different modes include different subsets of CWTOOLS.md to optimize context usage.
-     */
+    /** Inject user-owned CWTOOLS.md instructions independently from generated profile facts. */
     private getProjectRulesPrompt(mode?: AgentMode): string {
         const profile = this.parseProjectProfile();
         const parsed = this.parseProjectRules();
-        if (profile) return this.buildProjectProfilePrompt(mode, profile, parsed?.customRules);
-        if (!parsed) return '';
-
-        // Build mode uses a compact summary by default. Full CWTOOLS.md injection is
-        // still available through stellarisLanguageServices.ai.performance.fullProjectRulesInBuild.
-        if (mode === 'build' || !mode) {
-            const fullBuildRules = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance')
-                .get<boolean>('fullProjectRulesInBuild') === true;
-            if (fullBuildRules) {
-                return `<project-premise>\n# PROJECT RULES & CONTEXT (From CWTOOLS.md)\nRead these project-specific rules before attempting the task. Follow them when consistent with the current user request, current files, and CWT/LSP evidence; they never override tool safety, current diagnostics, or verified game rules:\n\n${parsed.raw}\n</project-premise>\n`;
-            }
-
-            const buildSections: string[] = [];
-            if (parsed.modInfo) buildSections.push(`## Mod Info\n${this.truncateProjectRuleSection(parsed.modInfo, 1200)}`);
-            if (parsed.projectStructure) buildSections.push(`## Project Structure\n${this.truncateProjectRuleSection(parsed.projectStructure, 1800)}`);
-            if (parsed.namespaces?.length) buildSections.push(`### Event Namespaces\n${parsed.namespaces.slice(0, 80).map(ns => `- \`${ns}\``).join('\n')}`);
-            if (parsed.agentGuidelines) buildSections.push(`## Agent Guidelines\n${this.truncateProjectRuleSection(parsed.agentGuidelines, 2600)}`);
-            if (parsed.customRules) buildSections.push(`## Custom Rules\n${this.truncateProjectRuleSection(parsed.customRules, 2200)}`);
-            if (buildSections.length === 0) return '';
-            return `<project-premise>\n# PROJECT RULES SUMMARY (From CWTOOLS.md)\nFollow these project-specific rules when they are consistent with the current user request, current files, and CWT/LSP evidence. If the task depends on omitted details or the user explicitly asks for full project policy, read CWTOOLS.md before editing.\n\n${buildSections.join('\n\n')}\n</project-premise>\n`;
+        const parts: string[] = [];
+        if (profile) parts.push(this.buildProjectProfilePrompt(mode, profile));
+        if (parsed) {
+            parts.push(`<project-instructions>\n# PROJECT INSTRUCTIONS (from user-owned CWTOOLS.md)\nFollow these project-specific instructions when consistent with the current user request, tool safety, current diagnostics, and verified CWT/LSP rules. The file is user-owned and is not a generated project-fact source.\n\n${this.boundedProjectInstructions(parsed.raw, 24_000)}\n</project-instructions>\n`);
         }
-
-        const sections: string[] = [];
-        // All modes get mod info and custom rules
-        if (parsed.modInfo) sections.push(`## Mod Info\n${parsed.modInfo}`);
-
-        if (mode === 'plan') {
-            if (parsed.projectStructure) sections.push(`## Project Structure\n${parsed.projectStructure}`);
-            if (parsed.namespaces?.length) sections.push(`### Event Namespaces\n${parsed.namespaces.map(ns => `- \`${ns}\``).join('\n')}`);
-            if (parsed.agentGuidelines) sections.push(`## Agent Guidelines\n${parsed.agentGuidelines}`);
-        } else if (mode === 'explore') {
-            if (parsed.knownIdentifiers) sections.push(`## Known Identifiers\n${parsed.knownIdentifiers}`);
-        } else if (mode === 'review') {
-            if (parsed.knownIdentifiers) sections.push(`## Known Identifiers\n${parsed.knownIdentifiers}`);
-            if (parsed.agentGuidelines) sections.push(`## Agent Guidelines\n${parsed.agentGuidelines}`);
-        } else if (mode === 'general' || mode === 'utility') {
-            if (parsed.agentGuidelines) sections.push(`## Agent Guidelines\n${parsed.agentGuidelines}`);
-        }
-
-        if (parsed.customRules) sections.push(`## Custom Rules\n${parsed.customRules}`);
-
-        if (sections.length === 0) return '';
-        return `<project-premise>\n# PROJECT CONTEXT (From CWTOOLS.md)\nTreat this as project convention context and cross-check it against current files and CWT/LSP evidence.\n\n${sections.join('\n\n')}\n</project-premise>\n`;
+        return parts.join('\n');
     }
 
     /**
-     * Build a slim project rules prompt for sub-agents — only mod info + namespaces.
+     * Build a slim project prompt with generated facts plus bounded user instructions.
      */
     private getSlimProjectRulesPrompt(): string {
         const profile = this.parseProjectProfile();
         const parsed = this.parseProjectRules();
-        const customRules = parsed?.customRules
-            ? `<project-rules>Custom Rules inherited from CWTOOLS.md:\n${this.truncateProjectRuleSection(parsed.customRules, 1600)}</project-rules>`
+        const projectInstructions = parsed
+            ? `<project-rules>User-owned instructions inherited from CWTOOLS.md:\n${this.boundedProjectInstructions(parsed.raw, 12_000)}</project-rules>`
             : '';
         if (profile) {
             const namespaces = profile.identifiers.namespaces.slice(0, 30);
@@ -995,14 +926,10 @@ export class PromptBuilder {
             ];
             if (namespaces.length) parts.push(`Namespaces: ${namespaces.join(', ')}`);
             if (profile.localisation.languages.length) parts.push(`Localisation: ${profile.localisation.languages.join(', ')}`);
-            return [`<project-hint>${parts.join(' | ')}</project-hint>`, customRules].filter(Boolean).join('\n');
+            return [`<project-hint>${parts.join(' | ')}</project-hint>`, projectInstructions].filter(Boolean).join('\n');
         }
         if (!parsed) return '';
-        const parts: string[] = [];
-        if (parsed.modInfo) parts.push(`Mod: ${parsed.modInfo.replace(/\n/g, ' | ').replace(/- \*\*/g, '').replace(/\*\*/g, '')}`);
-        if (parsed.namespaces?.length) parts.push(`Namespaces: ${parsed.namespaces.join(', ')}`);
-        const projectHint = parts.length > 0 ? `<project-hint>${parts.join(' | ')}</project-hint>` : '';
-        return [projectHint, customRules].filter(Boolean).join('\n');
+        return projectInstructions;
     }
 
     /**
@@ -1109,15 +1036,12 @@ ${trimmed}
      * Preserves game-specific identifiers and modding context.
      */
     buildCompactionPrompt(): string {
-        // Inject project entity protection hints from CWTOOLS.md
+        // Machine-generated identifiers come from profile.json, not user instructions.
         const profile = this.parseProjectProfile();
         if (profile) {
             return `You are a conversation summarizer. Follow the template in the user message exactly. Output ONLY the filled template, no preamble, no commentary.${this.buildCompactionProtectionHintFromProfile(profile)}`;
         }
-        const parsed = this.parseProjectRules();
-        const projectProtection = parsed ? this.buildCompactionProtectionHint(parsed) : '';
-
-        return `You are a conversation summarizer. Follow the template in the user message exactly. Output ONLY the filled template, no preamble, no commentary.${projectProtection}`;
+        return 'You are a conversation summarizer. Follow the template in the user message exactly. Output ONLY the filled template, no preamble, no commentary.';
     }
 
     private buildCompactionProtectionHintFromProfile(profile: ProjectProfile): string {
@@ -1133,27 +1057,6 @@ ${trimmed}
         if (ids.length) parts.push(`Key IDs: ${ids.join(', ')}`);
         if (parts.length === 0) return '';
         return `\n\nCRITICAL - These project-specific identifiers MUST be preserved verbatim in the summary (never omit or rephrase):\n${parts.join('\n')}`;
-    }
-
-    /**
-     * Build compaction protection hint from CWTOOLS.md — instructs the summarizer
-     * to always preserve project-specific identifiers and namespaces.
-     */
-    private buildCompactionProtectionHint(parsed: ParsedProjectRules): string {
-        const parts: string[] = [];
-        if (parsed.namespaces?.length) {
-            parts.push(`Event namespaces: ${parsed.namespaces.join(', ')}`);
-        }
-        // Extract key identifier names to protect
-        if (parsed.knownIdentifiers) {
-            const ids = (parsed.knownIdentifiers.match(/`([^`]+)`/g) || [])
-                .map((s: string) => s.replace(/`/g, ''))
-                .filter((s: string) => s.length > 3)
-                .slice(0, 15);
-            if (ids.length > 0) parts.push(`Key IDs: ${ids.join(', ')}`);
-        }
-        if (parts.length === 0) return '';
-        return `\n\nCRITICAL — These project-specific identifiers MUST be preserved verbatim in the summary (never omit or rephrase):\n${parts.join('\n')}`;
     }
 
     /**

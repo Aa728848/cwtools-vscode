@@ -130,7 +130,7 @@ EvidenceGate treats references to project-extensible TypeDefs as phase-aware. A 
 
 ##### Project Knowledge Pack
 
-`/init` has a quick profile phase and a deep semantic phase. The quick profile discovers actual PDX content directories and stable registered game metadata; it does not manufacture a fixed list of entity families or inject samples from selected folders. `chatInit.ts` keeps a `ProgressLocation.Window` indicator in VS Code's lower-left status area while it waits for CWTools, exports the database, and publishes the artifacts. The deep phase calls the internal `cwtools.ai.exportProjectKnowledge` command against one coherently locked `IGame` snapshot, then atomically writes a normalized SQLite V3 database. Workspace definitions, embedded vanilla definitions, definition stacks, reference topology, archetypes, resource overwrite state, active CWT override modes, unresolved facts, and typed graph facts therefore share one generation boundary. Graph nodes and edges are derived from CWTools definition types and reference topology; the exporter and semantic graph use generic typed-reference edges instead of command-name or entity-name classifiers. V3 extracts event execution facts from the same parsed CWTools nodes, preserves incoming/outgoing reference direction, and reports missing caller evidence as unknown rather than inferring entry status from IDs, source order, or layout.
+`/init` has a quick profile phase and a deep semantic phase. It also creates a minimal root `CWTOOLS.md` instruction scaffold when the file is missing; an existing file is user-owned and is never rewritten. The quick profile discovers actual PDX content directories and stable registered game metadata; it does not manufacture a fixed list of entity families or inject samples from selected folders. `chatInit.ts` keeps a `ProgressLocation.Window` indicator in VS Code's lower-left status area while it waits for CWTools, exports the database, and publishes the artifacts. The deep phase calls the internal `cwtools.ai.exportProjectKnowledge` command against one coherently locked `IGame` snapshot, then atomically writes a normalized SQLite database. Workspace definitions, embedded vanilla definitions, definition stacks, reference topology, archetypes, resource overwrite state, active CWT override modes, unresolved facts, and typed graph facts therefore share one generation boundary. Graph nodes and edges are derived from CWTools definition types and reference topology; the exporter and semantic graph use generic typed-reference edges instead of command-name or entity-name classifiers. Event execution facts come from the same parsed CWTools nodes, preserve incoming/outgoing reference direction, and report missing caller evidence as unknown rather than inferring entry status from IDs, source order, or layout.
 
 The persistent layout is intentionally compact:
 
@@ -205,14 +205,14 @@ sequenceDiagram
 | `aiService.ts` | Multi-provider HTTP/SSE clients, request formatting, fallback policies, and custom wire formats (`customApiFormat`) |
 | `codex/` | Browser PKCE OAuth, VS Code SecretStorage credentials, automatic token refresh, account status, compatibility models, and quota windows for the ChatGPT subscription provider |
 | `promptBuilder.ts` / `prompt/sections/` | Prompt builder facade, project context, and mode system instructions |
-| `projectInstructions.ts` | Bounded General-domain loader for root and path-scoped standard repository instructions |
+| `projectInstructions.ts` | Bounded General-domain instruction loader plus the one-time user-owned `CWTOOLS.md` scaffold |
 | `providers.ts` / `providers/models/` | Provider registry, default models, capabilities, pricing, and prompt caching discounts |
 | `types.ts` | Messages, tools, profiles, internal modes, contexts, Artifacts, and setting schemas |
 | `runnerPolicy.ts` | Mode-based tool exclusions, iteration limits, and sub-agent output token budgets |
 | `planModeGuard.ts` | Plan-mode write guards: limits writes to implementation plans and plan/blueprint/walkthrough output files; provides read-only `git_ops` checks (`validateGitOpsForMode`) |
 | `projectProfile.ts` | `/init` workspace scanning, project profile generation, and encoding/language detection |
 | `projectKnowledge.ts` | Deep `/init` manifest + SQLite generation, V1 migration, fingerprints, retrieval, and background refresh |
-| `chatInit.ts` | Command handler for `/init`, triggers quick profile plus deep semantic generation and renders `CWTOOLS.md` |
+| `chatInit.ts` | Command handler for `/init`; creates `CWTOOLS.md` only when missing, then triggers quick profile and deep semantic generation |
 | `gameKnowledge.ts` | Stable evidence-routing policy; mutable game facts are queried from CWT/CWTools LSP |
 | `skills.ts` | Skill index loader (`SKILL.md` for built-in, user, or project scopes) and `run_skill` execution |
 | `memoryParser.ts` | Private structured memory with provenance, confidence, usage, expiry, redaction, and bounded consolidation |
@@ -297,7 +297,7 @@ The composer exposes only the capability-domain selector. `AgentProfileSelection
 
 Every non-Workflow turn with automatic intent selection asks the configured model for a semantic intent, strategy, confidence, bounded evidence, whether the user explicitly requested execution or no writes, whether delegation was explicitly requested, and whether a material choice still belongs to the user. The capability domain is always selected by the user and is never model-routed. Once semantic routing succeeds, no keyword classifier may override its task-mode decision; deterministic text rules exist only as the unavailable-router fallback. `agentProfile.ts` validates the response, enters Execute when the user semantically authorizes proceeding, keeps explicit no-write requests and unresolved user decisions out of Execute mode, and falls back deterministically when routing is unavailable. The Webview shows a transient routing status and a bounded, expandable decision summary rather than hidden chain-of-thought. The router may recommend a strategy but cannot automatically commit an ordinary broad task to Multi-Agent; explicit delegation is retained, while all other fan-out is decided later from a validated task graph. Routing never changes the user-owned permission profile or approval policy.
 
-The admitted `domainProfile` is a Run invariant. Catalog profiles, Workflows, resume data, and child Agents may narrow tools or authorization but cannot replace that domain. General frozen prompts load bounded root `AGENTS.md`, `CLAUDE.md`, and `.github/copilot-instructions.md`; the dynamic prompt adds nested `AGENTS.md` files applicable to the current target. Paradox deliberately keeps generated `CWTOOLS.md` as its top-level project source. Once `/init` has produced `.cwtools/project/profile.json`, the mode-specific profile card replaces full `CWTOOLS.md` prompt injection; its preserved Custom Rules remain injected and are inherited in bounded form by slim child Agents. Changes to either root instruction source invalidate the frozen-prompt fingerprint.
+The admitted `domainProfile` is a Run invariant. Catalog profiles, Workflows, resume data, and child Agents may narrow tools or authorization but cannot replace that domain. General frozen prompts load bounded root `AGENTS.md`, `CLAUDE.md`, and `.github/copilot-instructions.md`; the dynamic prompt adds nested `AGENTS.md` files applicable to the current target. Paradox uses root `CWTOOLS.md` with AGENTS-style ownership semantics: `/init` scaffolds it only when absent, never derives machine facts into it, and never rewrites existing instructions. Generated profile cards and bounded full CWTOOLS instructions are injected as independent prompt sections; slim Paradox Agents inherit the same user instructions within their larger bound. Changes to either root instruction source invalidate the frozen-prompt fingerprint.
 
 The resolved admission creates an `AgentSchedulingState` with four independent dimensions:
 
@@ -636,7 +636,7 @@ EvidenceGate 对项目可扩展 TypeDef 引用执行分阶段判定。`pre_write
 
 ##### 项目知识包
 
-`/init` 现在分为快速画像阶段和深度语义阶段。快速画像只发现实际存在的 PDX 内容目录和稳定的注册游戏元数据，不再构造固定实体族清单，也不从指定目录注入类型样本。`chatInit.ts` 在等待 CWTools、导出数据库和发布产物期间，通过 `ProgressLocation.Window` 在 VS Code 左下角持续显示构建进度。深度阶段通过内部命令 `cwtools.ai.exportProjectKnowledge` 从同一个一致加锁的 `IGame` 快照原子生成规范化 SQLite V3 数据库，因此工作区定义、原版缓存定义、定义栈、引用拓扑、范例、资源覆盖状态、活动 CWT 覆盖模式、未解决事实和 typed graph facts 共享同一代数据边界。图节点和边由 CWTools definition type 与 reference topology 派生；导出器和语义图使用通用 typed-reference edge，不再为各游戏子系统维护指令名或实体名分类器。V3 从同一批 CWTools 解析节点提取事件执行事实，保留引用的传入/传出方向，并把缺失调用者证据报告为未知，不再根据 ID、源码顺序或图布局推断入口。
+`/init` 现在分为快速画像阶段和深度语义阶段；当根目录缺少 `CWTOOLS.md` 时还会创建最小指令模板，现有文件归用户所有且绝不重写。快速画像只发现实际存在的 PDX 内容目录和稳定的注册游戏元数据，不再构造固定实体族清单，也不从指定目录注入类型样本。`chatInit.ts` 在等待 CWTools、导出数据库和发布产物期间，通过 `ProgressLocation.Window` 在 VS Code 左下角持续显示构建进度。深度阶段通过内部命令 `cwtools.ai.exportProjectKnowledge` 从同一个一致加锁的 `IGame` 快照原子生成规范化 SQLite 数据库，因此工作区定义、原版缓存定义、定义栈、引用拓扑、范例、资源覆盖状态、活动 CWT 覆盖模式、未解决事实和 typed graph facts 共享同一代数据边界。图节点和边由 CWTools definition type 与 reference topology 派生；导出器和语义图使用通用 typed-reference edge，不再为各游戏子系统维护指令名或实体名分类器。事件执行事实来自同一批 CWTools 解析节点，保留引用的传入/传出方向，并把缺失调用者证据报告为未知，不再根据 ID、源码顺序或图布局推断入口。
 
 持久化结构保持为两个核心产物：
 
@@ -710,14 +710,14 @@ sequenceDiagram
 | `aiService.ts` | 各 AI Provider HTTP/SSE 客户端、请求适配、回退和 custom 线协议分发（`customApiFormat`） |
 | `codex/` | ChatGPT 订阅 Provider 的浏览器 PKCE OAuth、VS Code SecretStorage 凭据、Token 自动刷新、账户状态、兼容模型与额度窗口 |
 | `promptBuilder.ts` / `prompt/sections/` | Prompt facade、项目上下文和模式系统提示词 |
-| `projectInstructions.ts` | 有界加载通用领域根规则和目标路径适用的标准仓库指令 |
+| `projectInstructions.ts` | 有界加载通用领域标准仓库指令，并提供一次性的用户自有 `CWTOOLS.md` 模板 |
 | `providers.ts` / `providers/models/` | Provider facade、默认模型、能力、价格和缓存折扣 |
 | `types.ts` | 消息、工具、Profile、内部模式、上下文、Artifact、设置类型 |
 | `runnerPolicy.ts` | 模式级工具过滤、迭代上限和 slim sub-agent 输出预算 |
 | `planModeGuard.ts` | 计划模式写入守卫：仅放行实现计划与 plan/blueprint/walkthrough 产物文件；并提供非写入模式的只读 `git_ops` 门控（`validateGitOpsForMode`） |
 | `projectProfile.ts` | `/init` 项目扫描、profile 构建/读写、语言/编码检测 |
 | `projectKnowledge.ts` | 深度 `/init` manifest + SQLite 生成、V1 迁移、指纹、检索与后台刷新 |
-| `chatInit.ts` | `/init` 命令处理器、快速画像、深度语义生成和 CWTOOLS.md 渲染 |
+| `chatInit.ts` | `/init` 命令处理器；仅在缺失时创建 `CWTOOLS.md`，随后生成快速画像和深度语义 |
 | `gameKnowledge.ts` | 稳定证据路由策略；动态游戏事实从 CWT/CWTools LSP 查询 |
 | `skills.ts` | `SKILL.md` 技能索引（built-in/user/project）+ `run_skill` 按需正文加载 |
 | `memoryParser.ts` | 带来源、置信度、使用次数、过期、脱敏和有界合并的私有结构化长期记忆 |
@@ -802,7 +802,7 @@ sequenceDiagram
 
 每个启用自动意图选择的非 Workflow 回合都会请求当前模型按语义判断意图、策略、置信度、有界证据、用户是否明确要求执行或禁止写入、是否显式要求委派，以及是否仍存在必须由用户决定的关键选择。能力领域始终由用户手动选择，模型路由绝不切换领域。语义路由成功后，任何关键词分类器都不得覆盖任务模式结论；确定性文本规则仅在路由不可用时作为回退。`agentProfile.ts` 会验证结果、在用户按语义明确授权继续时进入执行模式、禁止显式只读请求和存在未决用户选择的请求进入执行模式，并在路由不可用时确定性回退。Webview 会显示临时路由状态和可展开的有界判断摘要，而不是隐藏思维链。路由器可以提出策略建议，但普通宽任务不会再在入口自动固定为多 Agent；用户显式委派会被保留，其余 Fan-out 均在取得并验证任务图后决定。路由不会改变始终由用户控制的权限 Profile 或审批策略。
 
-准入后的 `domainProfile` 是 Run 不变量。Catalog Profile、Workflow、恢复数据和子 Agent 只能收紧工具或授权，不能替换领域。通用领域的冻结提示词有界加载根目录 `AGENTS.md`、`CLAUDE.md` 和 `.github/copilot-instructions.md`，动态提示词再加入当前目标路径适用的嵌套 `AGENTS.md`；Paradox 则刻意继续以生成的 `CWTOOLS.md` 作为顶层项目来源。`/init` 生成 `.cwtools/project/profile.json` 后，由对应模式卡替代整份 `CWTOOLS.md` 的 Prompt 注入；其中保留的 Custom Rules 仍会注入，并以有界形式传给 slim 子 Agent。任一根规则源变化都会使冻结提示词指纹失效。
+准入后的 `domainProfile` 是 Run 不变量。Catalog Profile、Workflow、恢复数据和子 Agent 只能收紧工具或授权，不能替换领域。通用领域的冻结提示词有界加载根目录 `AGENTS.md`、`CLAUDE.md` 和 `.github/copilot-instructions.md`，动态提示词再加入当前目标路径适用的嵌套 `AGENTS.md`；Paradox 对根目录 `CWTOOLS.md` 采用 AGENTS 风格的所有权语义：`/init` 仅在缺失时创建模板，不把机器事实写入其中，也绝不重写现有指令。生成的 profile card 与有界完整的 CWTOOLS 指令作为两个独立区段注入；slim Paradox 子 Agent 在更大的独立上限内继承同一份用户指令。任一根规则源变化都会使冻结提示词指纹失效。
 
 解析后的准入会创建包含四个正交维度的 `AgentSchedulingState`：
 
@@ -988,7 +988,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 - 游戏检测和 prompt card 生成
 - `queryProjectProfile` 工具处理器
 
-`chatInit.ts` 是 `/init` 命令的入口处理器，负责调用 `projectProfile.ts` 生成 profile 并渲染 `CWTOOLS.md`。
+`chatInit.ts` 是 `/init` 命令的入口处理器，负责调用 `projectProfile.ts` 生成 profile、导出知识库，并仅在缺失时创建用户拥有的 `CWTOOLS.md` 指令模板。
 
 ##### Game Knowledge
 

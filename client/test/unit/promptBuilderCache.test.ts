@@ -118,7 +118,7 @@ describe('PromptBuilder frozen prompt fingerprint cache (plan §7.1)', () => {
         const builder = makeBuilder();
         builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
 
-        stubFlags.fullProjectRulesInBuild = true;
+        stubFlags.includeFullSmallFiles = true;
         builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
 
         expect(builder.getFrozenPromptCacheStats().missReasons.flag_changed).to.equal(1);

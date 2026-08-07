@@ -144,6 +144,7 @@ client/
       agentTools.ts           Tool dispatch hub
       aiService.ts            Multi-provider AI client
       promptBuilder.ts        Prompt construction facade
+      projectInstructions.ts Standard repository instruction loading and CWTOOLS.md scaffold
       projectProfile.ts       /init project scanning and profile
       chatInit.ts             /init command handler
       gameKnowledge.ts        Per-game PDXScript knowledge blocks (9 games)
@@ -514,6 +515,7 @@ client/
       agentTools.ts           Tool dispatch hub
       aiService.ts            Multi-provider AI client
       promptBuilder.ts        Prompt construction facade
+      projectInstructions.ts 标准仓库指令加载和 CWTOOLS.md 初始模板
       projectProfile.ts       /init project scanning and profile
       chatInit.ts             /init command handler
       gameKnowledge.ts        Per-game PDXScript knowledge blocks (9 games)

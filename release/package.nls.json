@@ -228,7 +228,6 @@
   "configuration.stellarisLanguageServices.ai.mcp.servers.description": "MCP server configurations. Declare each server for Paradox, General, or both capability domains; legacy entries remain Paradox-only.",
   "configuration.stellarisLanguageServices.ai.orchestrator.agentModels.description": "Custom model configuration for Orchestrator sub-agents (e.g. explorer, reviewer)",
   "configuration.stellarisLanguageServices.ai.performance.legacyFullToolset.description": "Use the legacy broad AI toolset instead of mode-aware tool filtering.",
-  "configuration.stellarisLanguageServices.ai.performance.fullProjectRulesInBuild.description": "Inject the full generated project rules content into Build mode prompts instead of the compact summary.",
   "configuration.stellarisLanguageServices.ai.performance.includeFullSmallFiles.description": "Include full current-file content for files under 100 lines instead of header plus local context.",
   "configuration.stellarisLanguageServices.ai.performance.compactionMinIntervalSeconds.description": "Minimum seconds between two automatic context compactions; manual and in-loop safety compaction are not throttled.",
   "configuration.stellarisLanguageServices.ai.performance.dynamicToolDisclosure.enabled.description": "Send only always-on and currently disclosed tool schemas to models that support the staged Agent runtime.",

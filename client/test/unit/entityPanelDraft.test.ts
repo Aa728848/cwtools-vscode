@@ -102,9 +102,11 @@ describe('entity preview locator drafts', () => {
         expect(host).not.to.include('Inserted locator override for mesh locator');
     });
 
-    it('directly selects read-only anchors and keeps local gizmos aligned', () => {
-        expect(webview).to.include('currentModel?.traverse(collectHitTarget)');
-        expect(webview).to.include('obj instanceof THREE.Bone && bonesToggle.checked');
+    it('restricts viewport picking to editable locators and keeps local gizmos aligned', () => {
+        expect(webview).to.include('Viewport picking is intentionally limited to editable .asset locators');
+        expect(webview).to.include('isLocatorObjectEditable(obj.parent)');
+        expect(webview).not.to.include('currentModel?.traverse(collectHitTarget)');
+        expect(webview).not.to.include('obj instanceof THREE.Bone && bonesToggle.checked');
         expect(webview).to.include("transformCtrl.setSpace('local')");
         expect(host).to.include('<option value="local" selected>');
         expect(css).to.include('grid-template-columns: repeat(3, minmax(0, 1fr))');

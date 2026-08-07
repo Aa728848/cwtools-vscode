@@ -1154,7 +1154,7 @@ function isInsideChildEntity(obj: THREE.Object3D): boolean {
 function isLocatorObjectEditable(obj: THREE.Object3D): boolean {
     // Only locators created by the current .asset are transform-editable.
     // Mesh locators, mesh overrides, bones, and child-entity anchors remain
-    // selectable so their attach mapping can be inspected or changed.
+    // available from the outline so their attach mapping can be inspected.
     return obj.userData?.isLocator === true
         && obj.userData?.source === 'script'
         && !isInsideChildEntity(obj)
@@ -1325,7 +1325,7 @@ function applyLocatorTransform(obj: THREE.Object3D, loc: ParsedLocator) {
 }
 
 function findLocatorAtScreenPoint(clientX: number, clientY: number): THREE.Object3D | null {
-    if (!currentModel && !locatorHelpers) return null;
+    if (!locatorHelpers) return null;
 
     const rect = renderer.domElement.getBoundingClientRect();
     mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
@@ -1333,59 +1333,27 @@ function findLocatorAtScreenPoint(clientX: number, clientY: number): THREE.Objec
 
     raycaster.setFromCamera(mouse, camera);
 
-    // Include locators parented to animated bones; they are not descendants of
-    // locatorHelpers and previously could only be selected from the outline.
+    // Viewport picking is intentionally limited to editable .asset locators.
+    // Model locators and bones are selected exclusively through the outline.
     const hitTargets: THREE.Object3D[] = [];
     const collectHitTarget = (obj: THREE.Object3D) => {
-        if (obj instanceof THREE.Mesh && obj.parent?.userData?.isLocator) hitTargets.push(obj);
+        if (obj instanceof THREE.Mesh && obj.parent && isLocatorObjectEditable(obj.parent)) {
+            hitTargets.push(obj);
+        }
     };
-    currentModel?.traverse(collectHitTarget);
-    if (!currentModel) locatorHelpers?.traverse(collectHitTarget);
+    locatorHelpers.traverse(collectHitTarget);
     const intersects = raycaster.intersectObjects(hitTargets, false);
 
     let target: THREE.Object3D | null = null;
     for (const intersection of intersects) {
         let candidate: THREE.Object3D | null = intersection.object;
         while (candidate && !candidate.userData?.isLocator) candidate = candidate.parent;
-        if (candidate?.userData?.isLocator && isLocatorVisuallyVisible(candidate)) {
+        if (candidate && isLocatorObjectEditable(candidate) && isLocatorVisuallyVisible(candidate)) {
             target = candidate;
             break;
         }
     }
-    if (target) return target;
-
-    // Bones and very small/read-only anchors use screen-space proximity as a
-    // fallback so the visible point/label is directly clickable in the viewport.
-    const world = new THREE.Vector3();
-    const projected = new THREE.Vector3();
-    let nearest: THREE.Object3D | null = null;
-    let nearestDistance = 14 * 14;
-    currentModel?.traverse(obj => {
-        if (nearestDistance < 0) return;
-        const isLocator = obj.userData?.isLocator === true && isLocatorVisuallyVisible(obj);
-        const isVisibleBone = obj instanceof THREE.Bone && bonesToggle.checked;
-        if (!isLocator && !isVisibleBone) return;
-        const label = getLabelForObject(obj);
-        const labelRect = label?.getBoundingClientRect();
-        if (labelRect
-            && clientX >= labelRect.left && clientX <= labelRect.right
-            && clientY >= labelRect.top && clientY <= labelRect.bottom) {
-            nearest = obj;
-            nearestDistance = -1;
-            return;
-        }
-        obj.getWorldPosition(world);
-        projected.copy(world).project(camera);
-        if (projected.z < -1 || projected.z > 1) return;
-        const screenX = rect.left + (projected.x + 1) * rect.width / 2;
-        const screenY = rect.top + (1 - projected.y) * rect.height / 2;
-        const distance = (screenX - clientX) ** 2 + (screenY - clientY) ** 2;
-        if (distance < nearestDistance) {
-            nearestDistance = distance;
-            nearest = obj;
-        }
-    });
-    return nearest;
+    return target;
 }
 
 function onLocatorPointerDown(event: PointerEvent) {

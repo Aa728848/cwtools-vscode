@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.10.13] - 2026-08-07
+
+### AI 数据库与知识解析 / AI Database and Knowledge Parsing
+- **[优化] 提升 AI 数据库解析能力**：增强了项目数据库与 AI 知识库的结构化解析与上下文提取能力，提升了复杂工作区下的关联与检索精准度。
+  English: [Optimization] Enhanced AI database parsing capabilities, improving structured parsing, context extraction, and retrieval accuracy across complex workspaces.
+
 ## [2.10.12] - 2026-08-06
 
 ### 项目数据库与知识库 / Project Database and Knowledge Base

@@ -703,6 +703,23 @@
         ],
         "keybindings": [
             {
+                "command": "cwtools.entityPreview.undo",
+                "key": "ctrl+z",
+                "mac": "cmd+z",
+                "when": "cwtools.entityPreview.editing"
+            },
+            {
+                "command": "cwtools.entityPreview.redo",
+                "key": "ctrl+shift+z",
+                "mac": "cmd+shift+z",
+                "when": "cwtools.entityPreview.editing"
+            },
+            {
+                "command": "cwtools.entityPreview.redo",
+                "key": "ctrl+y",
+                "when": "cwtools.entityPreview.editing"
+            },
+            {
                 "command": "cwtools.ai.manageIgnoredDiagnostics",
                 "key": "ctrl+shift+i",
                 "mac": "cmd+shift+i",

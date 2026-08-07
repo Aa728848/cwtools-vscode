@@ -2425,6 +2425,12 @@ export async function activate(context: ExtensionContext) {
 			}
 			await EntityPanel.create(context.extensionPath, doc);
 		});
+		safeRegisterCommand(context, "cwtools.entityPreview.undo", () => {
+			EntityPanel.currentPanel?.undo();
+		});
+		safeRegisterCommand(context, "cwtools.entityPreview.redo", () => {
+			EntityPanel.currentPanel?.redo();
+		});
 
 		// Particle Preview command
 		safeRegisterCommand(context, "cwtools.previewParticle", async () => {

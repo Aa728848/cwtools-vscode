@@ -59,6 +59,7 @@ type EntityPanelMessage =
     | { command: 'updateAttach'; locatorName: string; entityName: string; targetEntity?: string }
     | { command: 'requestEntityNames' }
     | { command: 'requestEnvironments' }
+    | { command: 'setEditMode'; editMode: boolean }
     | { command: 'undo' }
     | { command: 'redo' }
     | { command: 'saveDocument' }
@@ -81,6 +82,7 @@ export class EntityPanel {
     private _currentEntityIndex = 0;
     private _currentMeshData: Buffer | undefined;
     private _messageQueue: Promise<void> = Promise.resolve();
+    private _editMode = false;
     private readonly _draftDocuments = new Map<string, EntityDraftDocument>();
     private readonly _pendingPanelEditUris = new Set<string>();
     private _disposed = false;
@@ -94,6 +96,24 @@ export class EntityPanel {
                 const detail = error instanceof Error ? error.message : String(error);
                 void vscode.window.showErrorMessage(`${panelText('Entity edit failed', '实体编辑失败')}: ${detail}`);
             });
+    }
+
+    private _updateKeybindingContext(): void {
+        void vscode.commands.executeCommand(
+            'setContext',
+            'cwtools.entityPreview.editing',
+            !this._disposed && this._panel.active && this._editMode,
+        );
+    }
+
+    public undo(): void {
+        if (!this._editMode || !this._panel.active) return;
+        this._queueOperation(() => this._handleUndoRedo('undo'));
+    }
+
+    public redo(): void {
+        if (!this._editMode || !this._panel.active) return;
+        this._queueOperation(() => this._handleUndoRedo('redo'));
     }
 
     private _trackDraftDocument(document: vscode.TextDocument): void {
@@ -181,6 +201,8 @@ export class EntityPanel {
 
         this._panel.webview.html = this._getHtml();
         this._panel.onDidDispose(() => { void this._handlePanelClosed(); }, null, this._disposables);
+        this._disposables.push(this._panel.onDidChangeViewState(() => this._updateKeybindingContext()));
+        this._updateKeybindingContext();
         this._disposables.push(
             this._panel.webview.onDidReceiveMessage(async (msg: EntityPanelMessage) => {
                 if (!msg?.command) return;
@@ -274,6 +296,12 @@ export class EntityPanel {
                     }
                     case 'requestEnvironments': {
                         await this._sendEnvironments();
+                        break;
+                    }
+                    case 'setEditMode': {
+                        if (typeof msg.editMode !== 'boolean') break;
+                        this._editMode = msg.editMode;
+                        this._updateKeybindingContext();
                         break;
                     }
                     case 'undo': {
@@ -2026,6 +2054,8 @@ export class EntityPanel {
         this._searchRoots = [];
         this._entityGraph = null;
         this._currentMeshData = undefined;
+        this._editMode = false;
+        this._updateKeybindingContext();
         this._draftDocuments.clear();
         // Tell webview to clean up Three.js resources before destroying
         if (!this._panelClosed) {
@@ -2084,12 +2114,12 @@ export class EntityPanel {
         <button id="btn-rotate" class="toolbar-icon-btn tool-mode edit-only" data-i18n-title="rotateBtn" data-mode="rotate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/><polyline points="21,3 21,9 15,9"/></svg></button>
         <select id="sel-transform-space" class="toolbar-compact-select edit-only" title="${locale.startsWith('zh') ? '变换坐标系' : 'Transform space'}"><option value="local" selected>${locale.startsWith('zh') ? '局部' : 'Local'}</option><option value="world">${locale.startsWith('zh') ? '世界' : 'World'}</option></select>
         <select id="sel-multi-rotation-mode" class="toolbar-compact-select edit-only" title="${locale.startsWith('zh') ? '多选旋转方式' : 'Multi-selection rotation mode'}" disabled><option value="individual" selected>${locale.startsWith('zh') ? '各自轴' : 'Self'}</option><option value="center">${locale.startsWith('zh') ? '公共中心' : 'Orbit'}</option></select>
-        <label class="toolbar-checkbox-btn edit-only" title="${locale.startsWith('zh') ? '移动吸附（按住 X 临时启用）' : 'Translation snap (hold X temporarily)'}">
+        <label class="toolbar-checkbox-btn edit-only" title="${locale.startsWith('zh') ? '移动吸附（按住 X 临时启用）' : 'Translation snap (hold X temporarily)'}" aria-label="${locale.startsWith('zh') ? '移动吸附' : 'Translation snap'}">
             <input type="checkbox" id="chk-grid-snap">
-            <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h16v16H4zM9.33 4v16M14.67 4v16M4 9.33h16M4 14.67h16"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg></div>
+            <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v6a6 6 0 0 0 12 0V4M8 4v6a2 2 0 0 0 4 0V4M4 4h4M12 4h4"/><path d="M15 18h6m-3-3 3 3-3 3"/></svg></div>
         </label>
         <input id="move-snap-step" class="toolbar-number edit-only" type="number" min="0.0001" step="0.1" value="1" title="${locale.startsWith('zh') ? '移动步长' : 'Translation step'}">
-        <label class="toolbar-checkbox-btn edit-only" title="${locale.startsWith('zh') ? '旋转吸附' : 'Rotation snap'}"><input type="checkbox" id="chk-rotation-snap"><div class="icon-btn-content">°</div></label>
+        <label class="toolbar-checkbox-btn edit-only" title="${locale.startsWith('zh') ? '旋转吸附' : 'Rotation snap'}" aria-label="${locale.startsWith('zh') ? '旋转吸附' : 'Rotation snap'}"><input type="checkbox" id="chk-rotation-snap"><div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.5 8A7.5 7.5 0 1 0 20 14"/><path d="m15 5 4 3-4 3"/><path d="M12 3v2M5.6 5.6 7 7M3 12h2"/></svg></div></label>
         <input id="rotation-snap-step" class="toolbar-number edit-only" type="number" min="0.1" max="180" step="1" value="15" title="${locale.startsWith('zh') ? '旋转步长（度）' : 'Rotation step (degrees)'}">
         <label class="toolbar-checkbox-btn edit-only" title="${locale.startsWith('zh') ? '顶点吸附（按住 V 临时启用）' : 'Vertex snap (hold V temporarily)'}">
             <input type="checkbox" id="chk-vertex-snap">
@@ -2216,24 +2246,20 @@ export class EntityPanel {
                 <div class="props-body">
                     <div class="props-row"><label>${locale.startsWith('zh') ? '副本数' : 'Copies'}</label><input type="number" min="1" max="100" step="1" value="1" id="duplicate-copies"></div>
                     <div class="duplicate-section-label">${locale.startsWith('zh') ? '位置间隔' : 'Position step'}</div>
-                    <div class="duplicate-vector-row">
-                        <label><span class="axis-x">X</span><input type="number" step="0.1" value="0" id="duplicate-tx"></label>
-                        <label><span class="axis-y">Y</span><input type="number" step="0.1" value="0" id="duplicate-ty"></label>
-                        <label><span class="axis-z">Z</span><input type="number" step="0.1" value="0" id="duplicate-tz"></label>
-                    </div>
+                    <div class="props-row"><label>Position <span class="axis-x">X</span></label><input type="number" step="0.1" value="0" id="duplicate-tx"></div>
+                    <div class="props-row"><label>Position <span class="axis-y">Y</span></label><input type="number" step="0.1" value="0" id="duplicate-ty"></div>
+                    <div class="props-row"><label>Position <span class="axis-z">Z</span></label><input type="number" step="0.1" value="0" id="duplicate-tz"></div>
                     <div class="duplicate-section-label">${locale.startsWith('zh') ? '旋转间隔（度）' : 'Rotation step (degrees)'}</div>
-                    <div class="duplicate-vector-row">
-                        <label><span class="axis-x">X</span><input type="number" step="1" value="0" id="duplicate-rx"></label>
-                        <label><span class="axis-y">Y</span><input type="number" step="1" value="0" id="duplicate-ry"></label>
-                        <label><span class="axis-z">Z</span><input type="number" step="1" value="0" id="duplicate-rz"></label>
-                    </div>
+                    <div class="props-row"><label>Rotation <span class="axis-x">X</span></label><input type="number" step="1" value="0" id="duplicate-rx"></div>
+                    <div class="props-row"><label>Rotation <span class="axis-y">Y</span></label><input type="number" step="1" value="0" id="duplicate-ry"></div>
+                    <div class="props-row"><label>Rotation <span class="axis-z">Z</span></label><input type="number" step="1" value="0" id="duplicate-rz"></div>
                     <label class="duplicate-checkbox" title="${locale.startsWith('zh') ? '旋转副本的位置，形成以模型原点为中心的环形阵列' : 'Rotate copied positions to form an array around the model origin'}">
                         <input type="checkbox" id="duplicate-orbit">
                         <span>${locale.startsWith('zh') ? '绕模型原点旋转位置' : 'Orbit position around model origin'}</span>
                     </label>
                     <div class="duplicate-help">${locale.startsWith('zh') ? '每个副本在前一项基础上累加间隔；挂载实体会一并复制。' : 'Steps accumulate per copy; the attached entity is copied too.'}</div>
                     <div class="duplicate-preview" id="duplicate-preview"></div>
-                    <div class="props-actions">
+                    <div class="props-actions duplicate-actions">
                         <button class="toolbar-btn" id="btn-special-duplicate-confirm">${locale.startsWith('zh') ? '复制' : 'Duplicate'}</button>
                         <button class="toolbar-btn secondary" id="btn-special-duplicate-cancel">${locale.startsWith('zh') ? '取消' : 'Cancel'}</button>
                     </div>

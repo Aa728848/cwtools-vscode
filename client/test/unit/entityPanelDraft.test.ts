@@ -5,8 +5,12 @@ import * as path from 'path';
 describe('entity preview locator drafts', () => {
     const root = path.resolve(__dirname, '../../..');
     const host = fs.readFileSync(path.join(root, 'client/extension/entityPanel.ts'), 'utf8');
+    const extension = fs.readFileSync(path.join(root, 'client/extension/extension.ts'), 'utf8');
     const webview = fs.readFileSync(path.join(root, 'client/webview/entityPreview.ts'), 'utf8');
     const css = fs.readFileSync(path.join(root, 'client/webview/entityPreview.css'), 'utf8');
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, 'release/package.json'), 'utf8')) as {
+        contributes?: { keybindings?: Array<{ command?: string; key?: string; mac?: string; when?: string }> };
+    };
 
     function methodSource(name: string): string {
         const start = host.indexOf(`private async ${name}`);
@@ -52,6 +56,7 @@ describe('entity preview locator drafts', () => {
         expect(host).to.include("case 'updateLocators'");
         expect(host).to.include("case 'renameLocator'");
         expect(methodSource('_handleUpdateLocators')).to.include('const edit = new vscode.WorkspaceEdit()');
+        expect(methodSource('_handleUpdateLocators').match(/_applyDraftEdit/g)).to.have.length(1);
         expect(webview).to.include('captureMultiTransformSnapshot();');
         expect(webview).to.include("vscode.postMessage({ command: 'updateLocators', locators });");
         expect(webview).to.include('applySelfRotationDeltaToLocalTransform');
@@ -62,6 +67,39 @@ describe('entity preview locator drafts', () => {
         expect(host).to.include('id="move-snap-step"');
         expect(host).to.include('id="rotation-snap-step"');
         expect(host).to.include('不会建立动态绑定');
+    });
+
+    it('routes undo and redo through focused edit-mode keybindings', () => {
+        expect(extension).to.include('safeRegisterCommand(context, "cwtools.entityPreview.undo"');
+        expect(extension).to.include('safeRegisterCommand(context, "cwtools.entityPreview.redo"');
+        expect(host).to.include("'cwtools.entityPreview.editing'");
+        expect(host).to.include("case 'setEditMode'");
+        expect(webview).to.include("vscode.postMessage({ command: 'setEditMode', editMode });");
+
+        const keybindings = manifest.contributes?.keybindings ?? [];
+        expect(keybindings).to.deep.include({
+            command: 'cwtools.entityPreview.undo',
+            key: 'ctrl+z',
+            mac: 'cmd+z',
+            when: 'cwtools.entityPreview.editing',
+        });
+        expect(keybindings).to.deep.include({
+            command: 'cwtools.entityPreview.redo',
+            key: 'ctrl+shift+z',
+            mac: 'cmd+shift+z',
+            when: 'cwtools.entityPreview.editing',
+        });
+        expect(webview).not.to.include("vscode.postMessage({ command: e.shiftKey ? 'redo' : 'undo' });");
+    });
+
+    it('uses the same compact panel layout for properties and special duplicate', () => {
+        expect(host).to.include('<div id="special-duplicate-panel" class="hidden">');
+        expect(host).to.include('<div class="props-row"><label>Position <span class="axis-x">X</span>');
+        expect(host).to.include('<div class="props-row"><label>Rotation <span class="axis-z">Z</span>');
+        expect(host).to.include('<div class="props-actions duplicate-actions">');
+        expect(css).to.include('#special-duplicate-panel {\n    width: min(240px, calc(100% - 24px));');
+        expect(css).to.include('grid-template-columns: repeat(2, minmax(0, 1fr));');
+        expect(css).not.to.include('.duplicate-vector-row');
     });
 
     it('tracks cross-file drafts, confirms save, and protects navigation', () => {

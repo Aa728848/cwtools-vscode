@@ -373,6 +373,7 @@ function markDocumentModified(): void {
 
 function setWorkspaceMode(mode: 'preview' | 'edit'): void {
     editMode = mode === 'edit';
+    vscode.postMessage({ command: 'setEditMode', editMode });
     document.body.classList.toggle('edit-mode', editMode);
     previewModeButton.classList.toggle('active', !editMode);
     previewModeButton.setAttribute('aria-pressed', String(!editMode));
@@ -4323,20 +4324,6 @@ function handleWindowKeydown(e: KeyboardEvent) {
         }
         return;
     }
-    // Forward Ctrl+Z / Ctrl+Shift+Z to extension for undo/redo
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-        if (!editMode) return;
-        e.preventDefault();
-        vscode.postMessage({ command: e.shiftKey ? 'redo' : 'undo' });
-        return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
-        if (!editMode) return;
-        e.preventDefault();
-        vscode.postMessage({ command: 'redo' });
-        return;
-    }
-
     // Don't intercept if user is typing in an input
     const tag = (e.target as HTMLElement).tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;

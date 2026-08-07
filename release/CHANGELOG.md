@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.10.15] - 2026-08-07
+
+### 实体预览与编辑器 / Entity Preview & Editor
+- **[优化] 将实体预览撤销/重做路由至 VS Code 快捷键绑定**：优化了 Entity 预览中的撤销/重做操作响应机制，使其与全局快捷键（如 Ctrl+Z / Ctrl+Y）完全兼容。
+  English: [Improvement] Routed entity preview undo/redo actions through VS Code keybindings for standard Ctrl+Z/Ctrl+Y handling.
+- **[修复] 修复占位符 Token 拆分正则表达式**：修复了占位符格式化和文本拆分时的匹配处理。
+  English: [Fix] Fixed the regex pattern for placeholder token splitting during localization formatting.
+
+### MCP 服务端 / MCP Server Integration
+- **[更新] 同步 cwtools-mcp 子模块与协议架构至 0.2.1**：升级只读 MCP 服务端及 Schema 协议文件。
+  English: [Update] Bumped `cwtools-mcp` submodule pointer and synchronized MCP schema definition to version 0.2.1.
+
 ## [2.10.14] - 2026-08-07
 
 ### 模型预览与编辑 / Model Preview & Editing

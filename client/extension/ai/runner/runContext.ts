@@ -35,12 +35,13 @@ export class RunEventSink {
         type: AgentRunEventType,
         payload: Record<string, unknown>,
         metadata: RunEventMetadata = {},
+        options?: { debounced?: boolean },
     ): Promise<void> {
         await runLedger.appendEvent(this.identity.runId, type, payload, {
             invocationId: metadata.invocationId ?? this.identity.invocationId,
             agentId: metadata.agentId ?? this.identity.agentId,
             status: metadata.status,
-        });
+        }, options);
     }
 
     appendSoon(
@@ -48,7 +49,7 @@ export class RunEventSink {
         payload: Record<string, unknown>,
         metadata: RunEventMetadata = {},
     ): void {
-        this.append(type, payload, metadata).catch(() => {});
+        this.append(type, payload, metadata, { debounced: true }).catch(() => {});
     }
 }
 

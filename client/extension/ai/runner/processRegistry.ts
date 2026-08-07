@@ -5,6 +5,7 @@ import { atomicWriteJson, readJsonWithBackup } from './durableStorage';
 import { agentTaskManager, type AgentTaskStatus } from './taskManager';
 
 const MAX_PROCESS_RECORDS = 200;
+const PROCESS_PERSIST_DEBOUNCE_MS = 150;
 
 export interface BackgroundProcessRecord {
     processId: string;
@@ -37,6 +38,8 @@ export class ProcessRegistry {
     private readonly controls = new Map<string, ProcessControl>();
     private storageFile?: string;
     private persistChain: Promise<void> = Promise.resolve();
+    private dirty = false;
+    private flushTimer: ReturnType<typeof setTimeout> | undefined;
 
     static getInstance(): ProcessRegistry {
         if (!ProcessRegistry.instance) ProcessRegistry.instance = new ProcessRegistry();
@@ -220,6 +223,28 @@ export class ProcessRegistry {
 
     private persistSoon(): void {
         if (!this.storageFile) return;
+        this.dirty = true;
+        if (this.flushTimer) return;
+        // Output chunks arrive far faster than the file needs updating; coalesce
+        // a burst of changes into a single atomic write once activity pauses.
+        this.flushTimer = setTimeout(() => {
+            this.flushTimer = undefined;
+            void this.flushNow();
+        }, PROCESS_PERSIST_DEBOUNCE_MS);
+    }
+
+    /** Flush any pending write immediately (used on extension deactivation). */
+    flush(): Promise<void> {
+        if (this.flushTimer) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = undefined;
+        }
+        return this.flushNow();
+    }
+
+    private flushNow(): Promise<void> {
+        if (!this.storageFile || !this.dirty) return this.persistChain;
+        this.dirty = false;
         const file = this.storageFile;
         const records = this.list();
         this.persistChain = this.persistChain
@@ -228,6 +253,7 @@ export class ProcessRegistry {
                 await atomicWriteJson(file, records);
             })
             .catch(() => {});
+        return this.persistChain;
     }
 
     private transitionTask(record: BackgroundProcessRecord, status: AgentTaskStatus, eventSink?: RunEventSink): void {

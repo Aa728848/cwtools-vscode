@@ -10,7 +10,7 @@ import {
     type ChatMessage,
 } from '../types';
 import { isPathInsideOrEqual } from '../../pathScope';
-import { atomicWriteJson, readJsonWithBackup, sha256Text } from './durableStorage';
+import { atomicWriteJson, atomicWriteText, readJsonWithBackup, sha256Text } from './durableStorage';
 import { getHistoryPolicy } from './historyPolicy';
 import { schedulingStateFromAdmission } from './scheduling';
 import {
@@ -21,6 +21,10 @@ import {
 const RUN_LEDGER_FIELD_MAX_CHARS = 6000;
 const RUN_STATE_MAX_LOAD_BYTES = 4_000_000;
 const RUN_EVENTS_MAX_LOAD_BYTES = 4_000_000;
+const PERSIST_DEBOUNCE_MS = 150;
+/** Terminal runs whose full event arrays stay in memory; older ones are re-read from disk on demand. */
+const MAX_MEMORY_TERMINAL_RUN_EVENTS = 20;
+const TERMINAL_RUN_STATUSES = new Set(['done', 'failed', 'cancelled', 'completed']);
 
 export type AgentRunEventType =
     | 'run_created'
@@ -131,6 +135,9 @@ export class RunLedger {
     private runEvents = new Map<string, AgentRunEvent[]>();
     private runSequences = new Map<string, number>();
     private persistenceQueues = new Map<string, Promise<void>>();
+    private pendingEventBatches = new Map<string, AgentRunEvent[]>();
+    private flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    private flushRequests = new Map<string, { promise: Promise<void>; resolve: () => void }>();
     private runPrompts = new Map<string, string>();
     private runDirectories = new Map<string, string>();
     private emitter = new EventEmitter();
@@ -270,7 +277,8 @@ export class RunLedger {
         runId: string,
         type: AgentRunEventType,
         payload: any,
-        metadata?: { invocationId?: string; agentId?: string; status?: 'pending' | 'running' | 'done' | 'failed' | 'cancelled' }
+        metadata?: { invocationId?: string; agentId?: string; status?: 'pending' | 'running' | 'done' | 'failed' | 'cancelled' },
+        options?: { debounced?: boolean },
     ): Promise<void> {
         const run = this.activeRuns.get(runId);
         if (!run) {
@@ -281,6 +289,7 @@ export class RunLedger {
             run.updatedAt = Date.now();
             return;
         }
+        const wasTerminal = this.isTerminalRun(run);
 
         const timestamp = Date.now();
         run.updatedAt = timestamp;
@@ -363,15 +372,31 @@ export class RunLedger {
         const events = this.runEvents.get(runId);
         if (events) events.push(event);
 
-        // Persist event/state in per-run sequence order. Capture the state at
-        // this event boundary so a concurrent later event cannot race ahead.
-        const stateSnapshot = JSON.parse(JSON.stringify(run)) as AgentRunRecord;
-        stateSnapshot.context = {
-            ...stateSnapshot.context,
-            lastStableEventId: event.eventId,
-            lastStableSequence: event.sequence,
-        };
-        await this.enqueuePersistence(run, event, stateSnapshot);
+        // Persist in per-run sequence order. Events are batched per flush window
+        // (debounced for fire-and-forget appends, next-microtask for awaited ones)
+        // so high-frequency deltas such as process output do not deep-copy and
+        // rewrite run_state.json per chunk. A run reaching a terminal state
+        // always flushes immediately so the final state lands on disk promptly.
+        if (getHistoryPolicy().persistence !== 'off') {
+            const batch = this.pendingEventBatches.get(runId);
+            if (batch) batch.push(event);
+            else this.pendingEventBatches.set(runId, [event]);
+
+            const terminalNow = this.isTerminalRun(run);
+            if (options?.debounced && !terminalNow) {
+                this.requestDebouncedFlush(runId);
+            } else {
+                const timer = this.flushTimers.get(runId);
+                if (timer) {
+                    clearTimeout(timer);
+                    this.flushTimers.delete(runId);
+                }
+                await this.requestFlush(runId);
+            }
+            if (!wasTerminal && terminalNow) {
+                this.evictTerminalRunEvents();
+            }
+        }
 
         // Notify subscribers of the change
         this.emitter.emit('change', runId);
@@ -634,59 +659,130 @@ export class RunLedger {
         return this.runDirectories.get(runId) ?? this.getRunDir(topicId, runId);
     }
 
-    private enqueuePersistence(
-        run: AgentRunRecord,
-        event: AgentRunEvent,
-        stateSnapshot: AgentRunRecord,
-    ): Promise<void> {
-        if (getHistoryPolicy().persistence === 'off') return Promise.resolve();
-        const previous = this.persistenceQueues.get(run.runId) ?? Promise.resolve();
+    /** Flush the buffered events of a run on the next microtask; bursts coalesce into one write. */
+    private requestFlush(runId: string): Promise<void> {
+        const existing = this.flushRequests.get(runId);
+        if (existing) return existing.promise;
+        let resolve!: () => void;
+        const promise = new Promise<void>(r => { resolve = r; });
+        const entry = { promise, resolve };
+        this.flushRequests.set(runId, entry);
+        queueMicrotask(() => {
+            this.flushRequests.delete(runId);
+            void this.flushRun(runId).then(entry.resolve, entry.resolve);
+        });
+        return entry.promise;
+    }
+
+    /** Debounce a fire-and-forget flush so a burst of deltas lands in one write. */
+    private requestDebouncedFlush(runId: string): void {
+        if (this.flushTimers.has(runId)) return;
+        this.flushTimers.set(runId, setTimeout(() => {
+            this.flushTimers.delete(runId);
+            void this.flushRun(runId);
+        }, PERSIST_DEBOUNCE_MS));
+    }
+
+    /**
+     * Write one batch of buffered events plus the run state. The serialized state
+     * is taken synchronously together with the batch drain, so the state on disk
+     * always corresponds exactly to the last flushed event; events appended during
+     * the async write join the next batch and are re-applied on resume via
+     * lastStableSequence.
+     */
+    private flushRun(runId: string): Promise<void> {
+        const run = this.activeRuns.get(runId);
+        if (!run) return Promise.resolve();
+        const batch = this.pendingEventBatches.get(runId);
+        if (!batch || batch.length === 0) {
+            return this.persistenceQueues.get(runId) ?? Promise.resolve();
+        }
+        this.pendingEventBatches.delete(runId);
+        const policy = getHistoryPolicy();
+        if (policy.persistence === 'off') return Promise.resolve();
+        const stateText = this.serializeStateForPersistence(run, batch, policy);
+        const previous = this.persistenceQueues.get(runId) ?? Promise.resolve();
         const current = previous
             .catch(() => {})
-            .then(async () => {
-                if (getHistoryPolicy().persistence === 'full') await this.writeEventToDisk(run, event);
-                await this.writeStateToDisk(stateSnapshot);
-            });
-        this.persistenceQueues.set(run.runId, current);
+            .then(() => this.writeBatchToDisk(run, batch, stateText));
+        this.persistenceQueues.set(runId, current);
         return current.finally(() => {
-            if (this.persistenceQueues.get(run.runId) === current) {
-                this.persistenceQueues.delete(run.runId);
+            if (this.persistenceQueues.get(runId) === current) {
+                this.persistenceQueues.delete(runId);
             }
         });
     }
 
-    private async writeEventToDisk(run: AgentRunRecord, event: AgentRunEvent): Promise<void> {
+    private serializeStateForPersistence(
+        run: AgentRunRecord,
+        batch: AgentRunEvent[],
+        policy: ReturnType<typeof getHistoryPolicy>,
+    ): string | undefined {
+        const last = batch[batch.length - 1]!;
+        if (policy.persistence === 'metadata') {
+            return JSON.stringify({ ...run, userPromptPreview: '', steps: [], context: undefined });
+        }
+        return JSON.stringify({
+            ...run,
+            context: { ...run.context, lastStableEventId: last.eventId, lastStableSequence: last.sequence },
+        });
+    }
+
+    private async writeBatchToDisk(
+        run: AgentRunRecord,
+        batch: AgentRunEvent[],
+        stateText: string | undefined,
+    ): Promise<void> {
         try {
             const dir = this.resolveRunDir(run.topicId, run.runId);
             if (!fs.existsSync(dir)) {
                 await fs.promises.mkdir(dir, { recursive: true });
             }
-            const file = path.join(dir, 'events.jsonl');
-            const handle = await fs.promises.open(file, 'a', 0o600);
-            try {
-                await handle.writeFile(JSON.stringify(event) + '\n', 'utf8');
-                await handle.sync();
-            } finally {
-                await handle.close();
+            if (getHistoryPolicy().persistence === 'full') {
+                const file = path.join(dir, 'events.jsonl');
+                const handle = await fs.promises.open(file, 'a', 0o600);
+                try {
+                    await handle.writeFile(batch.map(event => JSON.stringify(event) + '\n').join(''), 'utf8');
+                    await handle.sync();
+                } finally {
+                    await handle.close();
+                }
+            }
+            if (stateText !== undefined) {
+                await atomicWriteText(path.join(dir, 'run_state.json'), stateText);
             }
         } catch (e) {
-            ErrorReporter.warn('RunLedger', `Failed to write event to disk for run ${run.runId}`, e);
+            ErrorReporter.warn('RunLedger', `Failed to persist run ${run.runId}`, e);
         }
     }
 
-    private async writeStateToDisk(run: AgentRunRecord): Promise<void> {
-        try {
-            const dir = this.resolveRunDir(run.topicId, run.runId);
-            if (!fs.existsSync(dir)) {
-                await fs.promises.mkdir(dir, { recursive: true });
-            }
-            const file = path.join(dir, 'run_state.json');
-            const persisted = getHistoryPolicy().persistence === 'metadata'
-                ? { ...run, userPromptPreview: '', steps: [], context: undefined }
-                : run;
-            await atomicWriteJson(file, persisted);
-        } catch (e) {
-            ErrorReporter.warn('RunLedger', `Failed to write state to disk for run ${run.runId}`, e);
+    /** Flush all pending persistence (used on extension deactivation). */
+    public async flushAll(): Promise<void> {
+        for (const [runId, timer] of this.flushTimers) {
+            clearTimeout(timer);
+            this.flushTimers.delete(runId);
+        }
+        const runIds = new Set<string>([...this.pendingEventBatches.keys(), ...this.persistenceQueues.keys()]);
+        await Promise.all([...runIds].map(runId => this.flushRun(runId)));
+    }
+
+    private isTerminalRun(run: AgentRunRecord): boolean {
+        return TERMINAL_RUN_STATUSES.has(run.status);
+    }
+
+    /** Drop event arrays of terminal runs beyond the retention window; re-read from disk on demand. */
+    private evictTerminalRunEvents(): void {
+        const candidates: Array<{ runId: string; updatedAt: number }> = [];
+        for (const [runId] of this.runEvents) {
+            const run = this.activeRuns.get(runId);
+            if (!run || !this.isTerminalRun(run)) continue;
+            candidates.push({ runId, updatedAt: run.updatedAt ?? 0 });
+        }
+        if (candidates.length <= MAX_MEMORY_TERMINAL_RUN_EVENTS) return;
+        candidates.sort((a, b) => b.updatedAt - a.updatedAt);
+        for (const candidate of candidates.slice(MAX_MEMORY_TERMINAL_RUN_EVENTS)) {
+            this.runEvents.delete(candidate.runId);
+            this.runPrompts.delete(candidate.runId);
         }
     }
 

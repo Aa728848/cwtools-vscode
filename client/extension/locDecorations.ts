@@ -515,15 +515,26 @@ export function registerLocalizationFeatures(context: vs.ExtensionContext, index
 		}),
 	);
 
+	// Full-document parses are expensive for large loc files; debounce the
+	// per-keystroke change path and re-run once typing pauses.
+	let locDecorationDebounce: ReturnType<typeof setTimeout> | undefined;
 	context.subscriptions.push(
 		vs.workspace.onDidChangeTextDocument(event => {
-			if (isYmlDocument(event.document)) {
-				cacheOpenDocumentLocalisation(event.document);
-			}
 			const editor = vs.window.activeTextEditor;
-			if (editor && event.document === editor.document) {
-				updateColorDecorations(editor);
+			if (!isYmlDocument(event.document) && !(editor && event.document === editor.document)) {
+				return;
 			}
+			if (locDecorationDebounce) clearTimeout(locDecorationDebounce);
+			locDecorationDebounce = setTimeout(() => {
+				locDecorationDebounce = undefined;
+				if (isYmlDocument(event.document)) {
+					cacheOpenDocumentLocalisation(event.document);
+				}
+				const current = vs.window.activeTextEditor;
+				if (current && event.document === current.document) {
+					updateColorDecorations(current);
+				}
+			}, 150);
 		}),
 		vs.workspace.onDidCloseTextDocument(document => {
 			openDocumentLocCache.delete(document.uri.toString());

@@ -37,7 +37,7 @@ module DocumentStoreUtils =
                 offsets.[lineIdx] <- i + 1
         offsets
 
-    /// O(log n) replacement for the old O(n) findRange.
+    /// O(log n) range-to-offset conversion via a pre-built lineOffsets cache.
     /// Uses a pre-built lineOffsets cache to jump directly to the right line,
     /// then walks within that line for the column offset.
     let findRangeFast (text: StringBuilder, lineOffsets: int[], range: Range) : struct (int * int) =
@@ -52,31 +52,6 @@ module DocumentStoreUtils =
         let startOffset = posToOffset range.start.line range.start.character
         let endOffset   = posToOffset range.``end``.line range.``end``.character
         struct (startOffset, endOffset)
-
-    /// Legacy O(n) fallback - kept for correctness validation only.
-    let findRange (text: StringBuilder, range: Range) : struct (int * int) =
-        let mutable line = 0
-        let mutable char = 0
-        let mutable startOffset = 0
-        let mutable endOffset = 0
-
-        for offset = 0 to text.Length do
-            if line = range.start.line && char = range.start.character then
-                startOffset <- offset
-
-            if line = range.``end``.line && char = range.``end``.character then
-                endOffset <- offset
-
-            if offset < text.Length then
-                let c = text[offset]
-
-                if c = '\n' then
-                    line <- line + 1
-                    char <- 0
-                else
-                    char <- char + 1
-
-        (startOffset, endOffset)
 
 open DocumentStoreUtils
 

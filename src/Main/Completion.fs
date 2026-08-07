@@ -930,8 +930,6 @@ let completionCallLSP (game: IGame) (p: CompletionParams) debugMode supportsInse
 
     let comp = game.Complete position path filetext
 
-
-    // logInfo $"completion {prefixSoFar}"
     // let extraKeywords = ["yes"; "no";]
     // let eventIDs = game.References.EventIDs
     // let names = eventIDs @ game.References.TriggerNames @ game.References.EffectNames @ game.References.ModifierNames @ game.References.ScopeNames @ extraKeywords
@@ -1092,19 +1090,10 @@ let completion
     =
     match gameObj with
     | Some game ->
-        // match experimental_completion with
-        // |true ->
-
-        // let variables = game.References.ScriptVariableNames |> List.map (fun v -> {defaultCompletionItem with label = v; kind = Some CompletionItemKind.Variable })
-        // logInfo (sprintf "completion prefix %A %A" prefixSoFar (items |> List.map (fun x -> x.label)))
-
-        let stopwatch = System.Diagnostics.Stopwatch.StartNew()
         let position = PosHelper.fromZ p.position.line p.position.character // |> (fun p -> Pos.fromZ)
 
         let filetext =
             (docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue "")
-
-        logInfo $"{p} {position}"
 
         let textBeforeCursor = getTextBeforeCursor filetext position
         let currentFilePath =
@@ -1149,8 +1138,6 @@ let completion
                             sortText = Some "0000000"
                             textEdit = paramTextEdit insertText
                         })
-
-                logInfo $"completion script-value params time %i{stopwatch.ElapsedMilliseconds}ms"
                 Some { isIncomplete = false; items = paramItems }
             | None ->
                 // Parameter / inline_script value completion: when the cursor is at
@@ -1159,7 +1146,6 @@ let completion
                     tryGetParameterValueCompletion game docs currentFilePath filetext position supportsInsertReplaceEdit
 
                 if paramValueItems.IsSome then
-                    logInfo $"completion param-value time %i{stopwatch.ElapsedMilliseconds}ms"
 
                     Some
                         { isIncomplete = false
@@ -1168,7 +1154,6 @@ let completion
 
                 // Normal (non-script_value) completion path
                 let items = getRawItems () |> Seq.toArray
-                logInfo $"completion items time %i{stopwatch.ElapsedMilliseconds}ms"
 
                 let prefixSoFar = prefixFromTextBeforeCursor textBeforeCursor
 

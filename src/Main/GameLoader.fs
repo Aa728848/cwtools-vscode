@@ -37,21 +37,6 @@ let tryReadStellarisGameVersion (vanillaPath: string) =
             logWarning (sprintf "GameLoader: failed to read Stellaris version from %s: %s" launcherSettings ex.Message)
             None
 
-let rec replaceFirst predicate value =
-    function
-    | [] -> []
-    | h :: t when predicate h -> value :: t
-    | h :: t -> h :: replaceFirst predicate value t
-
-let fixEmbeddedFileName (s: string) =
-    let count = (Seq.filter ((=) '.') >> Seq.length) s
-    let mutable out = "//" + s
-
-    [ 1 .. count - 1 ]
-    |> List.iter (fun _ -> out <- (replaceFirst ((=) '.') '\\' (out |> List.ofSeq)) |> Array.ofList |> String)
-
-    out
-
 let rec getAllFolders dirs =
     if Seq.isEmpty dirs then
         Seq.empty

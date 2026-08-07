@@ -1,16 +1,13 @@
 import { expect } from 'chai';
 import {
     getProfileByLanguageId,
-    getDefaultProfile,
     getAllLanguageIds,
     getAllProfiles,
     getAllLocalisationDirectoryNames,
-    getAllLocalisationFileExtensions,
     getLocalisationDirectoryGlob,
     getRulesRemoteUrl,
     getCacheSettingKey,
     isPreviewAvailable,
-    getGameInfoMap,
     getGameExeList,
     getGameFolderMapping,
     getAlternativeSteamFolderNames,
@@ -51,11 +48,6 @@ describe('GameProfile Registry', () => {
         expect(profile.rulesRemoteUrl).to.equal('');
     });
 
-    it('getDefaultProfile returns Stellaris', () => {
-        const profile = getDefaultProfile();
-        expect(profile.id).to.equal('stellaris');
-    });
-
     // ── Profile data integrity ─────────────────────────────────────────
 
     it('all profiles have non-empty required fields', () => {
@@ -94,7 +86,6 @@ describe('GameProfile Registry', () => {
     });
 
     it('derives localisation extensions and preserves CK2 CSV conventions', () => {
-        expect(getAllLocalisationFileExtensions()).to.deep.equal(['csv', 'yml']);
         const ck2 = getProfileByLanguageId('ck2');
         expect(ck2.localisation.fileExtensions).to.deep.equal(['csv']);
         expect(ck2.localisation.encoding).to.equal('windows-1252');
@@ -144,25 +135,6 @@ describe('GameProfile Registry', () => {
             expect(isPreviewAvailable(id, 'entityPreview'), `${id}.entityPreview`).to.be.false;
             expect(isPreviewAvailable(id, 'staticGalaxyPreview'), `${id}.staticGalaxyPreview`).to.be.false;
         }
-    });
-
-    // ── Game info map (for auto-detect) ────────────────────────────────
-
-    it('getGameInfoMap covers all profiles', () => {
-        const map = getGameInfoMap();
-        for (const id of getAllLanguageIds()) {
-            expect(map, `gameInfoMap should contain ${id}`).to.have.property(id);
-            expect(map[id]!.display).to.be.a('string').and.not.be.empty;
-            expect(map[id]!.steamFolder).to.be.a('string').and.not.be.empty;
-        }
-    });
-
-    it('getGameInfoMap includes subdirectory for games that need it', () => {
-        const map = getGameInfoMap();
-        expect(map['ck3']!.subdir).to.equal('game');
-        expect(map['vic3']!.subdir).to.equal('game');
-        expect(map['imperator']!.subdir).to.equal('game');
-        expect(map['stellaris']!.subdir).to.be.undefined;
     });
 
     // ── Exe detection list ─────────────────────────────────────────────

@@ -160,59 +160,6 @@ export function groupTimelineEvents(events: TimelineEvent[], i18n?: ChatI18nText
 }
 
 /**
- * Pairs tool_call_start and tool_call_end events by invocationId.
- */
-export function pairToolEvents(events: TimelineEvent[]): Array<{
-    start?: TimelineEvent;
-    end?: TimelineEvent;
-    invocationId: string;
-    toolName: string;
-    duration?: number;
-    status: string;
-}> {
-    const map = new Map<string, { start?: TimelineEvent; end?: TimelineEvent }>();
-
-    for (const evt of events) {
-        if (!evt.invocationId) continue;
-        if (!map.has(evt.invocationId)) map.set(evt.invocationId, {});
-        const pair = map.get(evt.invocationId)!;
-        if (evt.type === 'tool_call_start' || evt.type === 'tool_call_created') pair.start = evt;
-        if (evt.type === 'tool_call_end') pair.end = evt;
-    }
-
-    return [...map.entries()].map(([invocationId, pair]) => ({
-        start: pair.start,
-        end: pair.end,
-        invocationId,
-        toolName: pair.start?.payload?.toolName || pair.start?.payload?.name || 'unknown',
-        duration: pair.start && pair.end ? pair.end.timestamp - pair.start.timestamp : undefined,
-        status: pair.end?.payload?.success === false ? 'failed'
-            : pair.end ? 'done'
-            : 'running',
-    }));
-}
-
-/**
- * Groups events by agentId for sub-agent lane display.
- */
-export function groupByAgentLane(events: TimelineEvent[]): Map<string, {
-    agentId: string;
-    status: string;
-    events: TimelineEvent[];
-}> {
-    const lanes = new Map<string, { agentId: string; status: string; events: TimelineEvent[] }>();
-    for (const evt of events) {
-        const aid = evt.agentId ?? 'main';
-        if (!lanes.has(aid)) lanes.set(aid, { agentId: aid, status: 'running', events: [] });
-        lanes.get(aid)!.events.push(evt);
-        if (evt.type === 'subagent_end') {
-            lanes.get(aid)!.status = evt.payload?.status || 'done';
-        }
-    }
-    return lanes;
-}
-
-/**
  * Renders timeline HTML for embedding in the Agent Manager webview.
  */
 export function renderTimelineHTML(groups: TimelineGroup[], collapsible = false, collapsedGroups?: ReadonlySet<string>): string {

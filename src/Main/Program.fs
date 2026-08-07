@@ -35,6 +35,29 @@ let private inlayLocalVarPattern =
         @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
         System.Text.RegularExpressions.RegexOptions.Multiline ||| System.Text.RegularExpressions.RegexOptions.Compiled)
 
+let private inlayVarNamePattern =
+    System.Text.RegularExpressions.Regex(
+        "[a-zA-Z_][a-zA-Z0-9_]*",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
+// Replace whole-word occurrences of `word` in `text` (identifier boundaries only).
+let private replaceWholeWordInlay (text: string) (word: string) (replacement: string) =
+    let sb = System.Text.StringBuilder()
+    let mutable last = 0
+    let mutable replaced = false
+    let isWordChar (c: char) = System.Char.IsLetterOrDigit c || c = '_'
+    for m in inlayVarNamePattern.Matches(text) do
+        if m.Value = word then
+            let boundaryBefore = m.Index = 0 || not (isWordChar text.[m.Index - 1])
+            let endIndex = m.Index + m.Length
+            let boundaryAfter = endIndex >= text.Length || not (isWordChar text.[endIndex])
+            if boundaryBefore && boundaryAfter then
+                sb.Append(text.Substring(last, m.Index - last)) |> ignore
+                sb.Append(replacement) |> ignore
+                last <- endIndex
+                replaced <- true
+    if replaced then (sb.Append(text.Substring(last)).ToString()) else text
+
 let private definitionInjectionKeyPattern =
     System.Text.RegularExpressions.Regex(
         @"^\s*(INJECT|REPLACE|TRY_INJECT|TRY_REPLACE|INJECT_OR_CREATE|REPLACE_OR_CREATE):([A-Za-z0-9_.:-]+)\s*=",
@@ -7106,7 +7129,9 @@ type Server(client: ILanguageClient) =
                                     [ for m in localVarPattern.Matches(fileContent) ->
                                         m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() ]
                                 let varMap = (localVars @ globalVars) |> Map.ofList
-                                
+                                // One DataTable per inlay-hint request; created once, not per leaf.
+                                let inlayHintDataTable = new System.Data.DataTable()
+
                                 let tryFindLocText key =
                                     Map.tryFind key locMap |> Option.map (fun entry -> entry.desc)
                                 let tryFindVarText key = Map.tryFind key varMap
@@ -7233,24 +7258,21 @@ type Server(client: ILanguageClient) =
                                 let tryAddVarHint (rawVal: string) (position: CWTools.Utilities.Position.range) =
                                     if rawVal.StartsWith("@[") && rawVal.EndsWith("]") then
                                         let expr = rawVal.Substring(2, rawVal.Length - 3)
-                                        let varPattern = System.Text.RegularExpressions.Regex(@"[a-zA-Z_][a-zA-Z0-9_]*")
                                         let mutable finalExpr = expr
                                         let mutable allFound = true
-                                        for m in varPattern.Matches(expr) do
+                                        for m in inlayVarNamePattern.Matches(expr) do
                                             let varName = m.Value
                                             let key = if varName.StartsWith("@") then varName else "@" + varName
                                             match Map.tryFind key varMap with
                                             | Some v -> 
                                                 // Only replace whole word matches to prevent partial replacements
-                                                let wordPattern = System.Text.RegularExpressions.Regex(@"\b" + System.Text.RegularExpressions.Regex.Escape(varName) + @"\b")
-                                                finalExpr <- wordPattern.Replace(finalExpr, v)
+                                                finalExpr <- replaceWholeWordInlay finalExpr varName v
                                             | None ->
                                                 allFound <- false
                                                 
                                         if allFound then
                                             try
-                                                use table = new System.Data.DataTable()
-                                                let result = table.Compute(finalExpr, null)
+                                                let result = inlayHintDataTable.Compute(finalExpr, null)
                                                 let range = convRangeToLSPRange position
                                                 hints.Add {
                                                     position = getRealEndPos range.start range.``end``

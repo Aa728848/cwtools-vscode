@@ -471,24 +471,6 @@ export function getKnownProfileByLanguageId(languageId?: string | null): GamePro
 }
 
 /**
- * Returns the profile matching a document's language ID.
- * Accepts any object with a languageId property.
- * Falls back to Stellaris if no matching profile is found.
- */
-export function getProfileForDocument(document: { languageId: string }): GameProfile {
-	return getProfileByLanguageId(document.languageId);
-}
-
-
-
-/**
- * Returns the default profile (Stellaris).
- */
-export function getDefaultProfile(): GameProfile {
-	return PROFILES.get('stellaris')!;
-}
-
-/**
  * Returns all registered profiles.
  */
 export function getAllProfiles(): GameProfile[] {
@@ -508,17 +490,6 @@ export function getAllLocalisationDirectoryNames(): string[] {
 		}
 	}
 	return Array.from(names).sort();
-}
-
-/** Returns all localisation extensions declared by registered game profiles. */
-export function getAllLocalisationFileExtensions(): string[] {
-	const extensions = new Set<string>();
-	for (const profile of [...PROFILES.values(), GENERIC_PROFILE]) {
-		for (const extension of profile.localisation.fileExtensions) {
-			extensions.add(extension.replace(/^\./, '').toLowerCase());
-		}
-	}
-	return Array.from(extensions).sort();
 }
 
 /**
@@ -579,34 +550,10 @@ export function getGameIdForVanillaCacheFile(fileName: string): string | undefin
 }
 
 /**
- * Returns the install detection metadata for a given language ID.
- */
-export function getInstallProfile(languageId: string): GameInstallProfile {
-	return getProfileByLanguageId(languageId).install;
-}
-
-/**
  * Checks whether a specific preview capability is available for a game.
  */
 export function isPreviewAvailable(languageId: string, capability: keyof PreviewCapabilityProfile): boolean {
 	return getProfileByLanguageId(languageId).previews[capability];
-}
-
-/**
- * Build the gameInfoMap used by promptVanillaPath notification handler.
- * This replaces the inline Record<string, ...> in extension.ts.
- */
-export function getGameInfoMap(): Record<string, { display: string; steamFolder: string; subdir?: string; steamAppId: string }> {
-	const result: Record<string, { display: string; steamFolder: string; subdir?: string; steamAppId: string }> = {};
-	for (const profile of PROFILES.values()) {
-		result[profile.id] = {
-			display: profile.displayName,
-			steamFolder: profile.install.steamFolderName,
-			subdir: profile.folders.steamSubdir,
-			steamAppId: profile.install.steamAppId,
-		};
-	}
-	return result;
 }
 
 /**

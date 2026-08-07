@@ -4339,6 +4339,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         liveTextContent: string;
         liveThinkContent: string;
         liveSteps: any[];
+        liveStepKeys: Set<string>;
+        lastCodexRenderKey: string | null;
         container: HTMLElement | null;
         /** Store the uniqueId of the fullscreen container, used to find the corresponding card when subtask_complete */
         fullscreenId: string | null;
@@ -4404,6 +4406,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 liveTextContent: '',
                 liveThinkContent: '',
                 liveSteps: [],
+                liveStepKeys: new Set(),
+                lastCodexRenderKey: null,
                 container: currentAssistantDiv,
                 fullscreenId: null,
                 startedAt: Date.now(),
@@ -4667,6 +4671,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (!state.container) return;
         const host = state.container.querySelector(':scope > .codex-live-host') as HTMLElement | null;
         if (!host) return;
+        // Skip a full rebuild when neither the step list nor the text moved.
+        const lastStep = state.liveSteps[state.liveSteps.length - 1];
+        const lastSig = lastStep ? `${lastStep.invocationId ?? lastStep.type ?? ''}:${lastStep.content ?? lastStep.toolName ?? ''}` : '';
+        const renderKey = `${state.liveSteps.length}:${lastSig}:${finalContent.length}`;
+        if (renderKey === state.lastCodexRenderKey) return;
+        state.lastCodexRenderKey = renderKey;
         const uiSnapshot = snapshotCodexTurnUiState(host);
         host.innerHTML = renderAssistantTurnCodex(finalContent, state.liveSteps, {
             i18n: chatI18n,
@@ -4696,10 +4706,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (!currentAssistantDiv?.classList.contains('codex-message')) return;
         const state = getStreamState(undefined);
         const key = step.invocationId || step.permissionId || step.messageId || `${step.type}:${step.content || step.toolName || ''}`;
-        if (key && state.liveSteps.some(existing =>
-            (existing.invocationId || existing.permissionId || existing.messageId || `${existing.type}:${existing.content || existing.toolName || ''}`) === key
-        )) {
-            return;
+        if (key) {
+            if (state.liveStepKeys.has(key)) return;
+            state.liveStepKeys.add(key);
         }
         state.liveSteps.push(step);
         state.lastStepAt = Date.now();

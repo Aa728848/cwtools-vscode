@@ -215,6 +215,12 @@ export class PromptBuilder {
     private _frozenPromptMisses = new Map<FrozenPromptMissReason, number>();
     private _lastFrozenPromptLookup?: { hit: boolean; missReason?: FrozenPromptMissReason };
     private _lastFrozenPromptFingerprint: FrozenPromptFingerprint | undefined;
+    /** Skill-index hash cache keyed by domain; invalidated when any skill file's mtime/size changes. */
+    private readonly _skillsIndexCache = new Map<AgentRuntimeDomain, {
+        skills: ReturnType<typeof listSkills>;
+        signature: string;
+        hash: string;
+    }>();
 
     constructor(
         private workspaceRoot: string,
@@ -556,15 +562,24 @@ export class PromptBuilder {
      * Hash the installed skill index: frontmatter fields plus file mtime/size,
      * so SKILL.md body edits without frontmatter changes still invalidate the
      * frozen prompt (plan §7.1). listSkills() is sorted by name, so the hash
-     * is deterministic.
+     * is deterministic. The result is cached per domain and validated by
+     * statting the cached skill files, so the expensive directory scan only
+     * runs when a skill actually changed.
      */
     private computeSkillsIndexHash(domain: AgentRuntimeDomain): string {
+        const cached = this._skillsIndexCache.get(domain);
+        if (cached) {
+            const signature = this.skillsFileSignature(cached.skills);
+            if (signature === cached.signature) return cached.hash;
+            this._skillsIndexCache.delete(domain);
+        }
         const skills = listSkills({
             workspaceRoot: this.workspaceRoot,
             globalStoragePath: this.globalStoragePath,
             extensionPath: this.extensionPath,
         }, domain);
         if (skills.length === 0) return 'none';
+        const signature = this.skillsFileSignature(skills);
         const parts = skills.map(skill => {
             let fileSig = 'unreadable';
             try {
@@ -573,7 +588,20 @@ export class PromptBuilder {
             } catch { /* keep fallback marker */ }
             return [skill.name, skill.description, skill.capabilityDomain, skill.runAs ?? '', (skill.allowedTools ?? []).join(','), fileSig].join('|');
         });
-        return shortSha256(parts.join('\n'));
+        const hash = shortSha256(parts.join('\n'));
+        this._skillsIndexCache.set(domain, { skills, signature, hash });
+        return hash;
+    }
+
+    private skillsFileSignature(skills: ReturnType<typeof listSkills>): string {
+        return skills.map(skill => {
+            try {
+                const stat = fs.statSync(skill.filePath);
+                return `${stat.mtimeMs}:${stat.size}`;
+            } catch {
+                return 'unreadable';
+            }
+        }).join('|');
     }
 
     /**

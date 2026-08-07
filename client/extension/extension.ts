@@ -902,90 +902,7 @@ export async function activate(context: ExtensionContext) {
 		)
 	);
 
-	// Client-side Rename Provider — uses VSCode's built-in reference finding
-	// Fix #8: shared game language list (was duplicated as gameLanguages and gameLanguages2)
 	const gameLanguages = [...getAllLanguageIds(), 'paradox'];
-	const docSelector = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
-	const legacyClientRenameProviderEnabled = false;
-
-	if (legacyClientRenameProviderEnabled) {
-	context.subscriptions.push(
-		vs.languages.registerRenameProvider(docSelector, {
-			async provideRenameEdits(document, position, newName, _token) {
-				const wordRange = document.getWordRangeAtPosition(position, /[A-Za-z0-9_@$]+/);
-				const oldName = wordRange ? document.getText(wordRange) : '';
-				if (!oldName) {
-					throw new Error('No symbol found at cursor');
-				}
-
-				const edit = new WorkspaceEdit();
-				const editMeta: vs.WorkspaceEditEntryMetadata = {
-					needsConfirmation: true,
-					label: 'Rename Symbol'
-				};
-
-				// First try LSP references (works for type definitions)
-				const refs: vs.Location[] = await vs.commands.executeCommand(
-					'vscode.executeReferenceProvider', document.uri, position
-				) || [];
-
-				if (refs.length > 0) {
-					for (const ref of refs) {
-						const refDoc = await vs.workspace.openTextDocument(ref.uri);
-						const refText = refDoc.getText(ref.range);
-						if (refText === oldName) {
-							edit.replace(ref.uri, ref.range, newName, editMeta);
-						} else {
-							const lineText = refDoc.lineAt(ref.range.start.line).text;
-							const idx = lineText.indexOf(oldName, ref.range.start.character);
-							if (idx >= 0) {
-								edit.replace(ref.uri, new vs.Range(
-									ref.range.start.line, idx,
-									ref.range.start.line, idx + oldName.length
-								), newName, editMeta);
-							}
-						}
-					}
-				} else {
-					// Fallback: search all .txt files in workspace for exact word match
-					const files = await vs.workspace.findFiles('**/*.txt', '**/.*/**');
-					const wordBoundary = new RegExp(`(?<![A-Za-z0-9_])${oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_])`, 'g');
-					for (const fileUri of files.slice(0, 2000)) {
-						let text: string;
-						try { const buf = await vs.workspace.fs.readFile(fileUri); text = new TextDecoder('utf-8').decode(buf); } catch { continue; }
-						// L4 Fix: avoid openTextDocument (never freed — memory leak)
-						const offs: number[] = [0];
-						for (let j = 0; j < text.length; j++) { if (text[j] === '\n') { offs.push(j + 1); } }
-						const posAt = (o: number): vs.Position => {
-							let lv = 0, hv = offs.length - 1;
-							while (lv < hv) { const mid = Math.ceil((lv + hv) / 2);  
- if (offs[mid]! <= o) { lv = mid; } else { hv = mid - 1; } }
-							 
-							return new vs.Position(lv, o - offs[lv]!);
-						};
-						wordBoundary.lastIndex = 0;
-						let match: RegExpExecArray | null;
-						while ((match = wordBoundary.exec(text)) !== null) {
-							edit.replace(fileUri, new vs.Range(posAt(match.index), posAt(match.index + oldName.length)), newName, editMeta);
-						}
-					}
-				}
-
-				if (edit.size === 0) {
-					throw new Error('No occurrences found for rename');
-				}
-				return edit;
-			},
-			async prepareRename(document, position, _token) {
-				const wordRange = document.getWordRangeAtPosition(position, /[A-Za-z0-9_@$]+/);
-				if (!wordRange) {
-					throw new Error('Cannot rename this element');
-				}
-				return { range: wordRange, placeholder: document.getText(wordRange) };
-			}
-		})
-	);
-	}
 
 	// CodeLens click command — properly converts JSON args to VSCode types
 	safeRegisterCommand(context, 'cwtools.showReferences', async (uriStr: string, pos: any, locs?: any[]) => {
@@ -1268,8 +1185,8 @@ export async function activate(context: ExtensionContext) {
 
 			const result = await replayRun(pick.runId, agentRunner, overrides);
 
-			const origSnap = runLedger.getSnapshot(pick.runId);
-			const newSnap = runLedger.getSnapshot(result.newRun.runId);
+			const origSnap = await runLedger.getOrLoadSnapshot(pick.runId);
+			const newSnap = await runLedger.getOrLoadSnapshot(result.newRun.runId);
 			const origDoc = await vs.workspace.openTextDocument({
 				language: 'jsonc',
 				content: JSON.stringify(origSnap?.events ?? [], null, 2),
@@ -2875,6 +2792,14 @@ export async function reloadExtension(prompt: string, buttonText?: string, force
 }
 
 export async function deactivate(): Promise<void> {
+	// Flush the Agent run ledger and process registry so the final state of any
+	// active run survives a window/extension close (VS Code awaits deactivate).
+	try {
+		const { runLedger } = require('./ai/runner/runLedger') as typeof import('./ai/runner/runLedger');
+		await Promise.allSettled([processRegistry.flush(), runLedger.flushAll()]);
+	} catch (error) {
+		ErrorReporter.warn('Extension', 'Failed to flush Agent state during deactivation', error);
+	}
 	if (!defaultClient) return;
 	try {
 		await defaultClient.stop();

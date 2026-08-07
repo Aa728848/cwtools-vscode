@@ -1903,15 +1903,22 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         applyEmbeddedWorkbenchContent(pendingWorkbenchContent);
     }
 
+    // Body class churn includes theme/zoom toggles from the host and
+    // manager-resizing during pane drags; only react when the artifact drawer
+    // state actually flips (drawer open/close and pane width have explicit
+    // persistence paths of their own).
     const drawerObserver = new MutationObserver(mutations => {
         for (const mutation of mutations) {
-            if (mutation.attributeName === 'class') {
-                persistManagerUiState();
-                renderOverview();
-            }
+            if (mutation.attributeName !== 'class') continue;
+            const target = mutation.target as HTMLElement;
+            const wasOpen = (mutation.oldValue ?? '').includes('artifact-drawer-open');
+            if (wasOpen === target.classList.contains('artifact-drawer-open')) continue;
+            persistManagerUiState();
+            renderOverview();
+            break;
         }
     });
-    drawerObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    drawerObserver.observe(document.body, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
 
     renderOverview();
     renderInspector();

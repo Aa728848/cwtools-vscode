@@ -32,6 +32,13 @@ import {
 const COMMAND_SNAPSHOT_MAX_FILE_BYTES = 500_000;
 const COMMAND_SNAPSHOT_MAX_TOTAL_BYTES = 24_000_000;
 const COMMAND_SNAPSHOT_MAX_FILES = 8000;
+/**
+ * Bounded cache of agent-topic directory listings per `.cwtools`-style root,
+ * keyed by the root's own mtime (topic dirs appear/disappear when it changes).
+ * Avoids re-enumerating every topic on each run_command.
+ */
+const PROTECTED_TOPIC_DIRS_CACHE = new Map<string, { mtimeMs: number; topicDirs: string[] }>();
+const PROTECTED_TOPIC_DIRS_CACHE_MAX = 32;
 let sandboxRunnerFactory: (spawnFn: typeof import('child_process').spawn) => SandboxRunner = spawnFn => new BrokeredSandboxRunner(spawnFn);
 
 /** @internal Unit tests must opt into direct execution explicitly. */
@@ -140,6 +147,25 @@ export class ExternalToolHandler {
             getConfig: () => this.getWebAccessConfig(),
             getApiKey: provider => this.ctx.getWebSearchApiKey?.(provider) ?? Promise.resolve(undefined),
         });
+    }
+
+    /** Topic dirs of an agent storage root, cached until the root's own mtime changes. */
+    private cachedAgentTopicDirs(agentRoot: string): string[] {
+        try {
+            const stat = fs.statSync(agentRoot);
+            const cached = PROTECTED_TOPIC_DIRS_CACHE.get(agentRoot);
+            if (cached && cached.mtimeMs === stat.mtimeMs) return cached.topicDirs;
+            const topicDirs = fs.readdirSync(agentRoot, { withFileTypes: true })
+                .filter(entry => entry.isDirectory())
+                .map(entry => entry.name);
+            if (PROTECTED_TOPIC_DIRS_CACHE.size >= PROTECTED_TOPIC_DIRS_CACHE_MAX) {
+                PROTECTED_TOPIC_DIRS_CACHE.clear();
+            }
+            PROTECTED_TOPIC_DIRS_CACHE.set(agentRoot, { mtimeMs: stat.mtimeMs, topicDirs });
+            return topicDirs;
+        } catch {
+            return [];
+        }
     }
 
     private getWebAccessConfig(): WebAccessConfig {
@@ -1318,11 +1344,9 @@ export class ExternalToolHandler {
             const agentRoots = [path.join(root, '.cwtools'), path.join(root, '.cwtools-ai')];
             const privateNames = ['runs', 'threads', 'goals', 'blackboard', 'resume_state.json', 'resume_state.json.bak'];
             for (const agentRoot of agentRoots) {
-                try {
-                    for (const topic of fs.readdirSync(agentRoot, { withFileTypes: true }).filter(entry => entry.isDirectory())) {
-                        for (const name of privateNames) protectedPaths.push(path.join(agentRoot, topic.name, name));
-                    }
-                } catch { /* no legacy/project Agent storage */ }
+                for (const topic of this.cachedAgentTopicDirs(agentRoot)) {
+                    for (const name of privateNames) protectedPaths.push(path.join(agentRoot, topic, name));
+                }
             }
         }
         const sandboxProfile = {

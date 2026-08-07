@@ -537,7 +537,7 @@ function parseNamedBlockSymbols(
                 ? isGuiContainerBlock(blockName)
                 : isAssetContainerBlock(blockName);
             // Heuristic: a block whose own key looks like a definition name
-            // (e.g. `kuat_icon = { type = iconType ... }`) is a nested control
+            // (e.g. `samplemod_icon = { type = iconType ... }`) is a nested control
             // even without a TypeDef; skip pure field wrappers.
             const looksNamed = blockName.endsWith('Type')
                 || /^[a-z0-9_]+$/.test(blockName) && !isFieldWrapperKey(blockName);

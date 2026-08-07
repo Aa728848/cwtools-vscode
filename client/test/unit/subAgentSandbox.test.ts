@@ -116,7 +116,7 @@ describe('SubAgentSandbox', () => {
             expect(enforceSubAgentSafety(
                 sandbox,
                 'replace_lines',
-                { filePath: 'common/script_values/exe_kuat_value.txt' },
+                { filePath: 'common/script_values/exe_samplemod_value.txt' },
                 process.cwd()
             ).allowed).to.equal(true);
         });
@@ -252,7 +252,7 @@ describe('SubAgentSandbox', () => {
                 agentId: 'builder_topic_artifact',
                 role: 'build',
                 mode: 'build' as any,
-                writeScope: ['common/buildings/kuat_buildings.txt', '.cwtools'],
+                writeScope: ['common/buildings/samplemod_buildings.txt', '.cwtools'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
 
@@ -298,7 +298,7 @@ describe('SubAgentSandbox', () => {
                 agentId: 'builder_sibling',
                 role: 'build',
                 mode: 'build' as any,
-                writeScope: ['common/buildings/kuat_buildings.txt', '.cwtools'],
+                writeScope: ['common/buildings/samplemod_buildings.txt', '.cwtools'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
             // 同目录的另一个文件（由文件推导出目录作用域）→ 放行
@@ -314,7 +314,7 @@ describe('SubAgentSandbox', () => {
                 agentId: 'builder_escape',
                 role: 'build',
                 mode: 'build' as any,
-                writeScope: ['common/buildings/kuat_buildings.txt'],
+                writeScope: ['common/buildings/samplemod_buildings.txt'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
             const escape = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: 'common/buildings_evil/backdoor.txt' }, process.cwd());
@@ -341,7 +341,7 @@ describe('SubAgentSandbox', () => {
                 agentId: 'builder_case',
                 role: 'build',
                 mode: 'build' as any,
-                writeScope: ['common/buildings/kuat_buildings.txt'],
+                writeScope: ['common/buildings/samplemod_buildings.txt'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
             // 大小写不同的目录：Windows（大小写不敏感）放行，Linux（大小写敏感）拦截

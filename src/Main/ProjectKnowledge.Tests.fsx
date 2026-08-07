@@ -37,9 +37,9 @@ assertTrue "complete export does not truncate event state facts"
 assertTrue "full manifest eventLogic includes relation and state-access rows"
     (projectKnowledgeSource.Contains("eventGraph.logic.Length + eventGraph.stateAccesses.Length", StringComparison.Ordinal))
 
-let outgoingSource, outgoingTarget = orientTypedReference "kuat_legacy.38" "kuat_legacy.39" true
+let outgoingSource, outgoingTarget = orientTypedReference "samplemod_legacy.38" "samplemod_legacy.39" true
 let incomingSource, incomingTarget = orientTypedReference "container_event" "referenced_event" false
-assertTrue "outgoing typed reference preserves source-to-target direction" (outgoingSource = "kuat_legacy.38" && outgoingTarget = "kuat_legacy.39")
+assertTrue "outgoing typed reference preserves source-to-target direction" (outgoingSource = "samplemod_legacy.38" && outgoingTarget = "samplemod_legacy.39")
 assertTrue "incoming typed reference reverses target-to-source direction" (incomingSource = "referenced_event" && incomingTarget = "container_event")
 
 let provenanceRootPath = Path.Combine(Path.GetTempPath(), "cwtools-origin-workspace")
@@ -392,28 +392,28 @@ try
         insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "graph_version"; "$v", box "6" ]
         insert "INSERT INTO metadata(key, value) VALUES ($k, $v)" [ "$k", box "topology_truncated"; "$v", box "false" ]
         insert "INSERT INTO event_logic(event_id, relation_type, subject, scope, phase, source_file, line, details) VALUES ($event, $type, $subject, $scope, $phase, $file, $line, $details)"
-            [ "$event", box "kuat.100"; "$type", box "variable_set"; "$subject", box "kuat_counter"
-              "$scope", box ""; "$phase", box "immediate"; "$file", box "events/kuat.txt"; "$line", box 12
+            [ "$event", box "samplemod.100"; "$type", box "variable_set"; "$subject", box "samplemod_counter"
+              "$scope", box ""; "$phase", box "immediate"; "$file", box "events/samplemod.txt"; "$line", box 12
               "$details", box "if>AND" ]
         insert "INSERT INTO event_logic(event_id, relation_type, subject, scope, phase, source_file, line, details) VALUES ($event, $type, $subject, $scope, $phase, $file, $line, $details)"
-            [ "$event", box "kuat.101"; "$type", box "event_target_save"; "$subject", box "kuat_target"
-              "$scope", box ""; "$phase", box "option"; "$file", box "events/kuat.txt"; "$line", box 30
+            [ "$event", box "samplemod.101"; "$type", box "event_target_save"; "$subject", box "samplemod_target"
+              "$scope", box ""; "$phase", box "option"; "$file", box "events/samplemod.txt"; "$line", box 30
               "$details", box "" ]
         insert "INSERT INTO event_edges(source_kind, source_id, target_event_id, edge_type, label, source_file, line, confidence, call_operator, phase, delay, condition_path, scope_map, source_scope, target_scope) VALUES ($kind, $source, $target, $type, $label, $file, $line, $confidence, $callOperator, $phase, $delay, $conditionPath, $scopeMap, $sourceScope, $targetScope)"
-            [ "$kind", box "event"; "$source", box "kuat.100"; "$target", box "kuat.101"; "$type", box "typed_reference"
-              "$label", box ""; "$file", box "events/kuat.txt"; "$line", box 20; "$confidence", box "lsp"
+            [ "$kind", box "event"; "$source", box "samplemod.100"; "$target", box "samplemod.101"; "$type", box "typed_reference"
+              "$label", box ""; "$file", box "events/samplemod.txt"; "$line", box 20; "$confidence", box "lsp"
               "$callOperator", box "country_event"; "$phase", box "option"; "$delay", box "days=30"
               "$conditionPath", box "option"; "$scopeMap", box "ROOT->FROM"; "$sourceScope", box "country"; "$targetScope", box "country" ]
         insert "INSERT INTO inline_templates VALUES ($id,$logical,$file,1,$hash)"
-            [ "$id", box "kuat/generate_event"; "$logical", box "common/inline_scripts/kuat/generate_event.txt"; "$file", box "common/inline_scripts/kuat/generate_event.txt"; "$hash", box "abc" ]
+            [ "$id", box "samplemod/generate_event"; "$logical", box "common/inline_scripts/samplemod/generate_event.txt"; "$file", box "common/inline_scripts/samplemod/generate_event.txt"; "$hash", box "abc" ]
         insert "INSERT INTO inline_parameters VALUES ($template,$name,$kind,$kinds,$type,1,2)"
-            [ "$template", box "kuat/generate_event"; "$name", box "ID"; "$kind", box "identifier"; "$kinds", box "[\"identifier\"]"; "$type", box "identifier" ]
+            [ "$template", box "samplemod/generate_event"; "$name", box "ID"; "$kind", box "identifier"; "$kinds", box "[\"identifier\"]"; "$type", box "identifier" ]
         insert "INSERT INTO inline_invocations VALUES ($id,$file,42,$template,$enclosing)"
-            [ "$id", box "inv-kuat-42"; "$file", box "events/kuat_caller.txt"; "$template", box "kuat/generate_event"; "$enclosing", box "kuat.1" ]
+            [ "$id", box "inv-samplemod-42"; "$file", box "events/samplemod_caller.txt"; "$template", box "samplemod/generate_event"; "$enclosing", box "samplemod.1" ]
         insert "INSERT INTO inline_arguments VALUES ($inv,$name,$raw,$resolved,$kind)"
-            [ "$inv", box "inv-kuat-42"; "$name", box "ID"; "$raw", box "kuat.42"; "$resolved", box "kuat.42"; "$kind", box "identifier" ]
+            [ "$inv", box "inv-samplemod-42"; "$name", box "ID"; "$raw", box "samplemod.42"; "$resolved", box "samplemod.42"; "$kind", box "identifier" ]
         insert "INSERT INTO inline_expansions VALUES ($inv,$symbol,$type,$templateFile,$caller,3,42,$confidence)"
-            [ "$inv", box "inv-kuat-42"; "$symbol", box "kuat.42"; "$type", box "event"; "$templateFile", box "common/inline_scripts/kuat/generate_event.txt"; "$caller", box "events/kuat_caller.txt"; "$confidence", box "expanded" ]
+            [ "$inv", box "inv-samplemod-42"; "$symbol", box "samplemod.42"; "$type", box "event"; "$templateFile", box "common/inline_scripts/samplemod/generate_event.txt"; "$caller", box "events/samplemod_caller.txt"; "$confidence", box "expanded" ]
 
     let stateOptions =
         { databasePath = stateDb
@@ -432,13 +432,13 @@ try
     assertTrue "variable accesses surface with relation type and phase"
         (stateLogic |> Seq.exists (fun item ->
             item.Item("relationType").AsString() = "variable_set"
-            && item.Item("subject").AsString() = "kuat_counter"
+            && item.Item("subject").AsString() = "samplemod_counter"
             && item.Item("phase").AsString() = "immediate"
             && item.Item("details").AsString() = "if>AND"))
     assertTrue "event target saves surface as state facts"
         (stateLogic |> Seq.exists (fun item ->
             item.Item("relationType").AsString() = "event_target_save"
-            && item.Item("subject").AsString() = "kuat_target"
+            && item.Item("subject").AsString() = "samplemod_target"
             && item.Item("phase").AsString() = "option"))
     let stateEdges = stateResult.Item("eventGraph").Item("edges").AsArray()
     assertTrue "event edges carry call operator, delay and scope map"
@@ -446,10 +446,10 @@ try
             item.Item("callOperator").AsString() = "country_event"
             && item.Item("delay").AsString() = "days=30"
             && item.Item("scopeMap").AsString() = "ROOT->FROM"))
-    let inlineResult = queryProjectKnowledgeDatabase { stateOptions with identifiers = [ "kuat.42" ] }
+    let inlineResult = queryProjectKnowledgeDatabase { stateOptions with identifiers = [ "samplemod.42" ] }
     let inlineGraph = inlineResult.Item("inlineGraph")
     assertTrue "knowledge query seeds inline graph by expanded symbol id"
-        (inlineGraph.Item("expansions").AsArray() |> Seq.exists (fun item -> item.Item("expandedSymbolId").AsString() = "kuat.42"))
+        (inlineGraph.Item("expansions").AsArray() |> Seq.exists (fun item -> item.Item("expandedSymbolId").AsString() = "samplemod.42"))
     assertTrue "knowledge query returns the caller and arguments for an expanded id"
         (inlineGraph.Item("invocations").AsArray().Length = 1 && inlineGraph.Item("arguments").AsArray().Length = 1)
     // Synthetic bounded-query performance budget. This is deliberately a

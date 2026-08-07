@@ -107,8 +107,8 @@ describe('ProjectProfile localisation detection', () => {
             const locDir = path.join(workspaceRoot, 'localisation');
             fs.mkdirSync(path.join(locDir, 'english'), { recursive: true });
             fs.mkdirSync(path.join(locDir, 'simp_chinese'), { recursive: true });
-            fs.writeFileSync(path.join(locDir, 'english', 'kuat.yml'), '\ufeffl_english:\n', 'utf8');
-            fs.writeFileSync(path.join(locDir, 'simp_chinese', 'kuat.yml'), '\ufeffl_simp_chinese:\n', 'utf8');
+            fs.writeFileSync(path.join(locDir, 'english', 'samplemod.yml'), '\ufeffl_english:\n', 'utf8');
+            fs.writeFileSync(path.join(locDir, 'simp_chinese', 'samplemod.yml'), '\ufeffl_simp_chinese:\n', 'utf8');
 
             const profile = buildProjectProfile(workspaceRoot);
 
@@ -205,7 +205,7 @@ describe('ProjectProfile localisation detection', () => {
         const workspaceRoot = makeWorkspace();
         try {
             fs.writeFileSync(path.join(workspaceRoot, 'descriptor.mod'), [
-                'name="Kuat Test Mod"',
+                'name="SampleMod Test Mod"',
                 'supported_version="3.12.*"',
                 'remote_file_id="123456789"',
                 'tags={"Fleet" "Events"}',
@@ -233,7 +233,7 @@ describe('ProjectProfile localisation detection', () => {
             fs.mkdirSync(eventsDir, { recursive: true });
             fs.mkdirSync(placeholderDir, { recursive: true });
             fs.mkdirSync(path.join(workspaceRoot, '.vscode'), { recursive: true });
-            fs.writeFileSync(path.join(eventsDir, 'kuat_events.txt'), 'namespace = kuat\ncountry_event = { id = kuat.1 }\n', 'utf8');
+            fs.writeFileSync(path.join(eventsDir, 'samplemod_events.txt'), 'namespace = samplemod\ncountry_event = { id = samplemod.1 }\n', 'utf8');
             fs.writeFileSync(path.join(placeholderDir, 'compat_placeholder.txt'), '#_|acot/sofe|\nacot_has_dark_energy = { always = no }\n', 'utf8');
             fs.writeFileSync(path.join(workspaceRoot, '.vscode', 'settings.json'), JSON.stringify({
                 'stellarisLanguageServices.ai.ignoredDiagnostics': ['acot_sr_dark_energy', 'giga_system_scale'],
@@ -242,9 +242,9 @@ describe('ProjectProfile localisation detection', () => {
             const profile = buildProjectProfile(workspaceRoot);
 
             expect(profile.identifiers.namespaceDetails).to.deep.include({
-                name: 'kuat',
+                name: 'samplemod',
                 origin: 'workspace_owned',
-                files: ['events/kuat_events.txt'],
+                files: ['events/samplemod_events.txt'],
                 evidence: 'Namespace is declared in ordinary workspace event files.',
             });
             const acot = profile.compatibility?.possibleSoftDependencies.find(item => item.idOrPrefix === 'acot');

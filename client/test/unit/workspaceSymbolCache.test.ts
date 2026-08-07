@@ -117,7 +117,7 @@ describe('WorkspaceSymbolSqliteCache', () => {
             origin: 'workspace',
             fileVersion: 1,
             entries: [{
-                name: 'kuat_window',
+                name: 'samplemod_window',
                 kind: 'containerWindowType',
                 file: path.join(tempDir, 'interface', 'window.gui'),
                 line: 1,
@@ -125,14 +125,14 @@ describe('WorkspaceSymbolSqliteCache', () => {
                 origin: 'workspace',
                 guiFacts: {
                     offCanvas: false,
-                    localisationKeys: ['KUAT_WINDOW'],
+                    localisationKeys: ['SAMPLEMOD_WINDOW'],
                     customGuiReferences: [],
                     effectReferences: [],
                     spriteReferences: [],
                 },
             }],
         }], []);
-        expect(current.load().entries[0]?.guiFacts?.localisationKeys).to.deep.equal(['KUAT_WINDOW']);
+        expect(current.load().entries[0]?.guiFacts?.localisationKeys).to.deep.equal(['SAMPLEMOD_WINDOW']);
         current.close();
     });
 

@@ -127,7 +127,7 @@ describe('agent profile', () => {
         const resolved = resolveAgentProfile(
             '帮我把 executor_build.23 改成 executor_build.X，又是一个新的事件号',
             undefined,
-            { activeFile: 'events/kuat_executor_events.txt' },
+            { activeFile: 'events/samplemod_executor_events.txt' },
         );
         expect(resolved).to.include({ domain: 'paradox', intent: 'execute', strategy: 'single', mode: 'build' });
     });

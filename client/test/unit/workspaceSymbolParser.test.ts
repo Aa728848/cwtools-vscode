@@ -31,15 +31,15 @@ function parseScript(content: string, filePath: string, options: Parameters<type
 describe('Workspace Symbol Parser (indexing)', () => {
     it('parses name_field identities and namespaces from typed files', () => {
         const entries = parseScript([
-            'namespace = kuat',
+            'namespace = samplemod',
             'country_event = {',
-            '    id = kuat.100',
-            '    title = kuat.100.title',
+            '    id = samplemod.100',
+            '    title = samplemod.100.title',
             '}',
-        ].join('\n'), '/mod/events/kuat_events.txt');
+        ].join('\n'), '/mod/events/samplemod_events.txt');
 
-        expect(entries.map(entry => entry.name)).to.include('kuat');
-        const event = entries.find(entry => entry.name === 'kuat.100');
+        expect(entries.map(entry => entry.name)).to.include('samplemod');
+        const event = entries.find(entry => entry.name === 'samplemod.100');
         expect(event).to.deep.include({
             kind: 'event',
             line: 3,
@@ -50,19 +50,19 @@ describe('Workspace Symbol Parser (indexing)', () => {
     });
 
     it('infers common scripted trigger and technology symbols', () => {
-        const trigger = parseScript('kuat_is_force_user = {\n}', '/mod/common/scripted_triggers/kuat.txt');
-        const tech = parseScript('tech_kuat_reactor = {\n}', '/mod/common/technology/kuat.txt');
+        const trigger = parseScript('samplemod_is_force_user = {\n}', '/mod/common/scripted_triggers/samplemod.txt');
+        const tech = parseScript('tech_samplemod_reactor = {\n}', '/mod/common/technology/samplemod.txt');
 
-        expect(trigger[0]).to.deep.include({ name: 'kuat_is_force_user', kind: 'scripted_trigger', category: 'game_entity' });
-        expect(tech[0]).to.deep.include({ name: 'tech_kuat_reactor', kind: 'technology', category: 'game_entity' });
+        expect(trigger[0]).to.deep.include({ name: 'samplemod_is_force_user', kind: 'scripted_trigger', category: 'game_entity' });
+        expect(tech[0]).to.deep.include({ name: 'tech_samplemod_reactor', kind: 'technology', category: 'game_entity' });
     });
 
     it('infers additional common entity kinds', () => {
         const entries = [
-            parseScript('kuat_project = {\n}', '/mod/common/special_projects/kuat.txt')[0],
-            parseScript('kuat_chain = {\n}', '/mod/common/event_chains/kuat.txt')[0],
-            parseScript('kuat_tradition = {\n}', '/mod/common/traditions/kuat.txt')[0],
-            parseScript('KUAT_SECTION = {\n}', '/mod/common/section_templates/kuat.txt')[0],
+            parseScript('samplemod_project = {\n}', '/mod/common/special_projects/samplemod.txt')[0],
+            parseScript('samplemod_chain = {\n}', '/mod/common/event_chains/samplemod.txt')[0],
+            parseScript('samplemod_tradition = {\n}', '/mod/common/traditions/samplemod.txt')[0],
+            parseScript('SAMPLEMOD_SECTION = {\n}', '/mod/common/section_templates/samplemod.txt')[0],
         ];
 
         expect(entries.map(entry => entry?.kind)).to.deep.equal([
@@ -80,27 +80,27 @@ describe('Workspace Symbol Parser (indexing)', () => {
         const entries = parseScript([
             'spriteTypes = {',
             '    spriteType = {',
-            '        name = "GFX_evt_kuat_echo"',
-            '        texturefile = "gfx/event_pictures/kuat.dds"',
+            '        name = "GFX_evt_samplemod_echo"',
+            '        texturefile = "gfx/event_pictures/samplemod.dds"',
             '    }',
             '}',
             'sound = {',
-            '    name = kuat_force_echo',
+            '    name = samplemod_force_echo',
             '}',
-        ].join('\n'), '/mod/interface/kuat.gfx');
+        ].join('\n'), '/mod/interface/samplemod.gfx');
 
-        expect(entries.find(entry => entry.name === 'GFX_evt_kuat_echo')).to.deep.include({
+        expect(entries.find(entry => entry.name === 'GFX_evt_samplemod_echo')).to.deep.include({
             kind: 'sprite',
             source: 'asset',
             container: 'spriteType',
             category: 'asset',
         });
-        expect(entries.find(entry => entry.name === 'GFX_evt_kuat_echo')?.references?.[0]?.context).to.include('texturefile');
-        expect(entries.find(entry => entry.name === 'GFX_evt_kuat_echo')?.references?.[0]).to.include({
+        expect(entries.find(entry => entry.name === 'GFX_evt_samplemod_echo')?.references?.[0]?.context).to.include('texturefile');
+        expect(entries.find(entry => entry.name === 'GFX_evt_samplemod_echo')?.references?.[0]).to.include({
             property: 'texturefile',
-            target: 'gfx/event_pictures/kuat.dds',
+            target: 'gfx/event_pictures/samplemod.dds',
         });
-        expect(entries.find(entry => entry.name === 'kuat_force_echo')).to.deep.include({
+        expect(entries.find(entry => entry.name === 'samplemod_force_echo')).to.deep.include({
             kind: 'sound',
             source: 'asset',
             container: 'sound',
@@ -112,9 +112,9 @@ describe('Workspace Symbol Parser (indexing)', () => {
         const particle = parseScript([
             'pdxparticle = { name = "white_hole_particle" type = "black_hole_file" scale = 2.0 }',
             'entity = { name = "white_hole_entity" }',
-        ].join('\n'), '/mod/gfx/models/ships/kuat/kuat_particles.gfx');
-        const light = parseScript('light = { name = "kuat_white_hole_light" intensity = 2.5 }', '/mod/gfx/lights/kuat_lights.asset');
-        const entity = parseScript('entity = { name = kuat_white_hole_planet_01_entity pdxmesh = white_hole_new_mesh }', '/mod/gfx/models/planets/kuat.asset');
+        ].join('\n'), '/mod/gfx/models/ships/samplemod/samplemod_particles.gfx');
+        const light = parseScript('light = { name = "samplemod_white_hole_light" intensity = 2.5 }', '/mod/gfx/lights/samplemod_lights.asset');
+        const entity = parseScript('entity = { name = samplemod_white_hole_planet_01_entity pdxmesh = white_hole_new_mesh }', '/mod/gfx/models/planets/samplemod.asset');
 
         expect(particle.find(entry => entry.name === 'white_hole_particle')).to.deep.include({
             kind: 'particle',
@@ -124,12 +124,12 @@ describe('Workspace Symbol Parser (indexing)', () => {
             category: 'asset',
         });
         expect(particle.some(entry => entry.name === 'white_hole_entity' && entry.kind === 'particle')).to.equal(false);
-        expect(light.find(entry => entry.name === 'kuat_white_hole_light')).to.deep.include({
+        expect(light.find(entry => entry.name === 'samplemod_white_hole_light')).to.deep.include({
             kind: 'light',
             line: 1,
             container: 'light',
         });
-        expect(entity.find(entry => entry.name === 'kuat_white_hole_planet_01_entity')).to.deep.include({
+        expect(entity.find(entry => entry.name === 'samplemod_white_hole_planet_01_entity')).to.deep.include({
             kind: 'model_entity',
             line: 1,
             container: 'entity',
@@ -138,18 +138,18 @@ describe('Workspace Symbol Parser (indexing)', () => {
 
     it('attaches metadata and lightweight same-file references', () => {
         const entries = parseScript([
-            'kuat_effect = {',
-            '    add_modifier = kuat_effect',
+            'samplemod_effect = {',
+            '    add_modifier = samplemod_effect',
             '}',
             'other_effect = {',
-            '    kuat_effect = yes',
+            '    samplemod_effect = yes',
             '}',
-        ].join('\n'), '/mod/common/scripted_effects/kuat.txt', {
+        ].join('\n'), '/mod/common/scripted_effects/samplemod.txt', {
             updatedAt: 1234,
             fileVersion: 2,
         });
 
-        const effect = entries.find(entry => entry.name === 'kuat_effect');
+        const effect = entries.find(entry => entry.name === 'samplemod_effect');
         expect(effect).to.deep.include({ updatedAt: 1234, fileVersion: 2 });
         expect(effect?.references?.map(ref => ref.line)).to.deep.equal([2, 5]);
     });
@@ -157,91 +157,91 @@ describe('Workspace Symbol Parser (indexing)', () => {
     it('queries indexed symbols by prefix, kind, source, and directory', () => {
         const index = new Map<string, WorkspaceSymbolEntry[]>();
         addSymbolsToIndex(index, [
-            { name: 'kuat.100', kind: 'event', category: 'event', source: 'script', file: '/mod/events/kuat.txt', line: 1, references: [{ file: '/mod/events/kuat.txt', line: 3, context: 'id = kuat.100' }] },
-            { name: 'tech_kuat_reactor', kind: 'technology', category: 'game_entity', source: 'script', file: '/mod/common/technology/kuat.txt', line: 2 },
-            { name: 'GFX_evt_kuat_echo', kind: 'sprite', category: 'asset', source: 'asset', origin: 'vanilla', file: '/mod/interface/kuat.gfx', line: 3 },
+            { name: 'samplemod.100', kind: 'event', category: 'event', source: 'script', file: '/mod/events/samplemod.txt', line: 1, references: [{ file: '/mod/events/samplemod.txt', line: 3, context: 'id = samplemod.100' }] },
+            { name: 'tech_samplemod_reactor', kind: 'technology', category: 'game_entity', source: 'script', file: '/mod/common/technology/samplemod.txt', line: 2 },
+            { name: 'GFX_evt_samplemod_echo', kind: 'sprite', category: 'asset', source: 'asset', origin: 'vanilla', file: '/mod/interface/samplemod.gfx', line: 3 },
         ]);
 
-        expect(queryWorkspaceSymbolIndex(index, { name: 'kuat', prefix: true })).to.have.lengthOf(1);
-        expect(queryWorkspaceSymbolIndex(index, { name: 'kuat.100', exact: true })[0]!.references).to.equal(undefined);
-        expect(queryWorkspaceSymbolIndex(index, { name: 'kuat.100', exact: true, includeReferences: true })[0]!.references).to.have.lengthOf(1);
-        expect(queryWorkspaceSymbolIndex(index, { kind: 'sprite', source: 'asset' })[0]!.name).to.equal('GFX_evt_kuat_echo');
+        expect(queryWorkspaceSymbolIndex(index, { name: 'samplemod', prefix: true })).to.have.lengthOf(1);
+        expect(queryWorkspaceSymbolIndex(index, { name: 'samplemod.100', exact: true })[0]!.references).to.equal(undefined);
+        expect(queryWorkspaceSymbolIndex(index, { name: 'samplemod.100', exact: true, includeReferences: true })[0]!.references).to.have.lengthOf(1);
+        expect(queryWorkspaceSymbolIndex(index, { kind: 'sprite', source: 'asset' })[0]!.name).to.equal('GFX_evt_samplemod_echo');
         expect(queryWorkspaceSymbolIndex(index, { kind: 'sprite', source: 'asset', origin: 'workspace' })).to.have.lengthOf(0);
-        expect(queryWorkspaceSymbolIndex(index, { kind: 'sprite', source: 'asset', origin: 'vanilla' })[0]!.name).to.equal('GFX_evt_kuat_echo');
-        expect(queryWorkspaceSymbolIndex(index, { category: 'game_entity' })[0]!.name).to.equal('tech_kuat_reactor');
-        expect(queryWorkspaceSymbolIndex(index, { directory: 'common/technology' })[0]!.name).to.equal('tech_kuat_reactor');
+        expect(queryWorkspaceSymbolIndex(index, { kind: 'sprite', source: 'asset', origin: 'vanilla' })[0]!.name).to.equal('GFX_evt_samplemod_echo');
+        expect(queryWorkspaceSymbolIndex(index, { category: 'game_entity' })[0]!.name).to.equal('tech_samplemod_reactor');
+        expect(queryWorkspaceSymbolIndex(index, { directory: 'common/technology' })[0]!.name).to.equal('tech_samplemod_reactor');
     });
 
     it('uses lowercase keys for case-insensitive exact queries and sorted prefix ranges', () => {
         const index = new Map<string, WorkspaceSymbolEntry[]>();
         addSymbolsToIndex(index, [
-            { name: 'Tech_Kuat_Core', kind: 'technology', source: 'script', file: '/mod/common/technology/a.txt', line: 1 },
-            { name: 'tech_kuat_drive', kind: 'technology', source: 'script', file: '/mod/common/technology/b.txt', line: 1 },
+            { name: 'Tech_SampleMod_Core', kind: 'technology', source: 'script', file: '/mod/common/technology/a.txt', line: 1 },
+            { name: 'tech_samplemod_drive', kind: 'technology', source: 'script', file: '/mod/common/technology/b.txt', line: 1 },
             { name: 'unrelated', kind: 'technology', source: 'script', file: '/mod/common/technology/c.txt', line: 1 },
         ]);
         const sortedNames = Array.from(index.keys()).sort((a, b) => a.localeCompare(b));
 
-        expect(queryWorkspaceSymbolIndex(index, { name: 'TECH_KUAT_CORE', exact: true }, sortedNames)[0]?.name)
-            .to.equal('Tech_Kuat_Core');
-        expect(queryWorkspaceSymbolIndex(index, { name: 'TECH_KUAT_', prefix: true }, sortedNames).map(entry => entry.name))
-            .to.deep.equal(['Tech_Kuat_Core', 'tech_kuat_drive']);
+        expect(queryWorkspaceSymbolIndex(index, { name: 'TECH_SAMPLEMOD_CORE', exact: true }, sortedNames)[0]?.name)
+            .to.equal('Tech_SampleMod_Core');
+        expect(queryWorkspaceSymbolIndex(index, { name: 'TECH_SAMPLEMOD_', prefix: true }, sortedNames).map(entry => entry.name))
+            .to.deep.equal(['Tech_SampleMod_Core', 'tech_samplemod_drive']);
     });
 
     it('defers reference collection until matching files are supplied', () => {
         const entries = parseScript([
-            'kuat_effect = {',
-            '    add_modifier = kuat_effect',
+            'samplemod_effect = {',
+            '    add_modifier = samplemod_effect',
             '}',
-        ].join('\n'), '/mod/common/scripted_effects/kuat.txt', { maxReferencesPerSymbol: 0 });
+        ].join('\n'), '/mod/common/scripted_effects/samplemod.txt', { maxReferencesPerSymbol: 0 });
         expect(entries[0]?.references).to.equal(undefined);
 
         populateWorkspaceSymbolReferences(entries, new Map([
-            ['/mod/events/kuat.txt', 'country_event = {\n    immediate = { kuat_effect = yes }\n}'],
+            ['/mod/events/samplemod.txt', 'country_event = {\n    immediate = { samplemod_effect = yes }\n}'],
         ]), 5);
         expect(entries[0]?.references?.map(reference => `${reference.file}:${reference.line}`))
-            .to.deep.equal(['/mod/events/kuat.txt:2']);
+            .to.deep.equal(['/mod/events/samplemod.txt:2']);
     });
 
     it('rebuilds bounded cross-file references for indexed content', () => {
         const index = new Map<string, WorkspaceSymbolEntry[]>();
         addSymbolsToIndex(index, [
-            { name: 'kuat_effect', kind: 'scripted_effect', source: 'script', file: '/mod/common/scripted_effects/kuat.txt', line: 1 },
+            { name: 'samplemod_effect', kind: 'scripted_effect', source: 'script', file: '/mod/common/scripted_effects/samplemod.txt', line: 1 },
         ]);
         rebuildWorkspaceSymbolReferences(index, new Map([
-            ['/mod/common/scripted_effects/kuat.txt', 'kuat_effect = {\n}\n'],
-            ['/mod/events/kuat.txt', 'country_event = {\n    immediate = { kuat_effect = yes }\n}\n'],
+            ['/mod/common/scripted_effects/samplemod.txt', 'samplemod_effect = {\n}\n'],
+            ['/mod/events/samplemod.txt', 'country_event = {\n    immediate = { samplemod_effect = yes }\n}\n'],
         ]), 5);
 
-        const entry = queryWorkspaceSymbolIndex(index, { name: 'kuat_effect', exact: true, includeReferences: true })[0]!;
-        expect(entry.references?.map(ref => `${ref.file}:${ref.line}`)).to.deep.equal(['/mod/events/kuat.txt:2']);
+        const entry = queryWorkspaceSymbolIndex(index, { name: 'samplemod_effect', exact: true, includeReferences: true })[0]!;
+        expect(entry.references?.map(ref => `${ref.file}:${ref.line}`)).to.deep.equal(['/mod/events/samplemod.txt:2']);
     });
 
     it('caps large reference sets during rebuild', () => {
         const index = new Map<string, WorkspaceSymbolEntry[]>();
         addSymbolsToIndex(index, [
-            { name: 'kuat_effect', kind: 'scripted_effect', source: 'script', file: '/mod/common/scripted_effects/kuat.txt', line: 1 },
+            { name: 'samplemod_effect', kind: 'scripted_effect', source: 'script', file: '/mod/common/scripted_effects/samplemod.txt', line: 1 },
         ]);
-        const references = Array.from({ length: 500 }, () => 'kuat_effect = yes').join('\n');
+        const references = Array.from({ length: 500 }, () => 'samplemod_effect = yes').join('\n');
         rebuildWorkspaceSymbolReferences(index, new Map([
-            ['/mod/common/scripted_effects/kuat.txt', 'kuat_effect = {\n}\n'],
+            ['/mod/common/scripted_effects/samplemod.txt', 'samplemod_effect = {\n}\n'],
             ['/mod/events/large.txt', references],
         ]), 25);
 
-        const entry = queryWorkspaceSymbolIndex(index, { name: 'kuat_effect', exact: true, includeReferences: true })[0]!;
+        const entry = queryWorkspaceSymbolIndex(index, { name: 'samplemod_effect', exact: true, includeReferences: true })[0]!;
         expect(entry.references).to.have.lengthOf(25);
     });
 
     it('removes stale symbols for a deleted file', () => {
         const index = new Map<string, WorkspaceSymbolEntry[]>();
         addSymbolsToIndex(index, [
-            { name: 'kuat.100', kind: 'event', source: 'script', file: '/mod/events/kuat.txt', line: 1 },
-            { name: 'kuat.101', kind: 'event', source: 'script', file: '/mod/events/other.txt', line: 1 },
+            { name: 'samplemod.100', kind: 'event', source: 'script', file: '/mod/events/samplemod.txt', line: 1 },
+            { name: 'samplemod.101', kind: 'event', source: 'script', file: '/mod/events/other.txt', line: 1 },
         ]);
 
-        removeFileFromSymbolIndex(index, '/mod/events/kuat.txt');
+        removeFileFromSymbolIndex(index, '/mod/events/samplemod.txt');
 
-        expect(index.has('kuat.100')).to.equal(false);
-        expect(index.has('kuat.101')).to.equal(true);
+        expect(index.has('samplemod.100')).to.equal(false);
+        expect(index.has('samplemod.101')).to.equal(true);
     });
 
     it('uses arbitrary active TypeDefs and does not infer a game kind without them', () => {
@@ -269,51 +269,51 @@ describe('Workspace Symbol Parser (GUI recursion)', () => {
     it('indexes deeply nested named GUI controls', () => {
         const gui = [
             'containerType = {',
-            '    name = "kuat_root"',
-            '    background = { name = "kuat_bg" }',
+            '    name = "samplemod_root"',
+            '    background = { name = "samplemod_bg" }',
             '    nested = {',
-            '        name = "kuat_inner"',
-            '        deeper = { name = "kuat_deepest" }',
+            '        name = "samplemod_inner"',
+            '        deeper = { name = "samplemod_deepest" }',
             '    }',
             '}',
         ].join('\n');
-        const entries = parseWorkspaceSymbols(gui, '/mod/interface/kuat.gui', { definitionTypes: [] });
+        const entries = parseWorkspaceSymbols(gui, '/mod/interface/samplemod.gui', { definitionTypes: [] });
         const names = entries.map(entry => entry.name);
-        expect(names).to.include('kuat_root');
-        expect(names).to.include('kuat_inner');
-        expect(names).to.include('kuat_deepest');
+        expect(names).to.include('samplemod_root');
+        expect(names).to.include('samplemod_inner');
+        expect(names).to.include('samplemod_deepest');
     });
 
     it('preserves single-line nested effectButtonType name, effect and quadTextureSprite', () => {
         const gui = [
             'containerType = {',
-            '    name = "kuat_actions"',
-            '    effectButtonType = { name = "kuat_btn_1" effect = "kuat_button_effect_1" quadTextureSprite = "GFX_kuat_btn" }',
+            '    name = "samplemod_actions"',
+            '    effectButtonType = { name = "samplemod_btn_1" effect = "samplemod_button_effect_1" quadTextureSprite = "GFX_samplemod_btn" }',
             '}',
         ].join('\n');
-        const entries = parseWorkspaceSymbols(gui, '/mod/interface/kuat.gui', { definitionTypes: [] });
-        const button = entries.find(entry => entry.name === 'kuat_btn_1');
+        const entries = parseWorkspaceSymbols(gui, '/mod/interface/samplemod.gui', { definitionTypes: [] });
+        const button = entries.find(entry => entry.name === 'samplemod_btn_1');
         expect(button).to.not.equal(undefined);
         expect(button!.kind).to.equal('effectButtonType');
         expect(button!.references ?? []).to.satisfy((refs: Array<{ context: string }>) =>
-            refs.some(ref => ref.context.includes('kuat_button_effect_1'))
-            && refs.some(ref => ref.context.includes('GFX_kuat_btn')));
+            refs.some(ref => ref.context.includes('samplemod_button_effect_1'))
+            && refs.some(ref => ref.context.includes('GFX_samplemod_btn')));
         expect(button!.references).to.deep.include({
-            file: '/mod/interface/kuat.gui', line: 3,
-            context: 'effect = kuat_button_effect_1', property: 'effect', target: 'kuat_button_effect_1',
+            file: '/mod/interface/samplemod.gui', line: 3,
+            context: 'effect = samplemod_button_effect_1', property: 'effect', target: 'samplemod_button_effect_1',
         });
-        expect(button!.guiFacts?.spriteReferences).to.include('GFX_kuat_btn');
+        expect(button!.guiFacts?.spriteReferences).to.include('GFX_samplemod_btn');
     });
 
     it('does not treat field wrappers as named definitions', () => {
         const gui = [
             'containerType = {',
-            '    name = "kuat_root"',
+            '    name = "samplemod_root"',
             '    position = { x = 10 y = 20 }',
             '    format = { font = "medium" }',
             '}',
         ].join('\n');
-        const entries = parseWorkspaceSymbols(gui, '/mod/interface/kuat.gui', { definitionTypes: [] });
+        const entries = parseWorkspaceSymbols(gui, '/mod/interface/samplemod.gui', { definitionTypes: [] });
         expect(entries.map(entry => entry.name)).to.not.include('position');
         expect(entries.map(entry => entry.name)).to.not.include('format');
     });
@@ -343,19 +343,19 @@ describe('Workspace Symbol Parser (GUI recursion)', () => {
 describe('Workspace Symbol Parser (script flow facts)', () => {
     it('indexes state, event, scripted-call and localisation facts inside definitions', () => {
         const script = [
-            'kuat_button_effect = {',
-            '    set_country_flag = kuat_ready',
-            '    custom_tooltip = KUAT_READY_TT',
-            '    carrier_event = { id = kuat.200 }',
-            '    kuat_followup_effect = { }',
+            'samplemod_button_effect = {',
+            '    set_country_flag = samplemod_ready',
+            '    custom_tooltip = SAMPLEMOD_READY_TT',
+            '    carrier_event = { id = samplemod.200 }',
+            '    samplemod_followup_effect = { }',
             '}',
         ].join('\n');
-        const entry = parseWorkspaceSymbols(script, '/mod/common/button_effects/kuat.txt')
-            .find(item => item.name === 'kuat_button_effect');
+        const entry = parseWorkspaceSymbols(script, '/mod/common/button_effects/samplemod.txt')
+            .find(item => item.name === 'samplemod_button_effect');
 
-        expect(entry?.scriptFacts?.stateAccesses).to.deep.include({ operation: 'set', subject: 'kuat_ready', scope: 'country', line: 2 });
-        expect(entry?.scriptFacts?.localisationKeys).to.include('KUAT_READY_TT');
-        expect(entry?.scriptFacts?.eventReferences).to.include('kuat.200');
-        expect(entry?.scriptFacts?.callCandidates).to.include('kuat_followup_effect');
+        expect(entry?.scriptFacts?.stateAccesses).to.deep.include({ operation: 'set', subject: 'samplemod_ready', scope: 'country', line: 2 });
+        expect(entry?.scriptFacts?.localisationKeys).to.include('SAMPLEMOD_READY_TT');
+        expect(entry?.scriptFacts?.eventReferences).to.include('samplemod.200');
+        expect(entry?.scriptFacts?.callCandidates).to.include('samplemod_followup_effect');
     });
 });

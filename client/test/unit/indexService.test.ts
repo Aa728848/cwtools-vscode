@@ -65,15 +65,15 @@ describe('Localisation Parser (indexing)', () => {
 
     it('parses unindented entries from loose mod localisation files', () => {
         const entries = parseLocFile(`l_english:
-building_kuat_command_center_auto:0 "Command Center"
+building_samplemod_command_center_auto:0 "Command Center"
 `, '/test.yml');
         expect(entries).to.have.lengthOf(1);
-        expect(entries[0]!.key).to.equal('building_kuat_command_center_auto');
+        expect(entries[0]!.key).to.equal('building_samplemod_command_center_auto');
     });
 
     it('parses entries with comments after the value', () => {
         const entries = parseLocFile(`l_english:
- building_kuat_resource_center_auto:0 "Resource Center" # generated
+ building_samplemod_resource_center_auto:0 "Resource Center" # generated
 `, '/test.yml');
         expect(entries).to.have.lengthOf(1);
         expect(entries[0]!.value).to.equal('Resource Center');

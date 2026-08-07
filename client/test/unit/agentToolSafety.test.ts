@@ -630,20 +630,20 @@ describe('agent tool file path safety', () => {
     it('writes localisation entries into an explicit multi-file language transaction', async () => {
         const handler = createFileHandler();
         fs.mkdirSync(path.join(workspaceRoot, 'localisation', 'english'), { recursive: true });
-        const base = path.join('localisation', 'english', 'kuat_events_l_english.yml');
+        const base = path.join('localisation', 'english', 'samplemod_events_l_english.yml');
         const result = await handler.writeLocalisation({
             filePath: base,
             language: 'l_english',
             languages: ['l_english', 'l_simp_chinese'],
-            entries: [{ key: 'kuat.1.title', value: 'Kuat Echo' }],
+            entries: [{ key: 'samplemod.1.title', value: 'SampleMod Echo' }],
         }, makeContext('topic-123'));
         expect(result.success).to.equal(true);
-        const englishPath = path.join(workspaceRoot, 'localisation', 'english', 'kuat_events_l_english.yml');
-        const chinesePath = path.join(workspaceRoot, 'localisation', 'simp_chinese', 'kuat_events_l_simp_chinese.yml');
+        const englishPath = path.join(workspaceRoot, 'localisation', 'english', 'samplemod_events_l_english.yml');
+        const chinesePath = path.join(workspaceRoot, 'localisation', 'simp_chinese', 'samplemod_events_l_simp_chinese.yml');
         expect(fs.existsSync(englishPath)).to.equal(true);
         expect(fs.existsSync(chinesePath)).to.equal(true);
-        expect(fs.readFileSync(englishPath, 'utf8')).to.include('kuat.1.title');
-        expect(fs.readFileSync(chinesePath, 'utf8')).to.include('kuat.1.title');
+        expect(fs.readFileSync(englishPath, 'utf8')).to.include('samplemod.1.title');
+        expect(fs.readFileSync(chinesePath, 'utf8')).to.include('samplemod.1.title');
     });
 
     it('rolls back every language when a multi-file localisation write fails', async () => {
@@ -684,10 +684,10 @@ describe('agent tool file path safety', () => {
     it('rejects a multi-file transaction when the primary file is outside localisation folders', async () => {
         const handler = createFileHandler();
         const result = await handler.writeLocalisation({
-            filePath: '.cwtools-ai/scratch/kuat_events_l_english.yml',
+            filePath: '.cwtools-ai/scratch/samplemod_events_l_english.yml',
             language: 'l_english',
             languages: ['l_english', 'l_simp_chinese'],
-            entries: [{ key: 'kuat.1.title', value: 'Kuat Echo' }],
+            entries: [{ key: 'samplemod.1.title', value: 'SampleMod Echo' }],
         }, makeContext('topic-123'));
         expect(result.success).to.equal(false);
         expect(result.message).to.include('multi-file transaction rejected');
@@ -713,16 +713,16 @@ describe('agent tool file path safety', () => {
 
     it('extracts write target paths for runner scheduling without marking localisation as superseded', () => {
         expect(getAgentToolTargetFiles('write_localisation', {
-            filePath: 'localisation/english/kuat_l_english.yml',
+            filePath: 'localisation/english/samplemod_l_english.yml',
             languages: ['l_english', 'l_simp_chinese'],
         }, workspaceRoot)).to.deep.equal([
-            path.join(workspaceRoot, 'localisation', 'english', 'kuat_l_english.yml'),
-            path.join(workspaceRoot, 'localisation', 'simp_chinese', 'kuat_l_simp_chinese.yml'),
+            path.join(workspaceRoot, 'localisation', 'english', 'samplemod_l_english.yml'),
+            path.join(workspaceRoot, 'localisation', 'simp_chinese', 'samplemod_l_simp_chinese.yml'),
         ]);
-        expect(getAgentToolTargetFiles('replace_lines', { filePath: 'common/scripted_effects/kuat.txt' }, workspaceRoot))
-            .to.deep.equal([path.join(workspaceRoot, 'common', 'scripted_effects', 'kuat.txt')]);
-        expect(getAgentToolTargetFiles('write_file', { file: 'common/relics/kuat.txt' }, workspaceRoot))
-            .to.deep.equal([path.join(workspaceRoot, 'common', 'relics', 'kuat.txt')]);
+        expect(getAgentToolTargetFiles('replace_lines', { filePath: 'common/scripted_effects/samplemod.txt' }, workspaceRoot))
+            .to.deep.equal([path.join(workspaceRoot, 'common', 'scripted_effects', 'samplemod.txt')]);
+        expect(getAgentToolTargetFiles('write_file', { file: 'common/relics/samplemod.txt' }, workspaceRoot))
+            .to.deep.equal([path.join(workspaceRoot, 'common', 'relics', 'samplemod.txt')]);
         expect(getAgentToolTargetFiles('write_design_blueprint', {}, workspaceRoot, 'topic-123'))
             .to.deep.equal([
                 path.join(workspaceRoot, '.cwtools', 'topic-123', 'design_blueprint.md'),
@@ -898,9 +898,9 @@ describe('agent tool file path safety', () => {
         });
 
         const result = await handler.writeLocalisation({
-            filePath: 'localisation/english/kuat_rakata_arc_epilogue_l_english.yml',
+            filePath: 'localisation/english/samplemod_rakata_arc_epilogue_l_english.yml',
             language: 'l_english',
-            entries: [{ key: 'kuat_rakata_arc_epilogue_title', value: 'Epilogue' }],
+            entries: [{ key: 'samplemod_rakata_arc_epilogue_title', value: 'Epilogue' }],
         }, {
             runnerOptions: {
                 topicId: 'topic-123',
@@ -912,8 +912,8 @@ describe('agent tool file path safety', () => {
 
         expect(result.success).to.equal(true);
         expect(pendingWrite.called).to.equal(false);
-        const ymlAbs = path.join(workspaceRoot, 'localisation', 'english', 'kuat_rakata_arc_epilogue_l_english.yml');
-        expect(fs.readFileSync(ymlAbs, 'utf8')).to.include('kuat_rakata_arc_epilogue_title');
+        const ymlAbs = path.join(workspaceRoot, 'localisation', 'english', 'samplemod_rakata_arc_epilogue_l_english.yml');
+        expect(fs.readFileSync(ymlAbs, 'utf8')).to.include('samplemod_rakata_arc_epilogue_title');
     });
 
     it('lets orchestrator sub-agents run guarded replace_lines without pending-write confirmation', async () => {
@@ -923,16 +923,16 @@ describe('agent tool file path safety', () => {
             fileWriteMode: 'confirm',
             onPendingWrite: pendingWrite,
         });
-        const fileAbs = path.join(workspaceRoot, 'events', 'kuat_events.txt');
+        const fileAbs = path.join(workspaceRoot, 'events', 'samplemod_events.txt');
         fs.mkdirSync(path.dirname(fileAbs), { recursive: true });
-        fs.writeFileSync(fileAbs, 'country_event = {\n\tid = kuat.1\n}\n', 'utf8');
+        fs.writeFileSync(fileAbs, 'country_event = {\n\tid = samplemod.1\n}\n', 'utf8');
 
         const result = await handler.replaceLines({
             filePath: fileAbs,
             startLine: 2,
             endLine: 2,
-            expectedContent: '\tid = kuat.1',
-            newContent: '\tid = kuat.2',
+            expectedContent: '\tid = samplemod.1',
+            newContent: '\tid = samplemod.2',
         }, {
             runnerOptions: {
                 topicId: 'topic-123',
@@ -944,7 +944,7 @@ describe('agent tool file path safety', () => {
 
         expect(result.success).to.equal(true);
         expect(pendingWrite.called).to.equal(false);
-        expect(fs.readFileSync(fileAbs, 'utf8')).to.include('id = kuat.2');
+        expect(fs.readFileSync(fileAbs, 'utf8')).to.include('id = samplemod.2');
     });
 
     it('accepts replace_lines expectedContent copied from numbered read_file output', async () => {
@@ -1167,7 +1167,7 @@ describe('agent sprite candidate tool contract', () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot, fakeIndexService as any);
 
         const result = await executor.execute('query_workspace_index', {
-            name: 'kuat.100',
+            name: 'samplemod.100',
             kind: 'event',
             exact: true,
             includeReferences: true,
@@ -1175,7 +1175,7 @@ describe('agent sprite candidate tool contract', () => {
 
         expect(result.status).to.equal('ready');
         expect(result.totalCount).to.equal(1);
-        expect(result.entries[0].name).to.equal('kuat.100');
+        expect(result.entries[0].name).to.equal('samplemod.100');
         expect(result.entries[0].category).to.equal('event');
         expect(result.entries[0].references).to.have.lengthOf(1);
         expect(result.entries[0].fileVersion).to.equal(7);
@@ -1185,7 +1185,7 @@ describe('agent sprite candidate tool contract', () => {
     });
 
     it('traverses GUI button effect and sprite to a concrete texture asset', async () => {
-        const texturePath = path.join(workspaceRoot, 'gfx', 'interface', 'kuat_button.dds');
+        const texturePath = path.join(workspaceRoot, 'gfx', 'interface', 'samplemod_button.dds');
         fs.mkdirSync(path.dirname(texturePath), { recursive: true });
         const dds = Buffer.alloc(128);
         dds.write('DDS ', 0, 'ascii');
@@ -1193,31 +1193,31 @@ describe('agent sprite candidate tool contract', () => {
         dds.writeUInt32LE(64, 16);
         fs.writeFileSync(texturePath, dds);
         const symbols: Record<string, any[]> = {
-            kuat_btn: [{
-                name: 'kuat_btn', kind: 'effectButtonType', source: 'gui', origin: 'workspace',
-                file: path.join(workspaceRoot, 'interface', 'kuat.gui'), line: 3,
+            samplemod_btn: [{
+                name: 'samplemod_btn', kind: 'effectButtonType', source: 'gui', origin: 'workspace',
+                file: path.join(workspaceRoot, 'interface', 'samplemod.gui'), line: 3,
                 guiFacts: {
                     offCanvas: false,
-                    localisationKeys: ['KUAT_BUTTON_TT'],
+                    localisationKeys: ['SAMPLEMOD_BUTTON_TT'],
                     customGuiReferences: [],
-                    effectReferences: ['kuat_button_effect'],
-                    spriteReferences: ['GFX_kuat_button'],
+                    effectReferences: ['samplemod_button_effect'],
+                    spriteReferences: ['GFX_samplemod_button'],
                 },
             }],
-            kuat_button_effect: [{
-                name: 'kuat_button_effect', kind: 'button_effect', source: 'script', origin: 'workspace',
-                file: path.join(workspaceRoot, 'common', 'button_effects', 'kuat.txt'), line: 1,
+            samplemod_button_effect: [{
+                name: 'samplemod_button_effect', kind: 'button_effect', source: 'script', origin: 'workspace',
+                file: path.join(workspaceRoot, 'common', 'button_effects', 'samplemod.txt'), line: 1,
                 scriptFacts: {
-                    stateAccesses: [{ operation: 'set', subject: 'kuat_ready', scope: 'country', line: 2 }],
+                    stateAccesses: [{ operation: 'set', subject: 'samplemod_ready', scope: 'country', line: 2 }],
                     localisationKeys: [], eventReferences: [], callCandidates: [],
                 },
             }],
-            gfx_kuat_button: [{
-                name: 'GFX_kuat_button', kind: 'sprite', source: 'asset', origin: 'workspace',
-                file: path.join(workspaceRoot, 'interface', 'kuat.gfx'), line: 2,
+            gfx_samplemod_button: [{
+                name: 'GFX_samplemod_button', kind: 'sprite', source: 'asset', origin: 'workspace',
+                file: path.join(workspaceRoot, 'interface', 'samplemod.gfx'), line: 2,
                 references: [
-                    { file: 'interface/kuat.gfx', line: 3, context: 'texturefile = "gfx/interface/kuat_button.dds"' },
-                    { file: 'interface/kuat.gfx', line: 4, context: 'noOfFrames = 4' },
+                    { file: 'interface/samplemod.gfx', line: 3, context: 'texturefile = "gfx/interface/samplemod_button.dds"' },
+                    { file: 'interface/samplemod.gfx', line: 4, context: 'noOfFrames = 4' },
                 ],
             }],
         };
@@ -1225,20 +1225,20 @@ describe('agent sprite candidate tool contract', () => {
             status: 'ready', workspaceSymbolStatus: 'ready', workspaceSymbolCount: 3, workspaceSymbolUpdatedAt: 1,
             ensureWorkspaceSymbolsReady: async () => undefined,
             assetSearchRoots: () => [workspaceRoot],
-            queryLocalisation: (query: any) => query.key === 'KUAT_BUTTON_TT'
-                ? [{ key: query.key, file: path.join(workspaceRoot, 'localisation', 'english', 'kuat.yml'), line: 2 }]
+            queryLocalisation: (query: any) => query.key === 'SAMPLEMOD_BUTTON_TT'
+                ? [{ key: query.key, file: path.join(workspaceRoot, 'localisation', 'english', 'samplemod.yml'), line: 2 }]
                 : [],
             queryWorkspaceSymbols: (query: any) => symbols[String(query.name ?? '').toLowerCase()] ?? [],
         };
         const executor = new AgentToolExecutor({} as any, workspaceRoot, fakeIndexService as any);
         const result = await executor.execute('query_workspace_index', {
-            name: 'kuat_btn', exact: true, source: 'gui', includeAssetChain: true,
+            name: 'samplemod_btn', exact: true, source: 'gui', includeAssetChain: true,
         }) as any;
         const refs = result.assetChain[0].references;
-        expect(refs.some((ref: any) => ref.target === 'kuat_button_effect' && ref.exists)).to.equal(true);
-        expect(refs.some((ref: any) => ref.target === 'GFX_kuat_button' && ref.exists)).to.equal(true);
-        expect(refs.some((ref: any) => ref.target.endsWith('kuat_button.dds') && ref.exists && ref.depth === 2)).to.equal(true);
-        const texture = refs.find((ref: any) => ref.target.endsWith('kuat_button.dds'));
+        expect(refs.some((ref: any) => ref.target === 'samplemod_button_effect' && ref.exists)).to.equal(true);
+        expect(refs.some((ref: any) => ref.target === 'GFX_samplemod_button' && ref.exists)).to.equal(true);
+        expect(refs.some((ref: any) => ref.target.endsWith('samplemod_button.dds') && ref.exists && ref.depth === 2)).to.equal(true);
+        const texture = refs.find((ref: any) => ref.target.endsWith('samplemod_button.dds'));
         expect(texture.pathCaseMatches).to.equal(true);
         expect(texture.frameLayout).to.deep.include({ noOfFrames: 4, width: 64, height: 16, status: 'consistent' });
         expect(result.interfaceGraph.edges.some((edge: any) => edge.kind === 'gui_effect')).to.equal(true);
@@ -1286,7 +1286,7 @@ describe('agent sprite candidate tool contract', () => {
 
     it('returns unavailable workspace index result without IndexService', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
-        const result = await executor.execute('query_workspace_index', { name: 'kuat.100' }) as any;
+        const result = await executor.execute('query_workspace_index', { name: 'samplemod.100' }) as any;
 
         expect(result.status).to.equal('unavailable');
         expect(result.entries).to.deep.equal([]);
@@ -1396,16 +1396,16 @@ describe('agent sprite candidate tool contract', () => {
             generatedAt: '2026-05-24T00:00:00.000Z',
             workspaceRoot,
             workspaceKind: 'paradox_mod',
-            projectName: 'Kuat',
+            projectName: 'SampleMod',
             game: { id: 'stellaris', displayName: 'Stellaris', confidence: 'high', evidence: ['test'] },
             keyDirectories: [{ key: 'events', path: 'events', exists: true, fileCount: 1 }],
             localisation: { roots: ['localisation'], languages: ['l_english'], encoding: 'UTF-8 with BOM', sampleFiles: [] },
             identifiers: {
-                namespaces: ['kuat'],
-                variablePrefixes: ['@kuat_'],
+                namespaces: ['samplemod'],
+                variablePrefixes: ['@samplemod_'],
                 scriptedTriggers: [],
                 scriptedEffects: [],
-                events: ['kuat.1'],
+                events: ['samplemod.1'],
                 onActions: [],
                 staticModifiers: [],
             },
@@ -1423,7 +1423,7 @@ describe('agent sprite candidate tool contract', () => {
         const result = await executor.execute('query_project_profile', { section: 'summary', mode: 'build' }) as any;
 
         expect(result.status).to.equal('ready');
-        expect(result.summary).to.include('Project: Kuat');
+        expect(result.summary).to.include('Project: SampleMod');
         expect(result.promptCard).to.equal('Build card');
         expect(result.data.workspaceKind).to.equal('paradox_mod');
     });
@@ -1440,15 +1440,15 @@ describe('agent sprite candidate tool contract', () => {
         const lspTools = require('../../extension/ai/tools/lspTools') as typeof import('../../extension/ai/tools/lspTools');
         const interfaceDir = path.join(workspaceRoot, 'interface');
         fs.mkdirSync(interfaceDir, { recursive: true });
-        fs.writeFileSync(path.join(interfaceDir, 'kuat_eventpictures.gfx'), [
+        fs.writeFileSync(path.join(interfaceDir, 'samplemod_eventpictures.gfx'), [
             'spriteTypes = {',
             '    spriteType = {',
-            '        name = "GFX_evt_kuat_force_echo"',
-            '        texturefile = "gfx/event_pictures/kuat_force_echo.dds"',
+            '        name = "GFX_evt_samplemod_force_echo"',
+            '        texturefile = "gfx/event_pictures/samplemod_force_echo.dds"',
             '    }',
             '    spriteType = {',
-            '        name = "GFX_kuat_button_icon"',
-            '        texturefile = "gfx/interface/icons/kuat_button.dds"',
+            '        name = "GFX_samplemod_button_icon"',
+            '        texturefile = "gfx/interface/icons/samplemod_button.dds"',
             '    }',
             '}',
         ].join('\n'), 'utf8');
@@ -1459,15 +1459,15 @@ describe('agent sprite candidate tool contract', () => {
             fileTools.findFiles,
         );
         const result = await handler.findSpriteCandidates({
-            currentValue: 'GFX_evt_kuat_missing_echo',
-            query: 'kuat force echo',
+            currentValue: 'GFX_evt_samplemod_missing_echo',
+            query: 'samplemod force echo',
             fieldName: 'picture',
             searchContext: 'mod',
             limit: 5,
         });
 
-        expect(result.candidates.map(c => c.name)).to.include('GFX_evt_kuat_force_echo');
-        expect(result.candidates[0]!.name).to.equal('GFX_evt_kuat_force_echo');
+        expect(result.candidates.map(c => c.name)).to.include('GFX_evt_samplemod_force_echo');
+        expect(result.candidates[0]!.name).to.equal('GFX_evt_samplemod_force_echo');
         expect(result.candidates[0]!.textureFile).to.include('event_pictures');
     });
 
@@ -1525,15 +1525,15 @@ describe('agent sprite candidate tool contract', () => {
         const lspTools = require('../../extension/ai/tools/lspTools') as typeof import('../../extension/ai/tools/lspTools');
         const soundDir = path.join(workspaceRoot, 'sound');
         fs.mkdirSync(soundDir, { recursive: true });
-        fs.writeFileSync(path.join(soundDir, 'kuat_sounds.asset'), [
+        fs.writeFileSync(path.join(soundDir, 'samplemod_sounds.asset'), [
             'sounds = {',
             '    sound = {',
-            '        name = "kuat_force_echo_reveal"',
-            '        file = "sound/event/kuat_force_echo_reveal.wav"',
+            '        name = "samplemod_force_echo_reveal"',
+            '        file = "sound/event/samplemod_force_echo_reveal.wav"',
             '    }',
             '    music = {',
-            '        name = "kuat_force_theme"',
-            '        file = "music/kuat_force_theme.ogg"',
+            '        name = "samplemod_force_theme"',
+            '        file = "music/samplemod_force_theme.ogg"',
             '    }',
             '}',
         ].join('\n'), 'utf8');
@@ -1544,15 +1544,15 @@ describe('agent sprite candidate tool contract', () => {
             fileTools.findFiles,
         );
         const result = await handler.findSoundCandidates({
-            currentValue: 'kuat_force_echo_missing',
-            query: 'kuat force echo reveal',
+            currentValue: 'samplemod_force_echo_missing',
+            query: 'samplemod force echo reveal',
             fieldName: 'show_sound',
             searchContext: 'mod',
             limit: 5,
         });
 
-        expect(result.candidates.map(c => c.name)).to.include('kuat_force_echo_reveal');
-        expect(result.candidates[0]!.name).to.equal('kuat_force_echo_reveal');
+        expect(result.candidates.map(c => c.name)).to.include('samplemod_force_echo_reveal');
+        expect(result.candidates[0]!.name).to.equal('samplemod_force_echo_reveal');
         expect(result.candidates[0]!.fileRef).to.include('.wav');
     });
 });

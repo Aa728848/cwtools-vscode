@@ -65,29 +65,29 @@ assertTrue "country traversal reports country_wide amplification"
 
 // ─── gameplay relations: technology prerequisites and special project events ─
 let techContent = """technology = {
-    key = "tech_kuat_warp"
-    prerequisites = { "tech_kuat_drive" "tech_kuat_core" }
+    key = "tech_samplemod_warp"
+    prerequisites = { "tech_samplemod_drive" "tech_samplemod_core" }
 }
 """
-let techEntity = parseEntity techContent "common/technology/kuat_tech.txt"
+let techEntity = parseEntity techContent "common/technology/samplemod_tech.txt"
 
-let relations = collectRelations techEntity.rawEntity "common/technology/kuat_tech.txt" "tech_kuat_warp" "technology"
+let relations = collectRelations techEntity.rawEntity "common/technology/samplemod_tech.txt" "tech_samplemod_warp" "technology"
 assertTrue "technology prerequisites become directed edges"
     (relations |> List.exists (fun item ->
-        item.relationType = "prerequisite_of" && item.targetId = "tech_kuat_drive"))
+        item.relationType = "prerequisite_of" && item.targetId = "tech_samplemod_drive"))
 assertTrue "second prerequisite is captured"
-    (relations |> List.exists (fun item -> item.targetId = "tech_kuat_core"))
+    (relations |> List.exists (fun item -> item.targetId = "tech_samplemod_core"))
 
 let projectContent = """special_project = {
-    key = "kuat_project"
-    on_success = { country_event = { id = kuat_success.1 } }
-    on_fail = { country_event = { id = kuat_fail.1 } }
+    key = "samplemod_project"
+    on_success = { country_event = { id = samplemod_success.1 } }
+    on_fail = { country_event = { id = samplemod_fail.1 } }
 }
 """
-let projectEntity = parseEntity projectContent "common/special_projects/kuat_project.txt"
-let projectRelations = collectRelations projectEntity.rawEntity "common/special_projects/kuat_project.txt" "kuat_project" "special_project"
+let projectEntity = parseEntity projectContent "common/special_projects/samplemod_project.txt"
+let projectRelations = collectRelations projectEntity.rawEntity "common/special_projects/samplemod_project.txt" "samplemod_project" "special_project"
 assertTrue "special project success event edge"
-    (projectRelations |> List.exists (fun item -> item.relationType = "special_project_success_event" && item.targetId = "kuat_success.1"))
+    (projectRelations |> List.exists (fun item -> item.relationType = "special_project_success_event" && item.targetId = "samplemod_success.1"))
 
 let stateContent = """country_event = {
     id = state.1
@@ -123,12 +123,12 @@ let calledTraversalCost =
       nestingDepth = 0; frequency = "event_or_effect"; traversalRange = "country"; amplification = "country_wide"
       file = "common/scripted_effects/called.txt"; line = 1; confidence = "heuristic-static" }
 let callRelation =
-    { relationType = "calls_scripted_effect"; sourceId = "on_monthly_pulse"; targetId = "kuat_monthly_work"
+    { relationType = "calls_scripted_effect"; sourceId = "on_monthly_pulse"; targetId = "samplemod_monthly_work"
       sourceType = "on_action"; targetType = "scripted_effect"; file = "common/on_actions/pulse.txt"; line = 2
       confidence = "semantic"; provenance = "test" }
-let propagated = propagateCosts [ "on_monthly_pulse" ] [ "on_monthly_pulse", [ monthlySeedCost ]; "kuat_monthly_work", [ calledTraversalCost ] ] [ callRelation ]
+let propagated = propagateCosts [ "on_monthly_pulse" ] [ "on_monthly_pulse", [ monthlySeedCost ]; "samplemod_monthly_work", [ calledTraversalCost ] ] [ callRelation ]
 assertTrue "monthly pulse frequency propagates through scripted effects"
-    (propagated |> List.exists (fun item -> item.targetId = "kuat_monthly_work" && item.effectiveFrequency = "monthly" && item.relativeScore = 360))
+    (propagated |> List.exists (fun item -> item.targetId = "samplemod_monthly_work" && item.effectiveFrequency = "monthly" && item.relativeScore = 360))
 
 // ─── JSON contract ──────────────────────────────────────────────────────────
 let facts =

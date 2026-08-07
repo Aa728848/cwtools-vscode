@@ -2092,8 +2092,8 @@ describe('QualityGate', () => {
     it('buildCombinedReviewPrompt: sprite diagnostics trigger asset repair protocol', () => {
         const qg = new QualityGate();
         const prompt = qg.buildCombinedReviewPrompt(
-            ['events/kuat_force_echo_events.txt'],
-            'File: events/kuat_force_echo_events.txt\n[{"message":"Expected value of type sprite","line":299,"column":12}]',
+            ['events/samplemod_force_echo_events.txt'],
+            'File: events/samplemod_force_echo_events.txt\n[{"message":"Expected value of type sprite","line":299,"column":12}]',
         );
 
         expect(prompt).to.include('Sprite Resource Diagnostic Protocol');
@@ -2105,7 +2105,7 @@ describe('QualityGate', () => {
         const qg = new QualityGate();
         const prompt = qg.buildFixPrompt(
             'FAILED: 1 issue need to be fixed\nLine 299: Expected value of type sprite for picture = GFX_evt_analyzing_anomaly',
-            ['events/kuat_force_echo_events.txt'],
+            ['events/samplemod_force_echo_events.txt'],
         );
 
         expect(prompt).to.include('find_sprite_candidates');
@@ -2115,8 +2115,8 @@ describe('QualityGate', () => {
     it('buildFixPrompt: show_sound issues require verified asset candidates', () => {
         const qg = new QualityGate();
         const prompt = qg.buildFixPrompt(
-            'FAILED: 1 issue need to be fixed\nLine 42: show_sound = kuat_force_echo_missing references an unknown sound asset',
-            ['events/kuat_force_echo_events.txt'],
+            'FAILED: 1 issue need to be fixed\nLine 42: show_sound = samplemod_force_echo_missing references an unknown sound asset',
+            ['events/samplemod_force_echo_events.txt'],
         );
 
         expect(prompt).to.include('find_sound_candidates');

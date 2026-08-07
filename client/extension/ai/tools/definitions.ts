@@ -981,7 +981,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    symbolName: { type: 'string', description: 'The exact name of the symbol to find (e.g. "kuat_has_psionic_research", "distar.001")' },
+                    symbolName: { type: 'string', description: 'The exact name of the symbol to find (e.g. "samplemod_has_psionic_research", "distar.001")' },
                 },
                 required: ['symbolName'],
             },

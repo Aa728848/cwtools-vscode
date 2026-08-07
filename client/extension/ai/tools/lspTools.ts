@@ -514,7 +514,7 @@ export class LspToolHandler {
         if (!name) {
             return {
                 ok: false,
-                error: 'Missing required symbolName argument. Pass an exact symbol name, for example query_definition_by_name({ "symbolName": "kuat_has_psionic_research" }).',
+                error: 'Missing required symbolName argument. Pass an exact symbol name, for example query_definition_by_name({ "symbolName": "samplemod_has_psionic_research" }).',
             };
         }
         try {

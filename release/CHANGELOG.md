@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.10.16] - 2026-08-07
+
+### 版本打包与发布 / Packaging & Release
+- **[打包] 重新升级版本号并打包发布至 GitHub Release**：更新发布配置并重新构建发布扩展包。
+  English: [Package] Bumped version number and published updated release package to GitHub Release.
+
 ## [2.10.15] - 2026-08-07
 
 ### 实体预览与编辑器 / Entity Preview & Editor

@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.10.14] - 2026-08-07
+
+### 模型预览与编辑 / Model Preview & Editing
+- **[优化] 提升模型预览的编辑功能**：优化了模型预览面板交互与编辑体验，提供了更完善的编辑能力。
+  English: [Improvement] Enhanced editing capabilities for the model preview panel, improving interaction and editing experience.
+
 ## [2.10.13] - 2026-08-07
 
 ### AI 数据库与知识解析 / AI Database and Knowledge Parsing

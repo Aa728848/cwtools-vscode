@@ -549,6 +549,7 @@ function initThree() {
     // we must add getHelper() to the scene for the gizmo to render.
     transformCtrl = new TransformControls(camera, renderer.domElement);
     transformCtrl.setMode('translate');
+    transformCtrl.setSpace('local');
     // Fixed size — TransformControls auto-scales based on camera distance
     transformCtrl.setSize(0.7);
     transformCtrl.addEventListener('dragging-changed', (event) => {
@@ -557,8 +558,8 @@ function initThree() {
         if (isDragging && !selectedLocator && selectedLocators.size > 1) {
             captureMultiTransformSnapshot();
         }
-        // Commit one draft update when a gizmo drag finishes. Disk persistence
-        // remains behind the explicit Save action.
+        // Commit one in-memory draft update when a gizmo drag finishes. The
+        // document buffer and disk both remain behind the explicit Save action.
         if (!isDragging && editMode && selectedLocator) {
             updateSmartDuplicateStepFromSelected();
             updateLocatorDraft();
@@ -687,7 +688,7 @@ function initThree() {
     animate();
 }
 
-/** Update the unsaved .asset document buffer after a gizmo drag. */
+/** Update the in-memory .asset preview draft after a gizmo drag. */
 function updateLocatorDraft() {
     if (!editMode || !selectedLocator) return;
     updateLocatorsDraft([selectedLocator]);
@@ -1324,7 +1325,7 @@ function applyLocatorTransform(obj: THREE.Object3D, loc: ParsedLocator) {
 }
 
 function findLocatorAtScreenPoint(clientX: number, clientY: number): THREE.Object3D | null {
-    if (!locatorHelpers || !locatorHelpers.visible) return null;
+    if (!currentModel && !locatorHelpers) return null;
 
     const rect = renderer.domElement.getBoundingClientRect();
     mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
@@ -1332,8 +1333,15 @@ function findLocatorAtScreenPoint(clientX: number, clientY: number): THREE.Objec
 
     raycaster.setFromCamera(mouse, camera);
 
-    // Raycast against locator hit meshes (recursive=true to find spheres inside Groups)
-    const intersects = raycaster.intersectObjects(locatorHelpers.children, true);
+    // Include locators parented to animated bones; they are not descendants of
+    // locatorHelpers and previously could only be selected from the outline.
+    const hitTargets: THREE.Object3D[] = [];
+    const collectHitTarget = (obj: THREE.Object3D) => {
+        if (obj instanceof THREE.Mesh && obj.parent?.userData?.isLocator) hitTargets.push(obj);
+    };
+    currentModel?.traverse(collectHitTarget);
+    if (!currentModel) locatorHelpers?.traverse(collectHitTarget);
+    const intersects = raycaster.intersectObjects(hitTargets, false);
 
     let target: THREE.Object3D | null = null;
     for (const intersection of intersects) {
@@ -1344,7 +1352,40 @@ function findLocatorAtScreenPoint(clientX: number, clientY: number): THREE.Objec
             break;
         }
     }
-    return target;
+    if (target) return target;
+
+    // Bones and very small/read-only anchors use screen-space proximity as a
+    // fallback so the visible point/label is directly clickable in the viewport.
+    const world = new THREE.Vector3();
+    const projected = new THREE.Vector3();
+    let nearest: THREE.Object3D | null = null;
+    let nearestDistance = 14 * 14;
+    currentModel?.traverse(obj => {
+        if (nearestDistance < 0) return;
+        const isLocator = obj.userData?.isLocator === true && isLocatorVisuallyVisible(obj);
+        const isVisibleBone = obj instanceof THREE.Bone && bonesToggle.checked;
+        if (!isLocator && !isVisibleBone) return;
+        const label = getLabelForObject(obj);
+        const labelRect = label?.getBoundingClientRect();
+        if (labelRect
+            && clientX >= labelRect.left && clientX <= labelRect.right
+            && clientY >= labelRect.top && clientY <= labelRect.bottom) {
+            nearest = obj;
+            nearestDistance = -1;
+            return;
+        }
+        obj.getWorldPosition(world);
+        projected.copy(world).project(camera);
+        if (projected.z < -1 || projected.z > 1) return;
+        const screenX = rect.left + (projected.x + 1) * rect.width / 2;
+        const screenY = rect.top + (1 - projected.y) * rect.height / 2;
+        const distance = (screenX - clientX) ** 2 + (screenY - clientY) ** 2;
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearest = obj;
+        }
+    });
+    return nearest;
 }
 
 function onLocatorPointerDown(event: PointerEvent) {
@@ -1748,7 +1789,7 @@ function applyPropsToLocator() {
     setLocatorRotationDegrees(selectedLocator, rotation);
     updateSmartDuplicateStepFromSelected();
 
-    // Update the unsaved document buffer; Save performs disk persistence.
+    // Update the in-memory preview draft; Save applies it to the document.
     vscode.postMessage({
         command: 'updateLocator',
         locatorName: selectedLocator.name,
@@ -4649,7 +4690,7 @@ document.getElementById('btn-add-loc-confirm')?.addEventListener('click', () => 
     // Immediately create the locator in the 3D scene (no full reload)
     addLocatorToScene(name, position, rotation);
 
-    // Update the unsaved document buffer (no full preview reload).
+    // Update the in-memory preview draft (no document write or full reload).
     vscode.postMessage({
         command: 'addLocator',
         locatorName: name,

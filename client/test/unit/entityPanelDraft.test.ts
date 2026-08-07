@@ -6,6 +6,7 @@ describe('entity preview locator drafts', () => {
     const root = path.resolve(__dirname, '../../..');
     const host = fs.readFileSync(path.join(root, 'client/extension/entityPanel.ts'), 'utf8');
     const webview = fs.readFileSync(path.join(root, 'client/webview/entityPreview.ts'), 'utf8');
+    const css = fs.readFileSync(path.join(root, 'client/webview/entityPreview.css'), 'utf8');
 
     function methodSource(name: string): string {
         const start = host.indexOf(`private async ${name}`);
@@ -29,6 +30,9 @@ describe('entity preview locator drafts', () => {
         }
 
         expect(methodSource('_handleSaveDocument')).to.include('document.save()');
+        expect(methodSource('_handleSaveDocument')).to.include('vscode.workspace.applyEdit(edit)');
+        expect(methodSource('_applyDraftEdit')).not.to.include('vscode.workspace.applyEdit');
+        expect(methodSource('_applyDraftEdit')).to.include('applyDraftTextEdits');
         expect(host).to.include("case 'saveDocument'");
         expect(host).to.include('private _messageQueue: Promise<void> = Promise.resolve()');
     });
@@ -96,5 +100,13 @@ describe('entity preview locator drafts', () => {
         expect(host).to.include('Rejected transform for non-script locator');
         expect(host).to.include('Rejected transform for model locator or bone');
         expect(host).not.to.include('Inserted locator override for mesh locator');
+    });
+
+    it('directly selects read-only anchors and keeps local gizmos aligned', () => {
+        expect(webview).to.include('currentModel?.traverse(collectHitTarget)');
+        expect(webview).to.include('obj instanceof THREE.Bone && bonesToggle.checked');
+        expect(webview).to.include("transformCtrl.setSpace('local')");
+        expect(host).to.include('<option value="local" selected>');
+        expect(css).to.include('grid-template-columns: repeat(3, minmax(0, 1fr))');
     });
 });

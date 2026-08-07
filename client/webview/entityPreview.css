@@ -818,6 +818,7 @@ body.edit-mode .edit-only {
 .props-row input[type="number"],
 .props-row input[type="text"] {
     flex: 1;
+    min-width: 0;
     background: var(--ep-input-bg);
     color: var(--ep-input-fg);
     border: 1px solid var(--ep-input-border);
@@ -834,11 +835,18 @@ body.edit-mode .edit-only {
 }
 
 .props-actions {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
     margin-top: 8px;
-    justify-content: flex-end;
+}
+
+.props-actions .toolbar-btn {
+    width: 100%;
+    min-width: 0;
+    padding-right: 6px;
+    padding-left: 6px;
+    justify-content: center;
 }
 
 .static-transform-note {
@@ -849,10 +857,17 @@ body.edit-mode .edit-only {
 }
 
 .attach-manager-actions {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 5px;
     margin-top: 6px;
+}
+
+.attach-manager-actions .toolbar-btn {
+    min-width: 0;
+    padding-right: 5px;
+    padding-left: 5px;
+    justify-content: center;
 }
 
 .attach-diagnostic {
@@ -890,7 +905,7 @@ body.edit-mode .edit-only {
 }
 
 .props-action-leading {
-    margin-right: auto;
+    margin-right: 0;
 }
 
 .toolbar-btn.secondary {

@@ -26,7 +26,6 @@
         "../client/webview/chat/slashCommands.ts",
         "../client/webview/chat/topicViews.ts",
         "../client/webview/chat/topics.ts",
-        "../client/webview/chat/workflowSelector.ts",
         "../client/webview/chat/workflows.ts",
         "../client/webview/chat/toolPhrases.ts",
         "../client/webview/vscode.d.ts"

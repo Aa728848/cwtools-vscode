@@ -31,11 +31,6 @@
                 "kind": "build",
                 "isDefault": true
             }
-        },
-        {
-            "label": "PaketUpdate",
-            "command": "dotnet",
-            "args": ["paket", "update", "-g", "git", "--no-install"]
         }
     ]
 }

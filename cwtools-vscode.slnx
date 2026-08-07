@@ -1,7 +1,4 @@
 <Solution>
-  <Folder Name="/.paket/">
-    <File Path="paket.dependencies" />
-  </Folder>
   <Folder Name="/Solution Items/">
     <File Path="Directory.Packages.props" />
   </Folder>

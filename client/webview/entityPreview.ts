@@ -21,7 +21,11 @@ import {
     type LocatorTransformDelta,
     type LocatorVector3,
 } from './locatorDuplicate';
-import { applyWorldDeltaToLocalTransform, getSelectionWorldCenter } from './locatorMultiTransform';
+import {
+    applySelfRotationDeltaToLocalTransform,
+    applyWorldDeltaToLocalTransform,
+    getSelectionWorldCenter,
+} from './locatorMultiTransform';
 import { decompressBC1, decompressBC3, rgb565 } from './bcDecode';
 import { SkyboxEnvironment } from './skyboxEnvironment';
 import { EnvironmentUi, DEFAULT_ENV_STATE, type EnvironmentUiState } from './environmentUi';
@@ -188,6 +192,7 @@ const rotationSnapToggle = document.getElementById('chk-rotation-snap') as HTMLI
 const moveSnapStep = document.getElementById('move-snap-step') as HTMLInputElement;
 const rotationSnapStep = document.getElementById('rotation-snap-step') as HTMLInputElement;
 const transformSpaceSelect = document.getElementById('sel-transform-space') as HTMLSelectElement;
+const multiRotationModeSelect = document.getElementById('sel-multi-rotation-mode') as HTMLSelectElement;
 const vertexSnapToggle = document.getElementById('chk-vertex-snap') as HTMLInputElement;
 const normalToggle = document.getElementById('chk-normals') as HTMLInputElement;
 const bonesToggle = document.getElementById('chk-bones') as HTMLInputElement;
@@ -737,10 +742,20 @@ function applyMultiTransformFromPivot(): void {
     if (!snapshot) return;
     multiTransformPivot.updateMatrixWorld(true);
     const delta = multiTransformPivot.matrixWorld.clone().multiply(snapshot.pivotWorld.clone().invert());
+    const rotateIndividually = transformCtrl.getMode() === 'rotate'
+        && multiRotationModeSelect.value !== 'center';
     for (const item of snapshot.objects) {
         if (!item.object.parent) continue;
         item.object.parent.updateMatrixWorld(true);
-        const local = applyWorldDeltaToLocalTransform(item.world, item.object.parent.matrixWorld, delta);
+        const local = rotateIndividually
+            ? applySelfRotationDeltaToLocalTransform(
+                item.world,
+                item.object.parent.matrixWorld,
+                snapshot.pivotWorld,
+                multiTransformPivot.matrixWorld,
+                transformSpaceSelect.value === 'world' ? 'world' : 'local',
+            )
+            : applyWorldDeltaToLocalTransform(item.world, item.object.parent.matrixWorld, delta);
         item.object.position.copy(local.position);
         item.object.quaternion.copy(local.quaternion);
         item.object.updateMatrixWorld(true);
@@ -1376,6 +1391,8 @@ function setLocatorSelectedStyle(obj: THREE.Object3D, selected: boolean) {
 
 function updateLocatorSelectionActions() {
     const selection = Array.from(selectedLocators);
+    const editableSelectionCount = selection.filter(isLocatorObjectEditable).length;
+    multiRotationModeSelect.disabled = transformCtrl.getMode() !== 'rotate' || editableSelectionCount < 2;
     if (selection.length === 0 || selectedLocator) {
         locatorSelectionActions.classList.add('hidden');
         return;
@@ -4067,6 +4084,7 @@ function setTransformMode(mode: 'translate' | 'rotate') {
     document.querySelectorAll<HTMLElement>('.tool-mode').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.mode === mode);
     });
+    multiRotationModeSelect.disabled = mode !== 'rotate' || selectedLocators.size < 2;
 }
 
 document.getElementById('btn-translate')?.addEventListener('click', () => setTransformMode('translate'));

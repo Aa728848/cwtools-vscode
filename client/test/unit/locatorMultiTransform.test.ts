@@ -1,6 +1,10 @@
 import { expect } from 'chai';
 import * as THREE from 'three';
-import { applyWorldDeltaToLocalTransform, getSelectionWorldCenter } from '../../webview/locatorMultiTransform';
+import {
+    applySelfRotationDeltaToLocalTransform,
+    applyWorldDeltaToLocalTransform,
+    getSelectionWorldCenter,
+} from '../../webview/locatorMultiTransform';
 
 describe('locator multi transform', () => {
     it('uses the world-space center of the selected locators', () => {
@@ -25,7 +29,7 @@ describe('locator multi transform', () => {
         expect(result.position.toArray()).to.deep.equal([-5, 4, 0]);
     });
 
-    it('rotates a locator around the shared pivot delta', () => {
+    it('supports an explicit shared-center orbit', () => {
         const start = new THREE.Matrix4().makeTranslation(2, 0, 0);
         const delta = new THREE.Matrix4().makeRotationZ(Math.PI / 2);
         const result = applyWorldDeltaToLocalTransform(start, new THREE.Matrix4(), delta);
@@ -35,5 +39,34 @@ describe('locator multi transform', () => {
         const direction = new THREE.Vector3(1, 0, 0).applyQuaternion(result.quaternion);
         expect(direction.x).to.be.closeTo(0, 1e-10);
         expect(direction.y).to.be.closeTo(1, 1e-10);
+    });
+
+    it('rotates each locator around its own local axis without moving it', () => {
+        const startQuaternion = new THREE.Quaternion().setFromAxisAngle(
+            new THREE.Vector3(0, 1, 0),
+            Math.PI / 4,
+        );
+        const start = new THREE.Matrix4().compose(
+            new THREE.Vector3(2, 3, 4),
+            startQuaternion,
+            new THREE.Vector3(1, 1, 1),
+        );
+        const pivotStart = new THREE.Matrix4();
+        const localDelta = new THREE.Quaternion().setFromAxisAngle(
+            new THREE.Vector3(0, 0, 1),
+            Math.PI / 2,
+        );
+        const pivotCurrent = new THREE.Matrix4().makeRotationFromQuaternion(localDelta);
+        const result = applySelfRotationDeltaToLocalTransform(
+            start,
+            new THREE.Matrix4(),
+            pivotStart,
+            pivotCurrent,
+            'local',
+        );
+
+        expect(result.position.toArray()).to.deep.equal([2, 3, 4]);
+        const expected = startQuaternion.clone().multiply(localDelta);
+        expect(result.quaternion.angleTo(expected)).to.be.closeTo(0, 1e-10);
     });
 });

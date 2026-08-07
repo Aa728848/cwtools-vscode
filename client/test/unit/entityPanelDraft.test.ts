@@ -54,7 +54,11 @@ describe('entity preview locator drafts', () => {
         expect(methodSource('_handleUpdateLocators')).to.include('const edit = new vscode.WorkspaceEdit()');
         expect(webview).to.include('captureMultiTransformSnapshot();');
         expect(webview).to.include("vscode.postMessage({ command: 'updateLocators', locators });");
+        expect(webview).to.include('applySelfRotationDeltaToLocalTransform');
         expect(webview).to.include("transformCtrl.setSpace(transformSpaceSelect.value === 'local' ? 'local' : 'world')");
+        expect(host).to.include('id="sel-multi-rotation-mode"');
+        expect(host).to.include('<option value="individual" selected>');
+        expect(host).to.include('<option value="center">');
         expect(host).to.include('id="move-snap-step"');
         expect(host).to.include('id="rotation-snap-step"');
         expect(host).to.include('不会建立动态绑定');

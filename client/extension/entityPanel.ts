@@ -5,7 +5,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { buildEntityGraph, type EntityDefinition, type EntityGraph } from './entityAssetParser';
+import { buildEntityGraph, parseAssetFile, type EntityDefinition, type EntityGraph } from './entityAssetParser';
+import { findLocatorTextBlock, updateLocatorTransformBlock } from './entityLocatorEditing';
 import { matchesExt } from './fileExtensions';
 import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { isPathInsideOrEqual } from './pathScope';
@@ -31,6 +32,7 @@ type EntityPanelMessage =
     | { command: 'requestEnvironments' }
     | { command: 'undo' }
     | { command: 'redo' }
+    | { command: 'saveDocument' }
     | { command: 'screenshot'; data: string }
     | { command: 'log'; text: string; level?: 'info' | 'warn' | 'error' };
 
@@ -46,7 +48,23 @@ export class EntityPanel {
     private _skipNextReload = false;
     private _currentEntityName: string | undefined;
     private _currentEntityIndex = 0;
+    private _currentMeshData: Buffer | undefined;
+    private _messageQueue: Promise<void> = Promise.resolve();
+    private readonly _draftDocuments = new Map<string, vscode.TextDocument>();
     private static _outputChannel: vscode.OutputChannel | undefined;
+
+    private _queueOperation(operation: () => Promise<void>): void {
+        this._messageQueue = this._messageQueue
+            .then(operation, operation)
+            .catch(error => {
+                const detail = error instanceof Error ? error.message : String(error);
+                void vscode.window.showErrorMessage(`${panelText('Entity edit failed', '实体编辑失败')}: ${detail}`);
+            });
+    }
+
+    private _trackDraftDocument(document: vscode.TextDocument): void {
+        this._draftDocuments.set(document.uri.toString(), document);
+    }
 
     public static async create(extensionPath: string, document: vscode.TextDocument) {
         const column = vscode.window.activeTextEditor?.viewColumn;
@@ -117,23 +135,38 @@ export class EntityPanel {
                         break;
                     }
                     case 'updateLocator': {
-                        await this._handleUpdateLocator(msg);
+                        this._queueOperation(async () => {
+                            await this._handleUpdateLocator(msg);
+                            this._postDocumentState();
+                        });
                         break;
                     }
                     case 'addLocator': {
-                        await this._handleAddLocator(msg);
+                        this._queueOperation(async () => {
+                            await this._handleAddLocator(msg);
+                            this._postDocumentState();
+                        });
                         break;
                     }
                     case 'duplicateLocators': {
-                        await this._handleDuplicateLocators(msg);
+                        this._queueOperation(async () => {
+                            await this._handleDuplicateLocators(msg);
+                            this._postDocumentState();
+                        });
                         break;
                     }
                     case 'deleteLocators': {
-                        await this._handleDeleteLocators(msg);
+                        this._queueOperation(async () => {
+                            await this._handleDeleteLocators(msg);
+                            this._postDocumentState();
+                        });
                         break;
                     }
                     case 'updateAttach': {
-                        await this._handleUpdateAttach(msg);
+                        this._queueOperation(async () => {
+                            await this._handleUpdateAttach(msg);
+                            this._postDocumentState();
+                        });
                         break;
                     }
                     case 'requestEntityNames': {
@@ -145,34 +178,15 @@ export class EntityPanel {
                         break;
                     }
                     case 'undo': {
-                        if (this._document) {
-                            // Focus the text editor so undo targets the .asset file
-                            await vscode.window.showTextDocument(this._document.uri, {
-                                viewColumn: vscode.ViewColumn.One,
-                                preserveFocus: false,
-                            });
-                            await vscode.commands.executeCommand('undo');
-                            // Save and re-render
-                            await this._document.save();
-                            this._skipNextReload = true;
-                            await this._loadAndRender(this._document, this._currentEntityIndex);
-                            // Return focus to the webview
-                            this._panel.reveal();
-                        }
+                        this._queueOperation(() => this._handleUndoRedo('undo'));
                         break;
                     }
                     case 'redo': {
-                        if (this._document) {
-                            await vscode.window.showTextDocument(this._document.uri, {
-                                viewColumn: vscode.ViewColumn.One,
-                                preserveFocus: false,
-                            });
-                            await vscode.commands.executeCommand('redo');
-                            await this._document.save();
-                            this._skipNextReload = true;
-                            await this._loadAndRender(this._document, this._currentEntityIndex);
-                            this._panel.reveal();
-                        }
+                        this._queueOperation(() => this._handleUndoRedo('redo'));
+                        break;
+                    }
+                    case 'saveDocument': {
+                        this._queueOperation(() => this._handleSaveDocument());
                         break;
                     }
                     case 'screenshot': {
@@ -206,144 +220,150 @@ export class EntityPanel {
             }, null, this._disposables),
         );
 
+        // Locator edits are drafts in the VS Code buffers. Only saveDocument
+        // persists them, matching the GUI editor's preview/edit contract.
+        this._trackDraftDocument(document);
+        this._disposables.push(
+            vscode.workspace.onDidChangeTextDocument(event => {
+                if (this._draftDocuments.has(event.document.uri.toString())) {
+                    this._postDocumentState();
+                }
+            }),
+        );
+
         // Watch for document saves to auto-refresh preview
         this._disposables.push(
             vscode.workspace.onDidSaveTextDocument(async savedDoc => {
                 if (savedDoc.uri.fsPath === document.uri.fsPath) {
                     if (this._skipNextReload) {
                         this._skipNextReload = false;
+                        this._postDocumentState(false, true);
                         return;
                     }
                     this._entityGraph = null; // invalidate cache
                     await this._loadAndRender(savedDoc);
+                    this._postDocumentState(false, true);
                 }
             }),
         );
     }
 
+    private _postDocumentState(saving = false, saved = false): void {
+        const dirty = Array.from(this._draftDocuments.values()).some(document => document.isDirty);
+        void this._panel.webview.postMessage({ command: 'documentState', dirty, saving, saved });
+    }
+
+    private async _handleSaveDocument(): Promise<void> {
+        const dirtyDocuments = Array.from(this._draftDocuments.values()).filter(document => document.isDirty);
+        if (dirtyDocuments.length === 0) {
+            this._postDocumentState(false, true);
+            return;
+        }
+
+        this._postDocumentState(true);
+        if (this._document?.isDirty) this._skipNextReload = true;
+        let saved = true;
+        for (const document of dirtyDocuments) {
+            if (!await document.save()) saved = false;
+        }
+        if (!saved) {
+            this._skipNextReload = false;
+            void vscode.window.showErrorMessage(panelText(
+                'Unable to save all entity locator changes.',
+                '无法保存全部实体定位器更改。',
+            ));
+        }
+        for (const [key, document] of this._draftDocuments) {
+            if (document !== this._document && !document.isDirty) this._draftDocuments.delete(key);
+        }
+        this._postDocumentState(false, saved);
+    }
+
+    private async _handleUndoRedo(command: 'undo' | 'redo'): Promise<void> {
+        if (!this._document) return;
+        await vscode.window.showTextDocument(this._document.uri, {
+            viewColumn: vscode.ViewColumn.One,
+            preserveFocus: false,
+        });
+        await vscode.commands.executeCommand(command);
+        this._entityGraph = null;
+        await this._loadAndRender(this._document, this._currentEntityIndex);
+        this._postDocumentState();
+        this._panel.reveal();
+    }
+
+    private _isKnownAttachAnchor(document: vscode.TextDocument, entityName: string, anchorName: string): boolean {
+        const parsedEntity = parseAssetFile(document.getText(), document.uri.fsPath).entities
+            .find(entity => entity.name === entityName);
+        if (parsedEntity?.locators.some(locator => locator.name === anchorName)) return true;
+
+        if (document === this._document && entityName === this._currentEntityName
+            && this._currentMeshData?.includes(Buffer.from(anchorName, 'utf8'))) {
+            return true;
+        }
+        const entityDefinition = this._entityGraph?.entities.get(entityName);
+        const meshDefinition = entityDefinition?.pdxmesh
+            ? this._entityGraph?.meshes.get(entityDefinition.pdxmesh)
+            : undefined;
+        const meshFile = meshDefinition ? this._resolveFilePath(meshDefinition.file, this._searchRoots) : undefined;
+        if (!meshFile) return false;
+        try {
+            return fs.readFileSync(meshFile).includes(Buffer.from(anchorName, 'utf8'));
+        } catch {
+            return false;
+        }
+    }
+
     /**
      * Handle locator position/rotation update from the webview.
-     * - If the locator already exists in the .asset script → update it in-place.
-     * - If the locator is mesh-embedded with no script override → insert a new block.
+     * Only top-level static locators declared by the current .asset are mutable.
+     * Mesh locators, bones, state locators, and child-entity anchors are read-only.
      */
     private async _handleUpdateLocator(msg: { locatorName: string; position: [number, number, number]; rotation: [number, number, number]; scale: number }) {
         if (!this._document) return;
         const doc = this._document;
         const text = doc.getText();
         const lines = text.split('\n');
-
-        // Match locator name (with or without quotes)
-        const escapedName = msg.locatorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const locNamePattern = new RegExp(`name\\s*=\\s*"?${escapedName}"?`, 'i');
-
-        // First, find the current entity block
         const entityName = this._currentEntityName;
-        let entityBlockStart = -1;
-        let entityBlockEnd = -1;
-
-        if (entityName) {
-            const entityNameEsc = entityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const entityNamePat = new RegExp(`name\\s*=\\s*"?${entityNameEsc}"?`);
-            // Find the entity = { ... } block containing this entity name
-            for (let i = 0; i < lines.length; i++) {
-                if (/entity\s*=\s*\{/.test(lines[i]!)) {
-                    let depth = 0;
-                    let blockEnd = i;
-                    let hasName = false;
-                    for (let j = i; j < lines.length; j++) {
-                        for (const ch of lines[j]!) {
-                            if (ch === '{') depth++;
-                            if (ch === '}') depth--;
-                        }
-                        if (entityNamePat.test(lines[j]!)) hasName = true;
-                        if (depth <= 0) { blockEnd = j; break; }
-                    }
-                    if (hasName) {
-                        entityBlockStart = i;
-                        entityBlockEnd = blockEnd;
-                        break;
-                    }
-                }
-            }
+        const vectorIsValid = (value: unknown): value is [number, number, number] =>
+            Array.isArray(value) && value.length === 3 && value.every(item => typeof item === 'number' && Number.isFinite(item));
+        if (!entityName
+            || typeof msg.locatorName !== 'string'
+            || msg.locatorName.length === 0
+            || /["{}\r\n=]/.test(msg.locatorName)
+            || !vectorIsValid(msg.position)
+            || !vectorIsValid(msg.rotation)) {
+            return;
         }
 
-        // Try to find existing locator block within the entity
-        let locLineIndex = -1;
-        const searchStart = entityBlockStart >= 0 ? entityBlockStart : 0;
-        const searchEnd = entityBlockEnd >= 0 ? entityBlockEnd : lines.length - 1;
-
-        for (let i = searchStart; i <= searchEnd; i++) {
-            const line = lines[i]!;
-            // Match: locator = { name = xxx ... }
-            if (/locator\s*=\s*\{/.test(line) && locNamePattern.test(line)) {
-                locLineIndex = i;
-                break;
-            }
-            // Multi-line: locator = { on one line, name = xxx on next
-            if (/locator\s*=\s*\{/.test(line)) {
-                let depth = 0;
-                let blockEnd = i;
-                let foundName = false;
-                for (let j = i; j <= searchEnd; j++) {
-                    for (const ch of lines[j]!) {
-                        if (ch === '{') depth++;
-                        if (ch === '}') depth--;
-                    }
-                    if (locNamePattern.test(lines[j]!)) foundName = true;
-                    if (depth <= 0) { blockEnd = j; break; }
-                }
-                if (foundName) {
-                    // Replace entire multi-line block
-                    const indent = lines[i]!.match(/^(\s*)/)?.[1] ?? '\t';
-                    const p = msg.position;
-                    const r = msg.rotation;
-                    const newLine = `${indent}locator = { name = "${msg.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }`;
-                    const startPos = new vscode.Position(i, 0);
-                    const endPos = new vscode.Position(blockEnd, lines[blockEnd]!.length);
-                    const edit = new vscode.WorkspaceEdit();
-                    edit.replace(doc.uri, new vscode.Range(startPos, endPos), newLine);
-                    this._skipNextReload = true;
-                    await vscode.workspace.applyEdit(edit);
-                    await doc.save();
-                    return;
-                }
-            }
+        const parsedEntity = parseAssetFile(text, doc.uri.fsPath).entities.find(entity => entity.name === entityName);
+        const locator = parsedEntity?.locators.find(candidate => candidate.name === msg.locatorName);
+        if (!locator) {
+            console.warn(`[EntityPanel] Rejected transform for non-script locator "${msg.locatorName}"`);
+            return;
+        }
+        if (this._currentMeshData?.includes(Buffer.from(msg.locatorName, 'utf8'))) {
+            console.warn(`[EntityPanel] Rejected transform for model locator or bone "${msg.locatorName}"`);
+            return;
         }
 
-        if (locLineIndex >= 0) {
-            // Update existing single-line locator
-            const indent = lines[locLineIndex]!.match(/^(\s*)/)?.[1] ?? '\t';
-            const p = msg.position;
-            const r = msg.rotation;
-            const newLine = `${indent}locator = { name = "${msg.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }`;
-            const range = new vscode.Range(
-                new vscode.Position(locLineIndex, 0),
-                new vscode.Position(locLineIndex, lines[locLineIndex]!.length),
-            );
-            const edit = new vscode.WorkspaceEdit();
-            edit.replace(doc.uri, range, newLine);
-            this._skipNextReload = true;
-            await vscode.workspace.applyEdit(edit);
-            await doc.save();
-        } else {
-            // Locator is not script-defined (mesh/bone locator) — insert a new
-            // locator override block into the entity so the change persists.
-            if (entityBlockEnd >= 0) {
-                const p = msg.position;
-                const r = msg.rotation;
-                const insertText = `\tlocator = { name = "${msg.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }\n`;
-                const edit = new vscode.WorkspaceEdit();
-                edit.insert(doc.uri, new vscode.Position(entityBlockEnd, 0), insertText);
-                this._skipNextReload = true;
-                await vscode.workspace.applyEdit(edit);
-                await doc.save();
-                // Invalidate graph cache so subsequent edits see the new line
-                this._entityGraph = null;
-                console.log(`[EntityPanel] Inserted locator override for mesh locator "${msg.locatorName}"`);
-            } else {
-                console.warn(`[EntityPanel] Cannot insert locator "${msg.locatorName}": entity block not found`);
-            }
+        const block = findLocatorTextBlock(lines, locator.line);
+        if (!block) {
+            console.warn(`[EntityPanel] Cannot locate static locator block "${msg.locatorName}"`);
+            return;
         }
+        const oldText = lines.slice(block.startLine, block.endLine + 1).join('\n');
+        const newText = updateLocatorTransformBlock(oldText, msg.position, msg.rotation);
+        if (newText === oldText) return;
+
+        const range = new vscode.Range(
+            new vscode.Position(block.startLine, 0),
+            new vscode.Position(block.endLine, lines[block.endLine]!.length),
+        );
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(doc.uri, range, newText);
+        this._skipNextReload = true;
+        await vscode.workspace.applyEdit(edit);
     }
 
     /**
@@ -356,7 +376,14 @@ export class EntityPanel {
         const text = doc.getText();
         const lines = text.split('\n');
         const entityName = this._currentEntityName;
-        if (!entityName) {
+        const vectorIsValid = (value: unknown): value is [number, number, number] =>
+            Array.isArray(value) && value.length === 3 && value.every(item => typeof item === 'number' && Number.isFinite(item));
+        if (!entityName
+            || typeof msg.locatorName !== 'string'
+            || msg.locatorName.length === 0
+            || /["{}\r\n=]/.test(msg.locatorName)
+            || !vectorIsValid(msg.position)
+            || !vectorIsValid(msg.rotation)) {
             console.warn('[EntityPanel] No current entity for addLocator');
             return;
         }
@@ -364,7 +391,6 @@ export class EntityPanel {
         // Find the entity block (both start and end)
         const entityNameEsc = entityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const entityNamePat = new RegExp(`name\\s*=\\s*"?${entityNameEsc}"?`);
-        let entityBlockStart = -1;
         let entityBlockEnd = -1;
 
         for (let i = 0; i < lines.length; i++) {
@@ -381,7 +407,6 @@ export class EntityPanel {
                     if (depth <= 0) { blockEnd = j; break; }
                 }
                 if (hasName) {
-                    entityBlockStart = i;
                     entityBlockEnd = blockEnd;
                     break;
                 }
@@ -395,43 +420,16 @@ export class EntityPanel {
 
         const p = msg.position;
         const r = msg.rotation;
-        let insertText = '';
-
-        // Check if the locator already exists in the entity (script-defined or mesh/bone locator)
-        const locNameEsc = msg.locatorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const locExistPat = new RegExp(`locator\\s*=\\s*\\{[^}]*name\\s*=\\s*"?${locNameEsc}"?`);
-        let locatorExists = false;
-        for (let i = entityBlockStart; i <= entityBlockEnd; i++) {
-            if (locExistPat.test(lines[i]!)) {
-                locatorExists = true;
-                break;
-            }
-        }
-        // Also check if the name is a known mesh/bone locator (not in script)
-        if (!locatorExists && this._entityGraph) {
-            const entityDef = this._entityGraph.entities.get(entityName);
-            if (entityDef) {
-                // Check mesh locators
-                const meshDef = entityDef.pdxmesh ? this._entityGraph.meshes.get(entityDef.pdxmesh) : undefined;
-                if (meshDef) {
-                    const meshFilePath = this._resolveFilePath(meshDef.file, this._searchRoots);
-                    if (meshFilePath) {
-                        try {
-                            const data = fs.readFileSync(meshFilePath);
-                            // Quick check: if the locator name appears in the mesh file, it's a mesh/bone locator
-                            if (data.includes(Buffer.from(msg.locatorName, 'utf8'))) {
-                                locatorExists = true;
-                            }
-                        } catch { /* skip */ }
-                    }
-                }
-            }
+        const parsedEntity = parseAssetFile(text, doc.uri.fsPath).entities.find(entity => entity.name === entityName);
+        const existsInAsset = parsedEntity?.locators.some(locator => locator.name === msg.locatorName)
+            || parsedEntity?.states.some(state => state.locators.some(locator => locator.name === msg.locatorName));
+        const existsInModel = this._currentMeshData?.includes(Buffer.from(msg.locatorName, 'utf8')) ?? false;
+        if (existsInAsset || existsInModel) {
+            console.warn(`[EntityPanel] Rejected duplicate or model-backed locator name "${msg.locatorName}"`);
+            return;
         }
 
-        // Only create locator definition if it doesn't already exist
-        if (!locatorExists) {
-            insertText += `\tlocator = { name = "${msg.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }\n`;
-        }
+        let insertText = `\tlocator = { name = "${msg.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }\n`;
 
         // If attach entity is specified, append a new attach = { } block
         // (Stellaris format: each attach block holds exactly one locator→entity mapping)
@@ -444,7 +442,6 @@ export class EntityPanel {
             edit.insert(doc.uri, new vscode.Position(entityBlockEnd, 0), insertText);
             this._skipNextReload = true;
             await vscode.workspace.applyEdit(edit);
-            await doc.save();
         }
 
         console.log(`[EntityPanel] Added locator "${msg.locatorName}"${msg.attachEntity ? ` with attach → ${msg.attachEntity}` : ''}`);
@@ -545,8 +542,6 @@ export class EntityPanel {
             console.warn('[EntityPanel] Duplicate Special edit could not be applied');
             return;
         }
-        await doc.save();
-
         for (const locator of accepted) {
             if (locator.attachEntity) {
                 await this._sendAttachEntityData(locator.locatorName, locator.attachEntity);
@@ -559,17 +554,29 @@ export class EntityPanel {
     /** Delete script-defined locator and matching attach blocks in one undoable edit. */
     private async _handleDeleteLocators(msg: Extract<EntityPanelMessage, { command: 'deleteLocators' }>) {
         if (!this._document || msg.locatorNames.length === 0) return;
-        const names = Array.from(new Set(
+        const requestedNames = Array.from(new Set(
             msg.locatorNames.slice(0, 100)
                 .map(name => name.trim())
                 .filter(name => name.length > 0 && !/["{}\r\n=]/.test(name)),
         ));
-        if (names.length === 0) return;
+        if (requestedNames.length === 0) return;
 
         const doc = this._document;
-        const lines = doc.getText().split('\n');
+        const text = doc.getText();
+        const lines = text.split('\n');
         const entityName = this._currentEntityName;
         if (!entityName) return;
+
+        const requestedSet = new Set(requestedNames);
+        const parsedEntity = parseAssetFile(text, doc.uri.fsPath).entities.find(entity => entity.name === entityName);
+        const editableLocators = (parsedEntity?.locators ?? []).filter(locator =>
+            requestedSet.has(locator.name)
+            && !(this._currentMeshData?.includes(Buffer.from(locator.name, 'utf8')) ?? false));
+        const names = editableLocators.map(locator => locator.name);
+        if (names.length === 0) {
+            console.warn('[EntityPanel] Rejected delete request without editable static locators');
+            return;
+        }
 
         const entityNameEsc = entityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const entityNamePat = new RegExp(`name\\s*=\\s*"?${entityNameEsc}"?`);
@@ -598,16 +605,15 @@ export class EntityPanel {
 
         const namePatterns = names.map(name => {
             const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            return {
-                locator: new RegExp(`name\\s*=\\s*"?${escaped}"?(?:\\s|$)`, 'i'),
-                attach: new RegExp(`"?${escaped}"?\\s*=`, 'i'),
-            };
+            return new RegExp(`"?${escaped}"?\\s*=`, 'i');
         });
-        const blocksToDelete: Array<{ start: number; end: number }> = [];
+        const blocksToDelete: Array<{ start: number; end: number }> = editableLocators
+            .map(locator => findLocatorTextBlock(lines, locator.line))
+            .filter((block): block is { startLine: number; endLine: number } => block !== undefined)
+            .map(block => ({ start: block.startLine, end: block.endLine }));
         for (let i = entityBlockStart + 1; i < entityBlockEnd; i++) {
-            const isLocator = /locator\s*=\s*\{/.test(lines[i]!);
             const isAttach = /attach\s*=\s*\{/.test(lines[i]!);
-            if (!isLocator && !isAttach) continue;
+            if (!isAttach) continue;
 
             let depth = 0;
             let blockEnd = i;
@@ -619,8 +625,7 @@ export class EntityPanel {
                 if (depth <= 0) { blockEnd = j; break; }
             }
             const blockText = lines.slice(i, blockEnd + 1).join('\n');
-            const matches = namePatterns.some(pattern =>
-                isLocator ? pattern.locator.test(blockText) : pattern.attach.test(blockText));
+            const matches = namePatterns.some(pattern => pattern.test(blockText));
             if (matches) blocksToDelete.push({ start: i, end: blockEnd });
             i = blockEnd;
         }
@@ -640,7 +645,6 @@ export class EntityPanel {
             this._skipNextReload = false;
             return;
         }
-        await doc.save();
         this._entityGraph = null;
         console.log(`[EntityPanel] Deleted ${names.length} locator(s)`);
     }
@@ -652,7 +656,14 @@ export class EntityPanel {
      */
     private async _handleUpdateAttach(msg: Extract<EntityPanelMessage, { command: 'updateAttach' }>) {
         const targetEntityName = msg.targetEntity || this._currentEntityName;
-        if (!targetEntityName) return;
+        if (!targetEntityName
+            || typeof msg.locatorName !== 'string'
+            || typeof msg.entityName !== 'string'
+            || /["{}\r\n=]/.test(msg.locatorName)
+            || /["{}\r\n=]/.test(msg.entityName)
+            || (msg.targetEntity !== undefined && /["{}\r\n=]/.test(msg.targetEntity))) {
+            return;
+        }
 
         let doc = this._document;
         let isCrossFile = false;
@@ -749,6 +760,13 @@ export class EntityPanel {
             }
         }
 
+        // Removing a stale attach is always allowed. Creating or changing one
+        // requires a real static locator, model locator, or bone anchor.
+        if (msg.entityName && !this._isKnownAttachAnchor(doc, targetEntityName, msg.locatorName)) {
+            console.warn(`[EntityPanel] Rejected attach for unknown anchor "${msg.locatorName}"`);
+            return;
+        }
+
         const edit = new vscode.WorkspaceEdit();
         if (msg.entityName) {
             if (attachLine >= 0) {
@@ -773,8 +791,8 @@ export class EntityPanel {
         if (!isCrossFile) {
             this._skipNextReload = true;
         }
+        this._trackDraftDocument(doc);
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         console.log(`[EntityPanel] Updated attach for "${msg.locatorName}" on "${targetEntityName}" → "${msg.entityName || '(removed)'}"`);
 
         // When modifying across files: the same subentity may be referenced in multiple locations, and incremental updates cannot synchronize all instances.
@@ -913,6 +931,7 @@ export class EntityPanel {
 
     private async _loadAndRender(document: vscode.TextDocument, entityIndex = 0) {
         const content = document.getText();
+        this._currentMeshData = undefined;
         const docDir = path.dirname(document.uri.fsPath);
         const modRoot = this._findModRoot(docDir);
 
@@ -932,7 +951,6 @@ export class EntityPanel {
         }
 
         // Find all entities defined in the current file
-        const { parseAssetFile } = await import('./entityAssetParser');
         const currentEntities = parseAssetFile(content, document.uri.fsPath).entities;
         if (currentEntities.length === 0) {
             await this._panel.webview.postMessage({
@@ -980,6 +998,7 @@ export class EntityPanel {
                     try {
                         const data = await fs.promises.readFile(meshFilePath);
                         const buf = Buffer.from(data);
+                        this._currentMeshData = buf;
                         meshBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
                     } catch (e) {
                         console.warn(`Failed to read mesh file: ${meshFilePath}`, e);
@@ -1113,6 +1132,7 @@ export class EntityPanel {
             unresolvedParticles: particleResources.unresolved,
             fileName: path.basename(document.fileName),
         });
+        this._postDocumentState();
     }
 
     private _resolveFilePath(relPath: string, searchRoots: string[]): string | null {
@@ -1547,6 +1567,8 @@ export class EntityPanel {
         this._document = undefined;
         this._searchRoots = [];
         this._entityGraph = null;
+        this._currentMeshData = undefined;
+        this._draftDocuments.clear();
         // Tell webview to clean up Three.js resources before destroying
         try {
             this._panel.webview.postMessage({ command: 'dispose' });
@@ -1581,16 +1603,24 @@ export class EntityPanel {
         <span class="entity-name" data-i18n="title">Entity Preview</span>
         <select id="sel-entity" style="display:none"></select>
         <select id="sel-state" style="display:none"></select>
+        <div id="mode-switch" role="group" aria-label="${locale.startsWith('zh') ? '工作模式' : 'Workspace mode'}">
+            <button id="btn-preview" class="active" type="button" aria-pressed="true">${locale.startsWith('zh') ? '预览' : 'Preview'}</button>
+            <button id="btn-edit" type="button" aria-pressed="false">${locale.startsWith('zh') ? '编辑' : 'Edit'}</button>
+        </div>
+        <div id="document-actions" class="edit-only">
+            <button id="btn-save" class="toolbar-btn" type="button" disabled title="${locale.startsWith('zh') ? '保存定位器更改 (Ctrl+S)' : 'Save locator changes (Ctrl+S)'}">${locale.startsWith('zh') ? '保存' : 'Save'}</button>
+            <span id="edit-save-state" role="status" aria-live="polite">${locale.startsWith('zh') ? '已保存' : 'Saved'}</span>
+        </div>
         <span class="toolbar-separator"></span>
         <button id="btn-focus" class="toolbar-icon-btn" data-i18n-title="focus"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><circle cx="12" cy="12" r="3"/></svg></button>
-        <span class="toolbar-separator"></span>
-        <button id="btn-translate" class="toolbar-icon-btn tool-mode active" data-i18n-title="translateBtn" data-mode="translate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="14,7 19,12 14,17"/><line x1="12" y1="5" x2="12" y2="19"/><polyline points="7,14 12,19 17,14"/></svg></button>
-        <button id="btn-rotate" class="toolbar-icon-btn tool-mode" data-i18n-title="rotateBtn" data-mode="rotate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/><polyline points="21,3 21,9 15,9"/></svg></button>
-        <label class="toolbar-checkbox-btn" title="${locale.startsWith('zh') ? '网格吸附（按住 X 临时启用，步长 1）' : 'Grid snap (hold X temporarily, step 1)'}">
+        <span class="toolbar-separator edit-only"></span>
+        <button id="btn-translate" class="toolbar-icon-btn tool-mode active edit-only" data-i18n-title="translateBtn" data-mode="translate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="14,7 19,12 14,17"/><line x1="12" y1="5" x2="12" y2="19"/><polyline points="7,14 12,19 17,14"/></svg></button>
+        <button id="btn-rotate" class="toolbar-icon-btn tool-mode edit-only" data-i18n-title="rotateBtn" data-mode="rotate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/><polyline points="21,3 21,9 15,9"/></svg></button>
+        <label class="toolbar-checkbox-btn edit-only" title="${locale.startsWith('zh') ? '网格吸附（按住 X 临时启用，步长 1）' : 'Grid snap (hold X temporarily, step 1)'}">
             <input type="checkbox" id="chk-grid-snap">
             <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h16v16H4zM9.33 4v16M14.67 4v16M4 9.33h16M4 14.67h16"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg></div>
         </label>
-        <label class="toolbar-checkbox-btn" title="${locale.startsWith('zh') ? '顶点吸附（按住 V 临时启用）' : 'Vertex snap (hold V temporarily)'}">
+        <label class="toolbar-checkbox-btn edit-only" title="${locale.startsWith('zh') ? '顶点吸附（按住 V 临时启用）' : 'Vertex snap (hold V temporarily)'}">
             <input type="checkbox" id="chk-vertex-snap">
             <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 9 17H3L12 3Z"/><circle cx="12" cy="3" r="2.2" fill="currentColor" stroke="none"/><circle cx="3" cy="20" r="2.2" fill="currentColor" stroke="none"/><circle cx="21" cy="20" r="2.2" fill="currentColor" stroke="none"/></svg></div>
         </label>
@@ -1651,6 +1681,7 @@ export class EntityPanel {
                     <button class="props-close" id="btn-props-close">&times;</button>
                 </div>
                 <div class="props-body">
+                    <div id="props-locator-source" class="props-source"></div>
                     <div class="props-row"><label>Position X</label><input type="number" step="0.1" id="prop-px"></div>
                     <div class="props-row"><label>Position Y</label><input type="number" step="0.1" id="prop-py"></div>
                     <div class="props-row"><label>Position Z</label><input type="number" step="0.1" id="prop-pz"></div>

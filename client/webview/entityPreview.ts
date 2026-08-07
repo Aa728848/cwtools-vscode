@@ -166,7 +166,12 @@ const errorBanner = document.getElementById('error-banner')!;
 const emptyState = document.getElementById('empty-state')!;
 const propsPanel = document.getElementById('properties-panel')!;
 const propsName = document.getElementById('props-locator-name')!;
+const propsSource = document.getElementById('props-locator-source')!;
 const transformHint = document.getElementById('transform-hint')!;
+const previewModeButton = document.getElementById('btn-preview') as HTMLButtonElement;
+const editModeButton = document.getElementById('btn-edit') as HTMLButtonElement;
+const saveButton = document.getElementById('btn-save') as HTMLButtonElement;
+const editSaveState = document.getElementById('edit-save-state')!;
 
 // Toolbar controls
 const entityNameEl = toolbar.querySelector('.entity-name') as HTMLElement;
@@ -232,6 +237,9 @@ let animationFrameId = 0;
 let selectedLocator: THREE.Object3D | null = null;
 let selectedLocatorEditable = false;
 const selectedLocators = new Set<THREE.Object3D>();
+let editMode = false;
+let documentDirty = false;
+let saveInProgress = false;
 let lastHiddenLocators: THREE.Object3D[] = [];
 let treeSelectionAnchor: THREE.Object3D | null = null;
 let duplicateSourceLocator: THREE.Object3D | null = null;
@@ -274,6 +282,53 @@ interface SmartDuplicateState {
     attachEntity?: string;
 }
 let smartDuplicateState: SmartDuplicateState | null = null;
+
+function renderDocumentState(saved = false): void {
+    saveButton.disabled = !documentDirty || saveInProgress;
+    saveButton.classList.toggle('dirty', documentDirty);
+    editSaveState.classList.toggle('dirty', documentDirty && !saveInProgress);
+    editSaveState.classList.toggle('saving', saveInProgress);
+    editSaveState.classList.toggle('saved', saved && !documentDirty && !saveInProgress);
+    editSaveState.textContent = saveInProgress
+        ? (isChinese ? '正在保存…' : 'Saving…')
+        : documentDirty
+            ? (isChinese ? '未保存' : 'Modified')
+            : (isChinese ? '已保存' : 'Saved');
+}
+
+function markDocumentModified(): void {
+    documentDirty = true;
+    renderDocumentState();
+}
+
+function setWorkspaceMode(mode: 'preview' | 'edit'): void {
+    editMode = mode === 'edit';
+    document.body.classList.toggle('edit-mode', editMode);
+    previewModeButton.classList.toggle('active', !editMode);
+    previewModeButton.setAttribute('aria-pressed', String(!editMode));
+    editModeButton.classList.toggle('active', editMode);
+    editModeButton.setAttribute('aria-pressed', String(editMode));
+    hideContextMenu();
+    if (!editMode) {
+        hideAddLocatorPanel();
+        hideSpecialDuplicatePanel(false);
+        gridSnapHeld = false;
+        vertexSnapHeld = false;
+        updateTransformSnapping();
+    }
+    if (selectedLocator) {
+        selectLocator(selectedLocator, isLocatorObjectEditable(selectedLocator), true);
+    } else {
+        updateLocatorSelectionActions();
+    }
+}
+
+function requestDocumentSave(): void {
+    if (!editMode || !documentDirty || saveInProgress) return;
+    saveInProgress = true;
+    renderDocumentState();
+    vscode.postMessage({ command: 'saveDocument' });
+}
 
 // ── Skybox environment system ────────────────────────────────────────────────
 let envController: SkyboxEnvironment | null = null;
@@ -417,10 +472,11 @@ function initThree() {
     transformCtrl.addEventListener('dragging-changed', (event) => {
         const isDragging = (event as unknown as { value: boolean }).value;
         controls.enabled = !isDragging;
-        // Auto-save when gizmo drag finishes
-        if (!isDragging && selectedLocator) {
+        // Commit one draft update when a gizmo drag finishes. Disk persistence
+        // remains behind the explicit Save action.
+        if (!isDragging && editMode && selectedLocator) {
             updateSmartDuplicateStepFromSelected();
-            autoSaveLocator();
+            updateLocatorDraft();
         }
     });
     transformCtrl.addEventListener('objectChange', () => {
@@ -541,9 +597,9 @@ function initThree() {
     animate();
 }
 
-/** Auto-save locator position/rotation to the .asset file after gizmo drag */
-function autoSaveLocator() {
-    if (!selectedLocator) return;
+/** Update the unsaved .asset document buffer after a gizmo drag. */
+function updateLocatorDraft() {
+    if (!editMode || !selectedLocator) return;
     const rotation = getLocatorRotationDegrees(selectedLocator);
     vscode.postMessage({
         command: 'updateLocator',
@@ -552,6 +608,7 @@ function autoSaveLocator() {
         rotation: toPdxScriptRotation(rotation),
         scale: 1,
     });
+    markDocumentModified();
 }
 
 function clearParticleInstances(): void {
@@ -915,8 +972,13 @@ function isInsideChildEntity(obj: THREE.Object3D): boolean {
 }
 
 function isLocatorObjectEditable(obj: THREE.Object3D): boolean {
+    // Only locators created by the current .asset are transform-editable.
+    // Mesh locators, mesh overrides, bones, and child-entity anchors remain
+    // selectable so their attach mapping can be inspected or changed.
     return obj.userData?.isLocator === true
+        && obj.userData?.source === 'script'
         && !isInsideChildEntity(obj)
+        && !(obj instanceof THREE.Bone)
         && !(obj.parent instanceof THREE.Bone);
 }
 
@@ -1131,7 +1193,7 @@ function updateLocatorSelectionActions() {
         ? (isChinese ? '显示' : 'Show')
         : (isChinese ? '隐藏' : 'Hide');
     const deletableCount = selection.filter(isLocatorObjectDeletable).length;
-    deleteSelectedLocatorsButton.disabled = deletableCount === 0;
+    deleteSelectedLocatorsButton.disabled = !editMode || deletableCount === 0;
     deleteSelectedLocatorsButton.textContent = isChinese ? `删除 (${deletableCount})` : `Delete (${deletableCount})`;
     deleteSelectedLocatorsButton.title = deletableCount < selection.length
         ? (isChinese ? '仅删除脚本中新建的定位器；Mesh 定位器只能隐藏' : 'Only script-created locators can be deleted; mesh locators can only be hidden')
@@ -1161,31 +1223,48 @@ function selectLocator(obj: THREE.Object3D, editable = true, preserveSmartDuplic
         p = p.parent;
     }
     const isSubmodel = ownerEntity !== '';
-    selectedLocatorEditable = editable && !isSubmodel && !(obj instanceof THREE.Bone) && !(obj.parent instanceof THREE.Bone);
+    selectedLocatorEditable = editMode && editable && !isSubmodel && !(obj instanceof THREE.Bone) && !(obj.parent instanceof THREE.Bone);
+    const canEditTransform = editMode && editable;
 
     // Always show properties panel (attach editing is always allowed)
     updatePropsFromLocator(obj);
     propsPanel.classList.remove('hidden');
     propsName.textContent = obj instanceof THREE.Bone ? obj.name.replace(/^.*?__/, '') : obj.name;
+    const source = obj instanceof THREE.Bone ? 'bone' : String(obj.userData?.source ?? 'unknown');
+    const sourceLabels: Record<string, string> = isChinese
+        ? {
+            script: 'Asset 静态定位器 · 可编辑',
+            mesh: '模型定位器 · 变换只读',
+            override: '模型定位器覆盖 · 变换只读',
+            bone: '骨骼 · 变换只读',
+        }
+        : {
+            script: 'Asset locator · editable',
+            mesh: 'Model locator · read-only transform',
+            override: 'Model locator override · read-only transform',
+            bone: 'Bone · read-only transform',
+        };
+    propsSource.textContent = sourceLabels[source] ?? (isChinese ? '只读锚点' : 'Read-only anchor');
+    propsSource.dataset.source = source;
 
     // Position/rotation inputs: enabled only for editable locators
     const posRotInputs = [propPx, propPy, propPz, propRx, propRy, propRz];
     for (const input of posRotInputs) {
-        input.disabled = !editable;
-        input.style.opacity = editable ? '1' : '0.5';
+        input.disabled = !canEditTransform;
+        input.style.opacity = canEditTransform ? '1' : '0.5';
     }
 
     // Apply/Reset buttons: visible only for editable locators
     const applyBtn = document.getElementById('btn-apply');
     const resetBtn = document.getElementById('btn-reset');
     const duplicateBtn = document.getElementById('btn-special-duplicate');
-    if (applyBtn) applyBtn.style.display = editable ? '' : 'none';
-    if (resetBtn) resetBtn.style.display = editable ? '' : 'none';
+    if (applyBtn) applyBtn.style.display = canEditTransform ? '' : 'none';
+    if (resetBtn) resetBtn.style.display = canEditTransform ? '' : 'none';
     if (duplicateBtn) duplicateBtn.style.display = selectedLocatorEditable ? '' : 'none';
 
     // Attach entity input: enabled for all, including submodels (cross-file write supported)
-    propAttachEntity.disabled = false;
-    propAttachEntity.style.opacity = '1';
+    propAttachEntity.disabled = !editMode;
+    propAttachEntity.style.opacity = editMode ? '1' : '0.5';
     propAttachEntity.placeholder = isSubmodel ? `Attach to ${ownerEntity}` : 'e.g. some_entity_name';
 
     if (selectedLocatorEditable) {
@@ -1345,10 +1424,12 @@ function restoreLastHiddenLocators() {
 }
 
 function deleteSelectedLocatorObjects() {
+    if (!editMode) return;
     const deletable = Array.from(selectedLocators).filter(isLocatorObjectDeletable);
     if (deletable.length === 0) return;
     const names = deletable.map(obj => obj.name);
     vscode.postMessage({ command: 'deleteLocators', locatorNames: names });
+    markDocumentModified();
 
     for (const obj of deletable) {
         removeAttachAtLocator(obj.name);
@@ -1443,7 +1524,7 @@ function updatePropsFromLocator(obj: THREE.Object3D) {
 }
 
 function applyPropsToLocator() {
-    if (!selectedLocator) return;
+    if (!editMode || !selectedLocator) return;
     selectedLocator.position.set(
         parseFloat(propPx.value) || 0,
         parseFloat(propPy.value) || 0,
@@ -1457,7 +1538,7 @@ function applyPropsToLocator() {
     setLocatorRotationDegrees(selectedLocator, rotation);
     updateSmartDuplicateStepFromSelected();
 
-    // Send to extension for file write-back
+    // Update the unsaved document buffer; Save performs disk persistence.
     vscode.postMessage({
         command: 'updateLocator',
         locatorName: selectedLocator.name,
@@ -1465,6 +1546,7 @@ function applyPropsToLocator() {
         rotation: toPdxScriptRotation(rotation),
         scale: 1,
     });
+    markDocumentModified();
 }
 
 // ── Properties Panel: Attach Entity Editing ──────────────────────────────────
@@ -1515,7 +1597,7 @@ function showPropAutocomplete(filter: string) {
 }
 
 function sendUpdateAttach() {
-    if (!selectedLocator) return;
+    if (!editMode || !selectedLocator) return;
     
     // Determine the owner entity for cross-file writing
     let targetEntity = '';
@@ -1535,6 +1617,7 @@ function sendUpdateAttach() {
         entityName: propAttachEntity.value.trim(),
         targetEntity: targetEntity || undefined
     });
+    markDocumentModified();
 }
 
 propAttachEntity.addEventListener('input', () => {
@@ -3277,22 +3360,9 @@ function updateEntityTree(_entity: EntityData, _parsed?: ParsedMeshFile) {
             const obj = treeObjects.get(uuid);
             if (obj) {
                 if (obj.userData?.isLocator && !isLocatorVisuallyVisible(obj)) return;
-                // Determine whether the object belongs to a sub-entity (inside the attach model)
-                let isInsideChild = false;
-                let p = obj.parent;
-                while (p) {
-                    if (p.name.startsWith('attach_')) { isInsideChild = true; break; }
-                    if (p === currentModel) break;
-                    p = p.parent;
-                }
-                
-                // The points and bones of the submodel cannot be selected and edited.
-                if (isInsideChild) {
-                    return;
-                }
-
-                const isBoneParented = obj.parent instanceof THREE.Bone;
-                const isEditable = !isBoneParented && !(obj instanceof THREE.Bone);
+                // Child-entity anchors remain selectable for cross-file attach
+                // editing, but isLocatorObjectEditable keeps transforms read-only.
+                const isEditable = isLocatorObjectEditable(obj);
                 if (isEditable && (event.ctrlKey || event.metaKey)) {
                     treeSelectionAnchor = obj;
                     applyLocatorSelection([obj], 'add');
@@ -3620,7 +3690,7 @@ document.getElementById('btn-clear-locator-selection')?.addEventListener('click'
 // Properties panel buttons
 document.getElementById('btn-apply')?.addEventListener('click', applyPropsToLocator);
 document.getElementById('btn-reset')?.addEventListener('click', () => {
-    if (selectedLocator && selectedLocatorSnapshot) {
+    if (editMode && selectedLocator && selectedLocatorSnapshot) {
         // Restore original position/rotation
         selectedLocator.position.set(
             selectedLocatorSnapshot.px,
@@ -3633,7 +3703,7 @@ document.getElementById('btn-reset')?.addEventListener('click', () => {
             selectedLocatorSnapshot.rz,
         ]);
         updatePropsFromLocator(selectedLocator);
-        autoSaveLocator();
+        updateLocatorDraft();
     }
 });
 document.getElementById('btn-props-close')?.addEventListener('click', deselectLocator);
@@ -3722,6 +3792,7 @@ function hideSpecialDuplicatePanel(restoreProperties = true) {
 }
 
 function confirmSpecialDuplicate() {
+    if (!editMode) return;
     const source = duplicateSourceLocator;
     const options = readDuplicateOptions();
     if (!source || options.copies < 1 || options.copies > 100) {
@@ -3744,6 +3815,7 @@ function confirmSpecialDuplicate() {
 
     addLocatorsToScene(locators);
     vscode.postMessage({ command: 'duplicateLocators', locators });
+    markDocumentModified();
     hideSpecialDuplicatePanel();
 }
 
@@ -3769,6 +3841,7 @@ function updateSmartDuplicateStepFromSelected() {
 }
 
 function smartDuplicateSelectedLocator() {
+    if (!editMode) return;
     const source = selectedLocator;
     if (!source || !selectedLocatorEditable) return;
     const sourceTransform = getLocatorTransform(source);
@@ -3795,6 +3868,7 @@ function smartDuplicateSelectedLocator() {
     const duplicate = addLocatorsToScene([locator]);
     if (!duplicate) return;
     vscode.postMessage({ command: 'duplicateLocators', locators: [locator] });
+    markDocumentModified();
     smartDuplicateState = {
         activeObject: duplicate,
         baseTransform: sourceTransform,
@@ -3810,6 +3884,9 @@ function smartDuplicateSelectedLocator() {
 
 // Screenshot button
 document.getElementById('btn-screenshot')?.addEventListener('click', takeScreenshot);
+previewModeButton.addEventListener('click', () => setWorkspaceMode('preview'));
+editModeButton.addEventListener('click', () => setWorkspaceMode('edit'));
+saveButton.addEventListener('click', requestDocumentSave);
 
 // Keyboard shortcuts: F=focus, W=translate, E=rotate (Maya-style), Escape=deselect, Ctrl+Z=undo
 function handleWindowKeydown(e: KeyboardEvent) {
@@ -3819,13 +3896,22 @@ function handleWindowKeydown(e: KeyboardEvent) {
         takeScreenshot();
         return;
     }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        if (editMode) {
+            e.preventDefault();
+            requestDocumentSave();
+        }
+        return;
+    }
     // Forward Ctrl+Z / Ctrl+Shift+Z to extension for undo/redo
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if (!editMode) return;
         e.preventDefault();
         vscode.postMessage({ command: e.shiftKey ? 'redo' : 'undo' });
         return;
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        if (!editMode) return;
         e.preventDefault();
         vscode.postMessage({ command: 'redo' });
         return;
@@ -3841,12 +3927,14 @@ function handleWindowKeydown(e: KeyboardEvent) {
     }
 
     if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'x') {
+        if (!editMode) return;
         e.preventDefault();
         gridSnapHeld = true;
         updateTransformSnapping();
         return;
     }
     if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'v') {
+        if (!editMode) return;
         e.preventDefault();
         vertexSnapHeld = true;
         updateTransformSnapping();
@@ -3854,11 +3942,13 @@ function handleWindowKeydown(e: KeyboardEvent) {
     }
 
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
+        if (!editMode) return;
         e.preventDefault();
         showSpecialDuplicatePanel();
         return;
     }
     if (!e.ctrlKey && !e.metaKey && e.shiftKey && e.key.toLowerCase() === 'd') {
+        if (!editMode) return;
         e.preventDefault();
         smartDuplicateSelectedLocator();
         return;
@@ -3881,10 +3971,12 @@ function handleWindowKeydown(e: KeyboardEvent) {
             if (currentModel) fitCameraToModel(currentModel);
             break;
         case 'w':
+            if (!editMode) break;
             e.preventDefault();
             setTransformMode('translate');
             break;
         case 'e':
+            if (!editMode) break;
             e.preventDefault();
             setTransformMode('rotate');
             break;
@@ -4058,7 +4150,7 @@ function hideContextMenu() {
 
 canvasContainer.addEventListener('contextmenu', (e) => {
     // Only displayed if the entity is loaded and the locator is visible
-    if (!currentEntity || !locatorToggle.checked) return;
+    if (!editMode || !currentEntity || !locatorToggle.checked) return;
     e.preventDefault();
 
     // Compute 3D world position at right-click point (project onto
@@ -4108,6 +4200,7 @@ document.getElementById('ctx-add-locator')?.addEventListener('click', (e) => {
 // ── Add Locator Panel ────────────────────────────────────────────────────────
 
 function showAddLocatorPanel() {
+    if (!editMode) return;
     // Request fresh entity names from extension for autocomplete
     vscode.postMessage({ command: 'requestEntityNames' });
     addLocName.value = '';
@@ -4126,11 +4219,21 @@ document.getElementById('btn-add-locator-close')?.addEventListener('click', hide
 document.getElementById('btn-add-loc-cancel')?.addEventListener('click', hideAddLocatorPanel);
 
 document.getElementById('btn-add-loc-confirm')?.addEventListener('click', () => {
+    if (!editMode) return;
     const name = addLocName.value.trim();
     if (!name) {
         addLocName.style.borderColor = '#be1100';
         return;
     }
+    const nameExists = Array.from(getExistingLocatorNames()).some(existing => existing.toLowerCase() === name.toLowerCase());
+    if (nameExists) {
+        addLocName.setCustomValidity(isChinese
+            ? '该名称已被 Asset 定位器、模型定位器或骨骼使用。'
+            : 'This name is already used by an asset locator, model locator, or bone.');
+        addLocName.reportValidity();
+        return;
+    }
+    addLocName.setCustomValidity('');
     addLocName.style.borderColor = '';
 
     // Position: use the right-click world position, or camera target
@@ -4149,7 +4252,7 @@ document.getElementById('btn-add-loc-confirm')?.addEventListener('click', () => 
     // Immediately create the locator in the 3D scene (no full reload)
     addLocatorToScene(name, position, rotation);
 
-    // Send to extension for file write-back (no reload)
+    // Update the unsaved document buffer (no full preview reload).
     vscode.postMessage({
         command: 'addLocator',
         locatorName: name,
@@ -4157,6 +4260,7 @@ document.getElementById('btn-add-loc-confirm')?.addEventListener('click', () => 
         rotation,
         attachEntity,
     });
+    markDocumentModified();
 
     hideAddLocatorPanel();
 });
@@ -4216,6 +4320,7 @@ addLocName.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') document.getElementById('btn-add-loc-confirm')?.click();
     if (e.key === 'Escape') hideAddLocatorPanel();
 });
+addLocName.addEventListener('input', () => addLocName.setCustomValidity(''));
 addLocEntity.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !autocompleteList.classList.contains('visible')) {
         document.getElementById('btn-add-loc-confirm')?.click();
@@ -4362,6 +4467,12 @@ async function handleWindowMessage(event: MessageEvent) {
     if (!msg?.command) return;
 
     switch (msg.command) {
+        case 'documentState': {
+            documentDirty = msg.dirty === true;
+            saveInProgress = msg.saving === true;
+            renderDocumentState(msg.saved === true);
+            break;
+        }
         case 'environments': {
             const env = msg as EnvironmentsMessage;
             envController?.setPresets(env.presets ?? [], env.workerUri);
@@ -4505,4 +4616,6 @@ window.addEventListener('message', handleWindowMessage);
 // ── Initialize ───────────────────────────────────────────────────────────────
 
 initThree();
+setWorkspaceMode('preview');
+renderDocumentState(true);
 

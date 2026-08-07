@@ -92,6 +92,83 @@ body {
     margin: 0 4px;
 }
 
+.edit-only {
+    display: none !important;
+}
+
+body.edit-mode .edit-only {
+    display: inline-flex !important;
+}
+
+#mode-switch {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
+    border: 1px solid var(--ep-border);
+    border-radius: 5px;
+    background: var(--ep-input-bg);
+}
+
+#mode-switch button {
+    height: 24px;
+    min-width: 52px;
+    padding: 0 9px;
+    border: 0;
+    border-radius: 3px;
+    color: var(--vscode-descriptionForeground, var(--ep-fg));
+    background: transparent;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+#mode-switch button:hover {
+    color: var(--ep-fg);
+    background: var(--ep-hover-bg);
+}
+
+#mode-switch button.active {
+    color: var(--ep-select-fg);
+    background: var(--ep-select-bg);
+}
+
+#document-actions {
+    align-items: center;
+    gap: 7px;
+}
+
+#edit-save-state {
+    color: var(--vscode-descriptionForeground, var(--ep-fg));
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+#edit-save-state.dirty {
+    color: var(--vscode-notificationsWarningIcon-foreground, #cca700);
+}
+
+#edit-save-state.saving {
+    color: var(--ep-accent);
+}
+
+#edit-save-state.saved {
+    color: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.props-source {
+    margin-bottom: 8px;
+    padding: 4px 7px;
+    border: 1px solid var(--ep-border);
+    border-radius: 3px;
+    color: var(--vscode-descriptionForeground, var(--ep-fg));
+    background: color-mix(in srgb, var(--ep-input-bg) 78%, transparent);
+    font-size: 11px;
+}
+
+.props-source[data-source="script"] {
+    color: var(--vscode-testing-iconPassed, #73c991);
+}
+
 .env-ui {
     display: inline-flex;
     align-items: center;

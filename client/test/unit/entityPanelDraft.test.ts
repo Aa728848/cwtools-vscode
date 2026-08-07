@@ -80,6 +80,14 @@ describe('entity preview locator drafts', () => {
         expect(webview).to.include('data-attach-object-uuid');
     });
 
+    it('keeps world-axis orientation visible without a model', () => {
+        expect(host).to.include('id="orientation-gizmo"');
+        expect(host).to.include('World axis orientation');
+        expect(webview).to.include('new THREE.AxesHelper(1.5)');
+        expect(webview).to.include('function updateOrientationGizmo()');
+        expect(webview).to.include('updateOrientationGizmo();');
+    });
+
     it('keeps model locators and bones transform-read-only on both boundaries', () => {
         expect(webview).to.include("obj.userData?.source === 'script'");
         expect(webview).to.include("mesh: 'Model locator · read-only transform'");

@@ -227,6 +227,15 @@ const locatorSelectionCount = document.getElementById('locator-selection-count')
 const hideSelectedLocatorsButton = document.getElementById('btn-hide-selected-locators') as HTMLButtonElement;
 const deleteSelectedLocatorsButton = document.getElementById('btn-delete-selected-locators') as HTMLButtonElement;
 const sidebarResize = document.getElementById('sidebar-resize')!;
+const orientationAxisElements = (['x', 'y', 'z'] as const).map(axis => {
+    const group = document.getElementById(`orientation-axis-${axis}`)!;
+    return {
+        group,
+        line: group.querySelector('line') as SVGLineElement,
+        dot: group.querySelector('circle') as SVGCircleElement,
+        label: group.querySelector('text') as SVGTextElement,
+    };
+});
 
 // Cached entity names for autocomplete
 let cachedEntityNames: string[] = [];
@@ -245,6 +254,7 @@ let transformCtrl: TransformControls;
 let multiTransformPivot: THREE.Object3D;
 let currentModel: THREE.Group | null = null;
 let locatorHelpers: THREE.Group | null = null;
+let worldAxesHelper: THREE.AxesHelper | null = null;
 let animationFrameId = 0;
 let selectedLocator: THREE.Object3D | null = null;
 let selectedLocatorEditable = false;
@@ -521,6 +531,18 @@ function initThree() {
     grid.material.opacity = 0.3;
     grid.material.transparent = true;
     scene.add(grid);
+
+    // Persistent world axes remain useful even when an entity has no model.
+    worldAxesHelper = new THREE.AxesHelper(1.5);
+    worldAxesHelper.name = '__world_axes_helper';
+    worldAxesHelper.renderOrder = 20;
+    const axesMaterial = worldAxesHelper.material;
+    for (const material of Array.isArray(axesMaterial) ? axesMaterial : [axesMaterial]) {
+        material.depthTest = false;
+        material.transparent = true;
+        material.opacity = 0.9;
+    }
+    scene.add(worldAxesHelper);
 
     // TransformControls (Maya-style: W=translate, E=rotate)
     // In Three.js r155+, TransformControls is NOT an Object3D;
@@ -837,10 +859,54 @@ function updateStateParticles(delta: number): void {
 const locatorLabelEls: Map<string, HTMLDivElement> = new Map();
 let isWebviewVisible = true;
 
+const orientationDirections = [
+    new THREE.Vector3(1, 0, 0),
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3(0, 0, 1),
+] as const;
+const orientationFallbacks = [
+    new THREE.Vector2(1, 0),
+    new THREE.Vector2(0, -1),
+    new THREE.Vector2(-0.7, 0.7),
+] as const;
+const orientationCameraInverse = new THREE.Quaternion();
+const orientationDirection = new THREE.Vector3();
+
+function updateOrientationGizmo(): void {
+    orientationCameraInverse.copy(camera.quaternion).invert();
+    for (let index = 0; index < orientationDirections.length; index++) {
+        orientationDirection.copy(orientationDirections[index]!).applyQuaternion(orientationCameraInverse);
+        let dx = orientationDirection.x * 25;
+        let dy = -orientationDirection.y * 25;
+        const projectedLength = Math.hypot(dx, dy);
+        const fallback = orientationFallbacks[index]!;
+        if (projectedLength < 3) {
+            dx = fallback.x * 3;
+            dy = fallback.y * 3;
+        }
+        const length = Math.max(3, Math.hypot(dx, dy));
+        const labelOffset = 7;
+        const endX = 38 + dx;
+        const endY = 38 + dy;
+        const labelX = endX + dx / length * labelOffset;
+        const labelY = endY + dy / length * labelOffset;
+        const elements = orientationAxisElements[index]!;
+        elements.line.setAttribute('x2', endX.toFixed(2));
+        elements.line.setAttribute('y2', endY.toFixed(2));
+        elements.dot.setAttribute('cx', endX.toFixed(2));
+        elements.dot.setAttribute('cy', endY.toFixed(2));
+        elements.dot.setAttribute('r', projectedLength < 4 ? '4' : '3');
+        elements.label.setAttribute('x', labelX.toFixed(2));
+        elements.label.setAttribute('y', labelY.toFixed(2));
+        elements.group.style.opacity = String(0.5 + (orientationDirection.z + 1) * 0.22);
+    }
+}
+
 function animate() {
     if (!isWebviewVisible) return; // don't schedule frames when hidden
     animationFrameId = requestAnimationFrame(animate);
     controls.update();
+    updateOrientationGizmo();
 
     // Update animation mixers
     const delta = clock.getDelta();
@@ -4423,6 +4489,14 @@ function disposeAll() {
     if (locatorHelpers) {
         scene.remove(locatorHelpers);
         locatorHelpers = null;
+    }
+
+    if (worldAxesHelper) {
+        scene.remove(worldAxesHelper);
+        worldAxesHelper.geometry.dispose();
+        const materials = worldAxesHelper.material;
+        for (const material of Array.isArray(materials) ? materials : [materials]) material.dispose();
+        worldAxesHelper = null;
     }
 
     // Dispose renderer

@@ -2101,6 +2101,15 @@ export class EntityPanel {
                 <div class="empty-hint" data-i18n="openHint">Open a .asset file and click preview</div>
             </div>
             <div id="transform-hint" class="hidden"></div>
+            <div id="orientation-gizmo" title="${locale.startsWith('zh') ? '世界坐标轴方向' : 'World axis orientation'}" aria-label="${locale.startsWith('zh') ? '世界坐标轴方向' : 'World axis orientation'}">
+                <svg viewBox="0 0 76 76" aria-hidden="true">
+                    <circle class="orientation-center" cx="38" cy="38" r="3"></circle>
+                    <g id="orientation-axis-x"><line x1="38" y1="38" x2="62" y2="38"></line><circle cx="62" cy="38" r="3"></circle><text x="68" y="41">X</text></g>
+                    <g id="orientation-axis-y"><line x1="38" y1="38" x2="38" y2="14"></line><circle cx="38" cy="14" r="3"></circle><text x="38" y="9">Y</text></g>
+                    <g id="orientation-axis-z"><line x1="38" y1="38" x2="20" y2="54"></line><circle cx="20" cy="54" r="3"></circle><text x="14" y="62">Z</text></g>
+                </svg>
+                <span>${locale.startsWith('zh') ? '世界' : 'WORLD'}</span>
+            </div>
             <div id="selection-marquee"></div>
             <div id="locator-selection-actions" class="hidden">
                 <span id="locator-selection-count"></span>

@@ -1,271 +1,70 @@
 # Stellaris Language Serves
 
-[English](#english) | [中文](#zh-cn) | [CWT Rule Guide / CWT 规则指南](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/cwt-rule-config.md) | [Diagnostic Codes / 诊断码](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/diagnostic-codes.md)
+[English](#english) | [中文](#zh-cn) | [GitHub](https://github.com/Aa728848/cwtools-vscode) | [Report an issue](https://github.com/Aa728848/cwtools-vscode/issues)
 
 <a id="english"></a>
 
 ## English
 
-### 🌌 Stellaris Language Serves
+Build and maintain Paradox mods in VS Code with CWTools language support, Stellaris visual editors, vanilla comparison, Shader tooling, and an optional AI workspace.
 
-[![Built with F#](https://img.shields.io/badge/backend-F%23%20%2F%20.NET%2010-blue.svg?style=flat-square)](https://dotnet.microsoft.com/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen.svg?style=flat-square)]()
+### Start here
 
-**Stellaris Language Serves** is a premier, modern IDE-grade VS Code extension custom-built for Paradox game modding, centered around **Stellaris**. Based on the upstream [CWTools](https://github.com/cwtools/cwtools-vscode), it undergoes deep refactoring and customization, combining a **high-performance .NET 10 backend**, an **expressive Webview sandbox visualization engine**, and a **cutting-edge autonomous multi-agent AI coprocessor**.
+After installing the extension, open your mod folder in VS Code. On first use, select the vanilla game folder when prompted. CWTools loads the project and builds the indexes used by diagnostics, completion, navigation, and previews.
 
-> [!NOTE]
-> This project is not merely a syntax highlighter and validator; it is a **modern collaborative mod development hub** integrating 3D rendering, a real-time GUI canvas, a multi-agent parallel pipeline, and high-precision migration comparison.
+The extension package includes the language-server binaries for Windows, macOS, and Linux. You do not need a separate .NET installation to use the packaged extension.
 
----
+### Language support
 
-#### 🚀 Four Pillars of Core Technology
+- Diagnostics, completion, hover information, definitions, references, symbols, CodeLens, and inlay hints
+- Paradox script, localisation, assets, GUI files, and compile-unit-aware `.shader` / `.fxh` editing
+- Profiles for Stellaris, Hearts of Iron IV, Europa Universalis IV and V, Crusader Kings II and III, Imperator: Rome, Victoria II and 3, and custom CWT projects
+- Incremental project and vanilla indexes for larger workspaces
 
-##### ⚡ 1. High-Performance LSP (Language Server Protocol)
-The CWTools LSP server, customized using **.NET 10** and **F#**, serves as the computation base of the entire extension, providing millisecond-level responsiveness for massive mod codebases.
-- **Extreme Concurrent Performance**: Refactored the `LanguageServer` read-write lock mechanism. Read-only requests (hover preview, autocompletion, go-to-definition) execute concurrently across multiple threads; write modifications acquire exclusive locks sequentially, eliminating deadlocks or interface lagging.
-- **O(1) Definition Search**: The `DocumentStore` abandons traditional $O(N)$ traversals, adopting **lazy line offset cache reconstruction** to compress Hover and Go-To-Definition search times to $O(1)$, realizing instantaneous positioning even for large mod files with hundreds of thousands of lines of code.
-- **Semantic Validation & Macro Evaluation**: Supports deep syntax analysis, including real-time evaluation of complex macro expressions `@[...]` and `value:xxx|`, displaying localized texts in-line (CodeLens) and allowing hover previews of `inline_script` files.
-- **Cross-game Incremental Semantic Refresh**: Stellaris, HOI4, EU4, EU5, CK2, CK3, Imperator, VIC2, VIC3, and generic/custom CWT projects use the same staged type-index and scripted-service refresh. CWT `pathOptions` determine affected type keys, unchanged tries and validation arrays remain shared, and localisation add/change/delete updates only the affected dependency closure. CK2 CSV and each profile's localisation directories/encoding are routed through game capabilities; unsafe or superseded stages retain the guarded full-refresh fallback.
-- **Paradox Shader Language Service**: `.shader` and `.fxh` share one lossless outer-DSL, preprocessor, and tolerant HLSL/Cg front end. Features are compile-unit aware (`Includes`, mod/dependency/vanilla precedence, platform conditions) and include diagnostics, completion, hover, definitions/references, signature help, semantic tokens with delta updates, formatting, rename, inlay hints, folding/selection, call hierarchy, and workspace symbols. Interface `effectFile` and `.gui` sprite uses feed a versioned renderer-contract graph; only curated ABI evidence is classified as executable-hardcoded, while unproved entries remain unknown.
+Coverage depends on the active game profile and its CWT rules. Stellaris is the primary target for the bundled rules and visual tools.
 
-##### 🎨 2. Sandbox Multi-Dimensional Webview Visualization Engine
-This project makes deep use of the VS Code Webview isolation sandbox, utilizing modern web rendering technologies (Canvas / Cytoscape.js / Three.js) to deliver an unprecedented WYSIWYG experience to mod developers.
-- **GUI Canvas Real-time Preview & Editing**: Supports real-time bidirectional interactive rendering of Stellaris `.gui` interface configuration files. It perfectly renders `corneredTileSpriteType` 9-slice stretching and multi-frame sprite (`noOfFrames`) animations. It supports visual layer trees and directly **drags controls to resize/reposition them, automatically writing back coordinate changes to the source code**.
-- **3D Solar System Rendering & Orbit Editing**: Enter any solar system initializer `.txt` script in `solar_system_initializers/` to launch a gorgeous 3D system space. It supports recursive nesting of stars, planets, moons, and ring worlds. Developers can directly drag planets to modify their `orbit_distance` and `orbit_angle`, syncing changes back to the script.
-- **Static Galaxy Preview & Position Editor**: Opens `map/setup_scenarios/*.txt` `static_galaxy_scenario` files in a Canvas2D galaxy map with systems, coordinate ranges, nebulas, and explicit hyperlanes. In Edit Mode, drag systems or nebulas to rewrite X/Y, edit or add Z in the Inspector, and add/disconnect explicit hyperlanes with minimal, span-precise `WorkspaceEdit`s that participate in native undo; reversed ranges, duplicate ids, and dangling lanes surface as visual diagnostics.
-- **Technology Tree & Event Reference Network**: Uses Cytoscape.js to render highly interactive tech dependency and multi-level event flow graphs. It supports quick searching, relationship filtering, and double-clicking nodes to instantly navigate to the declaring script file and line number.
-- **Three.js Entity & Animation Rendering**: Supports loading and debugging Paradox native `.asset` 3D meshes, textures, and skeletal animations within the Webview sandbox.
-- **Particle Effect Preview & Editor**: Provides a three-pane editor for `particle={...}` definitions in `gfx/particles/**/*.asset` files, featuring Three.js real-time simulation, curve editing, subsystem/force/property modification, texture decoding, and write-back to `.asset`.
+### Stellaris visual tools
 
-##### 🤖 3. Autonomous AI Coprocessor
-This subsystem combines a general repository-coding Agent with a Paradox/CWTools specialist and a profile-aware multi-Agent runner.
-- **Automatic Agent Routing with an Explicit Domain Boundary**: The composer exposes only the **capability domain** (`Auto`, `Paradox / CWTools`, or `General Coding`). A lightweight model-routing call resolves task intent and the single/multi-Agent strategy on every turn from the request, recent conversation, and active-file context; the applied mode and strategy appear beneath that user message and survive topic replay. Scoped changes execute directly, while genuinely complex changes may enter Plan; approving its annotation card starts the domain-matched Multi-Agent coordinator directly. Permission profiles and approval policy remain user-owned and are never changed by Agent routing. Invalid or unavailable routing falls back to deterministic safe classification.
-- **Domain-Separated Execution**: The admitted capability domain is immutable for the Run; profiles, Workflows, and sub-Agents may only narrow it. General Coding reads standard repository policy (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, plus path-scoped nested `AGENTS.md`), exposes provider-neutral language intelligence and guarded rename, and can use domain-isolated skills, memory, and explicitly trusted MCP servers. It cannot call CWT/CWTools/PDXScript, localisation, game-asset, or EvidenceGate capabilities. Paradox treats root `CWTOOLS.md` as a user-owned instruction file: `/init` creates a minimal scaffold only when it is missing and never rewrites an existing file. Main and slim Paradox Agents inherit its bounded full content independently from the generated profile; mutable game facts come on demand from `profile.json`, active CWT rules, the CWTools LSP, and project indexes.
-- **Profile-Aware Parallel DAG Orchestration**: General Multi-Agent dispatches repository engineering roles; Paradox Multi-Agent adds CWT/LSP evidence, entity contracts, localisation specialists, and semantic quality gates. Both coordinate bounded parallel work through a shared Blackboard.
-- **Long-Run Reliability & Smart Context Windowing**: Structured context compression, recoverable checkpoints, progress-aware run budgets, activity-based child-Agent stall detection, and loop prevention allow long-running tasks to continue while still stopping genuinely stalled work.
-- **Bi-directional MCP Integration**: Configured stdio/SSE servers declare `Paradox`, `General`, or `Both`; the declaration is enforced both when tools are disclosed and immediately before execution. Legacy server entries default to Paradox-only. The plugin simultaneously **exports a read-only MCP Server** (the standalone `cwtools-mcp` package, see Section 8) with 34 semantic tools for external agents like **Codex / Claude Code**.
-- **Shader-Aware Agent Safety**: Seven read-only Shader queries expose symbols, compile units, platform variants, callers, reachability, validation, and vanilla comparison with provenance and version data. Shader edits must pass the preflight policy: engine-hardcoded and unknown Effects fail closed, and all reverse Include dependants are revalidated.
-- **Workspace-wide Localization Indexing**: An asynchronous incremental indexing system based on VS Code `FileSystemWatcher` feeds stable, accurate localization context to the large model.
+Open a supported file and use its editor-title action or context menu:
 
-##### 📂 4. Differences & Fast Migration Pipeline (Vanilla Compare)
-A powerful tool for updating mods to new Paradox game patches.
-- **Block-Level Diff**: Open side-by-side diff screens against corresponding vanilla files with one click.
-- **Safe Bottom-Up Merge**: Supports migrating the block under the cursor (`migrateBlockFromVanilla`). The underlying algorithm applies replacements **bottom-up (from back to front)**, preventing line offsets from invalidating subsequent changes.
+- GUI canvas with selection, positioning, resizing, texture lookup, and source write-back
+- 3D solar-system preview with orbit editing
+- Static-galaxy preview with system, nebula, coordinate, and explicit-hyperlane editing
+- Technology-tree and event-chain graphs
+- Entity, material, animation, and particle previews
 
----
+Source changes use VS Code workspace edits and can be undone normally. Previews distinguish source-backed data from estimates; runtime-generated content is not presented as exact file data.
 
-#### 🏛️ System Architecture
+### Vanilla comparison and migration
 
-Below is the overall module interaction and data flow topology:
+Use `Compare with Vanilla` on a matching mod file to open a diff. `Migrate Block from Vanilla` replaces the block under the cursor without turning the whole file into a generated rewrite.
 
-![System architecture overview](docs/system-architecture.png)
+### Optional AI workspace
 
----
+Run `AI: Open Chat Panel` to use the built-in agent workspace. It supports general coding and Paradox/CWTools-aware tasks, project indexing, plans and workflows, explicit tool permissions, and optional MCP servers.
 
-#### ⚙️ Quick Start
+AI providers are configured separately. Credentials are stored with VS Code SecretStorage, and tool calls remain subject to the selected sandbox and approval policy. The ChatGPT-subscription-compatible Codex provider relies on an upstream compatibility endpoint and may need updates when that endpoint changes.
 
-##### Prerequisites
-- **OS**: Windows / macOS / Linux
-- **VS Code**: 1.90.0 or higher
-- **.NET Runtime**: [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) is required for local building/development.
+### External agents through MCP
 
-##### Installation Steps
-1. Download the latest `.vsix` package from the Releases page.
-2. In VS Code, open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`), select `Extensions: Install from VSIX...`, and choose the downloaded VSIX file to complete the installation.
-3. Upon first activation, a notification will prompt you to select the **vanilla game installation folder** to build the initial language server cache.
+The separately released [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) package gives MCP clients read-only access to CWTools semantic queries. It normally connects to the active extension instead of starting another language server.
 
----
-
-#### 💡 Feature Guide
-
-##### 🎨 1. GUI Canvas Preview & Drag-and-Sync Editing
-* **How to open**: Open any `.gui` file in VS Code and click the **Palette Icon (Preview GUI)** in the top right editor toolbar.
-* **Operations**:
-  - The dual-column attribute panel will slide in on the right, automatically parsing DDS/TGA textures.
-  - You can click to select components in the canvas and **drag to resize or move them**. The AST rewriting algorithm will rewrite the code layout in the left `.gui` editor in real-time.
-  - Press `Ctrl+Z` to undo canvas modifications.
-
-##### 🌌 2. 3D Solar System Interactive Editor
-* **How to open**: Open any system initializer `.txt` script under `solar_system_initializers/` and click the **Telescope Icon (Preview Solar System)** in the top right.
-* **Operations**:
-  - Zoom with mouse wheel, pan with right-click, and rotate view with `Alt+Drag`.
-  - In **Edit Mode**, right-click the canvas to create stars, planets, moons, or ring worlds.
-  - **Drag a planet directly along its orbit** to modify its distance and angle; variables like `orbit_distance` and `orbit_angle` will sync back to the editor.
-
-##### 🌌 3. Static Galaxy Preview & Position Editor
-* **How to open**: Open any `.txt` file under `map/setup_scenarios/` and click the **Map Icon (Preview/Edit Static Galaxy)** in the editor title bar, or use the file's context menu. A `Static Galaxy Preview/Editor` entry is also available via **Open With...**.
-* **Operations**:
-  - Zoom with the mouse wheel, pan with `Space`/`Alt`/middle-drag, click to select a system or nebula, and **double-click to jump to its source block**.
-  - Use the **Preview / Edit** segmented control (shortcut `E`) to switch modes without losing zoom, pan, filters, or selection.
-  - In **Edit Mode**, drag a system or nebula to translate its X/Y position; range coordinates `{ min max }` keep their width, and only the touched number tokens are rewritten — one drag produces exactly one native undo step. The Inspector accepts precise X/Y/Z values (and can add a missing Z) plus nebula radius. Systems with an `initializer` show resolved details (star class with matching node color, planet/moon/belt counts, ring worlds). Explicit hyperlanes can be drawn on the canvas: right-click a system to enter lane-drawing mode, left-click to chain endpoints (A→B→C…), and right-click again to confirm all segments as a single edit; right-clicking an existing lane deletes its `add_hyperlane` declaration from the source. The **Spray/Erase** tools scatter or remove undefined random systems (named/initializer systems are always protected) with one undo step per stroke — the brush radius has a slider, `Alt+right-drag` resizes it, `Shift` sprays along a straight direction with scatter, and `Ctrl+Shift` presses exact lines whose column count grows with the radius.
-  - `random_hyperlanes = yes` is called out explicitly: runtime-generated lanes are never presented as exact preview data. An optional **Estimated lanes** toggle (off by default) draws a clearly-labeled heuristic approximation — never written back to source.
-  - Steam Workshop files show a risk banner and require confirmation before editing; copying the file into your mod workspace is offered as the safe path.
-
-##### 🌐 4. Tech Tree & Event Dependency Graph
-* **How to open**: Inside tech or event definition scripts, click the **Graph Icon (Show Dependency Graph)**.
-* **Operations**:
-  - Leverages Cytoscape.js to display pre-requisites and downstream effects.
-  - Supports searching, filter constraints, and node highlighting. **Double-click any node** to navigate and jump to its declaration line in the source file.
-
-##### 🤖 5. Autonomous AI Panel
-* **How to open**: Click the **AI Icon** in the Activity Bar or execute `AI: Open Chat Panel` in the Command Palette.
-* **Agent profile**: Use the composer menu only when you need to pin the **Capability Domain**. Task intent and execution strategy remain automatic; choosing `Auto` also lets the runtime detect the domain for each turn.
-* **Operations**: Supports context memory compression (triggered at 70% threshold) and importing/exporting full JSON execution archives.
-* **Codex with ChatGPT quota**: Select **Codex (ChatGPT Subscription)** in AI Settings and sign in once through the browser PKCE flow compatible with [OpenCode's ChatGPT Plus/Pro integration](https://opencode.ai/docs/providers/). Access and refresh tokens are stored only in VS Code SecretStorage and refreshed automatically; **Sign out** removes only this extension's credentials. The provider calls the fixed ChatGPT Codex Responses backend, never accepts an API key or endpoint override, and never falls back to billable OpenAI Platform calls. It does not install, launch, inspect, or share login state with Codex CLI/Desktop. Account, plan, quota windows, and a compatibility model catalog are shown in settings. Chat turns use the extension's native Agent runtime, so the selected model and reasoning level, current Agent sandbox, permission policy, write scheduler, tools, and MCP configuration all follow the same path as other providers. This subscription endpoint is an internal compatibility surface rather than a public stable API and may require updates when the upstream flow changes. The provider remains excluded from inline completion, translation preview, and child-Agent model selectors.
-* **Architecture Diagrams**: When a design or analysis contains several connected components, the Agent can emit Mermaid flow/sequence/state diagrams. Chat messages, live process text, tool-result cards, plans, blueprints, and walkthrough cards render them locally with VS Code theme colors, source copy, fullscreen viewing, and safe source fallback.
-* **Web Access**: Agent settings separate search from live page access. Search providers include OpenAI, Brave, Exa, Tavily, Serper, SerpAPI, SearXNG, and a DuckDuckGo fallback; provider keys are kept in VS Code SecretStorage. Live pages pass public-address, redirect, size, and domain-policy checks and are always treated as untrusted evidence.
-
-##### 📂 6. Vanilla Compare & Safe Merge
-* **Diff View**: When editing a mod file that shares the same name as a vanilla file, click the **Compare with Vanilla** CodeLens.
-* **Sync**: Click **Migrate Block from Vanilla** above a changed block. The system locks the write queue and applies changes bottom-up, keeping line coordinates accurate.
-
-##### 💎 7. Asset & 3D Mesh Animation Debugger
-* **How to open**: In `.asset` or `.gfx` files, click the **3D Model Icon (Preview Entity)**.
-* **3D & Material Debug**:
-  - Parses and renders `.mesh` files.
-  - Automatically loads and decodes DDS materials to render high-fidelity graphics.
-* **Animation Playback**:
-  - Renders skeleton node trees, allowing you to select and play animations (e.g., move, idle, attack) in the right-hand panel.
-  - Fine-tune materials (e.g., diffuse, specular) using slider panels.
-
-##### 🔌 8. MCP Server for External Agents (Codex / Claude Code)
-The companion **`cwtools-mcp`** package (developed in its own repository, vendored here under `submodules/cwtools-mcp`) is a **read-only** Model Context Protocol (MCP) server, offering 34 read-only semantic tools of CWTools (project knowledge pack, bounded project graph, syntax check, scope queries, definitions, references, diagnostics, scripted triggers/effects/enums, and seven Shader queries) to external agents. It is **not** bundled inside the extension VSIX — install it once and it rides on the active extension:
-* **Bounded Semantic Graph**: `explore_pdx_project` is the preferred first query for large mods. It returns ranked typed entry points, dependency edges, per-file semantic facts, provenance, truncation budgets, and freshness from the live CWTools model without reading whole files.
-* **Compact `/init` Knowledge Database**: the deep `/init` phase performs one complete export of the loaded project + vanilla definitions and workspace reference topology into `.cwtools/project/knowledge/manifest.json` plus `knowledge.sqlite`, replacing the former duplicated capability/archetype JSON set. Later ordinary saves are path-deduplicated into one short incremental batch and update only affected SQLite rows in a WAL transaction; the incremental export uses a shared game-model read lock, so completion, highlighting, CodeLens, and inlay hints remain responsive. Full rebuilds are restricted to project load or an explicit `/init`; graph-wide Shader, rule/config, and `.cwb` changes are marked stale for the next load instead of starting another full rebuild while editing. Deterministic partial results are published once with an accurate coverage warning instead of repeating the same full scan; transient loading/stale states still retry. `/init` also directly creates or incrementally updates `.cwtools/index/workspace-symbols.sqlite` before deep export. On first activation, an existing `.cwtools-ai` tree is merged into `.cwtools` and the old directory is removed; when both contain the same relative path, the current `.cwtools` copy wins and the legacy copy is preserved under `.cwtools/migration-conflicts/cwtools-ai/`. A lower-left VS Code progress indicator remains visible while the workspace index is built, CWTools becomes ready, and the knowledge database is published. `query_project_knowledge` resolves explicit IDs through SQLite indexes, expands their reference/event/logic neighbourhood, and falls back to bounded intent search only when no identifier seed is supplied. It retrieves definitions, stacks, topology, project/vanilla patterns, and event structure/logic—including call phases, `on_action` entries, flags, technologies, variables, and scope bridges—without loading the whole database into the prompt. Lazy `query_workspace_index` calls restore persistent SQLite rows, publish the workspace phase first, parse only changed files, and wait at most eight seconds before returning partial results while vanilla indexing continues. After a serialized vanilla `.cwb` and its metadata are successfully rewritten, the Extension immediately force-rebuilds that game's global vanilla-symbol SQLite database before reloading; the filesystem watcher remains a fallback and durably marks matching project knowledge for refresh, which resumes when the reloaded LSP reports ready.
-* **Extension-Host Bridge by Default**: The MCP entry script connects to the active VS Code-compatible host (VS Code, Cursor, VSCodium, Antigravity, etc.) through `globalStorage/mcp/bridge-manifest.json`, reusing the IDE's existing CWTools language client and Problems diagnostics instead of starting a second server. The manifest is auto-discovered across all supported hosts, so no path configuration is needed. The client workspace is discovered dynamically from MCP roots/session environment/cwd and must match the bridge workspace; mismatches return `bridge_unavailable` instead of answering from another project.
-* **Standalone Install**: install via npm (`npx -y cwtools-mcp`) or download the single-file `cwtools-mcp.cjs` from the [cwtools-mcp releases](https://github.com/Aa728848/cwtools-mcp/releases). Proxy scripts synced to `globalStorage` by older extension versions keep working unchanged. A legacy self-hosted LSP mode is still available with `--standalone`.
-* **Codex**:
-  ```sh
-  codex mcp add cwtools -- npx -y cwtools-mcp --stdio
-  ```
-* **Claude Code**:
-  ```sh
-  claude mcp add cwtools --scope user -- npx -y cwtools-mcp --stdio
-  ```
-* **Antigravity**: add `cwtools` to `~/.gemini/config/mcp_config.json` with `"command": "npx"` and `"args": ["-y", "cwtools-mcp", "--stdio"]`.
-  For the equivalent hand-written `~/.codex/config.toml`, `--standalone`/`--rules`/`--cache`/`--game-path` advanced options, and single-file setup, see the [cwtools-mcp README](https://github.com/Aa728848/cwtools-mcp).
-
-##### 🧩 9. Paradox Shader Editing and Safety
-* Open any Stellaris `gfx/FX/*.shader` or `.fxh` file normally. Navigation and validation are restricted to the file's real transitive Include compile unit; an unrelated file with the same symbol name is never used as a fallback.
-* Platform-conditional declarations stay visible with inactive semantic-token modifiers. Rename and code actions are conservative across variants, file overrides, renderer contracts, and curated executable ABI entries.
-* A `.gfx` `spriteType`, `corneredTileSpriteType`, or `progressbartype` `effectFile` is linked to its Shader file. Static `.gui` `GFX_*` uses then select only the renderer-contract Effects required for that sprite subtype; selecting a file never marks every Effect in it reachable.
-* Agent and MCP answers distinguish explicit data calls, confirmed renderer conventions, convention candidates, curated engine-hardcoded entries, and engine-or-unreferenced unknowns. Lack of a text reference is never treated as proof of an executable call.
-
-##### 📁 10. Paradox Game Folder Suggestions
-* Right-click a folder in Explorer and choose **CWTools: Create Paradox Game Folder...**, or run the same command from the Command Palette. The searchable picker suggests only the next directory level for the selected parent.
-* Suggestions merge the active CWT TypeDef paths, the detected game's profile conventions, and immediate child folders from the configured vanilla installation. Existing project files/folders are removed, while custom single- or multi-segment relative paths remain available.
-* The command supports Stellaris, HOI4, EU4, EU5, CK2, CK3, Imperator, Victoria II, Victoria 3, and Custom/Generic CWT projects. Unknown projects never silently inherit Stellaris, and the retired Stellaris `localisation_synced` path is not suggested.
-* Creation uses the VS Code workspace file-system API, rechecks the parent and target, rejects absolute/traversing/invalid paths, does not overwrite existing resources, and reveals the new folder in Explorer. Multi-root and writable virtual workspaces follow the same URI-safe path.
-
----
-
-#### 🛠️ Developer Hub
-
-If you intend to contribute code or perform development using AI assistants, please follow these guidelines:
-
-##### Fresh Clone Setup
-
-Install these tools before building or packaging:
-
-| Tool | Required version / notes |
-| --- | --- |
-| Git | A current version with submodule support |
-| Node.js / npm | Node.js 20.x or newer and npm 10.x or newer |
-| .NET SDK | .NET 10 SDK; `global.json` currently selects `10.0.301` and allows the latest minor roll-forward |
-| PowerShell | Windows PowerShell 5.1 or newer for the root `npm run pack*` scripts |
-| VS Code | 1.90 or newer; the `code` CLI is additionally required only by `npm run pack:install` / `pack:quick` |
-
-Clone the two required submodules and install all npm workspace dependencies:
-
-```bash
-git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
-cd cwtools-vscode
-npm install
+```sh
+codex mcp add cwtools -- npx -y cwtools-mcp --stdio
 ```
 
-If the repository was cloned without `--recurse-submodules`, repair it before
-building; a missing `submodules/cwtools` breaks the F# build and a missing
-`submodules/cwtools-stellaris-config/config` breaks packaging:
-
-```bash
-git submodule update --init --recursive
+```sh
+claude mcp add cwtools --scope user -- npx -y cwtools-mcp --stdio
 ```
 
-Before the first full package, verify that `node --version`, `npm --version`,
-`dotnet --version`, and `git --version` work from the same terminal, and check
-`$PSVersionTable.PSVersion` in PowerShell. Then run `npm run compile` once to
-catch dependency or frontend setup problems before the slower three-platform
-server publish.
+### Documentation
 
-##### Common Commands
-Run the following at the workspace root:
-```bash
-# 1. Compile TypeScript extension & build webviews via Rollup
-npm run compile
+- [Project README](https://github.com/Aa728848/cwtools-vscode#readme)
+- [CWT rule guide](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/cwt-rule-config.md)
+- [Diagnostic code reference](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/diagnostic-codes.md)
+- [Contribution guide](https://github.com/Aa728848/cwtools-vscode/blob/master/CONTRIBUTING.md)
 
-# 2. Run ESLint code checks (ESLint 9 strict mode)
-npm run lint
-
-# 3. Run unit tests
-npm run test:unit
-
-# 4. Run VS Code integration tests
-npm run test
-
-# 5. Build .NET/F# language server backend
-dotnet build src/LSP/
-dotnet build src/Main/
-
-# 6. Quality gate verify (Lint + Compile + Test + Release Gate)
-npm run verify
-
-# 7. Verify the MCP service (lives in the cwtools-mcp submodule)
-npm run generate:mcp-schema   # regenerates tool schemas into submodules/cwtools-mcp
-cd submodules/cwtools-mcp && npm run build && npm run test:contracts
-```
-
-For CWT rule authoring, see [CWT Rule Configuration Guide](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/cwt-rule-config.md).
-
-##### Submodules
-This repository uses three submodules with different roles:
-
-- [`submodules/cwtools/`](submodules/cwtools/README.md): upstream CWTools F# library used by the language server
-  for parsing, validation, game semantics, shader support, and scripted-type
-  refresh behavior.
-- [`submodules/cwtools-stellaris-config/`](submodules/cwtools-stellaris-config/README.md): Stellaris CWT rule configuration data.
-  Rules sync tooling compares it against game `script_documentation` logs and
-  vanilla `common/`; packaging uses its `config/` directory as the fallback
-  rules bundle.
-- [`submodules/cwtools-mcp/`](https://github.com/Aa728848/cwtools-mcp): the standalone read-only MCP server
-  (`cwtools-shared` + `cwtools-mcp` packages) for external agents. It has its own
-  repository and release cycle; the extension VSIX no longer bundles it.
-
-##### 📦 Extension Packaging
-The generated VSIX contains self-contained `win-x64`, `linux-x64`, and
-`osx-x64` servers. The root npm packaging commands invoke `package.ps1`, so run
-them from Windows PowerShell at the repository root after completing the fresh
-clone setup above:
-
-```bash
-npm run pack         # full package
-npm run pack:install # package and install locally
-npm run pack:quick   # skip server rebuild, package and install locally
-```
-
-`pack:quick` reuses existing server binaries; it is not suitable for the first
-package unless a complete `release/bin/server/` already exists. `pack:install`
-and `pack:quick` also require the VS Code `code` command on `PATH`. A successful
-package is written to `release/eddy-stellaris-cwt-<version>.vsix`.
-
-`npm run build:docs` validates the single-source bilingual docs and builds
-`release/README.md` from this README. For the full packaging workflow, see
-[.agents/workflows/package.md](https://github.com/Aa728848/cwtools-vscode/blob/master/.agents/workflows/package.md) or use
-`package.ps1` directly.
-
----
-
-#### 🤝 License
-This project is distributed under the [MIT License](LICENSE). Special thanks to the [CWTools](https://github.com/cwtools) open-source project and all contributors in the Paradox modding ecosystem!
+If something behaves unexpectedly, please include the game profile, extension version, relevant file type, and reproducible steps in a [GitHub issue](https://github.com/Aa728848/cwtools-vscode/issues).
 
 ---
 
@@ -273,263 +72,62 @@ This project is distributed under the [MIT License](LICENSE). Special thanks to 
 
 ## 中文
 
-### 🌌 Stellaris Language Serves
+在 VS Code 中使用 CWTools 语言服务开发 Paradox Mod，并按需使用 Stellaris 可视化编辑器、原版对比、Shader 工具和 AI 工作区。
 
-[![Built with F#](https://img.shields.io/badge/backend-F%23%20%2F%20.NET%2010-blue.svg?style=flat-square)](https://dotnet.microsoft.com/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen.svg?style=flat-square)]()
+### 开始使用
 
-**Stellaris Language Serves** 是专为 Paradox 游戏 Modding（以 **Stellaris (群星)** 为核心）打造的顶级、现代化集成开发环境（IDE）级 VS Code 扩展。它基于上游的 [CWTools](https://github.com/cwtools/cwtools-vscode) 进行了深度的重构与定制开发，融合了**超高性能的 .NET 10 后端**、**极富表现力的 Webview 沙盒可视化引擎**，以及**前沿的自主多 Agent AI 协处理器**。
+安装扩展后，把 Mod 文件夹作为 VS Code 工作区打开。首次使用时，请按提示选择原版游戏目录。CWTools 会加载项目，并建立诊断、补全、跳转和预览所需的索引。
 
-> [!NOTE]
-> 本项目不仅是一个语法高亮与校验工具，而是一个集成了 3D 渲染、实时 GUI 画布、多 Agent 并行流水线及高精密迁移对比的**现代化 Mod 协同开发中枢**。
+扩展包已经包含 Windows、macOS 和 Linux 的语言服务端。正常使用已安装的扩展不需要另外安装 .NET。
 
----
+### 语言服务
 
-#### 🚀 核心技术四大支柱
+- 诊断、补全、悬停信息、定义、引用、符号、CodeLens 和嵌入提示
+- Paradox 脚本、本地化、资产、GUI，以及按真实编译单元工作的 `.shader` / `.fxh` 编辑
+- 支持 Stellaris、Hearts of Iron IV、Europa Universalis IV 和 V、Crusader Kings II 和 III、Imperator: Rome、Victoria II 和 3，以及自定义 CWT 项目
+- 面向大型工作区的项目与原版增量索引
 
-##### ⚡ 1. 超高性能语言服务引擎 (High-Performance LSP)
-基于 **.NET 10** 和 **F#** 深度定制的 CWTools LSP 服务端，作为整个插件的计算底座，为庞大的 Mod 代码提供了毫秒级的极致响应。
-- **极致的并发性能**：重构了 `LanguageServer` 读写锁机制，只读请求（如悬浮预览、自动补全、跳转定义）多线程共享并发执行；变更写入操作（如文件修改）持独占锁串行执行，彻底告别慢查询导致的死锁或界面卡顿。
-- **O(1) 定位查找**：`DocumentStore` 摒弃了传统的 $O(N)$ 遍历，采用**惰性重建行偏移缓存**技术，将 Hover 和 Go-To-Definition 的查找时间直接压缩至 $O(1)$，对拥有数十万行代码的超大型 Mod 文件实现即时定位。
-- **语义校验与宏求值**：支持深度语法分析，甚至能对复杂的宏表达式 `@[...]` 以及 `value:xxx|` 进行实时求值，在编辑器行内无缝显示本地化文本（CodeLens）及 `inline_script` 文件悬浮预览。
-- **跨游戏增量语义刷新**：Stellaris、HOI4、EU4、EU5、CK2、CK3、Imperator、VIC2、VIC3 与通用/自定义 CWT 项目共用 staged 类型索引和 scripted-service 刷新。受影响的 type key 由 CWT `pathOptions` 推导，未变化的 trie 与验证数组继续共享；本地化新增、修改和删除只重算依赖闭包。CK2 CSV 以及各 profile 的本地化目录和编码均由游戏能力路由；不安全或已过期的 stage 仍使用带 guard 的全量刷新兜底。
-- **Paradox Shader 语言服务**：`.shader` 与 `.fxh` 共用无损的外层 DSL、预处理和容错 HLSL/Cg 前端；所有功能都按真实编译单元工作（`Includes`、Mod/依赖/原版覆盖顺序、平台条件），覆盖诊断、补全、悬停、定义/引用、签名帮助、支持 delta 的语义 token、格式化、重命名、inlay hint、折叠/选择范围、调用层级和工作区符号。interface `effectFile` 与 `.gui` 精灵使用会进入带版本的 renderer contract 图；只有 curated ABI 证据可归类为 EXE 硬调用，未证明入口始终保持 unknown。
+具体覆盖范围取决于当前游戏 Profile 及其 CWT 规则。随扩展提供的规则和可视化工具主要面向 Stellaris。
 
-##### 🎨 2. 沙盒化多维 Webview 可视化引擎 (Rich Visualization)
-本项目深度利用了 VS Code Webview 隔离沙盒，基于现代 Web 渲染技术（Canvas / Cytoscape.js / Three.js），为 Mod 开发者带来了前所未有的所见即所得体验。
-- **GUI Canvas 实时预览与编辑**：支持群星 `.gui` 文件的实时双向交互渲染。完美实现 `corneredTileSpriteType` 9-切片拉伸绘制、多帧精灵（`noOfFrames`）动画循环，支持可视化图层树和直接在画布上**拖拽调整控件尺寸及坐标并回写源码**。
-- **3D 恒星系渲染与轨道编辑**：进入 `solar_system_initializers/` 脚本，即可开启精美的 3D 星系空间。支持恒星、行星、卫星、环形世界（Ring World）的任意递归嵌套。开发者可以通过直接拖动行星改变其 `orbit_distance` 与 `orbit_angle` 并自动同步至脚本。
-- **静态银河预览与位置编辑**：在 Canvas2D 银河地图上打开 `map/setup_scenarios/*.txt` 中的 `static_galaxy_scenario`，展示系统、坐标范围、星云与显式超空间航道。编辑模式下可拖动系统或星云回写 X/Y、在检视器中编辑或补充 Z，并添加/断开显式航道；所有修改均使用最小 `WorkspaceEdit` 并接入原生撤销。反向范围、重复 ID、悬空航道等问题会以可视化诊断呈现。
-- **科技树与事件引用网络**：利用 Cytoscape.js 渲染高交互性的科技依赖图与事件链流向图。支持快速检索、关系筛选及点击节点瞬间定位至对应的 `.txt` 脚本源码行。
-- **Three.js 实体与动画渲染**：支持 Paradox 原生 `.asset` 三维网格、贴图及骨骼动画在 Webview 中的沙盒化加载与动作调试。
-- **粒子特效预览与编辑**：支持 Stellaris `gfx/particles/**/*.asset` 中 `particle={...}` 的三栏粒子编辑器，提供 Three.js 实时近似模拟、曲线编辑、子系统/力/属性编辑、贴图解码预览与 `.asset` 写回。
+### Stellaris 可视化工具
 
-##### 🤖 3. 自主 AI 协处理器 (Advanced AI System)
-该子系统同时提供通用仓库编码 Agent、Paradox / CWTools 专用 Agent，以及能够按领域选择角色和质量门的多 Agent 运行器。
-- **显式领域边界与自动 Agent 路由**：输入框只提供**能力领域**（`自动`、`Paradox / CWTools`、`通用编码`）选择；每一轮由轻量模型路由调用依据当前请求、近期对话和活动文件判断任务意图以及单/多 Agent 执行策略，实际采用的模式与策略会显示在对应用户消息下方并随 Topic 恢复。范围明确的修改直接执行，真正复杂的修改可以先进入 Plan；批准其批注卡后会直接启动与能力领域匹配的多 Agent 协调器。权限 Profile 与审批策略始终由用户控制，不会被 Agent 路由改变。路由不可用或结果无效时，使用确定性的安全回退。
-- **按领域分离执行链**：一次 Run 准入后的能力领域不可变，Profile、Workflow 与子 Agent 只能继续收紧。通用编码 Agent 会读取标准仓库规则（根目录 `AGENTS.md`、`CLAUDE.md`、`.github/copilot-instructions.md`，以及目标路径适用的嵌套 `AGENTS.md`），获得供应商无关的语言智能与受保护重命名，并可使用按领域隔离的 Skill、记忆和显式信任的 MCP Server；但不能调用 CWT/CWTools/PDXScript、本地化、游戏资产或 EvidenceGate。Paradox Agent 把根目录 `CWTOOLS.md` 视为用户拥有的指令文件：`/init` 仅在缺失时创建最小模板，绝不重写现有文件。主 Agent 与 slim 子 Agent 会独立于生成的 profile 继承其有界完整内容；动态游戏事实按需从 `profile.json`、活动 CWT 规则、CWTools LSP 和项目索引获取。
-- **Profile 感知的并行 DAG 编排**：通用多 Agent 使用领域中立的仓库工程角色；Paradox 多 Agent 额外使用 CWT/LSP 证据、实体契约、本地化专职角色和语义质量门。两者都通过共享黑板协调有界并行任务。
-- **长期运行可靠性与智能压缩**：结构化上下文压缩、可恢复检查点、按进展续期的运行预算、基于活动状态的子 Agent 卡死检测和循环防御，使长任务可以持续完成，同时仍会终止真正停滞的工作。
-- **MCP 双向集成（消费 + 输出）**：已配置的 stdio/SSE Server 必须声明 `Paradox`、`General` 或 `Both`，该声明在工具披露和实际执行前都会强制校验；旧配置默认仅允许 Paradox。插件同时**对外输出一个独立分发的只读 MCP 服务**（`cwtools-mcp` 包，见下方功能指引第 8 节），把 34 个 PDX 语义工具开放给 **Codex / Claude Code** 等外部 Agent 复用。
-- **Shader 感知的 Agent 安全门**：七个只读 Shader 查询提供符号、编译单元、平台变体、调用方、可达性、验证与原版对比，并携带来源和版本。Shader 写入必须经过 preflight 策略；引擎硬调用和未知 Effect 默认失败关闭，修改后会重新验证所有反向 Include 依赖。
-- **全工作区本地化索引**：全工作区本地化 YML 文本基于后台 `FileSystemWatcher` 异步实时增量索引，为大模型源源不断地输送稳定、精准的项目上下文。
+打开受支持的文件，再使用编辑器标题栏按钮或右键菜单：
 
-##### 📂 4. 原版对比与极速迁移通道 (Vanilla Compare & Sync)
-处理巨型 Mod 升级与适配 Paradox 官方版本更新的利器。
-- **块级无缝对比**：支持在脚本中一键开启与原版（Vanilla）对应文件的 Diff 视图。
-- **自底向上安全合并**：支持光标所在块的“一键迁移同步”（`migrateBlockFromVanilla`），底层迁移算法采用**从后往前（自底向上）**的替换策略，保证前端行号修改不会导致上方偏移失效，极速适配版本变动。
+- GUI 画布：选择、定位、缩放控件，查找贴图并写回源码
+- 3D 恒星系预览和轨道编辑
+- 静态银河预览，以及星系、星云、坐标和显式超空间航道编辑
+- 科技树与事件链关系图
+- 实体、材质、动画和粒子预览
 
----
+源码修改使用 VS Code 工作区编辑，可以正常撤销。预览会区分源码数据和估算结果，不会把运行时生成的内容当作文件中的精确数据。
 
-#### 🏛️ 系统架构全景图
+### 原版对比与迁移
 
-以下为项目的整体模块交互与数据流拓扑，清晰展现了各层级之间的隔离屏障与通信管道：
+在有原版对应文件的 Mod 文件中使用 `Compare with Vanilla` 打开差异视图。`Migrate Block from Vanilla` 只替换光标所在代码块，不会把整个文件变成一次生成式重写。
 
-![System architecture overview](docs/system-architecture.png)
+### 可选 AI 工作区
 
----
+运行 `AI: Open Chat Panel` 打开内置 Agent 工作区。它可以处理通用编码或 Paradox/CWTools 任务，并提供项目索引、计划和工作流、明确的工具权限，以及可选 MCP 服务。
 
-#### ⚙️ 极速安装与开始
+AI Provider 需要单独配置。凭据通过 VS Code SecretStorage 保存，工具调用仍受当前沙盒和审批策略限制。兼容 ChatGPT 订阅的 Codex Provider 依赖上游兼容端点；上游变化时，扩展可能需要同步更新。
 
-##### 运行要求
-- **操作系统**：Windows / macOS / Linux
-- **VS Code 版本**：1.90.0 或更高版本
-- **.NET 运行时**：本地开发编译需要安装 [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
+### 通过 MCP 连接外部 Agent
 
-##### 安装步骤
-1. 在 Release 页面下载最新的 `.vsix` 打包文件。
-2. 打开 VS Code，按下 `Ctrl+Shift+P` (macOS 下为 `Cmd+Shift+P`)，输入并选择 `Extensions: Install from VSIX...`，选择下载的 VSIX 文件完成安装。
-3. 首次激活插件时，系统会弹出通知提示您选择**原版游戏安装目录**以构建初次语言服务器缓存，完成配置后即可开启极速开发之旅。
-
----
-
-#### 💡 主要功能使用指引 (Feature Guide)
-
-为了让您能够快速上手这套极具表现力的 IDE 开发工具链，我们为您整理了如下核心功能的使用指引：
-
-##### 🎨 1. GUI 实时画布预览与拖拽同步编辑
-* **如何打开**：在 VS Code 中打开任意 `.gui` 界面配置文件，点击右上角编辑器工具栏的 **画板图标 (Preview GUI)**。
-* **同步操作**：
-  - 双列网格属性面板将呈现在右侧，支持 DDS/TGA 贴图自动检索与解码显示。
-  - 您可以直接在画布中点击选中控件并进行**拖拽缩放或平移位置**，底层的 AST 重构算法会即时重组代码并自动写回左侧的 `.gui` 源代码文件中。
-  - 支持 `Ctrl+Z` 随时撤销画布和属性更改，提供所见即所得的极速开发体验。
-
-##### 🌌 2. 3D 恒星系交互编辑器 (3D Solar System)
-* **如何打开**：在 `solar_system_initializers/` 目录下的星系初始化 `.txt` 脚本中，点击编辑器标题栏的 **望远镜图标 (Preview Solar System)**。
-* **三维交互**：
-  - 视图支持鼠标滚轮缩放、右键平移和 `Alt+拖拽` 进行多维度视角旋转。
-  - 在**编辑模式**下，您可以通过右键菜单直接创建恒星、行星、卫星以及 Ring World。
-  - 用鼠标**直接在 3D 轨道上拖拽行星**修改其轨道距离和角度，对应的 `orbit_distance` 与 `orbit_angle` 参数会同步写回至编辑器内的 Paradox 脚本。
-
-##### 🌌 3. 静态银河预览与位置编辑器 (Static Galaxy)
-* **如何打开**：打开 `map/setup_scenarios/` 目录下的 `.txt` 文件，点击编辑器标题栏的 **地图图标 (Preview/Edit Static Galaxy)**，或使用文件右键菜单；也可通过 **打开方式 (Open With...)** 选择 `Static Galaxy Preview/Editor`。
-* **交互操作**：
-  - 滚轮缩放，`空格`/`Alt`/中键拖动平移，单击选择系统或星云，**双击跳转到对应源码块**。
-  - 通过顶部的 **预览 / 编辑** 分段按钮（快捷键 `E`）切换模式，缩放、平移、筛选和选中项均不会重置。
-  - 在**编辑模式**下拖动系统或星云即可平移其 X/Y 位置；范围坐标 `{ min max }` 平移时保持宽度不变，写回只替换被修改的数字 token——一次拖动恰好对应一次原生撤销。检视器支持精确填写 X/Y/Z（包括为原本没有 Z 的位置补充 Z）以及星云半径。定义了 `initializer` 的系统会显示解析出的星系详情（恒星类型及同色节点、行星/卫星/小行星带数量、环形世界）。显式航道可直接在画布上绘制：右键点击系统进入绘制模式，左键连续链接端点（A→B→C…），再次右键把所有航段合并为一次写回；右键点击已有航道会从源码中删除对应的 `add_hyperlane` 声明。**喷涂/擦除**工具可批量散布或移除未定义的随机星系（有名称或 initializer 的系统始终受保护），每次笔画恰好一次撤销——笔刷半径可用滑块或 `Alt+右键拖动` 调整，按住 `Shift` 沿直线方向散布，`Ctrl+Shift` 则精确压线且列数随半径增加。
-  - `random_hyperlanes = yes` 会明确提示：运行时生成的随机航道不会被当作精确预览结果展示。可选的**估算航道**开关（默认关闭）绘制明确标注的启发式近似航道——永远不会写回源码。
-  - Steam Workshop 文件会显示风险横幅，编辑前需要确认，并优先提供复制到 Mod 工作区的安全路径。
-
-##### 🌐 4. 科技树与事件引用网络 (Dependency Graph)
-* **如何打开**：在科技或事件定义脚本中，点击右上角的 **依赖图图标 (Show Dependency Graph)**。
-* **交互导航**：
-  - 底层基于 Cytoscape.js 渲染高表现力的连线节点拓扑，直观呈现复杂科技前置要求或事件的多级触发链。
-  - 完美支持搜索框快速过滤、层级限制与节点高亮。**双击任意节点**，编辑器将自动跳转并精准高亮至其声明所在的源文件代码行。
-
-##### 🤖 5. 自主 AI 开发面板 (Autonomous AI)
-* **如何打开**：点击侧边栏的 **AI 图标**，或按快捷键 `Ctrl+Shift+P` 搜索并执行 `AI: Open Chat Panel` 开启会话。
-* **Agent Profile**：输入框旁的菜单只用于选择或固定**能力领域**；任务意图和执行策略始终自动判断。选择“自动”时，运行时也会逐轮识别能力领域。
-* **特性操作**：会话支持完整的上下文压缩（超过 70% 时自动生成紧凑记忆）以及一键无损导入导出完整
-运行步骤的 JSON 归档。
-* **使用 ChatGPT 额度的 Codex Provider**：在 AI 设置中选择 **Codex（ChatGPT 订阅）**，通过与 [OpenCode 的 ChatGPT Plus / Pro 集成](https://opencode.ai/docs/providers/)兼容的浏览器 PKCE 流程登录一次即可。Access Token 和 Refresh Token 只保存在 VS Code SecretStorage，并会自动刷新；“退出账号”只删除本插件保存的凭据。Provider 固定调用 ChatGPT Codex Responses 后端，不接受 API Key 或自定义 Endpoint，也不会降级到按量计费的 OpenAI Platform API。它不安装、启动或探测 Codex CLI / Desktop，也不与这些程序共享登录状态。设置页会显示账户、套餐、额度窗口及兼容模型清单。对话统一使用插件原生 Agent 运行时，因此所选模型与思考等级、当前 Agent 沙盒、权限策略、写入调度、工具和 MCP 配置均与其他 Provider 走同一条链路。该订阅端点属于内部兼容接口，并非公开稳定 API；上游流程变化时可能需要同步适配。该 Provider 仍从内联补全、翻译预览和子 Agent 模型选择器中排除。
-* **架构流程图**：当设计或分析包含多个相互关联的组件时，Agent 可以按需输出 Mermaid 流程图、时序图或状态图。聊天消息、实时过程文本、工具结果卡、计划、蓝图和 walkthrough 卡片都会使用 VS Code 主题在本地渲染，并支持复制源码、全屏查看和失败时安全回退到源码。
-* **网页访问**：Agent 设置将搜索与实时网页访问分开控制。搜索供应商支持 OpenAI、Brave、Exa、Tavily、Serper、SerpAPI、SearXNG，并可降级到 DuckDuckGo；供应商密钥保存在 VS Code SecretStorage。实时网页必须经过公开地址、重定向、响应大小和域名策略检查，并始终作为不可信外部证据处理。
-
-##### 📂 6. 原版对比与块级安全合并 (Vanilla Sync)
-* **一键对比**：插件激活后，当您编辑的 Mod 文件与原版游戏文件同名时，点击行上方的 CodeLens **Compare with Vanilla** 打开分屏 Diff。
-* **安全替换**：如果需要提取原版官方代码段，点击代码块上方出现的 **Migrate Block from Vanilla**。系统将锁定并发队列，自底向上智能应用合并，防止因前端坐标更改导致后续块偏移失效。
-
-##### 💎 7. Asset 资产与 3D Mesh 实体动画调试器 (Asset & Mesh Previewer)
-* **如何打开**：在 VS Code 中打开 `.asset` 实体配置文件或 `.gfx` 图形定义文件，点击右上角编辑器工具栏的 **3D 模型图标 (Preview Entity)**。
-* **3D 网格与材质调试**：
-  - 底层基于 Three.js 实现 Paradox 专有 3D 网格模型文件（`.mesh`）的极速沙盒化解析与三维渲染。
-  - 自动根据配置搜寻、加载并解码 DDS 格式的材质贴图，提供高保真的光照着色预览。
-* **骨骼动画微调**：
-  - 完美解析绑定的骨骼节点树，支持在右侧控制台中实时挑选、播放不同的骨骼动画序列（如移动、待机、战斗）。
-  - 支持材质属性（如漫反射、高光强度）在侧边栏面板上的动态滑块调节与实时重绘调试。
-
-##### 🔌 8. 通用 MCP 服务（供 Codex / Claude Code 调用）
-配套的 **`cwtools-mcp`** 包（在独立仓库开发，以 `submodules/cwtools-mcp` 形式挂回本仓库）是一个**只读**的 MCP 服务，把 CWTools 的 PDX 语义能力（项目知识包、有界项目语义图、验证 ID、查语法、查作用域、全项目诊断、定义/引用、补全、scripted effects/triggers/enums/modifiers/variables、实体信息和七个 Shader 查询，共 34 个只读工具）开放给任意 MCP 客户端。它**不随扩展 VSIX 分发**，独立安装一次即可依附于已激活的扩展工作。文件写入仍由你的 Agent 自带环境完成。
-* **有界语义图**：大型 Mod 优先调用 `explore_pdx_project`。它直接读取 live CWTools model，返回排序后的 typed entry point、依赖边、逐文件语义事实、provenance、截断预算与 freshness，不需要读取整份文件。
-* **紧凑的 `/init` 知识数据库**：深度 `/init` 阶段只执行一次完整导出，把已加载的项目与原版定义以及工作区引用拓扑保存为 `.cwtools/project/knowledge/manifest.json` 和 `knowledge.sqlite`，替代原先重复的 capability/archetype JSON 集合。之后的普通保存会按路径去重成一个短增量批次，并在 WAL 事务中只更新受影响的 SQLite 行；增量导出使用共享的游戏模型读锁，因此补全、高亮、CodeLens 和嵌入提示可以继续响应。全量重建仅在项目载入或显式 `/init` 时执行；涉及全图的 Shader、规则/配置和 `.cwb` 变化只标记为陈旧并留到下一次载入，不会在编辑期间再次启动全量重建。确定性的部分结果只发布一次并准确提示覆盖范围，不再重复相同的全量扫描；仅临时的加载中或陈旧状态会重试。`/init` 还会在深层导出前直接创建或增量更新 `.cwtools/index/workspace-symbols.sqlite`。首次激活时，已有 `.cwtools-ai` 会合并进 `.cwtools` 并删除旧目录；同一相对路径同时存在时，以当前 `.cwtools` 文件为准，旧冲突内容保存在 `.cwtools/migration-conflicts/cwtools-ai/`。构建工作区索引、等待 CWTools 和发布知识数据库期间，VS Code 左下角会持续显示进度。`query_project_knowledge` 会先通过 SQLite 索引解析显式 ID，再扩展其引用、事件与逻辑邻域；只有未提供标识符种子时才退回有界意图检索。它可按需检索定义、定义栈、拓扑、项目/原版范例，以及事件调用阶段、`on_action` 入口、Flag、科技、变量和作用域桥接等事件结构与逻辑关系，无需把整个数据库塞入提示词。懒加载的 `query_workspace_index` 会先恢复持久化 SQLite、优先发布工作区阶段、只解析变化文件，并最多等待八秒后返回部分结果，同时让原版索引继续构建。序列化原版 `.cwb` 及其元数据成功重写后，Extension 会在重载窗口前立即强制重建该游戏的全局原版符号 SQLite；文件 watcher 仍作为兜底，并持久标记匹配的项目知识为待刷新，重载后的 LSP 报告 ready 时会继续执行该刷新。
-
-* **默认复用插件内服务**：MCP 入口脚本会通过 `globalStorage/mcp/bridge-manifest.json` 连接当前已激活的 VS Code 兼容宿主（VS Code / Cursor / VSCodium / Antigravity 等），复用 IDE 中已有的 CWTools LSP 与 Problems 诊断，不再额外启动第二个重型服务。manifest 会在所有受支持宿主的 globalStorage 中自动发现，无需配置路径。客户端工作区会从 MCP roots、会话环境变量或 cwd 动态发现，且必须与 bridge 暴露的工作区一致；不一致时返回 `bridge_unavailable`，不会从另一个项目静默回答。
-* **独立安装**：通过 npm 安装（`npx -y cwtools-mcp`），或从 [cwtools-mcp Releases](https://github.com/Aa728848/cwtools-mcp/releases) 下载单文件 `cwtools-mcp.cjs`。旧版本插件同步到 `globalStorage` 的代理脚本仍然可用，不受影响。旧的独立 LSP 模式仍可用 `--standalone` 显式启用。
-* **Codex**：
+独立发布的 [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) 为 MCP 客户端提供只读 CWTools 语义查询。它通常会连接当前已激活的扩展，而不是再次启动语言服务。
 
 ```sh
 codex mcp add cwtools -- npx -y cwtools-mcp --stdio
 ```
 
-* **Claude Code**：
-
 ```sh
 claude mcp add cwtools --scope user -- npx -y cwtools-mcp --stdio
 ```
 
-* **Antigravity**：在 `~/.gemini/config/mcp_config.json` 中添加 `cwtools`，内容为 `"command": "npx"` 和 `"args": ["-y", "cwtools-mcp", "--stdio"]`。
+### 文档与反馈
 
-  等价的 `~/.codex/config.toml` 手写配置、`--standalone`/`--rules`/`--cache`/`--game-path` 高级选项与单文件接入方式，详见 [cwtools-mcp README](https://github.com/Aa728848/cwtools-mcp)。
+- [项目 README](https://github.com/Aa728848/cwtools-vscode#readme)
+- [CWT 规则指南](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/cwt-rule-config.md)
+- [诊断码速查](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/diagnostic-codes.md)
+- [贡献指南](https://github.com/Aa728848/cwtools-vscode/blob/master/CONTRIBUTING.md)
 
-##### 🧩 9. Paradox Shader 编辑与安全
-* 正常打开 Stellaris `gfx/FX/*.shader` 或 `.fxh` 即可使用。导航和验证只在文件真实的传递 Include 编译单元内进行；未 Include 的同名符号绝不会作为兜底绑定。
-* 平台条件声明会保留并以 inactive 语义 token 修饰。重命名与 code action 会保守处理条件变体、文件覆盖、renderer contract 和 curated EXE ABI 入口。
-* `.gfx` 中 `spriteType`、`corneredTileSpriteType`、`progressbartype` 的 `effectFile` 会连接到 Shader 文件；静态 `.gui` 的 `GFX_*` 使用再按 sprite subtype 选择 renderer contract 要求的 Effect，绝不会因文件被选择就把其中所有 Effect 判定为可达。
-* Agent 与 MCP 明确区分显式数据调用、已确认 renderer 约定、约定候选、curated 引擎硬调用和 engine-or-unreferenced unknown；“没有文本引用”永远不是 EXE 调用证据。
-
-##### 📁 10. Paradox 游戏文件夹建议
-* 在 Explorer 中右键文件夹并选择 **CWTools: 创建 Paradox 游戏文件夹...**，或从命令面板运行同名命令。可搜索选择器只建议当前父目录的下一层。
-* 候选会合并活动 CWT TypeDef 路径、已识别游戏的 profile 约定，以及已配置原版安装中对应层级的直接子目录；项目中已存在的文件/目录会被移除，同时允许输入自定义单段或多段相对路径。
-* 功能覆盖 Stellaris、HOI4、EU4、EU5、CK2、CK3、Imperator、Victoria II、Victoria 3 和 Custom/Generic CWT 项目。未知项目不会静默继承 Stellaris，已废弃的 Stellaris `localisation_synced` 路径也不会进入建议。
-* 创建过程使用 VS Code 工作区文件系统 API，并在写入前复核父目录与目标；绝对路径、路径穿越和非法名称会被拒绝，已有资源不会被覆盖。创建成功后会在 Explorer 中定位，多根工作区与可写 virtual workspace 使用同一套 URI 安全边界。
-
----
-
-#### 🛠️ 开发者指南 (Developer Hub)
-
-如果您有志于为本项目贡献代码，或者需要使用 AI 助手进行二次开发，请务必遵循以下工作流：
-
-##### 首次克隆与环境准备
-
-构建或打包前请先安装以下工具：
-
-| 工具 | 必要版本 / 说明 |
-| --- | --- |
-| Git | 支持 submodule 的当前版本 |
-| Node.js / npm | Node.js 20.x 或更高、npm 10.x 或更高 |
-| .NET SDK | .NET 10 SDK；`global.json` 当前选择 `10.0.301`，并允许滚动到最新 minor 版本 |
-| PowerShell | 根目录 `npm run pack*` 脚本需要 Windows PowerShell 5.1 或更高版本 |
-| VS Code | 1.90 或更高；只有 `npm run pack:install` / `pack:quick` 还要求 `code` CLI 可用 |
-
-克隆两个必需的子模块，并安装根项目及 npm workspaces 的全部依赖：
-
-```bash
-git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
-cd cwtools-vscode
-npm install
-```
-
-如果克隆时没有使用 `--recurse-submodules`，请在构建前补全子模块；缺少
-`submodules/cwtools` 会导致 F# 构建失败，缺少
-`submodules/cwtools-stellaris-config/config` 会导致打包失败：
-
-```bash
-git submodule update --init --recursive
-```
-
-首次完整打包前，请在同一个终端确认 `node --version`、`npm --version`、
-`dotnet --version` 和 `git --version` 均能正常运行，并在 PowerShell 中检查
-`$PSVersionTable.PSVersion`。建议先执行一次 `npm run compile`，尽早发现依赖或前端环境问题，再进行耗时更长的三平台服务端发布。
-
-##### 常用构建与验证命令
-在项目根目录下，您可以使用以下命令验证项目的完整性：
-
-```bash
-# 1. 编译全部 TypeScript 代码并使用 Rollup 捆绑前端 Webview UI
-npm run compile
-
-# 2. 运行 ESLint 代码质量检查 (ESLint 9 严格模式)
-npm run lint
-
-# 3. 运行 TypeScript 单元测试
-npm run test:unit
-
-# 4. 运行 VS Code 集成测试套件
-npm run test
-
-# 5. 编译 C# / F# 语言服务端后端代码
-dotnet build src/LSP/
-dotnet build src/Main/
-
-# 6. 一键全面质量检查 (Lint + Compile + Unit Test + Release Gate)
-npm run verify
-
-# 7. 校验 MCP 服务（位于 cwtools-mcp 子模块）
-npm run generate:mcp-schema  # 从上游工具定义重生成 MCP schema（写入 submodules/cwtools-mcp）
-cd submodules/cwtools-mcp && npm run build && npm run test:contracts
-```
-
-CWT 规则编写说明见 [CWT 规则配置开发指南](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/cwt-rule-config.md)。
-
-##### 子模块
-本仓库使用三个职责不同的子模块：
-
-- [`submodules/cwtools/`](submodules/cwtools/README.md)：上游 CWTools F# 库，供语言服务器复用解析、校验、游戏语义、Shader 支持和 scripted type 增量刷新等能力。
-- [`submodules/cwtools-stellaris-config/`](submodules/cwtools-stellaris-config/README.md)：Stellaris CWT 规则配置数据。规则同步工具会把它与游戏 `script_documentation` 日志和原版 `common/` 对比；打包时使用其中的 `config/` 目录作为 fallback 规则包来源。
-- [`submodules/cwtools-mcp/`](https://github.com/Aa728848/cwtools-mcp)：独立分发的只读 MCP 服务（`cwtools-shared` + `cwtools-mcp` 两个包），供外部 Agent 使用。它有独立仓库与发布节奏，扩展 VSIX 不再随包携带。
-
-##### 📦 插件打包
-生成的 VSIX 会包含自包含的 `win-x64`、`linux-x64` 和 `osx-x64` 服务端。
-根目录 npm 打包命令会调用 `package.ps1`，因此请先完成上述首次克隆准备，
-然后在仓库根目录使用 Windows PowerShell 执行：
-
-```bash
-npm run pack         # 完整打包
-npm run pack:install # 打包并安装到本机 VS Code
-npm run pack:quick   # 跳过服务端重编译，快速打包并安装
-```
-
-`pack:quick` 会复用现有服务端二进制；如果 `release/bin/server/` 尚无完整产物，
-它不适合首次打包。`pack:install` 和 `pack:quick` 还要求 VS Code 的 `code`
-命令已加入 `PATH`。打包成功后，产物位于
-`release/eddy-stellaris-cwt-<version>.vsix`。
-
-`npm run build:docs` 会校验单一双语主文档，并从本 README 生成
-`release/README.md`。完整打包流程见
-[.agents/workflows/package.md](https://github.com/Aa728848/cwtools-vscode/blob/master/.agents/workflows/package.md)，也可以直接使用
-`package.ps1`。
-
----
-
-#### 🤝 开源协议
-本项目采用 [MIT 许可证](LICENSE) 分发。特别感谢 [CWTools](https://github.com/cwtools) 开源项目以及所有为 Paradox Modding 生态做出贡献的开发者们！
+如果遇到问题，请在 [GitHub issue](https://github.com/Aa728848/cwtools-vscode/issues) 中附上游戏 Profile、扩展版本、相关文件类型和可复现步骤。

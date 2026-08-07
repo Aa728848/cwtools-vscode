@@ -1,15 +1,21 @@
-# CWTools Diagnostic Codes / 验证错误码说明
+# CWTools Diagnostic Codes / CWTools 诊断码
 
 [Project Overview / 项目介绍](../README.md) | [Contribution Guide / 贡献指南](../CONTRIBUTING.md) | [Architecture / 架构文档](../ARCHITECTURE.md) | [CWT Rule Guide / CWT 规则指南](cwt-rule-config.md)
 
-Reference for the `CWxxx` error codes reported by CWTools validation. Each
-section heading is the error code, so diagnostics link here directly via the
-error-code link in the Problems panel.
+This is the reference for `CWxxx` validation codes and `CWFXxxx` Shader codes.
+The code link in VS Code's Problems panel opens the matching section. If you
+arrived here directly, use the page search to jump to a code.
 
-本页是 CWTools 验证错误码的速查表。问题面板中点击错误码即可跳转到对应小节。
-每节包含:错误含义、常见原因和修复方法。
+本页收录 `CWxxx` 校验诊断和 `CWFXxxx` Shader 诊断。VS Code 问题面板中的
+错误码链接会直接打开对应小节；如果从文档首页进入，可以用页面搜索查找编号。
 
-Severity legend / 严重度: **E** Error, **W** Warning, **I** Information, **H** Hint.
+Severity / 严重度：**E** Error，**W** Warning，**I** Information，**H** Hint。
+
+Fix syntax and parse errors before investigating later semantic diagnostics in
+the same file. Parser recovery can make follow-up messages incomplete.
+
+同一文件中应先修复语法和解析错误，再处理后续语义诊断；解析恢复期间，后续消息
+可能不完整。
 
 ---
 

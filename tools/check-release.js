@@ -131,6 +131,15 @@ check('Release README includes English and Chinese overview sections', () => {
         && readme.includes('## 中文');
 });
 
+check('Release README matches the dedicated Marketplace source', () => {
+    const sourcePath = path.join(ROOT, 'docs', 'marketplace-readme.md');
+    const releaseReadmePath = path.join(RELEASE, 'README.md');
+    if (!fs.existsSync(sourcePath) || !fs.existsSync(releaseReadmePath)) return false;
+    const normalize = content => content.replace(/\r\n/g, '\n').trimEnd();
+    return normalize(fs.readFileSync(sourcePath, 'utf-8'))
+        === normalize(fs.readFileSync(releaseReadmePath, 'utf-8'));
+});
+
 check('Single-source bilingual docs are valid', () => {
     try {
         execSync('node tools/build-github-docs.js --check', { cwd: ROOT, stdio: 'pipe', timeout: 30000 });

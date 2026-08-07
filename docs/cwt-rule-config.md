@@ -6,7 +6,9 @@
 
 ## English
 
-This page is the project wiki for CWT rule configuration developers. It documents the rule model used by this repository, the supported rule blocks and field expressions, and the difference between shared, Legacy/Clausewitz, Jomini/modern, and game-specific support.
+This guide is for people who maintain CWT rules. It explains the rule model used by this project, the available blocks and field expressions, and the differences between shared, Legacy/Clausewitz, Jomini/modern, and game-specific support.
+
+If you are adding one field to an existing rule, start with [Basic Syntax](#basic-syntax), [Field Expression Support Matrix](#field-expression-support-matrix), and [Authoring Workflow](#authoring-workflow). Read the parser-oriented sections when you are changing the CWT language itself.
 
 The implementation source of truth is in:
 
@@ -17,7 +19,7 @@ The implementation source of truth is in:
 - `submodules/cwtools/CWTools/Rules/CompletionService.fs`
 - `submodules/cwtools-stellaris-config/config/`
 
-The format is inspired by reference-style rule documentation, but the semantics below describe this project rather than another tool's CWT dialect.
+The implementation files above are authoritative. Examples in this guide describe this project's dialect and may not apply unchanged to another CWT tool.
 
 ### Support Labels
 
@@ -809,7 +811,9 @@ When adding a field expression or changing field semantics, check:
 
 ## 中文
 
-本文档是本项目的 CWT 规则配置开发者 wiki。它说明本仓库使用的规则模型、支持的规则块和字段表达式，以及哪些能力属于通用、Legacy/Clausewitz、Jomini/现代或游戏特定支持。
+本文面向维护 CWT 规则的开发者，说明本项目使用的规则模型、可用规则块和字段表达式，以及哪些能力属于通用、Legacy/Clausewitz、Jomini/现代或游戏特定支持。
+
+如果只是给现有规则增加一个字段，可以先看[基础语法](#基础语法)、[字段表达式支持矩阵](#字段表达式支持矩阵)和[规则开发流程](#规则开发流程)。只有修改 CWT 语言本身时，才需要继续阅读偏解析器实现的章节。
 
 实现上的事实来源是：
 
@@ -820,7 +824,7 @@ When adding a field expression or changing field semantics, check:
 - `submodules/cwtools/CWTools/Rules/CompletionService.fs`
 - `submodules/cwtools-stellaris-config/config/`
 
-本文组织方式参考规则格式参考类文档，但字段、语义和支持范围按本项目实现重新整理。
+以上实现文件是最终依据。本文示例描述的是本项目方言，不一定能原样用于其他 CWT 工具。
 
 ### 支持范围标记
 

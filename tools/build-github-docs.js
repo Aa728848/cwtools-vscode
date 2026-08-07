@@ -18,6 +18,7 @@ const canonicalDocs = [
     'CONTRIBUTING.md',
     'ARCHITECTURE.md',
     'docs/cwt-rule-config.md',
+    'docs/marketplace-readme.md',
 ];
 
 function normalize(markdown) {

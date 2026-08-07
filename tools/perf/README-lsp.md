@@ -1,11 +1,10 @@
-# LSP performance reproduction
+# Reproducing LSP performance problems
 
-These tools make the freeze and 100-edit memory checks repeatable without
-changing files on disk.
+The scripts in this directory reproduce edit-time freezes and memory growth without changing files on disk. Keep the workspace, build commit, operation sequence, and trace together; a log by itself is not enough for a performance claim.
 
-## Fixed 100-edit run
+## Run the 100-edit harness
 
-Build the server first, then run the harness against a large Stellaris workspace:
+Build the server, choose a large Stellaris workspace and a representative event file, then run:
 
 ```powershell
 node tools/perf/lsp-memory-profile.mjs `
@@ -18,37 +17,29 @@ node tools/perf/lsp-memory-profile.mjs `
   --hold-ms 300000
 ```
 
-The harness prints the server PID, sends a comment-only change, save, and
-completion request each iteration, then leaves a five-minute stabilization
-window. Compare `Memory`, `Performance`, `Refresh`, `CarrierSnapshot`, and
-validation phase logs. The edited file is restored by `didClose`; disk content
-is never written.
+Each iteration sends a comment-only change, a save, and a completion request. The process then remains open for five minutes so memory can settle. `didClose` restores the in-memory document; the harness never writes the edited content to disk.
 
-## Runtime trace
+Record the printed server PID and retain the `Memory`, `Performance`, `Refresh`, `CarrierSnapshot`, and validation-phase logs.
 
-While the harness is in its edit or stabilization window, attach the trace
-collector using the printed PID:
+## Capture a runtime trace
+
+While the harness is editing or waiting, attach the trace collector to the printed PID:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/perf/capture-lsp-trace.ps1 `
   -ProcessId 12345 -DurationSeconds 90
 ```
 
-The trace includes CPU samples plus runtime GC, allocation, contention,
-ThreadPool and exception events. Open the resulting `.nettrace` in PerfView or
-Visual Studio. A freeze should now be attributable to one dominant request
-phase using the matching request IDs and heartbeat gaps in the LSP log.
+The `.nettrace` includes CPU samples, GC and allocation events, contention, ThreadPool events, and exceptions. Open it in PerfView or Visual Studio. Match request IDs and heartbeat gaps from the LSP log to the dominant request phase in the trace.
 
-## Acceptance matrix
+## Scenarios to compare
 
-Run the same build and workspace for each case:
+Use the same build and workspace for each case:
 
-1. Save a large event file while repeatedly requesting completion in another file.
+1. Save a large event file while requesting completion in another file.
 2. Edit a section template, then request completion and definition navigation.
 3. Perform 25 saves each across solar initializers, section templates, component sets, and events.
-4. Create, rename, and delete duplicate/overridden definitions.
-5. Edit scripted triggers/effects and inline scripts together with their callers.
+4. Create, rename, and delete duplicate or overridden definitions.
+5. Edit scripted triggers, scripted effects, inline scripts, and their callers in the same run.
 
-Do not claim latency or memory thresholds from logs alone. Retain the `.nettrace`,
-the complete monitor log, build commit, workspace file count, and operation
-sequence with every reported measurement.
+For every reported measurement, keep the trace, complete monitor log, build commit, workspace file count, and exact operation sequence.

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * Build the VSIX overview README from the root bilingual README.md.
+ * Build the VSIX overview README from the dedicated Marketplace source.
  *
  * VS Code renders a single README.md in the extension details page, while
- * package.nls*.json only localizes manifest contribution strings. The root
- * README.md is the single bilingual source of truth.
+ * package.nls*.json only localizes manifest contribution strings. Keep the
+ * repository README focused on contributors and the Marketplace source focused
+ * on extension users.
  */
 
 const fs = require('fs');
@@ -12,7 +13,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const releaseDir = path.join(root, 'release');
-const sourceReadmePath = path.join(root, 'README.md');
+const sourceReadmePath = path.join(root, 'docs', 'marketplace-readme.md');
 const releaseReadmePath = path.join(releaseDir, 'README.md');
 
 function normalize(markdown) {
@@ -34,35 +35,9 @@ function validateBilingualReadme(markdown) {
     }
 }
 
-function marketplaceReadme(markdown) {
-    let output = markdown;
-
-    output = output.replace(
-        /^\[English\]\(#english\).*$/m,
-        '[English](#english) | [中文](#zh-cn) | [CWT Rule Guide / CWT 规则指南](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/cwt-rule-config.md) | [Diagnostic Codes / 诊断码](https://github.com/Aa728848/cwtools-vscode/blob/master/docs/diagnostic-codes.md)'
-    );
-
-    output = output.replaceAll(
-        '[.agents/workflows/package.md](./.agents/workflows/package.md)',
-        '[.agents/workflows/package.md](https://github.com/Aa728848/cwtools-vscode/blob/master/.agents/workflows/package.md)'
-    );
-
-    output = output.replaceAll(
-        '(docs/cwt-rule-config.md)',
-        '(https://github.com/Aa728848/cwtools-vscode/blob/master/docs/cwt-rule-config.md)'
-    );
-
-    output = output.replaceAll(
-        '(docs/diagnostic-codes.md)',
-        '(https://github.com/Aa728848/cwtools-vscode/blob/master/docs/diagnostic-codes.md)'
-    );
-
-    return normalize(output);
-}
-
 const source = readRequired(sourceReadmePath);
 validateBilingualReadme(source);
 
 fs.mkdirSync(releaseDir, { recursive: true });
-fs.writeFileSync(releaseReadmePath, marketplaceReadme(source).replace(/\n/g, '\r\n'), 'utf8');
-console.log(`Built release README from root README.md: ${path.relative(root, releaseReadmePath)}`);
+fs.writeFileSync(releaseReadmePath, normalize(source).replace(/\n/g, '\r\n'), 'utf8');
+console.log(`Built release README from Marketplace source: ${path.relative(root, sourceReadmePath)}`);

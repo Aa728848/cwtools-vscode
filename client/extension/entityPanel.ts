@@ -2178,7 +2178,7 @@ export class EntityPanel {
                         <button class="toolbar-btn secondary" id="btn-open-attach-entity">${locale.startsWith('zh') ? '跳转定义' : 'Open Definition'}</button>
                     </div>
                     <div id="attach-diagnostic" class="attach-diagnostic hidden" role="status"></div>
-                    <div class="static-transform-note">${locale.startsWith('zh') ? '复制模型 Locator/Bone 的变换只会写入静态定位器，不会建立动态绑定。' : 'Copying a Model Locator/Bone transform writes a static locator value; it does not create a dynamic binding.'}</div>
+                    <div class="static-transform-note">${locale.startsWith('zh') ? '模型 Locator/Bone 的变换只读；切换到编辑模式后仍可设置 Attach。复制其变换只会写入静态定位器，不会建立动态绑定。' : 'Model Locator/Bone transforms are read-only; Attach remains editable in Edit mode. Copying their transform writes only a static locator value and does not create a dynamic binding.'}</div>
                     <div class="props-actions">
                         <button class="toolbar-btn secondary props-action-leading" id="btn-special-duplicate" title="${locale.startsWith('zh') ? '特殊复制 (Ctrl+Shift+D)' : 'Duplicate Special (Ctrl+Shift+D)'}">${locale.startsWith('zh') ? '特殊复制…' : 'Duplicate…'}</button>
                         <button class="toolbar-btn secondary" id="btn-copy-transform">${locale.startsWith('zh') ? '复制变换' : 'Copy Transform'}</button>

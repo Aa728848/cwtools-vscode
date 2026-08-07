@@ -1422,7 +1422,9 @@ function selectLocator(obj: THREE.Object3D, editable = true, preserveSmartDuplic
     selectedLocatorEditable = editMode && editable && !isSubmodel && !(obj instanceof THREE.Bone) && !(obj.parent instanceof THREE.Bone);
     const canEditTransform = editMode && editable;
 
-    // Always show properties panel (attach editing is always allowed)
+    // Always show properties. Transform permissions and attach permissions are
+    // deliberately independent: model anchors stay transform-read-only, while
+    // every selected anchor may edit attach data after entering Edit mode.
     updatePropsFromLocator(obj);
     propsPanel.classList.remove('hidden');
     propsName.textContent = obj instanceof THREE.Bone ? obj.name.replace(/^.*?__/, '') : obj.name;
@@ -1466,14 +1468,16 @@ function selectLocator(obj: THREE.Object3D, editable = true, preserveSmartDuplic
     if (pasteBtn) pasteBtn.disabled = !selectedLocatorEditable || !copiedLocatorWorldTransform;
     if (originBtn) originBtn.disabled = !selectedLocatorEditable;
 
-    // Attach entity input: enabled for all, including submodels (cross-file write supported)
-    propAttachEntity.disabled = !editMode;
-    propAttachEntity.style.opacity = editMode ? '1' : '0.5';
+    // Attach editing does not depend on selectedLocatorEditable. In particular,
+    // model locators and bones can manage attach data without gaining a gizmo.
+    const canEditAttach = editMode;
+    propAttachEntity.disabled = !canEditAttach;
+    propAttachEntity.style.opacity = canEditAttach ? '1' : '0.5';
     propAttachEntity.placeholder = isSubmodel ? `Attach to ${ownerEntity}` : 'e.g. some_entity_name';
     const setAttachButton = document.getElementById('btn-set-attach') as HTMLButtonElement | null;
     const clearAttachButton = document.getElementById('btn-clear-attach') as HTMLButtonElement | null;
-    if (setAttachButton) setAttachButton.disabled = !editMode;
-    if (clearAttachButton) clearAttachButton.disabled = !editMode || !propAttachEntity.value.trim();
+    if (setAttachButton) setAttachButton.disabled = !canEditAttach;
+    if (clearAttachButton) clearAttachButton.disabled = !canEditAttach || !propAttachEntity.value.trim();
 
     if (selectedLocatorEditable) {
         transformCtrl.attach(obj);

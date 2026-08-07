@@ -102,6 +102,14 @@ describe('entity preview locator drafts', () => {
         expect(host).not.to.include('Inserted locator override for mesh locator');
     });
 
+    it('keeps attach editing independent from read-only transforms', () => {
+        expect(webview).to.include('const canEditAttach = editMode;');
+        expect(webview).to.include('propAttachEntity.disabled = !canEditAttach;');
+        expect(webview).to.include('setAttachButton.disabled = !canEditAttach;');
+        expect(webview).not.to.include('propAttachEntity.disabled = !selectedLocatorEditable');
+        expect(host).to.include('模型 Locator/Bone 的变换只读；切换到编辑模式后仍可设置 Attach');
+    });
+
     it('restricts viewport picking to editable locators and keeps local gizmos aligned', () => {
         expect(webview).to.include('Viewport picking is intentionally limited to editable .asset locators');
         expect(webview).to.include('isLocatorObjectEditable(obj.parent)');

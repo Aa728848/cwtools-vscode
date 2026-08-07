@@ -137,6 +137,49 @@ body.edit-mode .edit-only {
     gap: 7px;
 }
 
+#draft-summary {
+    position: relative;
+    font-size: 11px;
+}
+
+#draft-summary.hidden {
+    display: none !important;
+}
+
+#draft-summary summary {
+    color: var(--ep-accent);
+    cursor: pointer;
+}
+
+#draft-summary-files {
+    position: absolute;
+    top: 24px;
+    right: 0;
+    z-index: 80;
+    min-width: 280px;
+    max-width: 420px;
+    padding: 8px;
+    border: 1px solid var(--ep-border);
+    border-radius: 5px;
+    background: var(--ep-toolbar-bg);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.draft-file + .draft-file {
+    margin-top: 7px;
+    padding-top: 7px;
+    border-top: 1px solid var(--ep-border);
+}
+
+.draft-file-name {
+    font-weight: 600;
+}
+
+.draft-file-operation {
+    color: var(--vscode-descriptionForeground, var(--ep-fg));
+    line-height: 1.4;
+}
+
 #edit-save-state {
     color: var(--vscode-descriptionForeground, var(--ep-fg));
     font-size: 11px;
@@ -240,6 +283,31 @@ body.edit-mode .edit-only {
 .toolbar-btn.danger {
     background: var(--vscode-button-secondaryBackground, #5a2525);
     color: var(--vscode-button-secondaryForeground, #fff);
+}
+
+.toolbar-btn.compact {
+    padding: 3px 6px;
+}
+
+.toolbar-compact-select,
+.toolbar-number {
+    height: 26px;
+    box-sizing: border-box;
+    border: 1px solid var(--ep-input-border);
+    border-radius: 3px;
+    color: var(--ep-input-fg);
+    background: var(--ep-input-bg);
+    font: inherit;
+    font-size: 11px;
+}
+
+.toolbar-compact-select {
+    width: 62px;
+}
+
+.toolbar-number {
+    width: 48px;
+    padding: 2px 3px;
 }
 
 .toolbar-btn:disabled {
@@ -767,9 +835,58 @@ body.edit-mode .edit-only {
 
 .props-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     margin-top: 8px;
     justify-content: flex-end;
+}
+
+.static-transform-note {
+    margin-top: 7px;
+    color: var(--vscode-descriptionForeground, var(--ep-fg));
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.attach-manager-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 6px;
+}
+
+.attach-diagnostic {
+    margin-top: 6px;
+    padding: 5px 7px;
+    border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+    color: var(--vscode-descriptionForeground, var(--ep-fg));
+    background: color-mix(in srgb, var(--ep-input-bg) 80%, transparent);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.attach-diagnostic.error {
+    border-left-color: var(--vscode-errorForeground, #f48771);
+    color: var(--vscode-errorForeground, #f48771);
+}
+
+.attach-diagnostic.hidden {
+    display: none;
+}
+
+.tree-inline-action {
+    margin-left: auto;
+    border: 0;
+    color: var(--vscode-descriptionForeground, var(--ep-fg));
+    background: transparent;
+    font-size: 10px;
+    cursor: pointer;
+    opacity: 0;
+}
+
+.tree-item:hover .tree-inline-action,
+.tree-inline-action:focus {
+    opacity: 1;
 }
 
 .props-action-leading {

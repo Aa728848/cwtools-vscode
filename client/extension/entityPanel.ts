@@ -6,12 +6,35 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { buildEntityGraph, parseAssetFile, type EntityDefinition, type EntityGraph } from './entityAssetParser';
-import { findLocatorTextBlock, updateLocatorTransformBlock } from './entityLocatorEditing';
+import { getNewAttachCycle } from './entityAttachDiagnostics';
+import {
+    findLocatorTextBlock,
+    renameLocatorBlock,
+    renameLocatorReferencesInEntity,
+    updateLocatorTransformBlock,
+} from './entityLocatorEditing';
 import { matchesExt } from './fileExtensions';
 import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { isPathInsideOrEqual } from './pathScope';
 import { resolveNamedParticleResources } from './particleResourceResolver';
 import { loadEnvironmentPresets } from './worldgfxPresets';
+
+type LocatorTransformUpdate = {
+    locatorName: string;
+    position: [number, number, number];
+    rotation: [number, number, number];
+    scale: number;
+};
+
+interface EntityDraftDocument {
+    document: vscode.TextDocument;
+    baselineText: string;
+    baselineVersion: number;
+    expectedVersion: number;
+    changedByPanel: boolean;
+    conflict: boolean;
+    operations: string[];
+}
 
 function panelText(en: string, zh: string): string {
     return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
@@ -23,7 +46,9 @@ type EntityPanelMessage =
     | { command: 'selectState'; stateName: string }
     | { command: 'selectEntity'; index: number }
     | { command: 'openFile' }
-    | { command: 'updateLocator'; locatorName: string; position: [number, number, number]; rotation: [number, number, number]; scale: number }
+    | ({ command: 'updateLocator' } & LocatorTransformUpdate)
+    | { command: 'updateLocators'; locators: LocatorTransformUpdate[] }
+    | { command: 'renameLocator'; oldName: string; newName: string }
     | { command: 'addLocator'; locatorName: string; position: [number, number, number]; rotation: [number, number, number]; attachEntity?: string }
     | { command: 'duplicateLocators'; locators: Array<{ locatorName: string; position: [number, number, number]; rotation: [number, number, number]; attachEntity?: string }> }
     | { command: 'deleteLocators'; locatorNames: string[] }
@@ -33,6 +58,8 @@ type EntityPanelMessage =
     | { command: 'undo' }
     | { command: 'redo' }
     | { command: 'saveDocument' }
+    | { command: 'discardDrafts' }
+    | { command: 'openEntityDefinition'; entityName: string }
     | { command: 'screenshot'; data: string }
     | { command: 'log'; text: string; level?: 'info' | 'warn' | 'error' };
 
@@ -50,7 +77,10 @@ export class EntityPanel {
     private _currentEntityIndex = 0;
     private _currentMeshData: Buffer | undefined;
     private _messageQueue: Promise<void> = Promise.resolve();
-    private readonly _draftDocuments = new Map<string, vscode.TextDocument>();
+    private readonly _draftDocuments = new Map<string, EntityDraftDocument>();
+    private readonly _pendingPanelEditUris = new Set<string>();
+    private _disposed = false;
+    private _panelClosed = false;
     private static _outputChannel: vscode.OutputChannel | undefined;
 
     private _queueOperation(operation: () => Promise<void>): void {
@@ -63,12 +93,47 @@ export class EntityPanel {
     }
 
     private _trackDraftDocument(document: vscode.TextDocument): void {
-        this._draftDocuments.set(document.uri.toString(), document);
+        const key = document.uri.toString();
+        if (this._draftDocuments.has(key)) return;
+        this._draftDocuments.set(key, {
+            document,
+            baselineText: document.getText(),
+            baselineVersion: document.version,
+            expectedVersion: document.version,
+            changedByPanel: false,
+            conflict: false,
+            operations: [],
+        });
+    }
+
+    private async _applyDraftEdit(
+        document: vscode.TextDocument,
+        edit: vscode.WorkspaceEdit,
+        operation: string,
+    ): Promise<boolean> {
+        this._trackDraftDocument(document);
+        const key = document.uri.toString();
+        const draft = this._draftDocuments.get(key)!;
+        this._pendingPanelEditUris.add(key);
+        try {
+            const applied = await vscode.workspace.applyEdit(edit);
+            if (!applied) return false;
+            draft.expectedVersion = document.version;
+            draft.changedByPanel = true;
+            if (!draft.operations.includes(operation)) draft.operations.push(operation);
+            this._postDocumentState();
+            return true;
+        } finally {
+            this._pendingPanelEditUris.delete(key);
+        }
     }
 
     public static async create(extensionPath: string, document: vscode.TextDocument) {
         const column = vscode.window.activeTextEditor?.viewColumn;
-        if (EntityPanel.currentPanel) EntityPanel.currentPanel.dispose();
+        if (EntityPanel.currentPanel) {
+            if (!await EntityPanel.currentPanel._confirmDraftNavigation()) return;
+            EntityPanel.currentPanel._finalizeDispose(true);
+        }
 
         const panel = new EntityPanel(extensionPath, column || vscode.ViewColumn.Beside, document);
         EntityPanel.currentPanel = panel;
@@ -99,24 +164,26 @@ export class EntityPanel {
         );
 
         this._panel.webview.html = this._getHtml();
-        this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+        this._panel.onDidDispose(() => { void this._handlePanelClosed(); }, null, this._disposables);
         this._disposables.push(
             this._panel.webview.onDidReceiveMessage(async (msg: EntityPanelMessage) => {
                 if (!msg?.command) return;
                 switch (msg.command) {
                     case 'goToLine': {
-                        const ed = await vscode.window.showTextDocument(document.uri, { viewColumn: vscode.ViewColumn.One });
+                        if (!this._document) break;
+                        const ed = await vscode.window.showTextDocument(this._document.uri, { viewColumn: vscode.ViewColumn.One });
                         const range = new vscode.Range(msg.line - 1, 0, msg.line - 1, 0);
                         ed.selection = new vscode.Selection(range.start, range.start);
                         ed.revealRange(range, vscode.TextEditorRevealType.InCenter);
                         break;
                     }
                     case 'selectEntity': {
-                        // User selected a different entity from the dropdown
-                        await this._loadAndRender(document, msg.index);
+                        if (!this._document || !await this._confirmDraftNavigation()) break;
+                        await this._loadAndRender(this._document, msg.index);
                         break;
                     }
                     case 'openFile': {
+                        if (!await this._confirmDraftNavigation()) break;
                         // Open file picker for .asset files
                         const uris = await vscode.window.showOpenDialog({
                             canSelectFiles: true,
@@ -128,7 +195,9 @@ export class EntityPanel {
                         if (uris && uris[0]) {
                             const doc = await vscode.workspace.openTextDocument(uris[0]);
                             await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
-                            // Re-trigger preview
+                            this._document = doc;
+                            this._trackDraftDocument(doc);
+                            this._panel.title = `Entity: ${path.basename(doc.fileName)}`;
                             this._entityGraph = null;
                             await this._loadAndRender(doc);
                         }
@@ -137,6 +206,20 @@ export class EntityPanel {
                     case 'updateLocator': {
                         this._queueOperation(async () => {
                             await this._handleUpdateLocator(msg);
+                            this._postDocumentState();
+                        });
+                        break;
+                    }
+                    case 'updateLocators': {
+                        this._queueOperation(async () => {
+                            await this._handleUpdateLocators(msg);
+                            this._postDocumentState();
+                        });
+                        break;
+                    }
+                    case 'renameLocator': {
+                        this._queueOperation(async () => {
+                            await this._handleRenameLocator(msg);
                             this._postDocumentState();
                         });
                         break;
@@ -186,7 +269,15 @@ export class EntityPanel {
                         break;
                     }
                     case 'saveDocument': {
-                        this._queueOperation(() => this._handleSaveDocument());
+                        this._queueOperation(async () => { await this._handleSaveDocument(); });
+                        break;
+                    }
+                    case 'discardDrafts': {
+                        this._queueOperation(async () => { await this._handleDiscardDrafts(); });
+                        break;
+                    }
+                    case 'openEntityDefinition': {
+                        await this._handleOpenEntityDefinition(msg.entityName);
                         break;
                     }
                     case 'screenshot': {
@@ -225,16 +316,35 @@ export class EntityPanel {
         this._trackDraftDocument(document);
         this._disposables.push(
             vscode.workspace.onDidChangeTextDocument(event => {
-                if (this._draftDocuments.has(event.document.uri.toString())) {
-                    this._postDocumentState();
+                const key = event.document.uri.toString();
+                const draft = this._draftDocuments.get(key);
+                if (!draft) return;
+                if (this._pendingPanelEditUris.has(key)) {
+                    draft.expectedVersion = event.document.version;
+                } else if (draft.changedByPanel) {
+                    draft.conflict = true;
+                } else {
+                    draft.baselineText = event.document.getText();
+                    draft.baselineVersion = event.document.version;
+                    draft.expectedVersion = event.document.version;
                 }
+                this._postDocumentState();
             }),
         );
 
         // Watch for document saves to auto-refresh preview
         this._disposables.push(
             vscode.workspace.onDidSaveTextDocument(async savedDoc => {
-                if (savedDoc.uri.fsPath === document.uri.fsPath) {
+                const draft = this._draftDocuments.get(savedDoc.uri.toString());
+                if (draft) {
+                    draft.baselineText = savedDoc.getText();
+                    draft.baselineVersion = savedDoc.version;
+                    draft.expectedVersion = savedDoc.version;
+                    draft.changedByPanel = false;
+                    draft.conflict = false;
+                    draft.operations = [];
+                }
+                if (savedDoc.uri.fsPath === this._document?.uri.fsPath) {
                     if (this._skipNextReload) {
                         this._skipNextReload = false;
                         this._postDocumentState(false, true);
@@ -249,22 +359,59 @@ export class EntityPanel {
     }
 
     private _postDocumentState(saving = false, saved = false): void {
-        const dirty = Array.from(this._draftDocuments.values()).some(document => document.isDirty);
-        void this._panel.webview.postMessage({ command: 'documentState', dirty, saving, saved });
+        const drafts = Array.from(this._draftDocuments.values()).filter(draft => draft.changedByPanel);
+        if (this._panelClosed) return;
+        void this._panel.webview.postMessage({
+            command: 'documentState',
+            dirty: drafts.length > 0,
+            saving,
+            saved,
+            conflict: drafts.some(draft => draft.conflict),
+            files: drafts.map(draft => ({
+                path: draft.document.uri.fsPath,
+                name: path.basename(draft.document.uri.fsPath),
+                conflict: draft.conflict,
+                operations: draft.operations,
+            })),
+        });
     }
 
-    private async _handleSaveDocument(): Promise<void> {
-        const dirtyDocuments = Array.from(this._draftDocuments.values()).filter(document => document.isDirty);
-        if (dirtyDocuments.length === 0) {
+    private _draftSummary(drafts: EntityDraftDocument[]): string {
+        return drafts.map(draft => {
+            const operations = draft.operations.length > 0 ? draft.operations.join('、') : panelText('Entity edits', '实体编辑');
+            return `${path.basename(draft.document.uri.fsPath)} — ${operations}${draft.conflict ? panelText(' (conflict)', '（存在冲突）') : ''}`;
+        }).join('\n');
+    }
+
+    private async _handleSaveDocument(skipConfirmation = false): Promise<boolean> {
+        const drafts = Array.from(this._draftDocuments.values()).filter(draft => draft.changedByPanel);
+        if (drafts.length === 0) {
             this._postDocumentState(false, true);
-            return;
+            return true;
+        }
+        const detail = this._draftSummary(drafts);
+        if (!skipConfirmation) {
+            const choice = await vscode.window.showInformationMessage(
+                panelText(`Save changes to ${drafts.length} file(s)?`, `保存 ${drafts.length} 个文件的更改？`),
+                { modal: true, detail },
+                panelText('Save All', '全部保存'),
+            );
+            if (!choice) return false;
+        }
+        if (drafts.some(draft => draft.conflict)) {
+            const choice = await vscode.window.showWarningMessage(
+                panelText('Some edited files changed outside the Entity editor.', '部分已编辑文件在实体编辑器之外发生了变化。'),
+                { modal: true, detail },
+                panelText('Save Anyway', '仍然保存'),
+            );
+            if (!choice) return false;
         }
 
         this._postDocumentState(true);
         if (this._document?.isDirty) this._skipNextReload = true;
         let saved = true;
-        for (const document of dirtyDocuments) {
-            if (!await document.save()) saved = false;
+        for (const draft of drafts) {
+            if (!await draft.document.save()) saved = false;
         }
         if (!saved) {
             this._skipNextReload = false;
@@ -273,19 +420,93 @@ export class EntityPanel {
                 '无法保存全部实体定位器更改。',
             ));
         }
-        for (const [key, document] of this._draftDocuments) {
-            if (document !== this._document && !document.isDirty) this._draftDocuments.delete(key);
+        if (saved) {
+            for (const draft of drafts) {
+                draft.baselineText = draft.document.getText();
+                draft.baselineVersion = draft.document.version;
+                draft.expectedVersion = draft.document.version;
+                draft.changedByPanel = false;
+                draft.conflict = false;
+                draft.operations = [];
+            }
         }
         this._postDocumentState(false, saved);
+        return saved;
+    }
+
+    private async _handleDiscardDrafts(skipConfirmation = false): Promise<boolean> {
+        const drafts = Array.from(this._draftDocuments.values()).filter(draft => draft.changedByPanel);
+        if (drafts.length === 0) return true;
+        if (!skipConfirmation) {
+            const choice = await vscode.window.showWarningMessage(
+                panelText('Discard all unsaved Entity editor changes?', '放弃实体编辑器中的全部未保存更改？'),
+                { modal: true, detail: this._draftSummary(drafts) },
+                panelText('Discard All', '全部放弃'),
+            );
+            if (!choice) return false;
+        }
+        for (const draft of drafts) {
+            const edit = new vscode.WorkspaceEdit();
+            const end = draft.document.positionAt(draft.document.getText().length);
+            edit.replace(draft.document.uri, new vscode.Range(new vscode.Position(0, 0), end), draft.baselineText);
+            const key = draft.document.uri.toString();
+            this._pendingPanelEditUris.add(key);
+            try {
+                if (!await vscode.workspace.applyEdit(edit)) return false;
+            } finally {
+                this._pendingPanelEditUris.delete(key);
+            }
+            draft.expectedVersion = draft.document.version;
+            draft.changedByPanel = false;
+            draft.conflict = false;
+            draft.operations = [];
+        }
+        this._entityGraph = null;
+        if (this._document && !this._panelClosed) await this._loadAndRender(this._document, this._currentEntityIndex);
+        this._postDocumentState(false, true);
+        return true;
+    }
+
+    private async _confirmDraftNavigation(): Promise<boolean> {
+        const drafts = Array.from(this._draftDocuments.values()).filter(draft => draft.changedByPanel);
+        if (drafts.length === 0) return true;
+        const save = panelText('Save and Continue', '保存并继续');
+        const discard = panelText('Discard and Continue', '放弃并继续');
+        const choice = await vscode.window.showWarningMessage(
+            panelText('There are unsaved Entity editor changes.', '实体编辑器中存在未保存更改。'),
+            { modal: true, detail: this._draftSummary(drafts) },
+            save,
+            discard,
+        );
+        if (choice === save) return this._handleSaveDocument(true);
+        if (choice === discard) return this._handleDiscardDrafts(true);
+        return false;
     }
 
     private async _handleUndoRedo(command: 'undo' | 'redo'): Promise<void> {
         if (!this._document) return;
+        this._trackDraftDocument(this._document);
+        const key = this._document.uri.toString();
+        const draft = this._draftDocuments.get(key)!;
         await vscode.window.showTextDocument(this._document.uri, {
             viewColumn: vscode.ViewColumn.One,
             preserveFocus: false,
         });
-        await vscode.commands.executeCommand(command);
+        this._pendingPanelEditUris.add(key);
+        try {
+            await vscode.commands.executeCommand(command);
+        } finally {
+            this._pendingPanelEditUris.delete(key);
+        }
+        draft.expectedVersion = this._document.version;
+        draft.changedByPanel = this._document.getText() !== draft.baselineText;
+        if (draft.changedByPanel) {
+            const operation = command === 'undo' ? panelText('Undo', '撤销') : panelText('Redo', '重做');
+            if (!draft.operations.includes(operation)) draft.operations.push(operation);
+        } else {
+            draft.operations = [];
+            draft.conflict = false;
+        }
         this._entityGraph = null;
         await this._loadAndRender(this._document, this._currentEntityIndex);
         this._postDocumentState();
@@ -319,7 +540,12 @@ export class EntityPanel {
      * Only top-level static locators declared by the current .asset are mutable.
      * Mesh locators, bones, state locators, and child-entity anchors are read-only.
      */
-    private async _handleUpdateLocator(msg: { locatorName: string; position: [number, number, number]; rotation: [number, number, number]; scale: number }) {
+    private async _handleUpdateLocator(msg: LocatorTransformUpdate) {
+        await this._handleUpdateLocators({ locators: [msg] });
+    }
+
+    /** Apply a multi-selection transform as one draft edit and one undo step. */
+    private async _handleUpdateLocators(msg: { locators: LocatorTransformUpdate[] }) {
         if (!this._document) return;
         const doc = this._document;
         const text = doc.getText();
@@ -327,43 +553,86 @@ export class EntityPanel {
         const entityName = this._currentEntityName;
         const vectorIsValid = (value: unknown): value is [number, number, number] =>
             Array.isArray(value) && value.length === 3 && value.every(item => typeof item === 'number' && Number.isFinite(item));
-        if (!entityName
-            || typeof msg.locatorName !== 'string'
-            || msg.locatorName.length === 0
-            || /["{}\r\n=]/.test(msg.locatorName)
-            || !vectorIsValid(msg.position)
-            || !vectorIsValid(msg.rotation)) {
-            return;
-        }
-
+        if (!entityName || !Array.isArray(msg.locators) || msg.locators.length === 0 || msg.locators.length > 500) return;
         const parsedEntity = parseAssetFile(text, doc.uri.fsPath).entities.find(entity => entity.name === entityName);
-        const locator = parsedEntity?.locators.find(candidate => candidate.name === msg.locatorName);
-        if (!locator) {
-            console.warn(`[EntityPanel] Rejected transform for non-script locator "${msg.locatorName}"`);
-            return;
-        }
-        if (this._currentMeshData?.includes(Buffer.from(msg.locatorName, 'utf8'))) {
-            console.warn(`[EntityPanel] Rejected transform for model locator or bone "${msg.locatorName}"`);
-            return;
-        }
-
-        const block = findLocatorTextBlock(lines, locator.line);
-        if (!block) {
-            console.warn(`[EntityPanel] Cannot locate static locator block "${msg.locatorName}"`);
-            return;
-        }
-        const oldText = lines.slice(block.startLine, block.endLine + 1).join('\n');
-        const newText = updateLocatorTransformBlock(oldText, msg.position, msg.rotation);
-        if (newText === oldText) return;
-
-        const range = new vscode.Range(
-            new vscode.Position(block.startLine, 0),
-            new vscode.Position(block.endLine, lines[block.endLine]!.length),
-        );
         const edit = new vscode.WorkspaceEdit();
-        edit.replace(doc.uri, range, newText);
+        let editCount = 0;
+        const seenNames = new Set<string>();
+        for (const update of msg.locators) {
+            if (typeof update?.locatorName !== 'string'
+                || update.locatorName.length === 0
+                || /["{}\r\n=]/.test(update.locatorName)
+                || seenNames.has(update.locatorName)
+                || !vectorIsValid(update.position)
+                || !vectorIsValid(update.rotation)) continue;
+            seenNames.add(update.locatorName);
+
+            const locator = parsedEntity?.locators.find(candidate => candidate.name === update.locatorName);
+            if (!locator) {
+                console.warn(`[EntityPanel] Rejected transform for non-script locator "${update.locatorName}"`);
+                continue;
+            }
+            if (this._currentMeshData?.includes(Buffer.from(update.locatorName, 'utf8'))) {
+                console.warn(`[EntityPanel] Rejected transform for model locator or bone "${update.locatorName}"`);
+                continue;
+            }
+            const block = findLocatorTextBlock(lines, locator.line);
+            if (!block) continue;
+            const oldText = lines.slice(block.startLine, block.endLine + 1).join('\n');
+            const newText = updateLocatorTransformBlock(oldText, update.position, update.rotation);
+            if (newText === oldText) continue;
+            edit.replace(doc.uri, new vscode.Range(
+                new vscode.Position(block.startLine, 0),
+                new vscode.Position(block.endLine, lines[block.endLine]!.length),
+            ), newText);
+            editCount++;
+        }
+        if (editCount === 0) return;
         this._skipNextReload = true;
-        await vscode.workspace.applyEdit(edit);
+        await this._applyDraftEdit(doc, edit, panelText(
+            `Transform ${editCount} locator(s)`,
+            `变换 ${editCount} 个定位器`,
+        ));
+    }
+
+    /** Rename one static locator plus attach and particle-node references in the current entity. */
+    private async _handleRenameLocator(msg: { oldName: string; newName: string }): Promise<void> {
+        if (!this._document || !this._currentEntityName) return;
+        const validName = (value: unknown): value is string =>
+            typeof value === 'string' && value.length > 0 && value.length <= 200 && !/["{}\r\n=]/.test(value);
+        if (!validName(msg.oldName) || !validName(msg.newName) || msg.oldName === msg.newName) return;
+
+        const doc = this._document;
+        const lines = doc.getText().split('\n');
+        const entity = parseAssetFile(doc.getText(), doc.uri.fsPath).entities
+            .find(candidate => candidate.name === this._currentEntityName);
+        const locator = entity?.locators.find(candidate => candidate.name === msg.oldName);
+        const collides = entity?.locators.some(candidate => candidate.name === msg.newName)
+            || entity?.states.some(state => state.locators.some(candidate => candidate.name === msg.newName))
+            || this._currentMeshData?.includes(Buffer.from(msg.newName, 'utf8'));
+        if (!entity || !locator || collides || this._currentMeshData?.includes(Buffer.from(msg.oldName, 'utf8'))) return;
+
+        const locatorLines = findLocatorTextBlock(lines, locator.line);
+        if (!locatorLines) return;
+        const entityStart = Math.max(0, entity.line - 1);
+        const entityEnd = Math.min(lines.length - 1, Math.max(entityStart, entity.endLine - 1));
+        const oldEntityText = lines.slice(entityStart, entityEnd + 1).join('\n');
+        const oldLocatorText = lines.slice(locatorLines.startLine, locatorLines.endLine + 1).join('\n');
+        const renamedLocatorText = renameLocatorBlock(oldLocatorText, msg.oldName, msg.newName);
+        let newEntityText = oldEntityText.replace(oldLocatorText, renamedLocatorText);
+        newEntityText = renameLocatorReferencesInEntity(newEntityText, msg.oldName, msg.newName);
+        if (newEntityText === oldEntityText) return;
+
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(doc.uri, new vscode.Range(
+            new vscode.Position(entityStart, 0),
+            new vscode.Position(entityEnd, lines[entityEnd]!.length),
+        ), newEntityText);
+        this._skipNextReload = true;
+        await this._applyDraftEdit(doc, edit, panelText(
+            `Rename locator ${msg.oldName} → ${msg.newName}`,
+            `重命名定位器 ${msg.oldName} → ${msg.newName}`,
+        ));
     }
 
     /**
@@ -441,7 +710,10 @@ export class EntityPanel {
             const edit = new vscode.WorkspaceEdit();
             edit.insert(doc.uri, new vscode.Position(entityBlockEnd, 0), insertText);
             this._skipNextReload = true;
-            await vscode.workspace.applyEdit(edit);
+            await this._applyDraftEdit(doc, edit, panelText(
+                `Add locator ${msg.locatorName}`,
+                `新建定位器 ${msg.locatorName}`,
+            ));
         }
 
         console.log(`[EntityPanel] Added locator "${msg.locatorName}"${msg.attachEntity ? ` with attach → ${msg.attachEntity}` : ''}`);
@@ -536,7 +808,10 @@ export class EntityPanel {
         const edit = new vscode.WorkspaceEdit();
         edit.insert(doc.uri, new vscode.Position(entityBlockEnd, 0), insertText);
         this._skipNextReload = true;
-        const applied = await vscode.workspace.applyEdit(edit);
+        const applied = await this._applyDraftEdit(doc, edit, panelText(
+            `Duplicate ${accepted.length} locator(s)`,
+            `复制 ${accepted.length} 个定位器`,
+        ));
         if (!applied) {
             this._skipNextReload = false;
             console.warn('[EntityPanel] Duplicate Special edit could not be applied');
@@ -640,7 +915,10 @@ export class EntityPanel {
             edit.delete(doc.uri, new vscode.Range(start, end));
         }
         this._skipNextReload = true;
-        const applied = await vscode.workspace.applyEdit(edit);
+        const applied = await this._applyDraftEdit(doc, edit, panelText(
+            `Delete ${names.length} locator(s)`,
+            `删除 ${names.length} 个定位器`,
+        ));
         if (!applied) {
             this._skipNextReload = false;
             return;
@@ -711,6 +989,30 @@ export class EntityPanel {
 
         if (!doc) return;
 
+        if (msg.entityName) {
+            if (!this._entityGraph) this._entityGraph = await this._buildEntityGraph(this._searchRoots);
+            const entities = this._entityDefinitionsWithDrafts();
+            if (!entities.has(msg.entityName)) {
+                await this._panel.webview.postMessage({
+                    command: 'attachValidation',
+                    locatorName: msg.locatorName,
+                    severity: 'error',
+                    message: panelText('Attached entity definition is missing.', '被挂载实体定义不存在。'),
+                });
+            } else {
+                const cycle = getNewAttachCycle(entities, targetEntityName, msg.entityName);
+                if (cycle) {
+                    await this._panel.webview.postMessage({
+                        command: 'attachValidation',
+                        locatorName: msg.locatorName,
+                        severity: 'error',
+                        message: panelText(`Circular attach blocked: ${cycle.join(' → ')}`, `已阻止循环挂载：${cycle.join(' → ')}`),
+                    });
+                    return;
+                }
+            }
+        }
+
         const text = doc.getText();
         const lines = text.split('\n');
 
@@ -764,6 +1066,12 @@ export class EntityPanel {
         // requires a real static locator, model locator, or bone anchor.
         if (msg.entityName && !this._isKnownAttachAnchor(doc, targetEntityName, msg.locatorName)) {
             console.warn(`[EntityPanel] Rejected attach for unknown anchor "${msg.locatorName}"`);
+            await this._panel.webview.postMessage({
+                command: 'attachValidation',
+                locatorName: msg.locatorName,
+                severity: 'error',
+                message: panelText('Attach anchor is missing.', '挂载锚点不存在。'),
+            });
             return;
         }
 
@@ -785,15 +1093,21 @@ export class EntityPanel {
             if (attachLine >= 0) {
                 const range = new vscode.Range(attachLine, 0, attachLine + 1, 0);
                 edit.delete(doc.uri, range);
-            }
+            } else return;
         }
 
         if (!isCrossFile) {
             this._skipNextReload = true;
         }
-        this._trackDraftDocument(doc);
-        await vscode.workspace.applyEdit(edit);
+        await this._applyDraftEdit(doc, edit, panelText(
+            `${msg.entityName ? 'Set' : 'Remove'} attach ${msg.locatorName}${msg.entityName ? ` → ${msg.entityName}` : ''}`,
+            `${msg.entityName ? '设置' : '清除'}挂载 ${msg.locatorName}${msg.entityName ? ` → ${msg.entityName}` : ''}`,
+        ));
         console.log(`[EntityPanel] Updated attach for "${msg.locatorName}" on "${targetEntityName}" → "${msg.entityName || '(removed)'}"`);
+
+        const updatedEntity = parseAssetFile(doc.getText(), doc.uri.fsPath).entities
+            .find(entity => entity.name === targetEntityName);
+        if (updatedEntity) await this._postAttachDiagnostics(updatedEntity, doc);
 
         // When modifying across files: the same subentity may be referenced in multiple locations, and incremental updates cannot synchronize all instances.
         // A full _loadAndRender overload must be triggered to ensure all reference points are refreshed.
@@ -889,6 +1203,74 @@ export class EntityPanel {
             command: 'entityNames',
             names,
         });
+    }
+
+    private async _handleOpenEntityDefinition(entityName: string): Promise<void> {
+        if (typeof entityName !== 'string' || entityName.length === 0 || /["{}\r\n=]/.test(entityName)) return;
+        if (!this._entityGraph) this._entityGraph = await this._buildEntityGraph(this._searchRoots);
+        const definition = this._entityGraph.entities.get(entityName);
+        if (!definition) {
+            void vscode.window.showWarningMessage(panelText(
+                `Entity definition not found: ${entityName}`,
+                `找不到实体定义：${entityName}`,
+            ));
+            return;
+        }
+        const document = await vscode.workspace.openTextDocument(vscode.Uri.file(definition.filePath));
+        const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
+        const position = new vscode.Position(Math.max(0, definition.line - 1), 0);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+    }
+
+    private _entityDefinitionsWithDrafts(): Map<string, EntityDefinition> {
+        const entities = new Map(this._entityGraph?.entities ?? []);
+        for (const draft of this._draftDocuments.values()) {
+            for (const entity of parseAssetFile(draft.document.getText(), draft.document.uri.fsPath).entities) {
+                entities.set(entity.name, entity);
+            }
+        }
+        return entities;
+    }
+
+    private async _postAttachDiagnostics(entity: EntityDefinition, document: vscode.TextDocument): Promise<void> {
+        if (!this._entityGraph) return;
+        const diagnostics: Array<{
+            locatorName: string;
+            entityName: string;
+            severity: 'warning' | 'error';
+            message: string;
+        }> = [];
+        const entities = this._entityDefinitionsWithDrafts();
+        for (const attach of entity.attaches) {
+            if (!this._isKnownAttachAnchor(document, entity.name, attach.locatorName)) {
+                diagnostics.push({
+                    locatorName: attach.locatorName,
+                    entityName: attach.entityName,
+                    severity: 'error',
+                    message: panelText('Attach anchor is missing.', '挂载锚点不存在。'),
+                });
+            }
+            if (!entities.has(attach.entityName)) {
+                diagnostics.push({
+                    locatorName: attach.locatorName,
+                    entityName: attach.entityName,
+                    severity: 'error',
+                    message: panelText('Attached entity definition is missing.', '被挂载实体定义不存在。'),
+                });
+                continue;
+            }
+            const cycle = getNewAttachCycle(entities, entity.name, attach.entityName);
+            if (cycle) {
+                diagnostics.push({
+                    locatorName: attach.locatorName,
+                    entityName: attach.entityName,
+                    severity: 'error',
+                    message: panelText(`Circular attach: ${cycle.join(' → ')}`, `循环挂载：${cycle.join(' → ')}`),
+                });
+            }
+        }
+        await this._panel.webview.postMessage({ command: 'attachDiagnostics', diagnostics });
     }
 
     private _getGamePath(): string | null {
@@ -1132,6 +1514,7 @@ export class EntityPanel {
             unresolvedParticles: particleResources.unresolved,
             fileName: path.basename(document.fileName),
         });
+        await this._postAttachDiagnostics(entity, document);
         this._postDocumentState();
     }
 
@@ -1535,6 +1918,25 @@ export class EntityPanel {
             await this._findFiles(gfxDir, '.gfx', gfxFiles, maxFiles);
         }
 
+        // Unsaved cross-file attach edits live in VS Code buffers. Overlay those
+        // buffers so previews and cycle diagnostics see the complete draft graph.
+        const pathKey = (filePath: string) => process.platform === 'win32'
+            ? path.resolve(filePath).toLowerCase()
+            : path.resolve(filePath);
+        const assetIndex = new Map(assetFiles.map((file, index) => [pathKey(file.path), index]));
+        for (const draft of this._draftDocuments.values()) {
+            if (!matchesExt(draft.document.fileName, '.asset')) continue;
+            const key = pathKey(draft.document.uri.fsPath);
+            const index = assetIndex.get(key);
+            const entry = { path: draft.document.uri.fsPath, content: draft.document.getText() };
+            if (index === undefined) {
+                assetIndex.set(key, assetFiles.length);
+                assetFiles.push(entry);
+            } else {
+                assetFiles[index] = entry;
+            }
+        }
+
         return buildEntityGraph(assetFiles, gfxFiles);
     }
 
@@ -1562,7 +1964,32 @@ export class EntityPanel {
         } catch { /* skip inaccessible */ }
     }
 
-    public dispose() {
+    private async _handlePanelClosed(): Promise<void> {
+        if (this._disposed) return;
+        this._panelClosed = true;
+        const drafts = Array.from(this._draftDocuments.values()).filter(draft => draft.changedByPanel);
+        if (drafts.length > 0) {
+            const save = panelText('Save All', '全部保存');
+            const discard = panelText('Discard All', '全部放弃');
+            const choice = await vscode.window.showWarningMessage(
+                panelText(
+                    'The Entity editor was closed with unsaved changes. Save them or discard only the Entity editor changes?',
+                    '实体编辑器关闭时仍有未保存更改。要保存，还是仅放弃实体编辑器产生的更改？',
+                ),
+                { modal: true, detail: this._draftSummary(drafts) },
+                save,
+                discard,
+            );
+            if (choice === save) await this._handleSaveDocument(true);
+            if (choice === discard) await this._handleDiscardDrafts(true);
+            // Dismissal keeps the dirty buffers open in VS Code.
+        }
+        this._finalizeDispose(false);
+    }
+
+    private _finalizeDispose(disposePanel: boolean): void {
+        if (this._disposed) return;
+        this._disposed = true;
         EntityPanel.currentPanel = undefined;
         this._document = undefined;
         this._searchRoots = [];
@@ -1570,14 +1997,20 @@ export class EntityPanel {
         this._currentMeshData = undefined;
         this._draftDocuments.clear();
         // Tell webview to clean up Three.js resources before destroying
-        try {
-            this._panel.webview.postMessage({ command: 'dispose' });
-        } catch { /* panel may already be disposed */ }
-        this._panel.dispose();
+        if (!this._panelClosed) {
+            try {
+                void this._panel.webview.postMessage({ command: 'dispose' });
+            } catch { /* panel may already be disposed */ }
+        }
+        if (disposePanel && !this._panelClosed) this._panel.dispose();
         while (this._disposables.length) {
             const d = this._disposables.pop();
             if (d) d.dispose();
         }
+    }
+
+    public dispose(): void {
+        this._finalizeDispose(true);
     }
 
     private _getHtml(): string {
@@ -1609,17 +2042,23 @@ export class EntityPanel {
         </div>
         <div id="document-actions" class="edit-only">
             <button id="btn-save" class="toolbar-btn" type="button" disabled title="${locale.startsWith('zh') ? '保存定位器更改 (Ctrl+S)' : 'Save locator changes (Ctrl+S)'}">${locale.startsWith('zh') ? '保存' : 'Save'}</button>
+            <button id="btn-discard-drafts" class="toolbar-btn secondary" type="button" disabled>${locale.startsWith('zh') ? '放弃全部' : 'Discard All'}</button>
             <span id="edit-save-state" role="status" aria-live="polite">${locale.startsWith('zh') ? '已保存' : 'Saved'}</span>
+            <details id="draft-summary" class="hidden"><summary id="draft-summary-label"></summary><div id="draft-summary-files"></div></details>
         </div>
         <span class="toolbar-separator"></span>
         <button id="btn-focus" class="toolbar-icon-btn" data-i18n-title="focus"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><circle cx="12" cy="12" r="3"/></svg></button>
         <span class="toolbar-separator edit-only"></span>
         <button id="btn-translate" class="toolbar-icon-btn tool-mode active edit-only" data-i18n-title="translateBtn" data-mode="translate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="14,7 19,12 14,17"/><line x1="12" y1="5" x2="12" y2="19"/><polyline points="7,14 12,19 17,14"/></svg></button>
         <button id="btn-rotate" class="toolbar-icon-btn tool-mode edit-only" data-i18n-title="rotateBtn" data-mode="rotate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/><polyline points="21,3 21,9 15,9"/></svg></button>
-        <label class="toolbar-checkbox-btn edit-only" title="${locale.startsWith('zh') ? '网格吸附（按住 X 临时启用，步长 1）' : 'Grid snap (hold X temporarily, step 1)'}">
+        <select id="sel-transform-space" class="toolbar-compact-select edit-only" title="${locale.startsWith('zh') ? '变换坐标系' : 'Transform space'}"><option value="world">${locale.startsWith('zh') ? '世界' : 'World'}</option><option value="local">${locale.startsWith('zh') ? '局部' : 'Local'}</option></select>
+        <label class="toolbar-checkbox-btn edit-only" title="${locale.startsWith('zh') ? '移动吸附（按住 X 临时启用）' : 'Translation snap (hold X temporarily)'}">
             <input type="checkbox" id="chk-grid-snap">
             <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h16v16H4zM9.33 4v16M14.67 4v16M4 9.33h16M4 14.67h16"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg></div>
         </label>
+        <input id="move-snap-step" class="toolbar-number edit-only" type="number" min="0.0001" step="0.1" value="1" title="${locale.startsWith('zh') ? '移动步长' : 'Translation step'}">
+        <label class="toolbar-checkbox-btn edit-only" title="${locale.startsWith('zh') ? '旋转吸附' : 'Rotation snap'}"><input type="checkbox" id="chk-rotation-snap"><div class="icon-btn-content">°</div></label>
+        <input id="rotation-snap-step" class="toolbar-number edit-only" type="number" min="0.1" max="180" step="1" value="15" title="${locale.startsWith('zh') ? '旋转步长（度）' : 'Rotation step (degrees)'}">
         <label class="toolbar-checkbox-btn edit-only" title="${locale.startsWith('zh') ? '顶点吸附（按住 V 临时启用）' : 'Vertex snap (hold V temporarily)'}">
             <input type="checkbox" id="chk-vertex-snap">
             <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 9 17H3L12 3Z"/><circle cx="12" cy="3" r="2.2" fill="currentColor" stroke="none"/><circle cx="3" cy="20" r="2.2" fill="currentColor" stroke="none"/><circle cx="21" cy="20" r="2.2" fill="currentColor" stroke="none"/></svg></div>
@@ -1665,6 +2104,8 @@ export class EntityPanel {
             <div id="selection-marquee"></div>
             <div id="locator-selection-actions" class="hidden">
                 <span id="locator-selection-count"></span>
+                <button class="toolbar-btn secondary" id="btn-paste-selected-transform">${locale.startsWith('zh') ? '粘贴变换' : 'Paste Transform'}</button>
+                <button class="toolbar-btn secondary" id="btn-origin-selected-locators">${locale.startsWith('zh') ? '位置归零' : 'To Origin'}</button>
                 <button class="toolbar-btn secondary" id="btn-hide-selected-locators" title="${locale.startsWith('zh') ? 'H 隐藏，Shift+H 恢复最近隐藏项' : 'H to hide; Shift+H restores the last hidden selection'}">${locale.startsWith('zh') ? '隐藏' : 'Hide'}</button>
                 <button class="toolbar-btn danger" id="btn-delete-selected-locators" title="Delete">${locale.startsWith('zh') ? '删除' : 'Delete'}</button>
                 <button class="props-close" id="btn-clear-locator-selection">&times;</button>
@@ -1682,6 +2123,7 @@ export class EntityPanel {
                 </div>
                 <div class="props-body">
                     <div id="props-locator-source" class="props-source"></div>
+                    <div class="props-row"><label>${locale.startsWith('zh') ? '名称' : 'Name'}</label><input type="text" id="prop-locator-rename"><button class="toolbar-btn compact" id="btn-rename-locator">${locale.startsWith('zh') ? '重命名' : 'Rename'}</button></div>
                     <div class="props-row"><label>Position X</label><input type="number" step="0.1" id="prop-px"></div>
                     <div class="props-row"><label>Position Y</label><input type="number" step="0.1" id="prop-py"></div>
                     <div class="props-row"><label>Position Z</label><input type="number" step="0.1" id="prop-pz"></div>
@@ -1690,8 +2132,18 @@ export class EntityPanel {
                     <div class="props-row"><label>Rotation Z</label><input type="number" step="1" id="prop-rz"></div>
                     <div class="props-row" style="position:relative"><label>${locale.startsWith('zh') ? '挂载实体' : 'Attach'}</label><input type="text" id="prop-attach-entity" autocomplete="off" placeholder="${locale.startsWith('zh') ? '(无)' : '(none)'}"></div>
                     <div id="prop-autocomplete-list" class="autocomplete-dropdown"></div>
+                    <div class="attach-manager-actions">
+                        <button class="toolbar-btn" id="btn-set-attach">${locale.startsWith('zh') ? '设置/替换' : 'Set / Replace'}</button>
+                        <button class="toolbar-btn secondary" id="btn-clear-attach">${locale.startsWith('zh') ? '清除' : 'Clear'}</button>
+                        <button class="toolbar-btn secondary" id="btn-open-attach-entity">${locale.startsWith('zh') ? '跳转定义' : 'Open Definition'}</button>
+                    </div>
+                    <div id="attach-diagnostic" class="attach-diagnostic hidden" role="status"></div>
+                    <div class="static-transform-note">${locale.startsWith('zh') ? '复制模型 Locator/Bone 的变换只会写入静态定位器，不会建立动态绑定。' : 'Copying a Model Locator/Bone transform writes a static locator value; it does not create a dynamic binding.'}</div>
                     <div class="props-actions">
                         <button class="toolbar-btn secondary props-action-leading" id="btn-special-duplicate" title="${locale.startsWith('zh') ? '特殊复制 (Ctrl+Shift+D)' : 'Duplicate Special (Ctrl+Shift+D)'}">${locale.startsWith('zh') ? '特殊复制…' : 'Duplicate…'}</button>
+                        <button class="toolbar-btn secondary" id="btn-copy-transform">${locale.startsWith('zh') ? '复制变换' : 'Copy Transform'}</button>
+                        <button class="toolbar-btn secondary" id="btn-paste-transform">${locale.startsWith('zh') ? '粘贴变换' : 'Paste Transform'}</button>
+                        <button class="toolbar-btn secondary" id="btn-origin-locator">${locale.startsWith('zh') ? '位置归零' : 'To Origin'}</button>
                         <button class="toolbar-btn" id="btn-apply" data-i18n="apply">Apply</button>
                         <button class="toolbar-btn secondary" id="btn-reset" data-i18n="reset">Reset</button>
                     </div>

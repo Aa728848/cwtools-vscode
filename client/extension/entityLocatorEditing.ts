@@ -80,3 +80,38 @@ export function updateLocatorTransformBlock(
     const withPosition = upsertVector(block, 'position', formatVector(position, 6));
     return upsertVector(withPosition, 'rotation', formatVector(rotation, 2));
 }
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function replacementName(source: string, newName: string): string {
+    return source.startsWith('"') ? `"${newName}"` : newName;
+}
+
+/** Rename the name field of one already-resolved static locator block. */
+export function renameLocatorBlock(block: string, oldName: string, newName: string): string {
+    const old = escapeRegExp(oldName);
+    const expression = new RegExp(`(\\bname\\s*=\\s*)("${old}"|${old})(?=\\s|}|#|$)`, 'i');
+    return block.replace(expression, (_match, prefix: string, value: string) =>
+        `${prefix}${replacementName(value, newName)}`);
+}
+
+/**
+ * Rename references that are scoped to an entity: attach keys and particle
+ * event nodes. This intentionally does not rename arbitrary script values.
+ */
+export function renameLocatorReferencesInEntity(entityText: string, oldName: string, newName: string): string {
+    const old = escapeRegExp(oldName);
+    const renameValue = (value: string) => replacementName(value, newName);
+    const attachExpression = /\battach\s*=\s*\{[^{}]*\}/gi;
+    const nodeExpression = new RegExp(`(\\bnode\\s*=\\s*)("${old}"|${old})(?=\\s|}|#|$)`, 'gi');
+
+    const withAttach = entityText.replace(attachExpression, attachBlock => {
+        const keyExpression = new RegExp(`("${old}"|${old})(\\s*=)`, 'gi');
+        return attachBlock.replace(keyExpression, (_match, value: string, suffix: string) =>
+            `${renameValue(value)}${suffix}`);
+    });
+    return withAttach.replace(nodeExpression, (_match, prefix: string, value: string) =>
+        `${prefix}${renameValue(value)}`);
+}

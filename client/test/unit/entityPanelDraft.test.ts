@@ -17,6 +17,8 @@ describe('entity preview locator drafts', () => {
     it('keeps every locator mutation off disk until explicit save', () => {
         for (const handler of [
             '_handleUpdateLocator',
+            '_handleUpdateLocators',
+            '_handleRenameLocator',
             '_handleAddLocator',
             '_handleDuplicateLocators',
             '_handleDeleteLocators',
@@ -40,6 +42,42 @@ describe('entity preview locator drafts', () => {
         expect(webview).to.include('updateLocatorDraft();');
         expect(webview).not.to.include('autoSaveLocator');
         expect(webview).to.include("vscode.postMessage({ command: 'saveDocument' });");
+    });
+
+    it('supports one-operation multi transforms and locator-only editing tools', () => {
+        expect(host).to.include("case 'updateLocators'");
+        expect(host).to.include("case 'renameLocator'");
+        expect(methodSource('_handleUpdateLocators')).to.include('const edit = new vscode.WorkspaceEdit()');
+        expect(webview).to.include('captureMultiTransformSnapshot();');
+        expect(webview).to.include("vscode.postMessage({ command: 'updateLocators', locators });");
+        expect(webview).to.include("transformCtrl.setSpace(transformSpaceSelect.value === 'local' ? 'local' : 'world')");
+        expect(host).to.include('id="move-snap-step"');
+        expect(host).to.include('id="rotation-snap-step"');
+        expect(host).to.include('不会建立动态绑定');
+    });
+
+    it('tracks cross-file drafts, confirms save, and protects navigation', () => {
+        expect(host).to.include('interface EntityDraftDocument');
+        expect(host).to.include('private async _applyDraftEdit');
+        expect(host).to.include('private async _confirmDraftNavigation');
+        expect(host).to.include('private async _handleDiscardDrafts');
+        expect(webview).to.include('External conflict');
+        expect(host).to.include("case 'discardDrafts'");
+        expect(host).to.include('id="draft-summary"');
+        expect(host).to.include('id="btn-discard-drafts"');
+        expect(webview).to.include('renderDraftSummary');
+    });
+
+    it('provides attach management and explicit semantic diagnostics', () => {
+        expect(host).to.include("case 'openEntityDefinition'");
+        expect(host).to.include('private async _postAttachDiagnostics');
+        expect(host).to.include('Circular attach blocked');
+        expect(host).to.include('Attached entity definition is missing');
+        expect(host).to.include('Attach anchor is missing');
+        expect(host).to.include('id="btn-set-attach"');
+        expect(host).to.include('id="btn-clear-attach"');
+        expect(host).to.include('id="btn-open-attach-entity"');
+        expect(webview).to.include('data-attach-object-uuid');
     });
 
     it('keeps model locators and bones transform-read-only on both boundaries', () => {

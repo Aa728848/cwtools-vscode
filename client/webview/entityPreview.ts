@@ -21,6 +21,7 @@ import {
     type LocatorTransformDelta,
     type LocatorVector3,
 } from './locatorDuplicate';
+import { applyWorldDeltaToLocalTransform, getSelectionWorldCenter } from './locatorMultiTransform';
 import { decompressBC1, decompressBC3, rgb565 } from './bcDecode';
 import { SkyboxEnvironment } from './skyboxEnvironment';
 import { EnvironmentUi, DEFAULT_ENV_STATE, type EnvironmentUiState } from './environmentUi';
@@ -171,7 +172,11 @@ const transformHint = document.getElementById('transform-hint')!;
 const previewModeButton = document.getElementById('btn-preview') as HTMLButtonElement;
 const editModeButton = document.getElementById('btn-edit') as HTMLButtonElement;
 const saveButton = document.getElementById('btn-save') as HTMLButtonElement;
+const discardDraftsButton = document.getElementById('btn-discard-drafts') as HTMLButtonElement;
 const editSaveState = document.getElementById('edit-save-state')!;
+const draftSummary = document.getElementById('draft-summary')!;
+const draftSummaryLabel = document.getElementById('draft-summary-label')!;
+const draftSummaryFiles = document.getElementById('draft-summary-files')!;
 
 // Toolbar controls
 const entityNameEl = toolbar.querySelector('.entity-name') as HTMLElement;
@@ -179,6 +184,10 @@ const wireframeToggle = document.getElementById('chk-wireframe') as HTMLInputEle
 const locatorToggle = document.getElementById('chk-locators') as HTMLInputElement;
 const meshLocatorToggle = document.getElementById('chk-mesh-locators') as HTMLInputElement;
 const gridSnapToggle = document.getElementById('chk-grid-snap') as HTMLInputElement;
+const rotationSnapToggle = document.getElementById('chk-rotation-snap') as HTMLInputElement;
+const moveSnapStep = document.getElementById('move-snap-step') as HTMLInputElement;
+const rotationSnapStep = document.getElementById('rotation-snap-step') as HTMLInputElement;
+const transformSpaceSelect = document.getElementById('sel-transform-space') as HTMLSelectElement;
 const vertexSnapToggle = document.getElementById('chk-vertex-snap') as HTMLInputElement;
 const normalToggle = document.getElementById('chk-normals') as HTMLInputElement;
 const bonesToggle = document.getElementById('chk-bones') as HTMLInputElement;
@@ -191,7 +200,9 @@ const propRx = document.getElementById('prop-rx') as HTMLInputElement;
 const propRy = document.getElementById('prop-ry') as HTMLInputElement;
 const propRz = document.getElementById('prop-rz') as HTMLInputElement;
 const propAttachEntity = document.getElementById('prop-attach-entity') as HTMLInputElement;
+const propLocatorRename = document.getElementById('prop-locator-rename') as HTMLInputElement;
 const propAutocompleteList = document.getElementById('prop-autocomplete-list')!;
+const attachDiagnostic = document.getElementById('attach-diagnostic')!;
 
 // Context menu & add-locator panel
 const contextMenu = document.getElementById('context-menu')!;
@@ -231,12 +242,27 @@ let scene: THREE.Scene;
 let camera: THREE.PerspectiveCamera;
 let controls: OrbitControls;
 let transformCtrl: TransformControls;
+let multiTransformPivot: THREE.Object3D;
 let currentModel: THREE.Group | null = null;
 let locatorHelpers: THREE.Group | null = null;
 let animationFrameId = 0;
 let selectedLocator: THREE.Object3D | null = null;
 let selectedLocatorEditable = false;
 const selectedLocators = new Set<THREE.Object3D>();
+interface MultiTransformSnapshot {
+    pivotWorld: THREE.Matrix4;
+    objects: Array<{ object: THREE.Object3D; world: THREE.Matrix4 }>;
+}
+let multiTransformSnapshot: MultiTransformSnapshot | null = null;
+let copiedLocatorWorldTransform: THREE.Matrix4 | null = null;
+let copiedLocatorTransformName = '';
+interface AttachDiagnostic {
+    locatorName: string;
+    entityName?: string;
+    severity: 'warning' | 'error';
+    message: string;
+}
+const attachDiagnostics: AttachDiagnostic[] = [];
 let editMode = false;
 let documentDirty = false;
 let saveInProgress = false;
@@ -285,6 +311,7 @@ let smartDuplicateState: SmartDuplicateState | null = null;
 
 function renderDocumentState(saved = false): void {
     saveButton.disabled = !documentDirty || saveInProgress;
+    discardDraftsButton.disabled = !documentDirty || saveInProgress;
     saveButton.classList.toggle('dirty', documentDirty);
     editSaveState.classList.toggle('dirty', documentDirty && !saveInProgress);
     editSaveState.classList.toggle('saving', saveInProgress);
@@ -294,6 +321,34 @@ function renderDocumentState(saved = false): void {
         : documentDirty
             ? (isChinese ? '未保存' : 'Modified')
             : (isChinese ? '已保存' : 'Saved');
+}
+
+function renderDraftSummary(files: Array<{ name: string; path?: string; conflict?: boolean; operations?: string[] }>): void {
+    draftSummary.classList.toggle('hidden', files.length === 0);
+    draftSummaryLabel.textContent = isChinese ? `${files.length} 个相关文件` : `${files.length} file(s)`;
+    draftSummaryFiles.innerHTML = '';
+    for (const file of files) {
+        const item = document.createElement('div');
+        item.className = 'draft-file';
+        const name = document.createElement('div');
+        name.className = 'draft-file-name';
+        name.textContent = `${file.conflict ? '⚠ ' : ''}${file.name}`;
+        if (file.path) name.title = file.path;
+        item.appendChild(name);
+        if (file.path) {
+            const filePath = document.createElement('div');
+            filePath.className = 'draft-file-operation';
+            filePath.textContent = file.path;
+            item.appendChild(filePath);
+        }
+        for (const operation of file.operations ?? []) {
+            const row = document.createElement('div');
+            row.className = 'draft-file-operation';
+            row.textContent = `• ${operation}`;
+            item.appendChild(row);
+        }
+        draftSummaryFiles.appendChild(item);
+    }
 }
 
 function markDocumentModified(): void {
@@ -319,6 +374,8 @@ function setWorkspaceMode(mode: 'preview' | 'edit'): void {
     if (selectedLocator) {
         selectLocator(selectedLocator, isLocatorObjectEditable(selectedLocator), true);
     } else {
+        if (editMode && selectedLocators.size > 1) attachMultiTransformPivot();
+        else transformCtrl.detach();
         updateLocatorSelectionActions();
     }
 }
@@ -381,6 +438,9 @@ function initThree() {
     scene.background = new THREE.Color().setStyle(
         getComputedStyle(document.body).getPropertyValue('--ep-bg').trim() || DEFAULT_SCENE_BG
     );
+    multiTransformPivot = new THREE.Object3D();
+    multiTransformPivot.name = '__locator_multi_transform_pivot';
+    scene.add(multiTransformPivot);
 
     // Camera
     camera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000);
@@ -472,11 +532,17 @@ function initThree() {
     transformCtrl.addEventListener('dragging-changed', (event) => {
         const isDragging = (event as unknown as { value: boolean }).value;
         controls.enabled = !isDragging;
+        if (isDragging && !selectedLocator && selectedLocators.size > 1) {
+            captureMultiTransformSnapshot();
+        }
         // Commit one draft update when a gizmo drag finishes. Disk persistence
         // remains behind the explicit Save action.
         if (!isDragging && editMode && selectedLocator) {
             updateSmartDuplicateStepFromSelected();
             updateLocatorDraft();
+        } else if (!isDragging && editMode && multiTransformSnapshot) {
+            multiTransformSnapshot = null;
+            updateLocatorsDraft(Array.from(selectedLocators));
         }
     });
     transformCtrl.addEventListener('objectChange', () => {
@@ -485,6 +551,8 @@ function initThree() {
                 snapSelectedLocatorToPointerVertex();
             }
             updatePropsFromLocator(selectedLocator);
+        } else if (multiTransformSnapshot && transformCtrl.object === multiTransformPivot) {
+            applyMultiTransformFromPivot();
         }
     });
     const transformHelper = transformCtrl.getHelper();
@@ -600,15 +668,60 @@ function initThree() {
 /** Update the unsaved .asset document buffer after a gizmo drag. */
 function updateLocatorDraft() {
     if (!editMode || !selectedLocator) return;
-    const rotation = getLocatorRotationDegrees(selectedLocator);
-    vscode.postMessage({
-        command: 'updateLocator',
-        locatorName: selectedLocator.name,
-        position: [selectedLocator.position.x, selectedLocator.position.y, selectedLocator.position.z],
-        rotation: toPdxScriptRotation(rotation),
+    updateLocatorsDraft([selectedLocator]);
+}
+
+function updateLocatorsDraft(objects: THREE.Object3D[]) {
+    if (!editMode) return;
+    const locators = objects.filter(isLocatorObjectEditable).map(object => ({
+        locatorName: object.name,
+        position: [object.position.x, object.position.y, object.position.z] as LocatorVector3,
+        rotation: toPdxScriptRotation(getLocatorRotationDegrees(object)),
         scale: 1,
-    });
+    }));
+    if (locators.length === 0) return;
+    if (locators.length === 1) vscode.postMessage({ command: 'updateLocator', ...locators[0] });
+    else vscode.postMessage({ command: 'updateLocators', locators });
     markDocumentModified();
+}
+
+function attachMultiTransformPivot(): void {
+    if (!editMode || selectedLocators.size < 2) return;
+    const objects = Array.from(selectedLocators).filter(isLocatorObjectEditable);
+    if (objects.length < 2) return;
+    multiTransformPivot.position.copy(getSelectionWorldCenter(objects));
+    const orientationSource = treeSelectionAnchor && selectedLocators.has(treeSelectionAnchor)
+        ? treeSelectionAnchor
+        : objects[objects.length - 1]!;
+    orientationSource.getWorldQuaternion(multiTransformPivot.quaternion);
+    multiTransformPivot.scale.set(1, 1, 1);
+    multiTransformPivot.updateMatrixWorld(true);
+    transformCtrl.attach(multiTransformPivot);
+}
+
+function captureMultiTransformSnapshot(): void {
+    multiTransformPivot.updateMatrixWorld(true);
+    const objects = Array.from(selectedLocators).filter(isLocatorObjectEditable);
+    for (const object of objects) object.updateMatrixWorld(true);
+    multiTransformSnapshot = {
+        pivotWorld: multiTransformPivot.matrixWorld.clone(),
+        objects: objects.map(object => ({ object, world: object.matrixWorld.clone() })),
+    };
+}
+
+function applyMultiTransformFromPivot(): void {
+    const snapshot = multiTransformSnapshot;
+    if (!snapshot) return;
+    multiTransformPivot.updateMatrixWorld(true);
+    const delta = multiTransformPivot.matrixWorld.clone().multiply(snapshot.pivotWorld.clone().invert());
+    for (const item of snapshot.objects) {
+        if (!item.object.parent) continue;
+        item.object.parent.updateMatrixWorld(true);
+        const local = applyWorldDeltaToLocalTransform(item.world, item.object.parent.matrixWorld, delta);
+        item.object.position.copy(local.position);
+        item.object.quaternion.copy(local.quaternion);
+        item.object.updateMatrixWorld(true);
+    }
 }
 
 function clearParticleInstances(): void {
@@ -1002,7 +1115,6 @@ function refreshLocatorVisualVisibility() {
     updateLocatorLabels();
 }
 
-const GRID_SNAP_STEP = 1;
 const vertexSnapRaycaster = new THREE.Raycaster();
 const vertexSnapLocal = new THREE.Vector3();
 const vertexSnapWorld = new THREE.Vector3();
@@ -1017,7 +1129,14 @@ function isVertexSnapActive(): boolean {
 }
 
 function updateTransformSnapping() {
-    transformCtrl.setTranslationSnap(isVertexSnapActive() ? null : isGridSnapActive() ? GRID_SNAP_STEP : null);
+    const translationStep = Number(moveSnapStep.value);
+    const rotationStep = Number(rotationSnapStep.value);
+    transformCtrl.setTranslationSnap(isVertexSnapActive()
+        ? null
+        : isGridSnapActive() && Number.isFinite(translationStep) && translationStep > 0 ? translationStep : null);
+    transformCtrl.setRotationSnap(rotationSnapToggle.checked && Number.isFinite(rotationStep) && rotationStep > 0
+        ? THREE.MathUtils.degToRad(rotationStep)
+        : null);
 }
 
 function rebuildVertexSnapMeshCache() {
@@ -1198,6 +1317,8 @@ function updateLocatorSelectionActions() {
     deleteSelectedLocatorsButton.title = deletableCount < selection.length
         ? (isChinese ? '仅删除脚本中新建的定位器；Mesh 定位器只能隐藏' : 'Only script-created locators can be deleted; mesh locators can only be hidden')
         : '';
+    const pasteButton = document.getElementById('btn-paste-selected-transform') as HTMLButtonElement | null;
+    if (pasteButton) pasteButton.disabled = !editMode || !copiedLocatorWorldTransform;
 }
 
 function clearLocatorSelectionStyles() {
@@ -1230,6 +1351,7 @@ function selectLocator(obj: THREE.Object3D, editable = true, preserveSmartDuplic
     updatePropsFromLocator(obj);
     propsPanel.classList.remove('hidden');
     propsName.textContent = obj instanceof THREE.Bone ? obj.name.replace(/^.*?__/, '') : obj.name;
+    propLocatorRename.value = obj.name;
     const source = obj instanceof THREE.Bone ? 'bone' : String(obj.userData?.source ?? 'unknown');
     const sourceLabels: Record<string, string> = isChinese
         ? {
@@ -1258,14 +1380,25 @@ function selectLocator(obj: THREE.Object3D, editable = true, preserveSmartDuplic
     const applyBtn = document.getElementById('btn-apply');
     const resetBtn = document.getElementById('btn-reset');
     const duplicateBtn = document.getElementById('btn-special-duplicate');
+    const renameBtn = document.getElementById('btn-rename-locator') as HTMLButtonElement | null;
+    const pasteBtn = document.getElementById('btn-paste-transform') as HTMLButtonElement | null;
+    const originBtn = document.getElementById('btn-origin-locator') as HTMLButtonElement | null;
     if (applyBtn) applyBtn.style.display = canEditTransform ? '' : 'none';
     if (resetBtn) resetBtn.style.display = canEditTransform ? '' : 'none';
     if (duplicateBtn) duplicateBtn.style.display = selectedLocatorEditable ? '' : 'none';
+    propLocatorRename.disabled = !selectedLocatorEditable;
+    if (renameBtn) renameBtn.disabled = !selectedLocatorEditable;
+    if (pasteBtn) pasteBtn.disabled = !selectedLocatorEditable || !copiedLocatorWorldTransform;
+    if (originBtn) originBtn.disabled = !selectedLocatorEditable;
 
     // Attach entity input: enabled for all, including submodels (cross-file write supported)
     propAttachEntity.disabled = !editMode;
     propAttachEntity.style.opacity = editMode ? '1' : '0.5';
     propAttachEntity.placeholder = isSubmodel ? `Attach to ${ownerEntity}` : 'e.g. some_entity_name';
+    const setAttachButton = document.getElementById('btn-set-attach') as HTMLButtonElement | null;
+    const clearAttachButton = document.getElementById('btn-clear-attach') as HTMLButtonElement | null;
+    if (setAttachButton) setAttachButton.disabled = !editMode;
+    if (clearAttachButton) clearAttachButton.disabled = !editMode || !propAttachEntity.value.trim();
 
     if (selectedLocatorEditable) {
         transformCtrl.attach(obj);
@@ -1330,6 +1463,11 @@ function applyLocatorSelection(objects: THREE.Object3D[], operation: LocatorSele
         }
     }
 
+    if (selectedLocators.size === 1) {
+        selectLocator(Array.from(selectedLocators)[0]!, true, true);
+        return;
+    }
+
     selectedLocator = null;
     selectedLocatorEditable = false;
     selectedLocatorSnapshot = null;
@@ -1337,10 +1475,14 @@ function applyLocatorSelection(objects: THREE.Object3D[], operation: LocatorSele
     transformCtrl.detach();
     propsPanel.classList.add('hidden');
     hideSpecialDuplicatePanel(false);
-    transformHint.classList.add('hidden');
-    transformHint.classList.remove('visible');
+    transformHint.textContent = isChinese
+        ? '多选整体变换 · W 移动 · E 旋转'
+        : 'Transform selection together · W Translate · E Rotate';
+    transformHint.classList.toggle('hidden', !editMode || selectedLocators.size < 2);
+    transformHint.classList.toggle('visible', editMode && selectedLocators.size > 1);
     for (const obj of selectedLocators) setLocatorSelectedStyle(obj, true);
     highlightTreeItems(new Set(Array.from(selectedLocators, obj => obj.name)));
+    if (editMode && selectedLocators.size > 1) attachMultiTransformPivot();
     updateLocatorSelectionActions();
 }
 
@@ -1462,6 +1604,7 @@ function deselectLocator() {
     selectedLocatorEditable = false;
     selectedLocatorSnapshot = null;
     smartDuplicateState = null;
+    multiTransformSnapshot = null;
     treeSelectionAnchor = null;
     transformCtrl.detach();
     propsPanel.classList.add('hidden');
@@ -1521,6 +1664,7 @@ function updatePropsFromLocator(obj: THREE.Object3D) {
         propAttachEntity.value = attachEntry?.entityName ?? '';
     }
     hidePropAutocomplete();
+    updateAttachDiagnostic();
 }
 
 function applyPropsToLocator() {
@@ -1546,6 +1690,97 @@ function applyPropsToLocator() {
         rotation: toPdxScriptRotation(rotation),
         scale: 1,
     });
+    markDocumentModified();
+}
+
+function copySelectedLocatorTransform(): void {
+    if (!selectedLocator) return;
+    selectedLocator.updateMatrixWorld(true);
+    copiedLocatorWorldTransform = selectedLocator.matrixWorld.clone();
+    copiedLocatorTransformName = selectedLocator.name;
+    const pasteButton = document.getElementById('btn-paste-transform') as HTMLButtonElement | null;
+    if (pasteButton) pasteButton.disabled = !selectedLocatorEditable;
+    updateLocatorSelectionActions();
+    transformHint.textContent = isChinese
+        ? `已复制 ${copiedLocatorTransformName} 的当前变换（静态值）`
+        : `Copied ${copiedLocatorTransformName} current transform (static value)`;
+    transformHint.classList.remove('hidden');
+    transformHint.classList.add('visible');
+}
+
+function applyWorldTransform(object: THREE.Object3D, worldTransform: THREE.Matrix4): void {
+    if (!object.parent) return;
+    object.parent.updateMatrixWorld(true);
+    const local = object.parent.matrixWorld.clone().invert().multiply(worldTransform);
+    const position = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
+    const ignoredScale = new THREE.Vector3();
+    local.decompose(position, quaternion, ignoredScale);
+    object.position.copy(position);
+    object.quaternion.copy(quaternion);
+    object.updateMatrixWorld(true);
+}
+
+function editableTransformSelection(): THREE.Object3D[] {
+    if (selectedLocator && isLocatorObjectEditable(selectedLocator)) return [selectedLocator];
+    return Array.from(selectedLocators).filter(isLocatorObjectEditable);
+}
+
+function pasteCopiedTransform(): void {
+    if (!editMode || !copiedLocatorWorldTransform) return;
+    const targets = editableTransformSelection();
+    if (targets.length === 0) return;
+    for (const target of targets) applyWorldTransform(target, copiedLocatorWorldTransform);
+    if (selectedLocator) updatePropsFromLocator(selectedLocator);
+    else attachMultiTransformPivot();
+    updateLocatorsDraft(targets);
+}
+
+function moveSelectionToOrigin(): void {
+    if (!editMode) return;
+    const targets = editableTransformSelection();
+    if (targets.length === 0) return;
+    for (const target of targets) target.position.set(0, 0, 0);
+    if (selectedLocator) updatePropsFromLocator(selectedLocator);
+    else attachMultiTransformPivot();
+    updateLocatorsDraft(targets);
+}
+
+function renameSelectedLocator(): void {
+    if (!editMode || !selectedLocator || !selectedLocatorEditable) return;
+    const oldName = selectedLocator.name;
+    const newName = propLocatorRename.value.trim();
+    const collides = Array.from(getExistingLocatorNames())
+        .some(name => name.toLowerCase() === newName.toLowerCase() && name !== oldName);
+    const valid = newName.length > 0 && newName.length <= 200 && !/["{}\r\n=]/.test(newName) && !collides;
+    propLocatorRename.setCustomValidity(valid ? '' : (isChinese ? '名称无效或已存在' : 'Invalid or duplicate name'));
+    if (!valid) {
+        propLocatorRename.reportValidity();
+        return;
+    }
+    if (newName === oldName) return;
+
+    vscode.postMessage({ command: 'renameLocator', oldName, newName });
+    const axes = selectedLocator.getObjectByName(`${oldName}_axes`);
+    const hit = selectedLocator.getObjectByName(`${oldName}_hit`);
+    if (axes) axes.name = `${newName}_axes`;
+    if (hit) hit.name = `${newName}_hit`;
+    selectedLocator.name = newName;
+    const label = locatorLabelEls.get(`${selectedLocator.id}`);
+    if (label) label.textContent = newName;
+    propsName.textContent = newName;
+    propLocatorRename.value = newName;
+    if (currentEntity) {
+        for (const locator of currentEntity.locators ?? []) if (locator.name === oldName) locator.name = newName;
+        for (const attach of currentEntity.attaches ?? []) if (attach.locatorName === oldName) attach.locatorName = newName;
+        for (const attach of currentEntity.attachData ?? []) if (attach.locatorName === oldName) attach.locatorName = newName;
+        for (const state of currentEntity.states ?? []) {
+            for (const event of state.particleEvents ?? []) if (event.node === oldName) event.node = newName;
+        }
+        updateEntityTree(currentEntity, lastParsedMeshFile ?? undefined);
+    }
+    treeSelectionAnchor = selectedLocator;
+    highlightTreeItem(newName);
     markDocumentModified();
 }
 
@@ -1617,7 +1852,37 @@ function sendUpdateAttach() {
         entityName: propAttachEntity.value.trim(),
         targetEntity: targetEntity || undefined
     });
-    markDocumentModified();
+    updateAttachDiagnostic();
+}
+
+function selectedAnchorName(): string | undefined {
+    if (!selectedLocator) return undefined;
+    return selectedLocator instanceof THREE.Bone
+        ? selectedLocator.name.replace(/^.*?__/, '')
+        : selectedLocator.name;
+}
+
+function updateAttachDiagnostic(): void {
+    const locatorName = selectedAnchorName();
+    const entityName = propAttachEntity.value.trim();
+    const diagnostic = locatorName
+        ? attachDiagnostics.find(item => item.locatorName === locatorName && (!item.entityName || item.entityName === entityName))
+        : undefined;
+    let message = diagnostic?.message ?? '';
+    let severity = diagnostic?.severity;
+    if (!message && entityName && cachedEntityNames.length > 0 && !cachedEntityNames.includes(entityName)) {
+        message = isChinese
+            ? '被挂载实体定义不存在。保存后该挂载仍无法解析。'
+            : 'Attached entity definition is missing and cannot be resolved after save.';
+        severity = 'error';
+    }
+    attachDiagnostic.textContent = message;
+    attachDiagnostic.classList.toggle('hidden', !message);
+    attachDiagnostic.classList.toggle('error', severity === 'error');
+    const openButton = document.getElementById('btn-open-attach-entity') as HTMLButtonElement | null;
+    if (openButton) openButton.disabled = !entityName || !cachedEntityNames.includes(entityName);
+    const clearButton = document.getElementById('btn-clear-attach') as HTMLButtonElement | null;
+    if (clearButton) clearButton.disabled = !editMode || !entityName;
 }
 
 propAttachEntity.addEventListener('input', () => {
@@ -1627,9 +1892,11 @@ propAttachEntity.addEventListener('input', () => {
     const val = propAttachEntity.value.trim();
     if (val.length === 0) {
         hidePropAutocomplete();
+        updateAttachDiagnostic();
         return;
     }
     showPropAutocomplete(val);
+    updateAttachDiagnostic();
 });
 
 propAttachEntity.addEventListener('focus', () => {
@@ -1652,6 +1919,18 @@ propAttachEntity.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         hidePropAutocomplete();
     }
+});
+
+document.getElementById('btn-set-attach')?.addEventListener('click', sendUpdateAttach);
+document.getElementById('btn-clear-attach')?.addEventListener('click', () => {
+    propAttachEntity.value = '';
+    hidePropAutocomplete();
+    sendUpdateAttach();
+    updateAttachDiagnostic();
+});
+document.getElementById('btn-open-attach-entity')?.addEventListener('click', () => {
+    const entityName = propAttachEntity.value.trim();
+    if (entityName) vscode.postMessage({ command: 'openEntityDefinition', entityName });
 });
 
 function highlightTreeItems(names: Set<string>) {
@@ -3241,6 +3520,7 @@ function updateEntityTree(_entity: EntityData, _parsed?: ParsedMeshFile) {
         let label = obj.name;
         let sublabel = '';
         let dataset = '';
+        let inlineAction = '';
         
         if (obj === currentModel) {
             isNode = true;
@@ -3254,6 +3534,7 @@ function updateEntityTree(_entity: EntityData, _parsed?: ParsedMeshFile) {
             icon = svgIconEntity;
             label = obj.name.replace('attach_', '');
             dataset = `data-entity-name="${label}"`;
+            inlineAction = `<button class="tree-inline-action" data-open-entity="${label}">${isChinese ? '定义' : 'Open'}</button>`;
         } else if (obj instanceof THREE.Bone) {
             isNode = true;
             nodeClass = 'tree-bone';
@@ -3261,6 +3542,7 @@ function updateEntityTree(_entity: EntityData, _parsed?: ParsedMeshFile) {
             label = label.replace(/^.*?__/, ''); // Clear collision prefix for display
             treeObjects.set(obj.uuid, obj);
             dataset = `data-object-uuid="${obj.uuid}"`;
+            inlineAction = `<button class="tree-inline-action" data-attach-object-uuid="${obj.uuid}">+ Attach</button>`;
         } else if ((obj.userData as any).isLocator) {
             isNode = true;
             nodeClass = 'tree-locator';
@@ -3269,6 +3551,7 @@ function updateEntityTree(_entity: EntityData, _parsed?: ParsedMeshFile) {
             sublabel = src;
             treeObjects.set(obj.uuid, obj);
             dataset = `data-object-uuid="${obj.uuid}"`;
+            inlineAction = `<button class="tree-inline-action" data-attach-object-uuid="${obj.uuid}">+ Attach</button>`;
         }
         
         let childrenHtml = '';
@@ -3299,6 +3582,7 @@ function updateEntityTree(_entity: EntityData, _parsed?: ParsedMeshFile) {
             nodeHtml += `<span class="tree-icon" style="margin-right:4px; display:flex;">${icon}</span>`;
             nodeHtml += `<span class="tree-label">${label}</span>`;
             if (sublabel) nodeHtml += `<span class="tree-sublabel" style="margin-left:8px;opacity:0.6;font-size:0.9em;">${sublabel}</span>`;
+            nodeHtml += inlineAction;
             nodeHtml += `</div>`;
             if (childrenHtml) {
                 nodeHtml += `<div class="tree-children${isCollapsed ? ' collapsed' : ''}" data-parent="${label}">`;
@@ -3353,6 +3637,23 @@ function updateEntityTree(_entity: EntityData, _parsed?: ParsedMeshFile) {
     const orderedSelectableLocators = Array.from(entityTree.querySelectorAll<HTMLElement>('.tree-locator[data-object-uuid]'))
         .map(el => treeObjects.get(el.dataset.objectUuid!))
         .filter((obj): obj is THREE.Object3D => !!obj && isLocatorObjectEditable(obj) && isLocatorVisuallyVisible(obj));
+
+    entityTree.querySelectorAll<HTMLElement>('[data-attach-object-uuid]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.stopPropagation();
+            const obj = treeObjects.get(button.dataset.attachObjectUuid!);
+            if (!obj) return;
+            selectLocator(obj, isLocatorObjectEditable(obj));
+            propAttachEntity.focus();
+        });
+    });
+    entityTree.querySelectorAll<HTMLElement>('[data-open-entity]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.stopPropagation();
+            const entityName = button.dataset.openEntity;
+            if (entityName) vscode.postMessage({ command: 'openEntityDefinition', entityName });
+        });
+    });
 
     entityTree.querySelectorAll<HTMLElement>('[data-object-uuid]').forEach(el => {
         el.addEventListener('click', (event) => {
@@ -3631,6 +3932,14 @@ gridSnapToggle.addEventListener('change', () => {
     updateTransformSnapping();
 });
 
+rotationSnapToggle.addEventListener('change', updateTransformSnapping);
+moveSnapStep.addEventListener('input', updateTransformSnapping);
+rotationSnapStep.addEventListener('input', updateTransformSnapping);
+transformSpaceSelect.addEventListener('change', () => {
+    transformCtrl.setSpace(transformSpaceSelect.value === 'local' ? 'local' : 'world');
+    if (!selectedLocator && selectedLocators.size > 1) attachMultiTransformPivot();
+});
+
 vertexSnapToggle.addEventListener('change', () => {
     if (vertexSnapToggle.checked) gridSnapToggle.checked = false;
     updateTransformSnapping();
@@ -3686,9 +3995,19 @@ document.getElementById('btn-rotate')?.addEventListener('click', () => setTransf
 hideSelectedLocatorsButton.addEventListener('click', toggleSelectedLocatorVisibility);
 deleteSelectedLocatorsButton.addEventListener('click', deleteSelectedLocatorObjects);
 document.getElementById('btn-clear-locator-selection')?.addEventListener('click', deselectLocator);
+document.getElementById('btn-paste-selected-transform')?.addEventListener('click', pasteCopiedTransform);
+document.getElementById('btn-origin-selected-locators')?.addEventListener('click', moveSelectionToOrigin);
 
 // Properties panel buttons
 document.getElementById('btn-apply')?.addEventListener('click', applyPropsToLocator);
+document.getElementById('btn-copy-transform')?.addEventListener('click', copySelectedLocatorTransform);
+document.getElementById('btn-paste-transform')?.addEventListener('click', pasteCopiedTransform);
+document.getElementById('btn-origin-locator')?.addEventListener('click', moveSelectionToOrigin);
+document.getElementById('btn-rename-locator')?.addEventListener('click', renameSelectedLocator);
+propLocatorRename.addEventListener('input', () => propLocatorRename.setCustomValidity(''));
+propLocatorRename.addEventListener('keydown', event => {
+    if (event.key === 'Enter') renameSelectedLocator();
+});
 document.getElementById('btn-reset')?.addEventListener('click', () => {
     if (editMode && selectedLocator && selectedLocatorSnapshot) {
         // Restore original position/rotation
@@ -3887,6 +4206,10 @@ document.getElementById('btn-screenshot')?.addEventListener('click', takeScreens
 previewModeButton.addEventListener('click', () => setWorkspaceMode('preview'));
 editModeButton.addEventListener('click', () => setWorkspaceMode('edit'));
 saveButton.addEventListener('click', requestDocumentSave);
+discardDraftsButton.addEventListener('click', () => {
+    if (!documentDirty || saveInProgress) return;
+    vscode.postMessage({ command: 'discardDrafts' });
+});
 
 // Keyboard shortcuts: F=focus, W=translate, E=rotate (Maya-style), Escape=deselect, Ctrl+Z=undo
 function handleWindowKeydown(e: KeyboardEvent) {
@@ -4471,6 +4794,11 @@ async function handleWindowMessage(event: MessageEvent) {
             documentDirty = msg.dirty === true;
             saveInProgress = msg.saving === true;
             renderDocumentState(msg.saved === true);
+            renderDraftSummary(Array.isArray(msg.files) ? msg.files : []);
+            if (msg.conflict === true) {
+                editSaveState.textContent = isChinese ? '外部变更冲突' : 'External conflict';
+                editSaveState.classList.add('dirty');
+            }
             break;
         }
         case 'environments': {
@@ -4552,6 +4880,25 @@ async function handleWindowMessage(event: MessageEvent) {
         }
         case 'entityNames': {
             updateEntityNamesList(msg.names ?? []);
+            updateAttachDiagnostic();
+            break;
+        }
+        case 'attachDiagnostics': {
+            attachDiagnostics.splice(0, attachDiagnostics.length, ...(Array.isArray(msg.diagnostics) ? msg.diagnostics : []));
+            updateAttachDiagnostic();
+            break;
+        }
+        case 'attachValidation': {
+            const locatorName = typeof msg.locatorName === 'string' ? msg.locatorName : '';
+            const existing = attachDiagnostics.findIndex(item => item.locatorName === locatorName && !item.entityName);
+            const diagnostic: AttachDiagnostic = {
+                locatorName,
+                severity: msg.severity === 'warning' ? 'warning' : 'error',
+                message: String(msg.message ?? ''),
+            };
+            if (existing >= 0) attachDiagnostics[existing] = diagnostic;
+            else attachDiagnostics.push(diagnostic);
+            updateAttachDiagnostic();
             break;
         }
         case 'attachEntityData': {

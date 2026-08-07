@@ -1,6 +1,11 @@
 import { expect } from 'chai';
 import { parseAssetFile } from '../../extension/entityAssetParser';
-import { findLocatorTextBlock, updateLocatorTransformBlock } from '../../extension/entityLocatorEditing';
+import {
+    findLocatorTextBlock,
+    renameLocatorBlock,
+    renameLocatorReferencesInEntity,
+    updateLocatorTransformBlock,
+} from '../../extension/entityLocatorEditing';
 
 describe('entity static locator editing', () => {
     it('finds the exact top-level locator block from the parser line', () => {
@@ -46,5 +51,26 @@ describe('entity static locator editing', () => {
         expect(updated).to.include('\n\t\tscale = 2\n');
         expect(updated).to.include('position = { -1.000000 0.500000 4.000000 }');
         expect(updated).to.include('rotation = { 0.00 90.00 0.00 }');
+    });
+
+    it('renames only the resolved locator name field', () => {
+        const source = 'locator = { name = "engine.old" parent_joint = "engine.old" position = { 0 0 0 } }';
+        const updated = renameLocatorBlock(source, 'engine.old', 'engine_new');
+
+        expect(updated).to.include('name = "engine_new"');
+        expect(updated).to.include('parent_joint = "engine.old"');
+    });
+
+    it('renames attach keys and particle nodes without changing entity values', () => {
+        const source = `entity = {
+    name = test
+    attach = { "engine.old" = "engine.old" }
+    state = { event = { node = engine.old particle = fx } }
+}`;
+        const updated = renameLocatorReferencesInEntity(source, 'engine.old', 'engine_new');
+
+        expect(updated).to.include('attach = { "engine_new" = "engine.old" }');
+        expect(updated).to.include('node = engine_new');
+        expect(updated).to.include('name = test');
     });
 });

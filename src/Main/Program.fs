@@ -3333,7 +3333,14 @@ type Server(client: ILanguageClient) =
                 && not (isInlineScriptDefinitionPath name)
             // Mark type refresh needed ONLY if the file was EDITED (not just opened).
             // Opening a file does not change its content, so the type/enum index is still valid.
-            if isEditAction && isIncrementalContributionCandidate name && not shallowAnalyze && not canTryIncrementalTypeRefresh then
+            // Inline-script templates never define types or rules: their save path refreshes
+            // callers (RefreshInlineScriptCallers) and revalidates them, so routing them
+            // through the multi-GB full RefreshCaches path is pure waste.
+            if isEditAction
+               && isIncrementalContributionCandidate name
+               && not shallowAnalyze
+               && not canTryIncrementalTypeRefresh
+               && not (isInlineScriptDefinitionPath name) then
                 needsTypeRefresh <- true
                 lastTypeRefreshRequestAt <- DateTime.UtcNow
                 let domains =

@@ -1,0 +1,1843 @@
+[19:39:03] [生命周期] LanguageClientState
+  详情: old: Stopped [old=Stopped] | new: Starting [new=Starting]
+
+[19:39:03] [生命周期] ClientServerProcess
+  详情: stage: spawned [stage=spawned] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad]
+
+[19:39:04] [生命周期] LanguageClientState
+  详情: old: Starting [old=Starting] | new: Running [new=Running]
+
+[19:39:05] [RequestTrace] {"id":1,"method":"textDocument/codeAction","totalMs":505.9828,"queueMs":0.0872,"processQueueMs":4.726,"workerWaitMs":0.1239,"lockWaitMs":500.9685,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":1,"workerThreads":10,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32757,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":8,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:05] [RequestTrace] {"id":2,"method":"textDocument/documentLink","totalMs":510.0103,"queueMs":0.2507,"processQueueMs":0.2271,"workerWaitMs":8.8113,"lockWaitMs":500.6687,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":2,"workerThreads":11,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32756,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":9,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:05] [RequestTrace] {"id":6,"method":"textDocument/codeAction","totalMs":502.3191,"queueMs":0.0058,"processQueueMs":0.0115,"workerWaitMs":2.2597,"lockWaitMs":499.9871,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":6,"workerThreads":10,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32757,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":6,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:05] [RequestTrace] {"id":4,"method":"textDocument/codeAction","totalMs":504.0023,"queueMs":0.0211,"processQueueMs":0.0149,"workerWaitMs":3.773,"lockWaitMs":500.1324,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":4,"workerThreads":10,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32757,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":6,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:05] [RequestTrace] {"id":5,"method":"textDocument/documentLink","totalMs":503.7169,"queueMs":0.0142,"processQueueMs":0.0465,"workerWaitMs":3.547,"lockWaitMs":500.0568,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":5,"workerThreads":10,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32757,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":6,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:05] [RequestTrace] {"id":3,"method":"textDocument/inlayHint","totalMs":510.1208,"queueMs":2.9658,"processQueueMs":0.0597,"workerWaitMs":6.123,"lockWaitMs":500.6581,"methodMs":0.2611,"responseMs":0.0071,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":3,"workerThreads":7,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32760,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":5,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:05] [RequestTrace] {"id":8,"method":"textDocument/documentSymbol","totalMs":501.7662,"queueMs":0.1627,"processQueueMs":0.0186,"workerWaitMs":0.4377,"lockWaitMs":501.0661,"methodMs":0.0781,"responseMs":0.0004,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":7,"workerThreads":12,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32755,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":10,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:05] [RequestTrace] {"id":13,"method":"textDocument/semanticTokens/full","totalMs":79.7864,"queueMs":0.1426,"processQueueMs":0.0227,"workerWaitMs":0.0287,"lockWaitMs":79.5486,"methodMs":0.0409,"responseMs":0.0002,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":6,"workerThreads":11,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32756,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":9,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:05] [RequestTrace] {"id":9,"method":"textDocument/codeAction","totalMs":505.7499,"queueMs":0.0124,"processQueueMs":0.023,"workerWaitMs":0.1673,"lockWaitMs":505.4863,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":8,"workerThreads":10,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32757,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":8,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:05] [RequestTrace] {"id":10,"method":"textDocument/codeAction","totalMs":499.6649,"queueMs":0.012,"processQueueMs":0.0234,"workerWaitMs":0.0325,"lockWaitMs":499.5389,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":8,"workerThreads":9,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32758,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":7,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:05] [RequestTrace] {"id":11,"method":"textDocument/documentLink","totalMs":500.0845,"queueMs":0.0181,"processQueueMs":0.0273,"workerWaitMs":0.0328,"lockWaitMs":499.945,"methodMs":0.058,"responseMs":0.0002,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":9,"workerThreads":8,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32759,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":6,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:06] [RequestTrace] {"id":12,"method":"textDocument/codeLens","totalMs":500.4547,"queueMs":0.1338,"processQueueMs":0.024,"workerWaitMs":0.0347,"lockWaitMs":500.1845,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":5,"workerThreads":8,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32759,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":6,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:06] [RequestTrace] {"id":14,"method":"textDocument/codeAction","totalMs":500.8077,"queueMs":0.0135,"processQueueMs":0.0214,"workerWaitMs":0.0378,"lockWaitMs":500.6945,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":7,"workerThreads":7,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32760,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":5,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:06] [RequestTrace] {"id":15,"method":"textDocument/inlayHint","totalMs":500.1996,"queueMs":0.0597,"processQueueMs":0.0243,"workerWaitMs":0.056,"lockWaitMs":500.0205,"methodMs":0.0331,"responseMs":0.0003,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":8,"workerThreads":6,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32761,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":4,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:06] [RequestTrace] {"id":16,"method":"textDocument/documentSymbol","totalMs":500.6737,"queueMs":0.0166,"processQueueMs":0.0095,"workerWaitMs":0.0177,"lockWaitMs":500.6105,"methodMs":0.0177,"responseMs":0.0001,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":9,"workerThreads":5,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32762,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":2,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:06] [RequestTrace] {"id":17,"method":"textDocument/codeAction","totalMs":500.4732,"queueMs":0.0031,"processQueueMs":0.0063,"workerWaitMs":0.0081,"lockWaitMs":500.3943,"methodMs":0.0594,"responseMs":0.0002,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":10,"workerThreads":5,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32762,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":2,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:06] [RequestTrace] {"id":19,"method":"textDocument/codeLens","totalMs":499.5883,"queueMs":0.0321,"processQueueMs":0.021,"workerWaitMs":0.036,"lockWaitMs":499.4601,"methodMs":0.0359,"responseMs":0.0003,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":6,"workerThreads":6,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32761,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":4,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:06] [RequestTrace] {"id":20,"method":"textDocument/codeAction","totalMs":499.9796,"queueMs":0.0233,"processQueueMs":0.0236,"workerWaitMs":0.0392,"lockWaitMs":499.8348,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":2,"workerThreads":5,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32762,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":3,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:06] [RequestTrace] {"id":21,"method":"textDocument/codeAction","totalMs":499.8493,"queueMs":0.0131,"processQueueMs":0.0428,"workerWaitMs":0.0335,"lockWaitMs":499.7142,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":3,"workerThreads":4,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32763,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":1,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:06] [RequestTrace] {"id":22,"method":"textDocument/codeAction","totalMs":499.4478,"queueMs":0.0055,"processQueueMs":0.0139,"workerWaitMs":0.0153,"lockWaitMs":499.3824,"methodMs":0.0283,"responseMs":0.0004,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":4,"workerThreads":4,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32763,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":1,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:07] [RequestTrace] {"id":23,"method":"textDocument/inlayHint","totalMs":517.7066,"queueMs":0.0426,"processQueueMs":0.0211,"workerWaitMs":0.0352,"lockWaitMs":517.5684,"methodMs":0.0349,"responseMs":0.0005,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":1,"workerThreads":3,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32764,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":1,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:08] [性能] WriteLock hold budget exceeded
+  详情: phase: gameInit [phase=gameInit] | 等待写锁: 0ms [wait=0ms] | 持有写锁: 3288ms [hold=3288ms]
+
+[19:39:18] [RequestTrace] {"id":25,"method":"textDocument/documentHighlight","totalMs":499.5242,"queueMs":0.116,"processQueueMs":0.0217,"workerWaitMs":0.0172,"lockWaitMs":499.3415,"methodMs":0.0244,"responseMs":0.0003,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":1,"workerThreads":2,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32765,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:39:19] [RequestTrace] {"id":26,"method":"textDocument/codeLens","totalMs":508.7083,"queueMs":0.0176,"processQueueMs":0.0235,"workerWaitMs":0.0161,"lockWaitMs":508.6236,"methodMs":0.0241,"responseMs":0.0004,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":1,"workerThreads":10,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32757,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:40:04] [RequestTrace] {"id":27,"method":"textDocument/documentHighlight","totalMs":142.8261,"queueMs":0.0376,"processQueueMs":0.0207,"workerWaitMs":0.0229,"lockWaitMs":142.7257,"methodMs":142.6993,"responseMs":0.0268,"lockKind":"read-fallback","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":1,"workerThreads":1,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32766,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[19:40:19] [RequestTrace] {"id":76,"method":"textDocument/hover","totalMs":50.27,"queueMs":0.1435,"processQueueMs":0.0127,"workerWaitMs":0.0135,"lockWaitMs":0,"methodMs":49.9787,"responseMs":0.1148,"lockKind":"read-fallback","lockAcquired":null,"outcome":"cancelled","queueDepth":1,"pendingCount":1,"workerThreads":1,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32766,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[19:40:20] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: phase: diagnostics-cleared [phase=diagnostics-cleared] | documentVersion: 2 [documentVersion=2] | modelEpoch: { game = 2L   rules = 2L   types = 2L   localisation = 2L } [modelEpoch={ game = 2L   rules = 2L   types = 2L   localisation = 2L }] | freshness: stale [freshness=stale]
+
+[19:40:20] [校验] 准备交互更新
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: 耗时: 0ms [elapsed=0ms]
+
+[19:40:20] [校验] 提交交互更新
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 2ms [hold=2ms] | 已提交: 是 [committed=True]
+
+[19:40:20] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: 模式: prepared-deep [mode=prepared-deep] | 浅层校验: 否 [shallow=False] | 本次分配: 15 MB [allocDeltaMB=15]
+  诊断: 文件: 7210 [files=7210] | 最新: 7209 [fresh=7209] | 待校验: 0 [pending=0] | 过期: 1 [stale=1]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 4 [resourceEpoch=4] | carrierEpoch: 3 [carrierEpoch=3] | typeRulesEpoch: 1 [typeRulesEpoch=1]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:20] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: phase: deep-complete [phase=deep-complete] | documentVersion: Some(2) [documentVersion=Some(2)] | modelEpoch: { game = 2L   rules = 2L   types = 2L   localisation = 2L } [modelEpoch={ game = 2L   rules = 2L   types = 2L   localisation = 2L }] | freshness: Pending [freshness=Pending]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验: rules,types [pending=rules,types]
+
+[19:40:20] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 2 [lint=2] | 全局刷新次数: 0 [refresh=0] | 本地化刷新次数: 0 [refreshLoc=0]
+  ↳ 补全次数: 0 [completion=0] | 字符串池: 614523 [strings=614523] | 整数池: 903122 [ints=903122]
+  内存: 托管堆: 3578MB [heap=3578MB] | 累计分配: 112161MB [alloc=112161MB] | 工作集: 5281MB [working=5281MB] | 专用内存: 5348MB [private=5348MB]
+  ↳ 堆碎片: 1156MB [fragmented=1156MB] | 第 0 代 GC: 1731 [gc0=1731] | 第 1 代 GC: 145 [gc1=145] | 第 2 代 GC: 11 [gc2=11]
+  诊断: 文件: 7210 [files=7210] | 最新: 7209 [fresh=7209] | 待校验: 1 [pending=1] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 4 [resourceEpoch=4] | carrierEpoch: 3 [carrierEpoch=3] | typeRulesEpoch: 1 [typeRulesEpoch=1]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:20] [性能] WriteLock hold budget exceeded
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: phase: inlineCaller [phase=inlineCaller] | 等待写锁: 0ms [wait=0ms] | 持有写锁: 133ms [hold=133ms]
+
+[19:40:20] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 3809MB [heap=3809MB] | 累计分配: 112643MB [alloc=112643MB] | 工作集: 5298MB [working=5298MB] | 专用内存: 5364MB [private=5364MB]
+  ↳ 堆碎片: 1156MB [fragmented=1156MB] | 第 0 代 GC: 1732 [gc0=1732] | 第 1 代 GC: 145 [gc1=145] | 第 2 代 GC: 11 [gc2=11]
+
+[19:40:20] [RequestTrace] {"id":83,"method":"textDocument/documentSymbol","totalMs":117.8299,"queueMs":0.0083,"processQueueMs":0.0112,"workerWaitMs":0.0128,"lockWaitMs":117.7858,"methodMs":11.0246,"responseMs":0.0171,"lockKind":"read-fallback","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":1,"workerThreads":4,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32763,"pendingWorkItems":0,"readerCount":1,"waitingReadCount":0,"waitingWriteCount":1,"writerActivityCount":1,"writerActiveCount":0}
+
+[19:40:20] [RequestTrace] {"id":84,"method":"textDocument/documentSymbol","totalMs":118.1893,"queueMs":0.0002,"processQueueMs":0.0006,"workerWaitMs":0.0053,"lockWaitMs":118.1765,"methodMs":11.4186,"responseMs":0.0116,"lockKind":"read-fallback","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":2,"workerThreads":3,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32764,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:40:20] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 1 [skip=1] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7210 [files=7210] | 最新: 7206 [fresh=7206] | 待校验: 4 [pending=4] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 5 [resourceEpoch=5] | carrierEpoch: 4 [carrierEpoch=4] | typeRulesEpoch: 1 [typeRulesEpoch=1]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:20] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:40:20] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 614523 [strings=614523] | 整数池: 903122 [ints=903122]
+  内存: 托管堆: 3810MB [heap=3810MB] | 累计分配: 112644MB [alloc=112644MB] | 工作集: 5298MB [working=5298MB] | 专用内存: 5364MB [private=5364MB]
+  ↳ 堆碎片: 1156MB [fragmented=1156MB] | 第 0 代 GC: 1732 [gc0=1732] | 第 1 代 GC: 145 [gc1=145] | 第 2 代 GC: 11 [gc2=11]
+  诊断: 文件: 7210 [files=7210] | 最新: 7206 [fresh=7206] | 待校验: 4 [pending=4] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 5 [resourceEpoch=5] | carrierEpoch: 4 [carrierEpoch=4] | typeRulesEpoch: 1 [typeRulesEpoch=1]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:20] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 15 ms [elapsedMs=15]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=1;quiet=False;cooldown=True;force=False [status=deferred:skip=1;quiet=False;cooldown=True;force=False]
+  内存: 托管堆: 3810MB [heap=3810MB] | 累计分配: 112644MB [alloc=112644MB] | 工作集: 5298MB [working=5298MB] | 专用内存: 5364MB [private=5364MB]
+  ↳ 堆碎片: 1156MB [fragmented=1156MB] | 第 0 代 GC: 1732 [gc0=1732] | 第 1 代 GC: 145 [gc1=145] | 第 2 代 GC: 11 [gc2=11]
+
+[19:40:23] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 3713MB [heap=3713MB] | 累计分配: 112857MB [alloc=112857MB] | 工作集: 5318MB [working=5318MB] | 专用内存: 5385MB [private=5385MB]
+  ↳ 堆碎片: 1133MB [fragmented=1133MB] | 第 0 代 GC: 1733 [gc0=1733] | 第 1 代 GC: 146 [gc1=146] | 第 2 代 GC: 11 [gc2=11]
+
+[19:40:23] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 2 [skip=2] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7210 [files=7210] | 最新: 7206 [fresh=7206] | 待校验: 4 [pending=4] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 5 [resourceEpoch=5] | carrierEpoch: 4 [carrierEpoch=4] | typeRulesEpoch: 1 [typeRulesEpoch=1]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:23] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:40:23] [校验] 批量校验文件 · local dynamic batch
+  详情: 文件: 4 [files=4] | 诊断数: 0 [diagnostics=0] | 耗时: 312 ms [elapsedMs=312] | 本次分配: 872 MB [allocDeltaMB=872]
+  诊断: 文件: 7210 [files=7210] | 最新: 7206 [fresh=7206] | 待校验: 4 [pending=4] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+
+[19:40:23] [内存] 分析周期
+  详情: 本周期分配: 669 MB [cycleAllocMB=669] | 字符串池: 614523 [strings=614523] | 整数池: 903122 [ints=903122]
+  内存: 托管堆: 3577MB [heap=3577MB] | 累计分配: 113526MB [alloc=113526MB] | 工作集: 5316MB [working=5316MB] | 专用内存: 5383MB [private=5383MB]
+  ↳ 堆碎片: 1128MB [fragmented=1128MB] | 第 0 代 GC: 1741 [gc0=1741] | 第 1 代 GC: 147 [gc1=147] | 第 2 代 GC: 11 [gc2=11]
+  诊断: 文件: 7210 [files=7210] | 最新: 7206 [fresh=7206] | 待校验: 4 [pending=4] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 5 [resourceEpoch=5] | carrierEpoch: 4 [carrierEpoch=4] | typeRulesEpoch: 1 [typeRulesEpoch=1]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:23] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 203 ms [elapsedMs=203]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=2;quiet=False;cooldown=True;force=False [status=deferred:skip=2;quiet=False;cooldown=True;force=False]
+  内存: 托管堆: 3586MB [heap=3586MB] | 累计分配: 113535MB [alloc=113535MB] | 工作集: 5316MB [working=5316MB] | 专用内存: 5383MB [private=5383MB]
+  ↳ 堆碎片: 1128MB [fragmented=1128MB] | 第 0 代 GC: 1741 [gc0=1741] | 第 1 代 GC: 147 [gc1=147] | 第 2 代 GC: 11 [gc2=11]
+
+[19:40:26] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 是 [doRefresh=True] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 3583MB [heap=3583MB] | 累计分配: 122282MB [alloc=122282MB] | 工作集: 5039MB [working=5039MB] | 专用内存: 5103MB [private=5103MB]
+  ↳ 堆碎片: 1128MB [fragmented=1128MB] | 第 0 代 GC: 2045 [gc0=2045] | 第 1 代 GC: 147 [gc1=147] | 第 2 代 GC: 11 [gc2=11]
+
+[19:40:26] [生命周期] AnalyzeLifecycle
+  详情: stage: prepare-before [stage=prepare-before] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | resourceEpoch: 5 [resourceEpoch=5]
+  ↳ 耗时: 3 ms [elapsedMs=3]
+  内存: 托管堆: 3568MB [heap=3568MB] | 累计分配: 122295MB [alloc=122295MB] | 工作集: 5039MB [working=5039MB] | 专用内存: 5103MB [private=5103MB]
+  ↳ 堆碎片: 1128MB [fragmented=1128MB] | 第 0 代 GC: 2045 [gc0=2045] | 第 1 代 GC: 147 [gc1=147] | 第 2 代 GC: 11 [gc2=11]
+
+[19:40:36] [生命周期] AnalyzeLifecycle
+  详情: stage: prepare-after [stage=prepare-after] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | outcome: prepared [outcome=prepared]
+  ↳ 耗时: 10433 ms [elapsedMs=10433] | totalElapsedMs: 10437 [totalElapsedMs=10437]
+  内存: 托管堆: 6405MB [heap=6405MB] | 累计分配: 148776MB [alloc=148776MB] | 工作集: 7702MB [working=7702MB] | 专用内存: 7784MB [private=7784MB]
+  ↳ 堆碎片: 730MB [fragmented=730MB] | 第 0 代 GC: 2158 [gc0=2158] | 第 1 代 GC: 171 [gc1=171] | 第 2 代 GC: 12 [gc2=12]
+
+[19:40:36] [生命周期] AnalyzeLifecycle
+  详情: stage: commit-before [stage=commit-before] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | resourceEpoch: 5 [resourceEpoch=5]
+  ↳ 耗时: 10441 ms [elapsedMs=10441]
+  内存: 托管堆: 6405MB [heap=6405MB] | 累计分配: 148777MB [alloc=148777MB] | 工作集: 7702MB [working=7702MB] | 专用内存: 7784MB [private=7784MB]
+  ↳ 堆碎片: 730MB [fragmented=730MB] | 第 0 代 GC: 2158 [gc0=2158] | 第 1 代 GC: 171 [gc1=171] | 第 2 代 GC: 12 [gc2=12]
+
+[19:40:36] [生命周期] AnalyzeLifecycle
+  详情: stage: commit-after [stage=commit-after] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | outcome: committed [outcome=committed]
+  ↳ 耗时: 3 ms [elapsedMs=3] | totalElapsedMs: 10444 [totalElapsedMs=10444]
+  内存: 托管堆: 6405MB [heap=6405MB] | 累计分配: 148777MB [alloc=148777MB] | 工作集: 7702MB [working=7702MB] | 专用内存: 7784MB [private=7784MB]
+  ↳ 堆碎片: 730MB [fragmented=730MB] | 第 0 代 GC: 2158 [gc0=2158] | 第 1 代 GC: 171 [gc1=171] | 第 2 代 GC: 12 [gc2=12]
+
+[19:40:36] [刷新] 刷新缓存
+  详情: 本次分配: 26495 MB [allocDeltaMB=26495] | 使用 staged 刷新: 是 [staged=true] | 强制刷新: 否 [force=False] | 达到跳过上限: 否 [skipLimit=False]
+  ↳ resourceEpoch: 5 [resourceEpoch=5]
+  内存: 托管堆: 6405MB [heap=6405MB] | 累计分配: 148777MB [alloc=148777MB] | 工作集: 7702MB [working=7702MB] | 专用内存: 7784MB [private=7784MB]
+  ↳ 堆碎片: 730MB [fragmented=730MB] | 第 0 代 GC: 2158 [gc0=2158] | 第 1 代 GC: 171 [gc1=171] | 第 2 代 GC: 12 [gc2=12]
+  诊断: 文件: 7210 [files=7210] | 最新: 7206 [fresh=7206] | 待校验: 4 [pending=4] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 2 [groupedTypeFiles=2]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 5 [resourceEpoch=5] | carrierEpoch: 4 [carrierEpoch=4] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:37] [RequestTrace] {"id":261,"method":"textDocument/codeLens","totalMs":528.0645,"queueMs":0.0028,"processQueueMs":0.001,"workerWaitMs":27.7004,"lockWaitMs":500.3339,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":3,"workerThreads":12,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32755,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":8,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:40:37] [RequestTrace] {"id":260,"method":"textDocument/inlayHint","totalMs":529.1302,"queueMs":0.024,"processQueueMs":0.0382,"workerWaitMs":28.9708,"lockWaitMs":500.0716,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":2,"workerThreads":11,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32756,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":7,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:40:37] [RequestTrace] {"id":270,"method":"textDocument/semanticTokens/full","totalMs":79.78,"queueMs":0.0117,"processQueueMs":0.014,"workerWaitMs":0.016,"lockWaitMs":79.7104,"methodMs":0.0242,"responseMs":0.0003,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":9,"workerThreads":12,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32755,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":8,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:40:37] [RequestTrace] {"id":262,"method":"textDocument/documentHighlight","totalMs":562.842,"queueMs":0.0089,"processQueueMs":63.1306,"workerWaitMs":0.0162,"lockWaitMs":499.6566,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":2,"pendingCount":4,"workerThreads":11,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32756,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":4,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:40:37] [RequestTrace] {"id":264,"method":"textDocument/documentLink","totalMs":562.753,"queueMs":0.0015,"processQueueMs":63.0461,"workerWaitMs":0.0574,"lockWaitMs":499.6216,"methodMs":0.0225,"responseMs":0.0006,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":4,"pendingCount":6,"workerThreads":11,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32756,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":4,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:40:37] [RequestTrace] {"id":263,"method":"textDocument/inlayHint","totalMs":562.7978,"queueMs":0.011,"processQueueMs":63.0753,"workerWaitMs":0.0425,"lockWaitMs":499.6261,"methodMs":0.037,"responseMs":0.0003,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":3,"pendingCount":5,"workerThreads":11,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32756,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":4,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:40:37] [RequestTrace] {"id":265,"method":"textDocument/codeAction","totalMs":562.9502,"queueMs":0.0023,"processQueueMs":62.9622,"workerWaitMs":0.0631,"lockWaitMs":499.6062,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":5,"pendingCount":7,"workerThreads":8,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32759,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":4,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:40:37] [RequestTrace] {"id":267,"method":"textDocument/codeAction","totalMs":499.9714,"queueMs":0.0071,"processQueueMs":0.0103,"workerWaitMs":0.0128,"lockWaitMs":499.9141,"methodMs":0.022,"responseMs":0.0004,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":8,"workerThreads":7,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32760,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":3,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:40:37] [RequestTrace] {"id":268,"method":"textDocument/documentSymbol","totalMs":500.1076,"queueMs":0.0094,"processQueueMs":0.0131,"workerWaitMs":0.0151,"lockWaitMs":500.0468,"methodMs":0.0189,"responseMs":0.0004,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":9,"workerThreads":6,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32761,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":2,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:40:37] [RequestTrace] {"id":269,"method":"textDocument/codeLens","totalMs":499.7269,"queueMs":0.0101,"processQueueMs":0.0135,"workerWaitMs":0.0143,"lockWaitMs":499.6665,"methodMs":0.018,"responseMs":0.0004,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":8,"workerThreads":5,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32762,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":1,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:40:38] [本地化] 本地化诊断
+  详情: 本次分配: 7633 MB [allocDeltaMB=7633] | 本地化文件缓存: 7 [locFiles=7] | 本地化错误: 547 [locErrors=547] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:40:38] [性能] WriteLock hold budget exceeded
+  详情: phase: refresh [phase=refresh] | 等待写锁: 0ms [wait=0ms] | 持有写锁: 1582ms [hold=1582ms] | didRefresh: 是 [didRefresh=True]
+  ↳ didLoc: 是 [didLoc=True]
+
+[19:40:38] [内存] GC after global refresh (idle)
+
+[19:40:38] [内存] 分析周期
+  详情: 本周期分配: 34510 MB [cycleAllocMB=34510] | 字符串池: 645386 [strings=645386] | 整数池: 964527 [ints=964527]
+  内存: 托管堆: 6385MB [heap=6385MB] | 累计分配: 156792MB [alloc=156792MB] | 工作集: 7575MB [working=7575MB] | 专用内存: 7663MB [private=7663MB]
+  ↳ 堆碎片: 703MB [fragmented=703MB] | 第 0 代 GC: 2211 [gc0=2211] | 第 1 代 GC: 177 [gc1=177] | 第 2 代 GC: 13 [gc2=13]
+  诊断: 文件: 7208 [files=7208] | 最新: 0 [fresh=0] | 待校验: 7208 [pending=7208] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 5 [resourceEpoch=5] | carrierEpoch: 4 [carrierEpoch=4] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:38] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 12162 ms [elapsedMs=12162]
+  ↳ didGlobalWork: 是 [didGlobalWork=True] | didRefresh: 是 [didRefresh=True] | 状态: refresh_caches_staged [status=refresh_caches_staged]
+  内存: 托管堆: 6400MB [heap=6400MB] | 累计分配: 156807MB [alloc=156807MB] | 工作集: 7575MB [working=7575MB] | 专用内存: 7663MB [private=7663MB]
+  ↳ 堆碎片: 703MB [fragmented=703MB] | 第 0 代 GC: 2211 [gc0=2211] | 第 1 代 GC: 177 [gc1=177] | 第 2 代 GC: 13 [gc2=13]
+
+[19:40:40] [RequestTrace] {"id":259,"method":"workspace/executeCommand","totalMs":3756.2588,"queueMs":0.5495,"processQueueMs":0.0159,"workerWaitMs":19.0088,"lockWaitMs":3736.2687,"methodMs":2203.9935,"responseMs":0.4237,"lockKind":"read","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":1,"workerThreads":3,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32764,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:40:40] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_normal.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 7875 MB [allocDeltaMB=7875]
+  诊断: 文件: 7208 [files=7208] | 最新: 0 [fresh=0] | 待校验: 7208 [pending=7208] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 6 [resourceEpoch=6] | carrierEpoch: 4 [carrierEpoch=4] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:40] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_normal.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 3L   rules = 3L   types = 3L   localisation = 3L } [modelEpoch={ game = 3L   rules = 3L   types = 3L   localisation = 3L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:40:40] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 49 MB [allocDeltaMB=49]
+  诊断: 文件: 7208 [files=7208] | 最新: 1 [fresh=1] | 待校验: 7207 [pending=7207] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 7 [resourceEpoch=7] | carrierEpoch: 4 [carrierEpoch=4] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:40] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(2) [documentVersion=Some(2)] | modelEpoch: { game = 3L   rules = 3L   types = 3L   localisation = 3L } [modelEpoch={ game = 3L   rules = 3L   types = 3L   localisation = 3L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:40:40] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\star_classes\kuat_star_classes.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 46 MB [allocDeltaMB=46]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 8 [resourceEpoch=8] | carrierEpoch: 4 [carrierEpoch=4] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:40] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\star_classes\kuat_star_classes.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 3L   rules = 3L   types = 3L   localisation = 3L } [modelEpoch={ game = 3L   rules = 3L   types = 3L   localisation = 3L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:40:40] [校验] 校验文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_collateral_damage_fixup_no.txt
+  详情: 浅层校验: 是 [shallow=True] | 本次分配: 34 MB [allocDeltaMB=34]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 8 [resourceEpoch=8] | carrierEpoch: 4 [carrierEpoch=4] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:40] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_collateral_damage_fixup_no.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion:  [documentVersion=] | modelEpoch: { game = 3L   rules = 3L   types = 3L   localisation = 3L } [modelEpoch={ game = 3L   rules = 3L   types = 3L   localisation = 3L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:40:42] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验:  [pending=]
+  内存: 托管堆: 3446MB [heap=3446MB] | 累计分配: 166552MB [alloc=166552MB] | 工作集: 6613MB [working=6613MB] | 专用内存: 6690MB [private=6690MB]
+  ↳ 堆碎片: 2606MB [fragmented=2606MB] | 第 0 代 GC: 2333 [gc0=2333] | 第 1 代 GC: 196 [gc1=196] | 第 2 代 GC: 13 [gc2=13]
+
+[19:40:42] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 7208 [files=7208] | 最新: 4 [fresh=4] | 待校验: 7204 [pending=7204] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 8 [resourceEpoch=8] | carrierEpoch: 4 [carrierEpoch=4] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:42] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:40:42] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 645386 [strings=645386] | 整数池: 964527 [ints=964527]
+  内存: 托管堆: 3446MB [heap=3446MB] | 累计分配: 166552MB [alloc=166552MB] | 工作集: 6613MB [working=6613MB] | 专用内存: 6690MB [private=6690MB]
+  ↳ 堆碎片: 2606MB [fragmented=2606MB] | 第 0 代 GC: 2333 [gc0=2333] | 第 1 代 GC: 196 [gc1=196] | 第 2 代 GC: 13 [gc2=13]
+  诊断: 文件: 7208 [files=7208] | 最新: 4 [fresh=4] | 待校验: 7204 [pending=7204] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 8 [resourceEpoch=8] | carrierEpoch: 4 [carrierEpoch=4] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:42] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 6 ms [elapsedMs=6]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: not_needed [status=not_needed]
+  内存: 托管堆: 3446MB [heap=3446MB] | 累计分配: 166552MB [alloc=166552MB] | 工作集: 6613MB [working=6613MB] | 专用内存: 6690MB [private=6690MB]
+  ↳ 堆碎片: 2606MB [fragmented=2606MB] | 第 0 代 GC: 2333 [gc0=2333] | 第 1 代 GC: 196 [gc1=196] | 第 2 代 GC: 13 [gc2=13]
+
+[19:40:51] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: phase: diagnostics-cleared [phase=diagnostics-cleared] | documentVersion: 3 [documentVersion=3] | modelEpoch: { game = 3L   rules = 3L   types = 3L   localisation = 3L } [modelEpoch={ game = 3L   rules = 3L   types = 3L   localisation = 3L }] | freshness: stale [freshness=stale]
+
+[19:40:51] [校验] 准备交互更新
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: 耗时: 0ms [elapsed=0ms]
+
+[19:40:51] [校验] 提交交互更新
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 1ms [hold=1ms] | 已提交: 是 [committed=True]
+
+[19:40:51] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: 模式: prepared-deep [mode=prepared-deep] | 浅层校验: 否 [shallow=False] | 本次分配: 15 MB [allocDeltaMB=15]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7204 [pending=7204] | 过期: 1 [stale=1]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 9 [resourceEpoch=9] | carrierEpoch: 5 [carrierEpoch=5] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:51] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: phase: deep-complete [phase=deep-complete] | documentVersion: Some(3) [documentVersion=Some(3)] | modelEpoch: { game = 3L   rules = 3L   types = 3L   localisation = 3L } [modelEpoch={ game = 3L   rules = 3L   types = 3L   localisation = 3L }] | freshness: Pending [freshness=Pending]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验: rules,types [pending=rules,types]
+
+[19:40:51] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 7 [lint=7] | 全局刷新次数: 1 [refresh=1] | 本地化刷新次数: 1 [refreshLoc=1]
+  ↳ 补全次数: 0 [completion=0] | 字符串池: 645386 [strings=645386] | 整数池: 964527 [ints=964527]
+  内存: 托管堆: 3435MB [heap=3435MB] | 累计分配: 166569MB [alloc=166569MB] | 工作集: 6599MB [working=6599MB] | 专用内存: 6675MB [private=6675MB]
+  ↳ 堆碎片: 2606MB [fragmented=2606MB] | 第 0 代 GC: 2334 [gc0=2334] | 第 1 代 GC: 196 [gc1=196] | 第 2 代 GC: 13 [gc2=13]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 9 [resourceEpoch=9] | carrierEpoch: 5 [carrierEpoch=5] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:51] [性能] WriteLock hold budget exceeded
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: phase: inlineCaller [phase=inlineCaller] | 等待写锁: 0ms [wait=0ms] | 持有写锁: 115ms [hold=115ms]
+
+[19:40:51] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 3448MB [heap=3448MB] | 累计分配: 167042MB [alloc=167042MB] | 工作集: 6598MB [working=6598MB] | 专用内存: 6674MB [private=6674MB]
+  ↳ 堆碎片: 2606MB [fragmented=2606MB] | 第 0 代 GC: 2349 [gc0=2349] | 第 1 代 GC: 196 [gc1=196] | 第 2 代 GC: 13 [gc2=13]
+
+[19:40:51] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 1 [skip=1] | 已进入静默期: 否 [quiet=False] | 冷却完成: 否 [cooldown=False]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 10 [resourceEpoch=10] | carrierEpoch: 6 [carrierEpoch=6] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:51] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:40:51] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 645386 [strings=645386] | 整数池: 964527 [ints=964527]
+  内存: 托管堆: 3448MB [heap=3448MB] | 累计分配: 167042MB [alloc=167042MB] | 工作集: 6598MB [working=6598MB] | 专用内存: 6674MB [private=6674MB]
+  ↳ 堆碎片: 2606MB [fragmented=2606MB] | 第 0 代 GC: 2349 [gc0=2349] | 第 1 代 GC: 196 [gc1=196] | 第 2 代 GC: 13 [gc2=13]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 10 [resourceEpoch=10] | carrierEpoch: 6 [carrierEpoch=6] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:51] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 6 ms [elapsedMs=6]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=1;quiet=False;cooldown=False;force=False [status=deferred:skip=1;quiet=False;cooldown=False;force=False]
+  内存: 托管堆: 3448MB [heap=3448MB] | 累计分配: 167042MB [alloc=167042MB] | 工作集: 6598MB [working=6598MB] | 专用内存: 6674MB [private=6674MB]
+  ↳ 堆碎片: 2606MB [fragmented=2606MB] | 第 0 代 GC: 2349 [gc0=2349] | 第 1 代 GC: 196 [gc1=196] | 第 2 代 GC: 13 [gc2=13]
+
+[19:40:54] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 3454MB [heap=3454MB] | 累计分配: 167260MB [alloc=167260MB] | 工作集: 6592MB [working=6592MB] | 专用内存: 6668MB [private=6668MB]
+  ↳ 堆碎片: 2606MB [fragmented=2606MB] | 第 0 代 GC: 2357 [gc0=2357] | 第 1 代 GC: 196 [gc1=196] | 第 2 代 GC: 13 [gc2=13]
+
+[19:40:54] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 2 [skip=2] | 已进入静默期: 否 [quiet=False] | 冷却完成: 否 [cooldown=False]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 10 [resourceEpoch=10] | carrierEpoch: 6 [carrierEpoch=6] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:54] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:40:54] [校验] 批量校验文件 · local dynamic batch
+  详情: 文件: 4 [files=4] | 诊断数: 0 [diagnostics=0] | 耗时: 396 ms [elapsedMs=396] | 本次分配: 895 MB [allocDeltaMB=895]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+
+[19:40:54] [内存] 分析周期
+  详情: 本周期分配: 726 MB [cycleAllocMB=726] | 字符串池: 645386 [strings=645386] | 整数池: 964527 [ints=964527]
+  内存: 托管堆: 3454MB [heap=3454MB] | 累计分配: 167987MB [alloc=167987MB] | 工作集: 6589MB [working=6589MB] | 专用内存: 6665MB [private=6665MB]
+  ↳ 堆碎片: 2594MB [fragmented=2594MB] | 第 0 代 GC: 2378 [gc0=2378] | 第 1 代 GC: 197 [gc1=197] | 第 2 代 GC: 13 [gc2=13]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 10 [resourceEpoch=10] | carrierEpoch: 6 [carrierEpoch=6] | typeRulesEpoch: 2 [typeRulesEpoch=2]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:40:54] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 295 ms [elapsedMs=295]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=2;quiet=False;cooldown=False;force=False [status=deferred:skip=2;quiet=False;cooldown=False;force=False]
+  内存: 托管堆: 3460MB [heap=3460MB] | 累计分配: 167993MB [alloc=167993MB] | 工作集: 6589MB [working=6589MB] | 专用内存: 6665MB [private=6665MB]
+  ↳ 堆碎片: 2594MB [fragmented=2594MB] | 第 0 代 GC: 2378 [gc0=2378] | 第 1 代 GC: 197 [gc1=197] | 第 2 代 GC: 13 [gc2=13]
+
+[19:40:57] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 是 [doRefresh=True] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 3464MB [heap=3464MB] | 累计分配: 174773MB [alloc=174773MB] | 工作集: 6574MB [working=6574MB] | 专用内存: 6651MB [private=6651MB]
+  ↳ 堆碎片: 2593MB [fragmented=2593MB] | 第 0 代 GC: 2614 [gc0=2614] | 第 1 代 GC: 198 [gc1=198] | 第 2 代 GC: 13 [gc2=13]
+
+[19:40:57] [生命周期] AnalyzeLifecycle
+  详情: stage: prepare-before [stage=prepare-before] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | resourceEpoch: 10 [resourceEpoch=10]
+  ↳ 耗时: 3 ms [elapsedMs=3]
+  内存: 托管堆: 3442MB [heap=3442MB] | 累计分配: 174781MB [alloc=174781MB] | 工作集: 6574MB [working=6574MB] | 专用内存: 6651MB [private=6651MB]
+  ↳ 堆碎片: 2593MB [fragmented=2593MB] | 第 0 代 GC: 2614 [gc0=2614] | 第 1 代 GC: 198 [gc1=198] | 第 2 代 GC: 13 [gc2=13]
+
+[19:41:10] [生命周期] AnalyzeLifecycle
+  详情: stage: prepare-after [stage=prepare-after] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | outcome: prepared [outcome=prepared]
+  ↳ 耗时: 12821 ms [elapsedMs=12821] | totalElapsedMs: 12824 [totalElapsedMs=12824]
+  内存: 托管堆: 6433MB [heap=6433MB] | 累计分配: 207105MB [alloc=207105MB] | 工作集: 8495MB [working=8495MB] | 专用内存: 8583MB [private=8583MB]
+  ↳ 堆碎片: 1041MB [fragmented=1041MB] | 第 0 代 GC: 2752 [gc0=2752] | 第 1 代 GC: 224 [gc1=224] | 第 2 代 GC: 14 [gc2=14]
+
+[19:41:10] [生命周期] AnalyzeLifecycle
+  详情: stage: commit-before [stage=commit-before] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | resourceEpoch: 10 [resourceEpoch=10]
+  ↳ 耗时: 12828 ms [elapsedMs=12828]
+  内存: 托管堆: 6433MB [heap=6433MB] | 累计分配: 207105MB [alloc=207105MB] | 工作集: 8495MB [working=8495MB] | 专用内存: 8583MB [private=8583MB]
+  ↳ 堆碎片: 1041MB [fragmented=1041MB] | 第 0 代 GC: 2752 [gc0=2752] | 第 1 代 GC: 224 [gc1=224] | 第 2 代 GC: 14 [gc2=14]
+
+[19:41:10] [生命周期] AnalyzeLifecycle
+  详情: stage: commit-after [stage=commit-after] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | outcome: committed [outcome=committed]
+  ↳ 耗时: 3 ms [elapsedMs=3] | totalElapsedMs: 12832 [totalElapsedMs=12832]
+  内存: 托管堆: 6433MB [heap=6433MB] | 累计分配: 207105MB [alloc=207105MB] | 工作集: 8495MB [working=8495MB] | 专用内存: 8583MB [private=8583MB]
+  ↳ 堆碎片: 1041MB [fragmented=1041MB] | 第 0 代 GC: 2752 [gc0=2752] | 第 1 代 GC: 224 [gc1=224] | 第 2 代 GC: 14 [gc2=14]
+
+[19:41:10] [刷新] 刷新缓存
+  详情: 本次分配: 32331 MB [allocDeltaMB=32331] | 使用 staged 刷新: 是 [staged=true] | 强制刷新: 否 [force=False] | 达到跳过上限: 否 [skipLimit=False]
+  ↳ resourceEpoch: 10 [resourceEpoch=10]
+  内存: 托管堆: 6433MB [heap=6433MB] | 累计分配: 207105MB [alloc=207105MB] | 工作集: 8495MB [working=8495MB] | 专用内存: 8583MB [private=8583MB]
+  ↳ 堆碎片: 1041MB [fragmented=1041MB] | 第 0 代 GC: 2752 [gc0=2752] | 第 1 代 GC: 224 [gc1=224] | 第 2 代 GC: 14 [gc2=14]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 10 [resourceEpoch=10] | carrierEpoch: 6 [carrierEpoch=6] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:10] [Heartbeat] 事件
+  详情: heartbeatGapMs: 523.1503 [heartbeatGapMs=523.1503] | pendingWorkItems: 0 [pendingWorkItems=0] | availableWorkers: 32752 [availableWorkers=32752] | writerActive: 1 [writerActive=1]
+  ↳ waitingWriters: 0 [waitingWriters=0]
+
+[19:41:12] [本地化] 本地化诊断
+  详情: 本次分配: 7474 MB [allocDeltaMB=7474] | 本地化文件缓存: 7 [locFiles=7] | 本地化错误: 547 [locErrors=547] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:41:12] [性能] WriteLock hold budget exceeded
+  详情: phase: refresh [phase=refresh] | 等待写锁: 0ms [wait=0ms] | 持有写锁: 2135ms [hold=2135ms] | didRefresh: 是 [didRefresh=True]
+  ↳ didLoc: 是 [didLoc=True]
+
+[19:41:12] [内存] GC after global refresh (idle)
+
+[19:41:12] [内存] 分析周期
+  详情: 本周期分配: 40359 MB [cycleAllocMB=40359] | 字符串池: 645386 [strings=645386] | 整数池: 964527 [ints=964527]
+  内存: 托管堆: 6597MB [heap=6597MB] | 累计分配: 215133MB [alloc=215133MB] | 工作集: 8525MB [working=8525MB] | 专用内存: 8620MB [private=8620MB]
+  ↳ 堆碎片: 962MB [fragmented=962MB] | 第 0 代 GC: 2802 [gc0=2802] | 第 1 代 GC: 229 [gc1=229] | 第 2 代 GC: 14 [gc2=14]
+  诊断: 文件: 7208 [files=7208] | 最新: 0 [fresh=0] | 待校验: 7208 [pending=7208] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 10 [resourceEpoch=10] | carrierEpoch: 6 [carrierEpoch=6] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:12] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 15097 ms [elapsedMs=15097]
+  ↳ didGlobalWork: 是 [didGlobalWork=True] | didRefresh: 是 [didRefresh=True] | 状态: refresh_caches_staged [status=refresh_caches_staged]
+  内存: 托管堆: 6618MB [heap=6618MB] | 累计分配: 215154MB [alloc=215154MB] | 工作集: 8525MB [working=8525MB] | 专用内存: 8620MB [private=8620MB]
+  ↳ 堆碎片: 962MB [fragmented=962MB] | 第 0 代 GC: 2802 [gc0=2802] | 第 1 代 GC: 229 [gc1=229] | 第 2 代 GC: 14 [gc2=14]
+
+[19:41:14] [RequestTrace] {"id":447,"method":"workspace/executeCommand","totalMs":4413.3594,"queueMs":0.0179,"processQueueMs":7.0185,"workerWaitMs":45.8031,"lockWaitMs":4360.169,"methodMs":2309.7181,"responseMs":0.3587,"lockKind":"read","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":1,"workerThreads":3,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32764,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:41:14] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_normal.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 6481 MB [allocDeltaMB=6481]
+  诊断: 文件: 7208 [files=7208] | 最新: 0 [fresh=0] | 待校验: 7208 [pending=7208] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 11 [resourceEpoch=11] | carrierEpoch: 6 [carrierEpoch=6] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:14] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_normal.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 4L   rules = 4L   types = 4L   localisation = 4L } [modelEpoch={ game = 4L   rules = 4L   types = 4L   localisation = 4L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:41:14] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 54 MB [allocDeltaMB=54]
+  诊断: 文件: 7208 [files=7208] | 最新: 1 [fresh=1] | 待校验: 7207 [pending=7207] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 12 [resourceEpoch=12] | carrierEpoch: 6 [carrierEpoch=6] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:14] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(3) [documentVersion=Some(3)] | modelEpoch: { game = 4L   rules = 4L   types = 4L   localisation = 4L } [modelEpoch={ game = 4L   rules = 4L   types = 4L   localisation = 4L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:41:14] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\star_classes\kuat_star_classes.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 41 MB [allocDeltaMB=41]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 13 [resourceEpoch=13] | carrierEpoch: 6 [carrierEpoch=6] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:14] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\star_classes\kuat_star_classes.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 4L   rules = 4L   types = 4L   localisation = 4L } [modelEpoch={ game = 4L   rules = 4L   types = 4L   localisation = 4L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:41:22] [校验] 校验文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 浅层校验: 是 [shallow=True] | 本次分配: 12 MB [allocDeltaMB=12]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 13 [resourceEpoch=13] | carrierEpoch: 6 [carrierEpoch=6] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:22] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 4L   rules = 4L   types = 4L   localisation = 4L } [modelEpoch={ game = 4L   rules = 4L   types = 4L   localisation = 4L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:41:22] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 11 [lint=11] | 全局刷新次数: 2 [refresh=2] | 本地化刷新次数: 2 [refreshLoc=2]
+  ↳ 补全次数: 0 [completion=0] | 字符串池: 645386 [strings=645386] | 整数池: 964527 [ints=964527]
+  内存: 托管堆: 6740MB [heap=6740MB] | 累计分配: 224867MB [alloc=224867MB] | 工作集: 8241MB [working=8241MB] | 专用内存: 8333MB [private=8333MB]
+  ↳ 堆碎片: 952MB [fragmented=952MB] | 第 0 代 GC: 2929 [gc0=2929] | 第 1 代 GC: 243 [gc1=243] | 第 2 代 GC: 14 [gc2=14]
+  诊断: 文件: 7208 [files=7208] | 最新: 4 [fresh=4] | 待校验: 7204 [pending=7204] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 13 [resourceEpoch=13] | carrierEpoch: 6 [carrierEpoch=6] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:23] [RequestTrace] {"id":463,"method":"textDocument/hover","totalMs":0.1386,"queueMs":0.0414,"processQueueMs":0.0119,"workerWaitMs":0.0136,"lockWaitMs":0,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":null,"outcome":"cancelled","queueDepth":1,"pendingCount":1,"workerThreads":1,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32766,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[19:41:25] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验:  [pending=]
+  内存: 托管堆: 6752MB [heap=6752MB] | 累计分配: 224891MB [alloc=224891MB] | 工作集: 8242MB [working=8242MB] | 专用内存: 8335MB [private=8335MB]
+  ↳ 堆碎片: 952MB [fragmented=952MB] | 第 0 代 GC: 2930 [gc0=2930] | 第 1 代 GC: 243 [gc1=243] | 第 2 代 GC: 14 [gc2=14]
+
+[19:41:25] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 7208 [files=7208] | 最新: 4 [fresh=4] | 待校验: 7204 [pending=7204] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 13 [resourceEpoch=13] | carrierEpoch: 6 [carrierEpoch=6] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:25] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:41:25] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 645386 [strings=645386] | 整数池: 964527 [ints=964527]
+  内存: 托管堆: 6752MB [heap=6752MB] | 累计分配: 224891MB [alloc=224891MB] | 工作集: 8242MB [working=8242MB] | 专用内存: 8335MB [private=8335MB]
+  ↳ 堆碎片: 952MB [fragmented=952MB] | 第 0 代 GC: 2930 [gc0=2930] | 第 1 代 GC: 243 [gc1=243] | 第 2 代 GC: 14 [gc2=14]
+  诊断: 文件: 7208 [files=7208] | 最新: 4 [fresh=4] | 待校验: 7204 [pending=7204] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 1 [semantic=1] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 13 [resourceEpoch=13] | carrierEpoch: 6 [carrierEpoch=6] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:25] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 6 ms [elapsedMs=6]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: not_needed [status=not_needed]
+  内存: 托管堆: 6752MB [heap=6752MB] | 累计分配: 224891MB [alloc=224891MB] | 工作集: 8242MB [working=8242MB] | 专用内存: 8335MB [private=8335MB]
+  ↳ 堆碎片: 952MB [fragmented=952MB] | 第 0 代 GC: 2930 [gc0=2930] | 第 1 代 GC: 243 [gc1=243] | 第 2 代 GC: 14 [gc2=14]
+
+[19:41:25] [RequestTrace] {"id":465,"method":"textDocument/hover","totalMs":0.0941,"queueMs":0.0101,"processQueueMs":0.0122,"workerWaitMs":0.0143,"lockWaitMs":0,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":null,"outcome":"cancelled","queueDepth":1,"pendingCount":1,"workerThreads":1,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32766,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[19:41:26] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: phase: diagnostics-cleared [phase=diagnostics-cleared] | documentVersion: 2 [documentVersion=2] | modelEpoch: { game = 4L   rules = 4L   types = 4L   localisation = 4L } [modelEpoch={ game = 4L   rules = 4L   types = 4L   localisation = 4L }] | freshness: stale [freshness=stale]
+
+[19:41:26] [校验] 准备交互更新
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 耗时: 0ms [elapsed=0ms]
+
+[19:41:26] [校验] 提交交互更新
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 1ms [hold=1ms] | 已提交: 是 [committed=True]
+
+[19:41:26] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 模式: prepared-deep [mode=prepared-deep] | 浅层校验: 否 [shallow=False] | 本次分配: 15 MB [allocDeltaMB=15]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7204 [pending=7204] | 过期: 1 [stale=1]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 14 [resourceEpoch=14] | carrierEpoch: 7 [carrierEpoch=7] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:26] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: phase: deep-complete [phase=deep-complete] | documentVersion: Some(2) [documentVersion=Some(2)] | modelEpoch: { game = 4L   rules = 4L   types = 4L   localisation = 4L } [modelEpoch={ game = 4L   rules = 4L   types = 4L   localisation = 4L }] | freshness: Pending [freshness=Pending]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验: rules,types [pending=rules,types]
+
+[19:41:26] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 6874MB [heap=6874MB] | 累计分配: 225242MB [alloc=225242MB] | 工作集: 8436MB [working=8436MB] | 专用内存: 8530MB [private=8530MB]
+  ↳ 堆碎片: 951MB [fragmented=951MB] | 第 0 代 GC: 2931 [gc0=2931] | 第 1 代 GC: 243 [gc1=243] | 第 2 代 GC: 14 [gc2=14]
+
+[19:41:26] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 1 [skip=1] | 已进入静默期: 否 [quiet=False] | 冷却完成: 否 [cooldown=False]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 15 [resourceEpoch=15] | carrierEpoch: 8 [carrierEpoch=8] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:26] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:41:26] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 6875MB [heap=6875MB] | 累计分配: 225243MB [alloc=225243MB] | 工作集: 8436MB [working=8436MB] | 专用内存: 8530MB [private=8530MB]
+  ↳ 堆碎片: 951MB [fragmented=951MB] | 第 0 代 GC: 2931 [gc0=2931] | 第 1 代 GC: 243 [gc1=243] | 第 2 代 GC: 14 [gc2=14]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 15 [resourceEpoch=15] | carrierEpoch: 8 [carrierEpoch=8] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:26] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 15 ms [elapsedMs=15]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=1;quiet=False;cooldown=False;force=False [status=deferred:skip=1;quiet=False;cooldown=False;force=False]
+  内存: 托管堆: 6875MB [heap=6875MB] | 累计分配: 225243MB [alloc=225243MB] | 工作集: 8436MB [working=8436MB] | 专用内存: 8530MB [private=8530MB]
+  ↳ 堆碎片: 951MB [fragmented=951MB] | 第 0 代 GC: 2931 [gc0=2931] | 第 1 代 GC: 243 [gc1=243] | 第 2 代 GC: 14 [gc2=14]
+
+[19:41:29] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 6775MB [heap=6775MB] | 累计分配: 225496MB [alloc=225496MB] | 工作集: 8438MB [working=8438MB] | 专用内存: 8532MB [private=8532MB]
+  ↳ 堆碎片: 950MB [fragmented=950MB] | 第 0 代 GC: 2933 [gc0=2933] | 第 1 代 GC: 243 [gc1=243] | 第 2 代 GC: 14 [gc2=14]
+
+[19:41:29] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 2 [skip=2] | 已进入静默期: 否 [quiet=False] | 冷却完成: 否 [cooldown=False]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 310 [errors=310] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 15 [resourceEpoch=15] | carrierEpoch: 8 [carrierEpoch=8] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:29] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:41:29] [校验] 批量校验文件 · local dynamic batch
+  详情: 文件: 3 [files=3] | 诊断数: 2 [diagnostics=2] | 耗时: 399 ms [elapsedMs=399] | 本次分配: 959 MB [allocDeltaMB=959]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+
+[19:41:29] [内存] 分析周期
+  详情: 本周期分配: 753 MB [cycleAllocMB=753] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 6780MB [heap=6780MB] | 累计分配: 226250MB [alloc=226250MB] | 工作集: 8425MB [working=8425MB] | 专用内存: 8521MB [private=8521MB]
+  ↳ 堆碎片: 946MB [fragmented=946MB] | 第 0 代 GC: 2944 [gc0=2944] | 第 1 代 GC: 244 [gc1=244] | 第 2 代 GC: 14 [gc2=14]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 15 [resourceEpoch=15] | carrierEpoch: 8 [carrierEpoch=8] | typeRulesEpoch: 3 [typeRulesEpoch=3]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:29] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 287 ms [elapsedMs=287]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=2;quiet=False;cooldown=False;force=False [status=deferred:skip=2;quiet=False;cooldown=False;force=False]
+  内存: 托管堆: 6792MB [heap=6792MB] | 累计分配: 226262MB [alloc=226262MB] | 工作集: 8423MB [working=8423MB] | 专用内存: 8520MB [private=8520MB]
+  ↳ 堆碎片: 946MB [fragmented=946MB] | 第 0 代 GC: 2945 [gc0=2945] | 第 1 代 GC: 244 [gc1=244] | 第 2 代 GC: 14 [gc2=14]
+
+[19:41:32] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 是 [doRefresh=True] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 6798MB [heap=6798MB] | 累计分配: 234243MB [alloc=234243MB] | 工作集: 8258MB [working=8258MB] | 专用内存: 8353MB [private=8353MB]
+  ↳ 堆碎片: 946MB [fragmented=946MB] | 第 0 代 GC: 3218 [gc0=3218] | 第 1 代 GC: 244 [gc1=244] | 第 2 代 GC: 14 [gc2=14]
+
+[19:41:32] [生命周期] AnalyzeLifecycle
+  详情: stage: prepare-before [stage=prepare-before] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | resourceEpoch: 15 [resourceEpoch=15]
+  ↳ 耗时: 4 ms [elapsedMs=4]
+  内存: 托管堆: 6783MB [heap=6783MB] | 累计分配: 234259MB [alloc=234259MB] | 工作集: 8258MB [working=8258MB] | 专用内存: 8353MB [private=8353MB]
+  ↳ 堆碎片: 946MB [fragmented=946MB] | 第 0 代 GC: 3218 [gc0=3218] | 第 1 代 GC: 244 [gc1=244] | 第 2 代 GC: 14 [gc2=14]
+
+[19:41:36] [Heartbeat] 事件
+  详情: heartbeatGapMs: 697.6456 [heartbeatGapMs=697.6456] | pendingWorkItems: 0 [pendingWorkItems=0] | availableWorkers: 32766 [availableWorkers=32766] | writerActive: 0 [writerActive=0]
+  ↳ waitingWriters: 0 [waitingWriters=0]
+
+[19:41:45] [生命周期] AnalyzeLifecycle
+  详情: stage: prepare-after [stage=prepare-after] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | outcome: prepared [outcome=prepared]
+  ↳ 耗时: 13620 ms [elapsedMs=13620] | totalElapsedMs: 13624 [totalElapsedMs=13624]
+  内存: 托管堆: 8059MB [heap=8059MB] | 累计分配: 269126MB [alloc=269126MB] | 工作集: 10755MB [working=10755MB] | 专用内存: 10886MB [private=10886MB]
+  ↳ 堆碎片: 1684MB [fragmented=1684MB] | 第 0 代 GC: 3398 [gc0=3398] | 第 1 代 GC: 278 [gc1=278] | 第 2 代 GC: 15 [gc2=15]
+
+[19:41:45] [生命周期] AnalyzeLifecycle
+  详情: stage: commit-before [stage=commit-before] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | resourceEpoch: 15 [resourceEpoch=15]
+  ↳ 耗时: 13629 ms [elapsedMs=13629]
+  内存: 托管堆: 8059MB [heap=8059MB] | 累计分配: 269126MB [alloc=269126MB] | 工作集: 10755MB [working=10755MB] | 专用内存: 10886MB [private=10886MB]
+  ↳ 堆碎片: 1684MB [fragmented=1684MB] | 第 0 代 GC: 3398 [gc0=3398] | 第 1 代 GC: 278 [gc1=278] | 第 2 代 GC: 15 [gc2=15]
+
+[19:41:45] [生命周期] AnalyzeLifecycle
+  详情: stage: commit-after [stage=commit-after] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | outcome: committed [outcome=committed]
+  ↳ 耗时: 4 ms [elapsedMs=4] | totalElapsedMs: 13633 [totalElapsedMs=13633]
+  内存: 托管堆: 8059MB [heap=8059MB] | 累计分配: 269126MB [alloc=269126MB] | 工作集: 10755MB [working=10755MB] | 专用内存: 10887MB [private=10887MB]
+  ↳ 堆碎片: 1684MB [fragmented=1684MB] | 第 0 代 GC: 3398 [gc0=3398] | 第 1 代 GC: 278 [gc1=278] | 第 2 代 GC: 15 [gc2=15]
+
+[19:41:45] [刷新] 刷新缓存
+  详情: 本次分配: 34882 MB [allocDeltaMB=34882] | 使用 staged 刷新: 是 [staged=true] | 强制刷新: 否 [force=False] | 达到跳过上限: 否 [skipLimit=False]
+  ↳ resourceEpoch: 15 [resourceEpoch=15]
+  内存: 托管堆: 8059MB [heap=8059MB] | 累计分配: 269126MB [alloc=269126MB] | 工作集: 10755MB [working=10755MB] | 专用内存: 10887MB [private=10887MB]
+  ↳ 堆碎片: 1684MB [fragmented=1684MB] | 第 0 代 GC: 3398 [gc0=3398] | 第 1 代 GC: 278 [gc1=278] | 第 2 代 GC: 15 [gc2=15]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 15 [resourceEpoch=15] | carrierEpoch: 8 [carrierEpoch=8] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:46] [Heartbeat] 事件
+  详情: heartbeatGapMs: 710.0022 [heartbeatGapMs=710.0022] | pendingWorkItems: 5 [pendingWorkItems=5] | availableWorkers: 32755 [availableWorkers=32755] | writerActive: 1 [writerActive=1]
+  ↳ waitingWriters: 0 [waitingWriters=0]
+
+[19:41:46] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: phase: diagnostics-cleared [phase=diagnostics-cleared] | documentVersion: 3 [documentVersion=3] | modelEpoch: { game = 5L   rules = 5L   types = 5L   localisation = 4L } [modelEpoch={ game = 5L   rules = 5L   types = 5L   localisation = 4L }] | freshness: stale [freshness=stale]
+
+[19:41:47] [RequestTrace] {"id":648,"method":"textDocument/codeAction","totalMs":641.6182,"queueMs":0.0108,"processQueueMs":0.2677,"workerWaitMs":140.4412,"lockWaitMs":500.8747,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":3,"workerThreads":13,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32754,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":8,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:41:47] [RequestTrace] {"id":647,"method":"textDocument/documentHighlight","totalMs":1428.1555,"queueMs":0.0132,"processQueueMs":4.2473,"workerWaitMs":922.0475,"lockWaitMs":501.8207,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":1,"pendingCount":2,"workerThreads":13,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32754,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":8,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:41:47] [RequestTrace] {"id":649,"method":"textDocument/codeLens","totalMs":641.7304,"queueMs":0.0031,"processQueueMs":0.2326,"workerWaitMs":141.2592,"lockWaitMs":500.2253,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":false,"outcome":"cancelled","queueDepth":2,"pendingCount":4,"workerThreads":11,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32756,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":7,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:41:47] [RequestTrace] {"id":650,"method":"textDocument/inlayHint","totalMs":597.9867,"queueMs":0.0233,"processQueueMs":97.5079,"workerWaitMs":0.0228,"lockWaitMs":500.4189,"methodMs":0.0105,"responseMs":0.0003,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":5,"workerThreads":10,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32757,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":6,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:41:47] [RequestTrace] {"id":656,"method":"textDocument/semanticTokens/full","totalMs":79.8101,"queueMs":0.009,"processQueueMs":0.0113,"workerWaitMs":0.0123,"lockWaitMs":79.7538,"methodMs":0.0204,"responseMs":0.0002,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":10,"workerThreads":9,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32758,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":5,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:41:47] [RequestTrace] {"id":652,"method":"textDocument/codeAction","totalMs":500.3353,"queueMs":0.0097,"processQueueMs":0.0188,"workerWaitMs":0.0198,"lockWaitMs":500.2615,"methodMs":0.0219,"responseMs":0.0004,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":6,"workerThreads":8,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32759,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":4,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:41:47] [RequestTrace] {"id":653,"method":"textDocument/documentSymbol","totalMs":499.8931,"queueMs":0.0098,"processQueueMs":0.0138,"workerWaitMs":0.0164,"lockWaitMs":499.8321,"methodMs":0.018,"responseMs":0.0003,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":7,"workerThreads":8,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32759,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":3,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:41:47] [RequestTrace] {"id":654,"method":"textDocument/documentSymbol","totalMs":499.8839,"queueMs":0.0003,"processQueueMs":0.0011,"workerWaitMs":0.0106,"lockWaitMs":499.8277,"methodMs":0.0119,"responseMs":0.0002,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":8,"workerThreads":8,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32759,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":3,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:41:47] [RequestTrace] {"id":655,"method":"textDocument/codeLens","totalMs":502.184,"queueMs":0.0087,"processQueueMs":0.0069,"workerWaitMs":0.0079,"lockWaitMs":502.1332,"methodMs":0.0225,"responseMs":0.0004,"lockKind":"read-fallback","lockAcquired":false,"outcome":"lock-timeout-fallback","queueDepth":1,"pendingCount":9,"workerThreads":7,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32760,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":3,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:41:47] [本地化] 本地化诊断
+  详情: 本次分配: 7165 MB [allocDeltaMB=7165] | 本地化文件缓存: 7 [locFiles=7] | 本地化错误: 547 [locErrors=547] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:41:47] [性能] WriteLock hold budget exceeded
+  详情: phase: refresh [phase=refresh] | 等待写锁: 0ms [wait=0ms] | 持有写锁: 1986ms [hold=1986ms] | didRefresh: 是 [didRefresh=True]
+  ↳ didLoc: 是 [didLoc=True]
+
+[19:41:47] [RequestTrace] {"id":659,"method":"textDocument/documentLink","totalMs":124.697,"queueMs":0.0097,"processQueueMs":0.0138,"workerWaitMs":0.0184,"lockWaitMs":124.647,"methodMs":1.8073,"responseMs":0.0101,"lockKind":"read-fallback","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":4,"workerThreads":5,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32762,"pendingWorkItems":0,"readerCount":1,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[19:41:47] [RequestTrace] {"id":657,"method":"textDocument/inlayHint","totalMs":324.0383,"queueMs":0.019,"processQueueMs":0.013,"workerWaitMs":0.0141,"lockWaitMs":323.9836,"methodMs":0.0167,"responseMs":0.0111,"lockKind":"read-fallback","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":5,"workerThreads":5,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32762,"pendingWorkItems":0,"readerCount":2,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[19:41:47] [内存] GC after global refresh (idle)
+
+[19:41:47] [内存] 分析周期
+  详情: 本周期分配: 42533 MB [cycleAllocMB=42533] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 8383MB [heap=8383MB] | 累计分配: 276778MB [alloc=276778MB] | 工作集: 10190MB [working=10190MB] | 专用内存: 10324MB [private=10324MB]
+  ↳ 堆碎片: 791MB [fragmented=791MB] | 第 0 代 GC: 3508 [gc0=3508] | 第 1 代 GC: 285 [gc1=285] | 第 2 代 GC: 16 [gc2=16]
+  诊断: 文件: 7208 [files=7208] | 最新: 0 [fresh=0] | 待校验: 7208 [pending=7208] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 15 [resourceEpoch=15] | carrierEpoch: 8 [carrierEpoch=8] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:47] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 15743 ms [elapsedMs=15743]
+  ↳ didGlobalWork: 是 [didGlobalWork=True] | didRefresh: 是 [didRefresh=True] | 状态: refresh_caches_staged [status=refresh_caches_staged]
+  内存: 托管堆: 8403MB [heap=8403MB] | 累计分配: 276797MB [alloc=276797MB] | 工作集: 10190MB [working=10190MB] | 专用内存: 10324MB [private=10324MB]
+  ↳ 堆碎片: 791MB [fragmented=791MB] | 第 0 代 GC: 3508 [gc0=3508] | 第 1 代 GC: 285 [gc1=285] | 第 2 代 GC: 16 [gc2=16]
+
+[19:41:50] [RequestTrace] {"id":646,"method":"workspace/executeCommand","totalMs":4252.1792,"queueMs":0.0149,"processQueueMs":2.671,"workerWaitMs":935.2409,"lockWaitMs":3313.5819,"methodMs":2307.4406,"responseMs":0.6777,"lockKind":"read","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":1,"workerThreads":3,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32764,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:41:50] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 6771 MB [allocDeltaMB=6771]
+  诊断: 文件: 7208 [files=7208] | 最新: 0 [fresh=0] | 待校验: 7208 [pending=7208] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 16 [resourceEpoch=16] | carrierEpoch: 9 [carrierEpoch=9] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:50] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(3) [documentVersion=Some(3)] | modelEpoch: { game = 5L   rules = 5L   types = 5L   localisation = 5L } [modelEpoch={ game = 5L   rules = 5L   types = 5L   localisation = 5L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:41:50] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 49 MB [allocDeltaMB=49]
+  诊断: 文件: 7208 [files=7208] | 最新: 1 [fresh=1] | 待校验: 7207 [pending=7207] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 17 [resourceEpoch=17] | carrierEpoch: 9 [carrierEpoch=9] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:50] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(3) [documentVersion=Some(3)] | modelEpoch: { game = 5L   rules = 5L   types = 5L   localisation = 5L } [modelEpoch={ game = 5L   rules = 5L   types = 5L   localisation = 5L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:41:50] [性能] WriteLock hold budget exceeded
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\star_classes\kuat_star_classes.txt
+  详情: phase: update [phase=update] | 持有写锁: 149ms [hold=149ms]
+
+[19:41:50] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\star_classes\kuat_star_classes.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 516 MB [allocDeltaMB=516]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 18 [resourceEpoch=18] | carrierEpoch: 9 [carrierEpoch=9] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:50] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\star_classes\kuat_star_classes.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 5L   rules = 5L   types = 5L   localisation = 5L } [modelEpoch={ game = 5L   rules = 5L   types = 5L   localisation = 5L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:41:52] [RequestTrace] {"id":661,"method":"workspace/executeCommand","totalMs":2180.8217,"queueMs":0.0221,"processQueueMs":0.0136,"workerWaitMs":0.0044,"lockWaitMs":2179.9728,"methodMs":2077.6875,"responseMs":0.8122,"lockKind":"read","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":1,"workerThreads":3,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32764,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[19:41:52] [校验] 准备交互更新
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 耗时: 0ms [elapsed=0ms]
+
+[19:41:52] [校验] 提交交互更新
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 1ms [hold=1ms] | 已提交: 是 [committed=True]
+
+[19:41:52] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 模式: prepared-deep [mode=prepared-deep] | 浅层校验: 否 [shallow=False] | 本次分配: 44 MB [allocDeltaMB=44]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7205 [pending=7205] | 过期: 1 [stale=1]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 19 [resourceEpoch=19] | carrierEpoch: 9 [carrierEpoch=9] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:52] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: phase: deep-complete [phase=deep-complete] | documentVersion: Some(3) [documentVersion=Some(3)] | modelEpoch: { game = 5L   rules = 5L   types = 5L   localisation = 5L } [modelEpoch={ game = 5L   rules = 5L   types = 5L   localisation = 5L }] | freshness: Pending [freshness=Pending]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验: rules,types [pending=rules,types]
+
+[19:41:52] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 16 [lint=16] | 全局刷新次数: 3 [refresh=3] | 本地化刷新次数: 3 [refreshLoc=3]
+  ↳ 补全次数: 0 [completion=0] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 4670MB [heap=4670MB] | 累计分配: 290449MB [alloc=290449MB] | 工作集: 8878MB [working=8878MB] | 专用内存: 8991MB [private=8991MB]
+  ↳ 堆碎片: 2406MB [fragmented=2406MB] | 第 0 代 GC: 3615 [gc0=3615] | 第 1 代 GC: 309 [gc1=309] | 第 2 代 GC: 16 [gc2=16]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 19 [resourceEpoch=19] | carrierEpoch: 9 [carrierEpoch=9] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:52] [性能] WriteLock hold budget exceeded
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: phase: inlineCaller [phase=inlineCaller] | 等待写锁: 0ms [wait=0ms] | 持有写锁: 102ms [hold=102ms]
+
+[19:41:52] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 4461MB [heap=4461MB] | 累计分配: 291221MB [alloc=291221MB] | 工作集: 8829MB [working=8829MB] | 专用内存: 8942MB [private=8942MB]
+  ↳ 堆碎片: 2406MB [fragmented=2406MB] | 第 0 代 GC: 3622 [gc0=3622] | 第 1 代 GC: 309 [gc1=309] | 第 2 代 GC: 16 [gc2=16]
+
+[19:41:52] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 1 [skip=1] | 已进入静默期: 否 [quiet=False] | 冷却完成: 否 [cooldown=False]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:52] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:41:52] [内存] 分析周期
+  详情: 本周期分配: 12 MB [cycleAllocMB=12] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 4385MB [heap=4385MB] | 累计分配: 291233MB [alloc=291233MB] | 工作集: 8813MB [working=8813MB] | 专用内存: 8926MB [private=8926MB]
+  ↳ 堆碎片: 2406MB [fragmented=2406MB] | 第 0 代 GC: 3622 [gc0=3622] | 第 1 代 GC: 309 [gc1=309] | 第 2 代 GC: 16 [gc2=16]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:52] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 11 ms [elapsedMs=11]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=1;quiet=False;cooldown=False;force=False [status=deferred:skip=1;quiet=False;cooldown=False;force=False]
+  内存: 托管堆: 4397MB [heap=4397MB] | 累计分配: 291244MB [alloc=291244MB] | 工作集: 8813MB [working=8813MB] | 专用内存: 8926MB [private=8926MB]
+  ↳ 堆碎片: 2406MB [fragmented=2406MB] | 第 0 代 GC: 3622 [gc0=3622] | 第 1 代 GC: 309 [gc1=309] | 第 2 代 GC: 16 [gc2=16]
+
+[19:41:53] [校验] 批量校验文件 · local dynamic batch
+  详情: 文件: 3 [files=3] | 诊断数: 0 [diagnostics=0] | 耗时: 427 ms [elapsedMs=427] | 本次分配: 1533 MB [allocDeltaMB=1533]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+
+[19:41:55] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 4396MB [heap=4396MB] | 累计分配: 299949MB [alloc=299949MB] | 工作集: 7465MB [working=7465MB] | 专用内存: 7573MB [private=7573MB]
+  ↳ 堆碎片: 2391MB [fragmented=2391MB] | 第 0 代 GC: 3912 [gc0=3912] | 第 1 代 GC: 312 [gc1=312] | 第 2 代 GC: 16 [gc2=16]
+
+[19:41:55] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 2 [skip=2] | 已进入静默期: 否 [quiet=False] | 冷却完成: 否 [cooldown=False]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:55] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:41:55] [内存] 分析周期
+  详情: 本周期分配: 9 MB [cycleAllocMB=9] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 4406MB [heap=4406MB] | 累计分配: 299958MB [alloc=299958MB] | 工作集: 7465MB [working=7465MB] | 专用内存: 7573MB [private=7573MB]
+  ↳ 堆碎片: 2391MB [fragmented=2391MB] | 第 0 代 GC: 3912 [gc0=3912] | 第 1 代 GC: 312 [gc1=312] | 第 2 代 GC: 16 [gc2=16]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:55] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 7 ms [elapsedMs=7]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=2;quiet=False;cooldown=False;force=False [status=deferred:skip=2;quiet=False;cooldown=False;force=False]
+  内存: 托管堆: 4413MB [heap=4413MB] | 累计分配: 299966MB [alloc=299966MB] | 工作集: 7465MB [working=7465MB] | 专用内存: 7573MB [private=7573MB]
+  ↳ 堆碎片: 2391MB [fragmented=2391MB] | 第 0 代 GC: 3912 [gc0=3912] | 第 1 代 GC: 312 [gc1=312] | 第 2 代 GC: 16 [gc2=16]
+
+[19:41:57] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 4427MB [heap=4427MB] | 累计分配: 308350MB [alloc=308350MB] | 工作集: 7456MB [working=7456MB] | 专用内存: 7565MB [private=7565MB]
+  ↳ 堆碎片: 2385MB [fragmented=2385MB] | 第 0 代 GC: 4200 [gc0=4200] | 第 1 代 GC: 312 [gc1=312] | 第 2 代 GC: 16 [gc2=16]
+
+[19:41:57] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 3 [skip=3] | 已进入静默期: 是 [quiet=True] | 冷却完成: 否 [cooldown=False]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:57] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:41:57] [内存] 分析周期
+  详情: 本周期分配: 8 MB [cycleAllocMB=8] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 4406MB [heap=4406MB] | 累计分配: 308358MB [alloc=308358MB] | 工作集: 7456MB [working=7456MB] | 专用内存: 7565MB [private=7565MB]
+  ↳ 堆碎片: 2385MB [fragmented=2385MB] | 第 0 代 GC: 4200 [gc0=4200] | 第 1 代 GC: 312 [gc1=312] | 第 2 代 GC: 16 [gc2=16]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:41:57] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 7 ms [elapsedMs=7]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=3;quiet=True;cooldown=False;force=False [status=deferred:skip=3;quiet=True;cooldown=False;force=False]
+  内存: 托管堆: 4417MB [heap=4417MB] | 累计分配: 308369MB [alloc=308369MB] | 工作集: 7456MB [working=7456MB] | 专用内存: 7565MB [private=7565MB]
+  ↳ 堆碎片: 2385MB [fragmented=2385MB] | 第 0 代 GC: 4200 [gc0=4200] | 第 1 代 GC: 312 [gc1=312] | 第 2 代 GC: 16 [gc2=16]
+
+[19:42:00] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 4416MB [heap=4416MB] | 累计分配: 311811MB [alloc=311811MB] | 工作集: 7459MB [working=7459MB] | 专用内存: 7567MB [private=7567MB]
+  ↳ 堆碎片: 2379MB [fragmented=2379MB] | 第 0 代 GC: 4315 [gc0=4315] | 第 1 代 GC: 313 [gc1=313] | 第 2 代 GC: 16 [gc2=16]
+
+[19:42:00] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 4 [skip=4] | 已进入静默期: 是 [quiet=True] | 冷却完成: 否 [cooldown=False]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:00] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:42:00] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 4416MB [heap=4416MB] | 累计分配: 311811MB [alloc=311811MB] | 工作集: 7459MB [working=7459MB] | 专用内存: 7567MB [private=7567MB]
+  ↳ 堆碎片: 2379MB [fragmented=2379MB] | 第 0 代 GC: 4315 [gc0=4315] | 第 1 代 GC: 313 [gc1=313] | 第 2 代 GC: 16 [gc2=16]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:00] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 5 ms [elapsedMs=5]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=4;quiet=True;cooldown=False;force=False [status=deferred:skip=4;quiet=True;cooldown=False;force=False]
+  内存: 托管堆: 4416MB [heap=4416MB] | 累计分配: 311811MB [alloc=311811MB] | 工作集: 7459MB [working=7459MB] | 专用内存: 7567MB [private=7567MB]
+  ↳ 堆碎片: 2379MB [fragmented=2379MB] | 第 0 代 GC: 4315 [gc0=4315] | 第 1 代 GC: 313 [gc1=313] | 第 2 代 GC: 16 [gc2=16]
+
+[19:42:02] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 4416MB [heap=4416MB] | 累计分配: 311811MB [alloc=311811MB] | 工作集: 7459MB [working=7459MB] | 专用内存: 7567MB [private=7567MB]
+  ↳ 堆碎片: 2379MB [fragmented=2379MB] | 第 0 代 GC: 4315 [gc0=4315] | 第 1 代 GC: 313 [gc1=313] | 第 2 代 GC: 16 [gc2=16]
+
+[19:42:02] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 5 [skip=5] | 已进入静默期: 是 [quiet=True] | 冷却完成: 否 [cooldown=False]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:02] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:42:02] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 4416MB [heap=4416MB] | 累计分配: 311811MB [alloc=311811MB] | 工作集: 7459MB [working=7459MB] | 专用内存: 7567MB [private=7567MB]
+  ↳ 堆碎片: 2379MB [fragmented=2379MB] | 第 0 代 GC: 4315 [gc0=4315] | 第 1 代 GC: 313 [gc1=313] | 第 2 代 GC: 16 [gc2=16]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 9 [cacheWriteKeys=9] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:02] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 6 ms [elapsedMs=6]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=5;quiet=True;cooldown=False;force=False [status=deferred:skip=5;quiet=True;cooldown=False;force=False]
+  内存: 托管堆: 4416MB [heap=4416MB] | 累计分配: 311811MB [alloc=311811MB] | 工作集: 7459MB [working=7459MB] | 专用内存: 7567MB [private=7567MB]
+  ↳ 堆碎片: 2379MB [fragmented=2379MB] | 第 0 代 GC: 4315 [gc0=4315] | 第 1 代 GC: 313 [gc1=313] | 第 2 代 GC: 16 [gc2=16]
+
+[19:42:05] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 4416MB [heap=4416MB] | 累计分配: 311811MB [alloc=311811MB] | 工作集: 7458MB [working=7458MB] | 专用内存: 7566MB [private=7566MB]
+  ↳ 堆碎片: 2379MB [fragmented=2379MB] | 第 0 代 GC: 4315 [gc0=4315] | 第 1 代 GC: 313 [gc1=313] | 第 2 代 GC: 16 [gc2=16]
+
+[19:42:05] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 6 [skip=6] | 已进入静默期: 是 [quiet=True] | 冷却完成: 否 [cooldown=False]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:05] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:42:05] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 4416MB [heap=4416MB] | 累计分配: 311811MB [alloc=311811MB] | 工作集: 7458MB [working=7458MB] | 专用内存: 7566MB [private=7566MB]
+  ↳ 堆碎片: 2379MB [fragmented=2379MB] | 第 0 代 GC: 4315 [gc0=4315] | 第 1 代 GC: 313 [gc1=313] | 第 2 代 GC: 16 [gc2=16]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:05] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 6 ms [elapsedMs=6]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=6;quiet=True;cooldown=False;force=False [status=deferred:skip=6;quiet=True;cooldown=False;force=False]
+  内存: 托管堆: 4416MB [heap=4416MB] | 累计分配: 311811MB [alloc=311811MB] | 工作集: 7458MB [working=7458MB] | 专用内存: 7566MB [private=7566MB]
+  ↳ 堆碎片: 2379MB [fragmented=2379MB] | 第 0 代 GC: 4315 [gc0=4315] | 第 1 代 GC: 313 [gc1=313] | 第 2 代 GC: 16 [gc2=16]
+
+[19:42:06] [校验] 校验文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_utllities_component\kuat_component_weapon_artellarys.txt
+  详情: 浅层校验: 是 [shallow=True] | 本次分配: 12 MB [allocDeltaMB=12]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 0 [semantic=0] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 10 [cacheWriteKeys=10] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 4 [typeRulesEpoch=4]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:06] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_utllities_component\kuat_component_weapon_artellarys.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 5L   rules = 5L   types = 5L   localisation = 5L } [modelEpoch={ game = 5L   rules = 5L   types = 5L   localisation = 5L }] | freshness: Pending [freshness=Pending]
+  ↳ 诊断数: 2 [diagnostics=2] | 待校验: rules,types [pending=rules,types]
+
+[19:42:08] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 是 [doRefresh=True] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 4440MB [heap=4440MB] | 累计分配: 311856MB [alloc=311856MB] | 工作集: 7459MB [working=7459MB] | 专用内存: 7567MB [private=7567MB]
+  ↳ 堆碎片: 2379MB [fragmented=2379MB] | 第 0 代 GC: 4316 [gc0=4316] | 第 1 代 GC: 313 [gc1=313] | 第 2 代 GC: 16 [gc2=16]
+
+[19:42:08] [生命周期] AnalyzeLifecycle
+  详情: stage: prepare-before [stage=prepare-before] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | resourceEpoch: 20 [resourceEpoch=20]
+  ↳ 耗时: 3 ms [elapsedMs=3]
+  内存: 托管堆: 4440MB [heap=4440MB] | 累计分配: 311856MB [alloc=311856MB] | 工作集: 7459MB [working=7459MB] | 专用内存: 7567MB [private=7567MB]
+  ↳ 堆碎片: 2379MB [fragmented=2379MB] | 第 0 代 GC: 4316 [gc0=4316] | 第 1 代 GC: 313 [gc1=313] | 第 2 代 GC: 16 [gc2=16]
+
+[19:42:13] [Heartbeat] 事件
+  详情: heartbeatGapMs: 866.8087 [heartbeatGapMs=866.8087] | pendingWorkItems: 0 [pendingWorkItems=0] | availableWorkers: 32766 [availableWorkers=32766] | writerActive: 0 [writerActive=0]
+  ↳ waitingWriters: 0 [waitingWriters=0]
+
+[19:42:22] [生命周期] AnalyzeLifecycle
+  详情: stage: prepare-after [stage=prepare-after] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | outcome: prepared [outcome=prepared]
+  ↳ 耗时: 13691 ms [elapsedMs=13691] | totalElapsedMs: 13694 [totalElapsedMs=13694]
+  内存: 托管堆: 9558MB [heap=9558MB] | 累计分配: 347392MB [alloc=347392MB] | 工作集: 11125MB [working=11125MB] | 专用内存: 11399MB [private=11399MB]
+  ↳ 堆碎片: 966MB [fragmented=966MB] | 第 0 代 GC: 4423 [gc0=4423] | 第 1 代 GC: 338 [gc1=338] | 第 2 代 GC: 17 [gc2=17]
+
+[19:42:22] [生命周期] AnalyzeLifecycle
+  详情: stage: commit-before [stage=commit-before] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | resourceEpoch: 20 [resourceEpoch=20]
+  ↳ 耗时: 13698 ms [elapsedMs=13698]
+  内存: 托管堆: 9558MB [heap=9558MB] | 累计分配: 347392MB [alloc=347392MB] | 工作集: 11125MB [working=11125MB] | 专用内存: 11399MB [private=11399MB]
+  ↳ 堆碎片: 966MB [fragmented=966MB] | 第 0 代 GC: 4423 [gc0=4423] | 第 1 代 GC: 338 [gc1=338] | 第 2 代 GC: 17 [gc2=17]
+
+[19:42:22] [生命周期] AnalyzeLifecycle
+  详情: stage: commit-after [stage=commit-after] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | outcome: committed [outcome=committed]
+  ↳ 耗时: 3 ms [elapsedMs=3] | totalElapsedMs: 13701 [totalElapsedMs=13701]
+  内存: 托管堆: 9558MB [heap=9558MB] | 累计分配: 347392MB [alloc=347392MB] | 工作集: 11125MB [working=11125MB] | 专用内存: 11399MB [private=11399MB]
+  ↳ 堆碎片: 966MB [fragmented=966MB] | 第 0 代 GC: 4423 [gc0=4423] | 第 1 代 GC: 338 [gc1=338] | 第 2 代 GC: 17 [gc2=17]
+
+[19:42:22] [刷新] 刷新缓存
+  详情: 本次分配: 35536 MB [allocDeltaMB=35536] | 使用 staged 刷新: 是 [staged=true] | 强制刷新: 否 [force=False] | 达到跳过上限: 否 [skipLimit=False]
+  ↳ resourceEpoch: 20 [resourceEpoch=20]
+  内存: 托管堆: 9558MB [heap=9558MB] | 累计分配: 347392MB [alloc=347392MB] | 工作集: 11125MB [working=11125MB] | 专用内存: 11399MB [private=11399MB]
+  ↳ 堆碎片: 966MB [fragmented=966MB] | 第 0 代 GC: 4423 [gc0=4423] | 第 1 代 GC: 338 [gc1=338] | 第 2 代 GC: 17 [gc2=17]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 3 [semantic=3] | CodeLens 缓存: 3 [codeLens=3] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 3 [groupedTypeFiles=3]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:23] [Heartbeat] 事件
+  详情: heartbeatGapMs: 850.7041 [heartbeatGapMs=850.7041] | pendingWorkItems: 1 [pendingWorkItems=1] | availableWorkers: 32755 [availableWorkers=32755] | writerActive: 1 [writerActive=1]
+  ↳ waitingWriters: 0 [waitingWriters=0]
+
+[19:42:24] [本地化] 本地化诊断
+  详情: 本次分配: 7236 MB [allocDeltaMB=7236] | 本地化文件缓存: 7 [locFiles=7] | 本地化错误: 547 [locErrors=547] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:42:24] [性能] WriteLock hold budget exceeded
+  详情: phase: refresh [phase=refresh] | 等待写锁: 0ms [wait=0ms] | 持有写锁: 2024ms [hold=2024ms] | didRefresh: 是 [didRefresh=True]
+  ↳ didLoc: 是 [didLoc=True]
+
+[19:42:24] [内存] GC after global refresh (idle)
+
+[19:42:24] [内存] 分析周期
+  详情: 本周期分配: 43148 MB [cycleAllocMB=43148] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 9389MB [heap=9389MB] | 累计分配: 355004MB [alloc=355004MB] | 工作集: 10920MB [working=10920MB] | 专用内存: 11198MB [private=11198MB]
+  ↳ 堆碎片: 868MB [fragmented=868MB] | 第 0 代 GC: 4534 [gc0=4534] | 第 1 代 GC: 346 [gc1=346] | 第 2 代 GC: 18 [gc2=18]
+  诊断: 文件: 7208 [files=7208] | 最新: 0 [fresh=0] | 待校验: 7208 [pending=7208] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 3 [semantic=3] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:24] [性能] 性能计数
+  详情: 最近操作: delayedAnalyze [last=delayedAnalyze] | 校验次数: 17 [lint=17] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 4 [refreshLoc=4]
+  ↳ 补全次数: 0 [completion=0] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 9402MB [heap=9402MB] | 累计分配: 355018MB [alloc=355018MB] | 工作集: 10920MB [working=10920MB] | 专用内存: 11198MB [private=11198MB]
+  ↳ 堆碎片: 868MB [fragmented=868MB] | 第 0 代 GC: 4534 [gc0=4534] | 第 1 代 GC: 346 [gc1=346] | 第 2 代 GC: 18 [gc2=18]
+  诊断: 文件: 7208 [files=7208] | 最新: 0 [fresh=0] | 待校验: 7208 [pending=7208] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 3 [semantic=3] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 20 [resourceEpoch=20] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:24] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 15842 ms [elapsedMs=15842]
+  ↳ didGlobalWork: 是 [didGlobalWork=True] | didRefresh: 是 [didRefresh=True] | 状态: refresh_caches_staged [status=refresh_caches_staged]
+  内存: 托管堆: 9419MB [heap=9419MB] | 累计分配: 355034MB [alloc=355034MB] | 工作集: 10920MB [working=10920MB] | 专用内存: 11198MB [private=11198MB]
+  ↳ 堆碎片: 868MB [fragmented=868MB] | 第 0 代 GC: 4534 [gc0=4534] | 第 1 代 GC: 346 [gc1=346] | 第 2 代 GC: 18 [gc2=18]
+
+[19:42:24] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 98 MB [allocDeltaMB=98]
+  诊断: 文件: 7208 [files=7208] | 最新: 0 [fresh=0] | 待校验: 7208 [pending=7208] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 3 [semantic=3] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 21 [resourceEpoch=21] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:24] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(3) [documentVersion=Some(3)] | modelEpoch: { game = 6L   rules = 6L   types = 6L   localisation = 6L } [modelEpoch={ game = 6L   rules = 6L   types = 6L   localisation = 6L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:42:24] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 37 MB [allocDeltaMB=37]
+  诊断: 文件: 7208 [files=7208] | 最新: 1 [fresh=1] | 待校验: 7207 [pending=7207] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 3 [semantic=3] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 22 [resourceEpoch=22] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:24] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(3) [documentVersion=Some(3)] | modelEpoch: { game = 6L   rules = 6L   types = 6L   localisation = 6L } [modelEpoch={ game = 6L   rules = 6L   types = 6L   localisation = 6L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:42:24] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\star_classes\kuat_star_classes.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 44 MB [allocDeltaMB=44]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 3 [semantic=3] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 23 [resourceEpoch=23] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:24] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\star_classes\kuat_star_classes.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 6L   rules = 6L   types = 6L   localisation = 6L } [modelEpoch={ game = 6L   rules = 6L   types = 6L   localisation = 6L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:42:24] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_utllities_component\kuat_component_weapon_strikecraft.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 48 MB [allocDeltaMB=48]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 3 [semantic=3] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 24 [resourceEpoch=24] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:24] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_utllities_component\kuat_component_weapon_strikecraft.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 6L   rules = 6L   types = 6L   localisation = 6L } [modelEpoch={ game = 6L   rules = 6L   types = 6L   localisation = 6L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:42:24] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_utllities_component\kuat_component_weapon_artellarys.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 48 MB [allocDeltaMB=48]
+  诊断: 文件: 7208 [files=7208] | 最新: 4 [fresh=4] | 待校验: 7204 [pending=7204] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 3 [semantic=3] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 25 [resourceEpoch=25] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:24] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_utllities_component\kuat_component_weapon_artellarys.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 6L   rules = 6L   types = 6L   localisation = 6L } [modelEpoch={ game = 6L   rules = 6L   types = 6L   localisation = 6L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 2 [diagnostics=2] | 待校验:  [pending=]
+
+[19:42:33] [校验] 校验文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_aux_sheild_and_armor_destroyed.txt
+  详情: 浅层校验: 是 [shallow=True] | 本次分配: 12 MB [allocDeltaMB=12]
+  诊断: 文件: 7208 [files=7208] | 最新: 5 [fresh=5] | 待校验: 7203 [pending=7203] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 11 [cacheWriteKeys=11] | resourceEpoch: 25 [resourceEpoch=25] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:33] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_aux_sheild_and_armor_destroyed.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 6L   rules = 6L   types = 6L   localisation = 6L } [modelEpoch={ game = 6L   rules = 6L   types = 6L   localisation = 6L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:42:33] [校验] 校验文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_exe_base_destroyed_chain.txt
+  详情: 浅层校验: 是 [shallow=True] | 本次分配: 12 MB [allocDeltaMB=12]
+  诊断: 文件: 7208 [files=7208] | 最新: 6 [fresh=6] | 待校验: 7202 [pending=7202] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 11 [cacheWriteKeys=11] | resourceEpoch: 25 [resourceEpoch=25] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:33] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_exe_base_destroyed_chain.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 6L   rules = 6L   types = 6L   localisation = 6L } [modelEpoch={ game = 6L   rules = 6L   types = 6L   localisation = 6L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:42:37] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验:  [pending=]
+  内存: 托管堆: 4495MB [heap=4495MB] | 累计分配: 363664MB [alloc=363664MB] | 工作集: 8610MB [working=8610MB] | 专用内存: 8853MB [private=8853MB]
+  ↳ 堆碎片: 3243MB [fragmented=3243MB] | 第 0 代 GC: 4797 [gc0=4797] | 第 1 代 GC: 347 [gc1=347] | 第 2 代 GC: 18 [gc2=18]
+
+[19:42:37] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 3 [semantic=3] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 2 [groupedTypeFiles=2]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 25 [resourceEpoch=25] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:37] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:42:37] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 4495MB [heap=4495MB] | 累计分配: 363664MB [alloc=363664MB] | 工作集: 8610MB [working=8610MB] | 专用内存: 8853MB [private=8853MB]
+  ↳ 堆碎片: 3243MB [fragmented=3243MB] | 第 0 代 GC: 4797 [gc0=4797] | 第 1 代 GC: 347 [gc1=347] | 第 2 代 GC: 18 [gc2=18]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 3 [semantic=3] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 2 [groupedTypeFiles=2]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 25 [resourceEpoch=25] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:37] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 6 ms [elapsedMs=6]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: not_needed [status=not_needed]
+  内存: 托管堆: 4495MB [heap=4495MB] | 累计分配: 363664MB [alloc=363664MB] | 工作集: 8610MB [working=8610MB] | 专用内存: 8853MB [private=8853MB]
+  ↳ 堆碎片: 3243MB [fragmented=3243MB] | 第 0 代 GC: 4797 [gc0=4797] | 第 1 代 GC: 347 [gc1=347] | 第 2 代 GC: 18 [gc2=18]
+
+[19:42:51] [RequestTrace] {"id":804,"method":"textDocument/hover","totalMs":18.3926,"queueMs":0.0103,"processQueueMs":0.0125,"workerWaitMs":0.0124,"lockWaitMs":0,"methodMs":18.3063,"responseMs":0.0483,"lockKind":"read-fallback","lockAcquired":null,"outcome":"cancelled","queueDepth":1,"pendingCount":1,"workerThreads":1,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32766,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[19:42:52] [校验] 校验文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\script_values\exe_kuat_value.txt
+  详情: 浅层校验: 是 [shallow=True] | 本次分配: 31 MB [allocDeltaMB=31]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 3 [semantic=3] | CodeLens 缓存: 3 [codeLens=3] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 4 [groupedTypeFiles=4]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 25 [resourceEpoch=25] | carrierEpoch: 10 [carrierEpoch=10] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:52] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\script_values\exe_kuat_value.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion:  [documentVersion=] | modelEpoch: { game = 6L   rules = 6L   types = 6L   localisation = 6L } [modelEpoch={ game = 6L   rules = 6L   types = 6L   localisation = 6L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:42:53] [RequestTrace] {"id":812,"method":"textDocument/hover","totalMs":0.0959,"queueMs":0.0103,"processQueueMs":0.0129,"workerWaitMs":0.0136,"lockWaitMs":0,"methodMs":0,"responseMs":0,"lockKind":"read-fallback","lockAcquired":null,"outcome":"cancelled","queueDepth":1,"pendingCount":1,"workerThreads":1,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32766,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[19:42:54] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: phase: diagnostics-cleared [phase=diagnostics-cleared] | documentVersion: 4 [documentVersion=4] | modelEpoch: { game = 6L   rules = 6L   types = 6L   localisation = 6L } [modelEpoch={ game = 6L   rules = 6L   types = 6L   localisation = 6L }] | freshness: stale [freshness=stale]
+
+[19:42:55] [校验] 准备交互更新
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 耗时: 0ms [elapsed=0ms]
+
+[19:42:55] [校验] 提交交互更新
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 1ms [hold=1ms] | 已提交: 是 [committed=True]
+
+[19:42:55] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 模式: prepared-deep [mode=prepared-deep] | 浅层校验: 否 [shallow=False] | 本次分配: 15 MB [allocDeltaMB=15]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7200 [pending=7200] | 过期: 1 [stale=1]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 11 [cacheWriteKeys=11] | resourceEpoch: 26 [resourceEpoch=26] | carrierEpoch: 11 [carrierEpoch=11] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:55] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: phase: deep-complete [phase=deep-complete] | documentVersion: Some(4) [documentVersion=Some(4)] | modelEpoch: { game = 6L   rules = 6L   types = 6L   localisation = 6L } [modelEpoch={ game = 6L   rules = 6L   types = 6L   localisation = 6L }] | freshness: Pending [freshness=Pending]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验: rules,types [pending=rules,types]
+
+[19:42:55] [性能] 性能计数
+  详情: 最近操作: lint [last=lint] | 校验次数: 26 [lint=26] | 全局刷新次数: 4 [refresh=4] | 本地化刷新次数: 4 [refreshLoc=4]
+  ↳ 补全次数: 0 [completion=0] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 4551MB [heap=4551MB] | 累计分配: 363720MB [alloc=363720MB] | 工作集: 8617MB [working=8617MB] | 专用内存: 8858MB [private=8858MB]
+  ↳ 堆碎片: 3243MB [fragmented=3243MB] | 第 0 代 GC: 4797 [gc0=4797] | 第 1 代 GC: 347 [gc1=347] | 第 2 代 GC: 18 [gc2=18]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 11 [cacheWriteKeys=11] | resourceEpoch: 26 [resourceEpoch=26] | carrierEpoch: 11 [carrierEpoch=11] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:55] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 4626MB [heap=4626MB] | 累计分配: 364053MB [alloc=364053MB] | 工作集: 8624MB [working=8624MB] | 专用内存: 8866MB [private=8866MB]
+  ↳ 堆碎片: 3242MB [fragmented=3242MB] | 第 0 代 GC: 4798 [gc0=4798] | 第 1 代 GC: 347 [gc1=347] | 第 2 代 GC: 18 [gc2=18]
+
+[19:42:55] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 1 [skip=1] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 11 [cacheWriteKeys=11] | resourceEpoch: 27 [resourceEpoch=27] | carrierEpoch: 12 [carrierEpoch=12] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:55] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:42:55] [内存] 分析周期
+  详情: 本周期分配: 0 MB [cycleAllocMB=0] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 4626MB [heap=4626MB] | 累计分配: 364053MB [alloc=364053MB] | 工作集: 8625MB [working=8625MB] | 专用内存: 8867MB [private=8867MB]
+  ↳ 堆碎片: 3242MB [fragmented=3242MB] | 第 0 代 GC: 4798 [gc0=4798] | 第 1 代 GC: 347 [gc1=347] | 第 2 代 GC: 18 [gc2=18]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 11 [cacheWriteKeys=11] | resourceEpoch: 27 [resourceEpoch=27] | carrierEpoch: 12 [carrierEpoch=12] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:55] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 6 ms [elapsedMs=6]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=1;quiet=False;cooldown=True;force=False [status=deferred:skip=1;quiet=False;cooldown=True;force=False]
+  内存: 托管堆: 4628MB [heap=4628MB] | 累计分配: 364055MB [alloc=364055MB] | 工作集: 8625MB [working=8625MB] | 专用内存: 8867MB [private=8867MB]
+  ↳ 堆碎片: 3242MB [fragmented=3242MB] | 第 0 代 GC: 4798 [gc0=4798] | 第 1 代 GC: 347 [gc1=347] | 第 2 代 GC: 18 [gc2=18]
+
+[19:42:57] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: phase: diagnostics-cleared [phase=diagnostics-cleared] | documentVersion: 5 [documentVersion=5] | modelEpoch: { game = 6L   rules = 6L   types = 6L   localisation = 6L } [modelEpoch={ game = 6L   rules = 6L   types = 6L   localisation = 6L }] | freshness: stale [freshness=stale]
+
+[19:42:57] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 4852MB [heap=4852MB] | 累计分配: 364278MB [alloc=364278MB] | 工作集: 8718MB [working=8718MB] | 专用内存: 8961MB [private=8961MB]
+  ↳ 堆碎片: 3242MB [fragmented=3242MB] | 第 0 代 GC: 4798 [gc0=4798] | 第 1 代 GC: 347 [gc1=347] | 第 2 代 GC: 18 [gc2=18]
+
+[19:42:57] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 2 [skip=2] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 11 [cacheWriteKeys=11] | resourceEpoch: 27 [resourceEpoch=27] | carrierEpoch: 12 [carrierEpoch=12] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:57] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:42:57] [内存] 分析周期
+  详情: 本周期分配: 4 MB [cycleAllocMB=4] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 4856MB [heap=4856MB] | 累计分配: 364283MB [alloc=364283MB] | 工作集: 8722MB [working=8722MB] | 专用内存: 8965MB [private=8965MB]
+  ↳ 堆碎片: 3242MB [fragmented=3242MB] | 第 0 代 GC: 4798 [gc0=4798] | 第 1 代 GC: 347 [gc1=347] | 第 2 代 GC: 18 [gc2=18]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 11 [cacheWriteKeys=11] | resourceEpoch: 27 [resourceEpoch=27] | carrierEpoch: 12 [carrierEpoch=12] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:57] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 6 ms [elapsedMs=6]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=2;quiet=False;cooldown=True;force=False [status=deferred:skip=2;quiet=False;cooldown=True;force=False]
+  内存: 托管堆: 4860MB [heap=4860MB] | 累计分配: 364287MB [alloc=364287MB] | 工作集: 8727MB [working=8727MB] | 专用内存: 8970MB [private=8970MB]
+  ↳ 堆碎片: 3242MB [fragmented=3242MB] | 第 0 代 GC: 4798 [gc0=4798] | 第 1 代 GC: 347 [gc1=347] | 第 2 代 GC: 18 [gc2=18]
+
+[19:42:58] [校验] 准备交互更新
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 耗时: 0ms [elapsed=0ms]
+
+[19:42:58] [校验] 提交交互更新
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 等待写锁: 0ms [wait=0ms] | 持有写锁: 2ms [hold=2ms] | 已提交: 是 [committed=True]
+
+[19:42:58] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 模式: prepared-deep [mode=prepared-deep] | 浅层校验: 否 [shallow=False] | 本次分配: 55 MB [allocDeltaMB=55]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7200 [pending=7200] | 过期: 1 [stale=1]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 11 [cacheWriteKeys=11] | resourceEpoch: 28 [resourceEpoch=28] | carrierEpoch: 13 [carrierEpoch=13] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:58] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: phase: deep-complete [phase=deep-complete] | documentVersion: Some(5) [documentVersion=Some(5)] | modelEpoch: { game = 6L   rules = 6L   types = 6L   localisation = 6L } [modelEpoch={ game = 6L   rules = 6L   types = 6L   localisation = 6L }] | freshness: Pending [freshness=Pending]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验: rules,types [pending=rules,types]
+
+[19:42:58] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 4498MB [heap=4498MB] | 累计分配: 366485MB [alloc=366485MB] | 工作集: 8553MB [working=8553MB] | 专用内存: 8795MB [private=8795MB]
+  ↳ 堆碎片: 3194MB [fragmented=3194MB] | 第 0 代 GC: 4847 [gc0=4847] | 第 1 代 GC: 348 [gc1=348] | 第 2 代 GC: 18 [gc2=18]
+
+[19:42:58] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 3 [skip=3] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 29 [resourceEpoch=29] | carrierEpoch: 14 [carrierEpoch=14] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:58] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:42:58] [内存] 分析周期
+  详情: 本周期分配: 16 MB [cycleAllocMB=16] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 4514MB [heap=4514MB] | 累计分配: 366502MB [alloc=366502MB] | 工作集: 8553MB [working=8553MB] | 专用内存: 8795MB [private=8795MB]
+  ↳ 堆碎片: 3194MB [fragmented=3194MB] | 第 0 代 GC: 4848 [gc0=4848] | 第 1 代 GC: 348 [gc1=348] | 第 2 代 GC: 18 [gc2=18]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 29 [resourceEpoch=29] | carrierEpoch: 14 [carrierEpoch=14] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:42:58] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 9 ms [elapsedMs=9]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=3;quiet=False;cooldown=True;force=False [status=deferred:skip=3;quiet=False;cooldown=True;force=False]
+  内存: 托管堆: 4496MB [heap=4496MB] | 累计分配: 366515MB [alloc=366515MB] | 工作集: 8550MB [working=8550MB] | 专用内存: 8792MB [private=8792MB]
+  ↳ 堆碎片: 3194MB [fragmented=3194MB] | 第 0 代 GC: 4848 [gc0=4848] | 第 1 代 GC: 348 [gc1=348] | 第 2 代 GC: 18 [gc2=18]
+
+[19:43:00] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 否 [doRefresh=False] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 4523MB [heap=4523MB] | 累计分配: 375514MB [alloc=375514MB] | 工作集: 8376MB [working=8376MB] | 专用内存: 8618MB [private=8618MB]
+  ↳ 堆碎片: 3187MB [fragmented=3187MB] | 第 0 代 GC: 5153 [gc0=5153] | 第 1 代 GC: 349 [gc1=349] | 第 2 代 GC: 18 [gc2=18]
+
+[19:43:00] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 是 [pending=true] | 连续跳过次数: 4 [skip=4] | 已进入静默期: 否 [quiet=False] | 冷却完成: 是 [cooldown=True]
+  ↳ 强制刷新: 否 [force=False]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 29 [resourceEpoch=29] | carrierEpoch: 14 [carrierEpoch=14] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:43:00] [本地化] 本地化诊断 · 已跳过
+  详情: 等待本地化更新: 否 [delayedLocUpdate=False] | 本轮执行全局刷新: 否 [doRefresh=False] | 本地化文件缓存: 7 [locFiles=7] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:43:00] [内存] 分析周期
+  详情: 本周期分配: 12 MB [cycleAllocMB=12] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 4506MB [heap=4506MB] | 累计分配: 375527MB [alloc=375527MB] | 工作集: 8376MB [working=8376MB] | 专用内存: 8618MB [private=8618MB]
+  ↳ 堆碎片: 3187MB [fragmented=3187MB] | 第 0 代 GC: 5153 [gc0=5153] | 第 1 代 GC: 349 [gc1=349] | 第 2 代 GC: 18 [gc2=18]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 1 [groupedTypeFiles=1]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 29 [resourceEpoch=29] | carrierEpoch: 14 [carrierEpoch=14] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:43:00] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 6 ms [elapsedMs=6]
+  ↳ didGlobalWork: 否 [didGlobalWork=False] | didRefresh: 否 [didRefresh=False] | 状态: deferred:skip=4;quiet=False;cooldown=True;force=False [status=deferred:skip=4;quiet=False;cooldown=True;force=False]
+  内存: 托管堆: 4514MB [heap=4514MB] | 累计分配: 375534MB [alloc=375534MB] | 工作集: 8376MB [working=8376MB] | 专用内存: 8618MB [private=8618MB]
+  ↳ 堆碎片: 3187MB [fragmented=3187MB] | 第 0 代 GC: 5153 [gc0=5153] | 第 1 代 GC: 349 [gc1=349] | 第 2 代 GC: 18 [gc2=18]
+
+[19:43:01] [校验] 批量校验文件 · local dynamic batch
+  详情: 文件: 3 [files=3] | 诊断数: 0 [diagnostics=0] | 耗时: 316 ms [elapsedMs=316] | 本次分配: 1028 MB [allocDeltaMB=1028]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+
+[19:43:03] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-begin [stage=analyze-begin] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 强制刷新: 否 [force=False]
+  ↳ 本轮执行全局刷新: 是 [doRefresh=True] | 待校验: rules,types [pending=rules,types]
+  内存: 托管堆: 4518MB [heap=4518MB] | 累计分配: 384256MB [alloc=384256MB] | 工作集: 8368MB [working=8368MB] | 专用内存: 8610MB [private=8610MB]
+  ↳ 堆碎片: 3173MB [fragmented=3173MB] | 第 0 代 GC: 5449 [gc0=5449] | 第 1 代 GC: 351 [gc1=351] | 第 2 代 GC: 18 [gc2=18]
+
+[19:43:03] [生命周期] AnalyzeLifecycle
+  详情: stage: prepare-before [stage=prepare-before] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | resourceEpoch: 29 [resourceEpoch=29]
+  ↳ 耗时: 3 ms [elapsedMs=3]
+  内存: 托管堆: 4531MB [heap=4531MB] | 累计分配: 384269MB [alloc=384269MB] | 工作集: 8368MB [working=8368MB] | 专用内存: 8610MB [private=8610MB]
+  ↳ 堆碎片: 3173MB [fragmented=3173MB] | 第 0 代 GC: 5449 [gc0=5449] | 第 1 代 GC: 351 [gc1=351] | 第 2 代 GC: 18 [gc2=18]
+
+[19:43:09] [Heartbeat] 事件
+  详情: heartbeatGapMs: 1063.1817 [heartbeatGapMs=1063.1817] | pendingWorkItems: 1 [pendingWorkItems=1] | availableWorkers: 32766 [availableWorkers=32766] | writerActive: 0 [writerActive=0]
+  ↳ waitingWriters: 0 [waitingWriters=0]
+
+[19:43:14] [悬停] 悬停
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_utllities_component\kuat_component_weapon_artellarys.txt
+  详情: 行: 32 [line=32] | 列: 4 [char=4] | 耗时: 18ms [elapsed=18ms] | 本次分配: 53 MB [allocDeltaMB=53]
+  ↳ 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 2 [groupedTypeFiles=2]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 29 [resourceEpoch=29] | carrierEpoch: 14 [carrierEpoch=14] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:43:15] [悬停] 悬停
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_utllities_component\kuat_component_weapon_artellarys.txt
+  详情: 行: 30 [line=30] | 列: 7 [char=7] | 耗时: 39ms [elapsed=39ms] | 本次分配: 30 MB [allocDeltaMB=30]
+  ↳ 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 2 [groupedTypeFiles=2]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 29 [resourceEpoch=29] | carrierEpoch: 14 [carrierEpoch=14] | typeRulesEpoch: 5 [typeRulesEpoch=5]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:43:18] [生命周期] AnalyzeLifecycle
+  详情: stage: prepare-after [stage=prepare-after] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | outcome: prepared [outcome=prepared]
+  ↳ 耗时: 15367 ms [elapsedMs=15367] | totalElapsedMs: 15371 [totalElapsedMs=15371]
+  内存: 托管堆: 10540MB [heap=10540MB] | 累计分配: 427346MB [alloc=427346MB] | 工作集: 12148MB [working=12148MB] | 专用内存: 12407MB [private=12407MB]
+  ↳ 堆碎片: 910MB [fragmented=910MB] | 第 0 代 GC: 5697 [gc0=5697] | 第 1 代 GC: 390 [gc1=390] | 第 2 代 GC: 19 [gc2=19]
+
+[19:43:18] [生命周期] AnalyzeLifecycle
+  详情: stage: commit-before [stage=commit-before] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | resourceEpoch: 29 [resourceEpoch=29]
+  ↳ 耗时: 15374 ms [elapsedMs=15374]
+  内存: 托管堆: 10540MB [heap=10540MB] | 累计分配: 427346MB [alloc=427346MB] | 工作集: 12148MB [working=12148MB] | 专用内存: 12407MB [private=12407MB]
+  ↳ 堆碎片: 910MB [fragmented=910MB] | 第 0 代 GC: 5697 [gc0=5697] | 第 1 代 GC: 390 [gc1=390] | 第 2 代 GC: 19 [gc2=19]
+
+[19:43:18] [生命周期] AnalyzeLifecycle
+  详情: stage: commit-after [stage=commit-after] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | outcome: committed [outcome=committed]
+  ↳ 耗时: 3 ms [elapsedMs=3] | totalElapsedMs: 15377 [totalElapsedMs=15377]
+  内存: 托管堆: 10540MB [heap=10540MB] | 累计分配: 427346MB [alloc=427346MB] | 工作集: 12148MB [working=12148MB] | 专用内存: 12407MB [private=12407MB]
+  ↳ 堆碎片: 910MB [fragmented=910MB] | 第 0 代 GC: 5697 [gc0=5697] | 第 1 代 GC: 390 [gc1=390] | 第 2 代 GC: 19 [gc2=19]
+
+[19:43:18] [刷新] 刷新缓存
+  详情: 本次分配: 43089 MB [allocDeltaMB=43089] | 使用 staged 刷新: 是 [staged=true] | 强制刷新: 否 [force=False] | 达到跳过上限: 否 [skipLimit=False]
+  ↳ resourceEpoch: 29 [resourceEpoch=29]
+  内存: 托管堆: 10540MB [heap=10540MB] | 累计分配: 427346MB [alloc=427346MB] | 工作集: 12148MB [working=12148MB] | 专用内存: 12407MB [private=12407MB]
+  ↳ 堆碎片: 910MB [fragmented=910MB] | 第 0 代 GC: 5697 [gc0=5697] | 第 1 代 GC: 390 [gc1=390] | 第 2 代 GC: 19 [gc2=19]
+  诊断: 文件: 7208 [files=7208] | 最新: 7 [fresh=7] | 待校验: 7201 [pending=7201] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 1 [codeLens=1] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 2 [groupedTypeFiles=2]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 29 [resourceEpoch=29] | carrierEpoch: 14 [carrierEpoch=14] | typeRulesEpoch: 6 [typeRulesEpoch=6]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:43:19] [Heartbeat] 事件
+  详情: heartbeatGapMs: 949.9273 [heartbeatGapMs=949.9273] | pendingWorkItems: 1 [pendingWorkItems=1] | availableWorkers: 32753 [availableWorkers=32753] | writerActive: 1 [writerActive=1]
+  ↳ waitingWriters: 0 [waitingWriters=0]
+
+[19:43:20] [本地化] 本地化诊断
+  详情: 本次分配: 7581 MB [allocDeltaMB=7581] | 本地化文件缓存: 7 [locFiles=7] | 本地化错误: 547 [locErrors=547] | 缓存的本地化 key: 156913 [cachedLocKeys=156913]
+
+[19:43:20] [性能] WriteLock hold budget exceeded
+  详情: phase: refresh [phase=refresh] | 等待写锁: 0ms [wait=0ms] | 持有写锁: 2194ms [hold=2194ms] | didRefresh: 是 [didRefresh=True]
+  ↳ didLoc: 是 [didLoc=True]
+
+[19:43:20] [内存] GC after global refresh (idle)
+
+[19:43:21] [内存] 分析周期
+  详情: 本周期分配: 51158 MB [cycleAllocMB=51158] | 字符串池: 645387 [strings=645387] | 整数池: 964529 [ints=964529]
+  内存: 托管堆: 10821MB [heap=10821MB] | 累计分配: 435416MB [alloc=435416MB] | 工作集: 12265MB [working=12265MB] | 专用内存: 12536MB [private=12536MB]
+  ↳ 堆碎片: 864MB [fragmented=864MB] | 第 0 代 GC: 5823 [gc0=5823] | 第 1 代 GC: 397 [gc1=397] | 第 2 代 GC: 20 [gc2=20]
+  诊断: 文件: 7208 [files=7208] | 最新: 0 [fresh=0] | 待校验: 7208 [pending=7208] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 29 [resourceEpoch=29] | carrierEpoch: 14 [carrierEpoch=14] | typeRulesEpoch: 6 [typeRulesEpoch=6]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:43:21] [生命周期] AnalyzeLifecycle
+  详情: stage: analyze-complete [stage=analyze-complete] | pid: 13960 [pid=13960] | instance: ac45fea8-bca4-407d-b453-b6af72a0e3ad [instance=ac45fea8-bca4-407d-b453-b6af72a0e3ad] | 耗时: 17693 ms [elapsedMs=17693]
+  ↳ didGlobalWork: 是 [didGlobalWork=True] | didRefresh: 是 [didRefresh=True] | 状态: refresh_caches_staged [status=refresh_caches_staged]
+  内存: 托管堆: 10839MB [heap=10839MB] | 累计分配: 435433MB [alloc=435433MB] | 工作集: 12276MB [working=12276MB] | 专用内存: 12546MB [private=12546MB]
+  ↳ 堆碎片: 864MB [fragmented=864MB] | 第 0 代 GC: 5823 [gc0=5823] | 第 1 代 GC: 397 [gc1=397] | 第 2 代 GC: 20 [gc2=20]
+
+[19:43:22] [RequestTrace] {"id":1059,"method":"workspace/executeCommand","totalMs":3143.4045,"queueMs":0.0158,"processQueueMs":0.0207,"workerWaitMs":14.9868,"lockWaitMs":3127.9761,"methodMs":1960.6127,"responseMs":0.4127,"lockKind":"read","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":1,"workerThreads":3,"maxWorkerThreads":32767,"minWorkerThreads":12,"availableWorkerThreads":32764,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":1,"writerActiveCount":1}
+
+[19:43:22] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 6683 MB [allocDeltaMB=6683]
+  诊断: 文件: 7208 [files=7208] | 最新: 0 [fresh=0] | 待校验: 7208 [pending=7208] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 30 [resourceEpoch=30] | carrierEpoch: 14 [carrierEpoch=14] | typeRulesEpoch: 6 [typeRulesEpoch=6]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:43:22] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_artilleary_weapon_destroyed.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(5) [documentVersion=Some(5)] | modelEpoch: { game = 7L   rules = 7L   types = 7L   localisation = 7L } [modelEpoch={ game = 7L   rules = 7L   types = 7L   localisation = 7L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:43:23] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 49 MB [allocDeltaMB=49]
+  诊断: 文件: 7208 [files=7208] | 最新: 1 [fresh=1] | 待校验: 7207 [pending=7207] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 31 [resourceEpoch=31] | carrierEpoch: 14 [carrierEpoch=14] | typeRulesEpoch: 6 [typeRulesEpoch=6]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:43:23] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\components\kuat_mutation_weapon_chain_damage_fixup_missile.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(3) [documentVersion=Some(3)] | modelEpoch: { game = 7L   rules = 7L   types = 7L   localisation = 7L } [modelEpoch={ game = 7L   rules = 7L   types = 7L   localisation = 7L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:43:23] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_aux_sheild_and_armor_destroyed.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 51 MB [allocDeltaMB=51]
+  诊断: 文件: 7208 [files=7208] | 最新: 2 [fresh=2] | 待校验: 7206 [pending=7206] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 32 [resourceEpoch=32] | carrierEpoch: 14 [carrierEpoch=14] | typeRulesEpoch: 6 [typeRulesEpoch=6]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:43:23] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_weapon_event\kuat_aux_sheild_and_armor_destroyed.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 7L   rules = 7L   types = 7L   localisation = 7L } [modelEpoch={ game = 7L   rules = 7L   types = 7L   localisation = 7L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:43:23] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\star_classes\kuat_star_classes.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 53 MB [allocDeltaMB=53]
+  诊断: 文件: 7208 [files=7208] | 最新: 3 [fresh=3] | 待校验: 7205 [pending=7205] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 33 [resourceEpoch=33] | carrierEpoch: 14 [carrierEpoch=14] | typeRulesEpoch: 6 [typeRulesEpoch=6]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:43:23] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\star_classes\kuat_star_classes.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 7L   rules = 7L   types = 7L   localisation = 7L } [modelEpoch={ game = 7L   rules = 7L   types = 7L   localisation = 7L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 0 [diagnostics=0] | 待校验:  [pending=]
+
+[19:43:23] [校验] 更新文件
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_utllities_component\kuat_component_weapon_artellarys.txt
+  详情: 模式: 完整 [mode=full] | 浅层校验: 是 [shallow=True] | 本次分配: 48 MB [allocDeltaMB=48]
+  诊断: 文件: 7208 [files=7208] | 最新: 4 [fresh=4] | 待校验: 7204 [pending=7204] | 过期: 0 [stale=0]
+  ↳ 错误: 312 [errors=312] | 警告: 72 [warnings=72]
+  缓存: 语义: 2 [semantic=2] | CodeLens 缓存: 0 [codeLens=0] | 嵌入提示缓存: 0 [inlay=0] | 本地化文件缓存: 7 [locFiles=7]
+  ↳ 本地化 key: 156913 [locKeys=156913] | 补全 TTL 缓存: 0 [completionTTL=0] | 类型引用缓存: 0 [typeRefs=0] | 类型文件分组: 0 [groupedTypeFiles=0]
+  ↳ 缓存写入记录: 12 [cacheWriteKeys=12] | resourceEpoch: 34 [resourceEpoch=34] | carrierEpoch: 14 [carrierEpoch=14] | typeRulesEpoch: 6 [typeRulesEpoch=6]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 2 [fileSetEpoch=2]
+
+[19:43:23] [校验] Validation
+  文件 [file]: c:\Users\eddy\Documents\Paradox Interactive\Stellaris\mod\mymod\KuatAncientEmpire\common\inline_scripts\kuat_utllities_component\kuat_component_weapon_artellarys.txt
+  详情: phase: shallow-complete [phase=shallow-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 7L   rules = 7L   types = 7L   localisation = 7L } [modelEpoch={ game = 7L   rules = 7L   types = 7L   localisation = 7L }] | freshness: Fresh [freshness=Fresh]
+  ↳ 诊断数: 2 [diagnostics=2] | 待校验:  [pending=]
+

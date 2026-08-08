@@ -4163,6 +4163,31 @@ type Server(client: ILanguageClient) =
                                     |> List.distinctBy normaliseCachePath
                                 let publishEpoch = nextDiagnosticEpoch ()
 
+                                // A batch can publish dynamic-expansion diagnostics to files
+                                // outside its own queue (cross-file call sites). Those files
+                                // were neither revalidated nor republished by later batches,
+                                // so a fixed error kept its stale diagnostic forever. Queue
+                                // them for a follow-up batch so they get freshly revalidated
+                                // and cleared when the underlying issue is gone.
+                                let validatedFilePaths =
+                                    filesToPublish
+                                    |> List.map normaliseCachePath
+                                    |> Set.ofList
+                                let outstandingDynamicDiagnosticFiles =
+                                    fileDiagnosticStates
+                                    |> Seq.choose (fun kvp ->
+                                        if kvp.Value.diagnostics |> List.exists DiagnosticMerge.isDynamicExpansionDiagnostic then
+                                            if validatedFilePaths.Contains(normaliseCachePath kvp.Key) then
+                                                None
+                                            else
+                                                Some kvp.Key
+                                        else
+                                            None)
+                                    |> Seq.toList
+                                if not outstandingDynamicDiagnosticFiles.IsEmpty then
+                                    scheduleDeferredDynamicRevalidation outstandingDynamicDiagnosticFiles
+                                    logDiag $"Deferred revalidation queued {outstandingDynamicDiagnosticFiles.Length} file(s) with outstanding dynamic diagnostics"
+
                                 for filePath in filesToPublish do
                                     let refreshed =
                                         refreshedByFile
@@ -4796,7 +4821,9 @@ type Server(client: ILanguageClient) =
                                 (not isEditAction)
                                 && (not options.forceDeepLint)
                                 && (match fileDiagnosticStates.TryGetValue(lintPath) with
-                                    | true, state -> state.freshness = Fresh
+                                    | true, state ->
+                                        state.freshness = Fresh
+                                        && sameModelEpoch state.modelEpoch (modelEpochSnapshot ())
                                     | _ -> false)
                             let supersededEdit =
                                 isEditAction

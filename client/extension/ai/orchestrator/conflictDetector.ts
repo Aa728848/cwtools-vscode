@@ -6,6 +6,7 @@
 */
 
 import { Blackboard } from './blackboard';
+import { BLACKBOARD_KEY_PREFIXES } from './blackboardSchema';
 import { aiText } from '../messages';
 import type { RunEventSink } from '../runner/runContext';
 
@@ -34,9 +35,9 @@ export interface ConflictResult {
 */
 export class ConflictDetector {
     /** Key prefix for writing intent in Blackboard */
-    private static readonly INTENT_PREFIX = '__intent:';
+    private static readonly INTENT_PREFIX = BLACKBOARD_KEY_PREFIXES.intent;
     /** The key prefix of the entity registered in Blackboard */
-    private static readonly ENTITY_PREFIX = '__entity:';
+    private static readonly ENTITY_PREFIX = BLACKBOARD_KEY_PREFIXES.entity;
     private eventSink?: RunEventSink;
 
     constructor(eventSink?: RunEventSink) {

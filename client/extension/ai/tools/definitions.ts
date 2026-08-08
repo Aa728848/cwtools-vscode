@@ -1920,6 +1920,10 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                             required: ['id', 'answer'],
                         },
                     },
+                    background: {
+                        type: 'boolean',
+                        description: 'Run the wave in the background and return immediately; completion arrives as a BACKGROUND TASK RESULT in the next turn. General domain: any role. Paradox domain: read-only roles (explore/plan/review) only.',
+                    },
                 },
                 required: [],
             },
@@ -1936,6 +1940,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     key: { type: 'string', description: 'Exact key to look up (mutually exclusive with prefix/type)' },
                     prefix: { type: 'string', description: 'Key prefix for range queries (e.g. "entity:" matches all entries starting with "entity:")' },
                     type: { type: 'string', enum: ['file_snapshot', 'scope_info', 'diag_result', 'entity_registry', 'entity_relation', 'acceptance_evidence', 'write_intent', 'free_text'], description: 'Filter by data type' },
+                    structured: { type: 'boolean', description: 'Parse JSON values and return them under `parsed` (or `parseError: true` when not JSON).' },
                 },
                 required: [],
             },
@@ -1965,6 +1970,23 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                 },
                 required: ['nodeIds'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'cancel_dispatch',
+            description: 'Cancel a background orchestration graph that is still running. The graph settles as cancelled and its partial state stays loadable for a later resume.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    graphId: {
+                        type: 'string',
+                        description: 'Graph id of the running background wave (returned by dispatch_agents as graphId).',
+                    },
+                },
+                required: ['graphId'],
             },
         },
     },

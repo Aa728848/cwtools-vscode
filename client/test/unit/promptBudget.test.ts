@@ -5,6 +5,9 @@ const vscodeStub = {
         getConfiguration: () => ({ get: <T>(_key: string, defaultValue?: T): T | undefined => defaultValue }),
         workspaceFolders: [],
     },
+    commands: {
+        executeCommand: async () => undefined,
+    },
     window: {
         activeTextEditor: undefined,
         createOutputChannel: () => ({ appendLine() {}, show() {}, clear() {}, dispose() {} }),

@@ -29,6 +29,8 @@ import { SOURCE } from '../messages';
 /** Per-node raw output cap; handoffs stay complete because the quality gate consumes them. */
 const MAX_STORED_OUTPUT_CHARS = 64 * 1024;
 const MAX_STORED_CLARIFICATION_CHARS = 4 * 1024;
+const MAX_CLARIFICATION_OPTIONS = 4;
+const MAX_CLARIFICATION_OPTION_CHARS = 200;
 const MAX_ORCHESTRATIONS_PER_TOPIC = 32;
 
 export interface StoredTaskNode {
@@ -78,6 +80,7 @@ export interface StoredSubAgentResult {
     runId?: string;
     needsClarification?: boolean;
     clarification?: string;
+    clarificationOptions?: string[];
     handoff?: AgentHandoff;
 }
 
@@ -230,6 +233,16 @@ export function serializeAgentResults(agentResults: Map<string, SubAgentResult>)
             clarification: result.clarification && result.clarification.length > MAX_STORED_CLARIFICATION_CHARS
                 ? result.clarification.slice(0, MAX_STORED_CLARIFICATION_CHARS)
                 : result.clarification,
+            clarificationOptions: result.clarificationOptions
+                ? result.clarificationOptions
+                    .map(option => option.trim())
+                    .filter(option => option.length > 0)
+                    .filter((option, index, all) => all.indexOf(option) === index)
+                    .slice(0, MAX_CLARIFICATION_OPTIONS)
+                    .map(option => option.length > MAX_CLARIFICATION_OPTION_CHARS
+                        ? option.slice(0, MAX_CLARIFICATION_OPTION_CHARS)
+                        : option)
+                : undefined,
             handoff: result.handoff,
         };
     }
@@ -250,6 +263,7 @@ export function deserializeAgentResults(stored: Record<string, StoredSubAgentRes
             runId: entry.runId,
             needsClarification: entry.needsClarification,
             clarification: entry.clarification,
+            clarificationOptions: entry.clarificationOptions,
             handoff: entry.handoff,
         });
     }

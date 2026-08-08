@@ -18,6 +18,7 @@ import { mergeTokenUsageTotals } from '../cacheCapability';
 import { TaskGraphEngine } from './taskGraphEngine';
 import { Blackboard } from './blackboard';
 import { ConflictDetector } from './conflictDetector';
+import { BLACKBOARD_KEY_PREFIXES } from './blackboardSchema';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, aiText } from '../messages';
 import type { RunEventSink } from '../runner/runContext';
@@ -382,7 +383,7 @@ export class ParallelExecutor {
                 };
 
                 const dependencyHandoffs = node.dependencies
-                    .map(dependencyId => blackboard.readValue(`__handoff:${dependencyId}`))
+                    .map(dependencyId => blackboard.readValue(`${BLACKBOARD_KEY_PREFIXES.handoff}${dependencyId}`))
                     .filter((value): value is string => !!value);
                 const executionNode = dependencyHandoffs.length > 0
                     ? {
@@ -421,7 +422,7 @@ export class ParallelExecutor {
                     }
                     if (result.handoff) {
                         blackboard.write(
-                            `__handoff:${node.id}`,
+                            `${BLACKBOARD_KEY_PREFIXES.handoff}${node.id}`,
                             JSON.stringify(result.handoff),
                             'free_text',
                             node.id,
@@ -429,7 +430,7 @@ export class ParallelExecutor {
                     }
                     for (const contract of node.produces ?? []) {
                         blackboard.write(
-                            `__entity:${contract.kind}:${contract.id}`,
+                            `${BLACKBOARD_KEY_PREFIXES.entity}${contract.kind}:${contract.id}`,
                             JSON.stringify({ nodeId: node.id, contract }),
                             'entity_registry',
                             node.id,
@@ -437,7 +438,7 @@ export class ParallelExecutor {
                     }
                     for (const contract of node.consumes ?? []) {
                         blackboard.write(
-                            `__relation:${node.id}:${contract.kind}:${contract.id}:${contract.operation}`,
+                            `${BLACKBOARD_KEY_PREFIXES.relation}${node.id}:${contract.kind}:${contract.id}:${contract.operation}`,
                             JSON.stringify({ nodeId: node.id, contract }),
                             'entity_relation',
                             node.id,

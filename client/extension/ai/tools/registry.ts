@@ -18,7 +18,7 @@ export type AgentToolName =
     | 'get_memory' | 'search_memory' | 'history' | 'save_memory' | 'forget_memory' | 'memory_recall_trace'
     | 'convert_image_to_dds' | 'convert_audio' | 'deploy_mod_asset' | 'mcp_call'
     | 'write_localisation' | 'write_design_blueprint' | 'save_workflow' | 'git_ops' | 'dispatch_agents'
-    | 'query_blackboard' | 'merge_results' | 'get_design_blueprint_contract'
+    | 'query_blackboard' | 'merge_results' | 'cancel_dispatch' | 'get_design_blueprint_contract'
     | 'query_shader_symbol' | 'query_shader_compile_unit' | 'query_shader_platform_variants' | 'query_shader_callers'
     | 'explain_shader_reachability' | 'validate_shader' | 'compare_shader_with_vanilla';
 
@@ -165,6 +165,7 @@ const TOOL_DOMAINS = {
     dispatch_agents: 'shared',
     query_blackboard: 'shared',
     merge_results: 'shared',
+    cancel_dispatch: 'shared',
     get_design_blueprint_contract: 'paradox',
     query_shader_symbol: 'paradox',
     query_shader_compile_unit: 'paradox',
@@ -239,6 +240,7 @@ const GENERAL_BLACKBOARD_SCHEMA: ToolDefinition = {
                     enum: ['file_snapshot', 'diag_result', 'write_intent', 'free_text'],
                     description: 'Optional repository record type filter.',
                 },
+                structured: { type: 'boolean', description: 'Parse JSON values and return them under `parsed` (or `parseError: true` when not JSON).' },
             },
             required: [],
         },
@@ -298,7 +300,7 @@ const NETWORK: AgentToolName[] = ['web_search', 'web_open'];
 const UTILITY: AgentToolName[] = ['run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process', 'git_ops', 'analyze_diagnostic_error'];
 const MEDIA: AgentToolName[] = ['convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
 const _MCP: AgentToolName[] = ['mcp_call'];
-const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results'];
+const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results', 'cancel_dispatch'];
 
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>([

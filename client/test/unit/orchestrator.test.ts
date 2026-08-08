@@ -85,9 +85,9 @@ describe('Blackboard', () => {
 
     it('queryByPrefix: 前缀查询', () => {
         const bb = new Blackboard();
-        bb.write('entity:ship', 'ship_data', 'entity_registry', 'a');
-        bb.write('entity:planet', 'planet_data', 'entity_registry', 'a');
-        bb.write('file:main.txt', 'content', 'file_snapshot', 'b');
+        bb.write('entity:ship', 'ship_data', 'free_text', 'a');
+        bb.write('entity:planet', 'planet_data', 'free_text', 'a');
+        bb.write('file:main.txt', 'content', 'free_text', 'b');
         const results = bb.queryByPrefix('entity:');
         expect(results).to.have.length(2);
         expect(results.every(r => r.key.startsWith('entity:'))).to.be.true;
@@ -95,9 +95,9 @@ describe('Blackboard', () => {
 
     it('queryByType: 类型过滤', () => {
         const bb = new Blackboard();
-        bb.write('a', 'x', 'file_snapshot', 'p');
-        bb.write('b', 'y', 'scope_info', 'p');
-        bb.write('c', 'z', 'file_snapshot', 'p');
+        bb.write('a', '{}', 'file_snapshot', 'p');
+        bb.write('b', '{}', 'scope_info', 'p');
+        bb.write('c', '{}', 'file_snapshot', 'p');
         const results = bb.queryByType('file_snapshot');
         expect(results).to.have.length(2);
     });
@@ -147,7 +147,7 @@ describe('Blackboard', () => {
     it('snapshot + restore: 序列化 / 反序列化', () => {
         const bb = new Blackboard();
         bb.write('snap1', 'data1', 'free_text', 'a');
-        bb.write('snap2', 'data2', 'scope_info', 'b');
+        bb.write('snap2', 'data2', 'free_text', 'b');
         const snapshot = bb.snapshot();
         const bb2 = new Blackboard();
         bb2.restore(snapshot);

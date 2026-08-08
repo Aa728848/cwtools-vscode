@@ -26,6 +26,7 @@ import type {
 } from '../types';
 import { TaskGraphEngine } from './taskGraphEngine';
 import { Blackboard } from './blackboard';
+import { BLACKBOARD_KEY_PREFIXES } from './blackboardSchema';
 import { ParallelExecutor, type SubAgentExecutor } from './parallelExecutor';
 import { QualityGate, PDX_DIAGNOSTIC_EXTENSIONS, isPdxDiagnosticFile } from './qualityGate';
 import { getAgentProfile } from './agentRegistry';
@@ -77,6 +78,31 @@ function normalizeClarificationText(text: string): string {
         .replace(/```[\w-]*\n?/g, '')
         .replace(/```/g, '')
         .trim();
+}
+
+const MAX_CLARIFICATION_OPTIONS = 4;
+const MAX_CLARIFICATION_OPTION_CHARS = 200;
+
+/**
+ * Extract preset answer options from an OPTIONS: block (one `- ` or `* ` item
+ * per line) that may follow the clarification text. Returns undefined when
+ * fewer than two valid options are present.
+ */
+export function parseClarificationOptions(text: string): string[] | undefined {
+    const marker = text.indexOf('OPTIONS:');
+    if (marker < 0) return undefined;
+    const options: string[] = [];
+    for (const line of text.slice(marker + 'OPTIONS:'.length).split(/\r?\n/)) {
+        const match = /^[-*]\s+(.+)$/.exec(line.trim());
+        if (!match) {
+            if (options.length > 0) break;
+            continue;
+        }
+        const option = match[1]!.trim().slice(0, MAX_CLARIFICATION_OPTION_CHARS);
+        if (option && !options.includes(option)) options.push(option);
+        if (options.length >= MAX_CLARIFICATION_OPTIONS) break;
+    }
+    return options.length >= 2 ? options : undefined;
 }
 
 /** 
@@ -405,7 +431,7 @@ export class Orchestrator {
                 }
                 result.qualityGate = reviewResult;
                 this.blackboard.write(
-                    '__quality_gate:final',
+                    `${BLACKBOARD_KEY_PREFIXES.qualityGate}final`,
                     JSON.stringify(reviewResult),
                     'acceptance_evidence',
                     '__quality_gate__',
@@ -423,17 +449,18 @@ export class Orchestrator {
         return result;
     }
 
-    private extractSubAgentClarification(output: string): string | undefined {
+    private extractSubAgentClarification(output: string): { clarification: string; options?: string[] } | undefined {
         const text = output.trim();
         if (!text) return undefined;
 
         if (text.includes(':::question')) {
-            return normalizeClarificationText(text);
+            return { clarification: normalizeClarificationText(text), options: parseClarificationOptions(text) };
         }
 
         const markerIndex = text.toUpperCase().indexOf(CLARIFICATION_PREFIX);
         if (markerIndex >= 0) {
-            return normalizeClarificationText(text.slice(markerIndex + CLARIFICATION_PREFIX.length).replace(/^[:：]\s*/, ''));
+            const raw = text.slice(markerIndex + CLARIFICATION_PREFIX.length).replace(/^[:：]\s*/, '');
+            return { clarification: normalizeClarificationText(raw), options: parseClarificationOptions(raw) };
         }
 
         return undefined;
@@ -814,10 +841,11 @@ export class Orchestrator {
             clearSubAgentGuards();
 
             const output = result.explanation || result.code || '';
-            const clarification = this.extractSubAgentClarification(output);
-            if (clarification) {
+            const clarificationDetails = this.extractSubAgentClarification(output);
+            if (clarificationDetails) {
+                const clarification = clarificationDetails.clarification;
                 _blackboard.write(
-                    `orchestrator:clarification:${taskNode.id}`,
+                    `${BLACKBOARD_KEY_PREFIXES.clarification}${taskNode.id}`,
                     clarification.slice(0, 8000),
                     'free_text',
                     taskNode.id,
@@ -847,6 +875,7 @@ export class Orchestrator {
                     runId: result.runId,
                     needsClarification: true,
                     clarification,
+                    clarificationOptions: clarificationDetails.options,
                 };
             }
 

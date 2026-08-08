@@ -61,6 +61,8 @@ import {
     deserializeGraph,
     deserializeAgentResults,
 } from './orchestrator/orchestrationStore';
+import { backgroundOrchestrators } from './orchestrator/backgroundOrchestrators';
+import { BLACKBOARD_KEY_PREFIXES } from './orchestrator/blackboardSchema';
 import { normalizeEvidenceGateMode, type EvidenceGateDecision, type EvidenceGateMode, type EvidenceGatePhase } from './evidence/evidenceTypes';
 import { isPdxScriptTarget } from './evidence/claimExtractor';
 import { runLedger } from './runner/runLedger';
@@ -2239,6 +2241,10 @@ export class AgentToolExecutor {
                 result = this.executeMergeResults(args, context);
                 break;
             }
+            case 'cancel_dispatch': {
+                result = this.executeCancelDispatch(args, context);
+                break;
+            }
 
             default:
                 // Check if this is a dynamically registered MCP tool (mcp_<server>_<tool>)
@@ -3179,6 +3185,9 @@ export class AgentToolExecutor {
         const resumeGraphId = typeof args.resumeGraphId === 'string' ? args.resumeGraphId.trim() : '';
         const appendTasks = Array.isArray(args.appendTasks) ? args.appendTasks : [];
         const answerClarifications = Array.isArray(args.answerClarifications) ? args.answerClarifications : [];
+        // Background execution: the wave returns immediately and keeps running
+        // off the tool call; completion arrives as a BACKGROUND TASK RESULT.
+        const backgroundRequested = args.background === true;
 
         const runnerOptsForLimits = context?.runnerOptions ?? this.parentRunnerOptions;
         const originalUserMessage = runnerOptsForLimits?.originalUserMessage
@@ -3203,6 +3212,18 @@ export class AgentToolExecutor {
             return {
                 success: false,
                 error: `resumeGraphId '${resumeGraphId}' is not a known orchestration for the current topic/domain. Use merge_results to inspect known graphs, or start a new dispatch.`,
+            };
+        }
+        if (resumeGraphId && backgroundOrchestrators.hasActive(resumeGraphId)) {
+            return {
+                success: false,
+                error: `Graph '${resumeGraphId}' is still running in the background. Wait for its BACKGROUND TASK RESULT, then resume or merge it.`,
+            };
+        }
+        if (backgroundRequested && blueprintFile) {
+            return {
+                success: false,
+                error: 'Background dispatch does not accept blueprintFile: blueprints are approved write contracts and stay synchronous. Run read-only fan-out in the background without a blueprint.',
             };
         }
         if (resumeGraphId && blueprintFile) {
@@ -3363,6 +3384,30 @@ export class AgentToolExecutor {
                     success: false,
                     error: `Appended task '${appendedWriter.id}' declares a write intent in the Paradox domain. Write waves are static contracts — dispatch them as a new graph instead of appending to '${resumeGraphId}'. Appended tasks must be read-only (explore/plan/review).`,
                 };
+            }
+        }
+        // Background waves in the Paradox domain are read-only evidence work;
+        // write waves keep the synchronous quality-gate transaction.
+        if (backgroundRequested && runtimeDomain === 'paradox') {
+            const backgroundWriter = normalizedTasks.find(task =>
+                !['explore', 'plan', 'review'].includes(task.agentType)
+                || (task.plannedFiles?.length ?? 0) > 0
+            );
+            if (backgroundWriter) {
+                return {
+                    success: false,
+                    error: `Background task '${backgroundWriter.id}' declares a write intent in the Paradox domain. Background waves are read-only (explore/plan/review); dispatch write waves synchronously.`,
+                };
+            }
+            if (resumeRecord) {
+                const resumableWriter = resumeRecord.graph.nodes.find(node =>
+                    node.status !== 'done' && !['explore', 'plan', 'review'].includes(node.agentType));
+                if (resumableWriter) {
+                    return {
+                        success: false,
+                        error: `Resumed graph '${resumeGraphId}' still contains write node '${resumableWriter.id}' that would run in the background. Finish write waves synchronously before backgrounding read-only follow-ups.`,
+                    };
+                }
             }
         }
         if (parentMode === 'explore') {
@@ -3607,6 +3652,7 @@ export class AgentToolExecutor {
                 context?.onBeforeFileWrite
                 ?? runnerOpts?.onBeforeFileWrite
                 ?? this.onBeforeFileWrite;
+            const validationRunId = parentRun?.runId ?? parentRunSink?.runId;
 
             const options: import('./orchestrator/types').OrchestratorOptions = {
                 domain: runnerOpts?.domain ?? (parentMode === 'orchestrator' ? 'general' : 'paradox'),
@@ -3654,65 +3700,144 @@ export class AgentToolExecutor {
 
             // A later dispatch may belong to another top-level run and must
             // not replace or cancel this graph.
-            const result = await orchestrator.execute(graph, options);
-            mergeTokenUsageTotals(context?.tokenAccumulator, result.totalTokenUsage);
 
-            // Cache results for use by merge_results
-            this._lastOrchestratorResult = result;
-            this._lastOrchestratorGraph = graph;
-            this._lastOrchestratorDomain = runtimeDomain;
-            this._lastOrchestratorTopicId = runnerOpts?.topicId;
-            const validationRunId = parentRun?.runId ?? parentRunSink?.runId;
-            if (validationRunId && (hasWriteTasks || result.qualityGate !== undefined)) {
-                this._orchestratorValidationByRun.set(validationRunId, {
-                    // A later quality-gated repair wave supersedes an earlier failed write wave.
-                    // Read-only fanout waves do not overwrite this validation state.
-                    success: result.success,
-                    summary: result.summary,
-                    pendingOnly: !!result.qualityGate
-                        && (result.qualityGate.validationPending ?? 0) > 0
-                        && result.qualityGate.operationalFailure !== true
-                        && result.qualityGate.diagnosticErrors === 0
-                        && (result.qualityGate.evidenceConflicts ?? 0) === 0
-                        && result.qualityGate.semanticIssues === 0
-                        && result.qualityGate.logicIssues === 0
-                        && result.qualityGate.acceptanceFailures.length === 0,
-                });
-                while (this._orchestratorValidationByRun.size > 100) {
-                    const oldest = this._orchestratorValidationByRun.keys().next().value as string | undefined;
-                    if (!oldest) break;
-                    this._orchestratorValidationByRun.delete(oldest);
+            // ─── Background mode: return immediately, keep the graph running ───
+            if (backgroundRequested) {
+                const bgGraphId = graph.id;
+                const bgTopicId = runnerOpts?.topicId;
+                const bgRunId = validationRunId;
+
+                // Graph-level aggregation notification: one BACKGROUND TASK
+                // RESULT entry when the whole graph settles.
+                let graphTask: import('./runner/taskManager').AgentTaskRecord | undefined;
+                if (bgTopicId && bgRunId) {
+                    try {
+                        agentTaskManager.configure(bgTopicId);
+                        graphTask = await agentTaskManager.create({
+                            kind: 'background_read',
+                            agentId: `graph:${bgGraphId}`,
+                            topicId: bgTopicId,
+                            runId: bgRunId,
+                            threadId: bgTopicId,
+                        });
+                    } catch {
+                        graphTask = undefined;
+                    }
                 }
+
+                // In-progress snapshot so merge_results/resume see the graph.
+                await saveOrchestration({
+                    topicId: bgTopicId,
+                    runId: bgRunId,
+                    domain: runtimeDomain,
+                    mode: parentMode,
+                    graph,
+                    agentResults: new Map(),
+                    blackboard: { entries: [], timestamp: Date.now() },
+                    summary: 'Background dispatch started; execution in progress.',
+                    totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                }).catch(() => false);
+
+                // Progress events go through the run ledger: the tool-call
+                // onStep closure is not reliable across turns.
+                const bgOptions = parentRunSink
+                    ? {
+                        ...options,
+                        onStep: (step: import('./types').AgentStep) => {
+                            parentRunSink.appendSoon('step_appended', {
+                                step: {
+                                    type: step.type,
+                                    content: step.content,
+                                    timestamp: step.timestamp,
+                                    agentId: step.agentId,
+                                    source: 'background',
+                                },
+                            });
+                        },
+                    }
+                    : options;
+
+                const bgBlackboardPrefix = blackboardDomainPrefix(context);
+                backgroundOrchestrators.start({
+                    graphId: bgGraphId,
+                    topicId: bgTopicId,
+                    runId: bgRunId,
+                    parentAbortSignal: globalSignal,
+                    run: async (bgAbortSignal) => {
+                        const bgLocalAbort = new AbortController();
+                        const onBgAbort = () => bgLocalAbort.abort(bgAbortSignal.reason);
+                        if (bgAbortSignal.aborted) {
+                            onBgAbort();
+                        } else {
+                            bgAbortSignal.addEventListener('abort', onBgAbort, { once: true });
+                        }
+                        try {
+                            const bgResult = await orchestrator.execute(graph, { ...bgOptions, abortSignal: bgLocalAbort.signal });
+                            if (graphTask) {
+                                await agentTaskManager.transition(
+                                    graphTask.taskId,
+                                    bgResult.success ? 'completed' : 'failed',
+                                    bgResult.summary,
+                                ).catch(() => {});
+                            }
+                            await this.finalizeOrchestration(bgResult, graph, {
+                                domain: runtimeDomain,
+                                mode: parentMode,
+                                topicId: bgTopicId,
+                                runId: bgRunId,
+                                hasWriteTasks,
+                                blackboardPrefix: bgBlackboardPrefix,
+                                blackboard: orchestrator.getBlackboard().snapshot(),
+                            }, context);
+                        } catch (error) {
+                            const cancelled = bgLocalAbort.signal.aborted
+                                || (error instanceof Error && error.name === 'AbortError');
+                            const errMsg = error instanceof Error ? error.message : String(error);
+                            if (graphTask) {
+                                await agentTaskManager.transition(
+                                    graphTask.taskId,
+                                    cancelled ? 'killed' : 'failed',
+                                    cancelled ? 'Cancelled by parent' : errMsg,
+                                ).catch(() => {});
+                            }
+                            await saveOrchestration({
+                                topicId: bgTopicId,
+                                runId: bgRunId,
+                                domain: runtimeDomain,
+                                mode: parentMode,
+                                graph,
+                                agentResults: new Map(),
+                                blackboard: { entries: [], timestamp: Date.now() },
+                                summary: cancelled
+                                    ? 'Background orchestration cancelled by parent.'
+                                    : `Background orchestration failed: ${errMsg}`,
+                                totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                            }).catch(() => false);
+                        } finally {
+                            bgAbortSignal.removeEventListener('abort', onBgAbort);
+                        }
+                    },
+                });
+
+                return {
+                    success: true,
+                    background: true,
+                    graphId: bgGraphId,
+                    nodeCount: graph.nodes.size,
+                    hint: 'Background dispatch started. A BACKGROUND TASK RESULT arrives in the next turn; then use merge_results(graphId) to consolidate, or dispatch_agents(resumeGraphId=...) to extend the graph.',
+                };
             }
 
-            //Write execution results to Blackboard for subsequent query
-            this.blackboard.write(
-                `${blackboardDomainPrefix(context)}orchestrator:lastResult`,
-                JSON.stringify({
-                    success: result.success,
-                    summary: result.summary,
-                    totalTokenUsage: result.totalTokenUsage,
-                    failedNodes: result.failedNodes,
-                    cancelledNodes: result.cancelledNodes,
-                }),
-                'free_text',
-                '__orchestrator__',
-            );
-
-            // Persist the full graph, per-node results, and blackboard so a
-            // later wave (or session) can resume or merge this orchestration.
-            await saveOrchestration({
-                topicId: runnerOpts?.topicId,
-                runId: validationRunId,
+            const result = await orchestrator.execute(graph, options);
+            await this.finalizeOrchestration(result, graph, {
                 domain: runtimeDomain,
                 mode: parentMode,
-                graph,
-                agentResults: result.agentResults,
+                topicId: runnerOpts?.topicId,
+                runId: validationRunId,
+                hasWriteTasks,
+                blackboardPrefix: blackboardDomainPrefix(context),
                 blackboard: orchestrator.getBlackboard().snapshot(),
-                summary: result.summary,
-                totalTokenUsage: result.totalTokenUsage,
-                qualityGate: result.qualityGate,
-            }).catch(() => false);
+            }, context);
 
             // Keep the parent Agent context compact while preserving enough detail for the final global walkthrough.
             const agentSummaries: Array<{
@@ -3735,10 +3860,14 @@ export class AgentToolExecutor {
                 needsClarification?: boolean;
                 clarification?: string;
             }> = [];
-            const clarifications: Array<{ id: string; clarification: string }> = [];
+            const clarifications: Array<{ id: string; clarification: string; options?: string[] }> = [];
             for (const [id, agentResult] of result.agentResults) {
                 if (agentResult.needsClarification && agentResult.clarification) {
-                    clarifications.push({ id, clarification: agentResult.clarification.slice(0, 4000) });
+                    clarifications.push({
+                        id,
+                        clarification: agentResult.clarification.slice(0, 4000),
+                        options: agentResult.clarificationOptions,
+                    });
                 }
                 if (parentRunSink) {
                     await parentRunSink.append(
@@ -3835,6 +3964,108 @@ export class AgentToolExecutor {
         }
     }
 
+    /**
+     * Shared post-execution settlement for foreground and background waves:
+     * token accounting, merge_results cache, run validation state, blackboard
+     * summary, and the durable orchestration record.
+     */
+    private async finalizeOrchestration(
+        result: import('./orchestrator/types').OrchestratorResult,
+        graph: import('./orchestrator/types').TaskGraph,
+        meta: {
+            domain: import('./types').AgentRuntimeDomain;
+            mode?: string;
+            topicId?: string;
+            runId?: string;
+            hasWriteTasks: boolean;
+            blackboardPrefix: string;
+            blackboard: import('./orchestrator/types').SerializedBlackboard;
+        },
+        context?: import('./types').AgentToolContext,
+    ): Promise<void> {
+        mergeTokenUsageTotals(context?.tokenAccumulator, result.totalTokenUsage);
+
+        // Cache results for use by merge_results
+        this._lastOrchestratorResult = result;
+        this._lastOrchestratorGraph = graph;
+        this._lastOrchestratorDomain = meta.domain;
+        this._lastOrchestratorTopicId = meta.topicId;
+        if (meta.runId && (meta.hasWriteTasks || result.qualityGate !== undefined)) {
+            this._orchestratorValidationByRun.set(meta.runId, {
+                // A later quality-gated repair wave supersedes an earlier failed write wave.
+                // Read-only fanout waves do not overwrite this validation state.
+                success: result.success,
+                summary: result.summary,
+                pendingOnly: !!result.qualityGate
+                    && (result.qualityGate.validationPending ?? 0) > 0
+                    && result.qualityGate.operationalFailure !== true
+                    && result.qualityGate.diagnosticErrors === 0
+                    && (result.qualityGate.evidenceConflicts ?? 0) === 0
+                    && result.qualityGate.semanticIssues === 0
+                    && result.qualityGate.logicIssues === 0
+                    && result.qualityGate.acceptanceFailures.length === 0,
+            });
+            while (this._orchestratorValidationByRun.size > 100) {
+                const oldest = this._orchestratorValidationByRun.keys().next().value as string | undefined;
+                if (!oldest) break;
+                this._orchestratorValidationByRun.delete(oldest);
+            }
+        }
+
+        // Write execution results to Blackboard for subsequent query
+        this.blackboard.write(
+            `${meta.blackboardPrefix}${BLACKBOARD_KEY_PREFIXES.orchestratorResult}`,
+            JSON.stringify({
+                success: result.success,
+                summary: result.summary,
+                totalTokenUsage: result.totalTokenUsage,
+                failedNodes: result.failedNodes,
+                cancelledNodes: result.cancelledNodes,
+            }),
+            'free_text',
+            '__orchestrator__',
+        );
+
+        // Persist the full graph, per-node results, and blackboard so a
+        // later wave (or session) can resume or merge this orchestration.
+        await saveOrchestration({
+            topicId: meta.topicId,
+            runId: meta.runId,
+            domain: meta.domain,
+            mode: meta.mode,
+            graph,
+            agentResults: result.agentResults,
+            blackboard: meta.blackboard,
+            summary: result.summary,
+            totalTokenUsage: result.totalTokenUsage,
+            qualityGate: result.qualityGate,
+        }).catch(() => false);
+    }
+
+    /**
+     * Execute the cancel_dispatch tool: abort a running background graph.
+     * Partial state stays persisted, so the graph can be resumed later.
+     */
+    private executeCancelDispatch(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
+        const graphId = typeof args.graphId === 'string' ? args.graphId.trim() : '';
+        if (!graphId) {
+            return { success: false, message: 'cancel_dispatch requires a graphId (returned by dispatch_agents).' };
+        }
+        if (!backgroundOrchestrators.hasActive(graphId)) {
+            return {
+                success: false,
+                message: `Graph '${graphId}' is not running in the background (it may have already completed). Use merge_results(graphId) to inspect it.`,
+            };
+        }
+        backgroundOrchestrators.cancel(graphId);
+        return {
+            success: true,
+            cancelled: true,
+            graphId,
+            hint: 'Background graph cancelled. Its partial state stays persisted: resume it later with dispatch_agents(resumeGraphId=...) or inspect with merge_results(graphId).',
+        };
+    }
+
     /** 
 * Execute the merge_results tool: extract a summary from the results of the most recent coordinator execution. 
 * Falls back to the durable orchestration store so past waves remain mergeable. 
@@ -3895,6 +4126,14 @@ export class AgentToolExecutor {
                 ?? (requestedRunId ? candidates.find(record => record.runId === requestedRunId) : candidates[0]);
         }
         if (storedRecord) {
+            if (backgroundOrchestrators.hasActive(storedRecord.graphId)) {
+                return {
+                    success: false,
+                    background: true,
+                    graphId: storedRecord.graphId,
+                    message: `Graph '${storedRecord.graphId}' is still running in the background; its results are not final yet. Wait for the BACKGROUND TASK RESULT, then merge again.`,
+                };
+            }
             const agentResults = deserializeAgentResults(storedRecord.agentResults);
             const graph = deserializeGraph(storedRecord.graph);
             const failedNodes = [...graph.nodes.values()].filter(node => node.status === 'failed').map(node => node.id);
@@ -3916,8 +4155,8 @@ export class AgentToolExecutor {
         }
 
         // 3. Legacy blackboard summary (never carries node detail).
-        const stored = this.blackboard.readValue(`${blackboardDomainPrefix(context)}orchestrator:lastResult`)
-            ?? (requestedDomain === 'paradox' ? this.blackboard.readValue('orchestrator:lastResult') : undefined);
+        const stored = this.blackboard.readValue(`${blackboardDomainPrefix(context)}${BLACKBOARD_KEY_PREFIXES.orchestratorResult}`)
+            ?? (requestedDomain === 'paradox' ? this.blackboard.readValue(BLACKBOARD_KEY_PREFIXES.orchestratorResult) : undefined);
         if (stored) {
             try {
                 const parsed = JSON.parse(stored);

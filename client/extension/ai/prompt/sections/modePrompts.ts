@@ -41,7 +41,7 @@ const SLIM_SUB_AGENT_RULE = `## Sub-Agent Boundary
 Execute only the assigned sub-task/blueprint; check shared context for IDs/scopes. You cannot question the user. SUB-AGENT COMMAND BOUNDARY: NEVER use \`run_command\`. For bulk file changes, use structured tools. Do NOT create helper scripts. Otherwise return \`BLOCKED_FOR_ORCHESTRATOR\` with the missing input.`;
 
 const SLIM_UTILITY_SUB_AGENT_RULE = `## Sub-Agent Boundary
-Execute only the assigned general-coding sub-task and stay within declared files. You cannot question the user. Use \`run_command\` only for scoped repository inspection, formatting, builds, or tests; all commands remain subject to the parent policy engine. Do not commit, publish, install dependencies, or broaden the task. Otherwise return \`BLOCKED_FOR_ORCHESTRATOR\` with the missing input.`;
+Execute only the assigned general-coding sub-task and stay within declared files. You cannot question the user. Use \`run_command\` only for scoped repository inspection, formatting, builds, or tests; all commands remain subject to the parent policy engine. Do not commit, publish, install dependencies, or broaden the task. Otherwise return \`BLOCKED_FOR_ORCHESTRATOR\` with the missing input. When a genuine choice needs the parent agent, offer preset answers: \`BLOCKED_FOR_ORCHESTRATOR: <question>\` followed by an \`OPTIONS:\` block with 2-4 \`- <choice>\` lines.`;
 
 const GENERAL_REPOSITORY_RULE = `## Repository Engineering Boundary
 - Work only from repository instructions, source code, ordinary language-server symbols/diagnostics, tests, build tools, version control, and user-approved external documentation.

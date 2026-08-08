@@ -196,8 +196,8 @@ export class MemoryToolHandler {
     }
 
     /** query_blackboard tool execution */
-    async queryBlackboard(args: { key?: string; prefix?: string; type?: string }, context?: import('../types').AgentToolContext): Promise<unknown> {
-        const { key: qbKey, prefix, type: qbType } = args;
+    async queryBlackboard(args: { key?: string; prefix?: string; type?: string; structured?: boolean }, context?: import('../types').AgentToolContext): Promise<unknown> {
+        const { key: qbKey, prefix, type: qbType, structured } = args;
         const domainPrefix = blackboardDomainPrefix(context);
         const domain = context?.runnerOptions?.domain
             ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
@@ -218,18 +218,28 @@ export class MemoryToolHandler {
             }
             return exposeEntry(entry);
         };
+        // structured=true parses JSON values so the model does not have to.
+        const maybeStructured = async (entry: BlackboardEntry) => {
+            const exposed = await resolveFileRef(entry);
+            if (!structured) return exposed;
+            try {
+                return { ...exposed, parsed: JSON.parse(exposed.value) };
+            } catch {
+                return { ...exposed, parseError: true };
+            }
+        };
 
         if (qbKey) {
             const entry = this.ctx.blackboard.read(`${domainPrefix}${qbKey}`)
                 ?? (domain === 'paradox' ? this.ctx.blackboard.read(qbKey) : undefined);
-            return entry ? { found: true, entry: await resolveFileRef(entry) } : { found: false };
+            return entry ? { found: true, entry: await maybeStructured(entry) } : { found: false };
         } else if (prefix) {
             const entries = this.ctx.blackboard.queryByPrefix(`${domainPrefix}${prefix}`);
             if (domain === 'paradox') {
                 entries.push(...this.ctx.blackboard.queryByPrefix(prefix)
                     .filter(entry => !entry.key.startsWith('domain:')));
             }
-            const resolved = await Promise.all(entries.slice(0, 50).map(resolveFileRef));
+            const resolved = await Promise.all(entries.slice(0, 50).map(maybeStructured));
             return { found: resolved.length > 0, count: entries.length, entries: resolved };
         } else if (qbType) {
             if (!BLACKBOARD_ENTRY_TYPES.has(qbType as BlackboardEntryType)) {
@@ -241,7 +251,7 @@ export class MemoryToolHandler {
                 entries.push(...this.ctx.blackboard.queryByType(qbType as BlackboardEntryType)
                     .filter(entry => !entry.key.startsWith('domain:')));
             }
-            const resolved = await Promise.all(entries.slice(0, 50).map(resolveFileRef));
+            const resolved = await Promise.all(entries.slice(0, 50).map(maybeStructured));
             return { found: resolved.length > 0, count: entries.length, entries: resolved };
         } else {
             return { success: false, message: aiText('Please provide a key, prefix, or type argument.', '请提供 key、prefix 或 type 参数') };

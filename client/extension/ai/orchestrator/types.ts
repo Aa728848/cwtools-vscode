@@ -195,6 +195,8 @@ export interface SubAgentResult {
     needsClarification?: boolean;
     /** Clarification content that needs to be processed by the main Agent */
     clarification?: string;
+    /** Optional preset answers (2-4) the parent agent/user can choose from. */
+    clarificationOptions?: string[];
     /** Validated, structured parent-facing handoff. */
     handoff?: import('../runner/agentHandoff').AgentHandoff;
 }

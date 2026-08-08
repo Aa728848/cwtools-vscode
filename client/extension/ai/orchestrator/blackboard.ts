@@ -16,6 +16,9 @@ import type {
     SerializedBlackboard,
 } from './types';
 import type { RunEventSink } from '../runner/runContext';
+import { validateBlackboardWrite } from './blackboardSchema';
+import { ErrorReporter } from '../errorReporter';
+import { SOURCE } from '../messages';
 
 /** Cancellation handle of subscription callback */
 export interface BlackboardDisposable {
@@ -152,6 +155,17 @@ export class Blackboard {
         agentId: string,
         expectedVersion?: number,
     ): BlackboardWriteResult {
+        // Schema gate: reject malformed entries before they can corrupt
+        // downstream consumers (quality gate, conflict detector, handoffs).
+        const schemaError = validateBlackboardWrite(type, key, value);
+        if (schemaError) {
+            ErrorReporter.warn(
+                SOURCE.ORCHESTRATOR,
+                `Blackboard write rejected (type=${type}, key=${key.slice(0, 80)}, agent=${agentId}): ${schemaError}`,
+            );
+            return { success: false, conflict: `Blackboard schema validation failed: ${schemaError}` };
+        }
+
         const existing = this.entries.get(key);
 
         // CAS check: if an expected version number is provided and it doesn't match the actual one, reject the write

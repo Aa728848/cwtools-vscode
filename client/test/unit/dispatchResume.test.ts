@@ -60,13 +60,14 @@ function loadModules() {
             store: require('../../extension/ai/orchestrator/orchestrationStore') as typeof import('../../extension/ai/orchestrator/orchestrationStore'),
             workspace: require('../../extension/ai/workspacePaths') as typeof import('../../extension/ai/workspacePaths'),
             engine: require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine'),
+            registry: require('../../extension/ai/orchestrator/backgroundOrchestrators') as typeof import('../../extension/ai/orchestrator/backgroundOrchestrators'),
         };
     } finally {
         moduleLoader._load = originalLoad;
     }
 }
 
-const { agentTools, store, workspace, engine } = loadModules();
+const { agentTools, store, workspace, engine, registry } = loadModules();
 const { AgentToolExecutor } = agentTools;
 const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
 
@@ -306,6 +307,38 @@ describe('merge_results durable store layer', () => {
         expect(result.fileGroups).to.have.length(1);
         expect(result.integration.entityContracts).to.have.length(1);
         expect(result.integration.entityContracts[0].nodeId).to.equal('n1');
+    });
+
+    it('merge_results reports graphs still running in the background', async () => {
+        const graph = engine.TaskGraphEngine.createGraph('Bg merge objective');
+        engine.TaskGraphEngine.addNode(graph, 'n1', 'explore', 'Inspect.', { dependencies: [] });
+        await store.saveOrchestration({
+            topicId: 'topic-a', domain: 'general', mode: 'orchestrator', graph,
+            agentResults: new Map(),
+            blackboard: { entries: [], timestamp: 1 },
+            summary: 'in progress',
+            totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+        });
+        const blocker = registry.backgroundOrchestrators.start({
+            graphId: graph.id,
+            topicId: 'topic-a',
+            run: (signal) => new Promise<void>((resolve) => {
+                signal.addEventListener('abort', () => resolve());
+            }),
+        });
+        void blocker;
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        const result = await executor.execute('merge_results', {
+            nodeIds: ['n1'],
+            graphId: graph.id,
+        }, {
+            runnerOptions: { topicId: 'topic-a', domain: 'general' },
+        } as any) as any;
+        expect(result.success).to.equal(false);
+        expect(result.background).to.equal(true);
+        expect(result.message).to.include('still running in the background');
+        registry.backgroundOrchestrators.cancel(graph.id);
+        await blocker.settled;
     });
 
     it('falls back to the latest wave when no graphId is given', async () => {

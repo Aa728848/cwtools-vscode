@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.10.17] - 2026-08-08
+
+### 性能与后端 / Performance & Backend
+- **[优化] 优化后端响应速度**：优化了后端服务响应处理流程，提升整体响应与执行速度。
+  English: [Optimization] Optimized backend response performance and processing flow, improving overall speed and execution.
+
 ## [2.10.16] - 2026-08-07
 
 ### 版本打包与发布 / Packaging & Release

@@ -1555,6 +1555,14 @@ type Server(client: ILanguageClient) =
     let mutable deferDynamicParameterDiagnostics = true
     let mutable dynamicDeferDelayMs = 300
     let dynamicDeferMaxFiles = 500
+    // Dynamic call-site validation and staged global refreshes both construct
+    // large rule graphs. Serialize them so a local edit cannot retain both
+    // snapshots at once and multiply peak memory.
+    let heavyAnalysisGate = new System.Threading.SemaphoreSlim(1, 1)
+    let acquireHeavyAnalysisGate () =
+        heavyAnalysisGate.Wait()
+        { new IDisposable with
+            member _.Dispose() = heavyAnalysisGate.Release() |> ignore }
 
     let runtimeStateLock = obj()
     let mutable validationRuntimeState =
@@ -4091,95 +4099,118 @@ type Server(client: ILanguageClient) =
                     let queued =
                         files
                         |> List.distinctBy normaliseCachePath
-                    let allocBefore = GC.GetTotalAllocatedBytes(false)
-                    let validationSw = Stopwatch.StartNew()
-                    let refreshedErrors, validatedModelEpoch =
-                        gameStateLock.EnterReadLock()
-                        try
-                            (try
-                                let warmSw = Stopwatch.StartNew()
-                                let warmed =
-                                    game.ForceDynamicParameterData(dynamicPreflightTimeoutMs, dynamicPreflightMaxEntities)
-                                warmSw.Stop()
-                                logDiag
-                                    $"Deferred revalidation warmed {warmed} dynamic-parameter entities (cap timeout={dynamicPreflightTimeoutMs}ms entities={dynamicPreflightMaxEntities}) in {warmSw.ElapsedMilliseconds}ms"
-                             with e -> logDiag $"Deferred revalidation warm-up error: {e.Message}")
+                    use _heavyAnalysisLease = acquireHeavyAnalysisGate ()
+                    do
+                        let batchModelEpoch = modelEpochSnapshot ()
+                        let batchVersions =
+                            queued |> List.map (fun filePath -> filePath, docs.GetVersionByPath(filePath))
+                        let batchStillCurrent () =
+                            sameModelEpoch batchModelEpoch (modelEpochSnapshot ())
+                            && batchVersions
+                               |> List.forall (fun (filePath, version) ->
+                                   docs.GetVersionByPath(filePath) = version)
 
-                            let errors = game.ValidateFiles queued
-                            errors, modelEpochSnapshot ()
-                        finally
-                            gameStateLock.ExitReadLock()
-                    validationSw.Stop()
+                        if not (batchStillCurrent ()) then
+                            scheduleDeferredDynamicRevalidation queued
+                            logDiag $"Deferred revalidation rescheduled stale batch before validation files={queued.Length}"
+                        else
+                            let allocBefore = GC.GetTotalAllocatedBytes(false)
+                            let validationSw = Stopwatch.StartNew()
+                            let refreshedResult =
+                                gameStateLock.EnterReadLock()
+                                try
+                                    (try
+                                        let warmSw = Stopwatch.StartNew()
+                                        let warmed = game.ForceDynamicParameterDataForFiles queued
+                                        warmSw.Stop()
+                                        logDiag
+                                            $"Deferred revalidation warmed {warmed} queued entities in {warmSw.ElapsedMilliseconds}ms"
+                                     with e -> logDiag $"Deferred revalidation warm-up error: {e.Message}")
 
-                    let refreshedDynamicDiagnostics =
-                        refreshedErrors
-                        |> List.choose (fun e ->
-                            if isDynamicParameterError e.code e.message e.relatedErrors then
-                                Some(
-                                    e.code,
-                                    e.severity,
-                                    e.range.FileName,
-                                    e.message,
-                                    e.range,
-                                    e.keyLength,
-                                    e.relatedErrors
-                                )
-                            else
-                                None)
-                        |> List.map parserErrorToDiagnostics
-                        |> List.filter diagnosticFilter
+                                    game.ValidateFilesLocalCancellable(
+                                        queued,
+                                        (fun () -> not (batchStillCurrent ()))
+                                    )
+                                finally
+                                    gameStateLock.ExitReadLock()
+                            validationSw.Stop()
 
-                    let refreshedByFile =
-                        refreshedDynamicDiagnostics
-                        |> List.groupBy (fst >> normaliseCachePath)
-                        |> Map.ofList
-                    let filesToPublish =
-                        queued
-                        @ (refreshedDynamicDiagnostics |> List.map fst)
-                        |> List.distinctBy normaliseCachePath
-                    let publishEpoch = nextDiagnosticEpoch ()
+                            match refreshedResult with
+                            | None ->
+                                scheduleDeferredDynamicRevalidation queued
+                                logDiag $"Deferred revalidation rescheduled superseded batch files={queued.Length}"
+                            | Some refreshedErrors ->
+                                let validatedModelEpoch = modelEpochSnapshot ()
 
-                    for filePath in filesToPublish do
-                        let refreshed =
-                            refreshedByFile
-                            |> Map.tryFind (normaliseCachePath filePath)
-                            |> Option.map (List.map snd)
-                            |> Option.defaultValue []
-                        let priorState =
-                            match fileDiagnosticStates.TryGetValue(filePath) with
-                            | true, state -> Some state
-                            | false, _ -> None
-                        let merged =
-                            DiagnosticMerge.mergeDeferredDefinitionDiagnostics
-                                (existingDiagnosticsForFile filePath)
-                                refreshed
-                        client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = merged }
+                                let refreshedDynamicDiagnostics =
+                                    refreshedErrors
+                                    |> List.choose (fun e ->
+                                        if isDynamicParameterError e.code e.message e.relatedErrors then
+                                            Some(
+                                                e.code,
+                                                e.severity,
+                                                e.range.FileName,
+                                                e.message,
+                                                e.range,
+                                                e.keyLength,
+                                                e.relatedErrors
+                                            )
+                                        else
+                                            None)
+                                    |> List.map parserErrorToDiagnostics
+                                    |> List.filter diagnosticFilter
 
-                        let validatedVersion =
-                            priorState
-                            |> Option.bind _.validatedVersion
-                            |> Option.orElseWith (fun () -> docs.GetVersionByPath(filePath))
-                        let pendingKinds =
-                            priorState
-                            |> Option.map _.pendingGlobalKinds
-                            |> Option.defaultValue []
-                            |> List.filter (fun kind -> kind <> "dynamicParameters")
-                        let freshness =
-                            if validatedVersion <> docs.GetVersionByPath(filePath) then Stale
-                            elif pendingKinds.IsEmpty then Fresh
-                            else Pending
-                        setFileDiagnosticStateWithSnapshot
-                            filePath
-                            publishEpoch
-                            validatedVersion
-                            validatedModelEpoch
-                            freshness
-                            pendingKinds
-                            merged
+                                let refreshedByFile =
+                                    refreshedDynamicDiagnostics
+                                    |> List.groupBy (fst >> normaliseCachePath)
+                                    |> Map.ofList
+                                let filesToPublish =
+                                    queued
+                                    @ (refreshedDynamicDiagnostics |> List.map fst)
+                                    |> List.distinctBy normaliseCachePath
+                                let publishEpoch = nextDiagnosticEpoch ()
 
-                    let allocatedMB = (GC.GetTotalAllocatedBytes(false) - allocBefore) / 1048576L
-                    monitorLog Lint
-                        $"ValidateFiles dynamic batch files={queued.Length} diagnostics={refreshedDynamicDiagnostics.Length} elapsedMs={validationSw.ElapsedMilliseconds} allocDeltaMB={allocatedMB}{getPerfDiagnosticSnapshot()}"
+                                for filePath in filesToPublish do
+                                    let refreshed =
+                                        refreshedByFile
+                                        |> Map.tryFind (normaliseCachePath filePath)
+                                        |> Option.map (List.map snd)
+                                        |> Option.defaultValue []
+                                    let priorState =
+                                        match fileDiagnosticStates.TryGetValue(filePath) with
+                                        | true, state -> Some state
+                                        | false, _ -> None
+                                    let merged =
+                                        DiagnosticMerge.mergeDeferredDefinitionDiagnostics
+                                            (existingDiagnosticsForFile filePath)
+                                            refreshed
+                                    client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = merged }
+
+                                    let validatedVersion =
+                                        priorState
+                                        |> Option.bind _.validatedVersion
+                                        |> Option.orElseWith (fun () -> docs.GetVersionByPath(filePath))
+                                    let pendingKinds =
+                                        priorState
+                                        |> Option.map _.pendingGlobalKinds
+                                        |> Option.defaultValue []
+                                        |> List.filter (fun kind -> kind <> "dynamicParameters")
+                                    let freshness =
+                                        if validatedVersion <> docs.GetVersionByPath(filePath) then Stale
+                                        elif pendingKinds.IsEmpty then Fresh
+                                        else Pending
+                                    setFileDiagnosticStateWithSnapshot
+                                        filePath
+                                        publishEpoch
+                                        validatedVersion
+                                        validatedModelEpoch
+                                        freshness
+                                        pendingKinds
+                                        merged
+
+                                let allocatedMB = (GC.GetTotalAllocatedBytes(false) - allocBefore) / 1048576L
+                                monitorLog Lint
+                                    $"ValidateFiles local dynamic batch files={queued.Length} diagnostics={refreshedDynamicDiagnostics.Length} elapsedMs={validationSw.ElapsedMilliseconds} allocDeltaMB={allocatedMB}{getPerfDiagnosticSnapshot()}"
             with e -> logDiag $"Deferred dynamic revalidation failed: {e.Message}"
         | _ -> ()
 
@@ -4328,7 +4359,8 @@ type Server(client: ILanguageClient) =
                 let correctionSw = Stopwatch.StartNew()
                 let allocBeforeCorrection = GC.GetTotalAllocatedBytes(false)
                 let correctedDynamicErrors =
-                    game.ValidateFiles candidateFiles
+                    game.ValidateFilesLocalCancellable(candidateFiles, (fun () -> false))
+                    |> Option.defaultValue []
                     |> List.filter (fun error ->
                         isDynamicParameterError error.code error.message error.relatedErrors)
                 correctionSw.Stop()
@@ -4369,6 +4401,12 @@ type Server(client: ILanguageClient) =
                 && (skipLimitReached
                     || forceGlobalRefresh
                     || (not (isCompletionActive ()) && quietEnough && cooldownElapsed))
+            let serializeGlobalWork =
+                doRefresh
+                || delayedLocUpdate
+                || (delayedScriptLocUpdate && now - lastScriptLocUpdateAt >= scriptLocUpdateCooldown)
+            use _heavyAnalysisLease =
+                if serializeGlobalWork then acquireHeavyAnalysisGate () else null
             let pendingDomainsText = String.concat "," pendingDomainsBeforeAnalyze
             monitorLog Lifecycle
                 $"AnalyzeLifecycle stage=analyze-begin {lifecycleIdentity} force={forceGlobalRefresh} doRefresh={doRefresh} pending={pendingDomainsText} {getPerfMemorySnapshot()}"

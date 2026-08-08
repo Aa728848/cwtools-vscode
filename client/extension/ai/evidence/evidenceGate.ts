@@ -42,6 +42,7 @@ import {
     type LocalDefinitionCandidate,
     type ReferenceKind,
 } from './claimExtractor';
+import { EvidenceLedger } from './evidenceLedger';
 
 export interface GateRuleInfo {
     name: string;
@@ -79,6 +80,10 @@ export interface EvidenceGateDeps {
     getIndexRevision?: () => string;
     /** Candidate CWT rules roots used to fingerprint the rules revision. */
     rulesRoots?: string[];
+    /** Private storage root for the durable decision ledger; unset disables persistence. */
+    ledgerRoot?: string;
+    /** Whether durable decisions may be written/read (default true when a root exists). */
+    persistDecisions?: boolean;
     now?: () => number;
     /** Total verification budget per evaluation. Defaults to GATE_TOTAL_TIMEOUT_MS. */
     totalTimeoutMs?: number;
@@ -239,15 +244,25 @@ export class EvidenceGate {
     private readonly now: () => number;
     private readonly totalTimeoutMs: number;
     private readonly decisionCache = new Map<string, { decision: EvidenceGateDecision; expiresAt: number; evidenceRevision: string }>();
+    private persistLedger?: EvidenceLedger;
 
     constructor(private readonly deps: EvidenceGateDeps) {
         this.now = deps.now ?? Date.now;
         this.totalTimeoutMs = Math.max(1_000, deps.totalTimeoutMs ?? GATE_TOTAL_TIMEOUT_MS);
     }
 
+    private getLedger(): EvidenceLedger | undefined {
+        if (this.deps.persistDecisions === false || !this.deps.ledgerRoot) return undefined;
+        if (!this.persistLedger) {
+            this.persistLedger = new EvidenceLedger({ root: this.deps.ledgerRoot, now: this.now });
+        }
+        return this.persistLedger;
+    }
+
     /** Drop cached decisions (e.g. after a rules sync). TTL/fingerprint normally handles this. */
     public invalidateCache(): void {
         this.decisionCache.clear();
+        void this.getLedger()?.clearAll().catch(() => {});
     }
 
     public async evaluate(input: EvidenceGateEvaluateInput): Promise<EvidenceGateDecision> {
@@ -271,6 +286,13 @@ export class EvidenceGate {
             return { ...cached.decision, fromCache: true };
         }
 
+        // Durable ledger: verified allow decisions survive runs and sessions
+        // while the evidence revision is unchanged.
+        const ledgerDecision = this.getLedger()?.lookup(cacheKey, evidenceRevision);
+        if (ledgerDecision) {
+            return { ...ledgerDecision, fromCache: true };
+        }
+
         const decision = await this.collect(input, rulesFingerprint, startedAt);
         this.storeInCache(cacheKey, decision, evidenceRevision);
         return decision;
@@ -291,6 +313,7 @@ export class EvidenceGate {
             if (oldest !== undefined) this.decisionCache.delete(oldest);
         }
         this.decisionCache.set(key, { decision, expiresAt, evidenceRevision });
+        void this.getLedger()?.store(key, decision, evidenceRevision).catch(() => {});
     }
 
     private makeSource(tool: string, target: string, revision: string): EvidenceSource {

@@ -140,6 +140,11 @@ export class Orchestrator {
         this.executor.setEventSink(options.runEventSink);
         this.qualityGate.setEventSink(options.runEventSink);
 
+        // Resumed graphs carry the previous wave's shared state.
+        if (options.restoredBlackboard) {
+            this.blackboard.restore(options.restoredBlackboard);
+        }
+
         emitStep({
             type: 'thinking',
             content: ORCHESTRATOR_MSG.START(taskGraph.nodes.size),

@@ -240,11 +240,14 @@ export function evaluateDispatchAdmission(
         explicitDelegation?: boolean;
         availableTokenBudget?: number;
         minimumScore?: number;
+        /** Valid dependency targets outside the candidate list (resumed graph node ids). */
+        knownTaskIds?: string[];
     } = {},
 ): DispatchAdmissionResult {
     if (tasks.length < 2) {
         return { accepted: false, score: -10, reason: 'Multi-Agent dispatch requires at least two distinct tasks.', conflicts: [] };
     }
+    const knownIds = new Set(options.knownTaskIds ?? []);
     const ids = new Set<string>();
     const objectives = new Set<string>();
     for (const task of tasks) {
@@ -261,7 +264,7 @@ export function evaluateDispatchAdmission(
     }
     const tasksById = new Map(tasks.map(task => [task.id, task]));
     for (const task of tasks) {
-        const missing = (task.dependencies ?? []).find(dependency => !tasksById.has(dependency));
+        const missing = (task.dependencies ?? []).find(dependency => !tasksById.has(dependency) && !knownIds.has(dependency));
         if (missing) {
             return {
                 accepted: false,

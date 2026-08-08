@@ -256,6 +256,8 @@ export interface OrchestratorResult {
 export interface OrchestratorOptions {
     /** Capability domain inherited by every child Agent in this graph. */
     domain?: import('../types').AgentRuntimeDomain;
+    /** Blackboard snapshot restored before execution (resumed graphs). */
+    restoredBlackboard?: SerializedBlackboard;
     /** Maximum number of concurrent Agents (default 4) */
     maxConcurrency?: number;
     /** Global Token budget upper limit (downgraded to serial after exceeding the limit) */

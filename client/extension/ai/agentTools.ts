@@ -54,6 +54,13 @@ import { sessionFileWriteMode, sessionPolicyPreset } from './runner/sessionPermi
 import type { ApiKeyManager } from './aiService';
 import { normalizeLegacyWebToolCall, type WebSearchProvider } from './tools/webAccess';
 import { EvidenceGate, type EvidenceCallRecord } from './evidence/evidenceGate';
+import {
+    saveOrchestration,
+    loadOrchestration,
+    listOrchestrations,
+    deserializeGraph,
+    deserializeAgentResults,
+} from './orchestrator/orchestrationStore';
 import { normalizeEvidenceGateMode, type EvidenceGateDecision, type EvidenceGateMode, type EvidenceGatePhase } from './evidence/evidenceTypes';
 import { isPdxScriptTarget } from './evidence/claimExtractor';
 import { runLedger } from './runner/runLedger';
@@ -837,6 +844,8 @@ export class AgentToolExecutor {
             this.evidenceGate = new EvidenceGate({
                 workspaceRoot: this.workspaceRoot,
                 gameProfile,
+                ledgerRoot: getPrivateAiStorageRoot(this.workspaceRoot) || undefined,
+                persistDecisions: vs.workspace.getConfiguration('stellarisLanguageServices.ai.evidenceGate').get<boolean>('persistLedger', true),
                 sendLspCommand: (command, cmdArgs, timeoutMs) => this.evidenceLspRequest(command, cmdArgs, timeoutMs),
                 queryRules: async (category, name) => {
                     const result = await this.lspHandler.queryRules({ category, name });
@@ -3165,10 +3174,16 @@ export class AgentToolExecutor {
             providerOverride?: string;
         }> | undefined;
 
+        // Resume/append/clarification contract (Phase 2): a later dispatch may
+        // continue a persisted graph instead of starting a fresh one.
+        const resumeGraphId = typeof args.resumeGraphId === 'string' ? args.resumeGraphId.trim() : '';
+        const appendTasks = Array.isArray(args.appendTasks) ? args.appendTasks : [];
+        const answerClarifications = Array.isArray(args.answerClarifications) ? args.answerClarifications : [];
+
         const runnerOptsForLimits = context?.runnerOptions ?? this.parentRunnerOptions;
         const originalUserMessage = runnerOptsForLimits?.originalUserMessage
             ?? (typeof args.userPrompt === 'string' ? args.userPrompt : undefined);
-        const userExecutionPolicy = deriveUserExecutionPolicy(
+        let userExecutionPolicy = deriveUserExecutionPolicy(
             originalUserMessage,
             args.userConstraints,
         );
@@ -3178,6 +3193,28 @@ export class AgentToolExecutor {
         const requiresStructuredWriteContract = isScriptMode;
         let featureManifest = args.featureManifest as import('./types').FeatureManifest | undefined;
         const blueprintFile = typeof args.blueprintFile === 'string' ? args.blueprintFile.trim() : '';
+
+        // Load the persisted graph up front when resuming so appended task
+        // ids and the stored feature manifest are known to later validations.
+        const resumeRecord = resumeGraphId
+            ? loadOrchestration(resumeGraphId, { topicId: runnerOptsForLimits?.topicId, domain: runtimeDomain })
+            : undefined;
+        if (resumeGraphId && !resumeRecord) {
+            return {
+                success: false,
+                error: `resumeGraphId '${resumeGraphId}' is not a known orchestration for the current topic/domain. Use merge_results to inspect known graphs, or start a new dispatch.`,
+            };
+        }
+        if (resumeGraphId && blueprintFile) {
+            return {
+                success: false,
+                error: 'Resumed graphs are already approved contracts; blueprintFile applies only to the initial dispatch. Use appendTasks to extend a resumed graph.',
+            };
+        }
+        if (resumeRecord && !featureManifest && resumeRecord.graph.featureManifest) {
+            featureManifest = resumeRecord.graph.featureManifest;
+        }
+
         if ((runnerOptsForLimits?.mode === 'explore' || runnerOptsForLimits?.mode === 'plan') && blueprintFile) {
             return {
                 success: false,
@@ -3236,17 +3273,37 @@ export class AgentToolExecutor {
             }
         }
 
-        if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
+        if (resumeGraphId) {
+            // Appended tasks form this wave; the stored graph contributes the rest.
+            tasks = appendTasks as typeof tasks;
+            const hasAnswers = answerClarifications.length > 0;
+            if ((!tasks || tasks.length === 0) && !hasAnswers) {
+                return {
+                    success: false,
+                    error: 'Resuming requires appendTasks (new read-only tasks) and/or answerClarifications; otherwise there is nothing left to execute.',
+                };
+            }
+        } else if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
             return { success: false, error: 'Provide tasks or blueprintFile. Each task must include id, agentType, and prompt.' };
         }
 
-        if (tasks.length > maxTasksPerDispatch) {
+        if (tasks && tasks.length > maxTasksPerDispatch) {
             return {
                 success: false,
                 error: `Concurrency guard: attempted to dispatch ${tasks.length} tasks at once, above the current mode limit of ${maxTasksPerDispatch}. Long task lists can cause model timeout or truncation; split the work into smaller waves.`
             };
         }
-        const normalizedTasks = tasks.map(task => normalizeDispatchTaskForLocalisationYml(task));
+        const normalizedTasks = (tasks ?? []).map(task => normalizeDispatchTaskForLocalisationYml(task));
+        if (resumeRecord) {
+            const existingIds = new Set(resumeRecord.graph.nodes.map(node => node.id));
+            const duplicate = normalizedTasks.find(task => existingIds.has(task.id));
+            if (duplicate) {
+                return {
+                    success: false,
+                    error: `Task id '${duplicate.id}' already exists in graph '${resumeGraphId}'. Choose new ids for appended tasks or use answerClarifications instead.`,
+                };
+            }
+        }
         if (userExecutionPolicy.localisationOwnership === 'user') {
             const localisationWriter = normalizedTasks.find(task =>
                 task.agentType === 'loc_writer'
@@ -3294,6 +3351,20 @@ export class AgentToolExecutor {
                 error: `Agent type '${invalidAgentType.agentType}' is not allowed in ${parentMode === 'plan' ? 'Plan' : parentMode === 'explore' ? 'Explore' : isScriptMode ? 'Paradox Multi-Agent' : 'General Multi-Agent'} mode. Allowed roles: ${[...allowedAgentTypes].join(', ')}.`,
             };
         }
+        // Resumed graphs keep the static write contract of the approved plan:
+        // appended nodes in the Paradox domain are read-only evidence work.
+        if (resumeGraphId && runtimeDomain === 'paradox') {
+            const appendedWriter = normalizedTasks.find(task =>
+                !['explore', 'plan', 'review'].includes(task.agentType)
+                || (task.plannedFiles?.length ?? 0) > 0
+            );
+            if (appendedWriter) {
+                return {
+                    success: false,
+                    error: `Appended task '${appendedWriter.id}' declares a write intent in the Paradox domain. Write waves are static contracts — dispatch them as a new graph instead of appending to '${resumeGraphId}'. Appended tasks must be read-only (explore/plan/review).`,
+                };
+            }
+        }
         if (parentMode === 'explore') {
             const taskWithWriteIntent = normalizedTasks.find(task => (task.plannedFiles?.length ?? 0) > 0);
             if (taskWithWriteIntent) {
@@ -3307,7 +3378,13 @@ export class AgentToolExecutor {
             ['build', 'loc_writer', 'gui_expert', 'utility'].includes(task.agentType)
             || (task.plannedFiles?.length ?? 0) > 0
         );
-        const evaluatedDispatchAdmission = evaluateDispatchAdmission(
+        // Answers-only resumes add no new work: the re-run nodes were already
+        // admitted by their first wave. Appended tasks are scored against the
+        // combined graph, so dependencies may reference stored node ids.
+        const admissionNeeded = normalizedTasks.length > 0;
+        const evaluatedDispatchAdmission = !admissionNeeded
+            ? { accepted: true, score: 0, reason: 'Answers-only resume of an already-admitted graph.', conflicts: [] }
+            : evaluateDispatchAdmission(
             normalizedTasks.map(task => ({
                 id: task.id,
                 objective: task.prompt,
@@ -3321,6 +3398,9 @@ export class AgentToolExecutor {
                     || parentMode === 'orchestrator'
                     || parentMode === 'script',
                 availableTokenBudget: runnerOptsForLimits?.tokenBudget,
+                knownTaskIds: resumeRecord
+                    ? resumeRecord.graph.nodes.map(node => node.id)
+                    : undefined,
             },
         );
         // Stored coordinator workflows and host-side callers historically used
@@ -3432,22 +3512,43 @@ export class AgentToolExecutor {
             globalSignal?.addEventListener('abort', onGlobalAbort, { once: true });
         }
 
+        // Kept for best-effort persistence when execution throws before returning.
+        let persistedGraph: import('./orchestrator/types').TaskGraph | undefined;
+
         try {
             //Dynamic import avoids circular dependencies
             const { Orchestrator } = await import('./orchestrator/orchestrator');
             const { TaskGraphEngine } = await import('./orchestrator/taskGraphEngine');
-            const { applyUserModelOverrides } = await import('./orchestrator/agentRegistry');
-            //Apply user's child Agent model configuration (read from VS Code settings)
+            const { applyUserModelOverrides } = await import('./orchestrator/agentRegistry');            //Apply user's child Agent model configuration (read from VS Code settings)
             const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
             const agentModels = cfg.get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels');
             if (agentModels) {
                 applyUserModelOverrides(agentModels);
             }
 
-            // Build TaskGraph
+            // Build TaskGraph (resume path restores the persisted graph and
+            // merges appended read-only tasks and clarification answers).
             const userPrompt = originalUserMessage || featureManifest?.objective || 'Multi-agent collaboration task';
-            const graph = TaskGraphEngine.createGraph(userPrompt, featureManifest);
-            graph.metadata.userExecutionPolicy = userExecutionPolicy;
+            let graph: import('./orchestrator/types').TaskGraph;
+            let restoredBlackboard: import('./orchestrator/types').SerializedBlackboard | undefined;
+            if (resumeRecord) {
+                graph = deserializeGraph(resumeRecord.graph);
+                restoredBlackboard = resumeRecord.blackboard;
+                // Nodes left incomplete by the previous wave are re-eligible.
+                for (const node of graph.nodes.values()) {
+                    if (node.status === 'failed' || node.status === 'cancelled') {
+                        node.status = 'pending';
+                        node.error = undefined;
+                        node.retryCount = 0;
+                    }
+                }
+                if (resumeRecord.graph.userExecutionPolicy) {
+                    userExecutionPolicy = resumeRecord.graph.userExecutionPolicy;
+                }
+            } else {
+                graph = TaskGraphEngine.createGraph(userPrompt, featureManifest);
+                graph.metadata.userExecutionPolicy = userExecutionPolicy;
+            }
 
             for (const task of normalizedTasks) {
                 TaskGraphEngine.addNode(
@@ -3469,11 +3570,28 @@ export class AgentToolExecutor {
                     },
                 );
             }
+            for (const entry of answerClarifications) {
+                const id = typeof entry?.id === 'string' ? entry.id : '';
+                const answer = typeof entry?.answer === 'string' ? entry.answer.trim() : '';
+                if (!id || !answer) continue;
+                const node = graph.nodes.get(id);
+                if (!node) {
+                    return { success: false, error: `answerClarifications references unknown node id '${id}'.` };
+                }
+                node.prompt = [node.prompt, '', '## Parent clarification answer', answer].join('\n');
+                if (node.status !== 'pending') {
+                    node.status = 'pending';
+                    node.error = undefined;
+                    node.retryCount = 0;
+                }
+            }
             TaskGraphEngine.linkEntityDependencies(graph);
+            persistedGraph = graph;
 
             // Instantiate Orchestrator
+            const pendingNodeCount = [...graph.nodes.values()].filter(node => node.status === 'pending').length;
             const orchestrator = new Orchestrator(this.parentAgentRunner, {
-                maxConcurrency: isScriptMode ? Math.min(8, Math.max(1, normalizedTasks.length)) : undefined,
+                maxConcurrency: isScriptMode ? Math.min(8, Math.max(1, pendingNodeCount)) : undefined,
             });
             const parentRunPromise = context?.agentRunner?.getActiveRunRecordPromise?.()
                 ?? this.parentAgentRunner.getActiveRunRecordPromise?.();
@@ -3500,6 +3618,7 @@ export class AgentToolExecutor {
                 parentRunId: parentRun?.runId ?? parentRunSink?.runId,
                 durableGoal: runnerOpts?.durableGoal,
                 readOnlyFanout: parentMode === 'explore',
+                restoredBlackboard,
                 originalUserMessage,
                 userExecutionPolicy,
                 runEventSink: parentRunSink,
@@ -3580,6 +3699,21 @@ export class AgentToolExecutor {
                 '__orchestrator__',
             );
 
+            // Persist the full graph, per-node results, and blackboard so a
+            // later wave (or session) can resume or merge this orchestration.
+            await saveOrchestration({
+                topicId: runnerOpts?.topicId,
+                runId: validationRunId,
+                domain: runtimeDomain,
+                mode: parentMode,
+                graph,
+                agentResults: result.agentResults,
+                blackboard: orchestrator.getBlackboard().snapshot(),
+                summary: result.summary,
+                totalTokenUsage: result.totalTokenUsage,
+                qualityGate: result.qualityGate,
+            }).catch(() => false);
+
             // Keep the parent Agent context compact while preserving enough detail for the final global walkthrough.
             const agentSummaries: Array<{
                 id: string;
@@ -3657,6 +3791,7 @@ export class AgentToolExecutor {
                 });
             }
 
+            const doneCount = [...graph.nodes.values()].filter(node => node.status === 'done').length;
             return {
                 success: result.success,
                 summary: result.summary,
@@ -3666,12 +3801,33 @@ export class AgentToolExecutor {
                 failedNodes: result.failedNodes,
                 cancelledNodes: result.cancelledNodes,
                 clarifications,
+                graphId: graph.id,
+                resumeGraphId: resumeGraphId || undefined,
+                completedNodes: doneCount,
+                indexRevision: readOnlyFanoutMode && this.indexService
+                    ? `${this.indexService.workspaceSymbolUpdatedAt ?? 'unbuilt'}:${this.indexService.workspaceSymbolCount}:${this.indexService.workspaceSymbolStatus}`
+                    : undefined,
                 hint: clarifications.length > 0
-                    ? 'One or more sub-agents escalated a decision to the parent agent. The parent agent should decide from the approved plan and available context when safe. Ask the user in the main chat only if the parent agent cannot make a safe decision, then dispatch a follow-up batch after the answer.'
-                    : 'To view the detailed output of each sub-agent, use the merge_results tool.',
+                    ? 'One or more sub-agents escalated a decision to the parent agent. Answer them with dispatch_agents(answerClarifications=[...], resumeGraphId=...) after deciding, optionally appending more read-only tasks.'
+                    : resumeGraphId
+                        ? `Wave complete. The graph '${graph.id}' is persisted and resumable: call dispatch_agents(resumeGraphId='${graph.id}', appendTasks=[...]) to extend it, or merge_results to consolidate node outputs.`
+                        : 'To view the detailed output of each sub-agent, use the merge_results tool.',
             };
         } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
+            if (persistedGraph) {
+                void saveOrchestration({
+                    topicId: runnerOptsForLimits?.topicId,
+                    runId: undefined,
+                    domain: runtimeDomain,
+                    mode: parentMode,
+                    graph: persistedGraph,
+                    agentResults: new Map(),
+                    blackboard: { entries: [], timestamp: Date.now() },
+                    summary: `Coordinator execution failed: ${errMsg}`,
+                    totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                }).catch(() => false);
+            }
             return { success: false, error: `Coordinator execution failed: ${errMsg}` };
         } finally {
             globalSignal?.removeEventListener('abort', onGlobalAbort);
@@ -3681,50 +3837,121 @@ export class AgentToolExecutor {
 
     /** 
 * Execute the merge_results tool: extract a summary from the results of the most recent coordinator execution. 
+* Falls back to the durable orchestration store so past waves remain mergeable. 
 */
     private executeMergeResults(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
         const requestedDomain = context?.runnerOptions?.domain
             ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
         const requestedTopicId = context?.runnerOptions?.topicId;
-        const cachedResultMatchesScope = !!this._lastOrchestratorResult
-            && (this._lastOrchestratorDomain === undefined
-                || (this._lastOrchestratorDomain === requestedDomain
-                    && (this._lastOrchestratorTopicId === undefined
-                        || requestedTopicId === this._lastOrchestratorTopicId)));
-        if (!cachedResultMatchesScope) {
-            //Try to read from Blackboard
-            const stored = this.blackboard.readValue(`${blackboardDomainPrefix(context)}orchestrator:lastResult`)
-                ?? (requestedDomain === 'paradox' ? this.blackboard.readValue('orchestrator:lastResult') : undefined);
-            if (stored) {
-                try {
-                    const parsed = JSON.parse(stored);
-                    return {
-                        success: false,
-                        ...parsed,
-                        source: 'blackboard',
-                        message: 'Detailed node outputs are no longer in memory, so the requested nodeIds cannot be merged safely. Dispatch a new verification/integration wave.',
-                    };
-                } catch {
-                    return { success: false, message: 'Failed to find the most recent orchestrator execution result. Please use dispatch_agents first.' };
-                }
-            }
-            return { success: false, message: 'Failed to find the most recent orchestrator execution result. Please use dispatch_agents first.' };
-        }
+        const requestedGraphId = typeof args.graphId === 'string' && args.graphId.trim().length > 0
+            ? args.graphId.trim()
+            : undefined;
+        const requestedRunId = typeof args.runId === 'string' && args.runId.trim().length > 0
+            ? args.runId.trim()
+            : undefined;
 
-        const r = this._lastOrchestratorResult!;
-        const graph = this._lastOrchestratorGraph;
         const requestedNodeIds = Array.isArray(args.nodeIds)
             ? args.nodeIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
             : [];
         if (requestedNodeIds.length === 0) {
             return { success: false, message: 'merge_results requires at least one nodeIds entry.' };
         }
-        const unknownNodeIds = requestedNodeIds.filter(id => !r.agentResults.has(id));
+        const strategy = args.strategy === 'concatenate' || args.strategy === 'summary' ? args.strategy : 'structured';
+
+        // 1. In-memory cache (fast path, same topic/domain and matching graphId).
+        const memoryGraph = this._lastOrchestratorGraph;
+        const memoryMatches = !!this._lastOrchestratorResult
+            && (this._lastOrchestratorDomain === undefined
+                || (this._lastOrchestratorDomain === requestedDomain
+                    && (this._lastOrchestratorTopicId === undefined
+                        || requestedTopicId === this._lastOrchestratorTopicId)))
+            && (!requestedGraphId || memoryGraph?.id === requestedGraphId)
+            && !requestedRunId;
+        if (memoryMatches) {
+            const r = this._lastOrchestratorResult!;
+            return this.assembleMergeReport(
+                r.agentResults,
+                memoryGraph,
+                {
+                    success: r.success,
+                    summary: r.summary,
+                    totalTokenUsage: r.totalTokenUsage,
+                    qualityGate: r.qualityGate,
+                    failedNodes: r.failedNodes,
+                    cancelledNodes: r.cancelledNodes,
+                },
+                requestedNodeIds,
+                strategy,
+            );
+        }
+
+        // 2. Durable store: explicit graphId, else the latest matching wave.
+        let storedRecord: import('./orchestrator/orchestrationStore').StoredOrchestration | undefined;
+        if (requestedGraphId) {
+            storedRecord = loadOrchestration(requestedGraphId, { topicId: requestedTopicId, domain: requestedDomain });
+        } else {
+            const candidates = listOrchestrations({ topicId: requestedTopicId, domain: requestedDomain, limit: 16 });
+            storedRecord = candidates.find(record => !record.complete && (!requestedRunId || record.runId === requestedRunId))
+                ?? (requestedRunId ? candidates.find(record => record.runId === requestedRunId) : candidates[0]);
+        }
+        if (storedRecord) {
+            const agentResults = deserializeAgentResults(storedRecord.agentResults);
+            const graph = deserializeGraph(storedRecord.graph);
+            const failedNodes = [...graph.nodes.values()].filter(node => node.status === 'failed').map(node => node.id);
+            const cancelledNodes = [...graph.nodes.values()].filter(node => node.status === 'cancelled').map(node => node.id);
+            return this.assembleMergeReport(
+                agentResults,
+                graph,
+                {
+                    success: failedNodes.length === 0 && cancelledNodes.length === 0,
+                    summary: storedRecord.summary,
+                    totalTokenUsage: storedRecord.totalTokenUsage,
+                    qualityGate: storedRecord.qualityGate,
+                    failedNodes,
+                    cancelledNodes,
+                },
+                requestedNodeIds,
+                strategy,
+            );
+        }
+
+        // 3. Legacy blackboard summary (never carries node detail).
+        const stored = this.blackboard.readValue(`${blackboardDomainPrefix(context)}orchestrator:lastResult`)
+            ?? (requestedDomain === 'paradox' ? this.blackboard.readValue('orchestrator:lastResult') : undefined);
+        if (stored) {
+            try {
+                const parsed = JSON.parse(stored);
+                return {
+                    success: false,
+                    ...parsed,
+                    source: 'blackboard',
+                    message: 'Detailed node outputs are no longer in memory, so the requested nodeIds cannot be merged safely. Dispatch a new verification/integration wave.',
+                };
+            } catch {
+                return { success: false, message: 'Failed to find the most recent orchestrator execution result. Please use dispatch_agents first.' };
+            }
+        }
+        return { success: false, message: 'Failed to find the most recent orchestrator execution result. Please use dispatch_agents first.' };
+    }
+
+    private assembleMergeReport(
+        agentResults: Map<string, import('./orchestrator/types').SubAgentResult>,
+        graph: import('./orchestrator/types').TaskGraph | undefined,
+        meta: {
+            success: boolean;
+            summary: string;
+            totalTokenUsage: import('./types').TokenUsage;
+            qualityGate?: import('./orchestrator/types').QualityGateResult;
+            failedNodes: string[];
+            cancelledNodes: string[];
+        },
+        selectedIds: string[],
+        strategy: 'concatenate' | 'structured' | 'summary',
+    ): unknown {
+        const unknownNodeIds = selectedIds.filter(id => !agentResults.has(id));
         if (unknownNodeIds.length > 0) {
             return { success: false, message: `Unknown or unavailable task node IDs: ${unknownNodeIds.join(', ')}` };
         }
-        const strategy = args.strategy === 'concatenate' || args.strategy === 'summary' ? args.strategy : 'structured';
-        const selectedIds = [...new Set(requestedNodeIds)];
         const allWrittenFiles = new Set<string>();
         const agentOutputs: Array<{
             id: string;
@@ -3740,7 +3967,7 @@ export class AgentToolExecutor {
         let totalOutputLen = 0;
 
         for (const id of selectedIds) {
-            const agentResult = r.agentResults.get(id)!;
+            const agentResult = agentResults.get(id)!;
             const files = [...new Set([
                 ...agentResult.writtenFiles,
                 ...(agentResult.handoff?.changedFiles ?? []),
@@ -3766,7 +3993,7 @@ export class AgentToolExecutor {
         const fileGroups = [...allWrittenFiles].map(file => ({
             file,
             nodeIds: selectedIds.filter(id => {
-                const result = r.agentResults.get(id);
+                const result = agentResults.get(id);
                 return result?.writtenFiles.includes(file) || result?.handoff?.changedFiles.includes(file);
             }),
         }));
@@ -3780,31 +4007,35 @@ export class AgentToolExecutor {
                 dependencies: node?.dependencies ?? [],
             };
         });
-        const selectedSucceeded = selectedIds.every(id => r.agentResults.get(id)?.success === true);
+        const selectedSucceeded = selectedIds.every(id => agentResults.get(id)?.success === true);
         const mergedOutput = strategy === 'concatenate'
             ? agentOutputs.map(item => `## ${item.id}\n${item.output}`).join('\n\n')
             : undefined;
+        const complete = graph ? [...graph.nodes.values()].every(node =>
+            node.status !== 'pending' && node.status !== 'running') : true;
 
         return {
             success: true,
-            overallSuccess: r.success && selectedSucceeded,
+            overallSuccess: meta.success && selectedSucceeded,
             strategy,
             selectedNodeIds: selectedIds,
-            summary: r.summary,
-            totalTokens: r.totalTokenUsage.total,
-            estimatedCostCny: r.totalTokenUsage.estimatedCostCny,
+            summary: meta.summary,
+            totalTokens: meta.totalTokenUsage.total,
+            estimatedCostCny: meta.totalTokenUsage.estimatedCostCny,
             totalFilesWritten: allWrittenFiles.size,
             writtenFiles: [...allWrittenFiles],
             fileGroups,
             agentOutputs,
             mergedOutput,
+            graphId: graph?.id,
+            resumeable: !complete,
             integration: {
                 featureManifest: graph?.metadata.featureManifest,
                 entityContracts,
-                qualityGate: r.qualityGate,
+                qualityGate: meta.qualityGate,
             },
-            failedNodes: r.failedNodes,
-            cancelledNodes: r.cancelledNodes,
+            failedNodes: meta.failedNodes,
+            cancelledNodes: meta.cancelledNodes,
         };
     }
 

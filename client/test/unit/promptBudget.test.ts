@@ -55,7 +55,9 @@ describe('AI static prompt budgets', () => {
             const modeTools = runnerPolicy.filterToolDefinitionsForMode(TOOL_DEFINITIONS, 'build');
             const tools = runnerPolicy.filterToolDefinitionsForStage(modeTools, 'build', buildStage);
             expect(tools.length, `${buildStage} tool count`).to.be.within(8, 15);
-            expect(measure(buildStage, false), `${buildStage} main system + tools`).to.be.at.most(8_000);
+            // 8_500: dispatch_agents gained resume/append/clarification
+            // parameters and merge_results gained durable-graph lookups.
+            expect(measure(buildStage, false), `${buildStage} main system + tools`).to.be.at.most(8_500);
             expect(measure(buildStage, true), `${buildStage} slim system + tools`).to.be.at.most(4_000);
         }
     });
@@ -80,7 +82,9 @@ describe('AI static prompt budgets', () => {
                 // read-only fan-out: dispatch, blackboard query, and result merge.
                 const maxToolCount = mode === 'plan' || mode === 'explore' ? 18 : 15;
                 expect(tools.length, `${mode}/${stage} tool count`).to.be.within(8, maxToolCount);
-                expect(total, `${mode}/${stage} system + tools`).to.be.at.most(8_000);
+                // 8_500: dispatch_agents gained resume/append/clarification
+                // parameters and merge_results gained durable-graph lookups.
+                expect(total, `${mode}/${stage} system + tools`).to.be.at.most(8_500);
                 expect(tools.some(tool => projectWriteTools.has(tool.function.name)), `${mode}/${stage} project writes`).to.equal(false);
             }
         }

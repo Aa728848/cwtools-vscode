@@ -1738,7 +1738,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'dispatch_agents',
-            description: 'Dispatch a bounded task DAG using only roles authorized by the current coordinator domain. Declare dependencies, planned files, and explicit userConstraints.',
+            description: 'Dispatch a bounded task DAG using only roles authorized by the current coordinator domain. Declare dependencies, planned files, and explicit userConstraints. Each wave persists and can be resumed via resumeGraphId.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1896,6 +1896,30 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                         },
                         required: ['objective', 'acceptanceCriteria'],
                     },
+                    resumeGraphId: {
+                        type: 'string',
+                        description: 'Resume a persisted graph (id returned by a previous dispatch as graphId). Done nodes are skipped; failed/cancelled nodes re-run; appended tasks are merged in. Write waves stay static contracts: in the Paradox domain appended roles must be read-only (explore/plan/review).',
+                    },
+                    appendTasks: {
+                        type: 'array',
+                        description: 'New tasks appended to a resumed graph; same item shape as tasks. Ids must be new; dependencies may reference existing node ids.',
+                        items: {
+                            type: 'object',
+                            required: ['id', 'agentType', 'prompt'],
+                        },
+                    },
+                    answerClarifications: {
+                        type: 'array',
+                        description: 'Parent answers to sub-agent clarifications from the last dispatch (clarifications[].id); each answered node is re-run with the answer appended.',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                id: { type: 'string' },
+                                answer: { type: 'string' },
+                            },
+                            required: ['id', 'answer'],
+                        },
+                    },
                 },
                 required: [],
             },
@@ -1931,6 +1955,14 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                         description: 'List of task node IDs whose results should be merged',
                     },
                     strategy: { type: 'string', enum: ['concatenate', 'structured', 'summary'], description: 'Merge strategy: "concatenate" (raw join), "structured" (group by file), "summary" (generate summary). Default: structured.' },
+                    graphId: {
+                        type: 'string',
+                        description: 'Persisted graph id to merge (from dispatch graphId). Defaults to the latest matching wave.',
+                    },
+                    runId: {
+                        type: 'string',
+                        description: 'Parent run id filter when waves belong to different runs.',
+                    },
                 },
                 required: ['nodeIds'],
             },

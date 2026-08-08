@@ -9,9 +9,7 @@ the task needs it.
 Before editing:
 
 1. Run `git status --short` and preserve unrelated working-tree changes.
-2. If `.codegraph/` exists, use `codegraph explore "<question>"` before raw
-   searches when locating or understanding code.
-3. Use targeted `rg` searches; do not dump the entire repository tree unless
+2. Use targeted `rg` searches; do not dump the entire repository tree unless
    it is genuinely needed.
 
 Read supporting documents by task:

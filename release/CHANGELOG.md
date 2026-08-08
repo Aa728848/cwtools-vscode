@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.10.19] - 2026-08-08
+
+### 性能与内存 / Performance & Memory
+- **[优化] 串行化重型分析并降低峰值内存**：动态调用点校验与分阶段全局刷新共用同一信号量串行执行，本地编辑不再同时持有两份大规则图；动态校验改为可取消，批次被新编辑取代时自动重新排队。
+  English: [Optimization] Serialized heavy analysis to cut peak memory — dynamic call-site validation and staged global refreshes share one gate so a local edit cannot retain two rule-graph snapshots; dynamic validation is cancellable and superseded batches re-queue automatically.
+- **[优化] 按文件预热动态参数数据**：延迟批处理只预热本批文件，替代原先的全量预热，减少无效计算与内存压力。
+  English: [Optimization] Per-file dynamic-parameter warm-up — deferred batches force computed data only for queued files instead of the whole workspace.
+
+### 诊断刷新 / Diagnostics Refresh
+- **[修复] 修复动态批处理发布缺口**：跨文件调用点诊断（如 inline script 调用方的展开报错）在错误修复后不再残留——仍持有动态展开诊断但未被本批校验的文件会自动进入后续批次重新校验，修复后旧报错被真正清除。
+  English: [Fix] Closed the deferred-batch publish gap — files holding dynamic-expansion diagnostics (e.g. inline-script caller errors) that a batch did not revalidate are re-queued automatically, so a fixed error is actually cleared instead of lingering.
+- **[修复] 修复打开/聚焦时跳过重新校验的问题**：模型版本（本地化/类型/规则）已变化但状态仍标记为最新（Fresh）的文件，打开或聚焦时会重新校验，不再显示过期报错。
+  English: [Fix] Open/focus revalidation no longer skipped when the model epoch moved — files marked fresh under an outdated model epoch are re-linted on open or focus, so stale diagnostics are replaced.
+
 ## [2.10.18] - 2026-08-08
 
 ### 多 Agent 编排 / Multi-Agent Orchestration

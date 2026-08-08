@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.10.18] - 2026-08-08
+
+### 多 Agent 编排 / Multi-Agent Orchestration
+- **[新增] 编排结果持久化与跨波次合并**：任务图、逐节点结果与黑板快照落盘持久化，`merge_results` 可跨波次、跨会话合并详细结果。
+  English: [New] Durable orchestration records and cross-wave merging — task graphs, per-node results, and blackboard snapshots persist to disk; `merge_results` merges past waves across turns and sessions.
+- **[新增] 可恢复多波次编排**：`dispatch_agents` 支持 `resumeGraphId` 续跑已持久化图、`appendTasks` 动态增补任务（Paradox 域限只读角色）、`answerClarifications` 回答子代理澄清后重跑对应节点。
+  English: [New] Resumable waves — resume persisted graphs, append tasks (read-only roles only in the Paradox domain), and re-run nodes after parent clarification answers.
+- **[新增] 后台子代理与取消**：`dispatch_agents(background: true)` 立即返回、图在后台继续执行，完成结果自动注入下一轮对话；新增 `cancel_dispatch` 取消后台图，取消后仍可恢复。
+  English: [New] Background dispatch and cancellation — waves run off the tool call with next-turn result notifications; `cancel_dispatch` aborts a running graph for later resume.
+- **[新增] 证据裁决持久化**：证据门的已验证裁决按证据版本落盘复用，减少跨会话重复验证（设置 `stellarisLanguageServices.ai.evidenceGate.persistLedger`，默认开启）。
+  English: [New] Persistent evidence decisions — verified allow verdicts are reused across runs keyed by evidence revision (`persistLedger`, on by default).
+- **[新增] 选项式澄清**：通用域子代理澄清可携带 2-4 个预设选项，父代理或用户直接选择回答。
+  English: [New] Option-based clarifications — General-domain sub-agents may attach preset OPTIONS lists to clarifications.
+- **[新增] 黑板写入校验与结构化查询**：按条目类型与键前缀校验黑板写入并拒绝畸形数据；`query_blackboard(structured: true)` 返回解析后的 JSON 值。
+  English: [New] Blackboard write validation by entry type and key prefix, plus structured JSON queries.
+
 ## [2.10.17] - 2026-08-08
 
 ### 性能与后端 / Performance & Backend

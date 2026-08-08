@@ -3296,9 +3296,7 @@ type Server(client: ILanguageClient) =
     let lint (doc: Uri) (shallowAnalyze: bool) (forceDisk: bool) (isEditAction: bool) (validateCachedOnly: bool) (fastDefinitionIndex: bool) (requestStillCurrent: unit -> bool) : Async<bool> =
         async {
             let name = getPathFromDoc doc
-            // Only content mutations invalidate file-derived editor features.
-            // Open/focus validation observes the same document version and must
-            // preserve CodeLens/semantic-token caches instead of rebuilding them.
+
             if isEditAction then
                 forgetFileCaches name
 
@@ -3309,14 +3307,6 @@ type Server(client: ILanguageClient) =
                     clearLocalisationCaches ()
                 if isEditAction then markFileStale name "localisation"
 
-            // Current-buffer edits can parse outside the game-state write lock and
-            // atomically install the prepared resource. Deep saves still run the
-            // normal validation afterwards, but under the shared read lock; only
-            // shallow typing/localisation uses detached interactive validation.
-            // Disk watcher updates use the same parse/prepare/commit pipeline as
-            // open-document edits. prepareUpdateFileInteractive reads from disk
-            // when no buffer text is supplied, so no content mutation needs to
-            // fall back to parse + validation while holding the write lock.
             let usePreparedEditorUpdate = isEditAction
             let useInteractiveValidation =
                 isEditAction
@@ -3331,11 +3321,7 @@ type Server(client: ILanguageClient) =
                 && incrementalTypeRefreshEnabled ()
                 && isIncrementalContributionCandidate name
                 && not (isInlineScriptDefinitionPath name)
-            // Mark type refresh needed ONLY if the file was EDITED (not just opened).
-            // Opening a file does not change its content, so the type/enum index is still valid.
-            // Inline-script templates never define types or rules: their save path refreshes
-            // callers (RefreshInlineScriptCallers) and revalidates them, so routing them
-            // through the multi-GB full RefreshCaches path is pure waste.
+
             if isEditAction
                && isIncrementalContributionCandidate name
                && not shallowAnalyze

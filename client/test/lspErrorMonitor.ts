@@ -27,10 +27,11 @@ export function setupLSPErrorMonitoring(): void {
         defaultClient.outputChannel.appendLine = (message: string) => {
             const timestamp = Date.now();
 
-            // Check for error messages and log them with timestamps
-            if (message.toLowerCase().includes('error') ||
-                message.toLowerCase().includes('exception') ||
-                message.toLowerCase().includes('[Error')) {
+            // Server errors use the LSP log format "[Error - HH:MM:SS] ...".
+            // Match that plus exception reports only — the `New configuration`
+            // dump contains a `"errors": { ... }` settings block, so a naive
+            // `includes('error')` would misreport normal startup as failures.
+            if (message.includes('[Error') || message.toLowerCase().includes('exception')) {
                 errorLog.push({
                     timestamp,
                     message: message

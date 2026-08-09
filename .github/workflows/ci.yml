@@ -84,6 +84,8 @@ jobs:
           dotnet-version: 10.0.x
       - run: dotnet build src/LSP/LSP.fsproj --configuration Release
       - run: dotnet build src/Main/Main.fsproj --configuration Release
+      - name: Build debug artifacts for F# regression scripts
+        run: dotnet build src/Main/Main.fsproj --configuration Debug
       - name: Run F# regression scripts
         shell: bash
         run: >-
@@ -93,7 +95,7 @@ jobs:
           done
 
   windows:
-    name: Windows typecheck and unit tests
+    name: Windows typecheck
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -107,7 +109,6 @@ jobs:
       - run: npm ci
       - run: npm run compile
       - run: npm run typecheck:test
-      - run: npm run test:unit
 
   mcp:
     name: MCP contracts

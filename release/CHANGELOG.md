@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.11.0] - 2026-08-09
+
+### 新功能 / New Features
+- **[新增] 实体预览支持旗帜颜色遮罩**：舰船等实体预览按舰队/国家旗帜颜色渲染遮罩，旗帜颜色可实时影响模型外观。
+  English: [New] Flag color masking in the entity preview — ship and entity models render with the fleet/country flag palette applied to masked surfaces.
+- **[优化] AI 对话已完成的回合默认折叠**：活动流（工具调用、执行步骤）默认收起，只显示状态条与最终回答，展开即可查看过程；流式输出中的回合保持展开。
+  English: [New] Completed AI turns collapse by default — the activity stream hides behind the status bar and final answer until expanded, while live turns stay open.
+
+### 修复 / Fixes
+- **[修复] 本地化悬停提示在某些环境下失效**：未配置本地化语言（英文界面常见）时，悬停在本地化键上不再显示对应文本——服务器现在始终按实际加载的游戏派生默认语言，本地化数据正常解析。
+  English: [Fix] Localisation hover could show nothing — when no localisation language was configured the server parsed zero keys; it now derives the language set for the loaded game (with a default fallback), so hovers resolve everywhere.
+- **[修复] 星系/舰船模型/GUI 预览可能完全无法打开或渲染**：共享文件扫描器在深层目录下会死锁（目录递归占满并发槽位后与排队任务互相等待），导致精灵索引和资产图永远构建不完。扫描器重构为"确定性发现 + 有界并发读取"，死锁消除。
+  English: [Fix] Solar-system, ship-model, and GUI previews could hang — the shared file walker deadlocked on deep directories (slotted recursion waited on queued reads), so sprite/asset indexes never finished. The walker now uses a deterministic discovery pass plus bounded concurrent reads.
+- **[变更] 远程规则渠道取消 stable，默认只使用 latest**：`rules_version` 设置仅保留 `latest` 与 `manual`；规则缓存始终跟踪远程默认分支，不再按 git tag 切换到"稳定版"。
+  English: [Changed] Removed the stable remote-rules channel — `rules_version` now offers only `latest` and `manual`, and the rules cache always tracks the remote default branch instead of checking out tagged releases.
+
+### 稳定性与工程 / Stability & Engineering
+- **[新增] Stellaris 项目语言关联与降级**：`*.txt/gui/gfx/asset/cwt` 按 Stellaris 语言加载；缺少原版数据（未安装游戏或无缓存）时自动切换到通用模式，补全与悬停仍可用。
+  English: [New] Stellaris file associations and graceful degradation — files load under the Stellaris language, and without vanilla data the server falls back to the generic game while completions and hovers keep working.
+- **[加固] 预览面板消息运行时校验**：GUI/星系/实体/粒子/事件链五个面板的 Webview 消息全部经过边界校验（行号范围、数组结构、截图大小上限、路径逃逸拦截），非法输入被拒绝而非触发异常。
+  English: [Hardening] Runtime validation for all preview-panel Webview messages — bounds, shapes, screenshot size caps, and workspace path escapes are rejected at the boundary.
+- **[加固] AI 运行时资源清理与图像限制**：运行中止/异常路径不再泄漏进程与监听器；MiniMax 图像描述改为独立适配器（超时、取消、8 MiB 上限、临时文件清理）。
+  English: [Hardening] AI runner cleanup and image limits — cancelled or failed runs release subprocesses and listeners; the MiniMax vision fallback gained timeouts, abort support, an 8 MiB cap, and temp-file cleanup.
+- **[工程] 测试门禁与三平台 CI**：修复 43 处严格类型错误，全量类型检查 0 错误；2044 项单元测试 + 13 项服务器回归测试 + 4 套件集成测试全部纳入 CI（Linux + Windows + .NET），推送即自动验证。
+  English: [Engineering] Test gates and three-platform CI — strict typecheck is clean, and 2044 unit tests, 13 F# regression scripts, and 4 Extension Host suites run automatically on every push.
+- **[工程] 确定性文件扫描器**：预览面板共享的递归文件扫描改为排序遍历、并发有界、上限同步执行、支持取消，结果按发现顺序稳定输出。
+  English: [Engineering] Deterministic file walker — sorted traversal, bounded concurrency, push-time limits, cancellation, and stable result ordering across the preview panels.
+
 ## [2.10.19] - 2026-08-08
 
 ### 性能与内存 / Performance & Memory

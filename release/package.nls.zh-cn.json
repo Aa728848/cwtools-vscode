@@ -67,7 +67,7 @@
   "configuration.stellarisLanguageServices.experimental.description": "是否启用实验性功能",
   "configuration.stellarisLanguageServices.debug_mode.description": "用于帮助编写规则的调试功能",
   "configuration.stellarisLanguageServices.logging.diagnostic.description": "是否输出诊断级别日志",
-  "configuration.stellarisLanguageServices.rules_version.description": "规则来源模式。latest/stable 会拉取远程规则到本地缓存；内置备用规则只会在远程更新失败且比缓存更新时使用。manual 只使用 rules_folder。",
+  "configuration.stellarisLanguageServices.rules_version.description": "规则来源模式。latest 会拉取远程规则到本地缓存；内置备用规则只会在远程更新失败且比缓存更新时使用。manual 只使用 rules_folder。",
   "configuration.stellarisLanguageServices.rules_remote_url.description": "可选的远程 CWTools 规则 Git 仓库链接。留空则使用扩展为当前游戏提供的默认规则仓库。",
   "configuration.stellarisLanguageServices.rules_folder.description": "仅当 rules_version 为 manual 时使用的本地规则文件夹。不会自动读取工作区 .cwtools 目录。",
   "configuration.stellarisLanguageServices.ignore_patterns.description": "要忽略的文件路径（不由语言服务加载），glob 模式列表",

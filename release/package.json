@@ -885,7 +885,6 @@
                         "scope": "window",
                         "type": "string",
                         "enum": [
-                            "stable",
                             "latest",
                             "manual"
                         ],

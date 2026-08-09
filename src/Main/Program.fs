@@ -1870,7 +1870,7 @@ type Server(client: ILanguageClient) =
     let mutable remoteRepoPath: string option = None
     let mutable bundledRulesPath: string option = None
 
-    let mutable rulesChannel: string = "stable"
+    let mutable rulesChannel: string = "latest"
     let mutable manualRulesFolder: string option = None
     let mutable useManualRules: bool = false
     let mutable preferBundledRules: bool = false
@@ -5687,7 +5687,6 @@ type Server(client: ILanguageClient) =
         (generation, startupCachePath, startupRemoteRepoPath, startupUseManualRules, startupRulesChannel, startupGame) =
         match startupCachePath, startupRemoteRepoPath, startupUseManualRules with
         | Some cp, Some rp, false ->
-            let stable = startupRulesChannel <> "latest"
             updateLoadingRuntime (fun state ->
                 { state with
                     lastRulesStatus = "updating_background"
@@ -5703,7 +5702,7 @@ type Server(client: ILanguageClient) =
                         try
                             // A failed background attempt already leaves the local model usable;
                             // do not repeat the same potentially slow network operation here.
-                            let result = Some (initOrUpdateRules rp cp stable false)
+                            let result = Some (initOrUpdateRules rp cp false)
                             sw.Stop()
                             result, None, int64 sw.ElapsedMilliseconds
                         with e ->

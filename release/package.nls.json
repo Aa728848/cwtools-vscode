@@ -67,7 +67,7 @@
   "configuration.stellarisLanguageServices.experimental.description": "Whether or not to enable experimental features",
   "configuration.stellarisLanguageServices.debug_mode.description": "Debug features for helping write rules",
   "configuration.stellarisLanguageServices.logging.diagnostic.description": "Whether to output diagnostic level logs",
-  "configuration.stellarisLanguageServices.rules_version.description": "Rules source mode. latest/stable pull remote rules into the local cache; bundled fallback is used only after a failed remote update when it is newer than the cache. manual uses only rules_folder.",
+  "configuration.stellarisLanguageServices.rules_version.description": "Rules source mode. latest pulls remote rules into the local cache; bundled fallback is used only after a failed remote update when it is newer than the cache. manual uses only rules_folder.",
   "configuration.stellarisLanguageServices.rules_remote_url.description": "Optional custom Git repository URL for remote CWTools rules. Leave empty to use the extension's default rules repository for the active game.",
   "configuration.stellarisLanguageServices.rules_folder.description": "A local rules folder used only when rules_version is manual. Workspace .cwtools folders are not read automatically.",
   "configuration.stellarisLanguageServices.ignore_patterns.description": "File paths to ignore (not loaded by the language service), list of glob patterns",

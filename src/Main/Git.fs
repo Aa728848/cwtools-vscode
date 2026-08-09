@@ -6,7 +6,7 @@ open System.IO
 open System.Linq
 open CWTools.Utilities.Utils
 
-let rec initOrUpdateRules repoPath gameCacheDir stable first =
+let rec initOrUpdateRules repoPath gameCacheDir first =
     if Directory.Exists gameCacheDir then
         ()
     else
@@ -55,16 +55,9 @@ let rec initOrUpdateRules repoPath gameCacheDir stable first =
             |> Option.defaultWith (fun () ->
                 failwith "Could not find a fetched origin/master or origin/main branch for CWTools rules.")
 
-        match stable with
-        | true ->
-            let describeOptions = DescribeOptions()
-            describeOptions.Strategy <- DescribeStrategy.Tags
-            describeOptions.MinimumCommitIdAbbreviatedSize <- 0
-            let tag = git.Describe(remoteBranch.Tip, describeOptions)
-            let checkoutOptions = CheckoutOptions()
-            checkoutOptions.CheckoutModifiers <- CheckoutModifiers.Force
-            Commands.Checkout(git, tag, checkoutOptions) |> ignore
-        | false -> git.Reset(ResetMode.Hard, remoteBranch.Tip)
+        // The rules cache always tracks the remote default branch; there is no
+        // separate "stable" (tagged) channel anymore.
+        git.Reset(ResetMode.Hard, remoteBranch.Tip)
 
         let newHash = git.Head.Tip.Sha
         logInfo $"cwtools new rules version: %A{newHash}"
@@ -79,6 +72,6 @@ let rec initOrUpdateRules repoPath gameCacheDir stable first =
 
 
         if first then
-            initOrUpdateRules repoPath gameCacheDir stable false
+            initOrUpdateRules repoPath gameCacheDir false
         else
             (false, None)

@@ -31,6 +31,20 @@ let isDynamicExpansionDiagnostic (diagnostic: Diagnostic) =
     || (diagnostic.relatedInformation
         |> List.exists (fun related -> related.message = "Related source"))
 
+/// CW codes whose diagnostics are produced by localisation validation. Keep
+/// this list synchronized with LOCALISATION_CODES in client diagnosticI18n.ts.
+let private localisationDiagnosticCodes =
+    set
+        [ "CW100"; "CW225"; "CW226"; "CW234"; "CW254"; "CW255"
+          "CW256"; "CW257"; "CW258"; "CW259"; "CW260"; "CW266"
+          "CW268"; "CW275" ]
+
+let isLocalisationDiagnostic (diagnostic: Diagnostic) =
+    diagnostic.code
+    |> Option.exists (fun code ->
+        let baseCode = code.Split('_').[0].ToUpperInvariant()
+        localisationDiagnosticCodes.Contains baseCode)
+
 /// Deferred dynamic revalidation currently recomputes rule and localisation
 /// diagnostics, but not parser diagnostics. Diagnostics without a code are
 /// conservatively left to their original producer.
@@ -42,6 +56,36 @@ let mergeDeferredValidationDiagnostics existing refreshed =
 
 let mergeDeferredDefinitionDiagnostics existing refreshed =
     replaceDomain isDynamicExpansionDiagnostic existing refreshed
+
+/// A deferred dynamic pass must include the files that currently carry
+/// expansion diagnostics in the same bounded batch as the newly requested
+/// files. Scheduling those diagnostic files after every pass lets two stable
+/// groups of real errors continually requeue each other.
+let planDeferredDynamicRevalidationBatch
+    (normalisePath: string -> string)
+    (maxFiles: int)
+    (requestedFiles: string list)
+    (diagnosticFiles: string list)
+    =
+    let capacity = max 0 maxFiles
+    let distinctSorted files =
+        files
+        |> List.distinctBy normalisePath
+        |> List.sortBy normalisePath
+
+    let requested =
+        requestedFiles
+        |> distinctSorted
+        |> List.truncate capacity
+    let requestedKeys = requested |> List.map normalisePath |> Set.ofList
+    let remainingCapacity = capacity - requested.Length
+    let diagnosticCleanup =
+        diagnosticFiles
+        |> distinctSorted
+        |> List.filter (normalisePath >> requestedKeys.Contains >> not)
+        |> List.truncate remainingCapacity
+
+    requested @ diagnosticCleanup
 
 /// A model refresh makes diagnostics pending, not disproven. Keep the last
 /// complete result visible until a validation pass for that file replaces it.

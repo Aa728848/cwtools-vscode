@@ -819,6 +819,22 @@
                         "default": false,
                         "description": "%configuration.stellarisLanguageServices.errors.vanilla.description%"
                     },
+                    "stellarisLanguageServices.errors.localisationFilter": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "off",
+                            "problems",
+                            "all"
+                        ],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.errors.localisationFilter.enum.off%",
+                            "%configuration.stellarisLanguageServices.errors.localisationFilter.enum.problems%",
+                            "%configuration.stellarisLanguageServices.errors.localisationFilter.enum.all%"
+                        ],
+                        "default": "off",
+                        "description": "%configuration.stellarisLanguageServices.errors.localisationFilter.description%"
+                    },
                     "stellarisLanguageServices.errors.ignore": {
                         "scope": "window",
                         "type": "array",

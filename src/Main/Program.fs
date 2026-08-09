@@ -1887,6 +1887,7 @@ type Server(client: ILanguageClient) =
 
     let mutable ignoreCodes: string array = [||]
     let mutable ignoreFiles: string array = [||]
+    let mutable localisationDiagnosticFilterMode = "off"
     let mutable dontLoadPatterns: string array = [||]
     /// key: FileName (use ConcurrentDictionary instead of immutable Map to reduce GC pressure)
     let locCache = System.Collections.Concurrent.ConcurrentDictionary<string, CWError list>()
@@ -2758,16 +2759,6 @@ type Server(client: ILanguageClient) =
               "CW239"; "CW246"; "CW250"; "CW261"; "CW266"; "CW273"
               "CW274"; "CW274D" ]
 
-    let localisationDiagnosticCodes =
-        set
-            [ "CW100"; "CW225"; "CW226"; "CW234"; "CW254"; "CW255"
-              "CW256"; "CW257"; "CW258"; "CW259"; "CW260"; "CW266"
-              "CW268"; "CW275" ]
-
-    let isLocalisationDiagnostic (diagnostic: Diagnostic) =
-        diagnostic.code
-        |> Option.exists localisationDiagnosticCodes.Contains
-
     /// Diagnostics whose truth depends on a complete global lookup/index. While
     /// editing a type-defining file these are deferred until the staged index is
     /// committed or a save/deep validation runs. Local parser/shape/CWT errors
@@ -2851,6 +2842,9 @@ type Server(client: ILanguageClient) =
         match (f, d) with
         | _, { Diagnostic.code = Some code } when Array.contains code ignoreCodes -> false
         | f, _ when Array.contains (Path.GetFileName f) ignoreFiles -> false
+        | _, diagnostic
+            when localisationDiagnosticFilterMode = "all"
+                 && DiagnosticMerge.isLocalisationDiagnostic diagnostic -> false
         | _, _ -> true
 
     let diagnosticCounts (diagnostics: Diagnostic list) =
@@ -4083,9 +4077,30 @@ type Server(client: ILanguageClient) =
                     scheduleDeferredDynamicRevalidation files
                     logDiag $"Deferred revalidation yielded to completion activity files={files.Length}"
                 else
+                    let dynamicDiagnosticFiles =
+                        fileDiagnosticStates
+                        |> Seq.choose (fun kvp ->
+                            if kvp.Value.diagnostics |> List.exists DiagnosticMerge.isDynamicExpansionDiagnostic then
+                                Some kvp.Key
+                            else
+                                None)
+                        |> Seq.toList
                     let queued =
-                        files
-                        |> List.distinctBy normaliseCachePath
+                        DiagnosticMerge.planDeferredDynamicRevalidationBatch
+                            normaliseCachePath
+                            dynamicDeferMaxFiles
+                            files
+                            dynamicDiagnosticFiles
+                    let requestedKeys = files |> List.map normaliseCachePath |> Set.ofList
+                    let addedDiagnosticFiles =
+                        queued
+                        |> List.filter (normaliseCachePath >> requestedKeys.Contains >> not)
+                    for path in addedDiagnosticFiles do
+                        clearFileCaches path
+                        markFilePendingDynamicRevalidation path
+                    if not addedDiagnosticFiles.IsEmpty then
+                        logDiag
+                            $"Deferred revalidation expanded batch with {addedDiagnosticFiles.Length} file(s) carrying dynamic diagnostics"
                     use _heavyAnalysisLease = acquireHeavyAnalysisGate ()
                     do
                         let batchModelEpoch = modelEpochSnapshot ()
@@ -4156,31 +4171,6 @@ type Server(client: ILanguageClient) =
                                     @ (refreshedDynamicDiagnostics |> List.map fst)
                                     |> List.distinctBy normaliseCachePath
                                 let publishEpoch = nextDiagnosticEpoch ()
-
-                                // A batch can publish dynamic-expansion diagnostics to files
-                                // outside its own queue (cross-file call sites). Those files
-                                // were neither revalidated nor republished by later batches,
-                                // so a fixed error kept its stale diagnostic forever. Queue
-                                // them for a follow-up batch so they get freshly revalidated
-                                // and cleared when the underlying issue is gone.
-                                let validatedFilePaths =
-                                    filesToPublish
-                                    |> List.map normaliseCachePath
-                                    |> Set.ofList
-                                let outstandingDynamicDiagnosticFiles =
-                                    fileDiagnosticStates
-                                    |> Seq.choose (fun kvp ->
-                                        if kvp.Value.diagnostics |> List.exists DiagnosticMerge.isDynamicExpansionDiagnostic then
-                                            if validatedFilePaths.Contains(normaliseCachePath kvp.Key) then
-                                                None
-                                            else
-                                                Some kvp.Key
-                                        else
-                                            None)
-                                    |> Seq.toList
-                                if not outstandingDynamicDiagnosticFiles.IsEmpty then
-                                    scheduleDeferredDynamicRevalidation outstandingDynamicDiagnosticFiles
-                                    logDiag $"Deferred revalidation queued {outstandingDynamicDiagnosticFiles.Length} file(s) with outstanding dynamic diagnostics"
 
                                 for filePath in filesToPublish do
                                     let refreshed =
@@ -4658,7 +4648,7 @@ type Server(client: ILanguageClient) =
                 let filesWithOldLocDiagnostics =
                     fileDiagnosticStates
                     |> Seq.choose (fun kvp ->
-                        if (kvp.Value.diagnostics |> List.exists isLocalisationDiagnostic)
+                        if (kvp.Value.diagnostics |> List.exists DiagnosticMerge.isLocalisationDiagnostic)
                            || (kvp.Value.pendingGlobalKinds |> List.contains "localisation") then
                             Some kvp.Key
                         else
@@ -4689,7 +4679,7 @@ type Server(client: ILanguageClient) =
                     let existing = existingDiagnosticsForFile filePath
                     let merged =
                         DiagnosticMerge.replaceDomain
-                            isLocalisationDiagnostic
+                            DiagnosticMerge.isLocalisationDiagnostic
                             existing
                             refreshedLocDiagnostics
                     client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = merged }
@@ -6068,6 +6058,19 @@ type Server(client: ILanguageClient) =
 
                 if ignoreFiles <> newIgnoreFiles then
                     ignoreFiles <- newIgnoreFiles
+                    requiresReload <- true
+
+                let newLocalisationDiagnosticFilterMode =
+                    match configValue ["errors"; "localisationFilter"] with
+                    | JsonValue.String "problems" -> "problems"
+                    | JsonValue.String "all" -> "all"
+                    | JsonValue.String "off" -> "off"
+                    | _ -> localisationDiagnosticFilterMode
+
+                if localisationDiagnosticFilterMode <> newLocalisationDiagnosticFilterMode then
+                    localisationDiagnosticFilterMode <- newLocalisationDiagnosticFilterMode
+                    // Rebuild diagnostic state so switching away from complete
+                    // suppression restores localisation diagnostics as well.
                     requiresReload <- true
 
                 let excludePatterns =

@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { buildDiagnosticHint, enrichDiagnosticsInPlace, diagnosticCodeString, foldLocalisationWarnings, foldRelatedCallSiteInformation, HINT_PREFIX } from '../../extension/diagnosticI18n';
+import { buildDiagnosticHint, enrichDiagnosticsInPlace, diagnosticCodeString, filterLocalisationDiagnostics, foldLocalisationWarnings, foldRelatedCallSiteInformation, HINT_PREFIX, isLocalisationDiagnostic } from '../../extension/diagnosticI18n';
 import type { EnrichableDiagnostic, FoldableDiagnostic } from '../../extension/diagnosticI18n';
 
 describe('diagnostic i18n enrichment', () => {
@@ -10,6 +10,24 @@ describe('diagnostic i18n enrichment', () => {
             expect(diagnosticCodeString({ value: 'CW102', target: 'https://example.com' })).to.equal('CW102');
             expect(diagnosticCodeString(undefined)).to.equal(undefined);
             expect(diagnosticCodeString(null)).to.equal(undefined);
+        });
+    });
+
+    describe('localisation diagnostic filtering', () => {
+        it('recognizes localisation codes and their subcodes in string and object form', () => {
+            expect(isLocalisationDiagnostic({ code: 'CW100' })).to.equal(true);
+            expect(isLocalisationDiagnostic({ code: 'cw255_detail' })).to.equal(true);
+            expect(isLocalisationDiagnostic({ code: { value: 'CW275' } })).to.equal(true);
+            expect(isLocalisationDiagnostic({ code: 'CW102' })).to.equal(false);
+        });
+
+        it('removes only localisation diagnostics', () => {
+            const diagnostics = [
+                { code: 'CW100', message: 'missing localisation' },
+                { code: 'CW102', message: 'unknown trigger' },
+                { code: undefined, message: 'uncoded parser recovery' },
+            ];
+            expect(filterLocalisationDiagnostics(diagnostics)).to.deep.equal(diagnostics.slice(1));
         });
     });
 

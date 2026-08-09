@@ -29,7 +29,8 @@ import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelPr
 import { lastAISettingsWriteTime } from './ai/chatSettings';
 import { checkForUpdates } from './updateChecker';
 import { registerCodeActions } from './codeActions';
-import { enrichDiagnosticsInPlace, diagnosticCodeString, diagnosticMatchesIgnoredKey, foldLocalisationWarnings, foldRelatedCallSiteInformation } from './diagnosticI18n';
+import { enrichDiagnosticsInPlace, diagnosticCodeString, diagnosticMatchesIgnoredKey, filterLocalisationDiagnostics, foldLocalisationWarnings, foldRelatedCallSiteInformation } from './diagnosticI18n';
+import type { LocalisationDiagnosticFilterMode } from './diagnosticI18n';
 import { isImagePathLinkText, registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
 import { registerPdxIndentFormatter } from './pdxIndentFormatter';
@@ -1831,8 +1832,15 @@ export async function activate(context: ExtensionContext) {
 				},
 				handleDiagnostics: (uri, diagnostics, next) => {
 					const config = workspace.getConfiguration('stellarisLanguageServices.ai');
+					const errorsConfig = workspace.getConfiguration('stellarisLanguageServices.errors');
 					const ignored = config.get<string[]>('ignoredDiagnostics', []);
 					let result = diagnostics;
+					const localisationFilter = errorsConfig.get<LocalisationDiagnosticFilterMode>('localisationFilter', 'off');
+					if (localisationFilter !== 'off') {
+						// "problems" keeps the server-side diagnostic state intact; "all"
+						// is filtered here as well so the panel updates before its reload finishes.
+						result = filterLocalisationDiagnostics(result);
+					}
 					if (ignored.length > 0) {
 						// Ignore-list matching runs against the original server message,
 						// before any enrichment rewrites it. relatedInformation is matched
@@ -1844,10 +1852,10 @@ export async function activate(context: ExtensionContext) {
 					if (config.get<boolean>('enhancedDiagnostics', true)) {
 						enrichDiagnosticsInPlace(result, vs.env.language.startsWith('zh'));
 					}
-					if (workspace.getConfiguration('stellarisLanguageServices.errors').get<boolean>('foldLocalisationWarnings', true)) {
+					if (errorsConfig.get<boolean>('foldLocalisationWarnings', true)) {
 						result = foldLocalisationWarnings(result, uri, vs.env.language.startsWith('zh'));
 					}
-					if (workspace.getConfiguration('stellarisLanguageServices.errors').get<boolean>('foldRelatedCallSiteInformation', true)) {
+					if (errorsConfig.get<boolean>('foldRelatedCallSiteInformation', true)) {
 						result = foldRelatedCallSiteInformation(result, vs.env.language.startsWith('zh'));
 					}
 					next(uri, result);
@@ -2398,6 +2406,15 @@ export async function activate(context: ExtensionContext) {
 
 		await client.start();
 		clientStarted = true;
+		context.subscriptions.push(workspace.onDidChangeConfiguration(event => {
+			if (!event.affectsConfiguration('stellarisLanguageServices.errors.localisationFilter')) return;
+			const mode = workspace.getConfiguration('stellarisLanguageServices.errors')
+				.get<LocalisationDiagnosticFilterMode>('localisationFilter', 'off');
+			if (mode === 'off') return;
+			client.diagnostics?.forEach((uri, diagnostics) => {
+				client.diagnostics?.set(uri, filterLocalisationDiagnostics(diagnostics));
+			});
+		}));
 		updateRulesStatusBar();
 		void maybeShowFirstRunExperience(healthOptions());
 	}

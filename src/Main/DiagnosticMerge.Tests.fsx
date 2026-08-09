@@ -89,3 +89,38 @@ let mergedPlainUndefinedVariable =
 
 if not (mergedPlainUndefinedVariable |> List.contains plainUndefinedVariable) then
     failwith "Deferred batch dropped a diagnostic owned by the immediate lint."
+
+let localisationDiagnostic = diagnostic "CW100" "Missing localisation"
+let localisationSubcodeDiagnostic = diagnostic "CW255_DETAIL" "Invalid localisation"
+
+if not (isLocalisationDiagnostic localisationDiagnostic) then
+    failwith "CW100 must be classified as a localisation diagnostic."
+
+if not (isLocalisationDiagnostic localisationSubcodeDiagnostic) then
+    failwith "Localisation diagnostic subcodes must inherit their base-code classification."
+
+if isLocalisationDiagnostic semanticDiagnostic then
+    failwith "Non-localisation diagnostics must remain visible when localisation filtering is enabled."
+
+// Regression: two stable groups of real dynamic errors must be validated in
+// one pass. Requeuing the diagnostic-bearing group after each pass caused the
+// groups to alternate forever and allocate terabytes of temporary data.
+let plannedDynamicBatch =
+    planDeferredDynamicRevalidationBatch
+        (fun path -> path.ToLowerInvariant())
+        10
+        [ "C:/mod/group-a.txt" ]
+        [ "C:/mod/group-b.txt"; "C:/MOD/GROUP-A.TXT" ]
+
+if plannedDynamicBatch <> [ "C:/mod/group-a.txt"; "C:/mod/group-b.txt" ] then
+    failwithf "Dynamic diagnostic carriers were not folded into one batch: %A" plannedDynamicBatch
+
+let boundedDynamicBatch =
+    planDeferredDynamicRevalidationBatch
+        id
+        2
+        [ "requested-b"; "requested-a" ]
+        [ "diagnostic-c" ]
+
+if boundedDynamicBatch <> [ "requested-a"; "requested-b" ] then
+    failwithf "Requested files must be deterministic and retain bounded priority: %A" boundedDynamicBatch

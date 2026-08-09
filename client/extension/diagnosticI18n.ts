@@ -475,6 +475,17 @@ const LOCALISATION_CODES = new Set([
     'CW268', 'CW275',
 ]);
 
+export type LocalisationDiagnosticFilterMode = 'off' | 'problems' | 'all';
+
+export function isLocalisationDiagnostic(diag: Pick<EnrichableDiagnostic, 'code'>): boolean {
+    const code = diagnosticCodeString(diag.code)?.toUpperCase().split('_', 1)[0];
+    return code !== undefined && LOCALISATION_CODES.has(code);
+}
+
+export function filterLocalisationDiagnostics<T extends EnrichableDiagnostic>(diagnostics: readonly T[]): T[] {
+    return diagnostics.filter(diagnostic => !isLocalisationDiagnostic(diagnostic));
+}
+
 const WARNING_SEVERITY = 1; // vscode.DiagnosticSeverity.Warning
 const INFORMATION_SEVERITY = 2; // vscode.DiagnosticSeverity.Information
 
@@ -492,7 +503,7 @@ export interface FoldableDiagnostic extends EnrichableDiagnostic {
 
 function localisationCodeOf(diag: FoldableDiagnostic): string | undefined {
     const code = codeOf(diag)?.toUpperCase().split('_', 1)[0];
-    return code && LOCALISATION_CODES.has(code) ? code : undefined;
+    return code && isLocalisationDiagnostic(diag) ? code : undefined;
 }
 
 /**
